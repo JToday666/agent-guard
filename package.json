@@ -1,0 +1,14 @@
+{
+  "name": "agent-guard",
+  "private": true,
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": "24.15.0",
+    "pnpm": "11.5.2"
+  },
+  "scripts": {
+    "dashboard:dev": "pnpm --filter @agentguard/dashboard dev",
+    "dashboard:typecheck": "pnpm --filter @agentguard/dashboard typecheck",
+    "dashboard:build": "pnpm --filter @agentguard/dashboard build"
+  }
+}

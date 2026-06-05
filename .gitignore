@@ -1,0 +1,23 @@
+# Python environment
+.venv/
+.uv-cache/
+
+# Node workspace
+node_modules/
+
+# Project agent instructions
+AGENTS.md
+
+# Dashboard dependencies and caches
+apps/dashboard/node_modules/
+apps/dashboard/.vite/
+apps/dashboard/*.tsbuildinfo
+apps/dashboard/*.local
+
+# Dashboard build outputs
+apps/dashboard/dist/
+apps/dashboard/dist-ssr/
+
+# Logs
+*.log
+pnpm-debug.log*

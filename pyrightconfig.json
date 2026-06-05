@@ -1,0 +1,26 @@
+{
+  "include": ["apps/guard-api", "apps/demo-agent", "packages", "redteam", "scripts", "tests"],
+  "exclude": [
+    "**/.*",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+    ".venv",
+    ".uv-cache",
+    "apps/dashboard",
+    "node_modules",
+    "data",
+    "artifacts",
+    "var"
+  ],
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["."]
+    }
+  ]
+}

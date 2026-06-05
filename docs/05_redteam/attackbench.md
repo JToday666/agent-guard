@@ -12,26 +12,26 @@ AttackBench 负责攻击样本、正常样本、攻击脚本、批量执行、�
 
 ## 2. 模块职责
 
-| 模块 | 职责 |
-|---|---|
-| datasets | 攻击样本和 benign 正常样本 |
-| scripts | 单场景攻击脚本 |
-| runners | 批量执行、防御前后重放 |
-| checkers | 攻击成功条件判断 |
-| reports | 指标、trace、截图和结果摘要 |
+| 模块     | 职责                        |
+| -------- | --------------------------- |
+| datasets | 攻击样本和 benign 正常样本  |
+| scripts  | 单场景攻击脚本              |
+| runners  | 批量执行、防御前后重放      |
+| checkers | 攻击成功条件判断            |
+| reports  | 指标、trace、截图和结果摘要 |
 
 ## 3. 样本类别
 
-| 文件 | 内容 | 阶段 |
-|---|---|---|
-| `prompt_injection.jsonl` | 提示注入 | P0 |
-| `tool_hijacking.jsonl` | 工具劫持 | P0 |
-| `file_exfiltration.jsonl` | 文件泄露 | P0 |
-| `benign.jsonl` | 正常任务 | P0 |
-| `jailbreak.jsonl` | 越狱 | P1 |
-| `code_execution_abuse.jsonl` | 代码执行滥用 | P1 |
-| `memory_poisoning.jsonl` | 记忆中毒 | P1 |
-| `environment_pollution.jsonl` | 环境污染 | P1-P2 |
+| 文件                          | 内容         | 阶段  |
+| ----------------------------- | ------------ | ----- |
+| `prompt_injection.jsonl`      | 提示注入     | P0    |
+| `tool_hijacking.jsonl`        | 工具劫持     | P0    |
+| `file_exfiltration.jsonl`     | 文件泄露     | P0    |
+| `benign.jsonl`                | 正常任务     | P0    |
+| `jailbreak.jsonl`             | 越狱         | P1    |
+| `code_execution_abuse.jsonl`  | 代码执行滥用 | P1    |
+| `memory_poisoning.jsonl`      | 记忆中毒     | P1    |
+| `environment_pollution.jsonl` | 环境污染     | P1-P2 |
 
 ## 4. AttackCase 格式
 
@@ -73,25 +73,25 @@ AttackBench 负责攻击样本、正常样本、攻击脚本、批量执行、�
 
 ## 6. 指标
 
-| 指标 | 含义 |
-|---|---|
+| 指标       | 含义             |
+| ---------- | ---------------- |
 | ASR before | 无防御攻击成功率 |
-| ASR after | 有防御攻击成功率 |
-| Block Rate | 恶意行为阻断率 |
-| FPR | 正常样本误报率 |
-| FNR | 恶意样本漏报率 |
-| Precision | 告警精确率 |
-| Recall | 恶意召回率 |
-| F1 | 综合检测指标 |
-| Latency | 延迟开销 |
+| ASR after  | 有防御攻击成功率 |
+| Block Rate | 恶意行为阻断率   |
+| FPR        | 正常样本误报率   |
+| FNR        | 恶意样本漏报率   |
+| Precision  | 告警精确率       |
+| Recall     | 恶意召回率       |
+| F1         | 综合检测指标     |
+| Latency    | 延迟开销         |
 
 ## 7. P0/P1/P2 开发边界
 
-| 阶段 | 交付 |
-|---|---|
-| P0 | 3 类攻击样本、benign 样本、基础 runner、ASR before/after、Block Rate、FPR |
-| P1 | 越狱、代码执行、记忆中毒、环境污染样本，FNR、Precision、Recall、Latency |
-| P2 | 消融实验、OpenClaw 对比、复杂多轮攻击 |
+| 阶段 | 交付                                                                      |
+| ---- | ------------------------------------------------------------------------- |
+| P0   | 3 类攻击样本、benign 样本、基础 runner、ASR before/after、Block Rate、FPR |
+| P1   | 越狱、代码执行、记忆中毒、环境污染样本，FNR、Precision、Recall、Latency   |
+| P2   | 消融实验、OpenClaw 对比、复杂多轮攻击                                     |
 
 ## 8. 验收证据
 

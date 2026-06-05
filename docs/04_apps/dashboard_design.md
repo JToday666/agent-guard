@@ -4,6 +4,8 @@
 
 Dashboard 是 AgentGuard 的监督端。它只读取 Core API，用于展示实时事件、告警、阻断记录、审批、攻击链路和评测指标。
 
+Dashboard 前端采用 Vue 3 + TypeScript + Sass + Pinia，使用 pnpm 管理依赖。
+
 关联入口：
 
 - [接口契约与事件模型](../02_core/interface_contract.md)
@@ -12,14 +14,14 @@ Dashboard 是 AgentGuard 的监督端。它只读取 Core API，用于展示实�
 
 ## 2. 模块职责
 
-| 模块 | 职责 |
-|---|---|
-| Event List | 展示 AuditEvent 列表和阻断状态 |
-| Trace Timeline | 按 `trace_id` 展示攻击链路 |
-| Approval Center | 处理 `ask` 决策 |
-| Metrics View | 展示 ASR、Block Rate、FPR、FNR、Latency |
-| Config Audit View | 展示 OpenClaw 配置风险 |
-| Audit Integrity View | 展示 hash chain 或审计完整性检查 |
+| 模块                 | 职责                                    |
+| -------------------- | --------------------------------------- |
+| Event List           | 展示 AuditEvent 列表和阻断状态          |
+| Trace Timeline       | 按 `trace_id` 展示攻击链路              |
+| Approval Center      | 处理 `ask` 决策                         |
+| Metrics View         | 展示 ASR、Block Rate、FPR、FNR、Latency |
+| Config Audit View    | 展示 OpenClaw 配置风险                  |
+| Audit Integrity View | 展示 hash chain 或审计完整性检查        |
 
 ## 3. 数据来源
 
@@ -36,15 +38,15 @@ Dashboard 不直接读取 LangGraph、OpenClaw、Mock Tools 或 redteam runner �
 
 ## 4. 页面优先级
 
-| 页面 | 阶段 | 内容 |
-|---|---|---|
-| 实时事件 | P0 | AuditEvent 列表、决策、风险分数、阻断原因 |
-| 总览 | P0 | 事件数、风险数、阻断数、ASR、FPR |
-| 审批中心 | P0-P1 | pending approval、allow_once、deny |
-| 攻击链路 | P1 | trace_id 时间线 |
-| 指标评测 | P1 | ASR、Block Rate、FPR、FNR、Latency |
-| 配置审计 | P2 | OpenClaw 配置风险 |
-| 审计完整性 | P2 | hash chain 验证 |
+| 页面       | 阶段  | 内容                                      |
+| ---------- | ----- | ----------------------------------------- |
+| 实时事件   | P0    | AuditEvent 列表、决策、风险分数、阻断原因 |
+| 总览       | P0    | 事件数、风险数、阻断数、ASR、FPR          |
+| 审批中心   | P0-P1 | pending approval、allow_once、deny        |
+| 攻击链路   | P1    | trace_id 时间线                           |
+| 指标评测   | P1    | ASR、Block Rate、FPR、FNR、Latency        |
+| 配置审计   | P2    | OpenClaw 配置风险                         |
+| 审计完整性 | P2    | hash chain 验证                           |
 
 ## 5. 展示原则
 
@@ -55,11 +57,11 @@ Dashboard 不直接读取 LangGraph、OpenClaw、Mock Tools 或 redteam runner �
 
 ## 6. P0/P1/P2 开发边界
 
-| 阶段 | 交付 |
-|---|---|
-| P0 | AuditEvent 列表、阻断记录、基础总览、Dashboard 审批 |
-| P1 | trace 时间线、指标评测、CLI 审批 |
-| P2 | OpenClaw 社交审批、配置审计、审计完整性 |
+| 阶段 | 交付                                                |
+| ---- | --------------------------------------------------- |
+| P0   | AuditEvent 列表、阻断记录、基础总览、Dashboard 审批 |
+| P1   | trace 时间线、指标评测、CLI 审批                    |
+| P2   | OpenClaw 社交审批、配置审计、审计完整性             |
 
 ## 7. 验收证据
 

@@ -61,20 +61,20 @@ docs/
 
 ## 4. 目录职责
 
-| 目录 | 职责 |
-|---|---|
-| `apps/guard-api` | FastAPI 服务入口，只封装 Core API |
-| `apps/dashboard` | 监督端页面，只读取 Core API |
-| `apps/demo-agent` | 被保护的 LangGraph 示例 Agent 和 Mock Tools |
-| `packages/agentguard-core` | 唯一安全判断中心 |
-| `packages/agentguard-sdk` | Core 客户端、事件构造、运行时接入辅助 |
-| `packages/agentguard-adapters` | LangGraph 等运行时适配层 |
-| `packages/agentguard-openclaw-plugin` | OpenClaw 插件包 |
-| `redteam/` | 攻击样本、正常样本、runner、成功条件、报告 |
-| `policies/` | 策略、规则、权限配置 |
-| `schemas/` | JSON Schema 与 OpenAPI |
-| `tests/` | 单元测试、契约测试、集成测试 |
-| `artifacts/` | 截图、trace、视频、大结果，默认不入库 |
+| 目录                                  | 职责                                        |
+| ------------------------------------- | ------------------------------------------- |
+| `apps/guard-api`                      | FastAPI 服务入口，只封装 Core API           |
+| `apps/dashboard`                      | Vue 3 监督端页面，只读取 Core API           |
+| `apps/demo-agent`                     | 被保护的 LangGraph 示例 Agent 和 Mock Tools |
+| `packages/agentguard-core`            | 唯一安全判断中心                            |
+| `packages/agentguard-sdk`             | Core 客户端、事件构造、运行时接入辅助       |
+| `packages/agentguard-adapters`        | LangGraph 等运行时适配层                    |
+| `packages/agentguard-openclaw-plugin` | OpenClaw 插件包                             |
+| `redteam/`                            | 攻击样本、正常样本、runner、成功条件、报告  |
+| `policies/`                           | 策略、规则、权限配置                        |
+| `schemas/`                            | JSON Schema 与 OpenAPI                      |
+| `tests/`                              | 单元测试、契约测试、集成测试                |
+| `artifacts/`                          | 截图、trace、视频、大结果，默认不入库       |
 
 ## 5. 边界规则
 

@@ -12,25 +12,25 @@ LangGraph 侧是 AgentGuard 的 P0 保底运行环境和自动化评测靶场。
 
 ## 2. 模块职责
 
-| 模块 | 职责 |
-|---|---|
-| Demo Agent | 接收 AttackCase 或用户任务，驱动模型和工具调用 |
-| Tool Interception Layer | 在工具执行前构造 ToolCallEvent 并调用 Core |
-| Mock Tools | 模拟文件、邮件、API、代码执行和记忆写入 |
-| Runtime Mapper | 将 LangGraph 原生状态映射为 AgentGuard 事件 |
-| Runner Hook | 将执行结果回传给 AttackBench runner |
+| 模块                    | 职责                                           |
+| ----------------------- | ---------------------------------------------- |
+| Demo Agent              | 接收 AttackCase 或用户任务，驱动模型和工具调用 |
+| Tool Interception Layer | 在工具执行前构造 ToolCallEvent 并调用 Core     |
+| Mock Tools              | 模拟文件、邮件、API、代码执行和记忆写入        |
+| Runtime Mapper          | 将 LangGraph 原生状态映射为 AgentGuard 事件    |
+| Runner Hook             | 将执行结果回传给 AttackBench runner            |
 
 ## 3. 接入点
 
-| 接入点 | 阶段 | 作用 |
-|---|---|---|
-| `ToolNode.wrap_tool_call` | P0 优先方案 | 当前 LangGraph 版本支持时，用作工具调用前拦截 |
-| `SecureToolNode` | P0 降级方案 | 当前版本不支持 wrapper 时，自定义 ToolNode 并在 tool invoke 前调用 Core |
-| 手写 `tool_node(state)` | P0 降级方案 | prebuilt agent 不便插桩时，使用 StateGraph 手写工具节点 |
-| `interrupt` | P0-P1 | `ask` 决策的人工确认 |
-| `pre_model_hook` | P1 | 输入过滤、上下文隔离 |
-| `post_model_hook` | P1 | 模型输出检测 |
-| memory/store wrapper | P1-P2 | 记忆读写审计 |
+| 接入点                    | 阶段        | 作用                                                                    |
+| ------------------------- | ----------- | ----------------------------------------------------------------------- |
+| `ToolNode.wrap_tool_call` | P0 优先方案 | 当前 LangGraph 版本支持时，用作工具调用前拦截                           |
+| `SecureToolNode`          | P0 降级方案 | 当前版本不支持 wrapper 时，自定义 ToolNode 并在 tool invoke 前调用 Core |
+| 手写 `tool_node(state)`   | P0 降级方案 | prebuilt agent 不便插桩时，使用 StateGraph 手写工具节点                 |
+| `interrupt`               | P0-P1       | `ask` 决策的人工确认                                                    |
+| `pre_model_hook`          | P1          | 输入过滤、上下文隔离                                                    |
+| `post_model_hook`         | P1          | 模型输出检测                                                            |
+| memory/store wrapper      | P1-P2       | 记忆读写审计                                                            |
 
 ## 4. 工具拦截兼容策略
 
@@ -73,24 +73,24 @@ flowchart TB
 
 ## 6. Mock Tools
 
-| 工具 | P0/P1 | 正常用途 | 风险 |
-|---|---|---|---|
-| `read_file` | P0 | 读取文档 | 敏感文件泄露 |
-| `write_file` | P0 | 保存总结结果 | 文件篡改 |
-| `send_email` | P0 | 发送结果 | 数据外传 |
-| `call_api` | P0 | 调用业务接口 | 越权调用、接口滥用 |
-| `code_exec` | P1 | 执行受控代码 | 危险命令、环境探测 |
-| `memory_write` | P1 | 写入长期记忆 | 记忆中毒 |
+| 工具           | P0/P1 | 正常用途     | 风险               |
+| -------------- | ----- | ------------ | ------------------ |
+| `read_file`    | P0    | 读取文档     | 敏感文件泄露       |
+| `write_file`   | P0    | 保存总结结果 | 文件篡改           |
+| `send_email`   | P0    | 发送结果     | 数据外传           |
+| `call_api`     | P0    | 调用业务接口 | 越权调用、接口滥用 |
+| `code_exec`    | P1    | 执行受控代码 | 危险命令、环境探测 |
+| `memory_write` | P1    | 写入长期记忆 | 记忆中毒           |
 
 所有工具必须使用 Mock 实现，副作用写入沙箱或 mock outbox，不连接真实邮箱和生产 API。
 
 ## 7. P0/P1/P2 开发边界
 
-| 阶段 | 交付 |
-|---|---|
-| P0 | Demo Agent、工具执行前拦截层、`read_file`、`write_file`、`send_email`、`call_api`、防御前后重放 |
-| P1 | pre/post model hook、tool result event、memory wrapper、`code_exec`、`memory_write` |
-| P2 | 多 Agent 链路、复杂上下文污染、多轮攻击样本 |
+| 阶段 | 交付                                                                                            |
+| ---- | ----------------------------------------------------------------------------------------------- |
+| P0   | Demo Agent、工具执行前拦截层、`read_file`、`write_file`、`send_email`、`call_api`、防御前后重放 |
+| P1   | pre/post model hook、tool result event、memory wrapper、`code_exec`、`memory_write`             |
+| P2   | 多 Agent 链路、复杂上下文污染、多轮攻击样本                                                     |
 
 ## 8. 验收证据
 

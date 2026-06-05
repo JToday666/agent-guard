@@ -15,32 +15,32 @@
 
 AgentGuard 保护大模型 Agent 的运行时高风险行为：
 
-| 保护目标 | P0/P1/P2 |
-|---|---|
-| 工具调用 | P0 |
-| 文件读写 | P0 |
-| 邮件或消息外发 | P0-P1 |
-| API 调用 | P0-P1 |
-| 代码执行 | P1 |
-| 记忆写入 | P1-P2 |
-| 上下文拼接 | P1 |
-| 工具结果回流 | P1 |
-| 最终输出 | P1 |
+| 保护目标       | P0/P1/P2 |
+| -------------- | -------- |
+| 工具调用       | P0       |
+| 文件读写       | P0       |
+| 邮件或消息外发 | P0-P1    |
+| API 调用       | P0-P1    |
+| 代码执行       | P1       |
+| 记忆写入       | P1-P2    |
+| 上下文拼接     | P1       |
+| 工具结果回流   | P1       |
+| 最终输出       | P1       |
 
 ## 3. 攻击面
 
-| 攻击面 | 示例 | 防御入口 |
-|---|---|---|
-| 提示注入 | 恶意邮件、文档、网页要求模型忽略规则 | 输入检测、上下文隔离、工具调用审计 |
-| 模型越狱 | 角色扮演、指令覆盖、多轮诱导 | 输入输出过滤、模型行为监测 |
-| 工具调用劫持 | 诱导调用非任务所需工具 | ToolCallEvent、TaskMismatchDetector |
-| 文件泄露 | 读取 `.env`、token、secret | SensitiveFileDetector |
-| API 滥用 | 上传敏感数据、SSRF、越权调用 | OutboundDLPDetector、NetworkSSRFDetector |
-| 代码执行滥用 | 执行 shell、读取环境变量 | CodeExecDetector |
-| 记忆中毒 | 写入恶意长期规则 | MemoryPoisoningDetector、Memory Guard |
-| 环境感知污染 | README、日志、API 返回污染 | ContextBuildEvent、ToolResultEvent |
-| 工具结果污染 | 工具返回结果中夹带指令 | ToolResultEvent、上下文来源标记 |
-| 外发泄露 | 邮件、消息、API 上传敏感数据 | OutboundDLPDetector |
+| 攻击面       | 示例                                 | 防御入口                                 |
+| ------------ | ------------------------------------ | ---------------------------------------- |
+| 提示注入     | 恶意邮件、文档、网页要求模型忽略规则 | 输入检测、上下文隔离、工具调用审计       |
+| 模型越狱     | 角色扮演、指令覆盖、多轮诱导         | 输入输出过滤、模型行为监测               |
+| 工具调用劫持 | 诱导调用非任务所需工具               | ToolCallEvent、TaskMismatchDetector      |
+| 文件泄露     | 读取 `.env`、token、secret           | SensitiveFileDetector                    |
+| API 滥用     | 上传敏感数据、SSRF、越权调用         | OutboundDLPDetector、NetworkSSRFDetector |
+| 代码执行滥用 | 执行 shell、读取环境变量             | CodeExecDetector                         |
+| 记忆中毒     | 写入恶意长期规则                     | MemoryPoisoningDetector、Memory Guard    |
+| 环境感知污染 | README、日志、API 返回污染           | ContextBuildEvent、ToolResultEvent       |
+| 工具结果污染 | 工具返回结果中夹带指令               | ToolResultEvent、上下文来源标记          |
+| 外发泄露     | 邮件、消息、API 上传敏感数据         | OutboundDLPDetector                      |
 
 ## 4. 攻击链示例
 
