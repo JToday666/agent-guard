@@ -31,21 +31,21 @@ Runtime Native Event
 
 ## 3. Core API
 
-| API | 阶段 | 用途 |
-|---|---|---|
-| `POST /v1/evaluate/tool-call` | P0 | 工具调用前风险判断 |
-| `POST /v1/audit/event` | P0 | 写入审计事件 |
-| `GET /v1/audit/events` | P0 | Dashboard 事件列表 |
-| `GET /v1/metrics/eval` | P0 | 评测指标 |
-| `POST /v1/evaluate/context-build` | P1 | 上下文拼接审计 |
-| `POST /v1/evaluate/model-call` | P1 | 模型输入输出审计 |
-| `POST /v1/evaluate/tool-result` | P1 | 工具结果回流审计 |
-| `POST /v1/evaluate/message` | P1 | 消息外发审计 |
-| `POST /v1/evaluate/memory-write` | P1 | 记忆写入审计 |
-| `GET /v1/audit/traces/{trace_id}` | P1 | 攻击链路详情 |
-| `GET /v1/metrics/runtime` | P1 | 运行时监控指标 |
-| `GET /v1/approvals/pending` | P1 | 待审批动作 |
-| `POST /v1/approvals/{approval_id}/resolve` | P1 | 审批处理 |
+| API                                        | 阶段 | 用途               |
+| ------------------------------------------ | ---- | ------------------ |
+| `POST /v1/evaluate/tool-call`              | P0   | 工具调用前风险判断 |
+| `POST /v1/audit/event`                     | P0   | 写入审计事件       |
+| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表 |
+| `GET /v1/metrics/eval`                     | P0   | 评测指标           |
+| `POST /v1/evaluate/context-build`          | P1   | 上下文拼接审计     |
+| `POST /v1/evaluate/model-call`             | P1   | 模型输入输出审计   |
+| `POST /v1/evaluate/tool-result`            | P1   | 工具结果回流审计   |
+| `POST /v1/evaluate/message`                | P1   | 消息外发审计       |
+| `POST /v1/evaluate/memory-write`           | P1   | 记忆写入审计       |
+| `GET /v1/audit/traces/{trace_id}`          | P1   | 攻击链路详情       |
+| `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标     |
+| `GET /v1/approvals/pending`                | P1   | 待审批动作         |
+| `POST /v1/approvals/{approval_id}/resolve` | P1   | 审批处理           |
 
 ## 4. 鉴权
 
@@ -257,11 +257,11 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 ## 12. P0/P1/P2 开发边界
 
-| 阶段 | 契约范围 |
-|---|---|
-| P0 | `ToolCallEvent`、`PolicyDecision`、`AuditEvent`、基础审计列表和评测指标 |
-| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询和审批 |
-| P2 | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展 |
+| 阶段 | 契约范围                                                                |
+| ---- | ----------------------------------------------------------------------- |
+| P0   | `ToolCallEvent`、`PolicyDecision`、`AuditEvent`、基础审计列表和评测指标 |
+| P1   | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询和审批        |
+| P2   | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展      |
 
 ## 13. 冻结规则
 

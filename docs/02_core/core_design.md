@@ -32,13 +32,13 @@ Core 不负责：
 
 ## 3. 输入与输出
 
-| 输入 | 来源 | 输出 |
-|---|---|---|
-| ToolCallEvent | LangGraph / OpenClaw Adapter | PolicyDecision、AuditEvent |
-| ContextBuildEvent | pre model hook | PolicyDecision、AuditEvent |
-| ModelCallEvent | model hook | AuditEvent 或告警 |
-| ToolResultEvent | tool result hook | AuditEvent 或告警 |
-| MemoryEvent | memory wrapper | PolicyDecision、AuditEvent |
+| 输入              | 来源                         | 输出                       |
+| ----------------- | ---------------------------- | -------------------------- |
+| ToolCallEvent     | LangGraph / OpenClaw Adapter | PolicyDecision、AuditEvent |
+| ContextBuildEvent | pre model hook               | PolicyDecision、AuditEvent |
+| ModelCallEvent    | model hook                   | AuditEvent 或告警          |
+| ToolResultEvent   | tool result hook             | AuditEvent 或告警          |
+| MemoryEvent       | memory wrapper               | PolicyDecision、AuditEvent |
 
 ## 4. 结构
 
@@ -81,44 +81,44 @@ flowchart TB
 
 ## 6. 检测器
 
-| 检测器 | 阶段 | 作用 |
-|---|---|---|
-| SensitiveFileDetector | P0 | 检测 `.env`、token、secret、key、private 路径 |
-| ToolHijackDetector | P0 | 检测工具名、工具类型和用户任务不匹配 |
-| TaskMismatchDetector | P0 | 判断工具动作与 `user_task` 是否偏离 |
-| OutboundDLPDetector | P0-P1 | 检测邮件、消息、API 外发中的敏感数据 |
-| PromptInjectionDetector | P1 | 检测不可信内容中的注入语句 |
-| JailbreakDetector | P1 | 检测模型越狱输入或输出 |
-| CodeExecDetector | P1 | 检测危险命令、系统探测、删除和外连 |
-| MemoryPoisoningDetector | P1-P2 | 检测恶意长期记忆写入 |
-| EnvironmentPoisoningDetector | P1-P2 | 检测 README、日志、API 返回污染 |
-| NetworkSSRFDetector | P2 | 检测内网、metadata 和异常外连访问 |
+| 检测器                       | 阶段  | 作用                                          |
+| ---------------------------- | ----- | --------------------------------------------- |
+| SensitiveFileDetector        | P0    | 检测 `.env`、token、secret、key、private 路径 |
+| ToolHijackDetector           | P0    | 检测工具名、工具类型和用户任务不匹配          |
+| TaskMismatchDetector         | P0    | 判断工具动作与 `user_task` 是否偏离           |
+| OutboundDLPDetector          | P0-P1 | 检测邮件、消息、API 外发中的敏感数据          |
+| PromptInjectionDetector      | P1    | 检测不可信内容中的注入语句                    |
+| JailbreakDetector            | P1    | 检测模型越狱输入或输出                        |
+| CodeExecDetector             | P1    | 检测危险命令、系统探测、删除和外连            |
+| MemoryPoisoningDetector      | P1-P2 | 检测恶意长期记忆写入                          |
+| EnvironmentPoisoningDetector | P1-P2 | 检测 README、日志、API 返回污染               |
+| NetworkSSRFDetector          | P2    | 检测内网、metadata 和异常外连访问             |
 
 ## 7. 策略决策
 
 P0 决策：
 
-| 决策 | 含义 | Adapter 行为 |
-|---|---|---|
-| `allow` | 低风险 | 执行工具 |
-| `deny` | 高风险 | 阻断工具并记录审计 |
-| `ask` | 中风险 | 暂停动作并创建审批项 |
+| 决策    | 含义   | Adapter 行为         |
+| ------- | ------ | -------------------- |
+| `allow` | 低风险 | 执行工具             |
+| `deny`  | 高风险 | 阻断工具并记录审计   |
+| `ask`   | 中风险 | 暂停动作并创建审批项 |
 
 P1/P2 扩展：
 
-| 决策 | 含义 |
-|---|---|
-| `modify` | 改写参数后放行 |
-| `audit_only` | 仅记录，不影响执行 |
-| `shadow_deny` | 影子模式模拟阻断 |
+| 决策          | 含义               |
+| ------------- | ------------------ |
+| `modify`      | 改写参数后放行     |
+| `audit_only`  | 仅记录，不影响执行 |
+| `shadow_deny` | 影子模式模拟阻断   |
 
 ## 8. P0/P1/P2 开发边界
 
-| 阶段 | Core 交付 |
-|---|---|
-| P0 | tool-call API、三类决策、敏感文件/工具劫持/任务偏离检测、AuditEvent、基础指标 |
-| P1 | 上下文和模型调用审计、消息外发、记忆写入、审批服务、FPR/FNR |
-| P2 | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit、消融实验 |
+| 阶段 | Core 交付                                                                     |
+| ---- | ----------------------------------------------------------------------------- |
+| P0   | tool-call API、三类决策、敏感文件/工具劫持/任务偏离检测、AuditEvent、基础指标 |
+| P1   | 上下文和模型调用审计、消息外发、记忆写入、审批服务、FPR/FNR                   |
+| P2   | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit、消融实验 |
 
 ## 9. 验收证据
 

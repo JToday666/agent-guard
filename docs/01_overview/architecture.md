@@ -20,13 +20,13 @@ Agent Security Core
 └── OpenClaw + Security Plugin
 ```
 
-| 层级 | 职责 | 开发优先级 |
-|---|---|---|
-| Agent Security Core | 统一事件模型、风险检测、策略决策、审批、审计、指标 | P0 |
-| LangGraph Shell | 可控评测靶场、Mock Tools、批量攻击样本重放 | P0 |
-| Dashboard | AuditEvent 展示、阻断记录、审批、指标 | P0-P1 |
-| OpenClaw Shell | 开源智能化应用接入、Hook 映射、配置审计 | P1-P2 |
-| Redteam / AttackBench | 攻击样本、正常样本、runner、成功条件和指标 | P0-P1 |
+| 层级                  | 职责                                               | 开发优先级 |
+| --------------------- | -------------------------------------------------- | ---------- |
+| Agent Security Core   | 统一事件模型、风险检测、策略决策、审批、审计、指标 | P0         |
+| LangGraph Shell       | 可控评测靶场、Mock Tools、批量攻击样本重放         | P0         |
+| Dashboard             | AuditEvent 展示、阻断记录、审批、指标              | P0-P1      |
+| OpenClaw Shell        | 开源智能化应用接入、Hook 映射、配置审计            | P1-P2      |
+| Redteam / AttackBench | 攻击样本、正常样本、runner、成功条件和指标         | P0-P1      |
 
 ## 3. 核心数据流
 
@@ -51,11 +51,11 @@ AttackCase / 用户任务
 
 ## 4. P0/P1/P2 开发边界
 
-| 阶段 | 必须实现的架构能力 | 不做或延后 |
-|---|---|---|
-| P0 | LangGraph 靶场、ToolCallEvent、PolicyDecision、AuditEvent、Mock Tools、Dashboard 事件页、AttackBench 基础 runner | OpenClaw 完整接入、多渠道审批、复杂模型检测 |
-| P1 | ContextBuildEvent、ToolResultEvent、MemoryEvent、输入输出过滤、攻击链路页、FPR/FNR 指标 | Tamper-Evident Audit、复杂 provenance 图 |
-| P2 | OpenClaw Config Audit、Memory Guard、Action Critic、Provenance Graph、消融实验 | 生产级多租户、安全沙箱逃逸检测 |
+| 阶段 | 必须实现的架构能力                                                                                               | 不做或延后                                  |
+| ---- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| P0   | LangGraph 靶场、ToolCallEvent、PolicyDecision、AuditEvent、Mock Tools、Dashboard 事件页、AttackBench 基础 runner | OpenClaw 完整接入、多渠道审批、复杂模型检测 |
+| P1   | ContextBuildEvent、ToolResultEvent、MemoryEvent、输入输出过滤、攻击链路页、FPR/FNR 指标                          | Tamper-Evident Audit、复杂 provenance 图    |
+| P2   | OpenClaw Config Audit、Memory Guard、Action Critic、Provenance Graph、消融实验                                   | 生产级多租户、安全沙箱逃逸检测              |
 
 ## 5. 验收证据
 

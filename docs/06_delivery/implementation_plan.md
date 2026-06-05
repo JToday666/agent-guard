@@ -13,11 +13,11 @@
 
 ## 2. 阶段目标
 
-| 阶段 | 目标 | 验收口径 |
-|---|---|---|
-| P0 | LangGraph 保底闭环 | 攻击样本能触发危险工具调用，Core 能阻断，Dashboard 能展示 |
-| P1 | 完整可解释链路 | 上下文、模型、工具结果、记忆和消息链路可追踪，可计算 FPR/FNR |
-| P2 | OpenClaw 与冲奖增强 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、消融实验 |
+| 阶段 | 目标                | 验收口径                                                               |
+| ---- | ------------------- | ---------------------------------------------------------------------- |
+| P0   | LangGraph 保底闭环  | 攻击样本能触发危险工具调用，Core 能阻断，Dashboard 能展示              |
+| P1   | 完整可解释链路      | 上下文、模型、工具结果、记忆和消息链路可追踪，可计算 FPR/FNR           |
+| P2   | OpenClaw 与冲奖增强 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、消融实验 |
 
 ## 3. P0 最小实现顺序
 
@@ -59,6 +59,7 @@
    - 统计 ASR before、ASR after、Block Rate、FPR。
 
 7. Dashboard event page
+   - 使用 Vue 3 + TypeScript + Sass + Pinia 初始化前端工程。
    - 展示 AuditEvent。
    - 展示阻断原因、命中规则、风险分数、资源目标。
    - 支持 `ask` 审批入口。
@@ -84,11 +85,11 @@
 
 ## 6. 分工建议
 
-| 成员 | 负责 |
-|---|---|
-| A | Core、schemas、policies、contract tests |
-| B | LangGraph、Mock Tools、Redteam runner |
-| C | Dashboard、OpenClaw Plugin、文档、Demo |
+| 成员 | 负责                                    |
+| ---- | --------------------------------------- |
+| A    | Core、schemas、policies、contract tests |
+| B    | LangGraph、Mock Tools、Redteam runner   |
+| C    | Dashboard、OpenClaw Plugin、文档、Demo  |
 
 ## 7. P0 验收标准
 
