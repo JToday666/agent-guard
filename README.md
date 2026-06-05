@@ -24,6 +24,7 @@ AgentGuard 是面向大模型智能体的运行时行为监督与攻击检测系
 | [docs/openclaw_plugin.md](docs/openclaw_plugin.md) | OpenClaw 插件接入 |
 | [docs/dashboard_design.md](docs/dashboard_design.md) | Dashboard 与审批 |
 | [docs/attackbench.md](docs/attackbench.md) | 攻击样本与评测指标 |
+| [docs/requirement_traceability_matrix.md](docs/requirement_traceability_matrix.md) | 命题要求追踪矩阵 |
 | [docs/implementation_plan.md](docs/implementation_plan.md) | 实施计划 |
 | [docs/demo_script.md](docs/demo_script.md) | 演示脚本 |
 

@@ -14,6 +14,7 @@ docs/
 ├── openclaw_plugin.md         # OpenClaw 插件接入
 ├── dashboard_design.md        # Dashboard 与审批
 ├── attackbench.md             # 攻击样本与评测指标
+├── requirement_traceability_matrix.md # 命题要求追踪矩阵
 ├── implementation_plan.md     # 阶段计划与验收
 └── demo_script.md             # 演示脚本
 ```
@@ -48,8 +49,9 @@ docs/
 
 1. `architecture.md`
 2. `threat_model.md`
-3. `attackbench.md`
-4. `demo_script.md`
+3. `requirement_traceability_matrix.md`
+4. `attackbench.md`
+5. `demo_script.md`
 
 ## 3. 维护规则
 
