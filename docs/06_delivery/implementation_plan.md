@@ -28,30 +28,37 @@
    - 实现 `POST /v1/evaluate/tool-call`。
    - 实现 `allow`、`deny`、`ask` 三类决策。
 
-2. Core 基础策略
+2. Schemas and contract tests
+   - 落地 `tool_call_event.schema.json`。
+   - 落地 `policy_decision.schema.json`。
+   - 落地 `audit_event.schema.json`。
+   - 落地 `attack_case.schema.json`。
+   - 用 schema 校验 P0 样本和 Core 响应。
+
+3. Core 基础策略
    - 敏感文件检测。
    - 工具调用劫持检测。
    - 用户任务与工具动作一致性检测。
    - 非白名单外发检测。
 
-3. LangGraph wrapper
+4. LangGraph wrapper
    - 在 ToolNode 执行前构造 ToolCallEvent。
    - 按 Core 决策执行、阻断或暂停。
    - 记录 trace_id、case_id、runtime。
 
-4. Mock Tools
+5. Mock Tools
    - `read_file`
    - `write_file`
    - `send_email`
    - `call_api`
    - 副作用只写入沙箱或 mock outbox。
 
-5. Redteam runner
+6. Redteam runner
    - 读取 AttackCase JSONL。
    - 支持 defense before / after 重放。
    - 统计 ASR before、ASR after、Block Rate、FPR。
 
-6. Dashboard event page
+7. Dashboard event page
    - 展示 AuditEvent。
    - 展示阻断原因、命中规则、风险分数、资源目标。
    - 支持 `ask` 审批入口。
@@ -93,4 +100,5 @@ P0 完成必须同时满足：
 4. 被拒绝的工具没有执行副作用。
 5. AuditEvent 被 Dashboard 展示。
 6. runner 输出 ASR before、ASR after、Block Rate、FPR。
-7. `git diff --check`、契约测试、runner smoke test 通过。
+7. `schemas/` 中至少存在 `tool_call_event.schema.json`、`policy_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。
+8. `git diff --check`、契约测试、runner smoke test 通过。
