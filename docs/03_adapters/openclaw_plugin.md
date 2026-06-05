@@ -53,6 +53,25 @@ packages/agentguard-openclaw-plugin/
 
 OpenClaw 接入在 P1 前必须先做 Hook 兼容性验证。验证结果决定插件实现范围，不能在未验证 Hook 的情况下承诺完整拦截链路。
 
+### Hook 验证状态
+
+状态枚举：
+
+| 状态 | 含义 |
+|---|---|
+| 待验证 | 尚未完成真实 OpenClaw 运行验证 |
+| 已验证 | 已通过最小 Hook 兼容性测试 |
+| 不支持 | 当前 OpenClaw 版本不提供该 Hook 或必要能力 |
+| 降级实现 | Hook 能力不完整，需要用替代 Hook 或 Adapter 侧封装完成 |
+
+| Hook | 状态 | 备注 |
+|---|---|---|
+| `before_tool_call` | 待验证 | P1 核心，决定能否做工具调用前阻断 |
+| `message_sending` | 待验证 | 外发 DLP，验证能否读取和拦截消息 |
+| `before_prompt_build` | 待验证 | 上下文审计，验证能否读取来源和 prompt |
+| `tool_result_persist` | 待验证 | 工具结果回流，验证能否判断是否持久化或进入上下文 |
+| `llm_input` / `llm_output` | 待验证 | 模型链路监控，P2 增强项 |
+
 | Hook | 目标 | 阶段 | 必须验证的字段/能力 |
 |---|---|---|---|
 | `before_tool_call` | 工具调用前拦截 | P1 必测 | 是否触发；`toolName`、`params`、`toolKind`、`toolCallId`、`runId`；能否 `block`、改写 `params`、`requireApproval`；能否关联 `session_id` / `trace_id` |
