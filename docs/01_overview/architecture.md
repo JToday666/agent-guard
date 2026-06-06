@@ -46,7 +46,8 @@ AttackCase / 用户任务
 
 - Core 只做安全判断，不执行工具。
 - Adapter 只做运行时映射和执行控制，不内置核心规则。
-- Dashboard 只读 Core API，不直接连接 Agent runtime。
+- Dashboard 只通过 Core API 获取数据和提交审批，不直接连接 Agent runtime。
+- Core API 采用统一 Capability Auth；Adapter 使用 adapter token，Dashboard 使用 browser session。
 - Redteam 提供 ground truth，评测结果不能由 Dashboard 推断。
 
 ## 4. P0/P1/P2 开发边界
