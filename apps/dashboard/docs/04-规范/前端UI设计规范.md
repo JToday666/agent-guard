@@ -110,7 +110,10 @@ stale
 - 禁止默认使用 `v-html`。
 - 必须展示富文本时，先经过可信白名单清洗，并说明允许的标签、属性和 URL 协议。
 - URL、文件名、下载地址、跳转地址必须校验。
-- token、secret、API key 不得出现在前端代码、localStorage、sessionStorage、日志或 URL query 中。
+- 长期凭证、secret、API key 不得出现在前端代码、前端 env、localStorage、sessionStorage、日志或 URL query 中。
+- browser session 只能使用 HttpOnly Cookie，由浏览器自动携带。
+- CSRF token 只保存在 Pinia 内存状态中，不做持久化。
+- 鉴权状态不得持久化到 localStorage、sessionStorage、IndexedDB 或持久化 Pinia 插件。
 - 权限控制以后端为准，前端只做体验层隐藏和提示。
 
 ## 10. 完成检查

@@ -33,6 +33,10 @@ Runtime Native Event
 
 | API                                        | 阶段 | 用途               |
 | ------------------------------------------ | ---- | ------------------ |
+| `POST /v1/auth/browser/launch`             | P0   | 创建 Dashboard launch code |
+| `POST /v1/auth/browser/exchange`           | P0   | launch code 换 browser session |
+| `GET /v1/auth/browser/me`                  | P0   | Dashboard 会话恢复 |
+| `POST /v1/auth/browser/logout`             | P0   | Dashboard 会话退出 |
 | `POST /v1/evaluate/tool-call`              | P0   | 工具调用前风险判断 |
 | `POST /v1/audit/event`                     | P0   | 写入审计事件       |
 | `GET /v1/audit/events`                     | P0   | Dashboard 事件列表 |
@@ -46,14 +50,21 @@ Runtime Native Event
 | `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标     |
 | `GET /v1/approvals/pending`                | P1   | 待审批动作         |
 | `POST /v1/approvals/{approval_id}/resolve` | P1   | 审批处理           |
+| `GET /v1/approvals/{approval_id}/wait`     | P1   | Adapter 等待审批结果 |
 
 ## 4. 鉴权
 
-```http
-Authorization: Bearer <AGENTGUARD_TOKEN>
-```
+P0 采用本地 Capability Auth，不做用户登录，不做 Dashboard 解锁。Core 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。
 
-P0 可以使用 demo token；P1 之后需要支持配置化 token 和运行时标识。
+| 调用方 | 凭证 | 要求 |
+| --- | --- | --- |
+| CLI / Launcher | control token | `Authorization: Bearer`，仅用于 `auth:launch` |
+| Adapter / Plugin | adapter token | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
+| Vue Dashboard | browser session | HttpOnly Cookie，用于 Dashboard API |
+| Vue 状态改变请求 | CSRF token | `X-AgentGuard-CSRF` |
+| 审批 resolve | approval nonce | JSON body，单次使用 |
+
+Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。详细方案见 [鉴权总体方案](../../share/鉴权总体方案.md)。
 
 ## 5. SecurityContext
 
@@ -267,7 +278,7 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 - P0 后不删除 `ToolCallEvent`、`PolicyDecision`、`AuditEvent` 字段。
 - 新字段只能 optional 添加。
-- Dashboard 只读 Core。
+- Dashboard 只通过 Core API 获取数据和提交审批。
 - Adapter 不写核心规则。
 - Core 不执行工具。
 - `schema_version` 变更必须同步 `schemas/`、contract tests 和文档。

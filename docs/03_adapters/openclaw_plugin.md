@@ -15,7 +15,7 @@ OpenClaw 侧用于开源智能化应用接入和正式演示。P1 前必须先�
 | 模块                 | 职责                                        |
 | -------------------- | ------------------------------------------- |
 | Plugin Entry         | 注册 OpenClaw 插件和 Hook                   |
-| Security Core Client | 调用 Core API 并处理超时、失败和 demo token |
+| Security Core Client | 调用 Core API 并处理超时、失败和 adapter token |
 | Hook Mapping         | 将 OpenClaw 原生事件映射成 AgentGuard Event |
 | Approval Adapter     | 将 `ask` 映射为 OpenClaw 审批或阻断提示     |
 | Config Audit         | 检查 OpenClaw 高风险配置                    |
@@ -99,7 +99,25 @@ OpenClaw 接入在 P1 前必须先做 Hook 兼容性验证。验证结果决定�
 | `modify`     | 改写 params 后执行 |
 | `audit_only` | 仅记录             |
 
-## 7. Config Audit
+## 7. 鉴权边界
+
+OpenClaw Plugin 使用 adapter token 调用 Core：
+
+```http
+Authorization: Bearer <AGENTGUARD_ADAPTER_TOKEN>
+```
+
+P0 adapter scopes：
+
+```text
+event:evaluate
+event:audit:write
+approval:wait
+```
+
+OpenClaw Plugin 不得拥有 `approval:resolve`，不得创建 browser session，不能读取 Dashboard 数据。
+
+## 8. Config Audit
 
 P2 检查项：
 
@@ -110,7 +128,7 @@ P2 检查项：
 - Gateway 暴露
 - 插件上下文权限过大
 
-## 8. P0/P1/P2 开发边界
+## 9. P0/P1/P2 开发边界
 
 | 阶段 | 交付                                                                                       |
 | ---- | ------------------------------------------------------------------------------------------ |
@@ -118,7 +136,7 @@ P2 检查项：
 | P1   | 验证 Hook、完成 `before_tool_call` 和 `message_sending`，Dashboard 显示 `runtime=openclaw` |
 | P2   | Config Audit、多渠道审批、模型链路监控                                                     |
 
-## 9. 验收证据
+## 10. 验收证据
 
 1. OpenClaw 中一次工具调用触发 `before_tool_call`。
 2. 插件能构造 ToolCallEvent 并调用 Core。

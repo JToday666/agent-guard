@@ -64,7 +64,7 @@ docs/
 | 目录                                  | 职责                                        |
 | ------------------------------------- | ------------------------------------------- |
 | `apps/guard-api`                      | FastAPI 服务入口，只封装 Core API           |
-| `apps/dashboard`                      | Vue 3 监督端页面，只读取 Core API           |
+| `apps/dashboard`                      | Vue 3 监督端页面，只通过 Core API 获取数据和提交审批 |
 | `apps/demo-agent`                     | 被保护的 LangGraph 示例 Agent 和 Mock Tools |
 | `packages/agentguard-core`            | 唯一安全判断中心                            |
 | `packages/agentguard-sdk`             | Core 客户端、事件构造、运行时接入辅助       |
@@ -81,6 +81,7 @@ docs/
 - Core 不依赖 Adapter，不读取 Dashboard 状态。
 - Adapter 不写核心规则，只把运行时事件映射成 AgentGuard Event。
 - Dashboard 不直连运行时，不直接判断攻击成功。
+- Core API 采用统一 Capability Auth；Adapter 使用 adapter token，Dashboard 使用 browser session。
 - Redteam 提供 ground truth，runner 负责统计指标。
 - Policies 不硬编码进 Adapter。
 - Schemas 是 API 和事件字段的唯一结构来源。
@@ -92,4 +93,4 @@ docs/
 1. P0 代码和样本能按目录职责放置，无跨目录职责混杂。
 2. `schemas/` 与 [接口契约](../02_core/interface_contract.md) 字段一致。
 3. `redteam/` 样本能被 runner 读取并生成指标。
-4. Dashboard 只通过 Core API 获取数据。
+4. Dashboard 只通过 Core API 获取数据和提交审批。
