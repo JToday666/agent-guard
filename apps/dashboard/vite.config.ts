@@ -1,13 +1,33 @@
 import { fileURLToPath, URL } from "node:url";
 
 import vue from "@vitejs/plugin-vue";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
-export default defineConfig({
-  plugins: [vue()],
-  resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
+const dashboardRoot = fileURLToPath(new URL(".", import.meta.url));
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, dashboardRoot, "");
+  const backendTarget = env.VITE_BACKEND_TARGET || "http://127.0.0.1:8000";
+
+  return {
+    envDir: dashboardRoot,
+    plugins: [vue()],
+    resolve: {
+      alias: {
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
+      },
     },
-  },
+    server: {
+      proxy: {
+        "/api": {
+          changeOrigin: true,
+          target: backendTarget,
+        },
+        "/uploads": {
+          changeOrigin: true,
+          target: backendTarget,
+        },
+      },
+    },
+  };
 });

@@ -16,8 +16,8 @@
             v-for="approval in sortedApprovals"
             :key="approval.id"
             type="button"
-            :class="{ 'approval-list__item--selected': selectedApproval.id === approval.id }"
-            @click="selectedApproval = approval"
+            :class="{ 'approval-list__item--selected': selectedApproval?.id === approval.id }"
+            @click="handleSelectApproval(approval)"
           >
             <strong>{{ approval.id }}</strong>
             <span>{{ approval.tool }}</span>
@@ -26,7 +26,11 @@
         </div>
       </section>
 
-      <section class="content-section approval-detail" aria-labelledby="approval-detail-title">
+      <section
+        v-if="selectedApproval"
+        class="content-section approval-detail"
+        aria-labelledby="approval-detail-title"
+      >
         <h2 id="approval-detail-title">审批详情</h2>
         <StatusBadge :label="getApprovalStatusLabel(resolutionStatus)" :tone="resolutionTone" />
         <dl>
@@ -56,13 +60,33 @@
           <RouterLink :to="`/events?event_id=${selectedApproval.eventId}`">查看事件</RouterLink>
         </div>
       </section>
+      <EmptyState
+        v-else-if="sortedApprovals.length === 0"
+        class="approvals-page__empty"
+        message="当前没有待处理或已处理的审批请求。"
+        title="暂无审批"
+        variant="empty"
+      >
+        <RouterLink to="/events">查看事件</RouterLink>
+      </EmptyState>
+      <EmptyState
+        v-else
+        class="approvals-page__empty"
+        :message="`审批 ${requestedApprovalId} 不存在或已不在可查看范围内。`"
+        title="未找到审批记录"
+        variant="not-found"
+      >
+        <RouterLink to="/approvals">返回审批队列</RouterLink>
+      </EmptyState>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, reactive } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
+import EmptyState from "../components/EmptyState.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import { approvals } from "../mocks/dashboard-data";
 import type { ApprovalRequest, ApprovalStatus } from "../types/dashboard";
@@ -70,6 +94,9 @@ import type { ApprovalRequest, ApprovalStatus } from "../types/dashboard";
 defineOptions({
   name: "ApprovalsPage",
 });
+
+const route = useRoute();
+const router = useRouter();
 
 const sortedApprovals = computed(() =>
   [...approvals].sort((left, right) => {
@@ -79,11 +106,23 @@ const sortedApprovals = computed(() =>
   }),
 );
 
-const selectedApproval = ref<ApprovalRequest>(sortedApprovals.value[0]);
-const localResolution = ref<ApprovalStatus | undefined>();
+const requestedApprovalId = computed(() =>
+  typeof route.params.approval_id === "string" ? route.params.approval_id : "",
+);
+
+const selectedApproval = computed<ApprovalRequest | undefined>(() => {
+  if (requestedApprovalId.value) {
+    return sortedApprovals.value.find((approval) => approval.id === requestedApprovalId.value);
+  }
+  return sortedApprovals.value[0];
+});
 
 const pendingApprovals = computed(() => approvals.filter((approval) => approval.status === "pending"));
-const resolutionStatus = computed(() => localResolution.value ?? selectedApproval.value.status);
+const resolvedByApprovalId = reactive(new Map<string, ApprovalStatus>());
+const resolutionStatus = computed(() => {
+  if (!selectedApproval.value) return "expired";
+  return resolvedByApprovalId.get(selectedApproval.value.id) ?? selectedApproval.value.status;
+});
 const resolutionTone = computed(() => {
   if (resolutionStatus.value === "allowed") return "success";
   if (resolutionStatus.value === "denied" || resolutionStatus.value === "expired") return "danger";
@@ -91,18 +130,13 @@ const resolutionTone = computed(() => {
 });
 
 function handleResolve(status: "allowed" | "denied"): void {
-  localResolution.value = status;
+  if (!selectedApproval.value) return;
+  resolvedByApprovalId.set(selectedApproval.value.id, status);
 }
 
-watch(
-  sortedApprovals,
-  (nextApprovals) => {
-    if (!selectedApproval.value && nextApprovals[0]) {
-      selectedApproval.value = nextApprovals[0];
-    }
-  },
-  { immediate: true },
-);
+function handleSelectApproval(approval: ApprovalRequest): void {
+  void router.push(`/approvals/${approval.id}`);
+}
 
 function getApprovalStatusLabel(status: ApprovalStatus): string {
   if (status === "allowed") return "已允许一次";

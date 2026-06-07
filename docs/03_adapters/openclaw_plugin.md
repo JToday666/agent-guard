@@ -12,13 +12,13 @@ OpenClaw 侧用于开源智能化应用接入和正式演示。P1 前必须先�
 
 ## 2. 模块职责
 
-| 模块                 | 职责                                        |
-| -------------------- | ------------------------------------------- |
-| Plugin Entry         | 注册 OpenClaw 插件和 Hook                   |
+| 模块                 | 职责                                           |
+| -------------------- | ---------------------------------------------- |
+| Plugin Entry         | 注册 OpenClaw 插件和 Hook                      |
 | Security Core Client | 调用 Core API 并处理超时、失败和 adapter token |
-| Hook Mapping         | 将 OpenClaw 原生事件映射成 AgentGuard Event |
-| Approval Adapter     | 将 `ask` 映射为 OpenClaw 审批或阻断提示     |
-| Config Audit         | 检查 OpenClaw 高风险配置                    |
+| Hook Mapping         | 将 OpenClaw 原生事件映射成 AgentGuard Event    |
+| Approval Adapter     | 将 `ask` 映射为 OpenClaw 审批或阻断提示        |
+| Config Audit         | 检查 OpenClaw 高风险配置                       |
 
 ## 3. 插件目录
 

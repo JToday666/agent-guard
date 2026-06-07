@@ -1,11 +1,25 @@
 <template>
-  <aside v-if="isOpen" class="detail-drawer" aria-labelledby="detail-drawer-title" role="complementary">
+  <aside
+    v-if="isOpen"
+    aria-labelledby="detail-drawer-title"
+    aria-modal="false"
+    class="detail-drawer"
+    role="dialog"
+    tabindex="-1"
+    @keydown.esc.prevent="emit('close')"
+  >
     <header class="detail-drawer__header">
       <div>
         <p>{{ eyebrow }}</p>
         <h2 id="detail-drawer-title">{{ title }}</h2>
       </div>
-      <button class="detail-drawer__close" type="button" aria-label="关闭详情" @click="$emit('close')">
+      <button
+        ref="closeButtonElement"
+        class="detail-drawer__close"
+        type="button"
+        aria-label="关闭详情"
+        @click="emit('close')"
+      >
         ×
       </button>
     </header>
@@ -16,19 +30,43 @@
 </template>
 
 <script setup lang="ts">
+import { nextTick, ref, watch } from "vue";
+
 defineOptions({
   name: "DetailDrawer",
 });
 
-defineEmits<{
+const emit = defineEmits<{
   close: [];
 }>();
 
-defineProps<{
+const props = defineProps<{
   eyebrow: string;
   isOpen: boolean;
   title: string;
 }>();
+
+const closeButtonElement = ref<HTMLButtonElement | null>(null);
+let restoreFocusElement: HTMLElement | null = null;
+
+watch(
+  () => props.isOpen,
+  async (isOpen, wasOpen) => {
+    if (isOpen) {
+      restoreFocusElement =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      await nextTick();
+      closeButtonElement.value?.focus();
+      return;
+    }
+
+    if (wasOpen) {
+      await nextTick();
+      restoreFocusElement?.focus();
+      restoreFocusElement = null;
+    }
+  },
+);
 </script>
 
 <style scoped lang="scss">

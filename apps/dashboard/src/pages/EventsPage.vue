@@ -34,11 +34,11 @@
       </form>
 
       <div class="quick-filters" aria-label="快速筛选">
-        <button type="button" @click="decisionFilter = 'deny'">拒绝 {{ denyCount }}</button>
-        <button type="button" @click="decisionFilter = 'ask'">待确认 {{ askCount }}</button>
-        <button type="button" @click="searchFilter = 'sensitive'">敏感文件</button>
-        <button type="button" @click="searchFilter = 'external'">外部发送</button>
-        <button type="button" @click="searchFilter = 'mismatch'">任务不一致</button>
+        <button type="button" @click="updateEventQuery({ decision: 'deny' })">拒绝 {{ denyCount }}</button>
+        <button type="button" @click="updateEventQuery({ decision: 'ask' })">待确认 {{ askCount }}</button>
+        <button type="button" @click="updateEventQuery({ search: 'sensitive' })">敏感文件</button>
+        <button type="button" @click="updateEventQuery({ search: 'external' })">外部发送</button>
+        <button type="button" @click="updateEventQuery({ search: 'mismatch' })">任务不一致</button>
       </div>
 
       <div v-if="filteredEvents.length > 0" class="table-wrap">
@@ -102,10 +102,10 @@
     </section>
 
     <DetailDrawer
-      :is-open="Boolean(selectedEvent)"
+      :is-open="Boolean(selectedEventId)"
       eyebrow="事件详情"
-      :title="selectedEvent?.id ?? ''"
-      @close="selectedEvent = undefined"
+      :title="selectedEvent?.id ?? '未找到事件'"
+      @close="handleCloseDrawer"
     >
       <template v-if="selectedEvent">
         <section class="detail-section">
@@ -159,13 +159,18 @@
           <pre>{{ selectedEvent }}</pre>
         </section>
       </template>
+      <EmptyState
+        v-else
+        message="当前事件不存在或已不在筛选范围内。关闭详情后可继续查看事件列表。"
+        title="未找到事件"
+      />
     </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { computed } from "vue";
+import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
 
 import DetailDrawer from "../components/DetailDrawer.vue";
 import EmptyState from "../components/EmptyState.vue";
@@ -178,54 +183,89 @@ defineOptions({
 });
 
 const route = useRoute();
-const selectedEvent = ref<AuditEventRow | undefined>();
-const decisionFilter = ref("");
-const runtimeFilter = ref("");
-const searchFilter = ref("");
+const router = useRouter();
+
+const decisionFilter = computed({
+  get: () => getQueryString("decision"),
+  set: (value: string) => updateEventQuery({ decision: value }),
+});
+const runtimeFilter = computed({
+  get: () => getQueryString("runtime"),
+  set: (value: string) => updateEventQuery({ runtime: value }),
+});
+const searchFilter = computed({
+  get: () => getQueryString("search"),
+  set: (value: string) => updateEventQuery({ search: value }),
+});
 
 const denyCount = computed(() => auditEvents.filter((event) => event.decision === "deny").length);
 const askCount = computed(() => auditEvents.filter((event) => event.decision === "ask").length);
 const latestEvents = computed(() =>
   [...auditEvents].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt)),
 );
+const selectedEventId = computed(() => getQueryString("event_id"));
+const selectedEvent = computed(() =>
+  selectedEventId.value ? latestEvents.value.find((event) => event.id === selectedEventId.value) : undefined,
+);
 
 const filteredEvents = computed(() =>
   latestEvents.value.filter((event) => {
     const searchValue = searchFilter.value.toLowerCase();
+    const severityValue = getQueryString("severity");
+    const blockedValue = getQueryString("blocked");
+    const typeValue = getQueryString("type").toLowerCase();
     const matchesDecision = !decisionFilter.value || event.decision === decisionFilter.value;
     const matchesRuntime = !runtimeFilter.value || event.runtime === runtimeFilter.value;
+    const matchesSeverity = !severityValue || event.severity === severityValue;
+    const matchesBlocked =
+      !blockedValue ||
+      (blockedValue === "true" && event.blocked) ||
+      (blockedValue === "false" && !event.blocked);
+    const searchableText = [
+      event.resource,
+      event.reason,
+      event.tool,
+      event.caseId,
+      event.traceId,
+      event.stage,
+      ...event.ruleHits,
+    ]
+      .join(" ")
+      .toLowerCase();
+    const matchesType = !typeValue || searchableText.includes(typeValue);
     const matchesSearch =
-      !searchValue ||
-      [event.resource, event.reason, event.tool, event.caseId, event.traceId, ...event.ruleHits]
-        .join(" ")
-        .toLowerCase()
-        .includes(searchValue);
+      !searchValue || searchableText.includes(searchValue);
 
-    return matchesDecision && matchesRuntime && matchesSearch;
+    return matchesDecision && matchesRuntime && matchesSeverity && matchesBlocked && matchesType && matchesSearch;
   }),
 );
 
-watch(
-  () => route.query,
-  (query) => {
-    decisionFilter.value = typeof query.decision === "string" ? query.decision : "";
-    runtimeFilter.value = typeof query.runtime === "string" ? query.runtime : "";
-    searchFilter.value =
-      typeof query.search === "string"
-        ? query.search
-        : typeof query.event_id === "string"
-          ? query.event_id
-          : "";
-    selectedEvent.value =
-      typeof query.event_id === "string"
-        ? latestEvents.value.find((event) => event.id === query.event_id)
-        : selectedEvent.value;
-  },
-  { immediate: true },
-);
-
 function handleSelectEvent(event: AuditEventRow): void {
-  selectedEvent.value = event;
+  updateEventQuery({ event_id: event.id });
+}
+
+function handleCloseDrawer(): void {
+  updateEventQuery({ event_id: undefined });
+}
+
+function getQueryString(key: string): string {
+  const value = route.query[key];
+  return typeof value === "string" ? value : "";
+}
+
+function updateEventQuery(nextQuery: Record<string, string | undefined>): void {
+  const query: LocationQueryRaw = { ...route.query };
+
+  Object.entries(nextQuery).forEach(([key, value]) => {
+    const normalizedValue = typeof value === "string" ? value.trim() : value;
+    if (normalizedValue) {
+      query[key] = normalizedValue;
+    } else {
+      delete query[key];
+    }
+  });
+
+  void router.replace({ path: "/events", query });
 }
 
 function getDecisionTone(decision: DecisionStatus): "neutral" | "success" | "warning" | "danger" {

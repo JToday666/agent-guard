@@ -4,7 +4,12 @@
     <div class="dashboard-shell__body" :class="{ 'dashboard-shell__body--collapsed': isSidebarCollapsed }">
       <AppSidebar :is-collapsed="isSidebarCollapsed" @toggle-collapse="handleToggleSidebar" />
       <main class="dashboard-shell__workspace" aria-label="Dashboard workspace">
-        <RouterView />
+        <RouterView v-slot="{ Component, route }">
+          <KeepAlive>
+            <component :is="Component" v-if="route.meta.keepAlive" :key="String(route.name ?? route.path)" />
+          </KeepAlive>
+          <component :is="Component" v-if="!route.meta.keepAlive" :key="route.fullPath" />
+        </RouterView>
       </main>
     </div>
   </div>
