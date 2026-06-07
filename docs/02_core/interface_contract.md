@@ -31,38 +31,38 @@ Runtime Native Event
 
 ## 3. Core API
 
-| API                                        | 阶段 | 用途               |
-| ------------------------------------------ | ---- | ------------------ |
-| `POST /v1/auth/browser/launch`             | P0   | 创建 Dashboard launch code |
+| API                                        | 阶段 | 用途                           |
+| ------------------------------------------ | ---- | ------------------------------ |
+| `POST /v1/auth/browser/launch`             | P0   | 创建 Dashboard launch code     |
 | `POST /v1/auth/browser/exchange`           | P0   | launch code 换 browser session |
-| `GET /v1/auth/browser/me`                  | P0   | Dashboard 会话恢复 |
-| `POST /v1/auth/browser/logout`             | P0   | Dashboard 会话退出 |
-| `POST /v1/evaluate/tool-call`              | P0   | 工具调用前风险判断 |
-| `POST /v1/audit/event`                     | P0   | 写入审计事件       |
-| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表 |
-| `GET /v1/metrics/eval`                     | P0   | 评测指标           |
-| `POST /v1/evaluate/context-build`          | P1   | 上下文拼接审计     |
-| `POST /v1/evaluate/model-call`             | P1   | 模型输入输出审计   |
-| `POST /v1/evaluate/tool-result`            | P1   | 工具结果回流审计   |
-| `POST /v1/evaluate/message`                | P1   | 消息外发审计       |
-| `POST /v1/evaluate/memory-write`           | P1   | 记忆写入审计       |
-| `GET /v1/audit/traces/{trace_id}`          | P1   | 攻击链路详情       |
-| `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标     |
-| `GET /v1/approvals/pending`                | P1   | 待审批动作         |
-| `POST /v1/approvals/{approval_id}/resolve` | P1   | 审批处理           |
-| `GET /v1/approvals/{approval_id}/wait`     | P1   | Adapter 等待审批结果 |
+| `GET /v1/auth/browser/me`                  | P0   | Dashboard 会话恢复             |
+| `POST /v1/auth/browser/logout`             | P0   | Dashboard 会话退出             |
+| `POST /v1/evaluate/tool-call`              | P0   | 工具调用前风险判断             |
+| `POST /v1/audit/event`                     | P0   | 写入审计事件                   |
+| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表             |
+| `GET /v1/metrics/eval`                     | P0   | 评测指标                       |
+| `GET /v1/approvals/pending`                | P0   | 待审批动作                     |
+| `POST /v1/approvals/{approval_id}/resolve` | P0   | Dashboard 审批处理             |
+| `GET /v1/approvals/{approval_id}/wait`     | P0   | Adapter 等待审批结果           |
+| `POST /v1/evaluate/context-build`          | P1   | 上下文拼接审计                 |
+| `POST /v1/evaluate/model-call`             | P1   | 模型输入输出审计               |
+| `POST /v1/evaluate/tool-result`            | P1   | 工具结果回流审计               |
+| `POST /v1/evaluate/message`                | P1   | 消息外发审计                   |
+| `POST /v1/evaluate/memory-write`           | P1   | 记忆写入审计                   |
+| `GET /v1/audit/traces/{trace_id}`          | P1   | 攻击链路详情                   |
+| `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标                 |
 
 ## 4. 鉴权
 
 P0 采用本地 Capability Auth，不做用户登录，不做 Dashboard 解锁。Core 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。
 
-| 调用方 | 凭证 | 要求 |
-| --- | --- | --- |
-| CLI / Launcher | control token | `Authorization: Bearer`，仅用于 `auth:launch` |
-| Adapter / Plugin | adapter token | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
-| Vue Dashboard | browser session | HttpOnly Cookie，用于 Dashboard API |
-| Vue 状态改变请求 | CSRF token | `X-AgentGuard-CSRF` |
-| 审批 resolve | approval nonce | JSON body，单次使用 |
+| 调用方           | 凭证            | 要求                                                                                 |
+| ---------------- | --------------- | ------------------------------------------------------------------------------------ |
+| CLI / Launcher   | control token   | `Authorization: Bearer`，仅用于 `auth:launch`                                        |
+| Adapter / Plugin | adapter token   | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
+| Vue Dashboard    | browser session | HttpOnly Cookie，用于 Dashboard API                                                  |
+| Vue 状态改变请求 | CSRF token      | `X-AgentGuard-CSRF`                                                                  |
+| 审批 resolve     | approval nonce  | JSON body，单次使用                                                                  |
 
 Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。详细方案见 [鉴权总体方案](../../share/鉴权总体方案.md)。
 
@@ -268,11 +268,11 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 ## 12. P0/P1/P2 开发边界
 
-| 阶段 | 契约范围                                                                |
-| ---- | ----------------------------------------------------------------------- |
-| P0   | `ToolCallEvent`、`PolicyDecision`、`AuditEvent`、基础审计列表和评测指标 |
-| P1   | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询和审批        |
-| P2   | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展      |
+| 阶段 | 契约范围                                                                                     |
+| ---- | -------------------------------------------------------------------------------------------- |
+| P0   | `ToolCallEvent`、`PolicyDecision`、`AuditEvent`、基础审计列表、评测指标和最小 Dashboard 审批 |
+| P1   | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询、CLI 审批和复杂审批体验           |
+| P2   | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展                           |
 
 ## 13. 冻结规则
 
