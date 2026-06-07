@@ -1,5 +1,5 @@
 <template>
-  <section class="empty-state" :aria-label="title">
+  <section class="empty-state" :class="`empty-state--${variant}`" :aria-label="title">
     <h2>{{ title }}</h2>
     <p>{{ message }}</p>
     <slot />
@@ -11,10 +11,13 @@ defineOptions({
   name: "EmptyState",
 });
 
-defineProps<{
+withDefaults(defineProps<{
   message: string;
   title: string;
-}>();
+  variant?: "empty" | "not-found" | "error" | "partial";
+}>(), {
+  variant: "empty",
+});
 </script>
 
 <style scoped lang="scss">
@@ -42,5 +45,20 @@ defineProps<{
     color: var(--color-text-muted);
     max-width: 36rem;
   }
+}
+
+.empty-state--not-found {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning-border);
+}
+
+.empty-state--error {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-border);
+}
+
+.empty-state--partial {
+  background: var(--color-active-soft);
+  border-color: var(--color-border-strong);
 }
 </style>

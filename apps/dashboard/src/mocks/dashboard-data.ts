@@ -135,11 +135,26 @@ export const traces: TraceSummary[] = [
 
 export const metricCards: MetricCard[] = [
   { label: "事件总数", value: "128", route: "/events", tone: "neutral" },
-  { label: "高风险", value: "8", route: "/events?severity=high", tone: "danger" },
-  { label: "已阻断", value: "12", route: "/events?blocked=true", tone: "success" },
+  {
+    label: "高风险",
+    value: "8",
+    route: "/events?severity=high",
+    tone: "danger",
+  },
+  {
+    label: "已阻断",
+    value: "12",
+    route: "/events?blocked=true",
+    tone: "success",
+  },
   { label: "待审批", value: "2", route: "/approvals", tone: "warning" },
   { label: "防护后 ASR", value: "4.8%", route: "/evaluation", tone: "success" },
-  { label: "FPR", value: "1.6%", route: "/evaluation?subset=benign", tone: "neutral" },
+  {
+    label: "FPR",
+    value: "1.6%",
+    route: "/evaluation?subset=benign",
+    tone: "neutral",
+  },
 ];
 
 export const systemStatus: SystemStatusItem[] = [
