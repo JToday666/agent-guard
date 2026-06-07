@@ -52,15 +52,15 @@ Authorization Bearer token
 
 ## 5. 页面优先级
 
-| 页面       | 阶段  | 内容                                      |
-| ---------- | ----- | ----------------------------------------- |
-| 实时事件   | P0    | AuditEvent 列表、决策、风险分数、阻断原因 |
-| 总览       | P0    | 事件数、风险数、阻断数、ASR、FPR          |
-| 审批中心   | P0-P1 | pending approval、allow_once、deny        |
-| 攻击链路   | P1    | trace_id 时间线                           |
-| 指标评测   | P1    | ASR、Block Rate、FPR、FNR、Latency        |
-| 配置审计   | P2    | OpenClaw 配置风险                         |
-| 审计完整性 | P2    | hash chain 验证                           |
+| 页面       | 阶段 | 内容                                                   |
+| ---------- | ---- | ------------------------------------------------------ |
+| 实时事件   | P0   | AuditEvent 列表、决策、风险分数、阻断原因              |
+| 总览       | P0   | 事件数、风险数、阻断数、ASR、FPR                       |
+| 审批中心   | P0   | pending approval、allow_once、deny、expired/error 状态 |
+| 攻击链路   | P1   | trace_id 时间线                                        |
+| 指标评测   | P1   | ASR、Block Rate、FPR、FNR、Latency                     |
+| 配置审计   | P2   | OpenClaw 配置风险                                      |
+| 审计完整性 | P2   | hash chain 验证                                        |
 
 ## 6. 展示原则
 
@@ -77,11 +77,25 @@ Authorization Bearer token
 | P1   | trace 时间线、指标评测、CLI 审批                    |
 | P2   | OpenClaw 社交审批、配置审计、审计完整性             |
 
+P0 Dashboard 审批是最小人工审批闭环：
+
+```text
+Core 返回 ask
+→ Core 创建 pending approval
+→ Dashboard 展示待审批
+→ 用户 allow_once / deny
+→ Adapter wait 收到结果
+→ 工具继续或取消
+→ AuditEvent 更新
+```
+
+P0 不做永久放行、多渠道审批、审批策略配置或 OpenClaw 社交审批。
+
 ## 8. 验收证据
 
 1. `deny` 事件能出现在实时事件页。
 2. 阻断记录显示 `reason`、`rule_hits`、`resource_targets`。
-3. `ask` 事件能进入审批中心。
+3. `ask` 事件能进入审批中心，并可由 Dashboard resolve 为 `allow_once` 或 `deny`。
 4. 指标页能展示 AttackBench 结果。
 5. Dashboard 不直接访问 runtime 内部数据。
-6. Dashboard 不保存长期 token，审批 resolve 使用 browser session、CSRF token 和 approval nonce。
+6. Dashboard 不保存长期 token，审批 resolve 使用 browser session、CSRF token 和 approval nonce，Adapter 能通过 wait 接口收到审批结果。

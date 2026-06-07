@@ -27,6 +27,8 @@
    - 实现 `ToolCallEvent`、`PolicyDecision`、`AuditEvent`。
    - 实现 `POST /v1/evaluate/tool-call`。
    - 实现 `allow`、`deny`、`ask` 三类决策。
+   - 实现最小 approvals API：`GET /v1/approvals/pending`、`POST /v1/approvals/{approval_id}/resolve`、`GET /v1/approvals/{approval_id}/wait`。
+   - P0 审批动作只支持 `allow_once` 和 `deny`。
 
 2. Schemas and contract tests
    - 落地 `tool_call_event.schema.json`。
@@ -62,7 +64,8 @@
    - 使用 Vue 3 + TypeScript + Sass + Pinia 初始化前端工程。
    - 展示 AuditEvent。
    - 展示阻断原因、命中规则、风险分数、资源目标。
-   - 支持 `ask` 审批入口。
+   - 展示 pending approval，并支持 `allow_once` / `deny`。
+   - 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
 
 ## 4. P1 开发项
 
@@ -99,7 +102,10 @@ P0 完成必须同时满足：
 2. 无防御时至少一个样本能触发危险工具调用。
 3. 有防御时 Core 在工具执行前返回 `deny` 或 `ask`。
 4. 被拒绝的工具没有执行副作用。
-5. AuditEvent 被 Dashboard 展示。
-6. runner 输出 ASR before、ASR after、Block Rate、FPR。
-7. `schemas/` 中至少存在 `tool_call_event.schema.json`、`policy_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。
-8. `git diff --check`、契约测试、runner smoke test 通过。
+5. `ask` 事件能创建 pending approval。
+6. Dashboard resolve 后，Adapter wait 能返回 `allow_once` 或 `deny`。
+7. 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
+8. AuditEvent 被 Dashboard 展示。
+9. runner 输出 ASR before、ASR after、Block Rate、FPR。
+10. `schemas/` 中至少存在 `tool_call_event.schema.json`、`policy_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。
+11. `git diff --check`、契约测试、runner smoke test 通过。
