@@ -1,5 +1,5 @@
 <template>
-  <div class="events-page page-with-drawer">
+  <div class="events-page page-with-drawer" :class="{ 'events-page--drawer-open': Boolean(selectedEventId) }">
     <section class="workspace-panel events-page__main" aria-labelledby="events-title">
       <header class="page-header">
         <div>
@@ -10,23 +10,8 @@
       </header>
 
       <form class="filter-bar" @submit.prevent>
-        <label>
-          决策
-          <select v-model="decisionFilter">
-            <option value="">全部</option>
-            <option value="deny">拒绝</option>
-            <option value="ask">待确认</option>
-            <option value="allow">放行</option>
-          </select>
-        </label>
-        <label>
-          运行时
-          <select v-model="runtimeFilter">
-            <option value="">全部</option>
-            <option value="langgraph">LangGraph</option>
-            <option value="openclaw">OpenClaw</option>
-          </select>
-        </label>
+        <AppSelect id="events-decision-filter" v-model="decisionFilter" label="决策" :options="decisionOptions" />
+        <AppSelect id="events-runtime-filter" v-model="runtimeFilter" label="运行时" :options="runtimeOptions" />
         <label>
           搜索
           <input v-model.trim="searchFilter" type="search" placeholder="资源 / 规则 / 原因" />
@@ -34,11 +19,16 @@
       </form>
 
       <div class="quick-filters" aria-label="快速筛选">
-        <button type="button" @click="updateEventQuery({ decision: 'deny' })">拒绝 {{ denyCount }}</button>
-        <button type="button" @click="updateEventQuery({ decision: 'ask' })">待确认 {{ askCount }}</button>
-        <button type="button" @click="updateEventQuery({ search: 'sensitive' })">敏感文件</button>
-        <button type="button" @click="updateEventQuery({ search: 'external' })">外部发送</button>
-        <button type="button" @click="updateEventQuery({ search: 'mismatch' })">任务不一致</button>
+        <button
+          v-for="filter in quickFilters"
+          :key="filter.key"
+          type="button"
+          :aria-pressed="isQuickFilterActive(filter.key)"
+          :class="{ 'quick-filters__button--active': isQuickFilterActive(filter.key) }"
+          @click="handleQuickFilterClick(filter.key)"
+        >
+          {{ filter.label }} {{ filter.count }}
+        </button>
       </div>
 
       <div v-if="filteredEvents.length > 0" class="table-wrap">
@@ -64,11 +54,13 @@
               v-for="event in filteredEvents"
               :key="event.id"
               :class="{ 'audit-table__row--selected': selectedEvent?.id === event.id }"
+              tabindex="0"
+              @click="handleSelectEvent(event)"
+              @keydown.enter.prevent="handleSelectEvent(event)"
+              @keydown.space.prevent="handleSelectEvent(event)"
             >
               <td>
-                <button class="table-link" type="button" @click="handleSelectEvent(event)">
-                  {{ event.time }}
-                </button>
+                <span class="table-link">{{ event.time }}</span>
               </td>
               <td>
                 <StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" />
@@ -172,6 +164,7 @@
 import { computed } from "vue";
 import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
 
+import AppSelect from "../components/AppSelect.vue";
 import DetailDrawer from "../components/DetailDrawer.vue";
 import EmptyState from "../components/EmptyState.vue";
 import StatusBadge from "../components/StatusBadge.vue";
@@ -187,7 +180,7 @@ const router = useRouter();
 
 const decisionFilter = computed({
   get: () => getQueryString("decision"),
-  set: (value: string) => updateEventQuery({ decision: value }),
+  set: (value: string) => updateEventQuery({ decision: value, rule: undefined }),
 });
 const runtimeFilter = computed({
   get: () => getQueryString("runtime"),
@@ -197,9 +190,30 @@ const searchFilter = computed({
   get: () => getQueryString("search"),
   set: (value: string) => updateEventQuery({ search: value }),
 });
+const decisionOptions = [
+  { label: "全部", value: "" },
+  { label: "拒绝", value: "deny" },
+  { label: "待确认", value: "ask" },
+  { label: "放行", value: "allow" },
+];
+const runtimeOptions = [
+  { label: "全部", value: "" },
+  { label: "LangGraph", value: "langgraph" },
+  { label: "OpenClaw", value: "openclaw" },
+];
 
-const denyCount = computed(() => auditEvents.filter((event) => event.decision === "deny").length);
-const askCount = computed(() => auditEvents.filter((event) => event.decision === "ask").length);
+const decisionQuickFilters = [
+  { decision: "deny", label: "拒绝" },
+  { decision: "ask", label: "待确认" },
+] as const;
+const ruleQuickFilters = [
+  { label: "敏感文件", rule: "P001_sensitive_file_access" },
+  { label: "外部发送", rule: "P005_external_send" },
+  { label: "任务不一致", rule: "P004_task_mismatch" },
+] as const;
+
+type QuickFilterKey = "all" | `decision:${DecisionStatus}` | `rule:${string}`;
+
 const latestEvents = computed(() =>
   [...auditEvents].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt)),
 );
@@ -207,15 +221,31 @@ const selectedEventId = computed(() => getQueryString("event_id"));
 const selectedEvent = computed(() =>
   selectedEventId.value ? latestEvents.value.find((event) => event.id === selectedEventId.value) : undefined,
 );
+const ruleFilter = computed(() => getQueryString("rule"));
+const quickFilters = computed<Array<{ count: number; key: QuickFilterKey; label: string }>>(() => [
+  { count: latestEvents.value.length, key: "all", label: "全部" },
+  ...decisionQuickFilters.map((filter) => ({
+    count: getDecisionCount(filter.decision),
+    key: `decision:${filter.decision}` as const,
+    label: filter.label,
+  })),
+  ...ruleQuickFilters.map((filter) => ({
+    count: getRuleHitCount(filter.rule),
+    key: `rule:${filter.rule}` as const,
+    label: filter.label,
+  })),
+]);
 
 const filteredEvents = computed(() =>
   latestEvents.value.filter((event) => {
     const searchValue = searchFilter.value.toLowerCase();
+    const ruleValue = ruleFilter.value;
     const severityValue = getQueryString("severity");
     const blockedValue = getQueryString("blocked");
     const typeValue = getQueryString("type").toLowerCase();
     const matchesDecision = !decisionFilter.value || event.decision === decisionFilter.value;
     const matchesRuntime = !runtimeFilter.value || event.runtime === runtimeFilter.value;
+    const matchesRule = !ruleValue || event.ruleHits.includes(ruleValue);
     const matchesSeverity = !severityValue || event.severity === severityValue;
     const matchesBlocked =
       !blockedValue ||
@@ -236,7 +266,15 @@ const filteredEvents = computed(() =>
     const matchesSearch =
       !searchValue || searchableText.includes(searchValue);
 
-    return matchesDecision && matchesRuntime && matchesSeverity && matchesBlocked && matchesType && matchesSearch;
+    return (
+      matchesDecision &&
+      matchesRuntime &&
+      matchesRule &&
+      matchesSeverity &&
+      matchesBlocked &&
+      matchesType &&
+      matchesSearch
+    );
   }),
 );
 
@@ -246,6 +284,36 @@ function handleSelectEvent(event: AuditEventRow): void {
 
 function handleCloseDrawer(): void {
   updateEventQuery({ event_id: undefined });
+}
+
+function handleQuickFilterClick(key: QuickFilterKey): void {
+  if (key === "all") {
+    updateEventQuery({ decision: undefined, rule: undefined });
+    return;
+  }
+
+  if (key.startsWith("decision:")) {
+    updateEventQuery({ decision: key.replace("decision:", ""), rule: undefined });
+    return;
+  }
+
+  updateEventQuery({ decision: undefined, rule: key.replace("rule:", "") });
+}
+
+function isQuickFilterActive(key: QuickFilterKey): boolean {
+  if (key === "all") return !decisionFilter.value && !ruleFilter.value;
+  if (key.startsWith("decision:")) {
+    return decisionFilter.value === key.replace("decision:", "") && !ruleFilter.value;
+  }
+  return ruleFilter.value === key.replace("rule:", "") && !decisionFilter.value;
+}
+
+function getDecisionCount(decision: DecisionStatus): number {
+  return latestEvents.value.filter((event) => event.decision === decision).length;
+}
+
+function getRuleHitCount(rule: string): number {
+  return latestEvents.value.filter((event) => event.ruleHits.includes(rule)).length;
 }
 
 function getQueryString(key: string): string {
@@ -297,6 +365,10 @@ function getSeverityLabel(severity: RiskSeverity): string {
 <style scoped lang="scss">
 .events-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.events-page--drawer-open {
   grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
 }
 
@@ -314,18 +386,29 @@ function getSeverityLabel(severity: RiskSeverity): string {
     color: var(--color-text-muted);
     display: grid;
     font-size: var(--font-size-12);
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
     gap: var(--space-1);
   }
 
-  input,
-  select {
-    background: var(--color-surface);
+  input {
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
     border: 1px solid var(--color-border);
     border-radius: var(--radius-2);
+    box-shadow: var(--shadow-subtle);
     color: var(--color-text);
-    min-height: 2.375rem;
+    min-height: 2.5rem;
     padding: 0 var(--space-3);
+    width: 100%;
+
+    &::placeholder {
+      color: var(--color-text-subtle);
+    }
+
+    &:hover {
+      border-color: var(--color-active-border);
+      box-shadow: 0 8px 18px rgb(37 99 235 / 0.08);
+    }
   }
 }
 
@@ -336,15 +419,39 @@ function getSeverityLabel(severity: RiskSeverity): string {
   margin-bottom: var(--space-4);
 
   button {
+    align-items: center;
     background: var(--color-surface-muted);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-pill);
     color: var(--color-text-muted);
     cursor: pointer;
+    display: inline-flex;
     font-size: var(--font-size-12);
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
+    gap: var(--space-2);
     min-height: 2rem;
     padding: 0 var(--space-3);
+
+    &:hover {
+      background: var(--color-active-soft);
+      border-color: var(--color-active-border);
+      color: var(--color-active);
+    }
+  }
+}
+
+.quick-filters__button--active {
+  background: var(--color-active) !important;
+  border-color: var(--color-active) !important;
+  box-shadow: var(--shadow-subtle);
+  color: var(--color-active-text) !important;
+
+  &::before {
+    content: "";
+    background: currentColor;
+    border-radius: 999px;
+    height: 0.375rem;
+    width: 0.375rem;
   }
 }
 
@@ -369,6 +476,7 @@ function getSeverityLabel(severity: RiskSeverity): string {
   td {
     border-bottom: 1px solid var(--color-border);
     font-size: var(--font-size-13);
+    line-height: var(--line-height-ui);
     max-width: 14rem;
     padding: var(--space-3);
     text-align: left;
@@ -378,25 +486,39 @@ function getSeverityLabel(severity: RiskSeverity): string {
   th {
     color: var(--color-text-subtle);
     font-size: var(--font-size-12);
-    font-weight: 760;
+    font-weight: var(--font-weight-bold);
+  }
+
+  tbody tr {
+    cursor: pointer;
+    transition:
+      background-color var(--transition-fast),
+      box-shadow var(--transition-fast);
+
+    &:hover {
+      background: var(--color-row-hover);
+    }
+
+    &:focus-visible {
+      box-shadow: inset 0 0 0 2px var(--color-focus);
+      outline: 0;
+    }
   }
 }
 
 .audit-table__row--selected {
   background: var(--color-active-soft);
+  box-shadow: inset 3px 0 0 var(--color-active);
 }
 
 .table-link {
-  background: transparent;
-  border: 0;
   color: var(--color-link);
-  cursor: pointer;
   font: inherit;
-  padding: 0;
+  font-weight: var(--font-weight-semibold);
 }
 
 .risk-score {
-  font-weight: 760;
+  font-weight: var(--font-weight-bold);
 }
 
 .detail-section {
@@ -405,6 +527,7 @@ function getSeverityLabel(severity: RiskSeverity): string {
 
   h2 {
     font-size: var(--font-size-14);
+    font-weight: var(--font-weight-bold);
     margin: 0;
   }
 
@@ -430,7 +553,7 @@ function getSeverityLabel(severity: RiskSeverity): string {
   }
 
   dd {
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
     margin: 0;
     overflow-wrap: anywhere;
     text-align: right;

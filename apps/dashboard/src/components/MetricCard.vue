@@ -23,6 +23,7 @@ defineProps<{
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-3);
+  box-shadow: var(--shadow-subtle);
   color: var(--color-text);
   display: grid;
   gap: var(--space-3);
@@ -31,10 +32,16 @@ defineProps<{
   padding: var(--space-4);
   text-decoration: none;
 
+  &:hover {
+    border-color: var(--color-active-border);
+    box-shadow: var(--shadow-raised);
+    transform: translateY(-1px);
+  }
+
   span {
     color: var(--color-text-muted);
     font-size: var(--font-size-13);
-    font-weight: 680;
+    font-weight: var(--font-weight-semibold);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -42,7 +49,7 @@ defineProps<{
 
   strong {
     font-size: var(--font-size-28);
-    line-height: 1;
+    line-height: var(--line-height-tight);
   }
 }
 

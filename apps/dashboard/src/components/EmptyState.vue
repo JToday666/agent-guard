@@ -25,6 +25,7 @@ withDefaults(defineProps<{
   background: var(--color-surface);
   border: 1px dashed var(--color-border-strong);
   border-radius: var(--radius-3);
+  box-shadow: var(--shadow-subtle);
   display: grid;
   gap: var(--space-2);
   min-height: 8rem;
@@ -39,6 +40,7 @@ withDefaults(defineProps<{
 
   h2 {
     font-size: var(--font-size-18);
+    font-weight: var(--font-weight-bold);
   }
 
   p {

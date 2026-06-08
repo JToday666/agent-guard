@@ -11,13 +11,21 @@ body {
   color: var(--color-text);
   font-family:
     Inter,
-    ui-sans-serif,
-    system-ui,
     -apple-system,
     BlinkMacSystemFont,
+    "SF Pro Text",
+    "SF Pro Display",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "Noto Sans CJK SC",
     "Segoe UI",
+    ui-sans-serif,
+    system-ui,
     sans-serif;
   font-synthesis: none;
+  line-height: var(--line-height-body);
   margin: 0;
   min-height: 100vh;
   text-rendering: optimizeLegibility;
@@ -41,12 +49,24 @@ a,
 input,
 select,
 textarea {
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+
   &:focus-visible {
-    outline: 3px solid var(--color-active-soft);
+    box-shadow: var(--shadow-focus);
+    outline: 0;
     outline-offset: 2px;
   }
 }
 
 a {
   color: var(--color-link);
+}
+
+button {
+  line-height: var(--line-height-ui);
 }

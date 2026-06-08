@@ -23,14 +23,14 @@
 
       <section class="content-section">
         <h2>配置审计</h2>
-        <p>当前配置存在部分待检查项。</p>
-        <button type="button">查看配置风险</button>
+        <p>适配器异常会进入事件流并保留关联链路。</p>
+        <RouterLink to="/events?type=adapter_error">查看适配器事件</RouterLink>
       </section>
 
       <section class="content-section">
         <h2>审计完整性</h2>
-        <p>审计链状态为 partial。</p>
-        <button type="button">查看完整性状态</button>
+        <p>系统状态展示审计写入、审批队列和最近事件时间。</p>
+        <RouterLink to="/system">查看系统状态</RouterLink>
       </section>
     </div>
   </section>

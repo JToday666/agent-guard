@@ -63,6 +63,7 @@ function handleRuntimeClick(): void {
   align-items: center;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+  box-shadow: var(--shadow-subtle);
   display: grid;
   gap: var(--space-4);
   grid-template-columns: minmax(10rem, 16rem) minmax(20rem, 1fr) minmax(16rem, 24rem) auto;
@@ -82,8 +83,13 @@ function handleRuntimeClick(): void {
   color: var(--color-text);
   display: block;
   font-size: var(--font-size-18);
-  font-weight: 760;
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
   text-decoration: none;
+
+  &:hover {
+    color: var(--color-active);
+  }
 }
 
 .top-bar__subtitle {
@@ -114,12 +120,18 @@ function handleRuntimeClick(): void {
   color: var(--color-text-muted);
   display: inline-flex;
   font-size: var(--font-size-12);
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   gap: var(--space-2);
   min-height: 1.75rem;
   padding: 0 var(--space-3);
   text-decoration: none;
   white-space: nowrap;
+
+  &:hover {
+    background: var(--color-active-soft);
+    border-color: var(--color-active-border);
+    color: var(--color-active);
+  }
 }
 
 button.top-bar__chip {
@@ -137,6 +149,14 @@ button.top-bar__chip {
     min-height: 2.25rem;
     padding: 0 var(--space-3);
     width: 100%;
+
+    &::placeholder {
+      color: var(--color-text-subtle);
+    }
+
+    &:hover {
+      border-color: var(--color-border-strong);
+    }
   }
 }
 

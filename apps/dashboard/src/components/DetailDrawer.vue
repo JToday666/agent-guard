@@ -73,6 +73,7 @@ watch(
 .detail-drawer {
   background: var(--color-surface);
   border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-raised);
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: calc(100vh - var(--top-bar-height));
@@ -95,13 +96,14 @@ watch(
   p {
     color: var(--color-text-subtle);
     font-size: var(--font-size-12);
-    font-weight: 760;
+    font-weight: var(--font-weight-bold);
     text-transform: uppercase;
   }
 
   h2 {
     font-size: var(--font-size-18);
-    line-height: 1.25;
+    font-weight: var(--font-weight-bold);
+    line-height: var(--line-height-tight);
     margin-top: var(--space-1);
     overflow-wrap: anywhere;
   }
@@ -120,6 +122,12 @@ watch(
   height: 2.25rem;
   justify-content: center;
   width: 2.25rem;
+
+  &:hover {
+    background: var(--color-danger-soft);
+    border-color: var(--color-danger-border);
+    color: var(--color-danger);
+  }
 }
 
 .detail-drawer__body {
