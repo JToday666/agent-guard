@@ -183,6 +183,15 @@ function getSeverityLabel(severity: ApprovalRequest["severity"]): string {
   padding: var(--space-3);
   text-align: left;
 
+  &:hover {
+    background: var(--color-row-hover);
+    border-color: var(--color-active-border);
+  }
+
+  strong {
+    font-weight: var(--font-weight-bold);
+  }
+
   span,
   small {
     overflow: hidden;
@@ -196,7 +205,9 @@ function getSeverityLabel(severity: ApprovalRequest["severity"]): string {
 }
 
 .approval-list__item--selected {
-  outline: 2px solid var(--color-active);
+  background: var(--color-active-soft) !important;
+  border-color: var(--color-active-border) !important;
+  box-shadow: inset 3px 0 0 var(--color-active);
 }
 
 .approval-detail {
@@ -221,7 +232,7 @@ function getSeverityLabel(severity: ApprovalRequest["severity"]): string {
   }
 
   dd {
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
     margin: 0;
     overflow-wrap: anywhere;
     text-align: right;
@@ -247,10 +258,16 @@ function getSeverityLabel(severity: ApprovalRequest["severity"]): string {
     color: var(--color-text);
     cursor: pointer;
     display: inline-flex;
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
     min-height: 2.5rem;
     padding: 0 var(--space-3);
     text-decoration: none;
+
+    &:hover {
+      background: var(--color-active-soft);
+      border-color: var(--color-active-border);
+      color: var(--color-active);
+    }
   }
 }
 

@@ -62,6 +62,11 @@ const trace = computed(() => traces.find((item) => item.id === traceId.value));
     border: 1px solid var(--color-border);
     border-radius: var(--radius-2);
     padding: var(--space-3);
+
+    &:hover {
+      background: var(--color-row-hover);
+      border-color: var(--color-active-border);
+    }
   }
 }
 </style>

@@ -71,13 +71,13 @@ const highRiskEvents = computed(() =>
 <style scoped lang="scss">
 .overview-page {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 
 .metric-grid,
 .overview-page__grid {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .metric-grid {
@@ -96,11 +96,17 @@ const highRiskEvents = computed(() =>
 
 .bar-list a {
   background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   color: var(--color-text);
   min-height: 2rem;
   overflow: hidden;
   text-decoration: none;
+
+  &:hover {
+    border-color: var(--color-active-border);
+    box-shadow: var(--shadow-subtle);
+  }
 }
 
 .bar-list span {
@@ -108,7 +114,7 @@ const highRiskEvents = computed(() =>
   background: var(--color-active-soft);
   display: flex;
   font-size: var(--font-size-12);
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   min-height: 2rem;
   min-width: 5rem;
   padding: 0 var(--space-3);
@@ -125,6 +131,11 @@ const highRiskEvents = computed(() =>
   min-height: 3rem;
   padding: 0 var(--space-3);
   text-decoration: none;
+
+  &:hover {
+    background: var(--color-row-hover);
+    border-color: var(--color-active-border);
+  }
 
   small {
     color: var(--color-text-muted);

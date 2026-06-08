@@ -111,6 +111,15 @@ function getTraceLabel(status: TraceSummary["status"]): string {
   padding: var(--space-3);
   text-decoration: none;
 
+  &:hover {
+    background: var(--color-row-hover);
+    border-color: var(--color-active-border);
+  }
+
+  strong {
+    font-weight: var(--font-weight-bold);
+  }
+
   span,
   small {
     overflow: hidden;
@@ -126,6 +135,7 @@ function getTraceLabel(status: TraceSummary["status"]): string {
 .trace-chain {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-3);
+  box-shadow: var(--shadow-subtle);
   padding: var(--space-4);
 
   header,
@@ -145,6 +155,7 @@ function getTraceLabel(status: TraceSummary["status"]): string {
 
   li {
     background: var(--color-surface-muted);
+    border: 1px solid transparent;
     border-radius: var(--radius-2);
     padding: var(--space-2) var(--space-3);
   }

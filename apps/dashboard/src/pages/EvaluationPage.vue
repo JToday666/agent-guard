@@ -50,12 +50,12 @@ const caseLabel = computed(() => {
 <style scoped lang="scss">
 .evaluation-page {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 
 .metric-grid {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
 }
 
@@ -74,6 +74,11 @@ const caseLabel = computed(() => {
   grid-template-columns: 8rem minmax(0, 1fr) auto;
   min-height: 3.25rem;
   padding: 0 var(--space-3);
+
+  &:hover {
+    background: var(--color-row-hover);
+    border-color: var(--color-active-border);
+  }
 
   span {
     overflow: hidden;

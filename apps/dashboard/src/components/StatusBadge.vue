@@ -23,9 +23,9 @@ defineProps<{
   border-radius: var(--radius-pill);
   display: inline-flex;
   font-size: var(--font-size-12);
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   gap: var(--space-2);
-  line-height: 1;
+  line-height: var(--line-height-ui);
   min-height: 1.75rem;
   max-width: 100%;
   padding: 0 var(--space-3);

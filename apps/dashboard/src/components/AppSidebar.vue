@@ -112,6 +112,7 @@ const navigationGroups = computed(() => [
 .sidebar {
   background: var(--color-nav);
   border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-subtle);
   min-height: calc(100vh - var(--top-bar-height));
   padding: var(--space-4);
 }
@@ -128,7 +129,7 @@ const navigationGroups = computed(() => [
 .sidebar__title {
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
-  font-weight: 760;
+  font-weight: var(--font-weight-bold);
 }
 
 .sidebar__collapse {
@@ -142,6 +143,12 @@ const navigationGroups = computed(() => [
   height: 2.375rem;
   justify-content: center;
   width: 2.375rem;
+
+  &:hover {
+    background: var(--color-active-soft);
+    border-color: var(--color-active-border);
+    color: var(--color-active);
+  }
 }
 
 .sidebar__toggle {
@@ -160,7 +167,7 @@ const navigationGroups = computed(() => [
   h2 {
     color: var(--color-text-subtle);
     font-size: var(--font-size-12);
-    font-weight: 760;
+    font-weight: var(--font-weight-bold);
     letter-spacing: 0;
     margin: 0;
     text-transform: uppercase;
@@ -178,6 +185,11 @@ const navigationGroups = computed(() => [
   min-width: 0;
   padding: 0 var(--space-3);
   text-decoration: none;
+
+  &:hover {
+    background: var(--color-row-hover);
+    color: var(--color-text);
+  }
 
   .sidebar__label,
   .sidebar__meta,
@@ -201,25 +213,37 @@ const navigationGroups = computed(() => [
 
 .sidebar__badge {
   align-items: center;
-  background: var(--color-warning);
+  background: #9f1239;
+  border: 2px solid var(--color-nav);
   border-radius: var(--radius-pill);
-  color: #ffffff;
+  box-shadow: 0 4px 10px rgb(159 18 57 / 0.28);
+  color: #ffffff !important;
   display: none;
   font-size: var(--font-size-11);
-  font-weight: 760;
+  font-weight: var(--font-weight-bold);
   height: 1.25rem;
   justify-content: center;
   min-width: 1.25rem;
-  padding: 0 var(--space-1);
+  padding: 0 0.3125rem;
   position: absolute;
-  right: 0.25rem;
-  top: 0.25rem;
+  right: 0.125rem;
+  top: 0.125rem;
 }
 
 .sidebar__link.router-link-active {
   background: var(--color-active);
   color: var(--color-active-text);
-  font-weight: 720;
+  box-shadow: var(--shadow-subtle);
+  font-weight: var(--font-weight-bold);
+
+  small {
+    color: rgb(255 255 255 / 0.78);
+  }
+
+  .sidebar__badge {
+    border-color: var(--color-active);
+    color: #ffffff !important;
+  }
 }
 
 .sidebar--collapsed {
@@ -283,7 +307,7 @@ const navigationGroups = computed(() => [
     color: var(--color-text);
     cursor: pointer;
     display: inline-flex;
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
     min-height: 2.25rem;
     padding: 0 var(--space-3);
   }
