@@ -1,0 +1,13 @@
+@charset "utf-8";
+
+.css-1qg06fp { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 10px; font-weight: 400; letter-spacing: 0.7px; display: flex; flex-flow: row wrap; color: rgb(255, 255, 255); -webkit-box-align: center; align-items: center; -webkit-box-pack: start; justify-content: flex-start; line-height: 24px; }
+
+.css-1qg06fp > span { margin: 0px 0px 16px; }
+
+@media (min-width: 564px) {
+  .css-1qg06fp > span { margin: 0px 8px 8px 0px; }
+}
+
+@media (min-width: 564px) {
+  .css-1qg06fp { -webkit-box-pack: center; justify-content: center; }
+}

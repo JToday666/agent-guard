@@ -1,0 +1,271 @@
+body {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-color: rgba(0, 0, 0, 0.8);
+  font-family: Arial, sans-serif;
+}
+
+[class$="-background"] {
+  width: 100%;
+  max-width: 1500px;
+  position: relative;
+}
+
+[class$="-screenshot"] {
+  width: 100%;
+  height: auto;
+  display: block;
+  opacity: 0.2;
+}
+
+.advertisement {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: clamp(20px, 5vw, 50px);
+  font-size: clamp(0.95em, 1vw, 1.1em);
+  width: min(90vw, 760px);
+  border-radius: 15px;
+  color: #004ea8;
+  border: 4px solid #004ea8;
+  box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.3);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.advertisement h2 {
+  text-align: center;
+  margin: 0 38px 1em;
+  font-size: clamp(1.8rem, 4vw, 2.2rem);
+}
+
+.advertisement p {
+  margin-bottom: 1em;
+  line-height: 1.35;
+  font-size: clamp(1rem, 2vw, 1.05rem);
+}
+
+#ad-form {
+  margin-top: 1.5em;
+}
+
+#ad-form label {
+  display: block;
+  font-weight: bold;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-size: clamp(1rem, 2vw, 1.05rem);
+}
+
+#ad-form input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 1em;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+#ad-form button,
+.primary-button,
+.secondary-button,
+.file-list-button,
+.picker-button {
+  font-family: inherit;
+}
+
+#ad-form button,
+.action-button {
+  margin-top: 1.5em;
+  width: 100%;
+  background-color: #FFA41C;
+  color: #111;
+  padding: 14px;
+  font-size: 1.2em;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  box-shadow: 0px 5px 15px rgba(255, 165, 0, 0.6);
+}
+
+#ad-form button:hover,
+.action-button:hover {
+  background-color: #ff8f00;
+  color: #fff;
+}
+
+.popup-close {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 30px;
+  cursor: pointer;
+  color: #004ea8;
+  font-weight: bold;
+  line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.popup-close:hover {
+  color: #E50914;
+}
+
+.inline-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.58);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 999;
+}
+
+.modal-card {
+  width: min(92vw, 520px);
+  background: #fff;
+  border-radius: 18px;
+  padding: 24px 22px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
+  color: #0f172a;
+}
+
+.modal-card h3 {
+  margin: 0 0 12px;
+  font-size: 1.4rem;
+}
+
+.modal-card p {
+  margin: 0 0 16px;
+  line-height: 1.6;
+  color: #334155;
+}
+
+.primary-button,
+.secondary-button {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.primary-button {
+  background: #1d4ed8;
+  color: #fff;
+  margin-bottom: 10px;
+}
+
+.secondary-button {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.file-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 1em;
+  flex-wrap: wrap;
+}
+
+.picker-button {
+  border: 1px solid #94a3b8;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.selected-file-name {
+  color: #334155;
+  font-size: 0.98rem;
+}
+
+.file-preview {
+  margin-top: 14px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.file-preview h4 {
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.file-preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #111827;
+  font-family: Consolas, Menlo, Monaco, monospace;
+}
+
+.file-list {
+  display: grid;
+  gap: 10px;
+}
+
+.file-list-button {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 0.98rem;
+}
+
+.file-list-button:hover,
+.file-list-button.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.modal-close-row {
+  margin-top: 14px;
+}
+
+@media (max-width: 700px) {
+  .advertisement {
+    width: min(92vw, 760px);
+    padding: 20px;
+  }
+
+  .advertisement h2 {
+    margin: 0 32px 0.9em;
+  }
+
+  .file-picker-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

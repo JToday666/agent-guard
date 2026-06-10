@@ -1,0 +1,909 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 26.5.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 340.7 225" style="enable-background:new 0 0 340.7 225;" xml:space="preserve" width="340.7" height="225">
+<style type="text/css">
+	.st0{fill:#505050;}
+	.st1{fill:#C0C0C0;}
+	.st2{fill:#FFFFFF;}
+	.st3{fill:#BFBFBF;}
+	.st4{fill:#515050;}
+	.st5{fill:#F2F2F2;}
+	.st6{fill:none;stroke:#C0C0C0;stroke-width:1.2;}
+	.st7{fill-rule:evenodd;clip-rule:evenodd;fill:#505050;}
+	.st8{fill:#939DA8;}
+	.st9{fill:#2D363E;}
+</style>
+<script  xmlns="">(function() {
+		window.addEventListener(&apos;message&apos;, function(event) {
+			if (
+				event.data &amp;&amp;
+				event.data.id &amp;&amp;
+				typeof event.data.id.startsWith === &apos;function&apos; &amp;&amp;
+				event.data.id.startsWith(&apos;adobeExperienceCloudDebuggerContentMessagingIdentifier-&apos;)
+			) {
+				event.stopImmediatePropagation();
+			}
+		},
+		{capture: true});
+	})();
+	</script>
+<script  xmlns="">(function() {
+			const contentScriptEventTrigger = function(data) {
+				window.postMessage({ id:&apos;adobeExperienceCloudDebuggerContentMessagingIdentifier-1&apos;, data: data });
+			}
+			const DATA_LAYER_LOCAL_STORAGE_KEY =
+  &quot;com.adobe.experiencePlatformDebugger.dataLayer.key&quot;;
+const dataLayerKey = window.localStorage.getItem(DATA_LAYER_LOCAL_STORAGE_KEY);
+
+if (dataLayerKey) {
+  // sindresorhus/on-change
+  // MIT - License
+  // https://github.com/sindresorhus/on-change
+  const PATH_SEPARATOR = &quot;.&quot;;
+  const TARGET = Symbol(&quot;target&quot;);
+  const UNSUBSCRIBE = Symbol(&quot;unsubscribe&quot;);
+
+  const isPrimitive = value =&gt;
+    value === null ||
+    (typeof value !== &quot;object&quot; &amp;&amp; typeof value !== &quot;function&quot;);
+
+  const isBuiltinWithoutMutableMethods = value =&gt;
+    value instanceof RegExp || value instanceof Number;
+
+  const isBuiltinWithMutableMethods = value =&gt; value instanceof Date;
+
+  const concatPath = (path, property) =&gt; {
+    let ret = path;
+    if (property &amp;&amp; property.toString) {
+      if (path) {
+        ret += PATH_SEPARATOR;
+      }
+
+      ret += property.toString();
+    }
+
+    return ret;
+  };
+
+  const walkPath = (path, callback) =&gt; {
+    let index;
+    let remainingPath = path;
+    while (remainingPath) {
+      index = remainingPath.indexOf(PATH_SEPARATOR);
+
+      if (index === -1) {
+        index = remainingPath.length;
+      }
+
+      callback(remainingPath.slice(0, index));
+
+      remainingPath = remainingPath.slice(index + 1);
+    }
+  };
+
+  const shallowClone = value =&gt; {
+    if (Array.isArray(value)) {
+      return value.slice();
+    }
+
+    return { ...value };
+  };
+
+  const onChange = (object, updateDataLayer, options = {}) =&gt; {
+    const proxyTarget = Symbol(&quot;ProxyTarget&quot;);
+    let inApply = false;
+    let changed = false;
+    let applyPath;
+    let applyPrevious;
+    let isUnsubscribed = false;
+    const equals = options.equals || Object.is;
+    let propCache = new WeakMap();
+    let pathCache = new WeakMap();
+    let proxyCache = new WeakMap();
+    let boundUpdateDataLayer;
+
+    const handleChange = (path, property, previous, value) =&gt; {
+      if (isUnsubscribed) {
+        return;
+      }
+
+      if (!inApply) {
+        boundUpdateDataLayer(concatPath(path, property), value, previous);
+        return;
+      }
+
+      if (
+        inApply &amp;&amp;
+        applyPrevious &amp;&amp;
+        previous !== undefined &amp;&amp;
+        value !== undefined &amp;&amp;
+        property !== &quot;length&quot;
+      ) {
+        let item = applyPrevious;
+
+        if (path !== applyPath) {
+          const appliedPath = path.replace(applyPath, &quot;&quot;).slice(1);
+
+          walkPath(appliedPath, key =&gt; {
+            item[key] = shallowClone(item[key]);
+            item = item[key];
+          });
+        }
+
+        item[property] = previous;
+      }
+
+      changed = true;
+    };
+
+    const getOwnPropertyDescriptor = (target, property) =&gt; {
+      let props = propCache ? propCache.get(target) : undefined;
+
+      if (props) {
+        return props;
+      }
+
+      props = new Map();
+      propCache.set(target, props);
+
+      let prop = props.get(property);
+      if (!prop) {
+        prop = Reflect.getOwnPropertyDescriptor(target, property);
+        props.set(property, prop);
+      }
+
+      return prop;
+    };
+
+    const invalidateCachedDescriptor = (target, property) =&gt; {
+      const props = propCache ? propCache.get(target) : undefined;
+
+      if (props) {
+        props.delete(property);
+      }
+    };
+
+    const buildProxy = (value, path) =&gt; {
+      if (isUnsubscribed) {
+        return value;
+      }
+
+      pathCache.set(value, path);
+
+      let proxy = proxyCache.get(value);
+
+      if (proxy === undefined) {
+        proxy = new Proxy(value, handler);
+        proxyCache.set(value, proxy);
+      }
+
+      return proxy;
+    };
+
+    const unsubscribe = target =&gt; {
+      isUnsubscribed = true;
+      propCache = null;
+      pathCache = null;
+      proxyCache = null;
+
+      return target;
+    };
+
+    const ignoreChange = property =&gt;
+      isUnsubscribed ||
+      (options.ignoreSymbols === true &amp;&amp; typeof property === &quot;symbol&quot;);
+
+    const handler = {
+      get(target, property, receiver) {
+        if (property === proxyTarget || property === TARGET) {
+          return target;
+        }
+
+        if (property === UNSUBSCRIBE &amp;&amp; pathCache.get(target) === &quot;&quot;) {
+          return unsubscribe(target);
+        }
+
+        const value = Reflect.get(target, property, receiver);
+        if (
+          isPrimitive(value) ||
+          isBuiltinWithoutMutableMethods(value) ||
+          property === &quot;constructor&quot; ||
+          options.isShallow === true
+        ) {
+          return value;
+        }
+
+        // Preserve invariants
+        const descriptor = getOwnPropertyDescriptor(target, property);
+        if (descriptor &amp;&amp; !descriptor.configurable) {
+          if (descriptor.set &amp;&amp; !descriptor.get) {
+            return undefined;
+          }
+
+          if (descriptor.writable === false) {
+            return value;
+          }
+        }
+
+        return buildProxy(value, concatPath(pathCache.get(target), property));
+      },
+
+      set(target, property, value, receiver) {
+        const proxyTargetValue =
+          value &amp;&amp; value[proxyTarget] !== undefined
+            ? value[proxyTarget]
+            : value;
+
+        const ignore = ignoreChange(property);
+        const previous = ignore
+          ? null
+          : Reflect.get(target, property, receiver);
+        const result = Reflect.set(
+          target[proxyTarget] || target,
+          property,
+          proxyTargetValue
+        );
+
+        if (!ignore &amp;&amp; !equals(previous, proxyTargetValue)) {
+          handleChange(
+            pathCache.get(target),
+            property,
+            previous,
+            proxyTargetValue
+          );
+        }
+
+        return result;
+      },
+
+      defineProperty(target, property, descriptor) {
+        const result = Reflect.defineProperty(target, property, descriptor);
+
+        if (!ignoreChange(property)) {
+          invalidateCachedDescriptor(target, property);
+
+          handleChange(
+            pathCache.get(target),
+            property,
+            undefined,
+            descriptor.value
+          );
+        }
+
+        return result;
+      },
+
+      deleteProperty(target, property) {
+        if (!Reflect.has(target, property)) {
+          return true;
+        }
+
+        const ignore = ignoreChange(property);
+        const previous = ignore ? null : Reflect.get(target, property);
+        const result = Reflect.deleteProperty(target, property);
+
+        if (!ignore) {
+          invalidateCachedDescriptor(target, property);
+
+          handleChange(pathCache.get(target), property, previous);
+        }
+
+        return result;
+      },
+
+      apply(target, thisArg, argumentsList) {
+        const compare = isBuiltinWithMutableMethods(proxyTargetThisArg);
+
+        const proxyTargetThisArg = compare ? thisArg[proxyTarget] : thisArg;
+
+        if (!inApply) {
+          inApply = true;
+
+          if (compare) {
+            applyPrevious = proxyTargetThisArg.valueOf();
+          }
+
+          if (
+            Array.isArray(proxyTargetThisArg) ||
+            toString.call(proxyTargetThisArg) === &quot;[object Object]&quot;
+          ) {
+            applyPrevious = shallowClone(proxyTargetThisArg[proxyTarget]);
+          }
+
+          applyPath = pathCache.get(target);
+          applyPath = applyPath.slice(
+            0,
+            Math.max(applyPath.lastIndexOf(PATH_SEPARATOR), 0)
+          );
+
+          const result = Reflect.apply(
+            target,
+            proxyTargetThisArg,
+            argumentsList
+          );
+
+          inApply = false;
+
+          if (
+            changed ||
+            (compare &amp;&amp; !equals(applyPrevious, proxyTargetThisArg.valueOf()))
+          ) {
+            handleChange(
+              applyPath,
+              &quot;&quot;,
+              applyPrevious,
+              proxyTargetThisArg[proxyTarget] || proxyTargetThisArg
+            );
+            applyPrevious = null;
+            changed = false;
+          }
+
+          return result;
+        }
+
+        return Reflect.apply(target, proxyTargetThisArg, argumentsList);
+      }
+    };
+
+    const proxy = buildProxy(object, &quot;&quot;);
+    boundUpdateDataLayer = updateDataLayer.bind(proxy);
+
+    return proxy;
+  };
+
+  onChange.target = proxy =&gt; proxy[TARGET] || proxy;
+  onChange.unsubscribe = proxy =&gt; proxy[UNSUBSCRIBE] || proxy;
+
+  let proxy;
+  let previousDataLayer;
+
+  function _serialize(dataLayer) {
+    try {
+      return JSON.stringify({ ...dataLayer }, null, 2);
+    } catch (e) {
+      return JSON.stringify(dataLayer, null, 2);
+    }
+  }
+
+  function _notify(dataLayer) {
+    contentScriptEventTrigger({
+      data: {
+        dataLayer
+      },
+      timestamp: Date.now(),
+      timeSincePageLoad: window.performance.now()
+    });
+  }
+
+  function onDataLayerUpdate() {
+    const dataLayer = _serialize(this);
+
+    if (previousDataLayer !== dataLayer) {
+      previousDataLayer = dataLayer;
+      _notify(dataLayer);
+    }
+  }
+
+  function onDataLayerSet(newDataLayer) {
+    const dataLayer = _serialize(newDataLayer);
+    if (!previousDataLayer || previousDataLayer !== dataLayer) {
+      previousDataLayer = dataLayer;
+      _notify(dataLayer);
+    }
+  }
+
+  Object.defineProperty(window, dataLayerKey, {
+    get() {
+      return proxy;
+    },
+    set(newDataLayer) {
+      onDataLayerSet(newDataLayer);
+      proxy = onChange(newDataLayer, onDataLayerUpdate);
+    },
+    enumerable: true,
+    configurable: true
+  });
+
+  const oldObjectDefine = Object.defineProperty.bind(Object);
+  Object.defineProperty = (obj, prop, descriptor) =&gt; {
+    if (prop === dataLayerKey) {
+      console.debug(
+        &quot;Data layer being overwritten by Object.defineProperty(). Falling back to polling...&quot;
+      );
+
+      function pollForChanges() {
+        const dataLayer = _serialize(window[dataLayerKey]);
+        if (previousDataLayer !== dataLayer) {
+          previousDataLayer = dataLayer;
+          _notify(dataLayer);
+        }
+        window.requestAnimationFrame(pollForChanges);
+      }
+
+      window.requestAnimationFrame(pollForChanges);
+    }
+    return oldObjectDefine(obj, prop, descriptor);
+  };
+}
+
+		})();
+	</script>
+<script  xmlns="">(function() {
+			const contentScriptEventTrigger = function(data) {
+				window.postMessage({ id:&apos;adobeExperienceCloudDebuggerContentMessagingIdentifier-2&apos;, data: data });
+			}
+			// https://github.com/adobe/alloy/wiki/Monitoring-Hooks
+
+// This script is run within an immediately executed function, so variables declared here
+// are local to this script only.
+const orgIdsByInstanceName = {};
+
+window.__alloyMonitors = window.__alloyMonitors || [];
+window.__alloyMonitors.push({
+  onBeforeNetworkRequest(data) {
+    setTimeout(() =&gt; {
+      contentScriptEventTrigger({
+        name: &quot;onAlloyNetworkRequest&quot;,
+        data: {
+          ...data,
+          orgId: orgIdsByInstanceName[data.instanceName]
+        }
+      });
+    });
+  },
+  onNetworkResponse(data) {
+    // There are fields in data that don&apos;t serialize well, so we only include parsedBody
+    setTimeout(() =&gt; {
+      contentScriptEventTrigger({
+        name: &quot;onAlloyNetworkResponse&quot;,
+        data: {
+          parsedBody: data.parsedBody,
+          orgId: orgIdsByInstanceName[data.instanceName]
+        }
+      });
+    });
+  },
+  onNetworkError(data) {
+    setTimeout(() =&gt; {
+      contentScriptEventTrigger({ name: &quot;onAlloyNetworkError&quot;, data });
+    });
+  },
+  onInstanceConfigured(data) {
+    // We keep a cache of orgIdsByInstanceNames here because the response to getLibraryInfo
+    // may happen after a network request already occurred.
+    orgIdsByInstanceName[data.instanceName] = data.config.orgId;
+    setTimeout(() =&gt; {
+      window[data.instanceName](&quot;getLibraryInfo&quot;).then(({ libraryInfo }) =&gt; {
+        // The configuration section uses debugEnabled to know the initial state
+        const debugEnabledSessionStorage = window.sessionStorage.getItem(
+          `com.adobe.alloy.instance.${data.instanceName}.debug`
+        );
+        const debugEnabled =
+          debugEnabledSessionStorage === &quot;true&quot; ||
+          (data.config.debugEnabled &amp;&amp; debugEnabledSessionStorage === null);
+
+        contentScriptEventTrigger({
+          name: &quot;onInstanceConfigured&quot;,
+          data: {
+            namespace: data.instanceName,
+            edgeConfigId: data.config.edgeConfigId,
+            edgeDomain: data.config.edgeDomain,
+            orgId: data.config.orgId,
+            // we only use the version (for now), so we don&apos;t need to send anything else.
+            libraryInfo: {
+              version: libraryInfo.version
+            },
+            debugEnabled
+          }
+        });
+      });
+    });
+  }
+});
+
+		})();
+	</script>
+<script  xmlns="">(function() {
+			const contentScriptEventTrigger = function(data) {
+				window.postMessage({ id:&apos;adobeExperienceCloudDebuggerContentMessagingIdentifier-3&apos;, data: data });
+			}
+			/**
+ * Hooks into both DTM&apos;s and Launch&apos;s logging mechanisms in order to capture all log messages and
+ * send them to the UI to display to the user
+ */
+function notifyContentScript(log) {
+  contentScriptEventTrigger({
+    data: log,
+    timestamp: Date.now(),
+    timeSincePageLoad: window.performance.now()
+  });
+}
+
+window._satellite = window._satellite || {};
+window._satellite.override = window._satellite.override || {};
+
+// Hook into _satellite in order to capture DTM logs
+if (window.Object &amp;&amp; window.Object.defineProperty) {
+  window.Object.defineProperty(
+    window._satellite.override,
+    &quot;adobe.aepDebugger.dtmInitHook&quot;,
+    {
+      enumerable: true,
+      get() {
+        onSatelliteInit();
+        return &quot;&quot;;
+      },
+      set() {}
+    }
+  );
+}
+
+function onSatelliteInit() {
+  // This function will run when DTM is loaded on the page. We use it to hook into DTM logs
+  const _satellite = window._satellite;
+  if (_satellite.Logger) {
+    _satellite.Logger.keepLimit = 9999;
+  }
+
+  // override notify
+  // Reason: we want to intercept messages that go through here
+  // without worrying about limits or messing anything up internally
+  const originalNotify = _satellite.notify;
+  _satellite.notify = (message, level) =&gt; {
+    const logLevel = [&quot;log&quot;, &quot;log&quot;, &quot;log&quot;, &quot;info&quot;, &quot;warn&quot;, &quot;error&quot;];
+
+    // call original
+    originalNotify(message, level);
+
+    const log = {
+      solution: &quot;dtm&quot;,
+      solutions: [&quot;dtm&quot;],
+      level: logLevel[level] || &quot;log&quot;,
+      message: &quot;&quot;
+    };
+
+    // make sure that we have a message
+    if (message &amp;&amp; typeof message === &quot;string&quot;) {
+      // only add it
+      log.message = message;
+
+      // check to see what solution it came from
+      if (message.indexOf(&quot;Adobe Analytics:&quot;) !== -1) {
+        log.solutions.push(&quot;analytics&quot;);
+      } else if (message.indexOf(&quot;Test &amp; Target:&quot;) !== -1) {
+        log.solutions.push(&quot;target&quot;);
+      } else if (message.indexOf(&quot;Visitor ID:&quot;) !== -1) {
+        log.solutions.push(&quot;visitorService&quot;);
+      } else if (message.indexOf(&quot;AdLens:&quot;) !== -1) {
+        log.solutions.push(&quot;mediaOptimizer&quot;);
+      }
+    }
+    notifyContentScript(log);
+  };
+}
+
+function _overrideConsoleLogFunction(prefix, solution, level) {
+  const originalFunction = console[level];
+  console[level] = (...args) =&gt; {
+    const argsAsArray = Array.prototype.slice.call(args);
+    originalFunction.apply(console, argsAsArray);
+    const mappedArgs = argsAsArray.map(arg =&gt; {
+      let result = &quot;&quot;;
+      if (arg &amp;&amp; typeof arg.toString === &quot;function&quot;) {
+        result = arg.toString();
+      }
+      if (!result || result === &quot;[object Object]&quot;) {
+        try {
+          result = JSON.stringify(arg);
+        } catch (e) {
+          return &quot;&quot;;
+        }
+      }
+      return result;
+    });
+
+    const message = mappedArgs.join(&quot; &quot;);
+
+    if (typeof message === &quot;string&quot;) {
+      if (message.indexOf(prefix) === 0) {
+        const log = {
+          solution,
+          solutions: [solution],
+          level,
+          message,
+          searchIndex: message,
+          params: mappedArgs
+        };
+
+        // check to see what solution it came from
+        if (message.indexOf(&quot;[Adobe Analytics]&quot;) !== -1) {
+          log.solutions.push(&quot;analytics&quot;);
+        } else if (message.indexOf(&quot;[Adobe Target]&quot;) !== -1) {
+          log.solutions.push(&quot;target&quot;);
+        } else if (message.indexOf(&quot;[Experience Cloud ID Service]&quot;) !== -1) {
+          log.solutions.push(&quot;visitorService&quot;);
+        } else if (message.indexOf(&quot;[Adobe Media Optimizer]&quot;) !== -1) {
+          log.solutions.push(&quot;mediaOptimizer&quot;);
+        }
+        notifyContentScript(log);
+      }
+    }
+  };
+}
+
+/**
+ * Overrides the various console.* methods in order to intercept messages that
+ * are sent to the console by launch. A message was sent be launch if it starts
+ * with the rocket emoji 🚀. Note that this is a somewhat brittle solution
+ * since if the emoji ever changes this integration will break. However this
+ * is the only solution that works for now.
+ *
+ * Any messages that are not prefixed with the rocket emoji are ignored and passed
+ * through to the original console function
+ */
+function _overrideConsoleForLaunch() {
+  const prefix = &quot;\uD83D\uDE80&quot;;
+  [&quot;error&quot;, &quot;info&quot;, &quot;log&quot;, &quot;warn&quot;].forEach(
+    _overrideConsoleLogFunction.bind(null, prefix, &quot;launch&quot;)
+  );
+}
+
+/**
+ * Intercepts console messages made by alloy (prefixed with [alloy]) and notifies content script about each one.
+ * Note that this is a brittle solution and should not be used long term.
+ *
+ * Ideally there will be some debugging hooks built into alloy itself that we can connect to
+ */
+function _overrideConsoleForAlloy() {
+  window.__alloyNS = [];
+  const originalPush = window.__alloyNS.push;
+  window.__alloyNS.push = (namespace, ...rest) =&gt; {
+    [&quot;error&quot;, &quot;info&quot;, &quot;log&quot;, &quot;warn&quot;].forEach(
+      _overrideConsoleLogFunction.bind(null, `[${namespace}]`, &quot;alloy&quot;)
+    );
+
+    originalPush.apply(
+      window.__alloyNS,
+      Array.prototype.slice.call([namespace, ...rest])
+    );
+  };
+}
+
+/**
+ * Overrides console.debug and console.warn methods in order to intercept messages that
+ * are sent to the console by at.js. A message was sent be at.js if it starts
+ * with &quot;AT:&quot;.
+ *
+ * Note that this is a somewhat brittle solution
+ * since if the prefix ever changes this integration will break. However this
+ * is the only solution that works for now, since at.js does not have any debugging hooks.
+ * If this ever breaks, the first place to look is at the logger implementation in at.js
+ * to see if they changed the prefix or started using different console functions. Check
+ * https://git.corp.adobe.com/TnT/atjs-library-v2/blob/master/src/delivery/monitoring/logger/helper.js
+ *
+ * Any messages that are not prefixed with &quot;AT:&quot; are ignored and passed
+ * through to the original console function
+ */
+function _overrideConsoleForAtJs() {
+  const prefix = &quot;AT:&quot;;
+  [&quot;debug&quot;, &quot;warn&quot;].forEach(
+    _overrideConsoleLogFunction.bind(null, prefix, &quot;target&quot;)
+  );
+}
+
+_overrideConsoleForLaunch();
+_overrideConsoleForAlloy();
+_overrideConsoleForAtJs();
+
+// Once the page has finished loading, remove _satellite if both DTM and Launch were not found
+window.addEventListener(&quot;load&quot;, () =&gt; {
+  if (!_hasDtm() &amp;&amp; !_hasLaunch()) {
+    delete window._satellite;
+  }
+});
+
+/**
+ * @returns {boolean} whether launch is present on the page
+ */
+function _hasLaunch() {
+  return !!(window._satellite &amp;&amp; window._satellite._container);
+}
+
+/**
+ * @returns {boolean} whether DTM is present on the page
+ */
+function _hasDtm() {
+  return !!(window._satellite &amp;&amp; window._satellite.configurationSettings);
+}
+
+		})();
+	</script>
+<script  xmlns="">(function() {
+			const contentScriptEventTrigger = function(data) {
+				window.postMessage({ id:&apos;adobeExperienceCloudDebuggerContentMessagingIdentifier-4&apos;, data: data });
+			}
+			window.___target_traces = window.___target_traces || [];
+const originalPush = window.___target_traces.push;
+
+window.___target_traces.push = function targetTracePush(trace) {
+  contentScriptEventTrigger({ trace });
+  originalPush.call(this, trace);
+};
+
+		})();
+	</script>
+<g>
+	<g transform="translate(71 7)">
+		<path class="st0" d="M2,0L2,0c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0C0.9,8,0,7.1,0,6V2C0,0.9,0.9,0,2,0z"/>
+		<path class="st0" d="M20,0L20,0c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2V2C18,0.9,18.9,0,20,0z"/>
+		<path class="st0" d="M2,18L2,18c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2v-4C0,18.9,0.9,18,2,18z"/>
+		<path class="st0" d="M20,18L20,18c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2v-4C18,18.9,18.9,18,20,18z"/>
+		<path class="st1" d="M17,21.4h-4.5c-0.2-0.3-0.4-0.6-0.8-0.8v-3.3h1.6V8.7h-1.6V5.4c0.3-0.2,0.6-0.5,0.8-0.8H17V3h-4.5
+			c-0.3-0.6-0.9-1-1.5-1S9.8,2.4,9.5,3H5v1.6h4.5c0.2,0.3,0.4,0.6,0.7,0.8v3.3H8.6v8.6h1.6v3.3c-0.3,0.2-0.5,0.4-0.7,0.8H5V23h4.5
+			c0.3,0.6,0.9,1,1.5,1s1.2-0.4,1.5-1H17V21.4z"/>
+	</g>
+	<g>
+		<path class="st0" d="M207,15c-2.8,0-5,2-5,4.5s2.2,4.5,5,4.5s5-2,5-4.5c0-1.2-0.5-2.3-1.5-3.2C209.6,15.5,208.3,15,207,15z"/>
+		<path class="st2" d="M209,21h-0.9v-1.7l-1,1.3H207l-1-1.3V21h-1v-3h0.9l1.1,1.3l1.1-1.3h0.9V21z"/>
+		<path class="st3" d="M197.9,27.3h-0.3v-6.4h2.4c0-0.3-0.1-0.6-0.1-0.9c0-0.2,0-0.5,0-0.7h-2.3v-6.6h0.3c0.2,0,0.4-0.1,0.5-0.2
+			c0.1-0.1,0.2-0.3,0.2-0.5V9.7c0-0.2-0.1-0.4-0.2-0.5c-0.1-0.1-0.3-0.2-0.5-0.2h-2.2c-0.4,0-0.7,0.3-0.7,0.7V12
+			c0,0.4,0.3,0.7,0.7,0.7h0.3v14.6h-0.3c-0.4,0-0.7,0.3-0.7,0.7v2.2c0,0.4,0.3,0.7,0.7,0.7h2.2c0.4,0,0.7-0.3,0.7-0.7V28
+			C198.7,27.6,198.3,27.3,197.9,27.3L197.9,27.3L197.9,27.3z M197.5,29.8h-1.4v-1.4h1.4V29.8L197.5,29.8L197.5,29.8z M197.5,11.5
+			h-1.4v-1.4h1.4V11.5L197.5,11.5L197.5,11.5z M207.2,27.4h-0.3V26c-0.3,0-0.5,0-0.8,0s-0.6,0-0.9-0.1v1.4h-0.4
+			c-0.4,0-0.8,0.3-0.8,0.7v2.2c0,0.4,0.4,0.7,0.8,0.7h2.4c0.4,0,0.8-0.3,0.8-0.7V28C208,27.7,207.6,27.4,207.2,27.4z M206.8,29.9
+			h-1.5v-1.4h1.5V29.9z M217.2,12.7c0.4,0,0.7-0.3,0.7-0.7V9.7c0-0.4-0.3-0.7-0.7-0.7l0,0H215c-0.4,0-0.7,0.3-0.7,0.7V12
+			c0,0.4,0.3,0.7,0.7,0.7h0.3v6.6H213c0,0.2,0,0.5,0,0.7c0,0.3,0,0.6-0.1,0.9h2.3v6.4H215c-0.4,0-0.7,0.3-0.7,0.7l0,0v2.2
+			c0,0.4,0.3,0.7,0.7,0.7h2.2c0.4,0,0.7-0.3,0.7-0.7V28c0-0.4-0.3-0.7-0.7-0.7h-0.3V12.7H217.2z M216.8,29.8h-1.4v-1.4h1.4V29.8z
+			 M216.8,11.5h-1.4v-1.4h1.4V11.5z M204.8,12.6h0.3V14c0.3,0,0.6-0.1,0.9-0.1c0.3,0,0.5,0,0.8,0v-1.3h0.4c0.4,0,0.8-0.3,0.8-0.7
+			V9.7c0-0.4-0.4-0.7-0.8-0.7h-2.4c-0.4,0-0.8,0.3-0.8,0.7v2.2C204,12.3,204.4,12.6,204.8,12.6z M205.3,10.1h1.5v1.4h-1.5V10.1
+			L205.3,10.1z"/>
+	</g>
+	<g>
+		<path class="st4" d="M192,79h18v10h-18V79z"/>
+		<path class="st2" d="M194,83.5c0-1.6,0.9-2.5,2-2.5s2,0.9,2,2.5s-0.8,2.5-2,2.5C194.9,86,194,85.1,194,83.5z M196.9,83.5
+			c0-1.1-0.4-1.5-0.9-1.5s-0.9,0.4-0.9,1.5s0.4,1.5,0.9,1.5S196.9,84.6,196.9,83.5z M199,83.5c0-1.6,0.9-2.5,2-2.5s2,0.9,2,2.5
+			s-0.8,2.5-2,2.5S199,85.1,199,83.5z M201.9,83.5c0-1.1-0.4-1.5-0.9-1.5s-0.9,0.4-0.9,1.5s0.4,1.5,0.9,1.5S201.9,84.6,201.9,83.5
+			L201.9,83.5z M205,83.5c0-1.6,0.9-2.5,2-2.5s2,0.9,2,2.5s-0.8,2.5-2,2.5S205,85.1,205,83.5z M207.9,83.5c0-1.1-0.4-1.5-0.9-1.5
+			s-0.9,0.4-0.9,1.5s0.4,1.5,0.9,1.5S207.9,84.6,207.9,83.5L207.9,83.5L207.9,83.5z"/>
+		<path class="st3" d="M211,79h7v10h-7V79z"/>
+		<path class="st4" d="M213.1,79c0,0.1,0,0.1,0,0.2c0,1.2,0.4,1.7,0.9,1.7s0.9-0.5,0.9-1.7c0-0.1,0-0.1,0-0.2h1.1v0.2
+			c0,1.8-0.9,2.8-2,2.8s-2-1-2-2.8V79H213.1z M215,88.5V84h-2v1h0.9v3.5H213V89h3v-0.5H215L215,88.5z"/>
+	</g>
+	<g>
+		<g>
+			<path class="st1" d="M131.3,28.5h23.9v2.8h-23.9V28.5z"/>
+			<path class="st2" d="M154.9,28.9V31h-23.3v-2.1H154.9z M155.6,28.2H131v3.4h24.6V28.2z"/>
+		</g>
+		<path class="st4" d="M134,7h14v21h-14V7z"/>
+		<path class="st2" d="M137,11h9v5h-9V11z"/>
+		<path class="st4" d="M152,13h2v3h-2V13z"/>
+		<path class="st3" d="M152.4,15.9v8c0,0.4-0.3,0.7-0.7,0.7s-0.7-0.3-0.7-0.7v-8.7c0-1.1-0.9-2-2-2.2v1.6c0.2,0.1,0.3,0.3,0.3,0.6
+			v8.6c0,1.2,1.1,2.2,2.3,2.2c1.3,0,2.3-1,2.3-2.2v-7.9L152.4,15.9L152.4,15.9z"/>
+	</g>
+	<g>
+		<path class="st4" d="M18,7h14v21H18V7z"/>
+		<path class="st3" d="M15.3,26C14,26,13,25,13,23.8v-8h1.6v8c0.1,0.4,0.4,0.6,0.8,0.6c0.3-0.1,0.6-0.3,0.7-0.6v-8.6
+			c0-1.1,0.8-2,2-2.2v1.6c-0.2,0.1-0.3,0.3-0.3,0.6v8.6C17.6,25,16.6,26,15.3,26"/>
+		<path class="st4" d="M12,13h2v3h-2V13z"/>
+		<path class="st1" d="M12,30h23v2H12V30z"/>
+		<path class="st5" d="M23.3,23l5.7-6.2h-3.2l1.9-4.8L22,18.1h3.2L23.3,23z"/>
+	</g>
+	<g>
+		<path class="st1" d="M32,79.9h-1.1V77H15v7h17V79.9z"/>
+		<path class="st0" d="M28,72h-9v1.6h3.3V75h2.5v-1.4H28V72z M11,77v9h1.6v-3.3H14v-2.5h-1.4V77H11z M34,80h2v8h-2V80z"/>
+		<path class="st2" d="M17,79h8v1h-8V79z M17,81h8v1h-8V81z M17,82h8v1h-8V82z"/>
+		<path class="st0" d="M32,84H15v3.5h2.1l2.2,4.5H31v-4.5h1V84z"/>
+	</g>
+	<g transform="translate(71 71)">
+		<path class="st1" d="M2,0L2,0c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0C0.9,8,0,7.1,0,6V2C0,0.9,0.9,0,2,0z"/>
+		<path class="st1" d="M21,0L21,0c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2V2C19,0.9,19.9,0,21,0z"/>
+		<path class="st0" d="M2,18L2,18c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2v-4C0,18.9,0.9,18,2,18z"/>
+		<path class="st0" d="M21,18L21,18c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2v-4C19,18.9,19.9,18,21,18z"/>
+		<path class="st1" d="M18,21.4h-4.9c-0.2-0.4-0.5-0.6-0.8-0.8v-3.3H14V8.7h-1.7V5.4C12.7,5.2,13,5,13.1,4.6H18V3h-4.9
+			c-0.3-0.6-0.9-1-1.6-1c-0.7,0-1.3,0.4-1.6,1H5v1.6h4.9c0.2,0.3,0.4,0.6,0.7,0.8v3.3H8.9v8.6h1.7v3.3c-0.3,0.2-0.6,0.4-0.7,0.8H5
+			V23h4.9c0.3,0.6,0.9,1,1.6,1s1.3-0.4,1.6-1H18V21.4z"/>
+	</g>
+	<g transform="translate(133 133)">
+		<path class="st0" d="M2,0L2,0c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0C0.9,8,0,7.1,0,6V2C0,0.9,0.9,0,2,0z"/>
+		<path class="st0" d="M20,0L20,0c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2V2C18,0.9,18.9,0,20,0z"/>
+		<path class="st1" d="M2,18L2,18c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2v-4C0,18.9,0.9,18,2,18z"/>
+		<path class="st1" d="M20,18L20,18c1.1,0,2,0.9,2,2v4c0,1.1-0.9,2-2,2l0,0c-1.1,0-2-0.9-2-2v-4C18,18.9,18.9,18,20,18z"/>
+		<path class="st1" d="M17,21.4h-4.5c-0.2-0.3-0.4-0.6-0.8-0.8v-3.3h1.6V8.7h-1.6V5.4c0.3-0.2,0.6-0.5,0.8-0.8H17V3h-4.5
+			c-0.3-0.6-0.9-1-1.5-1S9.8,2.4,9.5,3H5v1.6h4.5c0.2,0.3,0.4,0.6,0.7,0.8v3.3H8.6v8.6h1.6v3.3c-0.3,0.2-0.5,0.4-0.7,0.8H5V23h4.5
+			c0.3,0.6,0.9,1,1.5,1s1.2-0.4,1.5-1H17V21.4z"/>
+	</g>
+	<g transform="translate(131 72)">
+		<path class="st3" d="M6.9,17c0-2.6,2.5-4.6,5.6-4.6s5.6,2.1,5.6,4.6H27V7.2v0.6h-3.8c-0.8,0-0.9-0.5-0.9-1.1l0.3-2.3
+			c0-0.4,0.1-0.8,0.4-1C23.4,3.1,23.8,3,24.2,3H27V2h-4.5c-0.6,0-1.2,0.3-1.4,0.8c-0.4,0.7-0.8,2-1,4.4H1.5c-0.2,0-0.3,0.1-0.3,0.3
+			C1,9.5,1,11.4,1.3,13.4h0.9V17H6.9z"/>
+		<path class="st0" d="M2,18v-4H0v2.6c0,0.7,0.6,1.3,1.3,1.4h0.1H2L2,18z M22.3,4.5L22,6.8C22,7.5,22.1,8,22.9,8H27V3h-3
+			c-0.5,0-0.9,0.1-1.3,0.4C22.4,3.7,22.3,4.1,22.3,4.5z"/>
+		<circle class="st0" cx="12.5" cy="18.5" r="4.5"/>
+		<circle class="st3" cx="12.5" cy="18.5" r="2.5"/>
+		<path class="st0" d="M17,6V0h2v6H17z M1,6V0h2v6H1z"/>
+		<circle class="st0" cx="13" cy="3" r="1"/>
+		<circle class="st0" cx="16" cy="3" r="1"/>
+		<circle class="st0" cx="9" cy="3" r="1"/>
+		<circle class="st0" cx="11" cy="3" r="1"/>
+		<circle class="st0" cx="4" cy="3" r="1"/>
+		<circle class="st0" cx="7" cy="3" r="1"/>
+	</g>
+	<g>
+		<path class="st4" d="M6,138v2.2c0,1,0.7,1.8,1.6,1.8h1.8c0.9,0,1.6-0.8,1.6-1.8V138H6z"/>
+		<path class="st3" d="M7,133h1v2H7V133z M10,133h1v2h-1V133z"/>
+		<path class="st4" d="M5,136h8v1H5V136z M14,133h14v21H14V133z"/>
+		<path class="st3" d="M10.3,152C9,152,8,151,8,149.7v-5.9h1.6v5.9c0.1,0.4,0.4,0.7,0.8,0.6c0.3-0.1,0.6-0.3,0.7-0.6v-6.5
+			c0-1.1,0.8-2,2-2.2v1.6c-0.2,0.1-0.3,0.3-0.3,0.6v6.6C12.6,151,11.6,152,10.3,152"/>
+		<path class="st4" d="M8,141h2v3H8V141z"/>
+		<path class="st1" d="M7,156h24v2H7V156z"/>
+		<path class="st5" d="M18.3,149l5.7-6.2h-3.2l1.9-4.8l-5.6,6.1h3.2L18.3,149z"/>
+	</g>
+	<g>
+		<path class="st1" d="M215.5,143.7l-0.1,0.2l-0.1,0.2L205,154.9l3,2.1l8.2-11.8l0.8-6.2L215.5,143.7z"/>
+		<path class="st0" d="M217,134.8l-2.8,8.6L202.9,155l-8.9-8.3l11.4-11.7l8.6-3L217,134.8z"/>
+		<path class="st1" d="M213.4,137.4c-0.7,0.8-2,0.8-2.8,0.1l0,0c-0.8-0.8-0.8-2-0.1-2.8s2-0.8,2.8-0.1l0,0
+			C214.2,135.3,214.2,136.6,213.4,137.4"/>
+		<path class="st2" d="M212.7,136.7c-0.4,0.4-1,0.4-1.4,0.1c-0.4-0.4-0.4-1,0-1.4s1-0.4,1.4-0.1
+			C213.1,135.7,213.1,136.3,212.7,136.7 M203.5,147.8c-0.5,0-0.9-0.2-1.5-0.5l-0.6,0.6l-0.8-0.7l0.6-0.6c-0.3-0.3-0.5-0.5-0.7-0.9
+			c-0.2-0.3-0.4-0.6-0.4-0.9l1.4-0.6c0.1,0.3,0.2,0.6,0.4,0.9c0.2,0.3,0.4,0.5,0.6,0.7c0.2,0.2,0.4,0.3,0.5,0.3
+			c0.1,0.1,0.2,0,0.3-0.1s0.1-0.2,0-0.3c-0.1-0.2-0.2-0.4-0.4-0.6c-0.2-0.4-0.5-0.7-0.6-0.9c-0.1-0.3-0.2-0.6-0.2-0.9
+			c0-0.3,0.2-0.6,0.5-0.9c0.4-0.3,0.8-0.5,1.2-0.5c0.5,0,1,0.2,1.5,0.5l0.6-0.6l0.8,0.7l-0.6,0.6c0.4,0.5,0.7,0.9,0.9,1.4l-1.4,0.6
+			c-0.2-0.6-0.5-1-0.8-1.3c-0.4-0.3-0.6-0.4-0.8-0.3c-0.1,0.1-0.1,0.2,0,0.3c0.1,0.2,0.2,0.3,0.4,0.6c0.2,0.4,0.5,0.6,0.6,0.9
+			c0.1,0.3,0.2,0.6,0.2,0.9c0,0.3-0.2,0.6-0.5,0.9C204.4,147.7,203.9,147.9,203.5,147.8"/>
+	</g>
+	<g>
+		<path class="st3" d="M83.1,149.1c-0.4,0-0.8,0-1.1-0.1v6h2v-6C83.7,149,83.4,149.1,83.1,149.1z M83.1,137.9c0.3,0,0.6,0,0.9,0.1
+			v-5h-2v5C82.4,138,82.7,137.9,83.1,137.9z M75.7,134.3v1.5h-1.5v-1.5H75.7z M76.2,133h-2.4c-0.4,0-0.8,0.4-0.8,0.8v2.4
+			c0,0.4,0.4,0.8,0.8,0.8h2.4c0.4,0,0.8-0.4,0.8-0.8v-2.4C77,133.4,76.6,133,76.2,133z M75.7,140.3v1.5h-1.5v-1.5H75.7z M76.2,139
+			h-2.4c-0.4,0-0.8,0.4-0.8,0.8v2.4c0,0.4,0.4,0.8,0.8,0.8h2.4c0.4,0,0.8-0.4,0.8-0.8v-2.4C77,139.4,76.6,139,76.2,139L76.2,139z
+			 M75.7,146.2v1.5h-1.5v-1.5H75.7z M76.2,145h-2.4c-0.4,0-0.8,0.4-0.8,0.8v2.4c0,0.4,0.4,0.8,0.8,0.8h2.4c0.4,0,0.8-0.4,0.8-0.8
+			v-2.4C77,145.4,76.6,145,76.2,145L76.2,145z M75.7,152.2v1.5h-1.5v-1.5H75.7z M76.2,151h-2.4c-0.4,0-0.8,0.4-0.8,0.8v2.4
+			c0,0.4,0.4,0.8,0.8,0.8h2.4c0.4,0,0.8-0.4,0.8-0.8v-2.4C77,151.4,76.6,151,76.2,151L76.2,151z"/>
+		<path class="st0" d="M83,140c-2.2,0-4,1.8-4,4s1.8,4,4,4s4-1.8,4-4S85.2,140,83,140z"/>
+		<path class="st2" d="M83.1,144.5h-1.2l-0.2,0.5H81l1-3h0.9l1.1,3h-0.8L83.1,144.5L83.1,144.5z M82.9,143.9l-0.3-1.1l-0.4,1.1H82.9
+			L82.9,143.9z"/>
+	</g>
+	<g>
+		<path class="st0" d="M8.3,205h4.2v1.5H8.3V205z M8.3,207.8h8v1.5h-8C8.3,209.3,8.3,207.8,8.3,207.8z M8.3,210.6h6.2v1.5H8.3V210.6
+			z"/>
+		<path class="st3" d="M20.9,204.3h6v5.9h-6V204.3z"/>
+		<path class="st0" d="M28.1,199H6v18.2h23.5V199H28.1z M18,215.7H7.5v-12.6H18V215.7L18,215.7z M28.1,215.7h-8.6V213h8.6V215.7z
+			 M28.1,211.5h-8.6v-8.4h8.6V211.5z"/>
+	</g>
+	<g transform="translate(73.093 197.626)">
+		<path class="st6" d="M9.7,20.1c-0.4,0.2-0.8,0.2-1.2,0c-3.3-1.6-5.6-3.7-6.7-6.3C0.5,11.2,0.3,7.9,1,4c0.1-0.5,0.5-1,1-1.1
+			l6.9-2.1c0.3-0.1,0.6-0.1,0.8,0l6.6,2.1c0.5,0.2,0.8,0.6,0.9,1.1c0.7,3.8,0.5,7-0.8,9.8C15.1,16.5,12.8,18.6,9.7,20.1z"/>
+		<g>
+			<path id="a" class="st7" d="M14.6,7.9c0,0.2-0.1,0.3-0.2,0.5l-5.9,5.8c-0.1,0.1-0.3,0.2-0.5,0.2c-0.2,0-0.3-0.1-0.5-0.2l-3.4-3.4
+				c-0.1-0.1-0.2-0.3-0.2-0.5S4,10,4.1,9.8L5,9c0.1-0.1,0.3-0.2,0.5-0.2S5.8,8.9,6,9l2,2l4.5-4.4c0.1-0.1,0.3-0.2,0.5-0.2
+				s0.3,0.1,0.5,0.2l0.9,0.9C14.5,7.6,14.6,7.8,14.6,7.9z"/>
+		</g>
+	</g>
+	<g>
+		<path class="st8" d="M328.6,136.3h-5.3c-0.1,0-0.2-0.1-0.3-0.2c-0.1-0.1-0.2-0.2-0.2-0.3s0.1-0.2,0.2-0.3s0.2-0.2,0.3-0.2h5.3
+			c0.1,0,0.2,0.1,0.3,0.2c0.1,0.1,0.2,0.2,0.2,0.3s-0.1,0.2-0.2,0.3S328.7,136.3,328.6,136.3z"/>
+		<path class="st8" d="M332.2,138.9h-8.8c-0.1,0-0.2-0.1-0.3-0.2c-0.1-0.1-0.2-0.2-0.2-0.3c0-0.2,0.1-0.3,0.2-0.3
+			c0.1-0.1,0.2-0.2,0.3-0.2h8.8c0.1,0,0.2,0.1,0.3,0.2s0.2,0.2,0.2,0.3c0,0.2-0.1,0.2-0.2,0.3C332.4,138.8,332.3,138.9,332.2,138.9z
+			"/>
+		<path class="st8" d="M321,140.5h-6.3c-0.4,0-0.8-0.3-0.8-0.8v-5.3c0-0.5,0.3-0.8,0.8-0.8h6.3c0.4,0,0.8,0.3,0.8,0.8v5.3
+			C321.7,140.2,321.4,140.5,321,140.5z M314.8,139.6h6v-5.1h-6V139.6z"/>
+		<path class="st8" d="M321,158.6h-6.3c-0.4,0-0.8-0.3-0.8-0.8v-5.3c0-0.5,0.3-0.8,0.8-0.8h6.3c0.4,0,0.8,0.3,0.8,0.8v5.3
+			C321.7,158.2,321.4,158.6,321,158.6z M314.8,157.7h6v-5.1h-6V157.7z"/>
+		<path class="st8" d="M330.2,154.3h-6.9c-0.1,0-0.2-0.1-0.3-0.2c-0.1-0.1-0.2-0.2-0.2-0.3s0.1-0.2,0.2-0.3c0.1-0.1,0.2-0.2,0.3-0.2
+			h6.9c0.1,0,0.2,0.1,0.3,0.2c0.1,0.1,0.2,0.2,0.2,0.3s-0.1,0.3-0.2,0.3C330.5,154.3,330.4,154.3,330.2,154.3z"/>
+		<path class="st8" d="M334.3,156.9h-11c-0.1,0-0.2-0.1-0.3-0.2c-0.1-0.1-0.2-0.2-0.2-0.3s0.1-0.2,0.2-0.3s0.2-0.2,0.3-0.2h11
+			c0.1,0,0.2,0.1,0.3,0.2c0.1,0.1,0.2,0.2,0.2,0.3s-0.1,0.2-0.2,0.3C334.5,156.8,334.4,156.9,334.3,156.9z"/>
+		<path class="st9" d="M334.3,145.3h-11c-0.1,0-0.2-0.1-0.3-0.2c-0.1-0.1-0.2-0.2-0.2-0.3s0.1-0.2,0.2-0.3s0.2-0.2,0.3-0.2h11
+			c0.1,0,0.2,0.1,0.3,0.2c0.1,0.1,0.2,0.2,0.2,0.3s-0.1,0.2-0.2,0.3C334.5,145.3,334.4,145.3,334.3,145.3z"/>
+		<path class="st9" d="M332.3,147.9h-9.1c-0.1,0-0.2-0.1-0.3-0.2c-0.1-0.1-0.2-0.2-0.2-0.3c0-0.2,0.1-0.2,0.2-0.3s0.2-0.2,0.3-0.2
+			h9.1c0.1,0,0.2,0.1,0.3,0.2c0.1,0.1,0.2,0.2,0.2,0.3c0,0.2-0.1,0.2-0.2,0.3C332.6,147.8,332.5,147.9,332.3,147.9z"/>
+		<path class="st9" d="M321,142.6h-6.3c-0.4,0-0.8,0.3-0.8,0.8v5.2c0,0.5,0.3,0.8,0.8,0.8h6.3c0.4,0,0.8-0.3,0.8-0.8v-5.2
+			C321.7,142.9,321.4,142.6,321,142.6z M320.2,145.1l-3.2,2.7l0,0l0,0c-0.1,0-0.1,0.1-0.2,0.1c-0.1,0-0.1,0-0.2,0s-0.1,0-0.2-0.1
+			c-0.1-0.1-0.1-0.1-0.2-0.1l-1-1.2c-0.1-0.1-0.1-0.2-0.1-0.3s0.1-0.2,0.2-0.3s0.2-0.1,0.3-0.1s0.2,0.1,0.3,0.2l0.8,0.8l2.8-2.4
+			c0.1,0,0.1-0.1,0.2-0.1c0.1,0,0.1,0,0.2,0c0.1,0,0.1,0,0.2,0.1c0.1,0,0.1,0.1,0.2,0.1c0,0.1,0.1,0.1,0.1,0.2c0,0.1,0,0.1,0,0.2
+			s0,0.1-0.1,0.2C320.3,145,320.2,145,320.2,145.1z"/>
+	</g>
+</g>
+</svg>
+

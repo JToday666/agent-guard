@@ -1,0 +1,71 @@
+@charset "utf-8";
+
+.css-187y2xr { display: inline-block; min-width: 10px; padding: 6px; font-size: 12px; font-weight: 700; line-height: 1; color: rgb(0, 0, 0); text-align: center; white-space: nowrap; vertical-align: middle; background-color: rgb(243, 188, 42); border-radius: 13px; position: absolute; left: 60%; top: 15%; }
+
+.css-ovgeu { max-width: 312px; min-width: 284px; border-radius: 4px; background-color: rgb(255, 255, 255); padding: 16px; }
+
+.css-ovgeu > div:first-of-type { overflow: visible; }
+
+.css-1cu80qq { overflow: hidden; }
+
+.css-1onnlu1 { margin: -4px -2px; }
+
+.css-1onnlu1 > * { margin: 4px 2px; }
+
+.css-1b1a19r { overflow: unset; }
+
+.css-rvofl { margin: -2px -8px; display: flex; flex-direction: row; -webkit-box-align: center; align-items: center; -webkit-box-pack: justify; justify-content: space-between; }
+
+.css-rvofl > * { margin: 2px 8px; }
+
+.css-z4y6bn { font-family: Montserrat, sans-serif; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: rgb(0, 0, 0); line-height: 16px; }
+
+.css-18l3rk1 { background-color: transparent; border: 1px solid transparent; border-radius: 50%; cursor: pointer; padding: 0px; width: 32px; height: 32px; text-align: center; margin: 4px; }
+
+.css-18l3rk1:focus { outline: 0px; }
+
+.css-1vjert1 { height: 12px; width: 12px; fill: rgb(0, 107, 194); stroke: rgb(0, 107, 194); }
+
+.css-gbigso { margin: -4px -2px; display: flex; flex-flow: row wrap; -webkit-box-align: center; align-items: center; }
+
+.css-gbigso > * { margin: 4px 2px; }
+
+.css-1rr6d75 { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; letter-spacing: 0px; line-height: 24px; color: rgb(0, 0, 0); font-weight: 800; }
+
+.css-1tksz68 { flex: 1 0 12%; text-align: center; font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; letter-spacing: 0px; line-height: 24px; color: rgb(0, 0, 0); font-weight: 800; }
+
+.css-1iamcav { flex: 1 0 12%; text-align: center; }
+
+.css-xgff9b { height: 32px; }
+
+.css-1ogzj87 { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; font-weight: 400; letter-spacing: 0px; line-height: 18px; background-color: transparent; border: 1px solid transparent; border-radius: 50%; cursor: pointer; padding: 0px; width: 32px; height: 32px; text-align: center; color: rgb(192, 192, 192); }
+
+.css-1ogzj87:focus { box-shadow: rgb(7, 153, 248) 0px 0px 8px 0px; outline: 0px; }
+
+.css-1ogzj87:not(:active):hover { box-shadow: rgba(0, 0, 0, 0.1) 0px 8px 20px; border: 1px solid rgb(192, 192, 192); }
+
+.css-1ogzj87:focus:active { background: rgb(0, 107, 194); box-shadow: rgba(0, 0, 0, 0.2) 0px 8px 20px; color: rgb(255, 255, 255); }
+
+.css-wfyxo9 { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; font-weight: 400; letter-spacing: 0px; line-height: 18px; border: 1px solid transparent; border-radius: 50%; cursor: pointer; padding: 0px; width: 32px; height: 32px; text-align: center; background: rgb(0, 107, 194); color: rgb(255, 255, 255); }
+
+.css-wfyxo9:focus { box-shadow: rgb(7, 153, 248) 0px 0px 8px 0px; outline: 0px; }
+
+.css-wfyxo9:not(:active):hover { box-shadow: rgba(0, 0, 0, 0.1) 0px 8px 20px; border: none; }
+
+.css-wfyxo9:focus:active { background: rgb(0, 107, 194); box-shadow: rgba(0, 0, 0, 0.2) 0px 8px 20px; color: rgb(255, 255, 255); }
+
+.css-f6ok87 { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; font-weight: 400; letter-spacing: 0px; color: rgb(80, 80, 80); line-height: 18px; background-color: transparent; border: 1px solid transparent; border-radius: 50%; cursor: pointer; padding: 0px; width: 32px; height: 32px; text-align: center; }
+
+.css-f6ok87:focus { box-shadow: rgb(7, 153, 248) 0px 0px 8px 0px; outline: 0px; }
+
+.css-f6ok87:not(:active):hover { box-shadow: rgba(0, 0, 0, 0.1) 0px 8px 20px; border: 1px solid rgb(192, 192, 192); }
+
+.css-f6ok87:focus:active { background: rgb(0, 107, 194); box-shadow: rgba(0, 0, 0, 0.2) 0px 8px 20px; color: rgb(255, 255, 255); }
+
+.css-19xocy7 { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; font-weight: 400; letter-spacing: 0px; color: rgb(80, 80, 80); line-height: 18px; border: 1px solid transparent; border-radius: 50%; cursor: pointer; padding: 0px; width: 32px; height: 32px; text-align: center; background: rgb(235, 235, 235); }
+
+.css-19xocy7:focus { box-shadow: rgb(7, 153, 248) 0px 0px 8px 0px; outline: 0px; }
+
+.css-19xocy7:not(:active):hover { box-shadow: rgba(0, 0, 0, 0.1) 0px 8px 20px; border: 1px solid rgb(192, 192, 192); }
+
+.css-19xocy7:focus:active { background: rgb(0, 107, 194); box-shadow: rgba(0, 0, 0, 0.2) 0px 8px 20px; color: rgb(255, 255, 255); }
