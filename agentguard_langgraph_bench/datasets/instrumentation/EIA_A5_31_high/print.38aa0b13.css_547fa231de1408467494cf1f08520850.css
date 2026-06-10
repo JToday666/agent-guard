@@ -1,0 +1,49 @@
+@charset "utf-8";
+
+body { font-family: din-2014, Arial, sans-serif; font-style: normal; font-weight: 600; }
+
+footer, nav { display: none; }
+
+.master-nav { display: block; }
+
+.resflow-cars { zoom: 0.92; }
+
+.resflow-cars .reservation-steps, .resflow-cars nav { display: block; }
+
+.resflow-cars .header-nav-right { display: none; }
+
+.resflow-cars .reservation-sub-header { background-color: rgb(255, 255, 255); }
+
+.resflow-cars .reservation-steps { background: rgb(255, 255, 255); border-bottom: 1px solid rgb(195, 195, 195); border-top: 1px solid rgb(195, 195, 195); }
+
+.resflow-cars .reservation-steps .step { padding: 0.625rem 0px; text-align: left; width: 30%; }
+
+.resflow-cars .reservation-steps .step__step-index { display: none; }
+
+.resflow-cars .reservation-steps .step__step-title, .resflow-cars .reservation-steps .step__step-value { padding: 0px; }
+
+.resflow-cars .reservation-steps .step__step-title { line-height: 1.5rem; margin-bottom: 0px; }
+
+.resflow-cars .reservation-steps .step__step-date--col { display: block; margin-bottom: 5px; width: 100%; }
+
+.resflow-cars .reservation-steps .step__step-date--col:last-of-type { margin-bottom: 0px; }
+
+.resflow-cars .reservation-steps .step__step-value { color: rgb(24, 25, 24); font-size: 14px; height: auto; overflow: visible; }
+
+.reservation-flow.cars .unavailable-vehicles, .reservation-flow.cars .vehicle-list__item, .resflow-cars .reservation-steps .step[data-stephash="cars"], .resflow-cars .reservation-steps .step[data-stephash="dateTime"] .step__step-value .step__step-date--col:nth-of-type(2), .resflow-cars .reservation-steps .step[data-stephash="extras"], .resflow-cars .reservation-steps .step__arrow { display: none; }
+
+.reservation-flow.cars .vehicle-list__item--printable { display: list-item; }
+
+.account-page, .mobile-steps, .modal-header, .policy-tabs, .print-link, .reservation-flow.extras, .reservation-steps, .reservation-utility-nav, .search-for-receipts, .subscription-form, .summary-container, .verification-page #personal-information, .verification-page .optional-information, .verification-page .rate-taxes-fees, .verification-page .rental-information, .verification-page .terms-panel, .verification-page .verification-header { display: none; }
+
+.ReactModal__Overlay--after-open.modal-overlay { background-color: rgb(255, 255, 255); min-height: 100vh; overflow: visible; position: absolute; }
+
+body.ReactModal__Body--open { overflow: scroll; position: relative; }
+
+.hide-on-print * { visibility: hidden !important; }
+
+#content-container.hide-on-print { display: none; }
+
+.show-on-print { display: block; }
+
+.show-on-print, .show-on-print * { visibility: visible !important; }
