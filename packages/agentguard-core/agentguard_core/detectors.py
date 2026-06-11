@@ -23,7 +23,7 @@ class Detector:
 
 
 class SensitiveResourceDetector(Detector):
-    rule_id = "P001_sensitive_resource_access"
+    rule_id = "P001_sensitive_file_access"
 
     def evaluate(self, event: ToolCallEvent) -> list[DetectionResult]:
         results: list[DetectionResult] = []
@@ -70,7 +70,7 @@ class OutboundDetector(Detector):
                         decision="ask",
                         risk_score=62,
                         rule_hit=RuleHit(
-                            rule_id="P002_external_send_review",
+                            rule_id="P005_external_send",
                             rule_name="External Send Review",
                             severity="medium",
                             evidence=[f"recipient={target or 'unknown'}"],
@@ -87,7 +87,7 @@ class OutboundDetector(Detector):
                         decision="ask",
                         risk_score=70,
                         rule_hit=RuleHit(
-                            rule_id="P003_outbound_api_review",
+                            rule_id="P006_outbound_api_review",
                             rule_name="Outbound API Review",
                             severity="high",
                             evidence=[f"url={target}"],
@@ -193,4 +193,3 @@ def _verb_for_tool(tool_name: str) -> str:
         "memory_write": "memory",
         "code_exec": "execute",
     }.get(tool_name, tool_name)
-

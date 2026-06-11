@@ -41,6 +41,9 @@ def test_formal_schemas_validate_core_models() -> None:
         severity="low",
         blocked=False,
         reason="Allowed.",
+        attack_type="benign",
+        is_malicious=False,
+        latency_ms=1,
     )
 
     validate(tool_call.model_dump(mode="json"), _load_schema("tool_call_event.schema.json"))

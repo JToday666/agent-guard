@@ -101,6 +101,9 @@ class CapabilityAuthService:
             raise ApiAuthError("SESSION_EXPIRED")
         return session
 
+    def logout_browser_session(self, session_id: str) -> None:
+        self.sessions.pop(session_id, None)
+
     def verify_csrf(self, session: BrowserSession, csrf_token: str | None) -> None:
         if not csrf_token or not hmac.compare_digest(csrf_token, session.csrf_token):
             raise ApiAuthError("CSRF_INVALID", status_code=403)
@@ -140,4 +143,3 @@ class CapabilityAuthService:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-

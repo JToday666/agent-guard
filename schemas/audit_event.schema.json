@@ -12,6 +12,8 @@
     "timestamp": { "type": "string" },
     "stage": { "type": "string" },
     "event_type": { "type": "string" },
+    "attack_type": { "type": ["string", "null"] },
+    "is_malicious": { "type": ["boolean", "null"] },
     "summary": { "type": "string" },
     "decision": { "enum": ["allow", "deny", "ask"] },
     "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
@@ -21,6 +23,7 @@
     "rule_hits": { "type": "array", "items": { "type": "string" } },
     "reason": { "type": "string" },
     "links": { "type": "object" },
+    "latency_ms": { "type": ["integer", "null"] },
     "metadata": { "type": "object" }
   },
   "additionalProperties": false

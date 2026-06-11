@@ -106,6 +106,90 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     assert wait_response.json()["decision"] == "allow_once"
 
 
+def test_expired_approval_wait_returns_safe_default() -> None:
+    settings = CoreSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryCoreStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    decision_response = client.post(
+        "/v1/evaluate/tool-call",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_tool_call_payload(),
+    )
+    approval_id = decision_response.json()["approval"]["approval_id"]
+    approval = store.approvals[approval_id]
+    approval.expires_at = "2000-01-01T00:00:00+00:00"
+    store.approvals[approval_id] = approval
+
+    wait_response = client.get(
+        f"/v1/approvals/{approval_id}/wait",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+
+    assert wait_response.status_code == 200
+    assert wait_response.json() == {"status": "expired", "decision": "deny"}
+
+
+def test_browser_logout_invalidates_session() -> None:
+    settings = CoreSettings(control_token="control-secret")
+    app = create_app(store=MemoryCoreStore(), settings=settings)
+    client = TestClient(app)
+    launch_response = client.post(
+        "/v1/auth/browser/launch",
+        headers={"Authorization": "Bearer control-secret"},
+    )
+    launch_code = launch_response.json()["launch_code"]
+    exchange_response = client.post("/v1/auth/browser/exchange", json={"launch_code": launch_code})
+    assert exchange_response.status_code == 200
+
+    logout_response = client.post("/v1/auth/browser/logout")
+    me_response = client.get("/v1/auth/browser/me")
+
+    assert logout_response.status_code == 200
+    assert logout_response.json() == {"authenticated": False}
+    assert me_response.status_code == 401
+    assert me_response.json()["error"]["code"] == "SESSION_INVALID"
+
+
+def test_evaluate_tool_call_writes_dashboard_audit_and_metrics() -> None:
+    settings = CoreSettings(adapter_token="adapter-secret", control_token="control-secret")
+    app = create_app(store=MemoryCoreStore(), settings=settings)
+    client = TestClient(app)
+
+    decision_response = client.post(
+        "/v1/evaluate/tool-call",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_tool_call_payload(),
+    )
+    assert decision_response.status_code == 200
+    launch_response = client.post(
+        "/v1/auth/browser/launch",
+        headers={"Authorization": "Bearer control-secret"},
+    )
+    launch_code = launch_response.json()["launch_code"]
+    client.post("/v1/auth/browser/exchange", json={"launch_code": launch_code})
+
+    events_response = client.get("/v1/audit/events")
+    metrics_response = client.get("/v1/metrics/eval")
+
+    assert events_response.status_code == 200
+    event = events_response.json()[0]
+    assert event["trace_id"] == "trace_api"
+    assert event["case_id"] == "PI-API"
+    assert event["decision"] == "ask"
+    assert event["blocked"] is True
+    assert event["attack_type"] == "indirect_prompt_injection"
+    assert event["is_malicious"] is True
+    assert event["resource_targets"] == ["exfiltration-intake@red-team.agentguard.local"]
+    assert event["rule_hits"] == ["P005_external_send", "P004_task_mismatch"]
+    assert event["links"]["event_id"] == "evt_test"
+    assert event["latency_ms"] is not None
+    assert metrics_response.status_code == 200
+    assert metrics_response.json()["event_count"] == 1
+    assert metrics_response.json()["ask_count"] == 1
+
+
 def test_audit_event_round_trip_for_dashboard_fields() -> None:
     app = create_app(store=MemoryCoreStore(), settings=CoreSettings(adapter_token="adapter-secret"))
     client = TestClient(app)
@@ -124,10 +208,13 @@ def test_audit_event_round_trip_for_dashboard_fields() -> None:
         "severity": "medium",
         "blocked": True,
         "resource_targets": ["exfiltration-intake@red-team.agentguard.local"],
-        "rule_hits": ["P002_external_send_review"],
+        "rule_hits": ["P005_external_send"],
         "reason": "External send requires approval.",
         "links": {"event_id": "evt_test", "decision_id": "dec_test"},
         "metadata": {},
+        "attack_type": "indirect_prompt_injection",
+        "is_malicious": True,
+        "latency_ms": 2,
     }
 
     write_response = client.post(

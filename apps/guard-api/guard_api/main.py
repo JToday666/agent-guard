@@ -73,6 +73,14 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
             "csrf_token": session.csrf_token,
         }
 
+    @app.post("/v1/auth/browser/logout")
+    def logout(agentguard_session: str | None = Cookie(default=None)) -> JSONResponse:
+        session = auth.verify_browser_session(agentguard_session)
+        auth.logout_browser_session(session.session_id)
+        response = JSONResponse({"authenticated": False})
+        response.delete_cookie("agentguard_session", path="/")
+        return response
+
     @app.post("/v1/evaluate/tool-call")
     def evaluate_tool_call(payload: ToolCallEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "event:evaluate")

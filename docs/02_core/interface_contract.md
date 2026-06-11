@@ -27,7 +27,7 @@ Runtime Native Event
 - `pre_execution=true` 的工具事件必须在工具执行前送入 Core。
 - Core 返回 `deny` 时，Adapter 必须阻断工具执行。
 - Core 返回 `ask` 时，Adapter 必须暂停动作并等待审批。
-- AuditEvent 是 Dashboard 和指标统计的共同输入。
+- Core 每次评估 `ToolCallEvent` 后必须写入 AuditEvent；AuditEvent 是 Dashboard 和指标统计的共同输入。
 
 ## 3. Core API
 
@@ -164,6 +164,8 @@ AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。
   "runtime": "langgraph",
   "stage": "before_tool_call",
   "event_type": "tool_call_proposed",
+  "attack_type": "indirect_prompt_injection",
+  "is_malicious": true,
   "summary": "Agent attempted to read /private/token.txt",
   "decision": "deny",
   "risk_score": 92,
@@ -171,7 +173,8 @@ AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。
   "blocked": true,
   "resource_targets": ["/private/token.txt"],
   "rule_hits": ["P001_sensitive_file_access"],
-  "reason": "敏感文件访问，且与当前任务不一致"
+  "reason": "敏感文件访问，且与当前任务不一致",
+  "latency_ms": 18
 }
 ```
 

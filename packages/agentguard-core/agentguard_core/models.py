@@ -111,6 +111,8 @@ class AuditEvent(BaseModel):
     timestamp: str = Field(default_factory=utc_now_iso)
     stage: str = "before_tool_call"
     event_type: str = "tool_call_proposed"
+    attack_type: str | None = None
+    is_malicious: bool | None = None
     summary: str
     decision: Decision
     risk_score: int = Field(ge=0, le=100)
@@ -120,6 +122,7 @@ class AuditEvent(BaseModel):
     rule_hits: list[str] = Field(default_factory=list)
     reason: str
     links: dict[str, str] = Field(default_factory=dict)
+    latency_ms: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -151,4 +154,3 @@ class AuthContext(BaseModel):
     auth_method: str
     runtime: str | None = None
     agent_id: str | None = None
-
