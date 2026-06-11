@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 
 
-DEFAULT_DATABASE_URL = "postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard"
+DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
 
 
 @dataclass(slots=True)

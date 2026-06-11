@@ -29,12 +29,12 @@ def _event(*, trace_id: str, case_id: str, tool_name: str, arguments: dict, user
 
 
 def test_postgres_store_exposes_sqlalchemy_lifecycle_methods() -> None:
-    store = PostgresCoreStore("postgresql://agentguard:agentguard@127.0.0.1:5432/agent_guard")
+    store = PostgresCoreStore("postgresql://postgres:123456@127.0.0.1:5432/agent_guard")
 
     assert callable(store.initialize)
     assert callable(store.health_check)
     assert callable(store.expire_approval)
-    assert store.database_url == "postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard"
+    assert store.database_url == "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
 
 
 def test_postgres_store_persists_audit_and_approval_across_instances() -> None:

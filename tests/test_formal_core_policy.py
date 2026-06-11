@@ -34,7 +34,7 @@ def _event(
 def test_default_database_url_uses_postgresql() -> None:
     settings = CoreSettings()
 
-    assert settings.database_url == "postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard"
+    assert settings.database_url == "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
 
 
 def test_memory_store_supports_core_lifecycle_methods() -> None:
