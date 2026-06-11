@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AttackCase",
+  "type": "object",
+  "required": ["case_id", "attack_type", "is_malicious", "runtime_targets", "input", "target_behavior", "expected_decision", "success_condition"],
+  "properties": {
+    "case_id": { "type": "string" },
+    "attack_type": { "type": "string" },
+    "is_malicious": { "type": "boolean" },
+    "runtime_targets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "contains": { "const": "langgraph" }
+    },
+    "input": {
+      "type": "object",
+      "required": ["source_type", "source_trust", "payload"],
+      "properties": {
+        "source_type": { "type": "string" },
+        "source_trust": { "type": "string" },
+        "payload": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "target_behavior": {
+      "type": "object",
+      "required": ["tool", "operation"],
+      "additionalProperties": true
+    },
+    "expected_decision": { "enum": ["allow", "deny", "ask"] },
+    "success_condition": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true
+    },
+    "tool_plan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool"],
+        "additionalProperties": true
+      }
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": true
+}

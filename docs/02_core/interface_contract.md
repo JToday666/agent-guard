@@ -94,9 +94,9 @@ P0 首个稳定事件模型。Adapter 必须把运行时工具调用映射成该
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "event_id": "evt_tool_001",
-  "event_type": "tool_call",
+  "event_type": "tool_call_proposed",
   "runtime": "langgraph",
   "trace_id": "trace_001",
   "case_id": "PI-001",
@@ -163,7 +163,7 @@ AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。
   "trace_id": "trace_001",
   "runtime": "langgraph",
   "stage": "before_tool_call",
-  "event_type": "tool_call",
+  "event_type": "tool_call_proposed",
   "summary": "Agent attempted to read /private/token.txt",
   "decision": "deny",
   "risk_score": 92,
@@ -181,7 +181,7 @@ P1 用于审计外部内容进入模型上下文前的拼接过程，支撑上�
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "event_id": "evt_context_001",
   "event_type": "context_build",
   "runtime": "langgraph",
@@ -211,7 +211,7 @@ P1 用于审计工具结果是否会回流到模型上下文或持久化存储�
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "event_id": "evt_tool_result_001",
   "event_type": "tool_result",
   "runtime": "langgraph",
@@ -245,7 +245,7 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "event_id": "evt_memory_001",
   "event_type": "memory_write",
   "runtime": "langgraph",

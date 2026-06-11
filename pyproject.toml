@@ -1,0 +1,26 @@
+[project]
+name = "agent-guard"
+version = "0.1.0"
+description = "Formal AgentGuard Core and API service"
+requires-python = ">=3.12"
+dependencies = [
+  "agentguard-core",
+  "agentguard-guard-api",
+  "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+  "jsonschema>=4.26",
+  "pytest>=9",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+agentguard-core = { path = "packages/agentguard-core", editable = true }
+agentguard-guard-api = { path = "apps/guard-api", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

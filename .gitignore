@@ -1,6 +1,9 @@
 # Python environment
 .venv/
 .uv-cache/
+*.egg-info/
+__pycache__/
+*.py[cod]
 
 # Node dependencies
 **/node_modules/

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentguard-guard-api"
+version = "0.1.0"
+description = "FastAPI service wrapper for the formal AgentGuard Core"
+requires-python = ">=3.12"
+dependencies = [
+  "agentguard-core",
+  "fastapi>=0.136",
+  "uvicorn>=0.49",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["guard_api*"]

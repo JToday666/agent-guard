@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToolCallEvent",
+  "type": "object",
+  "required": ["schema_version", "event_id", "event_type", "runtime", "trace_id", "tool", "arguments", "pre_execution"],
+  "properties": {
+    "schema_version": { "const": "0.3" },
+    "event_id": { "type": "string" },
+    "event_type": { "const": "tool_call_proposed" },
+    "runtime": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "case_id": { "type": ["string", "null"] },
+    "attack_type": { "type": ["string", "null"] },
+    "is_malicious": { "type": ["boolean", "null"] },
+    "timestamp": { "type": "string" },
+    "security_context": { "type": "object" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "call_id"],
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "kind": { "type": ["string", "null"] },
+        "input_kind": { "type": ["string", "null"] },
+        "call_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "arguments": { "type": "object" },
+    "derived_resources": { "type": "array", "items": { "type": "object" } },
+    "pre_execution": { "type": "boolean" },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": true
+}
