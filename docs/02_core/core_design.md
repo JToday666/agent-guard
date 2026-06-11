@@ -56,6 +56,25 @@ packages/agentguard-core/
     └── storage/
 ```
 
+## 4.1 正式存储
+
+P0 正式 Core 默认使用 PostgreSQL：
+
+```text
+postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard
+```
+
+存储层使用 SQLAlchemy 2.x 同步 engine 和 Alembic migration。Alembic 负责创建 `audit_events` 与 `approvals` 表及基础索引；Core 继续以 JSONB 保存事件和审批 payload，避免 P0 阶段过早拆分规范化表。
+
+初始化命令：
+
+```bash
+AGENTGUARD_DATABASE_URL=postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard \
+uv run alembic upgrade head
+```
+
+服务启动后可用 `GET /health?check_db=true` 验证数据库连接。
+
 ## 5. 决策流程
 
 ```mermaid

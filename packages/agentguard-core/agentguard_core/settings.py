@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 
 
-DEFAULT_DATABASE_URL = "postgresql://agentguard:agentguard@127.0.0.1:5432/agentguard"
+DEFAULT_DATABASE_URL = "postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard"
 
 
 @dataclass(slots=True)
@@ -19,4 +19,3 @@ class CoreSettings:
     browser_session_ttl_seconds: int = 3600
     launch_code_ttl_seconds: int = 300
     approval_nonce_ttl_seconds: int = 900
-

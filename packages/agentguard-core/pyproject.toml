@@ -8,10 +8,18 @@ version = "0.1.0"
 description = "Formal AgentGuard Core policy, audit, approval, and metrics services"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.16",
   "pydantic>=2.9",
   "psycopg[binary]>=3.3",
+  "SQLAlchemy>=2.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agentguard_core*"]
+
+[tool.setuptools.package-data]
+agentguard_core = [
+  "migrations/*.py",
+  "migrations/versions/*.py",
+]

@@ -8,6 +8,12 @@ from agentguard_core.models import ApprovalRequest, AuditEvent
 
 
 class CoreStore(Protocol):
+    def initialize(self) -> None:
+        ...
+
+    def health_check(self) -> bool:
+        ...
+
     def add_audit_event(self, event: AuditEvent) -> None:
         ...
 
@@ -26,3 +32,5 @@ class CoreStore(Protocol):
     def resolve_approval(self, approval_id: str, decision: str) -> ApprovalRequest:
         ...
 
+    def expire_approval(self, approval_id: str) -> ApprovalRequest:
+        ...

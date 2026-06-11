@@ -29,6 +29,12 @@ class AgentGuardCore:
             TaskMismatchDetector(),
         ]
 
+    def initialize(self) -> None:
+        self.store.initialize()
+
+    def health_check(self) -> bool:
+        return self.store.health_check()
+
     def evaluate_tool_call(
         self,
         event: ToolCallEvent,
@@ -58,7 +64,13 @@ class AgentGuardCore:
         return self.store.list_audit_events()
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
-        return [approval for approval in self.store.list_pending_approvals() if not self._is_expired(approval)]
+        pending: list[ApprovalRequest] = []
+        for approval in self.store.list_pending_approvals():
+            if self._is_expired(approval):
+                self.store.expire_approval(approval.approval_id)
+                continue
+            pending.append(approval)
+        return pending
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         approval = self.store.get_approval(approval_id)
@@ -150,8 +162,7 @@ class AgentGuardCore:
 
     def _with_expired_status(self, approval: ApprovalRequest) -> ApprovalRequest:
         if self._is_expired(approval):
-            approval.status = "expired"
-            approval.decision = "deny"
+            return self.store.expire_approval(approval.approval_id)
         return approval
 
     def _is_expired(self, approval: ApprovalRequest) -> bool:

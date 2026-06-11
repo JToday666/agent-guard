@@ -7,6 +7,11 @@ from agentguard_core.storage.memory import MemoryCoreStore
 from guard_api.main import create_app
 
 
+class FailingHealthStore(MemoryCoreStore):
+    def health_check(self) -> bool:
+        return False
+
+
 def _tool_call_payload() -> dict:
     return {
         "schema_version": "0.3",
@@ -48,6 +53,36 @@ def test_evaluate_tool_call_requires_adapter_token() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTH_MISSING"
+
+
+def test_health_is_lightweight_by_default() -> None:
+    app = create_app(store=FailingHealthStore())
+    client = TestClient(app)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_health_can_check_database_success() -> None:
+    app = create_app(store=MemoryCoreStore())
+    client = TestClient(app)
+
+    response = client.get("/health?check_db=true")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "ok"}
+
+
+def test_health_can_report_database_failure() -> None:
+    app = create_app(store=FailingHealthStore())
+    client = TestClient(app)
+
+    response = client.get("/health?check_db=true")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "degraded", "database": "error"}
 
 
 def test_ask_approval_resolve_and_wait_flow() -> None:

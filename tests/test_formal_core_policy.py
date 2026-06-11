@@ -34,7 +34,15 @@ def _event(
 def test_default_database_url_uses_postgresql() -> None:
     settings = CoreSettings()
 
-    assert settings.database_url.startswith("postgresql://")
+    assert settings.database_url == "postgresql+psycopg://agentguard:agentguard@127.0.0.1:5432/agent_guard"
+
+
+def test_memory_store_supports_core_lifecycle_methods() -> None:
+    core = AgentGuardCore(store=MemoryCoreStore())
+
+    core.initialize()
+
+    assert core.health_check() is True
 
 
 def test_sensitive_file_is_denied_without_using_dataset_label() -> None:
@@ -163,6 +171,8 @@ def test_expired_approvals_are_hidden_and_resolve_to_safe_default() -> None:
     expired = core.get_approval(approval_id)
     assert expired is not None
     assert expired.status == "expired"
+    assert store.approvals[approval_id].status == "expired"
+    assert store.approvals[approval_id].decision == "deny"
     assert core.resolve_approval(approval_id, "allow_once").decision == "deny"
 
 

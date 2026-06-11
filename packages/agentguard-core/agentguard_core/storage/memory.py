@@ -12,6 +12,12 @@ class MemoryCoreStore:
     audit_events: list[AuditEvent] = field(default_factory=list)
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
 
+    def initialize(self) -> None:
+        return None
+
+    def health_check(self) -> bool:
+        return True
+
     def add_audit_event(self, event: AuditEvent) -> None:
         self.audit_events.append(event)
 
@@ -36,3 +42,9 @@ class MemoryCoreStore:
         self.approvals[approval_id] = approval
         return approval
 
+    def expire_approval(self, approval_id: str) -> ApprovalRequest:
+        approval = self.approvals[approval_id]
+        approval.status = "expired"
+        approval.decision = "deny"
+        self.approvals[approval_id] = approval
+        return approval

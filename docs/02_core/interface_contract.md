@@ -33,6 +33,8 @@ Runtime Native Event
 
 | API                                        | 阶段 | 用途                           |
 | ------------------------------------------ | ---- | ------------------------------ |
+| `GET /health`                              | P0   | Core 进程健康检查              |
+| `GET /health?check_db=true`                | P0   | Core 数据库连接健康检查        |
 | `POST /v1/auth/browser/launch`             | P0   | 创建 Dashboard launch code     |
 | `POST /v1/auth/browser/exchange`           | P0   | launch code 换 browser session |
 | `GET /v1/auth/browser/me`                  | P0   | Dashboard 会话恢复             |
@@ -53,6 +55,15 @@ Runtime Native Event
 | `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标                 |
 
 ## 4. 鉴权
+
+`GET /health` 不要求鉴权。默认只检查进程存活；带 `check_db=true` 时检查 PostgreSQL 连接。数据库不可用时返回 HTTP 503：
+
+```json
+{
+  "status": "degraded",
+  "database": "error"
+}
+```
 
 P0 采用本地 Capability Auth，不做用户登录，不做 Dashboard 解锁。Core 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。
 

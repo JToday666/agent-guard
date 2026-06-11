@@ -35,8 +35,12 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code}})
 
-    @app.get("/health")
-    def health() -> dict[str, str]:
+    @app.get("/health", response_model=None)
+    def health(check_db: bool = False) -> dict[str, str] | JSONResponse:
+        if check_db:
+            if core.health_check():
+                return {"status": "ok", "database": "ok"}
+            return JSONResponse(status_code=503, content={"status": "degraded", "database": "error"})
         return {"status": "ok"}
 
     @app.post("/v1/auth/browser/launch")
