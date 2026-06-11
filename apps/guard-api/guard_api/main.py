@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Cookie, FastAPI, Header, Request
@@ -29,7 +31,14 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
     settings = settings or CoreSettings()
     core = AgentGuardCore(store=store, settings=settings)
     auth = CapabilityAuthService(settings=settings)
-    app = FastAPI(title="AgentGuard Formal Core API", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        settings.validate_for_startup()
+        core.initialize()
+        yield
+
+    app = FastAPI(title="AgentGuard Formal Core API", version="0.1.0", lifespan=lifespan)
 
     @app.exception_handler(ApiAuthError)
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:

@@ -64,7 +64,13 @@ P0 正式 Core 默认使用 PostgreSQL：
 postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard
 ```
 
-存储层使用 SQLAlchemy 2.x 同步 engine 和 Alembic migration。Alembic 负责创建 `audit_events` 与 `approvals` 表及基础索引；Core 继续以 JSONB 保存事件和审批 payload，避免 P0 阶段过早拆分规范化表。
+该默认值只作为本地 development fallback。用户安装 `agentguard-core` 后不修改源码或 package 内 migration，而是通过环境变量配置自己的数据库：
+
+```bash
+export AGENTGUARD_DATABASE_URL=postgresql+psycopg://user:password@host:5432/agent_guard
+```
+
+存储层使用 SQLAlchemy 2.x 同步 engine 和 Alembic migration。用户负责准备 PostgreSQL server、database 和账号；Core/Alembic 负责创建 `audit_events` 与 `approvals` 表及基础索引。Core 继续以 JSONB 保存事件和审批 payload，避免 P0 阶段过早拆分规范化表。
 
 初始化命令：
 
@@ -73,7 +79,9 @@ AGENTGUARD_DATABASE_URL=postgresql+psycopg://postgres:123456@127.0.0.1:5432/agen
 uv run alembic upgrade head
 ```
 
-服务启动后可用 `GET /health?check_db=true` 验证数据库连接。
+`guard-api` 服务启动时会执行配置校验和 Core 初始化。`AGENTGUARD_ENV=production` 时必须显式覆盖 `AGENTGUARD_DATABASE_URL`、`AGENTGUARD_ADAPTER_TOKEN` 和 `AGENTGUARD_CONTROL_TOKEN`，不能依赖默认 development 配置。服务启动后可用 `GET /health?check_db=true` 验证数据库连接。
+
+仓库提供 `.env.example` 作为本地配置模板；Core 不自动加载 `.env`，部署时由 shell、进程管理器或平台注入环境变量。
 
 ## 5. 决策流程
 

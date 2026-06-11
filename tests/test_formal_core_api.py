@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agentguard_core.settings import CoreSettings
@@ -10,6 +11,20 @@ from guard_api.main import create_app
 class FailingHealthStore(MemoryCoreStore):
     def health_check(self) -> bool:
         return False
+
+
+class TrackingInitializeStore(MemoryCoreStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.initialize_count = 0
+
+    def initialize(self) -> None:
+        self.initialize_count += 1
+
+
+class FailingInitializeStore(MemoryCoreStore):
+    def initialize(self) -> None:
+        raise RuntimeError("core initialize failed")
 
 
 def _tool_call_payload() -> dict:
@@ -83,6 +98,26 @@ def test_health_can_report_database_failure() -> None:
 
     assert response.status_code == 503
     assert response.json() == {"status": "degraded", "database": "error"}
+
+
+def test_startup_initializes_core_store() -> None:
+    store = TrackingInitializeStore()
+    app = create_app(store=store, settings=CoreSettings(environment="development"))
+
+    assert store.initialize_count == 0
+    with TestClient(app) as client:
+        assert store.initialize_count == 1
+        response = client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_startup_fails_when_core_initialize_fails() -> None:
+    app = create_app(store=FailingInitializeStore(), settings=CoreSettings(environment="development"))
+
+    with pytest.raises(RuntimeError, match="core initialize failed"):
+        with TestClient(app):
+            pass
 
 
 def test_ask_approval_resolve_and_wait_flow() -> None:

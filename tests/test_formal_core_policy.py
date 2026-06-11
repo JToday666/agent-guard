@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from agentguard_core.models import SecurityContext, ToolCallEvent, ToolDescriptor
 from agentguard_core.service import AgentGuardCore
+from agentguard_core import settings as core_settings
 from agentguard_core.settings import CoreSettings
 from agentguard_core.storage.memory import MemoryCoreStore
 
@@ -31,10 +34,46 @@ def _event(
     )
 
 
-def test_default_database_url_uses_postgresql() -> None:
+def test_default_database_url_uses_postgresql(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTGUARD_DATABASE_URL", raising=False)
+
     settings = CoreSettings()
 
     assert settings.database_url == "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
+
+
+def test_settings_read_environment_when_instantiated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTGUARD_ENV", "production")
+    monkeypatch.setenv("AGENTGUARD_DATABASE_URL", "postgresql+psycopg://custom:secret@db:5432/custom")
+    monkeypatch.setenv("AGENTGUARD_ADAPTER_TOKEN", "adapter-from-env")
+    monkeypatch.setenv("AGENTGUARD_CONTROL_TOKEN", "control-from-env")
+    monkeypatch.setenv("AGENTGUARD_HOST", "0.0.0.0")
+    monkeypatch.setenv("AGENTGUARD_PORT", "9090")
+
+    settings = CoreSettings()
+
+    assert settings.environment == "production"
+    assert settings.database_url == "postgresql+psycopg://custom:secret@db:5432/custom"
+    assert settings.adapter_token == "adapter-from-env"
+    assert settings.control_token == "control-from-env"
+    assert settings.host == "0.0.0.0"
+    assert settings.port == 9090
+
+
+def test_development_allows_default_startup_configuration() -> None:
+    CoreSettings(environment="development").validate_for_startup()
+
+
+def test_production_rejects_default_startup_configuration() -> None:
+    settings = CoreSettings(environment="production")
+
+    with pytest.raises(core_settings.CoreConfigurationError) as exc_info:
+        settings.validate_for_startup()
+
+    message = str(exc_info.value)
+    assert "AGENTGUARD_DATABASE_URL" in message
+    assert "AGENTGUARD_ADAPTER_TOKEN" in message
+    assert "AGENTGUARD_CONTROL_TOKEN" in message
 
 
 def test_memory_store_supports_core_lifecycle_methods() -> None:
