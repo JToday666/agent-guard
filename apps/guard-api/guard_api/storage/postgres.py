@@ -1,4 +1,4 @@
-"""PostgreSQL store for the formal Core using SQLAlchemy and Alembic."""
+"""PostgreSQL-backed Guard API / Control Plane store."""
 
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from agentguard_core.models import ApprovalRequest, AuditEvent, utc_now_iso
-from agentguard_core.storage.base import (
+from agentguard_core import AuditEvent, utc_now_iso
+from guard_api.models import ApprovalRequest
+from guard_api.storage.base import (
     AuditEventFilters,
     EvalMetricFilters,
     EvalMetrics,
@@ -22,9 +23,9 @@ from agentguard_core.storage.base import (
     StoredBrowserSession,
     StoredLaunchCode,
 )
-from agentguard_core.storage.sqlalchemy_models import (
+from guard_api.storage.sqlalchemy_models import (
     approval_nonces,
-    approvals,
+    approval_requests,
     audit_events,
     browser_sessions,
     launch_codes,
@@ -32,9 +33,8 @@ from agentguard_core.storage.sqlalchemy_models import (
 
 
 @dataclass(slots=True)
-class PostgresCoreStore:
+class PostgresControlPlaneStore:
     database_url: str
-    _initialized: bool = False
     _engine: Engine = field(init=False, repr=False)
     _session_factory: sessionmaker[Session] = field(init=False, repr=False)
 
@@ -44,11 +44,7 @@ class PostgresCoreStore:
         self._session_factory = sessionmaker(bind=self._engine)
 
     def initialize(self) -> None:
-        config = Config()
-        config.set_main_option("script_location", str(_migrations_path()))
-        config.set_main_option("sqlalchemy.url", self.database_url)
-        command.upgrade(config, "head")
-        self._initialized = True
+        command.upgrade(self._alembic_config(), "head")
 
     def health_check(self) -> bool:
         try:
@@ -59,7 +55,6 @@ class PostgresCoreStore:
             return False
 
     def add_audit_event(self, event: AuditEvent) -> None:
-        self._ensure_schema()
         payload = event.model_dump(mode="json")
         stmt = pg_insert(audit_events).values(
             audit_id=event.audit_id,
@@ -68,14 +63,13 @@ class PostgresCoreStore:
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[audit_events.c.audit_id],
-            set_={"payload_json": stmt.excluded.payload_json},
+            set_={"payload_json": stmt.excluded.payload_json, "created_at": stmt.excluded.created_at},
         )
         with self._session_factory() as session:
             session.execute(stmt)
             session.commit()
 
     def list_audit_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
-        self._ensure_schema()
         filters = filters or AuditEventFilters()
         stmt = (
             select(audit_events.c.payload_json)
@@ -85,74 +79,69 @@ class PostgresCoreStore:
         )
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
-        return [AuditEvent.model_validate(_json_payload(row)) for row in rows]
+        return [AuditEvent.model_validate(row) for row in rows]
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        self._ensure_schema()
-        where_clause, params = _metric_where_clause(filters or EvalMetricFilters())
+        filters = filters or EvalMetricFilters()
+        where_sql, params = _metric_where_clause(filters)
         stmt = text(
             f"""
             SELECT
-                count(*) AS event_count,
-                count(*) FILTER (WHERE payload_json ->> 'decision' = 'allow') AS allow_count,
-                count(*) FILTER (WHERE payload_json ->> 'decision' = 'deny') AS deny_count,
-                count(*) FILTER (WHERE payload_json ->> 'decision' = 'ask') AS ask_count,
-                count(*) FILTER (
-                    WHERE payload_json ->> 'decision' IN ('deny', 'ask')
-                       OR payload_json ->> 'blocked' = 'true'
+                COUNT(*) AS event_count,
+                COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'allow') AS allow_count,
+                COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'deny') AS deny_count,
+                COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'ask') AS ask_count,
+                COUNT(*) FILTER (
+                    WHERE payload_json ->> 'blocked' = 'true'
+                       OR payload_json ->> 'decision' IN ('deny', 'ask')
                 ) AS blocked_count,
-                count(*) FILTER (WHERE payload_json ->> 'is_malicious' = 'false') AS labeled_benign_count,
-                count(*) FILTER (WHERE payload_json ->> 'is_malicious' = 'true') AS labeled_malicious_count,
-                count(*) FILTER (
+                COUNT(*) FILTER (WHERE payload_json ->> 'is_malicious' = 'false') AS benign_count,
+                COUNT(*) FILTER (WHERE payload_json ->> 'is_malicious' = 'true') AS malicious_count,
+                COUNT(*) FILTER (
                     WHERE payload_json ->> 'is_malicious' = 'false'
-                      AND (
-                        payload_json ->> 'decision' IN ('deny', 'ask')
-                        OR payload_json ->> 'blocked' = 'true'
-                      )
+                      AND (payload_json ->> 'blocked' = 'true' OR payload_json ->> 'decision' IN ('deny', 'ask'))
                 ) AS false_positive_count,
-                count(*) FILTER (
+                COUNT(*) FILTER (
                     WHERE payload_json ->> 'is_malicious' = 'true'
                       AND payload_json ->> 'decision' = 'allow'
-                      AND coalesce(payload_json ->> 'blocked', 'false') != 'true'
+                      AND COALESCE(payload_json ->> 'blocked', 'false') = 'false'
                 ) AS false_negative_count,
-                avg((payload_json ->> 'latency_ms')::double precision)
-                    FILTER (WHERE payload_json ->> 'latency_ms' IS NOT NULL) AS average_latency_ms
+                AVG(NULLIF(payload_json ->> 'latency_ms', '')::numeric) AS average_latency_ms
             FROM audit_events
-            {where_clause}
+            {where_sql}
             """
         )
         with self._session_factory() as session:
             row = session.execute(stmt, params).mappings().one()
-        event_count = int(row["event_count"] or 0)
-        blocked_count = int(row["blocked_count"] or 0)
-        labeled_benign_count = int(row["labeled_benign_count"] or 0)
-        labeled_malicious_count = int(row["labeled_malicious_count"] or 0)
-        false_positive_count = int(row["false_positive_count"] or 0)
-        false_negative_count = int(row["false_negative_count"] or 0)
+        event_count = int(row["event_count"])
+        blocked_count = int(row["blocked_count"])
+        benign_count = int(row["benign_count"])
+        malicious_count = int(row["malicious_count"])
+        false_positive_count = int(row["false_positive_count"])
+        false_negative_count = int(row["false_negative_count"])
         average_latency = row["average_latency_ms"]
         return {
             "event_count": event_count,
-            "allow_count": int(row["allow_count"] or 0),
-            "deny_count": int(row["deny_count"] or 0),
-            "ask_count": int(row["ask_count"] or 0),
+            "allow_count": int(row["allow_count"]),
+            "deny_count": int(row["deny_count"]),
+            "ask_count": int(row["ask_count"]),
             "blocked_count": blocked_count,
             "block_rate": (blocked_count / event_count) if event_count else None,
-            "fpr": (false_positive_count / labeled_benign_count) if labeled_benign_count else None,
-            "fnr": (false_negative_count / labeled_malicious_count) if labeled_malicious_count else None,
+            "fpr": (false_positive_count / benign_count) if benign_count else None,
+            "fnr": (false_negative_count / malicious_count) if malicious_count else None,
             "average_latency_ms": float(average_latency) if average_latency is not None else None,
         }
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
-        self._ensure_schema()
         payload = approval.model_dump(mode="json")
-        stmt = pg_insert(approvals).values(
+        stmt = pg_insert(approval_requests).values(
             approval_id=approval.approval_id,
             payload_json=payload,
             status=approval.status,
             created_at=approval.created_at,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=[approvals.c.approval_id],
+            index_elements=[approval_requests.c.approval_id],
             set_={"payload_json": stmt.excluded.payload_json, "status": stmt.excluded.status},
         )
         with self._session_factory() as session:
@@ -161,24 +150,22 @@ class PostgresCoreStore:
         return approval
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
-        self._ensure_schema()
         stmt = (
-            select(approvals.c.payload_json)
-            .where(approvals.c.status == "pending")
-            .order_by(approvals.c.created_at.asc())
+            select(approval_requests.c.payload_json)
+            .where(approval_requests.c.status == "pending")
+            .order_by(approval_requests.c.created_at.asc())
         )
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
-        return [ApprovalRequest.model_validate(_json_payload(row)) for row in rows]
+        return [ApprovalRequest.model_validate(row) for row in rows]
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        self._ensure_schema()
-        stmt = select(approvals.c.payload_json).where(approvals.c.approval_id == approval_id)
+        stmt = select(approval_requests.c.payload_json).where(approval_requests.c.approval_id == approval_id)
         with self._session_factory() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
             return None
-        return ApprovalRequest.model_validate(_json_payload(row))
+        return ApprovalRequest.model_validate(row)
 
     def resolve_approval(self, approval_id: str, decision: str) -> ApprovalRequest:
         approval = self.get_approval(approval_id)
@@ -200,16 +187,10 @@ class PostgresCoreStore:
         return approval
 
     def create_launch_code(self, code_hash: str, expires_at: str) -> StoredLaunchCode:
-        self._ensure_schema()
-        stmt = pg_insert(launch_codes).values(
-            code_hash=code_hash,
-            expires_at=expires_at,
-            created_at=utc_now_iso(),
-            used_at=None,
-        )
+        stmt = pg_insert(launch_codes).values(code_hash=code_hash, expires_at=expires_at, used_at=None)
         stmt = stmt.on_conflict_do_update(
             index_elements=[launch_codes.c.code_hash],
-            set_={"expires_at": stmt.excluded.expires_at, "created_at": stmt.excluded.created_at, "used_at": None},
+            set_={"expires_at": stmt.excluded.expires_at, "used_at": None},
         )
         with self._session_factory() as session:
             session.execute(stmt)
@@ -217,7 +198,6 @@ class PostgresCoreStore:
         return StoredLaunchCode(code_hash=code_hash, expires_at=expires_at)
 
     def consume_launch_code(self, code_hash: str, used_at: str) -> StoredLaunchCode | None:
-        self._ensure_schema()
         stmt = (
             update(launch_codes)
             .where(launch_codes.c.code_hash == code_hash, launch_codes.c.used_at.is_(None))
@@ -238,12 +218,10 @@ class PostgresCoreStore:
         csrf_token: str,
         expires_at: str,
     ) -> StoredBrowserSession:
-        self._ensure_schema()
         stmt = pg_insert(browser_sessions).values(
             session_hash=session_hash,
             csrf_token=csrf_token,
             expires_at=expires_at,
-            created_at=utc_now_iso(),
             revoked_at=None,
         )
         stmt = stmt.on_conflict_do_update(
@@ -251,7 +229,6 @@ class PostgresCoreStore:
             set_={
                 "csrf_token": stmt.excluded.csrf_token,
                 "expires_at": stmt.excluded.expires_at,
-                "created_at": stmt.excluded.created_at,
                 "revoked_at": None,
             },
         )
@@ -261,7 +238,6 @@ class PostgresCoreStore:
         return StoredBrowserSession(session_hash=session_hash, csrf_token=csrf_token, expires_at=expires_at)
 
     def get_browser_session(self, session_hash: str) -> StoredBrowserSession | None:
-        self._ensure_schema()
         stmt = select(
             browser_sessions.c.session_hash,
             browser_sessions.c.csrf_token,
@@ -280,7 +256,6 @@ class PostgresCoreStore:
         )
 
     def revoke_browser_session(self, session_hash: str, revoked_at: str) -> None:
-        self._ensure_schema()
         stmt = update(browser_sessions).where(browser_sessions.c.session_hash == session_hash).values(revoked_at=revoked_at)
         with self._session_factory() as session:
             session.execute(stmt)
@@ -295,14 +270,12 @@ class PostgresCoreStore:
         tool_call_id: str,
         expires_at: str,
     ) -> StoredApprovalNonce:
-        self._ensure_schema()
         stmt = pg_insert(approval_nonces).values(
             nonce_hash=nonce_hash,
             approval_id=approval_id,
             session_hash=session_hash,
             tool_call_id=tool_call_id,
             expires_at=expires_at,
-            created_at=utc_now_iso(),
             used_at=None,
         )
         stmt = stmt.on_conflict_do_update(
@@ -312,7 +285,6 @@ class PostgresCoreStore:
                 "session_hash": stmt.excluded.session_hash,
                 "tool_call_id": stmt.excluded.tool_call_id,
                 "expires_at": stmt.excluded.expires_at,
-                "created_at": stmt.excluded.created_at,
                 "used_at": None,
             },
         )
@@ -336,7 +308,6 @@ class PostgresCoreStore:
         tool_call_id: str,
         used_at: str,
     ) -> StoredApprovalNonce | None:
-        self._ensure_schema()
         stmt = (
             update(approval_nonces)
             .where(
@@ -372,59 +343,49 @@ class PostgresCoreStore:
 
     def _update_approval(self, approval: ApprovalRequest) -> None:
         stmt = (
-            update(approvals)
-            .where(approvals.c.approval_id == approval.approval_id)
+            update(approval_requests)
+            .where(approval_requests.c.approval_id == approval.approval_id)
             .values(payload_json=approval.model_dump(mode="json"), status=approval.status)
         )
         with self._session_factory() as session:
             session.execute(stmt)
             session.commit()
 
-    def _ensure_schema(self) -> None:
-        if not self._initialized:
-            self.initialize()
-
-
-def _normalize_database_url(database_url: str) -> str:
-    if database_url.startswith("postgresql://"):
-        return f"postgresql+psycopg://{database_url.removeprefix('postgresql://')}"
-    return database_url
+    def _alembic_config(self) -> Config:
+        migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
+        config = Config()
+        config.set_main_option("script_location", str(migrations_dir))
+        config.set_main_option("sqlalchemy.url", self.database_url)
+        return config
 
 
 def _audit_filter_conditions(filters: AuditEventFilters) -> list[Any]:
     conditions: list[Any] = []
     if filters.trace_id is not None:
-        conditions.append(_payload_text("trace_id") == filters.trace_id)
+        conditions.append(_json_text("trace_id") == filters.trace_id)
     if filters.case_id is not None:
-        conditions.append(_payload_text("case_id") == filters.case_id)
+        conditions.append(_json_text("case_id") == filters.case_id)
     if filters.runtime is not None:
-        conditions.append(_payload_text("runtime") == filters.runtime)
+        conditions.append(_json_text("runtime") == filters.runtime)
     if filters.decision is not None:
-        conditions.append(_payload_text("decision") == filters.decision)
+        conditions.append(_json_text("decision") == filters.decision)
     return conditions
 
 
 def _metric_where_clause(filters: EvalMetricFilters) -> tuple[str, dict[str, str]]:
-    conditions: list[str] = []
+    clauses: list[str] = []
     params: dict[str, str] = {}
-    if filters.trace_id is not None:
-        conditions.append("payload_json ->> 'trace_id' = :trace_id")
-        params["trace_id"] = filters.trace_id
-    if filters.case_id is not None:
-        conditions.append("payload_json ->> 'case_id' = :case_id")
-        params["case_id"] = filters.case_id
-    if filters.runtime is not None:
-        conditions.append("payload_json ->> 'runtime' = :runtime")
-        params["runtime"] = filters.runtime
-    if filters.decision is not None:
-        conditions.append("payload_json ->> 'decision' = :decision")
-        params["decision"] = filters.decision
-    if not conditions:
+    for key in ("trace_id", "case_id", "runtime", "decision"):
+        value = getattr(filters, key)
+        if value is not None:
+            clauses.append(f"payload_json ->> '{key}' = :{key}")
+            params[key] = value
+    if not clauses:
         return "", params
-    return f"WHERE {' AND '.join(conditions)}", params
+    return "WHERE " + " AND ".join(clauses), params
 
 
-def _payload_text(key: str) -> Any:
+def _json_text(key: str) -> Any:
     return audit_events.c.payload_json.op("->>")(key)
 
 
@@ -432,15 +393,7 @@ def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
 
 
-def _migrations_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "migrations"
-
-
-def _json_payload(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        import json
-
-        return json.loads(value)
-    return dict(value)
+def _normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql://"):
+        return f"postgresql+psycopg://{database_url.removeprefix('postgresql://')}"
+    return database_url

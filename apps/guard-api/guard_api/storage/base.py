@@ -1,11 +1,13 @@
-"""Storage protocol for Core audit and approval data."""
+"""Storage protocol for Guard API / Control Plane state."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentguard_core.models import ApprovalRequest, AuditEvent
+from agentguard_core import AuditEvent
+
+from guard_api.models import ApprovalRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +55,7 @@ class StoredApprovalNonce:
 EvalMetrics = dict[str, int | float | None]
 
 
-class CoreStore(Protocol):
+class ControlPlaneStore(Protocol):
     def initialize(self) -> None:
         ...
 

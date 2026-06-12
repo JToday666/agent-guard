@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GuardEvent",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "runtime",
+    "trace_id",
+    "pre_execution",
+    "security_context",
+    "payload",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.3" },
+    "event_id": { "type": "string" },
+    "event_type": { "type": "string" },
+    "runtime": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "case_id": { "type": ["string", "null"] },
+    "attack_type": { "type": ["string", "null"] },
+    "is_malicious": { "type": ["boolean", "null"] },
+    "timestamp": { "type": "string" },
+    "pre_execution": { "type": "boolean" },
+    "security_context": { "type": "object" },
+    "payload": {
+      "type": "object",
+      "required": ["tool", "arguments", "derived_resources"],
+      "properties": {
+        "tool": {
+          "type": "object",
+          "required": ["name", "call_id"],
+          "properties": {
+            "name": { "type": "string" },
+            "category": { "type": "string" },
+            "kind": { "type": ["string", "null"] },
+            "input_kind": { "type": ["string", "null"] },
+            "call_id": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "arguments": { "type": "object" },
+        "derived_resources": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": true
+}

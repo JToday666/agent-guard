@@ -1,11 +1,13 @@
-"""In-memory store used by tests and local smoke runs."""
+"""In-memory Control Plane store used by tests and local smoke runs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from agentguard_core.models import ApprovalRequest, AuditEvent, utc_now_iso
-from agentguard_core.storage.base import (
+from agentguard_core import AuditEvent, utc_now_iso
+
+from guard_api.models import ApprovalRequest
+from guard_api.storage.base import (
     AuditEventFilters,
     EvalMetricFilters,
     EvalMetrics,
@@ -16,7 +18,7 @@ from agentguard_core.storage.base import (
 
 
 @dataclass(slots=True)
-class MemoryCoreStore:
+class MemoryControlPlaneStore:
     audit_events: list[AuditEvent] = field(default_factory=list)
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
     launch_codes: dict[str, StoredLaunchCode] = field(default_factory=dict)

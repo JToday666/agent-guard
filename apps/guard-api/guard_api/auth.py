@@ -1,4 +1,4 @@
-"""Minimal P0 capability auth for the Guard API."""
+"""P0 capability auth for the Guard API / Control Plane."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ import hmac
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from agentguard_core.models import AuthContext, new_id
-from agentguard_core.settings import CoreSettings
-from agentguard_core.storage.base import CoreStore
+from agentguard_core import new_id
+
+from guard_api.settings import GuardApiSettings
+from guard_api.storage.base import ControlPlaneStore
 
 
 class ApiAuthError(Exception):
@@ -17,6 +18,17 @@ class ApiAuthError(Exception):
         self.code = code
         self.status_code = status_code
         super().__init__(code)
+
+
+@dataclass(slots=True)
+class AuthContext:
+    principal_type: str
+    principal_id: str
+    role: str
+    scopes: list[str]
+    auth_method: str
+    runtime: str | None = None
+    agent_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -28,8 +40,8 @@ class BrowserSession:
 
 @dataclass(slots=True)
 class CapabilityAuthService:
-    settings: CoreSettings
-    store: CoreStore
+    settings: GuardApiSettings
+    store: ControlPlaneStore
 
     def verify_bearer(self, authorization: str | None, required_scope: str) -> AuthContext:
         if not authorization:
@@ -77,11 +89,7 @@ class CapabilityAuthService:
         session_id = new_id("sess")
         csrf_token = new_id("csrf")
         expires_at = _now() + timedelta(seconds=self.settings.browser_session_ttl_seconds)
-        session = BrowserSession(
-            session_id=session_id,
-            csrf_token=csrf_token,
-            expires_at=expires_at,
-        )
+        session = BrowserSession(session_id=session_id, csrf_token=csrf_token, expires_at=expires_at)
         self.store.create_browser_session(
             _token_hash(session.session_id),
             csrf_token=session.csrf_token,

@@ -1,4 +1,4 @@
-"""Runtime settings for the formal AgentGuard Core."""
+"""Runtime settings for the Guard API / Control Plane."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ DEFAULT_CONTROL_TOKEN = "demo-control-token"
 DEFAULT_ENVIRONMENT = "development"
 
 
-class CoreConfigurationError(RuntimeError):
-    """Raised when Core startup configuration is not safe for the selected environment."""
+class GuardApiConfigurationError(RuntimeError):
+    """Raised when Guard API startup configuration is unsafe."""
 
 
 @dataclass(slots=True)
-class CoreSettings:
+class GuardApiSettings:
     database_url: str = field(default_factory=lambda: os.getenv("AGENTGUARD_DATABASE_URL", DEFAULT_DATABASE_URL))
     adapter_token: str = field(default_factory=lambda: os.getenv("AGENTGUARD_ADAPTER_TOKEN", DEFAULT_ADAPTER_TOKEN))
     control_token: str = field(default_factory=lambda: os.getenv("AGENTGUARD_CONTROL_TOKEN", DEFAULT_CONTROL_TOKEN))
@@ -40,4 +40,4 @@ class CoreSettings:
             default_variables.append("AGENTGUARD_CONTROL_TOKEN")
         if default_variables:
             names = ", ".join(default_variables)
-            raise CoreConfigurationError(f"Production startup requires explicit configuration for: {names}")
+            raise GuardApiConfigurationError(f"Production startup requires explicit configuration for: {names}")

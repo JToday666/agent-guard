@@ -1,25 +1,26 @@
-"""Policy engine for P0 formal Core decisions."""
+"""Policy engine for P0 stateless Core decisions."""
 
 from __future__ import annotations
 
 from time import perf_counter
 
 from .detectors import DetectionResult
-from .models import PolicyDecision, RuleHit, new_id
+from .models import ApprovalIntent, GuardDecision, RuleHit, new_id
 
 
-def build_policy_decision(results: list[DetectionResult], *, started_at: float) -> PolicyDecision:
+def build_guard_decision(results: list[DetectionResult], *, started_at: float) -> GuardDecision:
     latency_ms = int((perf_counter() - started_at) * 1000)
     if not results:
-        return PolicyDecision(
+        return GuardDecision(
             decision_id=new_id("dec"),
             decision="allow",
             risk_score=0,
             severity="low",
+            categories=[],
             rule_hits=[],
             reason="No P0 policy rule was triggered.",
             safe_message=None,
-            approval=None,
+            approval_intent=None,
             latency_ms=latency_ms,
         )
 
@@ -32,15 +33,16 @@ def build_policy_decision(results: list[DetectionResult], *, started_at: float) 
     else:
         decision = "allow"
 
-    return PolicyDecision(
+    return GuardDecision(
         decision_id=new_id("dec"),
         decision=decision,
         risk_score=risk_score,
         severity=_severity_for_score(risk_score),
+        categories=list(dict.fromkeys(item.category for item in results)),
         rule_hits=rule_hits,
         reason="; ".join(dict.fromkeys(item.reason for item in results)),
         safe_message=_safe_message(decision),
-        approval=None,
+        approval_intent=_approval_intent(decision, results),
         latency_ms=latency_ms,
     )
 
@@ -62,3 +64,11 @@ def _safe_message(decision: str) -> str | None:
         return "This tool call requires approval before it can continue."
     return None
 
+
+def _approval_intent(decision: str, results: list[DetectionResult]) -> ApprovalIntent | None:
+    if decision != "ask":
+        return None
+    for result in results:
+        if result.approval_resource:
+            return ApprovalIntent(resource=result.approval_resource)
+    return ApprovalIntent(resource="")

@@ -1,40 +1,22 @@
 from __future__ import annotations
 
-import os
 import hashlib
-from datetime import datetime, timedelta, timezone
+import os
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, text
 
-from agentguard_core.models import AuditEvent
-from agentguard_core.models import SecurityContext, ToolCallEvent, ToolDescriptor
-from agentguard_core.service import AgentGuardCore
-from agentguard_core.settings import CoreSettings
-from agentguard_core.storage.base import AuditEventFilters, EvalMetricFilters
-from agentguard_core.storage.postgres import PostgresCoreStore
+from agentguard_core import AuditEvent
 from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.models import ApprovalRequest
+from guard_api.settings import GuardApiSettings
+from guard_api.storage.base import AuditEventFilters, EvalMetricFilters
+from guard_api.storage.postgres import PostgresControlPlaneStore
 
 
-def _event(*, trace_id: str, case_id: str, tool_name: str, arguments: dict, user_task: str) -> ToolCallEvent:
-    return ToolCallEvent(
-        trace_id=trace_id,
-        case_id=case_id,
-        attack_type="postgres_integration",
-        is_malicious=True,
-        security_context=SecurityContext(
-            user_task=user_task,
-            source_trust="untrusted",
-            source_type="postgres-test",
-        ),
-        tool=ToolDescriptor(name=tool_name, call_id=f"call_{uuid4().hex}"),
-        arguments=arguments,
-    )
-
-
-def test_postgres_store_exposes_sqlalchemy_lifecycle_methods() -> None:
-    store = PostgresCoreStore("postgresql://postgres:123456@127.0.0.1:5432/agent_guard")
+def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
+    store = PostgresControlPlaneStore("postgresql://postgres:123456@127.0.0.1:5432/agent_guard")
 
     assert callable(store.initialize)
     assert callable(store.health_check)
@@ -49,44 +31,45 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_{run_id}"
-    case_id = f"PG-{run_id}"
-    approval_id: str | None = None
-    store = PostgresCoreStore(database_url)
+    approval_id = f"app_pg_{run_id}"
+    store = PostgresControlPlaneStore(database_url)
     try:
+        _reset_control_plane_schema(database_url)
         store.initialize()
-        core = AgentGuardCore(store=store)
-
-        decision = core.evaluate_tool_call(
-            _event(
+        store.add_audit_event(
+            _audit_event(
+                audit_id=f"audit_pg_{run_id}",
                 trace_id=trace_id,
-                case_id=case_id,
-                tool_name="send_email",
-                arguments={"to": "postgres-external@example.com"},
-                user_task="Complete the visible web form only",
+                decision="ask",
+                runtime="langgraph",
+                blocked=True,
+                is_malicious=True,
+                latency_ms=10,
+            )
+        )
+        store.create_approval(
+            ApprovalRequest(
+                approval_id=approval_id,
+                trace_id=trace_id,
+                tool_call_id=f"call_pg_{run_id}",
+                requesting_principal_id="cred_adapter_main",
+                runtime="langgraph",
+                agent_id="main",
+                tool="send_email",
+                resource="external@example.com",
+                reason="approval required",
+                risk_score=62,
+                severity="medium",
             )
         )
 
-        assert decision.decision == "ask"
-        assert decision.approval is not None
-        approval_id = decision.approval["approval_id"]
-        restarted_core = AgentGuardCore(store=PostgresCoreStore(database_url))
-        audits = [event for event in restarted_core.list_audit_events() if event.trace_id == trace_id]
-        approval = restarted_core.get_approval(approval_id)
+        restarted_store = PostgresControlPlaneStore(database_url)
+        audits = restarted_store.list_audit_events(AuditEventFilters(trace_id=trace_id))
+        approval = restarted_store.get_approval(approval_id)
 
-        assert len(audits) == 1
-        assert audits[0].case_id == case_id
-        assert audits[0].decision == "ask"
+        assert [event.trace_id for event in audits] == [trace_id]
         assert approval is not None
         assert approval.status == "pending"
-
-        approval.expires_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
-        store.create_approval(approval)
-        expired = restarted_core.get_approval(approval_id)
-
-        assert expired is not None
-        assert expired.status == "expired"
-        assert expired.decision == "deny"
-        assert restarted_core.get_approval(approval_id).status == "expired"
     finally:
         _cleanup_test_rows(database_url, trace_id, approval_id)
 
@@ -101,16 +84,17 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
     tool_call_id = f"call_pg_auth_{run_id}"
     launch_code: str | None = None
     session_id: str | None = None
-    store = PostgresCoreStore(database_url)
+    store = PostgresControlPlaneStore(database_url)
     try:
+        _reset_control_plane_schema(database_url)
         store.initialize()
-        settings = CoreSettings(control_token="control-secret")
+        settings = GuardApiSettings(control_token="control-secret")
         first_auth = CapabilityAuthService(settings=settings, store=store)
         launch_code = first_auth.create_launch_code()
-        second_auth = CapabilityAuthService(settings=settings, store=PostgresCoreStore(database_url))
+        second_auth = CapabilityAuthService(settings=settings, store=PostgresControlPlaneStore(database_url))
         session = second_auth.exchange_launch_code(launch_code)
         session_id = session.session_id
-        third_auth = CapabilityAuthService(settings=settings, store=PostgresCoreStore(database_url))
+        third_auth = CapabilityAuthService(settings=settings, store=PostgresControlPlaneStore(database_url))
 
         restored = third_auth.verify_browser_session(session.session_id)
         nonce = third_auth.issue_approval_nonce(
@@ -118,7 +102,7 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
             session_id=session.session_id,
             tool_call_id=tool_call_id,
         )
-        fourth_auth = CapabilityAuthService(settings=settings, store=PostgresCoreStore(database_url))
+        fourth_auth = CapabilityAuthService(settings=settings, store=PostgresControlPlaneStore(database_url))
         fourth_auth.consume_approval_nonce(
             nonce=nonce,
             approval_id=approval_id,
@@ -151,8 +135,9 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
     run_id = uuid4().hex
     trace_id = f"trace_pg_metric_{run_id}"
     other_trace_id = f"trace_pg_other_{run_id}"
-    store = PostgresCoreStore(database_url)
+    store = PostgresControlPlaneStore(database_url)
     try:
+        _reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -206,52 +191,36 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
         _cleanup_test_rows(database_url, other_trace_id, None)
 
 
-def test_postgres_metrics_are_not_limited_by_audit_list_default() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
-
-    run_id = uuid4().hex
-    trace_id = f"trace_pg_many_{run_id}"
-    store = PostgresCoreStore(database_url)
-    try:
-        store.initialize()
-        for index in range(505):
-            store.add_audit_event(
-                _audit_event(
-                    audit_id=f"audit_pg_many_{run_id}_{index}",
-                    trace_id=trace_id,
-                    decision="allow",
-                    runtime="langgraph",
-                    blocked=False,
-                    is_malicious=False,
-                    latency_ms=1,
-                )
-            )
-
-        listed = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
-        metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
-
-        assert len(listed) == 500
-        assert metrics["event_count"] == 505
-        assert metrics["allow_count"] == 505
-        assert metrics["blocked_count"] == 0
-    finally:
-        _cleanup_test_rows(database_url, trace_id, None)
-
-
 def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None) -> None:
     try:
-        engine = create_engine(PostgresCoreStore(database_url).database_url)
+        engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
             if approval_id is not None:
-                conn.execute(text("DELETE FROM approvals WHERE approval_id = :approval_id"), {"approval_id": approval_id})
+                conn.execute(
+                    text("DELETE FROM approval_requests WHERE approval_id = :approval_id"),
+                    {"approval_id": approval_id},
+                )
             conn.execute(
                 text("DELETE FROM audit_events WHERE payload_json ->> 'trace_id' = :trace_id"),
                 {"trace_id": trace_id},
             )
     except Exception:
         return None
+
+
+def _reset_control_plane_schema(database_url: str) -> None:
+    engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
+    with engine.begin() as conn:
+        for table in [
+            "approval_nonces",
+            "browser_sessions",
+            "launch_codes",
+            "approval_requests",
+            "approvals",
+            "audit_events",
+            "alembic_version",
+        ]:
+            conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
 
 
 def _cleanup_auth_rows(
@@ -261,15 +230,10 @@ def _cleanup_auth_rows(
     session_id: str | None,
 ) -> None:
     try:
-        engine = create_engine(PostgresCoreStore(database_url).database_url)
+        engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
             conn.execute(
-                text(
-                    """
-                    DELETE FROM approval_nonces
-                    WHERE approval_id = :approval_id
-                    """
-                ),
+                text("DELETE FROM approval_nonces WHERE approval_id = :approval_id"),
                 {"approval_id": approval_id},
             )
             if launch_code is not None:

@@ -1,4 +1,4 @@
-"""FastAPI service entrypoint for the formal AgentGuard Core."""
+"""FastAPI entrypoint for the Guard API / Control Plane."""
 
 from __future__ import annotations
 
@@ -10,12 +10,19 @@ from fastapi import Cookie, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from agentguard_core.models import AuditEvent, ToolCallEvent
-from agentguard_core.service import AgentGuardCore
-from agentguard_core.settings import CoreSettings
-from agentguard_core.storage.base import AuditEventFilters, CoreStore, EvalMetricFilters
+from agentguard_core import AuditEvent, GuardEvent
 
-from .auth import ApiAuthError, CapabilityAuthService
+from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.services import (
+    ApprovalService,
+    AuditService,
+    EvaluationService,
+    MetricService,
+    PolicyService,
+)
+from guard_api.settings import GuardApiSettings
+from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters
+from guard_api.storage.postgres import PostgresControlPlaneStore
 
 
 class LaunchExchangeRequest(BaseModel):
@@ -31,18 +38,26 @@ def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
 
 
-def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None = None) -> FastAPI:
-    settings = settings or CoreSettings()
-    core = AgentGuardCore(store=store, settings=settings)
-    auth = CapabilityAuthService(settings=settings, store=core.store)
+def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSettings | None = None) -> FastAPI:
+    settings = settings or GuardApiSettings()
+    store = store or PostgresControlPlaneStore(settings.database_url)
+    auth = CapabilityAuthService(settings=settings, store=store)
+    audit_service = AuditService(store=store)
+    approval_service = ApprovalService(store=store, settings=settings)
+    metric_service = MetricService(store=store)
+    evaluation_service = EvaluationService(
+        policy_service=PolicyService(),
+        audit_service=audit_service,
+        approval_service=approval_service,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         settings.validate_for_startup()
-        core.initialize()
+        store.initialize()
         yield
 
-    app = FastAPI(title="AgentGuard Formal Core API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="AgentGuard Guard API", version="0.1.0", lifespan=lifespan)
 
     @app.exception_handler(ApiAuthError)
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:
@@ -51,7 +66,7 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
     @app.get("/health", response_model=None)
     def health(check_db: bool = False) -> dict[str, str] | JSONResponse:
         if check_db:
-            if core.health_check():
+            if store.health_check():
                 return {"status": "ok", "database": "ok"}
             return JSONResponse(status_code=503, content={"status": "degraded", "database": "error"})
         return {"status": "ok"}
@@ -98,16 +113,16 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
         response.delete_cookie("agentguard_session", path="/")
         return response
 
-    @app.post("/v1/evaluate/tool-call")
-    def evaluate_tool_call(payload: ToolCallEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    @app.post("/v1/guard/evaluate")
+    def evaluate_guard_event(payload: GuardEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "event:evaluate")
-        decision = core.evaluate_tool_call(payload, requesting_principal_id=context.principal_id)
-        return decision.model_dump(mode="json")
+        response = evaluation_service.evaluate(payload, requesting_principal_id=context.principal_id)
+        return response.model_dump(mode="json")
 
-    @app.post("/v1/audit/event")
+    @app.post("/v1/audit/events")
     def audit_event(payload: AuditEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:audit:write")
-        return core.submit_audit_event(payload)
+        return audit_service.submit(payload)
 
     @app.get("/v1/audit/events")
     def audit_events(
@@ -126,7 +141,7 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
             decision=decision,
             limit=_bounded_limit(limit),
         )
-        return [event.model_dump(mode="json") for event in core.list_audit_events(filters)]
+        return [event.model_dump(mode="json") for event in audit_service.list_events(filters)]
 
     @app.get("/v1/metrics/eval")
     def eval_metrics(
@@ -138,13 +153,13 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
     ) -> dict[str, Any]:
         auth.verify_browser_session(agentguard_session)
         filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
-        return core.eval_metrics(filters)
+        return metric_service.eval_metrics(filters)
 
     @app.get("/v1/approvals/pending")
     def pending_approvals(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:
         session = auth.verify_browser_session(agentguard_session)
         rows: list[dict[str, Any]] = []
-        for approval in core.list_pending_approvals():
+        for approval in approval_service.list_pending_approvals():
             payload = approval.model_dump(mode="json")
             payload["approval_nonce"] = auth.issue_approval_nonce(
                 approval_id=approval.approval_id,
@@ -163,7 +178,7 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
     ) -> dict[str, Any]:
         session = auth.verify_browser_session(agentguard_session)
         auth.verify_csrf(session, x_agentguard_csrf)
-        approval = core.get_approval(approval_id)
+        approval = approval_service.get_approval(approval_id)
         if approval is None:
             raise ApiAuthError("APPROVAL_NOT_FOUND", status_code=404)
         auth.consume_approval_nonce(
@@ -174,7 +189,7 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
         )
         if payload.decision not in approval.decision_options:
             raise ApiAuthError("APPROVAL_DECISION_INVALID", status_code=403)
-        resolved = core.resolve_approval(approval_id, payload.decision)
+        resolved = approval_service.resolve_approval(approval_id, payload.decision)
         return {
             "approval_id": resolved.approval_id,
             "status": resolved.status,
@@ -184,7 +199,7 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
     @app.get("/v1/approvals/{approval_id}/wait")
     def wait_approval(approval_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "approval:wait")
-        approval = core.get_approval(approval_id)
+        approval = approval_service.get_approval(approval_id)
         if approval is None:
             raise ApiAuthError("APPROVAL_NOT_FOUND", status_code=404)
         if approval.requesting_principal_id != context.principal_id:

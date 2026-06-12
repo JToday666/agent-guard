@@ -1,4 +1,4 @@
-"""Formal AgentGuard Core domain models."""
+"""Stateless AgentGuard Core domain models."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ class SecurityContext(BaseModel):
     source_trust: str = "trusted"
     channel: str | None = None
     sender_id: str | None = None
-    session_id: str | None = None
     run_id: str | None = None
     agent_id: str = "main"
     current_step: str = "before_tool"
@@ -40,6 +39,8 @@ class SecurityContext(BaseModel):
 
 
 class ToolDescriptor(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     name: str
     category: str = "tool"
     kind: str | None = None
@@ -52,6 +53,8 @@ class ToolDescriptor(BaseModel):
 
 
 class DerivedResource(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     resource_type: str
     operation: str
     target: str
@@ -59,11 +62,19 @@ class DerivedResource(BaseModel):
     direction: str
 
 
-class ToolCallEvent(BaseModel):
+class ToolCallPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    tool: ToolDescriptor
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    derived_resources: list[DerivedResource] = Field(default_factory=list)
+
+
+class GuardEvent(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     schema_version: str = "0.3"
-    event_id: str = Field(default_factory=lambda: new_id("evt_tool"))
+    event_id: str = Field(default_factory=lambda: new_id("evt"))
     event_type: str = "tool_call_proposed"
     runtime: str = "langgraph"
     trace_id: str
@@ -71,11 +82,9 @@ class ToolCallEvent(BaseModel):
     attack_type: str | None = None
     is_malicious: bool | None = None
     timestamp: str = Field(default_factory=utc_now_iso)
-    security_context: SecurityContext = Field(default_factory=SecurityContext)
-    tool: ToolDescriptor
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    derived_resources: list[DerivedResource] = Field(default_factory=list)
     pre_execution: bool = True
+    security_context: SecurityContext = Field(default_factory=SecurityContext)
+    payload: ToolCallPayload
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -86,15 +95,21 @@ class RuleHit(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
-class PolicyDecision(BaseModel):
+class ApprovalIntent(BaseModel):
+    options: list[ApprovalResolution] = Field(default_factory=lambda: ["allow_once", "deny"])
+    resource: str
+
+
+class GuardDecision(BaseModel):
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
     risk_score: int = Field(ge=0, le=100)
     severity: str
+    categories: list[str] = Field(default_factory=list)
     rule_hits: list[RuleHit] = Field(default_factory=list)
     reason: str
     safe_message: str | None = None
-    approval: dict[str, Any] | None = None
+    approval_intent: ApprovalIntent | None = None
     latency_ms: int | None = None
 
     @property
@@ -126,31 +141,9 @@ class AuditEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ApprovalRequest(BaseModel):
-    approval_id: str = Field(default_factory=lambda: new_id("app"))
-    trace_id: str
-    tool_call_id: str
-    requesting_principal_id: str
-    runtime: str = "langgraph"
-    agent_id: str = "main"
-    status: Literal["pending", "resolved", "expired"] = "pending"
-    decision_options: list[ApprovalResolution] = Field(default_factory=lambda: ["allow_once", "deny"])
-    decision: ApprovalResolution | None = None
-    tool: str
-    resource: str
-    reason: str
-    risk_score: int = Field(ge=0, le=100)
-    severity: str
-    created_at: str = Field(default_factory=utc_now_iso)
-    expires_at: str | None = None
-    resolved_at: str | None = None
+class PolicyBundle(BaseModel):
+    model_config = ConfigDict(extra="allow")
 
-
-class AuthContext(BaseModel):
-    principal_type: str
-    principal_id: str
-    role: str
-    scopes: list[str]
-    auth_method: str
-    runtime: str | None = None
-    agent_id: str | None = None
+    bundle_id: str = "default"
+    version: str = "p0"
+    metadata: dict[str, Any] = Field(default_factory=dict)

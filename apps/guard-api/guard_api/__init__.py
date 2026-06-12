@@ -1,2 +1,1 @@
-"""FastAPI wrapper for the formal AgentGuard Core."""
-
+"""Guard API / Control Plane FastAPI application."""

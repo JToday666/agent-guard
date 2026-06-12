@@ -5,7 +5,7 @@ from pathlib import Path
 
 from jsonschema import validate
 
-from agentguard_core.models import AuditEvent, PolicyDecision, ToolCallEvent
+from agentguard_core import AuditEvent, GuardDecision, GuardEvent, ToolCallPayload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,21 +15,24 @@ def _load_schema(name: str) -> dict:
     return json.loads((ROOT / "schemas" / name).read_text(encoding="utf-8"))
 
 
-def test_formal_schemas_validate_core_models() -> None:
-    tool_call = ToolCallEvent(
+def test_public_schemas_validate_target_models() -> None:
+    event = GuardEvent(
         trace_id="trace_schema",
-        tool={"name": "read_file", "category": "file", "kind": "file_read", "call_id": "call_schema"},
-        arguments={"path": "/docs/public.txt"},
+        payload=ToolCallPayload(
+            tool={"name": "read_file", "category": "file", "kind": "file_read", "call_id": "call_schema"},
+            arguments={"path": "/docs/public.txt"},
+        ),
     )
-    decision = PolicyDecision(
+    decision = GuardDecision(
         decision_id="dec_schema",
         decision="allow",
         risk_score=0,
         severity="low",
+        categories=[],
         rule_hits=[],
         reason="Allowed.",
         safe_message=None,
-        approval=None,
+        approval_intent=None,
         latency_ms=1,
     )
     audit = AuditEvent(
@@ -46,8 +49,8 @@ def test_formal_schemas_validate_core_models() -> None:
         latency_ms=1,
     )
 
-    validate(tool_call.model_dump(mode="json"), _load_schema("tool_call_event.schema.json"))
-    validate(decision.model_dump(mode="json"), _load_schema("policy_decision.schema.json"))
+    validate(event.model_dump(mode="json"), _load_schema("guard_event.schema.json"))
+    validate(decision.model_dump(mode="json"), _load_schema("guard_decision.schema.json"))
     validate(audit.model_dump(mode="json"), _load_schema("audit_event.schema.json"))
     validate(
         {
