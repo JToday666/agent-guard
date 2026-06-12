@@ -22,7 +22,7 @@ docs/
 
 1. [总体架构](01_overview/architecture.md)
 2. [接口契约与事件模型](02_core/interface_contract.md)
-3. [Agent Security Core 设计](02_core/core_design.md)
+3. [`agentguard-core` 设计](02_core/core_design.md)
 4. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
 5. [AttackBench 攻击样本与评测](05_redteam/attackbench.md)
 6. [Dashboard 与审批流](04_apps/dashboard_design.md)
@@ -31,7 +31,7 @@ docs/
 ### Core 开发
 
 1. [接口契约与事件模型](02_core/interface_contract.md)
-2. [Agent Security Core 设计](02_core/core_design.md)
+2. [`agentguard-core` 设计](02_core/core_design.md)
 3. [威胁模型](02_core/threat_model.md)
 4. [实施路线与验收标准](06_delivery/implementation_plan.md)
 
@@ -69,8 +69,8 @@ docs/
 | [requirement_traceability_matrix.md](00_requirements/requirement_traceability_matrix.md) | 命题要求、模块设计和验收证据的追踪矩阵      |
 | [architecture.md](01_overview/architecture.md)                                           | 系统总体架构、核心链路和模块关系            |
 | [repo_structure.md](01_overview/repo_structure.md)                                       | 仓库目录职责和边界规则                      |
-| [interface_contract.md](02_core/interface_contract.md)                                   | Core API、事件模型、决策模型和冻结规则      |
-| [core_design.md](02_core/core_design.md)                                                 | Core 内部职责、检测器、策略和指标设计       |
+| [interface_contract.md](02_core/interface_contract.md)                                   | Guard API / Control Plane API、事件模型、决策模型和冻结规则 |
+| [core_design.md](02_core/core_design.md)                                                 | 无状态 Core 职责、检测器、策略和风险判定设计 |
 | [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标            |
 | [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路 |
 | [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计      |
@@ -83,6 +83,6 @@ docs/
 
 - 根目录 `README.md` 只保留项目门面和关键入口，完整文档地图只维护在本文件。
 - 接口字段变更必须先更新 [interface_contract.md](02_core/interface_contract.md)，再同步 schemas 和实现。
-- Core 不依赖 Adapter；Adapter 不写核心规则；Dashboard 不直连运行时。
+- Core 不依赖 Adapter，不暴露 HTTP API，不读写数据库；Adapter 不写核心规则；Dashboard 不直连运行时。
 - 攻击样本真值由 Redteam 提供，评测指标由 AttackBench runner 汇总。
 - 命题要求变化或答辩口径变化时，优先更新追踪矩阵。

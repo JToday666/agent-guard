@@ -63,11 +63,11 @@ docs/
 
 | 目录                                  | 职责                                                 |
 | ------------------------------------- | ---------------------------------------------------- |
-| `apps/guard-api`                      | FastAPI 服务入口，只封装 Core API                    |
-| `apps/dashboard`                      | Vue 3 监督端页面，只通过 Core API 获取数据和提交审批 |
+| `apps/guard-api`                      | Guard API / Control Plane 后端，负责 HTTP、鉴权、审计、审批、指标和状态服务 |
+| `apps/dashboard`                      | Vue 3 监督端页面，只通过 Guard API 获取数据和提交审批 |
 | `apps/demo-agent`                     | 被保护的 LangGraph 示例 Agent 和 Mock Tools          |
-| `packages/agentguard-core`            | 唯一安全判断中心                                     |
-| `packages/agentguard-sdk`             | Core 客户端、事件构造、运行时接入辅助                |
+| `packages/agentguard-core`            | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出 |
+| `packages/agentguard-sdk`             | Guard API 客户端、事件构造、运行时接入辅助           |
 | `packages/agentguard-adapters`        | LangGraph 等运行时适配层                             |
 | `packages/agentguard-openclaw-plugin` | OpenClaw 插件包                                      |
 | `redteam/`                            | 攻击样本、正常样本、runner、成功条件、报告           |
@@ -78,10 +78,10 @@ docs/
 
 ## 5. 边界规则
 
-- Core 不依赖 Adapter，不读取 Dashboard 状态。
+- Core 不依赖 Adapter，不读取 Dashboard 状态，不暴露 HTTP API，不读写数据库。
 - Adapter 不写核心规则，只把运行时事件映射成 AgentGuard Event。
 - Dashboard 不直连运行时，不直接判断攻击成功。
-- Core API 采用统一 Capability Auth；Adapter 使用 adapter token，Dashboard 使用 browser session。
+- Guard API / Control Plane API 采用统一 Capability Auth；Adapter 使用 adapter token，Dashboard 使用 browser session。
 - Redteam 提供 ground truth，runner 负责统计指标。
 - Policies 不硬编码进 Adapter。
 - Schemas 是 API 和事件字段的唯一结构来源。
@@ -93,4 +93,4 @@ docs/
 1. P0 代码和样本能按目录职责放置，无跨目录职责混杂。
 2. `schemas/` 与 [接口契约](../02_core/interface_contract.md) 字段一致。
 3. `redteam/` 样本能被 runner 读取并生成指标。
-4. Dashboard 只通过 Core API 获取数据和提交审批。
+4. Dashboard 只通过 Guard API 获取数据和提交审批。

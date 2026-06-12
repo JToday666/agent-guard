@@ -15,7 +15,7 @@ OpenClaw 侧用于开源智能化应用接入和正式演示。P1 前必须先�
 | 模块                 | 职责                                           |
 | -------------------- | ---------------------------------------------- |
 | Plugin Entry         | 注册 OpenClaw 插件和 Hook                      |
-| Security Core Client | 调用 Core API 并处理超时、失败和 adapter token |
+| Guard API Client | 调用 Guard API / Control Plane API 并处理超时、失败和 adapter token |
 | Hook Mapping         | 将 OpenClaw 原生事件映射成 AgentGuard Event    |
 | Approval Adapter     | 将 `ask` 映射为 OpenClaw 审批或阻断提示        |
 | Config Audit         | 检查 OpenClaw 高风险配置                       |
@@ -91,7 +91,7 @@ OpenClaw 接入在 P1 前必须先做 Hook 兼容性验证。验证结果决定�
 
 ## 6. 决策映射
 
-| Core 决策    | OpenClaw 行为      |
+| GuardDecision | OpenClaw 行为      |
 | ------------ | ------------------ |
 | `allow`      | 放行               |
 | `deny`       | block              |
@@ -101,7 +101,7 @@ OpenClaw 接入在 P1 前必须先做 Hook 兼容性验证。验证结果决定�
 
 ## 7. 鉴权边界
 
-OpenClaw Plugin 使用 adapter token 调用 Core：
+OpenClaw Plugin 使用 adapter token 调用 Guard API：
 
 ```http
 Authorization: Bearer <AGENTGUARD_ADAPTER_TOKEN>
@@ -139,7 +139,7 @@ P2 检查项：
 ## 10. 验收证据
 
 1. OpenClaw 中一次工具调用触发 `before_tool_call`。
-2. 插件能构造 ToolCallEvent 并调用 Core。
+2. 插件能构造 GuardEvent / ToolCallEvent payload 并调用 Guard API。
 3. `deny` 能阻断 OpenClaw 工具调用。
 4. Dashboard 能显示 OpenClaw runtime 事件。
 5. Config Audit 能输出至少 3 类配置风险。
