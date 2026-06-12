@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentguard-guard-api"
+version = "0.1.0"
+description = "Guard API / Control Plane service for AgentGuard"
+requires-python = ">=3.12"
+dependencies = [
+  "agentguard-core",
+  "alembic>=1.16",
+  "fastapi>=0.136",
+  "psycopg[binary]>=3.3",
+  "SQLAlchemy>=2.0",
+  "uvicorn>=0.49",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["guard_api*"]
+
+[tool.setuptools.package-data]
+guard_api = [
+  "migrations/*.py",
+  "migrations/versions/*.py",
+]

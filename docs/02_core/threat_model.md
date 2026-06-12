@@ -7,7 +7,7 @@
 关联入口：
 
 - [接口契约与事件模型](interface_contract.md)
-- [Agent Security Core 设计](core_design.md)
+- [`agentguard-core` 设计](core_design.md)
 - [AttackBench 攻击样本与评测](../05_redteam/attackbench.md)
 - [命题要求追踪矩阵](../00_requirements/requirement_traceability_matrix.md)
 
@@ -33,7 +33,7 @@ AgentGuard 保护大模型 Agent 的运行时高风险行为：
 | ------------ | ------------------------------------ | ---------------------------------------- |
 | 提示注入     | 恶意邮件、文档、网页要求模型忽略规则 | 输入检测、上下文隔离、工具调用审计       |
 | 模型越狱     | 角色扮演、指令覆盖、多轮诱导         | 输入输出过滤、模型行为监测               |
-| 工具调用劫持 | 诱导调用非任务所需工具               | ToolCallEvent、TaskMismatchDetector      |
+| 工具调用劫持 | 诱导调用非任务所需工具               | GuardEvent / ToolCallEvent payload、TaskMismatchDetector |
 | 文件泄露     | 读取 `.env`、token、secret           | SensitiveFileDetector                    |
 | API 滥用     | 上传敏感数据、SSRF、越权调用         | OutboundDLPDetector、NetworkSSRFDetector |
 | 代码执行滥用 | 执行 shell、读取环境变量             | CodeExecDetector                         |
@@ -49,8 +49,8 @@ AgentGuard 保护大模型 Agent 的运行时高风险行为：
 → 拼入上下文
 → 模型生成 read_file('/private/token.txt')
 → ToolNode wrapper 拦截
-→ Core 判断来源不可信 + 敏感文件 + 任务不一致
-→ PolicyDecision: deny
+→ Guard API 调用 Core 判断来源不可信 + 敏感文件 + 任务不一致
+→ GuardDecision: deny
 → 工具未执行
 → Dashboard 展示攻击链
 ```
@@ -73,5 +73,5 @@ P0/P1 不承诺覆盖：
 1. 每个 P0 攻击面至少有一个 AttackCase。
 2. 每个 AttackCase 有目标行为和成功条件。
 3. 无防御时能触发危险动作或危险意图。
-4. 有防御时 Core 在执行前给出 `deny` 或 `ask`。
+4. 有防御时 Guard API 在执行前给出 `deny` 或 `ask`。
 5. Dashboard 能展示原因和 trace。

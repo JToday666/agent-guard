@@ -15,7 +15,7 @@
 
 | 阶段 | 目标                | 验收口径                                                               |
 | ---- | ------------------- | ---------------------------------------------------------------------- |
-| P0   | LangGraph 保底闭环  | 攻击样本能触发危险工具调用，Core 能阻断，Dashboard 能展示              |
+| P0   | LangGraph 保底闭环  | 攻击样本能触发危险工具调用，Guard API 调用 Core 得到阻断决策，Dashboard 能展示 |
 | P1   | 完整可解释链路      | 上下文、模型、工具结果、记忆和消息链路可追踪，可计算 FPR/FNR           |
 | P2   | OpenClaw 与冲奖增强 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、消融实验 |
 
@@ -23,19 +23,20 @@
 
 必须按以下顺序推进，避免先做 UI 或增强项导致闭环不稳。
 
-1. Core event/decision
-   - 实现 `ToolCallEvent`、`PolicyDecision`、`AuditEvent`。
-   - 实现 `POST /v1/evaluate/tool-call`。
-   - 实现 `allow`、`deny`、`ask` 三类决策。
-   - 实现最小 approvals API：`GET /v1/approvals/pending`、`POST /v1/approvals/{approval_id}/resolve`、`GET /v1/approvals/{approval_id}/wait`。
+1. Guard API / Control Plane event flow
+   - 实现 `GuardEvent`、`GuardDecision`、`AuditEvent`。
+   - 实现统一判定入口 `POST /v1/guard/evaluate`。
+   - Guard API 负责鉴权、加载策略快照、调用 `agentguard-core.evaluate(event, policies)`。
+   - Core 返回 `allow`、`deny`、`ask` 三类 P0 决策，不创建审批记录。
+   - Guard API 实现最小 approvals API：`GET /v1/approvals/pending`、`POST /v1/approvals/{approval_id}/resolve`、`GET /v1/approvals/{approval_id}/wait`。
    - P0 审批动作只支持 `allow_once` 和 `deny`。
 
 2. Schemas and contract tests
-   - 落地 `tool_call_event.schema.json`。
-   - 落地 `policy_decision.schema.json`。
+   - 落地 `guard_event.schema.json`。
+   - 落地 `guard_decision.schema.json`。
    - 落地 `audit_event.schema.json`。
    - 落地 `attack_case.schema.json`。
-   - 用 schema 校验 P0 样本和 Core 响应。
+   - 用 schema 校验 P0 样本、Guard API 响应和 Core 判定输出。
 
 3. Core 基础策略
    - 敏感文件检测。
@@ -44,8 +45,8 @@
    - 非白名单外发检测。
 
 4. LangGraph wrapper
-   - 在 ToolNode 执行前构造 ToolCallEvent。
-   - 按 Core 决策执行、阻断或暂停。
+   - 在 ToolNode 执行前构造 `GuardEvent`，其中 `ToolCallEvent` 作为 P0 payload。
+   - 调用 Guard API，并按 `GuardDecision` 执行、阻断或暂停。
    - 记录 trace_id、case_id、runtime。
 
 5. Mock Tools
@@ -90,9 +91,9 @@
 
 | 成员 | 负责                                    |
 | ---- | --------------------------------------- |
-| A    | Core、schemas、policies、contract tests |
-| B    | LangGraph、Mock Tools、Redteam runner   |
-| C    | Dashboard、OpenClaw Plugin、文档、Demo  |
+| A    | 无状态 Core、Guard API、schemas、policies、contract tests |
+| B    | LangGraph、Mock Tools、Redteam runner                    |
+| C    | Dashboard、OpenClaw Plugin、文档、Demo                   |
 
 ## 7. P0 验收标准
 
@@ -100,12 +101,12 @@ P0 完成必须同时满足：
 
 1. 至少 3 类攻击样本和 benign 样本可运行。
 2. 无防御时至少一个样本能触发危险工具调用。
-3. 有防御时 Core 在工具执行前返回 `deny` 或 `ask`。
+3. 有防御时 Guard API 在工具执行前返回 `deny` 或 `ask`。
 4. 被拒绝的工具没有执行副作用。
-5. `ask` 事件能创建 pending approval。
+5. `ask` 决策能由 Guard API 创建 pending approval。
 6. Dashboard resolve 后，Adapter wait 能返回 `allow_once` 或 `deny`。
 7. 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
 8. AuditEvent 被 Dashboard 展示。
 9. runner 输出 ASR before、ASR after、Block Rate、FPR。
-10. `schemas/` 中至少存在 `tool_call_event.schema.json`、`policy_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。
+10. `schemas/` 中至少存在 `guard_event.schema.json`、`guard_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。
 11. `git diff --check`、契约测试、runner smoke test 通过。
