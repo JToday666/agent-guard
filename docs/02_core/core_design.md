@@ -70,7 +70,9 @@ postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard
 export AGENTGUARD_DATABASE_URL=postgresql+psycopg://user:password@host:5432/agent_guard
 ```
 
-存储层使用 SQLAlchemy 2.x 同步 engine 和 Alembic migration。用户负责准备 PostgreSQL server、database 和账号；Core/Alembic 负责创建 `audit_events` 与 `approvals` 表及基础索引。Core 继续以 JSONB 保存事件和审批 payload，避免 P0 阶段过早拆分规范化表。
+存储层使用 SQLAlchemy 2.x 同步 engine 和 Alembic migration。用户负责准备 PostgreSQL server、database 和账号；Core/Alembic 负责创建 `audit_events`、`approvals`、`browser_sessions`、`launch_codes` 与 `approval_nonces` 表及基础索引。Core 继续以 JSONB 保存事件和审批 payload，避免 P0 阶段过早拆分规范化表。
+
+Dashboard browser session、launch code 和 approval nonce 默认持久化到 PostgreSQL。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；approval nonce 和 launch code 都是一次性消费；logout 会撤销 browser session。
 
 初始化命令：
 
@@ -82,6 +84,8 @@ uv run alembic upgrade head
 `guard-api` 服务启动时会执行配置校验和 Core 初始化。`AGENTGUARD_ENV=production` 时必须显式覆盖 `AGENTGUARD_DATABASE_URL`、`AGENTGUARD_ADAPTER_TOKEN` 和 `AGENTGUARD_CONTROL_TOKEN`，不能依赖默认 development 配置。服务启动后可用 `GET /health?check_db=true` 验证数据库连接。
 
 仓库提供 `.env.example` 作为本地配置模板；Core 不自动加载 `.env`，部署时由 shell、进程管理器或平台注入环境变量。
+
+`GET /v1/audit/events` 支持按 `trace_id`、`case_id`、`runtime`、`decision` 和 `limit` 过滤。`GET /v1/metrics/eval` 支持同样的过滤字段，不受 audit list 默认 500 条限制；PostgreSQL 路径使用数据库聚合查询计算指标。
 
 ## 5. 决策流程
 

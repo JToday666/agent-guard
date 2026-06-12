@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from agentguard_core.models import AuthContext, new_id
 from agentguard_core.settings import CoreSettings
+from agentguard_core.storage.base import CoreStore
 
 
 class ApiAuthError(Exception):
@@ -25,21 +27,9 @@ class BrowserSession:
 
 
 @dataclass(slots=True)
-class ApprovalNonce:
-    nonce: str
-    approval_id: str
-    session_id: str
-    tool_call_id: str
-    expires_at: datetime
-    used: bool = False
-
-
-@dataclass(slots=True)
 class CapabilityAuthService:
     settings: CoreSettings
-    launch_codes: dict[str, datetime] = field(default_factory=dict)
-    sessions: dict[str, BrowserSession] = field(default_factory=dict)
-    nonces: dict[str, ApprovalNonce] = field(default_factory=dict)
+    store: CoreStore
 
     def verify_bearer(self, authorization: str | None, required_scope: str) -> AuthContext:
         if not authorization:
@@ -74,35 +64,44 @@ class CapabilityAuthService:
 
     def create_launch_code(self) -> str:
         code = new_id("lc")
-        self.launch_codes[code] = _now() + timedelta(seconds=self.settings.launch_code_ttl_seconds)
+        expires_at = _now() + timedelta(seconds=self.settings.launch_code_ttl_seconds)
+        self.store.create_launch_code(_token_hash(code), expires_at.isoformat())
         return code
 
     def exchange_launch_code(self, code: str) -> BrowserSession:
-        expires_at = self.launch_codes.pop(code, None)
-        if expires_at is None:
+        launch_code = self.store.consume_launch_code(_token_hash(code), _now().isoformat())
+        if launch_code is None:
             raise ApiAuthError("LAUNCH_CODE_INVALID")
-        if expires_at < _now():
+        if _parse_datetime(launch_code.expires_at) < _now():
             raise ApiAuthError("LAUNCH_CODE_EXPIRED")
+        session_id = new_id("sess")
+        csrf_token = new_id("csrf")
+        expires_at = _now() + timedelta(seconds=self.settings.browser_session_ttl_seconds)
         session = BrowserSession(
-            session_id=new_id("sess"),
-            csrf_token=new_id("csrf"),
-            expires_at=_now() + timedelta(seconds=self.settings.browser_session_ttl_seconds),
+            session_id=session_id,
+            csrf_token=csrf_token,
+            expires_at=expires_at,
         )
-        self.sessions[session.session_id] = session
+        self.store.create_browser_session(
+            _token_hash(session.session_id),
+            csrf_token=session.csrf_token,
+            expires_at=session.expires_at.isoformat(),
+        )
         return session
 
     def verify_browser_session(self, session_id: str | None) -> BrowserSession:
         if not session_id:
             raise ApiAuthError("SESSION_INVALID")
-        session = self.sessions.get(session_id)
-        if session is None:
+        stored = self.store.get_browser_session(_token_hash(session_id))
+        if stored is None or stored.revoked_at is not None:
             raise ApiAuthError("SESSION_INVALID")
-        if session.expires_at < _now():
+        expires_at = _parse_datetime(stored.expires_at)
+        if expires_at < _now():
             raise ApiAuthError("SESSION_EXPIRED")
-        return session
+        return BrowserSession(session_id=session_id, csrf_token=stored.csrf_token, expires_at=expires_at)
 
     def logout_browser_session(self, session_id: str) -> None:
-        self.sessions.pop(session_id, None)
+        self.store.revoke_browser_session(_token_hash(session_id), _now().isoformat())
 
     def verify_csrf(self, session: BrowserSession, csrf_token: str | None) -> None:
         if not csrf_token or not hmac.compare_digest(csrf_token, session.csrf_token):
@@ -110,12 +109,13 @@ class CapabilityAuthService:
 
     def issue_approval_nonce(self, *, approval_id: str, session_id: str, tool_call_id: str) -> str:
         nonce = new_id("nonce")
-        self.nonces[nonce] = ApprovalNonce(
-            nonce=nonce,
+        expires_at = _now() + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
+        self.store.create_approval_nonce(
+            _token_hash(nonce),
             approval_id=approval_id,
-            session_id=session_id,
+            session_hash=_token_hash(session_id),
             tool_call_id=tool_call_id,
-            expires_at=_now() + timedelta(seconds=self.settings.approval_nonce_ttl_seconds),
+            expires_at=expires_at.isoformat(),
         )
         return nonce
 
@@ -127,19 +127,29 @@ class CapabilityAuthService:
         session_id: str,
         tool_call_id: str,
     ) -> None:
-        approval_nonce = self.nonces.get(nonce)
-        if approval_nonce is None or approval_nonce.used:
+        approval_nonce = self.store.consume_approval_nonce(
+            _token_hash(nonce),
+            approval_id=approval_id,
+            session_hash=_token_hash(session_id),
+            tool_call_id=tool_call_id,
+            used_at=_now().isoformat(),
+        )
+        if approval_nonce is None:
             raise ApiAuthError("APPROVAL_NONCE_INVALID", status_code=403)
-        if approval_nonce.expires_at < _now():
+        if _parse_datetime(approval_nonce.expires_at) < _now():
             raise ApiAuthError("APPROVAL_NONCE_INVALID", status_code=403)
-        if (
-            approval_nonce.approval_id != approval_id
-            or approval_nonce.session_id != session_id
-            or approval_nonce.tool_call_id != tool_call_id
-        ):
-            raise ApiAuthError("APPROVAL_NONCE_INVALID", status_code=403)
-        approval_nonce.used = True
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _token_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _parse_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed

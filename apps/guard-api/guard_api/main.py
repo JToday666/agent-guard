@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from agentguard_core.models import AuditEvent, ToolCallEvent
 from agentguard_core.service import AgentGuardCore
 from agentguard_core.settings import CoreSettings
-from agentguard_core.storage.base import CoreStore
+from agentguard_core.storage.base import AuditEventFilters, CoreStore, EvalMetricFilters
 
 from .auth import ApiAuthError, CapabilityAuthService
 
@@ -27,10 +27,14 @@ class ApprovalResolveRequest(BaseModel):
     approval_nonce: str
 
 
+def _bounded_limit(limit: int) -> int:
+    return max(1, min(limit, 1000))
+
+
 def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None = None) -> FastAPI:
     settings = settings or CoreSettings()
     core = AgentGuardCore(store=store, settings=settings)
-    auth = CapabilityAuthService(settings=settings)
+    auth = CapabilityAuthService(settings=settings, store=core.store)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -106,14 +110,35 @@ def create_app(*, store: CoreStore | None = None, settings: CoreSettings | None 
         return core.submit_audit_event(payload)
 
     @app.get("/v1/audit/events")
-    def audit_events(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:
+    def audit_events(
+        trace_id: str | None = None,
+        case_id: str | None = None,
+        runtime: str | None = None,
+        decision: str | None = None,
+        limit: int = 500,
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
         auth.verify_browser_session(agentguard_session)
-        return [event.model_dump(mode="json") for event in core.list_audit_events()]
+        filters = AuditEventFilters(
+            trace_id=trace_id,
+            case_id=case_id,
+            runtime=runtime,
+            decision=decision,
+            limit=_bounded_limit(limit),
+        )
+        return [event.model_dump(mode="json") for event in core.list_audit_events(filters)]
 
     @app.get("/v1/metrics/eval")
-    def eval_metrics(agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+    def eval_metrics(
+        trace_id: str | None = None,
+        case_id: str | None = None,
+        runtime: str | None = None,
+        decision: str | None = None,
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
         auth.verify_browser_session(agentguard_session)
-        return core.eval_metrics()
+        filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
+        return core.eval_metrics(filters)
 
     @app.get("/v1/approvals/pending")
     def pending_approvals(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:

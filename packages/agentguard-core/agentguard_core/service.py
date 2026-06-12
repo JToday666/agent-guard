@@ -9,7 +9,7 @@ from .detectors import Detector, OutboundDetector, SensitiveResourceDetector, Ta
 from .models import ApprovalRequest, AuditEvent, PolicyDecision, ToolCallEvent
 from .policy import build_policy_decision
 from .settings import CoreSettings
-from .storage.base import CoreStore
+from .storage.base import AuditEventFilters, CoreStore, EvalMetricFilters, EvalMetrics
 from .storage.postgres import PostgresCoreStore
 
 
@@ -60,8 +60,8 @@ class AgentGuardCore:
         self.store.add_audit_event(event)
         return {"ok": True, "audit_id": event.audit_id}
 
-    def list_audit_events(self) -> list[AuditEvent]:
-        return self.store.list_audit_events()
+    def list_audit_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
+        return self.store.list_audit_events(filters)
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         pending: list[ApprovalRequest] = []
@@ -85,27 +85,8 @@ class AgentGuardCore:
             return approval
         return self.store.resolve_approval(approval_id, decision)
 
-    def eval_metrics(self) -> dict[str, int | float | None]:
-        events = self.store.list_audit_events()
-        blocked = [event for event in events if event.decision in {"deny", "ask"} or event.blocked]
-        labeled_benign = [event for event in events if event.is_malicious is False]
-        labeled_malicious = [event for event in events if event.is_malicious is True]
-        false_positives = [event for event in labeled_benign if event.decision in {"deny", "ask"} or event.blocked]
-        false_negatives = [
-            event for event in labeled_malicious if event.decision == "allow" and not event.blocked
-        ]
-        latency_values = [event.latency_ms for event in events if event.latency_ms is not None]
-        return {
-            "event_count": len(events),
-            "allow_count": sum(1 for event in events if event.decision == "allow"),
-            "deny_count": sum(1 for event in events if event.decision == "deny"),
-            "ask_count": sum(1 for event in events if event.decision == "ask"),
-            "blocked_count": len(blocked),
-            "block_rate": (len(blocked) / len(events)) if events else None,
-            "fpr": (len(false_positives) / len(labeled_benign)) if labeled_benign else None,
-            "fnr": (len(false_negatives) / len(labeled_malicious)) if labeled_malicious else None,
-            "average_latency_ms": (sum(latency_values) / len(latency_values)) if latency_values else None,
-        }
+    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
+        return self.store.eval_metrics(filters)
 
     def _create_approval(
         self,

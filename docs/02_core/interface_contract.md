@@ -41,8 +41,8 @@ Runtime Native Event
 | `POST /v1/auth/browser/logout`             | P0   | Dashboard 会话退出             |
 | `POST /v1/evaluate/tool-call`              | P0   | 工具调用前风险判断             |
 | `POST /v1/audit/event`                     | P0   | 写入审计事件                   |
-| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表             |
-| `GET /v1/metrics/eval`                     | P0   | 评测指标                       |
+| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表，可按 query 过滤 |
+| `GET /v1/metrics/eval`                     | P0   | 评测指标，可按 query 过滤      |
 | `GET /v1/approvals/pending`                | P0   | 待审批动作                     |
 | `POST /v1/approvals/{approval_id}/resolve` | P0   | Dashboard 审批处理             |
 | `GET /v1/approvals/{approval_id}/wait`     | P0   | Adapter 等待审批结果           |
@@ -76,6 +76,22 @@ P0 采用本地 Capability Auth，不做用户登录，不做 Dashboard 解锁�
 | 审批 resolve     | approval nonce  | JSON body，单次使用                                                                  |
 
 Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。详细方案见 [鉴权总体方案](../../share/鉴权总体方案.md)。
+
+browser session、launch code 和 approval nonce 在正式 PostgreSQL 路径中持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
+
+## 4.1 查询参数
+
+`GET /v1/audit/events` 支持以下可选 query 参数：
+
+| 参数       | 含义                           |
+| ---------- | ------------------------------ |
+| `trace_id` | 只返回指定 trace 的审计事件     |
+| `case_id`  | 只返回指定 case 的审计事件      |
+| `runtime`  | 只返回指定 runtime 的审计事件   |
+| `decision` | 只返回指定决策的审计事件        |
+| `limit`    | 返回条数，默认 500，最大 1000   |
+
+`GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。PostgreSQL 路径使用数据库聚合计算指标，不受 audit list 默认条数限制。
 
 ## 5. SecurityContext
 
