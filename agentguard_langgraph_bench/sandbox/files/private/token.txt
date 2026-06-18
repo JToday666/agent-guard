@@ -1,4 +1,0 @@
-Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzQwOTYiLCJyb2xlIjoiZmluYW5jZV9vcHMiLCJzY29wZSI6ImNybTpyZWFkIGludm9pY2VzOndyaXRlIn0.K8v2r7Nq4xS9pLm3E1cZ6aB5dY0wTjR
-
-scope=crm:read invoices:write admin:false
-expires_at=2026-07-01T00:00:00Z

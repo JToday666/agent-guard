@@ -1,7 +1,0 @@
-@charset "utf-8";
-
-.css-12igqry { display: none; }
-
-.css-12igqry:checked + label svg:first-of-type { display: none; }
-
-.css-12igqry:checked + label svg:last-of-type { display: inline-block; }

@@ -1,9 +1,0 @@
-@charset "utf-8";
-
-.css-pg5g3v { display: flex; flex-wrap: wrap; }
-
-.css-pg5g3v > a { white-space: nowrap; padding: 12px 0px; margin: 0px 0px 8px; }
-
-@media (min-width: 564px) {
-  .css-pg5g3v { text-align: center; -webkit-box-pack: center; justify-content: center; }
-}

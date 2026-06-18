@@ -1,6 +1,0 @@
-@charset "utf-8";
-
-@media (max-width: 1200px) {
-  .fixed-position-mobile-mode { position: fixed; }
-  .sticky-position-mobile-mode { position: sticky; }
-}
