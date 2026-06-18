@@ -1,0 +1,71 @@
+@charset "utf-8";
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content .cmp-teaser__title { color: rgb(24, 25, 24); font-size: 1.125rem; font-style: normal; font-weight: 700; letter-spacing: -0.015625rem; line-height: 1.33; margin-bottom: 1.25rem; text-transform: none; }
+
+@media (min-width: 640px) {
+  .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content .cmp-teaser__title { color: rgb(24, 25, 24); font-size: 1.3125rem; font-style: normal; font-weight: 700; letter-spacing: -0.015625rem; line-height: 1.19; margin-bottom: 1.25rem; text-transform: none; }
+}
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__action-link { align-items: center; appearance: none; border: none; border-radius: 3.75rem; color: rgb(255, 255, 255); cursor: pointer; display: inline-flex; font-family: din-2014, Arial, sans-serif; font-size: 0.9375rem; font-weight: 600; height: auto; letter-spacing: -0.25px; margin: 0px 0px 1.5rem; padding: 0.75rem 1.875rem; text-decoration: none; text-transform: none; word-break: break-word; }
+
+.carousel.meet-the-fleet .cmp-carousel .active.cmp-teaser__action-link, .carousel.meet-the-fleet .cmp-carousel .cmp-teaser__action-link:active, .carousel.meet-the-fleet .cmp-carousel .cmp-teaser__action-link:hover, .carousel.meet-the-fleet .cmp-carousel .hover.cmp-teaser__action-link { background-color: rgb(0, 102, 57); color: rgb(255, 255, 255); outline: 0px; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__action-link { background-color: rgb(18, 127, 74); }
+
+.carousel.meet-the-fleet { --rs-link__text-decoration:underline; margin: 0px; max-width: none; padding: 0px; width: 100%; }
+
+.carousel.meet-the-fleet .cmp-carousel { box-sizing: content-box; padding-bottom: 6.25rem; position: relative; width: 100%; }
+
+.carousel.meet-the-fleet .cmp-carousel .fleet-carousel-content__car-link { margin-top: 0.9375rem; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slides { padding-left: 25%; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__content { align-items: center; display: flex; flex-direction: column; padding: 0px 0.625rem; text-align: center; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__content .cmp-teaser__description { display: none; margin: 0px; padding: 0px 1.25rem; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__content .cmp-teaser__description p { margin: 0px; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__content .cmp-teaser__action-container { display: none; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-image__image { margin: 0px auto; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__item { display: block; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content { margin: 1.25rem auto 0px; max-width: 53.125rem; padding: 0px 12.5%; text-align: center; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content .cmp-teaser__title { padding: 0px 1.25rem; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content .cmp-teaser__description { margin: 0px; padding: 0px 1.25rem; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content .cmp-teaser__description p { margin: 0px; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__action-link { margin: 1.875rem; text-align: center; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-teaser__action-link .icon-nav-external-link-white { float: right; margin-left: 0.625rem; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav { align-items: center; display: flex; justify-content: center; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__indicators { display: none; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--next, .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--previous { background: none; padding: 0px 0.5em; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--next .cmp-carousel__action-icon, .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--previous .cmp-carousel__action-icon { background-color: initial; background-image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOCIgaGVpZ2h0PSIxMyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJtMCAyLjI0MyA0LjU4IDQuNTlMMCAxMS40MjNsMS40MSAxLjQxIDYtNi02LTZMMCAyLjI0M1oiIGZpbGw9IiMxMjdmNGEiLz48L3N2Zz4="); background-repeat: no-repeat; background-size: auto; display: block; height: 0.75rem; width: 0.75rem; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--next .cmp-carousel__action-text, .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--previous .cmp-carousel__action-text { clip: rect(0px, 0px, 0px, 0px); height: 1px; margin: -1px; overflow: hidden; position: absolute; width: 1px; }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--next:hover .cmp-carousel__action-icon, .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--previous:hover .cmp-carousel__action-icon { background-image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOCIgaGVpZ2h0PSIxMyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJtMCAyLjI0MyA0LjU4IDQuNTlMMCAxMS40MjNsMS40MSAxLjQxIDYtNi02LTZMMCAyLjI0M1oiIGZpbGw9IiMwMDY2MzkiLz48L3N2Zz4="); }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--previous { transform: scaleX(-1); }
+
+.carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--pause, .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__nav .cmp-carousel__action--play { display: none; }
+
+@media (min-width: 640px) {
+  .carousel.meet-the-fleet .cmp-carousel .fleet-carousel-content__car-link { margin-top: 1.8125rem; }
+}
+
+@media (min-width: 1280px) {
+  .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slides { padding-left: 12.5%; }
+  .carousel.meet-the-fleet .cmp-carousel .cmp-teaser__content .cmp-teaser__description { display: block; }
+  .carousel.meet-the-fleet .cmp-carousel .cmp-carousel__slide-content { display: none; }
+}

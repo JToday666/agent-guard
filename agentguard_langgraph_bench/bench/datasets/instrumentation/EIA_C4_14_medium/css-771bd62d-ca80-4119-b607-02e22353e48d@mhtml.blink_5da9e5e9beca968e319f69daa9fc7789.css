@@ -1,0 +1,521 @@
+@charset "utf-8";
+
+@font-face { font-family: opendyslexicregular; src: url("https://wsv3cdn.audioeye.com/v2/build/3bf6ac4e3c9a3ab6267bb56a7dc2606d.woff2") format("woff2"), url("https://wsv3cdn.audioeye.com/v2/build/0d698a2ef475a1ad9c04e2afed8d1975.woff") format("woff"), url("https://wsv3cdn.audioeye.com/v2/build/a3160b5d84882d315182d0d3c6048faa.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+
+@font-face { font-family: Raleway; src: url("https://wsv3cdn.audioeye.com/v2/build/5143ef2345ddaa4e6c990d04b9ed2f33.woff2") format("woff2"), url("https://wsv3cdn.audioeye.com/v2/build/624153f26b35b6dc374d3c9f9bb9940c.woff") format("woff"), url("https://wsv3cdn.audioeye.com/v2/build/52c9416c04026271f0cb7be2f9f913fd.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+
+[class*=" ae-icon-lite-reader-"], [class^="ae-icon-lite-reader-"] { color: rgb(118, 128, 144); speak: none; font-style: normal; font-weight: 400; font-variant: normal; text-transform: none; line-height: 1; -webkit-font-smoothing: antialiased; font-family: lite_reader_icons !important; }
+
+html[data-audioeye-lr-c_big], html[data-audioeye-lr-c_big] #ae_app #ae_toolbar_container *, html[data-audioeye-lr-c_big] * { cursor: url("data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmOCI/Pgo8IURPQ1RZUEUgc3ZnIFBVQkxJQyAiLS8vVzNDLy9EVEQgU1ZHIDEuMS8vRU4iICJodHRwOi8vd3d3LnczLm9yZy9HcmFwaGljcy9TVkcvMS4xL0RURC9zdmcxMS5kdGQiPgo8c3ZnIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmVyc2lvbj0iMS4xIiBpZD0ibHJlYWRlcl9sYXJnZV9jdXJzb3IiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIHg9IjBweCIgeT0iMHB4IgoJIHZpZXdCb3g9IjAgMCAzMiAzMiIgc3R5bGU9ImVuYWJsZS1iYWNrZ3JvdW5kOm5ldyAwIDAgMzIgMzI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj48Zz48cGF0aCBmaWxsPSIjRkZGRkZGIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlPSJibGFjayIgZD0ibTEsMWw5LDI4bDcsLTdsOCw4bDUsLTVsLTgsLThsNywtN3oiLz48L2c+PC9zdmc+"), url("https://wsv3cdn.audioeye.com/v2/build/bafc1df6358adc764094db250cf5a718.cur"), auto !important; }
+
+#ae_toolbar_container[data-audioeye-lr-c_big] button { cursor: url("data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmOCI/Pgo8IURPQ1RZUEUgc3ZnIFBVQkxJQyAiLS8vVzNDLy9EVEQgU1ZHIDEuMS8vRU4iICJodHRwOi8vd3d3LnczLm9yZy9HcmFwaGljcy9TVkcvMS4xL0RURC9zdmcxMS5kdGQiPgo8c3ZnIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmVyc2lvbj0iMS4xIiBpZD0ibHJlYWRlcl9sYXJnZV9jdXJzb3IiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIHg9IjBweCIgeT0iMHB4IgoJIHZpZXdCb3g9IjAgMCAzMiAzMiIgc3R5bGU9ImVuYWJsZS1iYWNrZ3JvdW5kOm5ldyAwIDAgMzIgMzI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj48Zz48cGF0aCBmaWxsPSIjRkZGRkZGIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlPSJibGFjayIgZD0ibTEsMWw5LDI4bDcsLTdsOCw4bDUsLTVsLTgsLThsNywtN3oiLz48L2c+PC9zdmc+"), url("https://wsv3cdn.audioeye.com/v2/build/bafc1df6358adc764094db250cf5a718.cur"), auto !important; }
+
+.ae-icon-lite-reader-line::before { content: ""; }
+
+.ae-icon-lite-reader-emph-mask::before { content: ""; }
+
+.ae-icon-lite-reader-spacing::before { content: ""; }
+
+.ae-icon-lite-reader-contrast::before { content: ""; }
+
+.ae-icon-lite-reader-cursor::before { content: ""; }
+
+.ae-icon-lite-reader-focus::before { content: ""; }
+
+.ae-icon-lite-reader-halt::before { content: ""; }
+
+.ae-icon-lite-reader-highlighter::before { content: ""; }
+
+.ae-icon-lite-reader-text::before { content: ""; }
+
+.ae-icon-lite-reader-tooltip::before { content: ""; margin-top: 4px; }
+
+.ae-icon-lite-reader-reset::before { content: ""; margin-top: 4px; }
+
+.ae-icon-lite-reader-exit::before { content: ""; }
+
+.ae-icon-lite-reader-cursor::before { position: relative; top: 3px; font-size: 30px; width: 100%; }
+
+.ae-icon-lite-reader-spacing::before { font-size: 31px; position: relative; top: 4px; vertical-align: top; }
+
+.audioeye-lreader-feature-active .ae-icon-lite-reader-spacing::before { font-size: 22px; }
+
+#audioeye_rg_above { box-sizing: border-box; opacity: 0; bottom: 19px; top: 0px; left: 0px; z-index: 2147483646; width: 100% !important; min-width: 100% !important; position: fixed !important; }
+
+#audioeye_rg_above.disabled { display: none !important; }
+
+#audioeye_rg { box-sizing: border-box; background: rgb(0, 0, 0); border: 3px solid rgb(255, 243, 0); border-radius: 5px; top: 20px; left: 0px; z-index: 2147483647; width: 100% !important; min-width: 100% !important; position: fixed !important; height: 12px !important; }
+
+#audioeye_rg_below { box-sizing: border-box; opacity: 0; bottom: 0px; top: 21px; left: 0px; z-index: 2147483646; width: 100% !important; min-width: 100% !important; position: fixed !important; }
+
+#audioeye_rg_below.disabled { display: none !important; }
+
+#audioeye_memph_b, #audioeye_memph_t { box-sizing: border-box; background: rgb(0, 0, 0); backdrop-filter: blur(1px); opacity: 0.2; left: 0px; z-index: 2147483647; width: 100% !important; min-width: 100% !important; position: fixed !important; }
+
+#audioeye_memph_t { top: 0px; }
+
+#audioeye_memph_b { bottom: 0px; }
+
+body iframe#ae_tooltip_on_hover { z-index: -100; padding: 10px; border: 2px solid rgb(245, 245, 245); box-shadow: rgb(245, 245, 245) 0px 0px 2px 2px; border-radius: 8px; display: inline-block; opacity: 0; background-color: rgba(0, 0, 0, 0.85) !important; position: absolute !important; }
+
+.data-audioeye-lr-contrast_setting_1 { filter: contrast(1.75) !important; }
+
+.data-audioeye-lr-contrast_setting_2 { filter: grayscale(1) contrast(1.75) !important; }
+
+.data-audioeye-lr-contrast_setting_3 { filter: invert(100%) !important; }
+
+[data-audioeye-lr-contrast_setting="1"] { filter: contrast(1.75) !important; }
+
+[data-audioeye-lr-contrast_setting="2"] { filter: grayscale(1) contrast(1.75) !important; }
+
+[data-audioeye-lr-contrast_setting="3"] { filter: invert(100%) !important; }
+
+body[data-audioeye-lr-force-background="1"] { background: rgb(255, 255, 255) !important; }
+
+[data-audioeye-lr-colorshift_setting="1"] { filter: hue-rotate(90deg) !important; }
+
+.data-audioeye-lr-contrast_setting_1[data-audioeye-lr-colorshift_setting="1"], [data-audioeye-lr-contrast_setting="1"][data-audioeye-lr-colorshift_setting="1"] { filter: contrast(1.75) hue-rotate(90deg) !important; }
+
+.data-audioeye-lr-contrast_setting_2[data-audioeye-lr-colorshift_setting="1"], [data-audioeye-lr-contrast_setting="2"][data-audioeye-lr-colorshift_setting="1"] { filter: grayscale(1) contrast(1.75) hue-rotate(90deg) !important; }
+
+.data-audioeye-lr-contrast_setting_3[data-audioeye-lr-colorshift_setting="1"], [data-audioeye-lr-contrast_setting="3"][data-audioeye-lr-colorshift_setting="1"] { filter: invert(100%) hue-rotate(90deg) !important; }
+
+[data-audioeye-lr-k] :focus { outline: rgb(113, 25, 225) solid 4px !important; outline-offset: 2px !important; }
+
+[data-audioeye-lr-k] :focus:not(#ae-skip-to-content) { z-index: 100000 !important; }
+
+[data-audioeye-lr-k] .ae-lite-reader-item.audioeye-lreader-feature-active { background-color: rgb(83, 144, 65); color: rgb(255, 255, 255) !important; }
+
+[data-audioeye-lr-hlt="1"] h1, [data-audioeye-lr-hlt="1"] h2, [data-audioeye-lr-hlt="1"] h3, [data-audioeye-lr-hlt="1"] h4, [data-audioeye-lr-hlt="1"] h5, [data-audioeye-lr-hlt="1"] h6 { background: rgb(254, 254, 0) !important; color: rgb(0, 0, 0) !important; }
+
+[data-audioeye-lr-hlt="2"] a { background: rgb(254, 254, 0) !important; color: rgb(0, 0, 0) !important; }
+
+[data-audioeye-lr-hlt="3"] [role="button"], [data-audioeye-lr-hlt="3"] button { background: rgb(254, 254, 0) !important; color: rgb(0, 0, 0) !important; }
+
+[data-audioeye-lr-hlt] button :not(.a11y-icon-background):not(.a11y-icon-figure-and-border) { color: rgb(0, 0, 0) !important; }
+
+[data-audioeye-lr-hlt="4"] [role="button"], [data-audioeye-lr-hlt="4"] a, [data-audioeye-lr-hlt="4"] button, [data-audioeye-lr-hlt="4"] h1, [data-audioeye-lr-hlt="4"] h2, [data-audioeye-lr-hlt="4"] h3, [data-audioeye-lr-hlt="4"] h4, [data-audioeye-lr-hlt="4"] h5, [data-audioeye-lr-hlt="4"] h6 { background: rgb(254, 254, 0) !important; color: rgb(0, 0, 0) !important; }
+
+[data-audioeye-lr-textsize="12"] { font-size: 12px !important; }
+
+[data-audioeye-lr-textsize="13"] { font-size: 13px !important; }
+
+[data-audioeye-lr-textsize="14"] { font-size: 14px !important; }
+
+[data-audioeye-lr-textsize="15"] { font-size: 15px !important; }
+
+[data-audioeye-lr-textsize="16"] { font-size: 16px !important; }
+
+[data-audioeye-lr-textsize="17"] { font-size: 17px !important; }
+
+[data-audioeye-lr-textsize="18"] { font-size: 18px !important; }
+
+[data-audioeye-lr-textsize="19"] { font-size: 19px !important; }
+
+[data-audioeye-lr-textsize="20"] { font-size: 20px !important; }
+
+[data-audioeye-lr-textsize="21"] { font-size: 21px !important; }
+
+[data-audioeye-lr-textsize="22"] { font-size: 22px !important; }
+
+[data-audioeye-lr-textsize="23"] { font-size: 23px !important; }
+
+[data-audioeye-lr-textsize="24"] { font-size: 24px !important; }
+
+[data-audioeye-lr-textsize="25"] { font-size: 25px !important; }
+
+[data-audioeye-lr-textsize="26"] { font-size: 26px !important; }
+
+[data-audioeye-lr-textsize="27"] { font-size: 27px !important; }
+
+[data-audioeye-lr-textsize="28"] { font-size: 28px !important; }
+
+[data-audioeye-lr-textsize="29"] { font-size: 29px !important; }
+
+[data-audioeye-lr-textsize="30"] { font-size: 30px !important; }
+
+[data-audioeye-lr-textsize="31"] { font-size: 31px !important; }
+
+[data-audioeye-lr-textsize="32"] { font-size: 32px !important; }
+
+[data-audioeye-lr-textsize="33"] { font-size: 33px !important; }
+
+[data-audioeye-lr-textsize="34"] { font-size: 34px !important; }
+
+[data-audioeye-lr-textsize="35"] { font-size: 35px !important; }
+
+[data-audioeye-lr-textsize="36"] { font-size: 36px !important; }
+
+[data-audioeye-lr-textsize="37"] { font-size: 37px !important; }
+
+[data-audioeye-lr-textsize="38"] { font-size: 38px !important; }
+
+[data-audioeye-lr-textsize="39"] { font-size: 39px !important; }
+
+[data-audioeye-lr-textsize="40"] { font-size: 40px !important; }
+
+[data-audioeye-lr-textsize="41"] { font-size: 41px !important; }
+
+[data-audioeye-lr-textsize="42"] { font-size: 42px !important; }
+
+[data-audioeye-lr-textsize="43"] { font-size: 43px !important; }
+
+[data-audioeye-lr-textsize="44"] { font-size: 44px !important; }
+
+[data-audioeye-lr-textsize="45"] { font-size: 45px !important; }
+
+[data-audioeye-lr-textsize="46"] { font-size: 46px !important; }
+
+[data-audioeye-lr-textsize="47"] { font-size: 47px !important; }
+
+[data-audioeye-lr-textsize="48"] { font-size: 48px !important; }
+
+[data-audioeye-lr-textsize="49"] { font-size: 49px !important; }
+
+[data-audioeye-lr-textsize="50"] { font-size: 50px !important; }
+
+[data-audioeye-lr-textsize="51"] { font-size: 51px !important; }
+
+[data-audioeye-lr-textsize="52"] { font-size: 52px !important; }
+
+[data-audioeye-lr-textsize="53"] { font-size: 53px !important; }
+
+[data-audioeye-lr-textsize="54"] { font-size: 54px !important; }
+
+[data-audioeye-lr-textsize="55"] { font-size: 55px !important; }
+
+[data-audioeye-lr-textsize="56"] { font-size: 56px !important; }
+
+[data-audioeye-lr-textsize="57"] { font-size: 57px !important; }
+
+[data-audioeye-lr-textsize="58"] { font-size: 58px !important; }
+
+[data-audioeye-lr-textsize="59"] { font-size: 59px !important; }
+
+[data-audioeye-lr-textsize="60"] { font-size: 60px !important; }
+
+[data-audioeye-lr-textsize="61"] { font-size: 61px !important; }
+
+[data-audioeye-lr-textsize="62"] { font-size: 62px !important; }
+
+[data-audioeye-lr-textsize="63"] { font-size: 63px !important; }
+
+[data-audioeye-lr-textsize="64"] { font-size: 64px !important; }
+
+[data-audioeye-lr-textsize="65"] { font-size: 65px !important; }
+
+[data-audioeye-lr-textsize="66"] { font-size: 66px !important; }
+
+[data-audioeye-lr-textsize="67"] { font-size: 67px !important; }
+
+[data-audioeye-lr-textsize="68"] { font-size: 68px !important; }
+
+[data-audioeye-lr-textsize="69"] { font-size: 69px !important; }
+
+[data-audioeye-lr-textsize="70"] { font-size: 70px !important; }
+
+[data-audioeye-lr-textsize="71"] { font-size: 71px !important; }
+
+[data-audioeye-lr-textsize="72"] { font-size: 72px !important; }
+
+[data-audioeye-lr-textsize="73"] { font-size: 73px !important; }
+
+[data-audioeye-lr-textsize="74"] { font-size: 74px !important; }
+
+[data-audioeye-lr-textsize="75"] { font-size: 75px !important; }
+
+[data-audioeye-lr-textsize="76"] { font-size: 76px !important; }
+
+[data-audioeye-lr-textsize="77"] { font-size: 77px !important; }
+
+[data-audioeye-lr-textsize="78"] { font-size: 78px !important; }
+
+[data-audioeye-lr-textsize="79"] { font-size: 79px !important; }
+
+[data-audioeye-lr-textsize="80"] { font-size: 80px !important; }
+
+[data-audioeye-lr-textsize="81"] { font-size: 81px !important; }
+
+[data-audioeye-lr-textsize="82"] { font-size: 82px !important; }
+
+[data-audioeye-lr-textsize="83"] { font-size: 83px !important; }
+
+[data-audioeye-lr-textsize="84"] { font-size: 84px !important; }
+
+[data-audioeye-lr-textsize="85"] { font-size: 85px !important; }
+
+[data-audioeye-lr-textsize="86"] { font-size: 86px !important; }
+
+[data-audioeye-lr-textsize="87"] { font-size: 87px !important; }
+
+[data-audioeye-lr-textsize="88"] { font-size: 88px !important; }
+
+[data-audioeye-lr-textsize="89"] { font-size: 89px !important; }
+
+[data-audioeye-lr-textsize="90"] { font-size: 90px !important; }
+
+[data-audioeye-lr-textsize="91"] { font-size: 91px !important; }
+
+[data-audioeye-lr-textsize="92"] { font-size: 92px !important; }
+
+[data-audioeye-lr-textsize="93"] { font-size: 93px !important; }
+
+[data-audioeye-lr-textsize="94"] { font-size: 94px !important; }
+
+[data-audioeye-lr-textsize="95"] { font-size: 95px !important; }
+
+[data-audioeye-lr-textsize="96"] { font-size: 96px !important; }
+
+[data-audioeye-lr-textsize="97"] { font-size: 97px !important; }
+
+[data-audioeye-lr-textsize="98"] { font-size: 98px !important; }
+
+[data-audioeye-lr-textsize="99"] { font-size: 99px !important; }
+
+[data-audioeye-lr-textsize="100"] { font-size: 100px !important; }
+
+[data-audioeye-lr-textsize="101"] { font-size: 101px !important; }
+
+[data-audioeye-lr-textsize="102"] { font-size: 102px !important; }
+
+[data-audioeye-lr-textsize="103"] { font-size: 103px !important; }
+
+[data-audioeye-lr-textsize="104"] { font-size: 104px !important; }
+
+[data-audioeye-lr-textsize="105"] { font-size: 105px !important; }
+
+[data-audioeye-lr-textsize="106"] { font-size: 106px !important; }
+
+[data-audioeye-lr-textsize="107"] { font-size: 107px !important; }
+
+[data-audioeye-lr-textsize="108"] { font-size: 108px !important; }
+
+[data-audioeye-lr-textsize="109"] { font-size: 109px !important; }
+
+[data-audioeye-lr-textsize="110"] { font-size: 110px !important; }
+
+[data-audioeye-lr-textsize="111"] { font-size: 111px !important; }
+
+[data-audioeye-lr-textsize="112"] { font-size: 112px !important; }
+
+[data-audioeye-lr-textsize="113"] { font-size: 113px !important; }
+
+[data-audioeye-lr-textsize="114"] { font-size: 114px !important; }
+
+[data-audioeye-lr-textsize="115"] { font-size: 115px !important; }
+
+[data-audioeye-lr-textsize="116"] { font-size: 116px !important; }
+
+[data-audioeye-lr-textsize="117"] { font-size: 117px !important; }
+
+[data-audioeye-lr-textsize="118"] { font-size: 118px !important; }
+
+[data-audioeye-lr-textsize="119"] { font-size: 119px !important; }
+
+[data-audioeye-lr-textsize="120"] { font-size: 120px !important; }
+
+[data-audioeye-lr-textsize="121"] { font-size: 121px !important; }
+
+[data-audioeye-lr-textsize="122"] { font-size: 122px !important; }
+
+[data-audioeye-lr-textsize="123"] { font-size: 123px !important; }
+
+[data-audioeye-lr-textsize="124"] { font-size: 124px !important; }
+
+[data-audioeye-lr-textsize="125"] { font-size: 125px !important; }
+
+[data-audioeye-lr-textsize="126"] { font-size: 126px !important; }
+
+[data-audioeye-lr-textsize="127"] { font-size: 127px !important; }
+
+[data-audioeye-lr-textsize="128"] { font-size: 128px !important; }
+
+[data-audioeye-lr-textsize="129"] { font-size: 129px !important; }
+
+[data-audioeye-lr-textsize="130"] { font-size: 130px !important; }
+
+[data-audioeye-lr-textsize="131"] { font-size: 131px !important; }
+
+[data-audioeye-lr-textsize="132"] { font-size: 132px !important; }
+
+[data-audioeye-lr-textsize="133"] { font-size: 133px !important; }
+
+[data-audioeye-lr-textsize="134"] { font-size: 134px !important; }
+
+[data-audioeye-lr-textsize="135"] { font-size: 135px !important; }
+
+[data-audioeye-lr-textsize="136"] { font-size: 136px !important; }
+
+[data-audioeye-lr-textsize="137"] { font-size: 137px !important; }
+
+[data-audioeye-lr-textsize="138"] { font-size: 138px !important; }
+
+[data-audioeye-lr-textsize="139"] { font-size: 139px !important; }
+
+[data-audioeye-lr-textsize="140"] { font-size: 140px !important; }
+
+[data-audioeye-lr-textsize="141"] { font-size: 141px !important; }
+
+[data-audioeye-lr-textsize="142"] { font-size: 142px !important; }
+
+[data-audioeye-lr-textsize="143"] { font-size: 143px !important; }
+
+[data-audioeye-lr-textsize="144"] { font-size: 144px !important; }
+
+[data-audioeye-lr-textsize="145"] { font-size: 145px !important; }
+
+[data-audioeye-lr-textsize="146"] { font-size: 146px !important; }
+
+[data-audioeye-lr-textsize="147"] { font-size: 147px !important; }
+
+[data-audioeye-lr-textsize="148"] { font-size: 148px !important; }
+
+[data-audioeye-lr-textsize="149"] { font-size: 149px !important; }
+
+[data-audioeye-lr-textsize="150"] { font-size: 150px !important; }
+
+[data-audioeye-lr-textsize="151"] { font-size: 151px !important; }
+
+[data-audioeye-lr-textsize="152"] { font-size: 152px !important; }
+
+[data-audioeye-lr-textsize="153"] { font-size: 153px !important; }
+
+[data-audioeye-lr-textsize="154"] { font-size: 154px !important; }
+
+[data-audioeye-lr-textsize="155"] { font-size: 155px !important; }
+
+[data-audioeye-lr-textsize="156"] { font-size: 156px !important; }
+
+[data-audioeye-lr-textsize="157"] { font-size: 157px !important; }
+
+[data-audioeye-lr-textsize="158"] { font-size: 158px !important; }
+
+[data-audioeye-lr-textsize="159"] { font-size: 159px !important; }
+
+[data-audioeye-lr-textsize="160"] { font-size: 160px !important; }
+
+[data-audioeye-lr-textsize="161"] { font-size: 161px !important; }
+
+[data-audioeye-lr-textsize="162"] { font-size: 162px !important; }
+
+[data-audioeye-lr-textsize="163"] { font-size: 163px !important; }
+
+[data-audioeye-lr-textsize="164"] { font-size: 164px !important; }
+
+[data-audioeye-lr-textsize="165"] { font-size: 165px !important; }
+
+[data-audioeye-lr-textsize="166"] { font-size: 166px !important; }
+
+[data-audioeye-lr-textsize="167"] { font-size: 167px !important; }
+
+[data-audioeye-lr-textsize="168"] { font-size: 168px !important; }
+
+[data-audioeye-lr-textsize="169"] { font-size: 169px !important; }
+
+[data-audioeye-lr-textsize="170"] { font-size: 170px !important; }
+
+[data-audioeye-lr-textsize="171"] { font-size: 171px !important; }
+
+[data-audioeye-lr-textsize="172"] { font-size: 172px !important; }
+
+[data-audioeye-lr-textsize="173"] { font-size: 173px !important; }
+
+[data-audioeye-lr-textsize="174"] { font-size: 174px !important; }
+
+[data-audioeye-lr-textsize="175"] { font-size: 175px !important; }
+
+[data-audioeye-lr-textsize="176"] { font-size: 176px !important; }
+
+[data-audioeye-lr-textsize="177"] { font-size: 177px !important; }
+
+[data-audioeye-lr-textsize="178"] { font-size: 178px !important; }
+
+[data-audioeye-lr-textsize="179"] { font-size: 179px !important; }
+
+[data-audioeye-lr-textsize="180"] { font-size: 180px !important; }
+
+[data-audioeye-lr-textsize="181"] { font-size: 181px !important; }
+
+[data-audioeye-lr-textsize="182"] { font-size: 182px !important; }
+
+[data-audioeye-lr-textsize="183"] { font-size: 183px !important; }
+
+[data-audioeye-lr-textsize="184"] { font-size: 184px !important; }
+
+[data-audioeye-lr-textsize="185"] { font-size: 185px !important; }
+
+[data-audioeye-lr-textsize="186"] { font-size: 186px !important; }
+
+[data-audioeye-lr-textsize="187"] { font-size: 187px !important; }
+
+[data-audioeye-lr-textsize="188"] { font-size: 188px !important; }
+
+[data-audioeye-lr-textsize="189"] { font-size: 189px !important; }
+
+[data-audioeye-lr-textsize="190"] { font-size: 190px !important; }
+
+[data-audioeye-lr-textsize="191"] { font-size: 191px !important; }
+
+[data-audioeye-lr-textsize="192"] { font-size: 192px !important; }
+
+[data-audioeye-lr-textsize="193"] { font-size: 193px !important; }
+
+[data-audioeye-lr-textsize="194"] { font-size: 194px !important; }
+
+[data-audioeye-lr-textsize="195"] { font-size: 195px !important; }
+
+[data-audioeye-lr-textsize="196"] { font-size: 196px !important; }
+
+[data-audioeye-lr-textsize="197"] { font-size: 197px !important; }
+
+[data-audioeye-lr-textsize="198"] { font-size: 198px !important; }
+
+[data-audioeye-lr-textsize="199"] { font-size: 199px !important; }
+
+[data-audioeye-lr-textsize="200"] { font-size: 200px !important; }
+
+[data-audioeye-lr-space_setting="1"] * { line-height: 1.5em !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
+
+[data-audioeye-lr-space_setting="1"] #ae_app * { line-height: normal !important; letter-spacing: normal !important; word-spacing: normal !important; }
+
+[data-audioeye-lr-font_setting="1"] :not(.audioeye-setting-carousel-icon):not(.ae-lite-reader-item) { font-family: Arial, sans-serif !important; }
+
+[data-audioeye-lr-font_setting="2"] :not(.audioeye-setting-carousel-icon):not(.ae-lite-reader-item) { font-family: Georgia, serif !important; }
+
+[data-audioeye-lr-font_setting="3"] :not(.audioeye-setting-carousel-icon):not(.ae-lite-reader-item) { font-family: opendyslexicregular, serif !important; }
+
+#ae_toolbar_container[data-audioeye-lr-font_setting="3"] * { line-height: 1.3em !important; }
+
+[data-audioeye-lr-disable_animations] * { transition: none 0s ease 0s !important; animation-play-state: paused !important; }
+
+@media (max-width: 700px) {
+  body.ae-lite-reader #ae_module_controlbar, body[data-audioeye-lite-reader] #ae_module_controlbar { height: 110px; }
+  #ae_app #ae-lite_reader { align-items: flex-start; }
+  #ae-lite_reader #audioeye_lreader_tools { height: 100%; padding: 10px 0px; }
+  #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_scroll_container { display: inline-block; line-height: 48px; }
+  #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_c_big, #ae-lite_reader #audioeye_lreader_tools button, #ae-lite_reader .audioeye-setting-carousel { display: inline-block; height: auto; width: 16%; margin: 0px; vertical-align: top; }
+  #ae-lite_reader #audioeye_lreader_tools #audioeye_alt_desc, #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_c_big, #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_k, #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_memph, #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_rg { display: none; }
+  #ae_app .audioeye-lite-reader-name, #ae_app .audioeye-setting-carousel-name { color: rgb(255, 255, 255); display: block; font-size: 12px; margin: 5px 0px 0px; }
+  #ae-lite_reader #audioeye_lreader_close { margin: 18px 10px 0px auto; }
+}
+
+@media (max-width: 500px) {
+  body.ae-lite-reader #ae_module_controlbar, body[data-audioeye-lite-reader] #ae_module_controlbar { height: 176px; }
+  #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_c_big, #ae-lite_reader #audioeye_lreader_tools button, #ae-lite_reader .audioeye-setting-carousel { width: 33%; }
+  #ae-lite_reader #audioeye_lreader_tools { width: calc(100% - 36px); }
+  #ae-lite_reader #audioeye_lreader_scroll_container { min-width: 255px; overflow: auto; }
+  #ae-lite_reader #audioeye_lreader_tools .ae-lite-reader-item:nth-child(7) { margin: 0px; }
+  #ae_app #ae-lite_reader { height: 100%; }
+  #ae-lite_reader #audioeye_lreader_tools #audioeye_lreader_scroll_container { line-height: 82px; }
+}
+
+@media (-ms-high-contrast:none) {
+  #audioeye_lreader_contrast_setting { display: none !important; }
+}
+
+@supports (-moz-appearance:none) {
+  [data-audioeye-lr-contrast_setting="1"] { mix-blend-mode: hard-light; filter: none !important; background: rgb(255, 255, 255) !important; }
+  [data-audioeye-lr-contrast_setting="2"] { mix-blend-mode: luminosity; filter: none !important; background: rgb(255, 255, 255) !important; }
+  [data-audioeye-lr-contrast_setting="3"] { mix-blend-mode: difference; filter: none !important; background: rgb(255, 255, 255) !important; }
+  [data-audioeye-lr-contrast_setting="4"] { mix-blend-mode: revert; filter: none !important; background: rgb(255, 255, 255) !important; }
+}

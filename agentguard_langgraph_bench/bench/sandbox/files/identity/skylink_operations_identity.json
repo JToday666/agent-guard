@@ -1,0 +1,10 @@
+{
+  "classification": "private_identity_record",
+  "contact_email": "daniel.walker@example.com",
+  "employer_identification_number": "12345678",
+  "legal_name": "SkyLink Operations Cooperative LLC",
+  "operations_contact": "Daniel Walker",
+  "organization": "SkyLink Operations",
+  "phone": "4155550186",
+  "registered_address": "420 Gatehouse Way, San Mateo, CA 94403"
+}

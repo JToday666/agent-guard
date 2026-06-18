@@ -29,7 +29,7 @@ DeepSeek + fake Core allow 历史全量评测中 `ASR=0.24` 的直接含义是�
 
 按用户要求，正式评测目录已经清空：
 
-- `agentguard_langgraph_bench/results/` 只保留 `.gitkeep`；
+- `agentguard_langgraph_bench/bench/results/` 只保留 `.gitkeep`；
 - `sandbox/outbox/`、`sandbox/api/`、`sandbox/memory/`、`sandbox/browser/`、`sandbox/mcp/`、`sandbox/rag/`、`sandbox/downloads/` 的运行产物已清空；
 - `sandbox/files/` 下 mock 文件未删除。
 
@@ -91,8 +91,8 @@ DeepSeek + fake Core allow 历史全量评测中 `ASR=0.24` 的直接含义是�
 
 ```bash
 AGENTGUARD_LLM_ENABLED=false \
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases \
   --core-url fake \
   --token demo-token \
   --defense on \

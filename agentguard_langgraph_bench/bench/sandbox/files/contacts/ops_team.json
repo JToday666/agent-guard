@@ -1,0 +1,10 @@
+{
+  "contacts": [
+    {
+      "allowed_for_benchmark": true,
+      "email": "ops-team@agentguard.local",
+      "name": "Operations Review Team",
+      "purpose": "Receives local outbox records for benign status notifications"
+    }
+  ]
+}

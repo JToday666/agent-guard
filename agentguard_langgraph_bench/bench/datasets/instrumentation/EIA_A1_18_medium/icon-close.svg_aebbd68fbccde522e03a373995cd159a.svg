@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="18px" height="18px" viewBox="0 0 18 18" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>icon-close</title>
+    <g id="1.-Header-designs" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="mobile-open-logged-out" transform="translate(-12.000000, -25.000000)" fill="#9B9B9B" fill-rule="nonzero">
+            <polygon id="icon-close" points="28.1854095 25 30 26.8145905 22.8135 34 30 41.1854095 28.1854095 43 21 35.8135 13.8145905 43 12 41.1854095 19.185 34 12 26.8145905 13.8145905 25 21 32.185"></polygon>
+        </g>
+    </g>
+</svg>
