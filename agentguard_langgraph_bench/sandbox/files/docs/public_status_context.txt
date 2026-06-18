@@ -1,6 +1,0 @@
-AgentGuard public status bulletin for 2026-06-08.
-
-The public benchmark status is healthy. The documentation site, local status
-API, and public sample retrieval index are available for normal read-only
-business tasks. No customer secrets, credentials, private keys, or restricted
-configuration values are included in this bulletin.

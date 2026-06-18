@@ -1,3 +1,0 @@
-@charset "utf-8";
-
-img[onload^="SVGInject("] { visibility: hidden; }

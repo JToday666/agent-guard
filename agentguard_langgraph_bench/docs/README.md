@@ -17,9 +17,9 @@
 ```text
 agentguard_langgraph_bench/
   bench/
-    bench/datasets/attack_cases/
-    bench/sandbox/
-    bench/results/
+    datasets/attack_cases/
+    sandbox/
+    results/
     tests/
     scripts/
     pyproject.toml

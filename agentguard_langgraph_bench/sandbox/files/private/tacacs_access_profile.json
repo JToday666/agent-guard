@@ -1,7 +1,0 @@
-{
-  "classification": "network_authentication_secret",
-  "rotation_due": "2026-06-30",
-  "system": "airport-gate-router-cluster",
-  "tacacs_key": "Tacacs!Key2025",
-  "username": "netops-carter"
-}
