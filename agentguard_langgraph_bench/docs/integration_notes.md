@@ -34,15 +34,30 @@ LangGraph 演示 Agent
 - 保留最终文档中已包含于 P0 或可作为可选字段保留的语义字段，使未来 Core/Dashboard 可以消费 `trace_id`、`case_id`、`runtime`、`decision`、`risk_score`、`severity`、`resource_targets`、`rule_hits` 和 `reason`。
 - schema version 和 event type 应保持可配置，使同一 adapter 后续可以迁移到 `0.3` / `tool_call_proposed`，且不改变执行语义。
 
+## 当前分层结构
+
+本包现在按三类业务目录分离：
+
+```text
+src/agentguard_langgraph_bench/
+  bench/                # AttackBench、数据集、runner、metrics、mock tools、sandbox/runtime
+  adapter/              # LangGraph Adapter、Core client、事件/资源/audit 映射
+  demo_agent/           # smoke test / 演示用 LangGraph demo agent
+  *.py                  # 旧导入路径兼容入口
+```
+
+根包中的 `adapter.py`、`secure_tool_node.py`、`agent.py`、`runner.py`、`tools.py` 等文件仅作为旧导入路径兼容入口；真实实现位于上述子包。
+
 ## LangGraph 适配器到 Core
 
 模块位置：
 
-- `src/agentguard_langgraph_bench/adapter.py`
-- `src/agentguard_langgraph_bench/secure_tool_node.py`
-- `src/agentguard_langgraph_bench/core_client.py`
-- `src/agentguard_langgraph_bench/models.py`
-- `src/agentguard_langgraph_bench/agent.py`
+- `src/agentguard_langgraph_bench/adapter/langgraph_adapter.py`
+- `src/agentguard_langgraph_bench/adapter/secure_tool_node.py`
+- `src/agentguard_langgraph_bench/adapter/core_client.py`
+- `src/agentguard_langgraph_bench/adapter/event_models.py`
+- `src/agentguard_langgraph_bench/demo_agent/graph.py`
+- `src/agentguard_langgraph_bench/bench/runner.py`
 
 连接流程：
 
@@ -67,7 +82,7 @@ LangGraph 演示 Agent
   "runtime": "langgraph",
   "trace_id": "trace_<uuid>",
   "case_id": "PI-001",
-  "attack_type": "indirect_prompt_injection",
+  "attack_type": "prompt_injection",
   "is_malicious": true,
   "timestamp": "2026-06-06T00:00:00+08:00",
   "security_context": {
@@ -228,7 +243,7 @@ deny fixture 示例：
 所有工具都应是 LangChain Core tools。所有副作用必须限制在：
 
 ```text
-agentguard_langgraph_bench/sandbox/
+agentguard_langgraph_bench/bench/sandbox/
 ```
 
 sandbox 映射：
@@ -252,7 +267,7 @@ sandbox 映射：
 MCPSafety 迁移后的 tool hijacking 链路：
 
 ```text
-AttackCase(tool_hijack)
+AttackCase(tool_hijacking)
   -> planning node 产生 mcp_call
   -> SecureToolNode 构造 ToolCallEvent 并调用 Core
   -> allow 后 MockToolRegistry.mcp_call 写入 sandbox/mcp/calls.jsonl
@@ -361,12 +376,12 @@ PoisonedRAG 攻击成功规则按原 benchmark 迁移到现有 `rag_answered_inc
 runner 模式：
 
 ```bash
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases \
   --defense off
 
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases \
   --core-url http://localhost:8000 \
   --token demo-token \
   --defense on
@@ -377,9 +392,9 @@ python -m agentguard_langgraph_bench.runner \
 必需输出：
 
 ```text
-agentguard_langgraph_bench/results/run_<timestamp>.json
-agentguard_langgraph_bench/results/run_<timestamp>.csv
-agentguard_langgraph_bench/results/summary_<timestamp>.json
+agentguard_langgraph_bench/bench/results/run_<timestamp>.json
+agentguard_langgraph_bench/bench/results/run_<timestamp>.csv
+agentguard_langgraph_bench/bench/results/summary_<timestamp>.json
 ```
 
 每条 case 结果字段应包括：
@@ -396,7 +411,7 @@ agentguard_langgraph_bench/results/summary_<timestamp>.json
 - `side_effects`
 - `attack_success`
 - `expected_decision`
-- 对 `tool_hijack` 额外包含 `hijacking_report`、`hijacking_mode`、`target_tool`、`hijacked_tool`、`resisted`、`resistance_score`、`evidence_status`
+- 对 `tool_hijacking` 额外包含 `hijacking_report`、`hijacking_mode`、`target_tool`、`hijacked_tool`、`resisted`、`resistance_score`、`evidence_status`
 - 对 `metadata.source_dataset=MCPSafety` 的样本额外包含 `mcpsafety_evaluation_report`、`mcpsafety_evaluator`、`mcpsafety_attack_success`、`mcpsafety_evidence_status`
 
 summary 字段应包括：

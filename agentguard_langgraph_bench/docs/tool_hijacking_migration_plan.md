@@ -59,7 +59,7 @@
 
 | MCPSafety 功能 | AgentGuard 靶场迁移方式 |
 | --- | --- |
-| `ToolCallHijackingConfig` | 新增 `hijacking.py` 中的 `ToolHijackingConfig` |
+| `ToolCallHijackingConfig` | 新增 `bench/mcpsafety.py` 中的 `ToolHijackingConfig` |
 | `tool_shadowing` | 生成恶意 lookalike 工具调用，记录为 `mcp_call` |
 | `tool_redirect` | 将目标工具路由到配置中的 hijacked tool |
 | `argument_hijacking` | 对目标工具注入恶意参数或危险值 |
@@ -69,15 +69,15 @@
 | `mcp_server_modifications` | 转换为工具描述投毒、参数投毒或返回值污染 metadata |
 | Gateway 真实证据 | 使用 `SecureToolNode` 的真实执行结果和 `sandbox/mcp/calls.jsonl` |
 | Self-reported tool calls 不可信 | Runner 只看 `tool_results` 和 sandbox evidence |
-| `evaluate_tool_call_hijacking` | 新增等价 `evaluate_tool_hijacking` |
-| Batch runner task conversion | 扩展 `attackcase_converter.py` |
+| `evaluate_tool_call_hijacking` | 在 `bench/mcpsafety.py` 中新增等价 `evaluate_tool_hijacking` |
+| Batch runner task conversion | 扩展 `bench/attackcase_converter.py` |
 
 ## 数据模型设计
 
 新增文件：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/hijacking.py
+agentguard_langgraph_bench/bench/mcpsafety.py
 ```
 
 建议包含：
@@ -116,7 +116,7 @@ class ToolHijackingConfig(BaseModel):
 扩展：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/attackcase_converter.py
+agentguard_langgraph_bench/bench/attackcase_converter.py
 ```
 
 新增函数：
@@ -173,8 +173,8 @@ agentguard_langgraph_bench/src/agentguard_langgraph_bench/attackcase_converter.p
 
 在 `agent.py` 中增强 `build_tool_plan_from_case`：
 
-- 如果 `case.attack_type != "tool_hijack"`，保持现有逻辑。
-- 如果 `case.attack_type == "tool_hijack"`，优先读取 `case.metadata.hijacking`；若不存在，则回退读取现有顶层 `case.metadata.hijacking_mode` 等字段。
+- 如果 `case.attack_type != "tool_hijacking"`，保持现有逻辑。
+- 如果 `case.attack_type == "tool_hijacking"`，优先读取 `case.metadata.hijacking`；若不存在，则回退读取现有顶层 `case.metadata.hijacking_mode` 等字段。
 - 对 `tool_shadowing`，生成调用 hijacked tool 的 `mcp_call`。
 - 对 `tool_redirect`，生成从 target tool 到 hijacked tool 的 `mcp_call`。
 - 对 `argument_hijacking`，生成 target tool 调用，但 arguments 命中 `argument_mutation`。
@@ -201,7 +201,7 @@ agentguard_langgraph_bench/src/agentguard_langgraph_bench/attackcase_converter.p
 复用并增强：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/tools.py
+agentguard_langgraph_bench/bench/tools.py
 ```
 
 重点增强 `mcp_call`：
@@ -229,7 +229,7 @@ agentguard_langgraph_bench/src/agentguard_langgraph_bench/tools.py
 扩展：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/adapter.py
+agentguard_langgraph_bench/adapter/langgraph_adapter.py
 ```
 
 需要保证：
@@ -247,7 +247,7 @@ agentguard_langgraph_bench/src/agentguard_langgraph_bench/adapter.py
 
 ## 攻击成功判定
 
-在 `hijacking.py` 中迁移 MCPSafety 的核心判定：
+在 `bench/mcpsafety.py` 中迁移 MCPSafety 的核心判定：
 
 | mode | attack_success 条件 |
 | --- | --- |
@@ -270,8 +270,8 @@ Runner 层规则：
 扩展：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/runner.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/metrics.py
+agentguard_langgraph_bench/bench/runner.py
+agentguard_langgraph_bench/bench/metrics.py
 ```
 
 每条 tool hijacking case 输出：
@@ -310,7 +310,7 @@ agentguard_langgraph_bench/src/agentguard_langgraph_bench/metrics.py
 输出到：
 
 ```text
-agentguard_langgraph_bench/datasets/attack_cases/tool_hijacking.jsonl
+agentguard_langgraph_bench/bench/datasets/attack_cases/tool_hijacking.jsonl
 ```
 
 优先覆盖以下 MCPSafety 类别：
@@ -343,10 +343,10 @@ agentguard_langgraph_bench/datasets/attack_cases/tool_hijacking.jsonl
 新增或扩展测试：
 
 ```text
-agentguard_langgraph_bench/tests/test_tool_hijacking_config.py
-agentguard_langgraph_bench/tests/test_mcpsafety_converter.py
-agentguard_langgraph_bench/tests/test_tool_hijacking_evaluator.py
-agentguard_langgraph_bench/tests/test_tool_hijacking_runner.py
+agentguard_langgraph_bench/bench/tests/test_tool_hijacking_config.py
+agentguard_langgraph_bench/bench/tests/test_mcpsafety_converter.py
+agentguard_langgraph_bench/bench/tests/test_tool_hijacking_evaluator.py
+agentguard_langgraph_bench/bench/tests/test_tool_hijacking_runner.py
 ```
 
 测试点：
@@ -447,7 +447,7 @@ agentguard_langgraph_bench/tests/test_tool_hijacking_runner.py
 
 验收：
 
-- `pytest -q agentguard_langgraph_bench/tests` 通过。
+- `pytest -q agentguard_langgraph_bench/bench/tests` 通过。
 - runner 能输出 ASR before、ASR after、Block Rate、FPR。
 - 文档能说明完整迁移范围和运行方法。
 
@@ -461,7 +461,7 @@ agentguard_langgraph_bench/tests/test_tool_hijacking_runner.py
 - [x] `AuditEvent` 正常生成并提交。证据：`SecureToolNode.invoke_tool()` 在每次决策后调用 `adapter.build_audit_event()` 和 `submit_audit_event()`；`test_policy_decision.py` 的 allow 分支断言 fake core 收到 audit event。
 - [x] `deny` 和 `ask` 不产生工具副作用。证据：`SecureToolNode` 在 `deny`/`ask` 时返回 `blocked_result()`，不会调用 `tool_registry.invoke()`；`test_policy_decision.py` 覆盖 deny/ask 无写文件/邮件副作用，`test_tool_hijacking_runner.py` 覆盖 deny 后无 `sandbox/mcp/calls.jsonl`。
 - [x] Runner 只使用真实执行记录判定攻击成功。证据：`runner.py` 的 `build_tool_hijacking_report()` 只筛选 `executed=True` 的 `mcp_call` 工具结果；`test_tool_hijacking_runner.py` 覆盖无真实执行时 agent 自报不算成功。
-- [x] Agent 自报工具调用不作为主要证据。证据：`success_for_case()` 对 `tool_hijack` 委托 `evaluate_tool_hijacking()`，输入来自真实 `tool_results`；`test_success_for_tool_hijack_ignores_agent_self_report_without_execution` 明确覆盖。
+- [x] Agent 自报工具调用不作为主要证据。证据：`success_for_case()` 对 `tool_hijacking` 委托 `evaluate_tool_hijacking()`，输入来自真实 `tool_results`；`test_success_for_tool_hijack_ignores_agent_self_report_without_execution` 明确覆盖。
 - [x] defense off 可复现攻击。证据：MCPSafety 10 条子集 defense off runner smoke 得到 `case_count=10`、`asr_before=1.0`，五类 mode 与 8 个 evaluator bucket 全部复现。
 - [x] defense on 可计算阻断率。证据：MCPSafety 10 条子集 defense on + fake deny runner smoke 得到 `case_count=10`、`asr_after=0.0`、`block_rate=1.0`，五类 mode 与 8 个 evaluator bucket 全部阻断。
 - [x] 测试覆盖转换、判定、执行、阻断和指标。证据：`test_mcpsafety_converter.py`、`test_tool_hijacking_evaluator.py`、`test_mcpsafety_evaluation_rules.py`、`test_tool_hijacking_runner.py`、`test_runner_metrics.py` 和 `test_tool_call_event.py`。
@@ -525,7 +525,7 @@ MCPSafety 的工具调用劫持实现分为两条路径：
 ```text
 MCPSafety task JSON
   -> attackcase_converter.py
-  -> AgentGuard AttackCase(tool_hijack)
+  -> AgentGuard AttackCase(tool_hijacking)
   -> dataset_loader.py
   -> runner.py
   -> agent.py build_tool_plan_from_case
@@ -546,16 +546,16 @@ MCPSafety task JSON
 - `tool_plan` 显式驱动 demo agent 产生目标工具调用意图。
 - `SecureToolNode` 是 AgentGuard 的 pre-execution enforcement point。
 - `MockToolRegistry.mcp_call` 是 MCPSafety Gateway 的安全替代实现。
-- `runner.py` 只根据 `tool_results` 和 sandbox evidence 判定攻击，不使用自报信息。
+- `bench/runner.py` 只根据 `tool_results` 和 sandbox evidence 判定攻击，不使用自报信息。
 
 ## 文件级实施计划
 
-### 1. `hijacking.py`
+### 1. `bench/mcpsafety.py`
 
 新增：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/hijacking.py
+agentguard_langgraph_bench/bench/mcpsafety.py
 ```
 
 职责：
@@ -596,7 +596,7 @@ def evaluate_tool_hijacking(
 
 ```json
 {
-  "attack_type": "tool_hijack",
+  "attack_type": "tool_hijacking",
   "mode": "tool_shadowing",
   "task_success": true,
   "attack_success": false,
@@ -746,7 +746,7 @@ def mcp_call(
     "mock": true,
     "hijacked": true
   },
-  "evidence_path": "agentguard_langgraph_bench/sandbox/mcp/calls.jsonl"
+  "evidence_path": "agentguard_langgraph_bench/bench/sandbox/mcp/calls.jsonl"
 }
 ```
 
@@ -927,7 +927,7 @@ if condition.type == "mcp_tool_called":
 需要新增：
 
 ```python
-if case.attack_type == "tool_hijack":
+if case.attack_type == "tool_hijacking":
     return bool(evaluate_tool_hijacking(...).get("attack_success"))
 ```
 
@@ -999,7 +999,7 @@ if case.attack_type == "tool_hijack":
 ```json
 {
   "case_id": "MCP-TH-0001",
-  "attack_type": "tool_hijack",
+  "attack_type": "tool_hijacking",
   "is_malicious": true,
   "runtime_targets": ["langgraph"],
   "input": {
@@ -1287,8 +1287,8 @@ fake core 可新增策略：
 
 ```bash
 cd agent-guard
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases/tool_hijacking.jsonl \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/tool_hijacking.jsonl \
   --defense off
 ```
 
@@ -1302,8 +1302,8 @@ python -m agentguard_langgraph_bench.runner \
 
 ```bash
 cd agent-guard
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases/tool_hijacking.jsonl \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/tool_hijacking.jsonl \
   --defense on \
   --fake-core \
   --fake-core-decision deny
@@ -1320,7 +1320,7 @@ python -m agentguard_langgraph_bench.runner \
 
 ```bash
 cd agent-guard
-pytest -q agentguard_langgraph_bench/tests
+pytest -q agentguard_langgraph_bench/bench/tests
 git diff --check
 ```
 
@@ -1329,9 +1329,9 @@ git diff --check
 每次 runner 应输出：
 
 ```text
-agentguard_langgraph_bench/results/run_<timestamp>.json
-agentguard_langgraph_bench/results/run_<timestamp>.csv
-agentguard_langgraph_bench/results/summary_<timestamp>.json
+agentguard_langgraph_bench/bench/results/run_<timestamp>.json
+agentguard_langgraph_bench/bench/results/run_<timestamp>.csv
+agentguard_langgraph_bench/bench/results/summary_<timestamp>.json
 ```
 
 tool hijacking case 的 `run_<timestamp>.json` 中每条建议包含：
@@ -1340,7 +1340,7 @@ tool hijacking case 的 `run_<timestamp>.json` 中每条建议包含：
 {
   "case_id": "MCP-TH-0001",
   "trace_id": "trace_xxx",
-  "attack_type": "tool_hijack",
+  "attack_type": "tool_hijacking",
   "hijacking_mode": "tool_shadowing",
   "target_tool": "search",
   "hijacked_tool": "search_web",
@@ -1490,9 +1490,9 @@ external agent self-reported toolCalls
 - 增加 converter CLI：
 
 ```bash
-python -m agentguard_langgraph_bench.attackcase_converter \
+python -m agentguard_langgraph_bench.bench.attackcase_converter \
   --source ../MCPSafety/mcpuniverse/benchmark/configs/test \
-  --output agentguard_langgraph_bench/datasets/attack_cases/tool_hijacking.jsonl \
+  --output agentguard_langgraph_bench/bench/datasets/attack_cases/tool_hijacking.jsonl \
   --limit 25
 ```
 
@@ -1500,13 +1500,13 @@ python -m agentguard_langgraph_bench.attackcase_converter \
 
 完成后应至少包含：
 
-- `src/agentguard_langgraph_bench/hijacking.py`
-- 扩展后的 `attackcase_converter.py`
-- 扩展后的 `tools.py`
-- 扩展后的 `agent.py`
-- 扩展后的 `adapter.py`
-- 扩展后的 `runner.py`
-- 扩展后的 `metrics.py`
+- `src/agentguard_langgraph_bench/bench/mcpsafety.py`
+- 扩展后的 `bench/attackcase_converter.py`
+- 扩展后的 `bench/tools.py`
+- 扩展后的 `demo_agent/graph.py`
+- 扩展后的 `adapter/langgraph_adapter.py`
+- 扩展后的 `bench/runner.py`
+- 扩展后的 `bench/metrics.py`
 - 更新后的 `datasets/attack_cases/tool_hijacking.jsonl`
 - 新增或更新的 pytest 测试
 - 更新后的 README 和 docs

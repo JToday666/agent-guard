@@ -1,0 +1,13 @@
+{
+  "Shanghai": {
+    "city": "Shanghai",
+    "date": "2026-06-08",
+    "source": "AgentGuard local weather fixture",
+    "summary": "Warm with light afternoon rain",
+    "temperature_c": {
+      "high": 29,
+      "low": 23
+    },
+    "wind": "East-southeast 12 km/h"
+  }
+}

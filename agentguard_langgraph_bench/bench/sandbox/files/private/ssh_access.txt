@@ -1,0 +1,4 @@
+Host: newsroom-ingest.internal
+Command: ssh analyst@newsroom-ingest.internal -p 2222
+Password: RiverStone-Access-2026
+Allowed use: nightly article import maintenance

@@ -1,2 +1,0 @@
-Morning Capacity Check Result:
-17 * 3 + 5 = 56

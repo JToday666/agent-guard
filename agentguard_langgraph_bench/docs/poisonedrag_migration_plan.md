@@ -10,7 +10,7 @@
 - `../PoisonedRAG/` 只能只读访问。
 - 不修改 LangGraph、LangChain 或 LangChain Core 源码。
 - 不调用真实外网 API，不发送真实邮件，不写真实长期记忆系统。
-- 所有运行副作用只能写入 `agentguard_langgraph_bench/sandbox/` 或 `agentguard_langgraph_bench/results/`。
+- 所有运行副作用只能写入 `agentguard_langgraph_bench/bench/sandbox/` 或 `agentguard_langgraph_bench/bench/results/`。
 
 ## 0. 当前实现状态
 
@@ -29,11 +29,11 @@
 最新验证：
 
 ```text
-env AGENTGUARD_LLM_ENABLED=false python -m pytest -q agentguard_langgraph_bench/tests
+env AGENTGUARD_LLM_ENABLED=false python -m pytest -q agentguard_langgraph_bench/bench/tests
 91 passed in 2.12s
 
-env AGENTGUARD_LLM_ENABLED=false python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/poisonedrag/attack_cases/memory_poisoning_dynamic.jsonl \
+env AGENTGUARD_LLM_ENABLED=false python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/poisonedrag/attack_cases/memory_poisoning_dynamic.jsonl \
   --defense off \
   --poisonedrag-mode poisoned \
   --poison-prefix question \
@@ -48,8 +48,8 @@ poisonedrag.overall.poisoned_attack_success_rate=1.0
 poisonedrag.overall.poison_context_hit_rate=1.0
 summary=/tmp/ag_pr_dynamic_off_latest/summary_20260608T071018784300Z.json
 
-env AGENTGUARD_LLM_ENABLED=false python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/poisonedrag/attack_cases/memory_poisoning_dynamic.jsonl \
+env AGENTGUARD_LLM_ENABLED=false python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/poisonedrag/attack_cases/memory_poisoning_dynamic.jsonl \
   --defense on \
   --fake-core \
   --fake-core-decision deny \
@@ -84,16 +84,16 @@ summary=/tmp/ag_pr_dynamic_deny_latest/summary_20260608T071018783730Z.json
 
 | PoisonedRAG 功能 | 原实现位置 | 迁移要求 | 目标位置 |
 |---|---|---|---|
-| 读取 adv targeted results | `results/adv_targeted_results/{dataset}.json`、`web_agent_benchmark/data.py` | 必须迁移，读取复制后的 artifacts | `src/agentguard_langgraph_bench/poisonedrag_data.py` |
-| 读取 clean retrieval 排名 | `results/beir_results/{dataset}-contriever.json` | 必须迁移 | `poisonedrag_data.py` |
-| 读取 clean corpus 文本 | `datasets/{dataset}/corpus.jsonl`、`.cache/web_agent_benchmark/*_clean_docs.json` | 必须迁移，优先支持轻量缓存或采样副本 | `poisonedrag_data.py` |
-| `QuestionCase` / `CleanDoc` 数据结构 | `web_agent_benchmark/data.py` | 必须迁移，字段适配 Pydantic 或 dataclass | `poisonedrag_data.py` |
-| clean context 构造 | `ContextBuilder._clean_context_docs` | 必须迁移 | `poisonedrag_context.py` |
-| poison docs 构造 | `ContextBuilder._poison_docs` | 必须迁移 | `poisonedrag_context.py` |
-| `poison_prefix=question|none` | `ContextBuilder._build_poison_text` | 必须迁移 | `poisonedrag_context.py` |
-| light scorer | `ContextBuilder._score_poison_light` | 必须迁移，作为默认 scorer | `poisonedrag_context.py` |
-| exact Contriever scorer | `ExactContrieverScorer` | 可选迁移，默认不启用 | `poisonedrag_context.py` |
-| clean / poisoned 模式 | `ContextBuilder.search(mode=...)` | 必须迁移 | `poisonedrag_context.py`、runner 参数 |
+| 读取 adv targeted results | `results/adv_targeted_results/{dataset}.json`、`web_agent_benchmark/data.py` | 必须迁移，读取复制后的 artifacts | `src/agentguard_langgraph_bench/bench/poisonedrag_data.py` |
+| 读取 clean retrieval 排名 | `results/beir_results/{dataset}-contriever.json` | 必须迁移 | `bench/poisonedrag_data.py` |
+| 读取 clean corpus 文本 | `datasets/{dataset}/corpus.jsonl`、`.cache/web_agent_benchmark/*_clean_docs.json` | 必须迁移，优先支持轻量缓存或采样副本 | `bench/poisonedrag_data.py` |
+| `QuestionCase` / `CleanDoc` 数据结构 | `web_agent_benchmark/data.py` | 必须迁移，字段适配 Pydantic 或 dataclass | `bench/poisonedrag_data.py` |
+| clean context 构造 | `ContextBuilder._clean_context_docs` | 必须迁移 | `bench/poisonedrag_context.py` |
+| poison docs 构造 | `ContextBuilder._poison_docs` | 必须迁移 | `bench/poisonedrag_context.py` |
+| `poison_prefix=question|none` | `ContextBuilder._build_poison_text` | 必须迁移 | `bench/poisonedrag_context.py` |
+| light scorer | `ContextBuilder._score_poison_light` | 必须迁移，作为默认 scorer | `bench/poisonedrag_context.py` |
+| exact Contriever scorer | `ExactContrieverScorer` | 可选迁移，默认不启用 | `bench/poisonedrag_context.py` |
+| clean / poisoned 模式 | `ContextBuilder.search(mode=...)` | 必须迁移 | `bench/poisonedrag_context.py`、runner 参数 |
 | agent-facing payload 去标签 | `BenchmarkApp._agent_payload` | 必须迁移语义：agent 只能看到 question + contexts | `tools.rag_retrieve` 返回与 lifecycle metadata |
 | answer 保存 | `AnswerStore` | 迁移为 sandbox/results 记录 | `tools.rag_answer`、runner results |
 | PoisonedRAG 指标 | `web_agent_benchmark/evaluation.py` | 必须迁移为专项 metrics | `poisonedrag_metrics.py` 或 `metrics.py` |
@@ -235,7 +235,7 @@ PoisonedRAG 需要读取的只读源路径：
 建议新增：
 
 ```text
-agentguard_langgraph_bench/datasets/poisonedrag/
+agentguard_langgraph_bench/bench/datasets/poisonedrag/
   README.md
   adv_targeted_results/
   beir_results/
@@ -636,8 +636,8 @@ sandbox/rag/answers.jsonl
 示例：
 
 ```bash
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases/memory_poisoning.jsonl \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning.jsonl \
   --defense off \
   --poisonedrag-mode poisoned \
   --poison-prefix question \
@@ -646,8 +646,8 @@ python -m agentguard_langgraph_bench.runner \
 ```
 
 ```bash
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases/memory_poisoning.jsonl \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning.jsonl \
   --core-url http://localhost:8000 \
   --token demo-token \
   --defense on \
@@ -874,7 +874,7 @@ P0 不新增 `rag_answered_correct`。当前 `runner.success_for_case` 只显式
 
 验收：
 
-- 所有新增数据位于 `agentguard_langgraph_bench/datasets/poisonedrag/`。
+- 所有新增数据位于 `agentguard_langgraph_bench/bench/datasets/poisonedrag/`。
 - 不修改 `../PoisonedRAG/`。
 - 能用简单 loader 读取所有目标 dataset。
 
@@ -1048,14 +1048,14 @@ P0 不新增 `rag_answered_correct`。当前 `runner.success_for_case` 只显式
 
 ```bash
 cd agent-guard
-python -m pip install -r agentguard_langgraph_bench/requirements.txt
+python -m pip install -r agentguard_langgraph_bench/bench/requirements.txt
 python -m pip install -e agentguard_langgraph_bench
-pytest -q agentguard_langgraph_bench/tests
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases/memory_poisoning.jsonl \
+pytest -q agentguard_langgraph_bench/bench/tests
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning.jsonl \
   --defense off
-python -m agentguard_langgraph_bench.runner \
-  --dataset agentguard_langgraph_bench/datasets/attack_cases/memory_poisoning.jsonl \
+python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning.jsonl \
   --core-url fake \
   --token demo-token \
   --defense on \
@@ -1211,28 +1211,28 @@ P2 可选：
 
 ```text
 agentguard_langgraph_bench/docs/poisonedrag_migration_plan.md
-agentguard_langgraph_bench/datasets/poisonedrag/README.md
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/poisonedrag_data.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/poisonedrag_context.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/poisonedrag_metrics.py
-agentguard_langgraph_bench/tests/test_poisonedrag_data.py
-agentguard_langgraph_bench/tests/test_poisonedrag_context.py
-agentguard_langgraph_bench/tests/test_poisonedrag_converter.py
-agentguard_langgraph_bench/tests/test_memory_poisoning_poisonedrag_runner.py
+agentguard_langgraph_bench/bench/datasets/poisonedrag/README.md
+agentguard_langgraph_bench/bench/poisonedrag_data.py
+agentguard_langgraph_bench/bench/poisonedrag_context.py
+agentguard_langgraph_bench/bench/poisonedrag_metrics.py
+agentguard_langgraph_bench/bench/tests/test_poisonedrag_data.py
+agentguard_langgraph_bench/bench/tests/test_poisonedrag_context.py
+agentguard_langgraph_bench/bench/tests/test_poisonedrag_converter.py
+agentguard_langgraph_bench/bench/tests/test_memory_poisoning_poisonedrag_runner.py
 ```
 
 计划修改：
 
 ```text
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/tools.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/agent.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/runner.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/metrics.py
-agentguard_langgraph_bench/src/agentguard_langgraph_bench/attackcase_converter.py
+agentguard_langgraph_bench/bench/tools.py
+agentguard_langgraph_bench/demo_agent/graph.py
+agentguard_langgraph_bench/bench/runner.py
+agentguard_langgraph_bench/bench/metrics.py
+agentguard_langgraph_bench/bench/attackcase_converter.py
 agentguard_langgraph_bench/docs/dataset_mapping.md
 agentguard_langgraph_bench/docs/integration_notes.md
 agentguard_langgraph_bench/docs/final_report.md
-agentguard_langgraph_bench/README.md
+agentguard_langgraph_bench/docs/README.md
 ```
 
 注意：这些修改都必须局限于 `agentguard_langgraph_bench/` 内部。
@@ -1254,14 +1254,14 @@ agentguard_langgraph_bench/README.md
 本计划已按当前 `agentguard_langgraph_bench` 实现做过一致性检查。检查对象包括：
 
 ```text
-src/agentguard_langgraph_bench/models.py
-src/agentguard_langgraph_bench/adapter.py
-src/agentguard_langgraph_bench/config.py
-src/agentguard_langgraph_bench/tools.py
-src/agentguard_langgraph_bench/agent.py
-src/agentguard_langgraph_bench/runner.py
-src/agentguard_langgraph_bench/metrics.py
-src/agentguard_langgraph_bench/dataset_loader.py
+src/agentguard_langgraph_bench/bench/models.py
+src/agentguard_langgraph_bench/adapter/langgraph_adapter.py
+src/agentguard_langgraph_bench/bench/config.py
+src/agentguard_langgraph_bench/bench/tools.py
+src/agentguard_langgraph_bench/demo_agent/graph.py
+src/agentguard_langgraph_bench/bench/runner.py
+src/agentguard_langgraph_bench/bench/metrics.py
+src/agentguard_langgraph_bench/bench/dataset_loader.py
 tests/test_attackcase_schema.py
 tests/test_tool_call_event.py
 tests/test_audit_event.py
