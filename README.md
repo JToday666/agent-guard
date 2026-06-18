@@ -4,11 +4,14 @@ AgentGuard 是面向大模型智能体的运行时行为监督与攻击检测系
 
 ## 架构定位
 
-采用 **一核两壳**：
+采用 **四层目标架构**：
 
-- **一核**：Agent Security Core，统一事件模型、风险检测、策略决策、审批、审计和指标。
-- **壳一**：LangGraph + LangChain Core + Mock Tools，用作可控评测靶场和 P0 保底闭环。
-- **壳二**：OpenClaw + Security Plugin，用作开源智能化应用接入和演示。
+- **Runtime Adapter**：接入 LangGraph、OpenClaw 或通用工具运行时，负责事件映射和执行控制。
+- **Guard API / Control Plane**：统一 HTTP 入口，负责鉴权、策略管理、审计、告警、审批、指标和调用链状态。
+- **agentguard-core**：无状态安全判定库，负责事件规范化、检测器、策略匹配、风险评分和 `GuardDecision` 输出。
+- **Dashboard / Evaluation**：监督展示、审批处理、指标分析和 AttackBench 评测。
+
+LangGraph 和 OpenClaw 是四层架构下的运行时接入与演示场景，不再作为总体架构层级。
 
 ## 开发入口
 
@@ -16,7 +19,7 @@ AgentGuard 是面向大模型智能体的运行时行为监督与攻击检测系
 | ---------------------------------------------------------------------------------- | ---------------------------- |
 | [docs/README.md](docs/README.md)                                                   | 完整文档地图和开发阅读路径   |
 | [docs/01_overview/architecture.md](docs/01_overview/architecture.md)               | 总体架构和运行链路           |
-| [docs/02_core/interface_contract.md](docs/02_core/interface_contract.md)           | Core API、事件模型和决策契约 |
+| [docs/02_core/interface_contract.md](docs/02_core/interface_contract.md)           | Guard API / Control Plane API、事件模型和决策契约 |
 | [docs/06_delivery/implementation_plan.md](docs/06_delivery/implementation_plan.md) | P0/P1/P2 开发顺序和验收标准  |
 
 ## 答辩入口
@@ -32,9 +35,10 @@ AgentGuard 是面向大模型智能体的运行时行为监督与攻击检测系
 ```text
 AttackCase
 → LangGraph Agent
-→ ToolNode wrapper
-→ Agent Security Core
-→ allow / deny / ask
-→ AuditEvent
+→ Runtime Adapter
+→ Guard API / Control Plane
+→ agentguard-core.evaluate(...)
+→ GuardDecision
+→ Control Plane state services
 → Dashboard
 ```

@@ -1,0 +1,13 @@
+{
+  "meeting_number": "999 111 1025",
+  "password": "skyblue",
+  "service": "AgentGuard ZoomClone Local",
+  "host": "Morgan Lee",
+  "scheduled_at": "2026-06-08T14:30:00+08:00",
+  "participant_count": 7,
+  "policy": {
+    "screen_share": "host_only",
+    "media_uploads": "disabled",
+    "disruptive_content": "blocked"
+  }
+}

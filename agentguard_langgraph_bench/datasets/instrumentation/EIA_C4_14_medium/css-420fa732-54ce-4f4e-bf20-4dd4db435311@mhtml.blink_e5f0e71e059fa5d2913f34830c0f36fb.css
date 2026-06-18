@@ -1,0 +1,13 @@
+@charset "utf-8";
+
+.css-1yukjqw { cursor: pointer; color: inherit; text-decoration: none; }
+
+.css-1yukjqw:hover { text-decoration: underline; }
+
+.css-1yukjqw:focus { border-radius: 4px; box-shadow: rgb(0, 107, 194) 0px 0px 8px; text-decoration: none; }
+
+.css-1yukjqw:active { border-radius: 4px; box-shadow: none; background-color: rgba(192, 192, 192, 0.4); text-decoration: none; }
+
+h1 .css-1yukjqw, h2 .css-1yukjqw, h3 .css-1yukjqw, h4 .css-1yukjqw, h5 .css-1yukjqw, h6 .css-1yukjqw { color: inherit; text-decoration: none; }
+
+h1 .css-1yukjqw:hover, h2 .css-1yukjqw:hover, h3 .css-1yukjqw:hover, h4 .css-1yukjqw:hover, h5 .css-1yukjqw:hover, h6 .css-1yukjqw:hover { color: rgb(0, 107, 194); text-decoration: none; }

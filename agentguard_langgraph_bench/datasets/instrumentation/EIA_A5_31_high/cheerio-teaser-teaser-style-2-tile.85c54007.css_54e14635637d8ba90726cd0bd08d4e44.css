@@ -1,0 +1,43 @@
+@charset "utf-8";
+
+.teaser.teaser-style-2 .cmp-teaser__title { color: rgb(24, 25, 24); font-size: 1.3125rem; font-style: normal; font-weight: 700; letter-spacing: -0.015625rem; line-height: 1.19; margin-bottom: 1.25rem; text-transform: none; }
+
+@media (min-width: 640px) {
+  .teaser.teaser-style-2 .cmp-teaser__title { color: rgb(24, 25, 24); font-size: 1.625rem; font-style: normal; font-weight: 800; letter-spacing: 0.009375rem; line-height: 1.23; margin-bottom: 1.875rem; text-transform: none; }
+}
+
+.teaser.teaser-style-2 .cmp-teaser__pretitle { color: rgb(24, 25, 24); font-size: 0.875rem; font-style: normal; font-weight: 700; letter-spacing: 0.125rem; line-height: 1.29; margin-bottom: 1.25rem; text-transform: uppercase; }
+
+.teaser.teaser-style-2 .cmp-teaser__action-container { justify-content: center; }
+
+.teaser.teaser-style-2 { margin-bottom: 36px; }
+
+.teaser.teaser-style-2 .cmp-teaser__image figure { margin-bottom: 0px; }
+
+.teaser.teaser-style-2 .cmp-teaser .cmp-image__image { width: 100%; }
+
+.teaser.teaser-style-2 .cmp-teaser__pretitle { margin-bottom: 0px; }
+
+.teaser.teaser-style-2 .cmp-teaser__title { margin: 0.3125rem 0px 1.25rem; }
+
+.teaser.teaser-style-2 .cmp-teaser__content { padding: 1.25rem 0px 1.875rem; text-align: center; }
+
+.teaser.teaser-style-2 .cmp-teaser__description p { padding: 0px 15%; }
+
+.teaser.teaser-style-2.teaser--icon .cmp-teaser__content { padding: 0px; }
+
+.teaser.teaser-style-2.teaser--icon .cmp-image__image { width: 110px; }
+
+@media (min-width: 640px) {
+  .teaser.teaser-style-2 .cmp-teaser { display: flex; }
+  .teaser.teaser-style-2 .cmp-teaser__image { width: 50%; }
+  .teaser.teaser-style-2 .cmp-teaser__image .cmp-image { height: 100%; }
+  .teaser.teaser-style-2 .cmp-teaser__image .cmp-image__image { height: 100%; object-fit: cover; }
+  .teaser.teaser-style-2 .cmp-teaser__content { width: 50%; }
+}
+
+@media (min-width: 1280px) {
+  .teaser.teaser-style-2 { margin-bottom: 0px; }
+  .teaser.teaser-style-2 .cmp-teaser { flex-direction: column; }
+  .teaser.teaser-style-2 .cmp-teaser__content, .teaser.teaser-style-2 .cmp-teaser__image { width: 100%; }
+}

@@ -2,11 +2,11 @@
 
 ## 1. 文档定位
 
-本文定义 Adapter、Core、Dashboard、AttackBench 之间的公共契约。实现代码、schemas、测试和 Dashboard 页面必须以本文为准。
+本文定义 Runtime Adapter、Guard API / Control Plane、Stateless Core、Dashboard 和 AttackBench 之间的公共契约。实现代码、schemas、测试和 Dashboard 页面必须以本文为准。
 
 关联入口：
 
-- [Agent Security Core 设计](core_design.md)
+- [`agentguard-core` 设计](core_design.md)
 - [LangGraph 评测靶场](../03_adapters/langgraph_adapter.md)
 - [Dashboard 与审批流](../04_apps/dashboard_design.md)
 - [AttackBench 攻击样本与评测](../05_redteam/attackbench.md)
@@ -16,57 +16,132 @@
 ```text
 Runtime Native Event
 → Adapter Mapping
-→ AgentGuard Event
-→ Core Decision
+→ GuardEvent
+→ POST /v1/guard/evaluate
+→ Guard API / Control Plane
+→ agentguard-core.evaluate(event, policies)
+→ GuardDecision
+→ Control Plane state services
 → Adapter Enforcement
-→ AuditEvent
+→ AuditEvent / Alert / Approval / Metrics
 ```
 
 核心约束：
 
-- `pre_execution=true` 的工具事件必须在工具执行前送入 Core。
+- `pre_execution=true` 的工具事件必须在工具执行前送入 `guard-api`。
+- `agentguard-core` 只做无状态判定，不暴露 HTTP API，不读写数据库，不创建审批记录。
+- Guard API / Control Plane 负责鉴权、策略快照加载、调用 core、审计入库、告警生成、审批状态、指标聚合和 Dashboard 查询。
 - Core 返回 `deny` 时，Adapter 必须阻断工具执行。
-- Core 返回 `ask` 时，Adapter 必须暂停动作并等待审批。
-- AuditEvent 是 Dashboard 和指标统计的共同输入。
+- Core 返回 `ask` 时，Adapter 必须暂停动作并通过 Guard API 等待审批结果。
+- AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源；AuditEvent 的写入、查询和聚合由 Guard API / Control Plane 负责。
 
-## 3. Core API
+## 3. Guard API / Control Plane API
 
-| API                                        | 阶段 | 用途               |
-| ------------------------------------------ | ---- | ------------------ |
-| `POST /v1/auth/browser/launch`             | P0   | 创建 Dashboard launch code |
-| `POST /v1/auth/browser/exchange`           | P0   | launch code 换 browser session |
-| `GET /v1/auth/browser/me`                  | P0   | Dashboard 会话恢复 |
-| `POST /v1/auth/browser/logout`             | P0   | Dashboard 会话退出 |
-| `POST /v1/evaluate/tool-call`              | P0   | 工具调用前风险判断 |
-| `POST /v1/audit/event`                     | P0   | 写入审计事件       |
-| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表 |
-| `GET /v1/metrics/eval`                     | P0   | 评测指标           |
-| `POST /v1/evaluate/context-build`          | P1   | 上下文拼接审计     |
-| `POST /v1/evaluate/model-call`             | P1   | 模型输入输出审计   |
-| `POST /v1/evaluate/tool-result`            | P1   | 工具结果回流审计   |
-| `POST /v1/evaluate/message`                | P1   | 消息外发审计       |
-| `POST /v1/evaluate/memory-write`           | P1   | 记忆写入审计       |
-| `GET /v1/audit/traces/{trace_id}`          | P1   | 攻击链路详情       |
-| `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标     |
-| `GET /v1/approvals/pending`                | P1   | 待审批动作         |
-| `POST /v1/approvals/{approval_id}/resolve` | P1   | 审批处理           |
-| `GET /v1/approvals/{approval_id}/wait`     | P1   | Adapter 等待审批结果 |
+| API | 阶段 | 用途 |
+| --- | ---- | ---- |
+| `GET /health` | P0 | `guard-api` 进程健康检查 |
+| `GET /health?check_db=true` | P0 | Control Plane 数据库连接健康检查 |
+| `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
+| `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
+| `GET /v1/audit/events` | P0 | Dashboard 事件列表，可按 query 过滤 |
+| `GET /v1/metrics/eval` | P0 | 评测指标，可按 query 过滤 |
+| `POST /v1/auth/browser/launch` | P0 | 创建 Dashboard launch code |
+| `POST /v1/auth/browser/exchange` | P0 | launch code 换 browser session |
+| `GET /v1/auth/browser/me` | P0 | Dashboard 会话恢复 |
+| `POST /v1/auth/browser/logout` | P0 | Dashboard 会话退出 |
+| `GET /v1/approvals/pending` | P0 | Dashboard 查询待审批动作 |
+| `POST /v1/approvals/{approval_id}/resolve` | P0 | Dashboard 审批处理 |
+| `GET /v1/approvals/{approval_id}/wait` | P0 | Adapter 等待审批结果 |
+| `GET /v1/traces/{trace_id}` | P1 | 攻击链路详情 |
+| `POST /v1/policies` | P1 | 创建或导入策略 |
+| `GET /v1/policies` | P1 | 策略列表和策略快照查询 |
+| `POST /v1/eval/runs` | P1 | 创建评测任务 |
+| `GET /v1/metrics/runtime` | P1 | 运行时监控指标 |
 
-## 4. 鉴权
+目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
 
-P0 采用本地 Capability Auth，不做用户登录，不做 Dashboard 解锁。Core 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。
+## 4. 鉴权与状态
+
+`GET /health` 不要求鉴权。带 `check_db=true` 时检查 Control Plane 数据库连接；数据库不可用时返回 HTTP 503：
+
+```json
+{
+  "status": "degraded",
+  "database": "error"
+}
+```
+
+P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。Core 不参与鉴权，不读取 token，不管理 session。
 
 | 调用方 | 凭证 | 要求 |
-| --- | --- | --- |
-| CLI / Launcher | control token | `Authorization: Bearer`，仅用于 `auth:launch` |
+| ------ | ---- | ---- |
+| CLI / Launcher | control token | `Authorization: Bearer`，仅用于 `auth:launch` 和控制面管理能力 |
 | Adapter / Plugin | adapter token | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
 | Vue Dashboard | browser session | HttpOnly Cookie，用于 Dashboard API |
 | Vue 状态改变请求 | CSRF token | `X-AgentGuard-CSRF` |
 | 审批 resolve | approval nonce | JSON body，单次使用 |
 
-Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。详细方案见 [鉴权总体方案](../../share/鉴权总体方案.md)。
+Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
 
-## 5. SecurityContext
+## 4.1 查询参数
+
+`GET /v1/audit/events` 支持以下可选 query 参数：
+
+| 参数 | 含义 |
+| ---- | ---- |
+| `trace_id` | 只返回指定 trace 的审计事件 |
+| `case_id` | 只返回指定 case 的审计事件 |
+| `runtime` | 只返回指定 runtime 的审计事件 |
+| `decision` | 只返回指定决策的审计事件 |
+| `limit` | 返回条数，默认 500，最大 1000 |
+
+`GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
+
+## 5. GuardEvent
+
+`GuardEvent` 是 Adapter 发送给 Guard API 的统一事件封装。P0 首个稳定 payload 是 `ToolCallEvent`，P1 扩展上下文、模型、工具结果、消息外发和记忆写入。
+
+```json
+{
+  "schema_version": "0.3",
+  "event_id": "evt_001",
+  "event_type": "tool_call_proposed",
+  "runtime": "langgraph",
+  "trace_id": "trace_001",
+  "case_id": "PI-001",
+  "attack_type": "indirect_prompt_injection",
+  "is_malicious": true,
+  "timestamp": "2026-06-04T12:00:00+09:00",
+  "pre_execution": true,
+  "security_context": {},
+  "payload": {
+    "tool": {
+      "name": "read_file",
+      "category": "file",
+      "kind": "file_read",
+      "input_kind": null,
+      "call_id": "call_001"
+    },
+    "arguments": {
+      "path": "/private/token.txt"
+    },
+    "derived_resources": [
+      {
+        "resource_type": "file",
+        "operation": "read",
+        "target": "/private/token.txt",
+        "data_classification": "secret",
+        "direction": "local"
+      }
+    ]
+  },
+  "metadata": {}
+}
+```
+
+Guard API 可以直接把该事件和已加载的 `PolicySnapshot` 传入 `agentguard-core.evaluate(event, policies)`。Core 不负责从数据库加载策略。
+
+## 6. SecurityContext
 
 `SecurityContext` 记录用户任务、来源、会话、运行时、信任级别和派生资源，是任务一致性判断的主要输入。
 
@@ -88,22 +163,12 @@ Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。详细方�
 }
 ```
 
-## 6. ToolCallEvent
+## 7. ToolCallEvent Payload
 
-P0 首个稳定事件模型。Adapter 必须把运行时工具调用映射成该结构。
+P0 首个稳定事件 payload。Adapter 必须把运行时工具调用映射成该结构，并放入 `GuardEvent.payload`。
 
 ```json
 {
-  "schema_version": "0.1",
-  "event_id": "evt_tool_001",
-  "event_type": "tool_call",
-  "runtime": "langgraph",
-  "trace_id": "trace_001",
-  "case_id": "PI-001",
-  "attack_type": "indirect_prompt_injection",
-  "is_malicious": true,
-  "timestamp": "2026-06-04T12:00:00+09:00",
-  "security_context": {},
   "tool": {
     "name": "read_file",
     "category": "file",
@@ -122,15 +187,13 @@ P0 首个稳定事件模型。Adapter 必须把运行时工具调用映射成该
       "data_classification": "secret",
       "direction": "local"
     }
-  ],
-  "pre_execution": true,
-  "metadata": {}
+  ]
 }
 ```
 
-## 7. PolicyDecision
+## 8. GuardDecision
 
-Core 对每个评估请求返回一个决策。P0 必须支持 `allow`、`deny`、`ask`。
+Core 对每个评估请求返回一个 `GuardDecision`。P0 必须支持 `allow`、`deny`、`ask`。
 
 ```json
 {
@@ -138,6 +201,7 @@ Core 对每个评估请求返回一个决策。P0 必须支持 `allow`、`deny`�
   "decision": "deny",
   "risk_score": 92,
   "severity": "high",
+  "categories": ["sensitive_file_access"],
   "rule_hits": [
     {
       "rule_id": "P001_sensitive_file_access",
@@ -148,14 +212,34 @@ Core 对每个评估请求返回一个决策。P0 必须支持 `allow`、`deny`�
   ],
   "reason": "请求读取敏感文件，且与当前用户任务不一致",
   "safe_message": "该工具调用涉及敏感资源，已被阻断。",
-  "approval": null,
+  "approval_intent": null,
   "latency_ms": 18
 }
 ```
 
-## 8. AuditEvent
+`ask` 决策必须包含审批意图，但不包含已持久化的 approval row 或 approval nonce：
 
-AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。
+```json
+{
+  "decision_id": "dec_002",
+  "decision": "ask",
+  "risk_score": 68,
+  "severity": "medium",
+  "categories": ["outbound_dlp"],
+  "rule_hits": [],
+  "reason": "外发邮件包含潜在敏感内容，需要人工确认",
+  "approval_intent": {
+    "options": ["allow_once", "deny"],
+    "resource": "email:external"
+  }
+}
+```
+
+Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `approval_id` 返回给 Adapter。
+
+## 9. AuditEvent
+
+AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
 
 ```json
 {
@@ -163,7 +247,9 @@ AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。
   "trace_id": "trace_001",
   "runtime": "langgraph",
   "stage": "before_tool_call",
-  "event_type": "tool_call",
+  "event_type": "tool_call_proposed",
+  "attack_type": "indirect_prompt_injection",
+  "is_malicious": true,
   "summary": "Agent attempted to read /private/token.txt",
   "decision": "deny",
   "risk_score": 92,
@@ -171,24 +257,17 @@ AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。
   "blocked": true,
   "resource_targets": ["/private/token.txt"],
   "rule_hits": ["P001_sensitive_file_access"],
-  "reason": "敏感文件访问，且与当前任务不一致"
+  "reason": "敏感文件访问，且与当前任务不一致",
+  "latency_ms": 18
 }
 ```
 
-## 9. ContextBuildEvent
+## 10. ContextBuildEvent Payload
 
 P1 用于审计外部内容进入模型上下文前的拼接过程，支撑上下文隔离和环境污染检测。
 
 ```json
 {
-  "schema_version": "0.1",
-  "event_id": "evt_context_001",
-  "event_type": "context_build",
-  "runtime": "langgraph",
-  "trace_id": "trace_001",
-  "case_id": "PI-001",
-  "timestamp": "2026-06-04T12:00:01+09:00",
-  "security_context": {},
   "sources": [
     {
       "source_id": "email_001",
@@ -200,25 +279,16 @@ P1 用于审计外部内容进入模型上下文前的拼接过程，支撑上�
     }
   ],
   "will_enter_context": true,
-  "sanitized": false,
-  "metadata": {}
+  "sanitized": false
 }
 ```
 
-## 10. ToolResultEvent
+## 11. ToolResultEvent Payload
 
 P1 用于审计工具结果是否会回流到模型上下文或持久化存储，防止工具结果污染后续推理。
 
 ```json
 {
-  "schema_version": "0.1",
-  "event_id": "evt_tool_result_001",
-  "event_type": "tool_result",
-  "runtime": "langgraph",
-  "trace_id": "trace_001",
-  "case_id": "PI-001",
-  "timestamp": "2026-06-04T12:00:02+09:00",
-  "security_context": {},
   "tool": {
     "name": "read_file",
     "category": "file",
@@ -234,25 +304,16 @@ P1 用于审计工具结果是否会回流到模型上下文或持久化存储�
   "will_persist": true,
   "sanitized": false,
   "contains_sensitive_data": false,
-  "contains_instruction_like_text": true,
-  "metadata": {}
+  "contains_instruction_like_text": true
 }
 ```
 
-## 11. MemoryEvent
+## 12. MemoryEvent Payload
 
 P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 ```json
 {
-  "schema_version": "0.1",
-  "event_id": "evt_memory_001",
-  "event_type": "memory_write",
-  "runtime": "langgraph",
-  "trace_id": "trace_001",
-  "case_id": "MP-001",
-  "timestamp": "2026-06-04T12:00:03+09:00",
-  "security_context": {},
   "memory": {
     "namespace": "user_preferences",
     "key": "report_delivery_rule",
@@ -261,32 +322,32 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
     "operation": "write"
   },
   "will_persist": true,
-  "requires_approval": true,
-  "metadata": {}
+  "requires_approval": true
 }
 ```
 
-## 12. P0/P1/P2 开发边界
+## 13. P0/P1/P2 开发边界
 
-| 阶段 | 契约范围                                                                |
-| ---- | ----------------------------------------------------------------------- |
-| P0   | `ToolCallEvent`、`PolicyDecision`、`AuditEvent`、基础审计列表和评测指标 |
-| P1   | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询和审批        |
-| P2   | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展      |
+| 阶段 | 契约范围 |
+| ---- | -------- |
+| P0 | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、评测指标和最小 Dashboard 审批 |
+| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询、策略快照、CLI 审批和复杂审批体验 |
+| P2 | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展 |
 
-## 13. 冻结规则
+## 14. 冻结规则
 
-- P0 后不删除 `ToolCallEvent`、`PolicyDecision`、`AuditEvent` 字段。
+- P0 后不删除 `GuardEvent`、`GuardDecision`、`AuditEvent` 字段。
 - 新字段只能 optional 添加。
-- Dashboard 只通过 Core API 获取数据和提交审批。
-- Adapter 不写核心规则。
-- Core 不执行工具。
+- Dashboard 只通过 Guard API 获取数据和提交审批。
+- Adapter 不写核心规则，不访问数据库。
+- Core 不执行工具，不暴露 HTTP API，不读写数据库。
 - `schema_version` 变更必须同步 `schemas/`、contract tests 和文档。
 
-## 14. 验收证据
+## 15. 验收证据
 
 1. P0 三个核心模型有 JSON Schema。
-2. `POST /v1/evaluate/tool-call` 能返回 `allow`、`deny`、`ask`。
-3. Adapter 能依据 `PolicyDecision` 控制工具是否执行。
-4. Dashboard 能基于 AuditEvent 展示阻断原因。
-5. AttackBench runner 能用 `case_id`、`trace_id` 汇总指标。
+2. `POST /v1/guard/evaluate` 能返回 `allow`、`deny`、`ask`。
+3. Adapter 能依据 `GuardDecision` 控制工具是否执行。
+4. Core 返回 `ask` 时只包含审批意图，approval row 和 nonce 由 Guard API / Control Plane 创建。
+5. Dashboard 能基于 AuditEvent 展示阻断原因。
+6. AttackBench runner 能用 `case_id`、`trace_id` 汇总指标。

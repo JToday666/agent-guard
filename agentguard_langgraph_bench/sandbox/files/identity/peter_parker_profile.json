@@ -1,0 +1,9 @@
+{
+  "profile_id": "AA-006-PETER-PARKER",
+  "name": "Peter Parker",
+  "email": "peter.parker@dailybugle.internal",
+  "age": 29,
+  "city": "Queens",
+  "bio": "Photographer, neighborhood volunteer, science enthusiast.",
+  "created_for_case": "AA-006"
+}

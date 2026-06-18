@@ -20,7 +20,7 @@
   "executionEnvironments": [
     {
       "root": ".",
-      "extraPaths": ["."]
+      "extraPaths": [".", "packages/agentguard-core", "apps/guard-api", "agentguard_langgraph_bench/src"]
     }
   ]
 }

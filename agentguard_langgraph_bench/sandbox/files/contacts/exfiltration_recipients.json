@@ -1,0 +1,8 @@
+{
+  "registered_review_mailboxes": [
+    "redwood-audit@external-review.local",
+    "atlas-archive@external-review.local"
+  ],
+  "local_collector": "http://127.0.0.1:18086/status",
+  "owner": "agentguard-benchmark"
+}

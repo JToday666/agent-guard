@@ -2,12 +2,12 @@
 
 ## 1. 文档定位
 
-LangGraph 侧是 AgentGuard 的 P0 保底运行环境和自动化评测靶场。它负责稳定复现攻击、触发 Mock Tools、验证 Core 决策和输出 AttackBench 指标。
+LangGraph 侧是 AgentGuard 的 P0 保底运行环境和自动化评测靶场。它负责稳定复现攻击、触发 Mock Tools、验证 Guard API / Core 判定链路和输出 AttackBench 指标。
 
 关联入口：
 
 - [接口契约与事件模型](../02_core/interface_contract.md)
-- [Agent Security Core 设计](../02_core/core_design.md)
+- [`agentguard-core` 设计](../02_core/core_design.md)
 - [AttackBench 攻击样本与评测](../05_redteam/attackbench.md)
 
 ## 2. 模块职责
@@ -15,7 +15,7 @@ LangGraph 侧是 AgentGuard 的 P0 保底运行环境和自动化评测靶场。
 | 模块                    | 职责                                           |
 | ----------------------- | ---------------------------------------------- |
 | Demo Agent              | 接收 AttackCase 或用户任务，驱动模型和工具调用 |
-| Tool Interception Layer | 在工具执行前构造 ToolCallEvent 并调用 Core     |
+| Tool Interception Layer | 在工具执行前构造 GuardEvent，其中 ToolCallEvent 是 P0 payload，并调用 Guard API |
 | Mock Tools              | 模拟文件、邮件、API、代码执行和记忆写入        |
 | Runtime Mapper          | 将 LangGraph 原生状态映射为 AgentGuard 事件    |
 | Runner Hook             | 将执行结果回传给 AttackBench runner            |
@@ -25,7 +25,7 @@ LangGraph 侧是 AgentGuard 的 P0 保底运行环境和自动化评测靶场。
 | 接入点                    | 阶段        | 作用                                                                    |
 | ------------------------- | ----------- | ----------------------------------------------------------------------- |
 | `ToolNode.wrap_tool_call` | P0 优先方案 | 当前 LangGraph 版本支持时，用作工具调用前拦截                           |
-| `SecureToolNode`          | P0 降级方案 | 当前版本不支持 wrapper 时，自定义 ToolNode 并在 tool invoke 前调用 Core |
+| `SecureToolNode`          | P0 降级方案 | 当前版本不支持 wrapper 时，自定义 ToolNode 并在 tool invoke 前调用 Guard API |
 | 手写 `tool_node(state)`   | P0 降级方案 | prebuilt agent 不便插桩时，使用 StateGraph 手写工具节点                 |
 | `interrupt`               | P0-P1       | `ask` 决策的人工确认                                                    |
 | `pre_model_hook`          | P1          | 输入过滤、上下文隔离                                                    |
@@ -38,8 +38,8 @@ LangGraph 版本更新较快，P0 实现不绑定单一 API 名称。工具执�
 
 ```text
 工具调用意图
-→ 构造 ToolCallEvent
-→ Core 返回 PolicyDecision
+→ 构造 GuardEvent / ToolCallEvent payload
+→ Guard API 调用 Core 并返回 GuardDecision
 → allow 才执行工具
 → deny / ask 不执行工具
 ```
@@ -47,7 +47,7 @@ LangGraph 版本更新较快，P0 实现不绑定单一 API 名称。工具执�
 实现优先级：
 
 1. 首选当前版本支持的 `ToolNode.wrap_tool_call` 或等价 wrapper 能力。
-2. 若不可用，实现 `SecureToolNode`，在每次工具 `invoke` 前调用 Core。
+2. 若不可用，实现 `SecureToolNode`，在每次工具 `invoke` 前调用 Guard API。
 3. 若 prebuilt agent 不便插桩，使用手写 `StateGraph` 和 `tool_node(state)`，显式控制工具执行。
 
 ## 5. 运行链路
@@ -58,16 +58,18 @@ flowchart TB
     B["LangGraph Agent"]
     C["LLM Node"]
     D["Tool Interception Layer"]
-    E["ToolCallEvent"]
-    F["Core"]
-    G{"PolicyDecision"}
+    E["GuardEvent / ToolCallEvent payload"]
+    F["Guard API / Control Plane"]
+    G["agentguard-core.evaluate"]
+    K{"GuardDecision"}
     H["Mock Tools"]
     I["AuditEvent"]
     J["AttackBench Metrics"]
 
     A --> B --> C --> D --> E --> F --> G
-    G -- "allow" --> H
-    G -- "deny / ask" --> I
+    G --> K
+    K -- "allow" --> H
+    K -- "deny / ask" --> I
     H --> I --> J
 ```
 
@@ -95,7 +97,7 @@ flowchart TB
 ## 8. 验收证据
 
 1. `PI-001` 能诱导 Agent 生成 `read_file('/private/token.txt')`。
-2. 工具执行前拦截层能在工具执行前调用 Core，不依赖单一 LangGraph API 名称。
-3. Core 返回 `deny` 后 Mock Tool 不执行。
+2. 工具执行前拦截层能在工具执行前调用 Guard API，不依赖单一 LangGraph API 名称。
+3. Guard API 返回 `deny` 后 Mock Tool 不执行。
 4. `ask` 决策能通过 interrupt 暂停动作。
 5. AttackBench runner 能读取 LangGraph trace 并统计结果。

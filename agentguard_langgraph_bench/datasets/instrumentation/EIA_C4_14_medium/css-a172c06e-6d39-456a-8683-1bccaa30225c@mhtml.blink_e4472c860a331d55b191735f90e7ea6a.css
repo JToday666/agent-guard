@@ -1,0 +1,12 @@
+@charset "utf-8";
+
+.css-18u86wc { display: none; }
+
+.css-18u86wc:checked + label svg:first-of-type { display: none; }
+
+.css-18u86wc:checked + label svg:last-of-type { display: inline-block; }
+
+@media (min-width: 1200px) {
+  .css-18u86wc:checked { background: rgb(64, 108, 180); }
+  .css-18u86wc:checked + label { background: rgb(64, 108, 180); }
+}

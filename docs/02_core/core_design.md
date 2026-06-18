@@ -1,8 +1,8 @@
-# Agent Security Core 设计
+# `agentguard-core` 设计
 
 ## 1. 文档定位
 
-Core 是 AgentGuard 的唯一安全判断中心。本文定义 Core 的职责、内部模块、检测器、决策流程和验收边界。
+Core 是 AgentGuard 的无状态安全判定内核。本文定义 Core 的职责、输入输出、内部模块、检测器、决策流程和验收边界。Core 的目标是成为可嵌入、可测试、低延迟、框架无关的 Python 判定库。
 
 关联入口：
 
@@ -14,116 +14,178 @@ Core 是 AgentGuard 的唯一安全判断中心。本文定义 Core 的职责、
 
 Core 负责：
 
-- schema 校验；
-- 风险检测；
-- 风险评分；
-- 策略决策；
-- 审批状态；
-- 审计记录；
-- 指标统计；
-- P1/P2 的 provenance、memory guard、action critic 扩展。
+- 标准安全事件的 schema 校验和规范化；
+- 从事件中派生资源、动作、数据方向和信任边界；
+- 执行 prompt injection、tool hijacking、敏感资源访问、数据外发、代码执行、记忆投毒等检测器；
+- 执行策略匹配和策略结果合并；
+- 计算风险分数、严重等级和风险类别；
+- 生成可解释证据、命中规则和安全原因；
+- 输出 `GuardDecision`，包括 `allow`、`deny`、`ask`、`modify`、`audit_only`、`shadow_deny` 等目标态动作；
+- 支持离线评测和单元测试直接调用。
 
 Core 不负责：
 
-- 调用或执行工具；
-- 读取运行时私有状态；
-- 渲染 Dashboard 页面；
+- 暴露 HTTP API；
+- 读取或写入 PostgreSQL、Redis、文件系统等基础设施；
+- 执行 Alembic migration；
+- 创建、查询或更新审计日志；
+- 创建、查询或更新审批记录；
+- 聚合指标、生成报表或维护评测任务状态；
+- 管理 browser session、CSRF token、launch code、approval nonce、API Key；
+- 调用或执行 Agent 工具；
+- 读取 Agent runtime 私有状态；
+- 渲染 Dashboard 页面或推送 WebSocket；
 - 管理 Redteam 样本 ground truth。
+
+这些状态和副作用能力逻辑上属于 Guard API / Control Plane。MVP 阶段它们实现为 `guard-api` 内部 service layer，而不是 Core 的一部分。
 
 ## 3. 输入与输出
 
-| 输入              | 来源                         | 输出                       |
-| ----------------- | ---------------------------- | -------------------------- |
-| ToolCallEvent     | LangGraph / OpenClaw Adapter | PolicyDecision、AuditEvent |
-| ContextBuildEvent | pre model hook               | PolicyDecision、AuditEvent |
-| ModelCallEvent    | model hook                   | AuditEvent 或告警          |
-| ToolResultEvent   | tool result hook             | AuditEvent 或告警          |
-| MemoryEvent       | memory wrapper               | PolicyDecision、AuditEvent |
+Core 目标接口：
 
-## 4. 结构
+```python
+def evaluate(event: GuardEvent, policies: PolicyBundle | PolicySnapshot) -> GuardDecision:
+    ...
+```
+
+| 输入 | 来源 | 说明 |
+| ---- | ---- | ---- |
+| `GuardEvent` | Adapter 或离线评测 runner | 统一安全事件封装，内部可承载 `ToolCallEvent`、`ContextBuildEvent`、`ModelCallEvent`、`ToolResultEvent`、`MemoryEvent` 等具体事件 |
+| `PolicyBundle` / `PolicySnapshot` | Guard API / Control Plane 或离线评测配置 | 已加载、已解析的策略快照；Core 不在判定链路中实时查询数据库 |
+
+| 输出 | 消费方 | 说明 |
+| ---- | ------ | ---- |
+| `GuardDecision` | Guard API 或离线评测 runner | 安全判定结果，包含动作、风险分数、严重等级、命中规则、原因和证据 |
+
+`AuditEvent` 可以由 Core 提供领域 schema 或 builder，但审计入库、查询、指标聚合和 Dashboard 展示由 Guard API / Control Plane 负责。
+
+## 4. 内部结构
+
+目标态 Core 结构：
 
 ```text
 packages/agentguard-core/
 └── agentguard_core/
     ├── events/
-    ├── detectors/
+    │   ├── schema.py
+    │   ├── types.py
+    │   └── normalizer.py
+    ├── decisions/
+    │   ├── schema.py
+    │   └── actions.py
     ├── policy/
-    ├── isolation/
-    ├── action_critic/
-    ├── provenance/
-    ├── audit/
-    ├── metrics/
-    └── storage/
+    │   ├── engine.py
+    │   ├── bundle.py
+    │   ├── matcher.py
+    │   └── builtin_rules.py
+    ├── detectors/
+    ├── risk/
+    ├── evidence/
+    ├── engine.py
+    └── __init__.py
 ```
+
+不属于目标态 Core 的目录或能力：
+
+- `storage/`；
+- `migrations/`；
+- FastAPI route；
+- Dashboard session / nonce；
+- 审批状态机；
+- 指标查询服务。
+
+如果为了兼容历史实现短期保留这些文件，应在文档和代码命名中标记为迁移遗留，不作为目标态架构边界。
 
 ## 5. 决策流程
 
 ```mermaid
 flowchart TB
-    A["接收事件"]
-    B["Schema 校验"]
-    C["资源派生"]
-    D["风险检测"]
-    E["风险评分"]
-    F["策略决策"]
-    G{"allow / deny / ask"}
-    H["审批服务"]
-    I["审计记录"]
-    J["指标统计"]
-    K["返回决策"]
+    A["接收 GuardEvent"]
+    B["Schema 校验与规范化"]
+    C["资源和动作派生"]
+    D["策略匹配"]
+    E["检测器执行"]
+    F["风险评分"]
+    G["证据生成"]
+    H["决策合并"]
+    I["返回 GuardDecision"]
 
-    A --> B --> C --> D --> E --> F --> G
-    G --> H
-    G --> I
-    I --> J
-    G --> K
+    A --> B --> C --> D --> E --> F --> G --> H --> I
 ```
 
-## 6. 检测器
+Core 判定流程必须保持无状态、无外部 I/O。策略、白名单、阈值和租户配置应以 `PolicyBundle` / `PolicySnapshot` 的形式作为输入传入。
 
-| 检测器                       | 阶段  | 作用                                          |
-| ---------------------------- | ----- | --------------------------------------------- |
-| SensitiveFileDetector        | P0    | 检测 `.env`、token、secret、key、private 路径 |
-| ToolHijackDetector           | P0    | 检测工具名、工具类型和用户任务不匹配          |
-| TaskMismatchDetector         | P0    | 判断工具动作与 `user_task` 是否偏离           |
-| OutboundDLPDetector          | P0-P1 | 检测邮件、消息、API 外发中的敏感数据          |
-| PromptInjectionDetector      | P1    | 检测不可信内容中的注入语句                    |
-| JailbreakDetector            | P1    | 检测模型越狱输入或输出                        |
-| CodeExecDetector             | P1    | 检测危险命令、系统探测、删除和外连            |
-| MemoryPoisoningDetector      | P1-P2 | 检测恶意长期记忆写入                          |
-| EnvironmentPoisoningDetector | P1-P2 | 检测 README、日志、API 返回污染               |
-| NetworkSSRFDetector          | P2    | 检测内网、metadata 和异常外连访问             |
+## 6. `ask` 决策语义
 
-## 7. 策略决策
+`ask` 是 Core 输出的安全动作，含义是“该行为风险中等或上下文不足，需要人工确认后才能执行”。
+
+Core 只负责返回审批意图和必要证据，例如：
+
+```json
+{
+  "decision": "ask",
+  "risk_score": 68,
+  "severity": "medium",
+  "reason": "外发邮件包含潜在敏感内容，需要人工确认",
+  "approval_intent": {
+    "options": ["allow_once", "deny"],
+    "resource": "email:external"
+  }
+}
+```
+
+Core 不创建 approval row，不生成 approval nonce，不等待审批结果。Guard API / Control Plane 根据 `ask` 决策创建审批记录、发布 Dashboard 待办，并向 Adapter 提供 wait 接口。
+
+## 7. 检测器
+
+| 检测器 | 阶段 | 作用 |
+| ------ | ---- | ---- |
+| SensitiveFileDetector | P0 | 检测 `.env`、token、secret、key、private 路径 |
+| ToolHijackDetector | P0 | 检测工具名、工具类型和用户任务不匹配 |
+| TaskMismatchDetector | P0 | 判断工具动作与 `user_task` 是否偏离 |
+| OutboundDLPDetector | P0-P1 | 检测邮件、消息、API 外发中的敏感数据 |
+| PromptInjectionDetector | P1 | 检测不可信内容中的注入语句 |
+| JailbreakDetector | P1 | 检测模型越狱输入或输出 |
+| CodeExecDetector | P1 | 检测危险命令、系统探测、删除和外连 |
+| MemoryPoisoningDetector | P1-P2 | 检测恶意长期记忆写入 |
+| EnvironmentPoisoningDetector | P1-P2 | 检测 README、日志、API 返回污染 |
+| NetworkSSRFDetector | P2 | 检测内网、metadata 和异常外连访问 |
+
+检测器不得直接访问数据库、HTTP 服务、Dashboard 状态或 Agent runtime 私有对象。检测器只读取 `GuardEvent`、派生资源和策略快照。
+
+## 8. 策略决策
 
 P0 决策：
 
-| 决策    | 含义   | Adapter 行为         |
-| ------- | ------ | -------------------- |
-| `allow` | 低风险 | 执行工具             |
-| `deny`  | 高风险 | 阻断工具并记录审计   |
-| `ask`   | 中风险 | 暂停动作并创建审批项 |
+| 决策 | 含义 | Adapter 行为 |
+| ---- | ---- | ------------ |
+| `allow` | 低风险 | 执行工具 |
+| `deny` | 高风险 | 阻断工具并记录审计 |
+| `ask` | 中风险或上下文不足 | 暂停动作并等待 Guard API / Control Plane 审批 |
 
 P1/P2 扩展：
 
-| 决策          | 含义               |
-| ------------- | ------------------ |
-| `modify`      | 改写参数后放行     |
-| `audit_only`  | 仅记录，不影响执行 |
-| `shadow_deny` | 影子模式模拟阻断   |
+| 决策 | 含义 |
+| ---- | ---- |
+| `modify` | 改写参数后放行 |
+| `audit_only` | 仅记录，不影响执行 |
+| `shadow_deny` | 影子模式模拟阻断 |
 
-## 8. P0/P1/P2 开发边界
+## 9. P0/P1/P2 开发边界
 
-| 阶段 | Core 交付                                                                     |
-| ---- | ----------------------------------------------------------------------------- |
-| P0   | tool-call API、三类决策、敏感文件/工具劫持/任务偏离检测、AuditEvent、基础指标 |
-| P1   | 上下文和模型调用审计、消息外发、记忆写入、审批服务、FPR/FNR                   |
-| P2   | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit、消融实验 |
+| 阶段 | Core 交付 |
+| ---- | --------- |
+| P0 | `GuardEvent` / `ToolCallEvent`、`GuardDecision`、敏感文件检测、工具劫持检测、任务偏离检测、基础风险评分、可解释规则命中 |
+| P1 | 上下文和模型调用审计事件 schema、消息外发检测、记忆写入检测、策略快照输入、FPR/FNR 所需证据字段 |
+| P2 | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit 所需领域模型和检测扩展 |
 
-## 9. 验收证据
+审批服务、审计入库、指标聚合、Trace 查询、PostgreSQL migration、Redis/WebSocket 推送不属于 Core 交付，它们属于 Guard API / Control Plane。
 
-1. 对 `read_file('/private/token.txt')` 返回 `deny`。
-2. 对非白名单邮件外发返回 `ask` 或 `deny`。
+## 10. 验收证据
+
+1. 对 `read_file('/private/token.txt')` 返回 `deny`，且不需要数据库连接。
+2. 对非白名单邮件外发返回 `ask` 或 `deny`，审批记录不由 Core 创建。
 3. 对正常文档读取返回 `allow`。
-4. 每次决策生成 `rule_hits`、`risk_score`、`reason`。
-5. 指标接口能汇总 Block Rate、FPR、FNR、Latency。
+4. 每次决策生成 `rule_hits`、`risk_score`、`reason` 和可解释证据。
+5. 离线评测可以直接调用 `agentguard-core.evaluate(event, policies)`。
+6. Guard API 可以在同一决策结果上补充审计入库、审批状态和指标聚合，而不改变 Core 判定逻辑。
