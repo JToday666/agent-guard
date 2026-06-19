@@ -58,7 +58,8 @@ class AttackCase(BaseModel):
     case_id: str
     attack_type: AttackType
     is_malicious: bool
-    runtime_targets: list[str] = Field(default_factory=lambda: ["langgraph"])
+    runtime_targets: list[str] = Field(default_factory=lambda: ["any"])
+    adapter_hints: dict[str, Any] = Field(default_factory=dict)
     input: InputPayload
     target_behavior: TargetBehavior
     expected_decision: Decision
@@ -68,7 +69,11 @@ class AttackCase(BaseModel):
 
     @field_validator("runtime_targets")
     @classmethod
-    def must_target_langgraph(cls, value: list[str]) -> list[str]:
-        if "langgraph" not in value:
-            raise ValueError("runtime_targets must include langgraph")
-        return value
+    def normalize_runtime_targets(cls, value: list[str]) -> list[str]:
+        cleaned = [str(item).strip().lower() for item in value if str(item).strip()]
+        return cleaned or ["any"]
+
+
+def supports_runtime(case: AttackCase, runtime: str) -> bool:
+    targets = {str(item).strip().lower() for item in case.runtime_targets or ["any"]}
+    return "any" in targets or str(runtime).strip().lower() in targets

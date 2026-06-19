@@ -21,6 +21,20 @@ COLLECT_CONTROLS_JS = """
     if (el.closest("[hidden], [aria-hidden='true'], .hidden")) return false;
     return true;
   }
+  function actionable(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "a") {
+      const href = el.getAttribute("href") || "";
+      return href && !href.startsWith("link://");
+    }
+    if (tag === "label") {
+      const target = document.getElementById(el.getAttribute("for") || "");
+      if (!target) return false;
+      const type = (target.getAttribute("type") || "").toLowerCase();
+      return ["checkbox", "radio", "file", "button", "submit", "reset"].includes(type);
+    }
+    return true;
+  }
   const selector = [
     "a[href]",
     "button",
@@ -33,7 +47,7 @@ COLLECT_CONTROLS_JS = """
     "select"
   ].join(",");
   return Array.from(document.querySelectorAll(selector))
-    .filter((el) => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true")
+    .filter((el) => visible(el) && actionable(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true")
     .map((el, index) => {
       const rect = el.getBoundingClientRect();
       return {
@@ -52,21 +66,24 @@ COLLECT_CONTROLS_JS = """
 
 
 SNAPSHOT_JS = """
-() => ({
-  href: window.location.href,
-  hash: window.location.hash,
-  text: document.body.innerText.replace(/\\s+/g, " ").trim(),
-  lastClick: document.body.getAttribute("data-ag-last-click") || "",
-  changeCount: document.body.getAttribute("data-ag-change-count") || "",
-  modalCount: document.querySelectorAll(".ag-modal-backdrop, .modal-overlay:not(.hidden), [role='dialog']:not([aria-hidden='true'])").length,
-  drawerCount: document.querySelectorAll(".ag-drawer").length,
-  popoverCount: document.querySelectorAll(".ag-popover").length,
-  toastCount: document.querySelectorAll(".ag-toast").length,
-  status: (document.querySelector("#ag-local-status, [role='status']") || {}).textContent || "",
-  expanded: Array.from(document.querySelectorAll("[aria-expanded]")).map((el) => el.getAttribute("aria-expanded")).join("|"),
-  cartCount: (document.querySelector("#cart-count") || {}).textContent || "",
-  galleryIndex: document.body.getAttribute("data-ag-gallery-index") || ""
-})
+() => {
+  const body = document.body;
+  return {
+    href: window.location.href,
+    hash: window.location.hash,
+    text: body ? body.innerText.replace(/\\s+/g, " ").trim() : "",
+    lastClick: body ? body.getAttribute("data-ag-last-click") || "" : "",
+    changeCount: body ? body.getAttribute("data-ag-change-count") || "" : "",
+    modalCount: document.querySelectorAll(".ag-modal-backdrop, .modal-overlay:not(.hidden), [role='dialog']:not([aria-hidden='true'])").length,
+    drawerCount: document.querySelectorAll(".ag-drawer").length,
+    popoverCount: document.querySelectorAll(".ag-popover").length,
+    toastCount: document.querySelectorAll(".ag-toast").length,
+    status: (document.querySelector("#ag-local-status, [role='status']") || {}).textContent || "",
+    expanded: Array.from(document.querySelectorAll("[aria-expanded]")).map((el) => el.getAttribute("aria-expanded")).join("|"),
+    cartCount: (document.querySelector("#cart-count") || {}).textContent || "",
+    galleryIndex: body ? body.getAttribute("data-ag-gallery-index") || "" : ""
+  };
+}
 """
 
 
@@ -91,8 +108,22 @@ CLICK_CONTROL_JS = """
     if (el.closest("[hidden], [aria-hidden='true'], .hidden")) return false;
     return true;
   }
+  function actionable(el) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "a") {
+      const href = el.getAttribute("href") || "";
+      return href && !href.startsWith("link://");
+    }
+    if (tag === "label") {
+      const target = document.getElementById(el.getAttribute("for") || "");
+      if (!target) return false;
+      const type = (target.getAttribute("type") || "").toLowerCase();
+      return ["checkbox", "radio", "file", "button", "submit", "reset"].includes(type);
+    }
+    return true;
+  }
   const controls = Array.from(document.querySelectorAll(selector))
-    .filter((el) => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true");
+    .filter((el) => visible(el) && actionable(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true");
   const el = controls[index];
   if (!el) return false;
   el.scrollIntoView({ block: "center", inline: "center" });
@@ -152,6 +183,13 @@ def _changed(before: dict, after: dict) -> bool:
 
 
 def _wait_for_local_ui(page) -> None:
+    try:
+        page.wait_for_function(
+            "() => document.body",
+            timeout=5000,
+        )
+    except Exception:
+        pass
     try:
         page.wait_for_function(
             "() => window.AgentGuardLocalUI && window.AgentGuardLocalUI.__installed",

@@ -1,0 +1,13 @@
+mode = "http"
+endpoint = "http://127.0.0.1:19000/run"
+timeout = 120
+
+[tool_server]
+mode = "http"
+host = "127.0.0.1"
+port = 18090
+
+[task]
+include_attackcase_metadata = true
+include_tool_plan_as_hint = true
+include_oracle = false
