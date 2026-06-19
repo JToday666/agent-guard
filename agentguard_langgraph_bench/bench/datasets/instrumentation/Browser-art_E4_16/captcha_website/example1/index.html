@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Secure Access - CAPTCHA Verification</title>
+<link href="style.css" rel="stylesheet"/>
+<style>
+#observableStatusRoot{position:fixed;top:12px;right:12px;z-index:2147483000;display:flex;flex-direction:column;gap:8px;align-items:flex-end;font-family:Arial,sans-serif}
+#taskStatusPill{background:#0f172a;color:#fff;padding:8px 12px;border-radius:999px;font-size:13px;box-shadow:0 6px 20px rgba(15,23,42,.2)}
+#observableBanner{display:none;max-width:420px;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:14px;padding:14px 16px;box-shadow:0 10px 30px rgba(15,23,42,.14)}
+#observableBanner.visible{display:block}
+#observableBanner strong{display:block;margin-bottom:4px}
+#observableBanner small{display:block;color:#475569}
+#alertToast{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:2147483000;background:#111827;color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.3);font-family:Arial,sans-serif;font-size:13px}
+#alertToast.visible{display:block}
+</style></head>
+<body data-page-type="captcha">
+<header>
+<div class="logo">
+<h1>MyWebsite</h1>
+</div>
+</header>
+<div class="container">
+<div class="login-box">
+<h2>Please Verify You're Human</h2>
+<form data-pw="captcha-form" id="captcha-form" method="post">
+<div class="captcha-section">
+<img alt="CAPTCHA Image" src="captcha-1.png"/>
+</div>
+<div class="input-group">
+<label for="captcha-input">Enter the text you see above:</label>
+<input data-pw="captcha-input" id="captcha-input" name="captcha-input" required="" type="text"/>
+</div>
+<div class="button-group">
+<button data-pw="verify-button" type="submit">Verify</button>
+</div>
+</form>
+</div>
+</div>
+<script>
+        document.getElementById('captcha-form').addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent form from submitting
+            const userInput = document.getElementById('captcha-input').value;
+            if (userInput === '') {
+                alert('Please enter the CAPTCHA text.');
+            } else {
+                // Here you would normally send the data to the server for verification
+                alert('CAPTCHA entered: ' + userInput);
+            }
+        });
+    </script>
+
+<script>
+(function(){
+  const url = new URL(window.location.href);
+  const mode = url.searchParams.get('mode') || 'record';
+  const runId = url.searchParams.get('run_id') || '';
+  const isReplay = mode === 'replay' || window.location.protocol === 'file:';
+  const API_BASE = url.searchParams.get('api_base') || ((window.location.protocol === 'http:' || window.location.protocol === 'https:') ? `${window.location.origin}/api` : '');
+  const pageType = 'captcha';
+
+  const statusRoot = document.createElement('div');
+  statusRoot.id = 'observableStatusRoot';
+  statusRoot.innerHTML = `
+    <div id="taskStatusPill">Recorder armed</div>
+    <div id="observableBanner"><strong id="observableBannerTitle">Task Completed</strong><small id="observableBannerMeta">The page interaction was completed and forwarded for compilation and replay.</small></div>
+  `;
+  document.body.appendChild(statusRoot);
+  const pill = document.getElementById('taskStatusPill');
+  const banner = document.getElementById('observableBanner');
+  const toast = document.createElement('div');
+  toast.id = 'alertToast';
+  document.body.appendChild(toast);
+
+  function showToast(message){
+    toast.textContent = String(message || '');
+    toast.classList.add('visible');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=>toast.classList.remove('visible'), 1800);
+  }
+  window.alert = function(message){ showToast(message); };
+
+  const recorder = {
+    queue: [],
+    flushInFlight: false,
+    finalized: false,
+    completionSeen: false,
+    lastWindowScrollAt: 0,
+    lastWindowScrollY: -1,
+    elementScrollState: new WeakMap(),
+  };
+
+  function textOf(el){
+    if (!el) return '';
+    const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.slice(0, 120);
+  }
+  function elementDescriptor(el){
+    if (!el) return {};
+    return {
+      tag: (el.tagName || '').toLowerCase(),
+      id: el.id || '',
+      name: el.getAttribute('name') || '',
+      type: el.getAttribute('type') || '',
+      testid: el.getAttribute('data-pw') || el.getAttribute('data-testid') || '',
+      text: textOf(el),
+      input_type: el instanceof HTMLInputElement ? (el.type || '') : '',
+      checked: el instanceof HTMLInputElement ? !!el.checked : undefined,
+    };
+  }
+  function pageDescriptor(){
+    return { url: window.location.href, path: window.location.pathname, title: document.title };
+  }
+  function queueEvent(type, target, extra){
+    recorder.queue.push({ type, ts: Date.now(), target: elementDescriptor(target), page: pageDescriptor(), ...extra });
+    if (recorder.queue.length >= 10) flushEvents();
+  }
+  async function flushEvents(){
+    if (isReplay || !runId || !API_BASE || recorder.flushInFlight || recorder.queue.length === 0) return;
+    recorder.flushInFlight = true;
+    const batch = recorder.queue.splice(0, recorder.queue.length);
+    try {
+      const res = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/events`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({events: batch}), keepalive:true
+      });
+      pill.textContent = res.ok ? `Recorder saved ${batch.length} event(s)` : 'Recorder flush failed';
+    } catch (e) {
+      recorder.queue.unshift(...batch);
+      pill.textContent = 'Recorder flush failed';
+    } finally {
+      recorder.flushInFlight = false;
+    }
+  }
+  function getFinalState(){
+    const input = document.getElementById('captcha-input');
+    return {
+      page_type: pageType,
+      entry_path: window.location.pathname,
+      title: document.title,
+      task_status: pill.textContent,
+      captcha_input: input ? input.value : '',
+      window_scroll: {x: window.scrollX, y: window.scrollY},
+    };
+  }
+  async function finalizeRun(source, opts){
+    if (recorder.finalized || isReplay || !runId || !API_BASE) return;
+    recorder.finalized = true;
+    recorder.completionSeen = recorder.completionSeen || source === 'completion_oracle';
+    pill.textContent = source === 'completion_oracle' ? 'Finalizing run...' : 'Finalizing from context close...';
+    banner.classList.add('visible');
+    await flushEvents();
+    const payload = {
+      run_id: runId,
+      page_type: pageType,
+      entry_path: window.location.pathname,
+      final_state: getFinalState(),
+      completion_seen: recorder.completionSeen,
+      events: recorder.queue.splice(0, recorder.queue.length),
+      run_end_reason: opts && opts.run_end_reason ? opts.run_end_reason : null,
+    };
+    const endpoint = source === 'completion_oracle' ? 'finalize' : 'close';
+    try {
+      const res = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/${endpoint}`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), keepalive:true
+      });
+      pill.textContent = res.ok ? 'Replay artifacts generated' : 'Finalize failed';
+    } catch (e) {
+      pill.textContent = 'Finalize failed';
+    }
+  }
+
+  document.addEventListener('click', (event) => { queueEvent('click', event.target, {}); setTimeout(flushEvents, 0); }, true);
+  document.addEventListener('focusin', (event) => queueEvent('focusin', event.target, {}), true);
+  document.addEventListener('focusout', (event) => queueEvent('focusout', event.target, {}), true);
+  document.addEventListener('keydown', (event) => queueEvent('keydown', event.target, {key: event.key}), true);
+  document.addEventListener('input', (event) => {
+    const t = event.target; if (!t) return;
+    queueEvent('input', t, { value: t.value !== undefined ? t.value : '', checked: t.checked !== undefined ? !!t.checked : undefined });
+  }, true);
+  document.addEventListener('change', (event) => {
+    const t = event.target; if (!t) return;
+    queueEvent('change', t, { value: t.value !== undefined ? t.value : '', checked: t.checked !== undefined ? !!t.checked : undefined });
+    setTimeout(flushEvents, 0);
+  }, true);
+  window.addEventListener('scroll', () => {
+    const now = Date.now();
+    if (Math.abs(window.scrollY - recorder.lastWindowScrollY) < 6 && now - recorder.lastWindowScrollAt < 120) return;
+    recorder.lastWindowScrollAt = now;
+    recorder.lastWindowScrollY = window.scrollY;
+    queueEvent('scroll_window', document.scrollingElement || document.documentElement, {x: window.scrollX, y: window.scrollY});
+  }, {passive:true});
+  document.addEventListener('scroll', (event) => {
+    const el = event.target;
+    if (!(el instanceof Element)) return;
+    if (el === document || el === document.body || el === document.documentElement) return;
+    const prev = recorder.elementScrollState.get(el) || {top: -1, left: -1, at: 0};
+    const now = Date.now();
+    if (Math.abs(el.scrollTop - prev.top) < 6 && Math.abs(el.scrollLeft - prev.left) < 6 && now - prev.at < 120) return;
+    recorder.elementScrollState.set(el, {top: el.scrollTop, left: el.scrollLeft, at: now});
+    queueEvent('scroll_element', el, {scrollTop: el.scrollTop, scrollLeft: el.scrollLeft});
+  }, true);
+  setInterval(flushEvents, 700);
+  const form = document.getElementById('captcha-form');
+  const input = document.getElementById('captcha-input');
+  if (form) {
+    form.addEventListener('submit', async () => {
+      const value = input ? input.value.trim() : '';
+      if (!value) return;
+      recorder.completionSeen = true;
+      queueEvent('task_completed', form, {value});
+      await finalizeRun('completion_oracle');
+    });
+  }
+  window.addEventListener('pagehide', () => { if (!recorder.finalized) finalizeRun('context_close', {run_end_reason:'pagehide'}); });
+  window.addEventListener('beforeunload', () => { if (!recorder.finalized) finalizeRun('context_close', {run_end_reason:'beforeunload'}); });
+})();
+</script>
+</body>
+<footer>
+<p>© 2024 MyWebsite. All rights reserved.</p>
+</footer>
+</html>

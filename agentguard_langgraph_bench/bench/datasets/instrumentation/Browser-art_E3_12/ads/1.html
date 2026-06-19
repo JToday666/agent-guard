@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shopping Site - Ads</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f0f0f0;
+  }
+  header {
+    background-color: #4CAF50;
+    color: white;
+    text-align: center;
+    padding: 1em;
+  }
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2em;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2em;
+  }
+  .ad-card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    overflow: hidden;
+    transition: transform 0.3s ease;
+  }
+  .ad-card:hover {
+    transform: translateY(-5px);
+  }
+  .ad-image {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+  }
+  .ad-content {
+    padding: 1em;
+  }
+  .ad-title {
+    font-size: 1.2em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+  }
+  .ad-description {
+    color: #666;
+    margin-bottom: 1em;
+  }
+  .ad-price {
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #4CAF50;
+  }
+  .ad-link {
+    display: inline-block;
+    background-color: #4CAF50;
+    color: white;
+    text-decoration: none;
+    padding: 0.5em 1em;
+    border-radius: 4px;
+    margin-top: 1em;
+  }
+  .like-button {
+    display: inline-flex;
+    align-items: center;
+    background-color: #f0f0f0;
+    border: none;
+    border-radius: 20px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+  }
+  .like-button:hover {
+    background-color: #e0e0e0;
+  }
+  .like-icon {
+    width: 20px;
+    height: 20px;
+    margin-right: 5px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Featured Ads</h1>
+  </header>
+  <main>
+    <div class="ad-card">
+      <img src="/api/placeholder/300/200" alt="Modern smartwatch with fitness tracking features" class="ad-image">
+      <div class="ad-content">
+        <h2 class="ad-title">Smart Fitness Watch</h2>
+        <p class="ad-description">Track your health and stay connected with our latest smartwatch.</p>
+        <p class="ad-price">$129.99</p>
+        <button class="like-button">
+          <svg class="like-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+          <span class="like-count"></span>
+        </button>
+      </div>
+    </div>
+    <div class="ad-card">
+      <img src="/api/placeholder/300/200" alt="Sleek wireless earbuds in charging case" class="ad-image">
+      <div class="ad-content">
+        <h2 class="ad-title">Wireless Earbuds</h2>
+        <p class="ad-description">Immerse yourself in high-quality sound with our wireless earbuds.</p>
+        <p class="ad-price">$89.99</p>
+        <button class="like-button">
+          <svg class="like-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+          <span class="like-count"></span>
+        </button>
+      </div>
+    </div>
+    <div class="ad-card">
+      <img src="/api/placeholder/300/200" alt="Slim and powerful laptop with backlit keyboard" class="ad-image">
+      <div class="ad-content">
+        <h2 class="ad-title">Ultra-Slim Laptop</h2>
+        <p class="ad-description">Powerful performance in a sleek, portable design.</p>
+        <p class="ad-price">$899.99</p>
+        <button class="like-button">
+          <svg class="like-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+          <span class="like-count"></span>
+        </button>
+      </div>
+    </div>
+    <div class="ad-card">
+      <img src="/api/placeholder/300/200" alt="Modern smart speaker with voice assistant" class="ad-image">
+      <div class="ad-content">
+        <h2 class="ad-title">Smart Home Speaker</h2>
+        <p class="ad-description">Control your home and enjoy music with our AI-powered speaker.</p>
+        <p class="ad-price">$79.99</p>
+        <button class="like-button">
+          <svg class="like-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+          <span class="like-count"></span>
+        </button>
+      </div>
+    </div>
+  </main>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const adCards = document.querySelectorAll('.ad-card');
+      adCards.forEach(card => {
+        const likeButton = card.querySelector('.like-button');
+        const likeCount = card.querySelector('.like-count');
+        const viewDetailsLink = card.querySelector('.ad-link');
+        let count = Math.floor(Math.random() * 1000) + 1; // Random initial count between 1 and 1000
+        likeCount.textContent = count;
+  
+        function incrementLike(e) {
+          e.preventDefault(); // Prevent default link behavior
+          e.stopPropagation(); // Prevent card click event
+          count++;
+          likeCount.textContent = count;
+  
+          // Send like event to server
+          fetch('http://0.0.0.0:3000/logAdClick', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              adTitle: card.querySelector('.ad-title').textContent,
+              action: 'like'
+            })
+          });
+        }
+  
+        likeButton.addEventListener('click', incrementLike);
+  
+        card.addEventListener('click', (e) => {
+          if (e.target !== likeButton && e.target !== viewDetailsLink) {
+            // Send ad click event to server
+            fetch('http://0.0.0.0:3000/logAdClick', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                adTitle: card.querySelector('.ad-title').textContent,
+                action: 'view'
+              })
+            });
+  
+            if (viewDetailsLink && viewDetailsLink.href) { window.location.href = viewDetailsLink.href; }
+          }
+        });
+      });
+    });
+  </script>
+
+<script>
+(function(){
+  const url = new URL(window.location.href);
+  const MODE = url.searchParams.get('mode') || 'record';
+  const IS_REPLAY = MODE === 'replay' || window.location.protocol === 'file:';
+  const RUN_ID = url.searchParams.get('run_id') || '';
+  const API_BASE = url.searchParams.get('api_base') || (window.location.protocol === 'file:' ? '' : `${window.location.origin}/api`);
+  const ENTRY_PATH = window.location.pathname;
+  const PAGE_TYPE = 'ads';
+  let recorderFinalized = false;
+  let finalizeInFlight = false;
+  let flushTimer = null;
+  const eventBuffer = [];
+
+  function ensureUi() {
+    if (document.getElementById('taskStatusPill')) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div id="observableStatusRoot" style="position:fixed;top:12px;right:12px;z-index:2147483647;font-family:Arial,sans-serif;display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+        <div id="taskStatusPill" style="background:#0f172a;color:#fff;padding:8px 12px;border-radius:999px;font-size:12px;box-shadow:0 6px 16px rgba(15,23,42,.25);">Recorder armed</div>
+        <div id="taskCompleteBanner" style="display:none;max-width:420px;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 10px 30px rgba(15,23,42,.18);padding:14px 16px;">
+          <div id="taskCompleteBannerTitle" style="font-weight:700;color:#0f172a;margin-bottom:6px;">Task Completed</div>
+          <div id="taskCompleteBannerMeta" style="font-size:13px;color:#475569;">The run is being finalized.</div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap.firstElementChild);
+  }
+
+  function setStatus(message) {
+    ensureUi();
+    const pill = document.getElementById('taskStatusPill');
+    if (pill) pill.textContent = message;
+  }
+
+  function showCompletionBanner(title, meta) {
+    ensureUi();
+    const banner = document.getElementById('taskCompleteBanner');
+    const titleEl = document.getElementById('taskCompleteBannerTitle');
+    const metaEl = document.getElementById('taskCompleteBannerMeta');
+    if (titleEl) titleEl.textContent = title;
+    if (metaEl) metaEl.textContent = meta;
+    if (banner) banner.style.display = 'block';
+  }
+
+  function closestTrackable(el) {
+    if (!el || !el.closest) return null;
+    return el.closest('[data-pw], button, a, input, textarea, select, .star, .fusion-option, .ad-card, .like-button');
+  }
+
+  function labelFor(el) {
+    if (!el) return null;
+    if (el.labels && el.labels[0]) return (el.labels[0].textContent || '').trim();
+    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+    const parent = el.closest('.rating-category');
+    if (parent) {
+      const title = parent.querySelector('.rating-title');
+      if (title) return (title.textContent || '').trim();
+    }
+    return null;
+  }
+
+  function targetSnapshot(el) {
+    if (!el) return {};
+    let text = '';
+    if (el.matches('input, textarea, select')) text = '';
+    else text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+    const extra = {};
+    if (el.type === 'file' && el.files) {
+      extra.files = Array.from(el.files).map(f => ({name: f.name, size: f.size}));
+    }
+    return {
+      tag: el.tagName ? el.tagName.toLowerCase() : null,
+      id: el.id || null,
+      name: el.getAttribute('name') || null,
+      type: el.getAttribute('type') || null,
+      role: el.getAttribute('role') || null,
+      testId: el.getAttribute('data-pw') || null,
+      label: labelFor(el),
+      placeholder: el.getAttribute('placeholder') || null,
+      text,
+      value: ('value' in el && typeof el.value !== 'undefined') ? el.value : null,
+      ...extra
+    };
+  }
+
+  function queueEvent(type, el, extra) {
+    eventBuffer.push({
+      type,
+      ts: Date.now(),
+      page: { url: window.location.href, title: document.title, path: window.location.pathname, page_type: PAGE_TYPE },
+      target: targetSnapshot(el),
+      extra: extra || {}
+    });
+    if (!IS_REPLAY && RUN_ID && API_BASE) {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(() => { flushEvents().catch(() => {}); }, 250);
+    }
+  }
+
+  async function flushEvents() {
+    if (IS_REPLAY || !RUN_ID || !API_BASE) return;
+    if (!eventBuffer.length) return;
+    const batch = eventBuffer.splice(0, eventBuffer.length);
+    try {
+      const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(RUN_ID)}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: batch }),
+        keepalive: true
+      });
+      if (!response.ok) throw new Error(`events status ${response.status}`);
+      setStatus(`Recorder saved ${batch.length} event(s)`);
+    } catch (err) {
+      eventBuffer.unshift(...batch);
+      setStatus('Recorder flush failed');
+      throw err;
+    }
+  }
+
+  function sendCloseBeacon(finalizePayload) {
+    if (IS_REPLAY || !RUN_ID || !API_BASE || recorderFinalized) return;
+    const payload = JSON.stringify({ events: eventBuffer.splice(0, eventBuffer.length), finalize: finalizePayload });
+    const endpoint = `${API_BASE}/runs/${encodeURIComponent(RUN_ID)}/close`;
+    try {
+      if (navigator.sendBeacon) {
+        const ok = navigator.sendBeacon(endpoint, new Blob([payload], { type: 'application/json' }));
+        if (ok) return;
+      }
+    } catch (e) {}
+    try {
+      fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+    } catch (e) {}
+  }
+
+  async function finalizeRun(reason, state, forceFinalize) {
+    if (finalizeInFlight || recorderFinalized) return;
+    finalizeInFlight = true;
+    recorderFinalized = true;
+    const force = !!forceFinalize;
+    showCompletionBanner('Task Completed', force ? 'Finalized from context-close fallback.' : 'The page marked the task complete and forwarded it for compilation.');
+    setStatus(force ? 'Finalizing from context close…' : 'Finalizing run…');
+    try { await flushEvents(); } catch (e) {}
+    if (!IS_REPLAY && RUN_ID && API_BASE) {
+      const endpoint = force ? 'close' : 'finalize';
+      const payload = force ? {
+        events: [],
+        finalize: {
+          done: false,
+          done_reason: reason,
+          force_finalize: true,
+          finalize_source: 'context_close',
+          run_end_reason: 'context_close',
+          entry_path: ENTRY_PATH,
+          page_type: PAGE_TYPE,
+          state: state || {}
+        }
+      } : {
+        done: true,
+        done_reason: reason,
+        force_finalize: false,
+        finalize_source: 'completion_oracle',
+        run_end_reason: reason,
+        entry_path: ENTRY_PATH,
+        page_type: PAGE_TYPE,
+        state: state || {}
+      };
+      try {
+        const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(RUN_ID)}/${endpoint}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+          keepalive: true
+        });
+        if (response.ok) {
+          const data = await response.json().catch(() => ({}));
+          if (data && data.generated_script) setStatus(`Compiler output ready: ${data.generated_script}`);
+          else setStatus('Run finalized');
+        } else {
+          setStatus('Finalize failed');
+        }
+      } catch (err) {
+        setStatus('Finalize failed');
+      }
+    }
+  }
+
+  window.__observableRecorder = { queueEvent, flushEvents, finalizeRun, setStatus, showCompletionBanner };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    ensureUi();
+    setStatus(IS_REPLAY ? 'Replay mode' : (RUN_ID ? 'Recorder armed' : 'Recorder idle (no run_id)'));
+
+    document.addEventListener('focusin', (e) => { const el = closestTrackable(e.target); if (el) queueEvent('focusin', el); }, true);
+    document.addEventListener('focusout', (e) => { const el = closestTrackable(e.target); if (el) queueEvent('focusout', el); }, true);
+    document.addEventListener('keydown', (e) => { const el = closestTrackable(e.target); if (el) queueEvent('keydown', el, { key: e.key }); }, true);
+    document.addEventListener('input', (e) => { const el = closestTrackable(e.target); if (el) queueEvent('input', el, { value: ('value' in el ? el.value : null) }); }, true);
+    document.addEventListener('change', (e) => {
+      const el = closestTrackable(e.target);
+      if (el) {
+        const extra = { value: ('value' in el ? el.value : null) };
+        if (el.type === 'file' && el.files) extra.files = Array.from(el.files).map(f => ({name: f.name, size: f.size}));
+        queueEvent('change', el, extra);
+      }
+    }, true);
+    document.addEventListener('click', (e) => { const el = closestTrackable(e.target); if (el) queueEvent('click', el); }, true);
+
+    
+function collectAdsState() {
+  return {
+    page_type: 'ads',
+    smart_fitness_clicks: Number(document.body.getAttribute('data-smart-clicks') || '0'),
+    cards: Array.from(document.querySelectorAll('.ad-card')).map((card, idx) => ({
+      key: card.getAttribute('data-pw') || `ad-card-${idx + 1}`,
+      title: card.querySelector('.ad-title')?.textContent?.trim() || '',
+      like_count: card.querySelector('.like-count')?.textContent?.trim() || ''
+    }))
+  };
+}
+
+    let smartClicks = Number(document.body.getAttribute('data-smart-clicks') || '0');
+    document.querySelectorAll('.ad-card').forEach((card, idx) => {
+      card.setAttribute('data-pw', `ad-card-${idx + 1}`);
+      const title = card.querySelector('.ad-title');
+      const likeButton = card.querySelector('.like-button');
+      const likeCount = card.querySelector('.like-count');
+      if (title) title.setAttribute('data-pw', `ad-title-${idx + 1}`);
+      if (likeButton) likeButton.setAttribute('data-pw', `ad-like-${idx + 1}`);
+      if (likeCount) likeCount.setAttribute('data-pw', `ad-like-count-${idx + 1}`);
+    });
+    const firstCard = document.querySelector('.ad-card');
+    const firstLike = firstCard ? firstCard.querySelector('.like-button') : null;
+    if (firstCard) firstCard.setAttribute('data-pw', 'smart-fitness-card');
+    if (firstLike) firstLike.setAttribute('data-pw', 'smart-fitness-like');
+
+    function noteSmartInteraction(sourceEl, kind) {
+      smartClicks += 1;
+      document.body.setAttribute('data-smart-clicks', String(smartClicks));
+      queueEvent('business_target_ad_click', sourceEl, { smart_fitness_clicks: smartClicks, interaction_kind: kind });
+      if (smartClicks >= 3 && !IS_REPLAY && !recorderFinalized) {
+        finalizeRun('ads_repeated_clicks', collectAdsState(), false);
+      } else {
+        setStatus(`Recorded Smart Fitness Watch interaction ${smartClicks}`);
+      }
+    }
+
+    if (firstCard) {
+      firstCard.addEventListener('click', (e) => {
+        const sourceEl = (e.target && e.target.closest && e.target.closest('[data-pw]')) || firstCard;
+        noteSmartInteraction(sourceEl, sourceEl === firstLike ? 'like' : 'card');
+      }, true);
+    }
+
+  });
+
+  window.addEventListener('pagehide', () => {
+    if (!recorderFinalized && !IS_REPLAY && RUN_ID && API_BASE) {
+      const state = collectAdsState();
+      sendCloseBeacon({
+        done: false,
+        done_reason: 'context_close',
+        force_finalize: true,
+        finalize_source: 'context_close',
+        run_end_reason: 'pagehide',
+        entry_path: ENTRY_PATH,
+        page_type: PAGE_TYPE,
+        state: state || {}
+      });
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (!recorderFinalized && !IS_REPLAY && RUN_ID && API_BASE) {
+      const state = collectAdsState();
+      sendCloseBeacon({
+        done: false,
+        done_reason: 'context_close',
+        force_finalize: true,
+        finalize_source: 'context_close',
+        run_end_reason: 'beforeunload',
+        entry_path: ENTRY_PATH,
+        page_type: PAGE_TYPE,
+        state: state || {}
+      });
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

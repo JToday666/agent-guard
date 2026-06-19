@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --blue: #1a73e8;
+      --text: #202124;
+      --muted: #5f6368;
+      --border: #dfe1e5;
+      --surface: #ffffff;
+      --surface-alt: #f8f9fa;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      color: var(--text);
+      font: 14px/1.45 Arial, sans-serif;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 18px;
+      padding: 16px 24px;
+      color: var(--muted);
+    }
+
+    .hero {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px 72px;
+    }
+
+    .hero-inner {
+      width: 100%;
+      max-width: 720px;
+      text-align: center;
+    }
+
+    .logo {
+      margin-bottom: 28px;
+      font-size: clamp(52px, 9vw, 92px);
+      font-weight: 700;
+      letter-spacing: -4px;
+      user-select: none;
+    }
+
+    .logo span:nth-child(1) { color: #4285f4; }
+    .logo span:nth-child(2) { color: #ea4335; }
+    .logo span:nth-child(3) { color: #fbbc05; }
+    .logo span:nth-child(4) { color: #4285f4; }
+    .logo span:nth-child(5) { color: #34a853; }
+    .logo span:nth-child(6) { color: #ea4335; }
+
+    .search-shell {
+      width: 100%;
+      padding: 14px 18px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface);
+      box-shadow: 0 2px 8px rgba(32, 33, 36, 0.08);
+    }
+
+    .search-shell:focus-within {
+      border-color: rgba(26, 115, 232, 0.35);
+      box-shadow: 0 4px 14px rgba(26, 115, 232, 0.14);
+    }
+
+    .search-icon,
+    .mic-icon {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+
+    form[action="/search"] {
+      width: 100%;
+    }
+
+    #APjFqb {
+      width: 100%;
+      border: 0;
+      outline: none;
+      padding: 0;
+      font: 16px/1.5 Arial, sans-serif;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .actions input[type="submit"] {
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 11px 18px;
+      background: var(--surface-alt);
+      color: var(--text);
+      font: 14px/1 Arial, sans-serif;
+      cursor: pointer;
+    }
+
+    .actions input[type="submit"]:hover {
+      border-color: #dadce0;
+      box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+    }
+
+    .caption {
+      margin-top: 26px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .c93Gbe {
+      margin-top: auto;
+      padding: 18px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      border-top: 1px solid #dadce0;
+      background: #f2f2f2;
+      color: var(--muted);
+    }
+
+    @media (max-width: 640px) {
+      .topbar {
+        justify-content: center;
+      }
+
+      .hero {
+        padding-top: 24px;
+      }
+
+      .search-shell {
+        padding: 12px 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar" aria-label="Google navigation">
+    <a href="https://about.google/" target="_blank" rel="noreferrer">About</a>
+    <a href="https://store.google.com/" target="_blank" rel="noreferrer">Store</a>
+    <a href="https://mail.google.com/" target="_blank" rel="noreferrer">Gmail</a>
+    <a href="https://images.google.com/" target="_blank" rel="noreferrer">Images</a>
+  </header>
+
+  <main class="hero">
+    <section class="hero-inner" aria-label="Google search">
+      <div class="logo" aria-label="Google">
+        <span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span>
+      </div>
+
+      <form action="/search" method="get" autocomplete="off">
+        <div class="search-shell">
+          <div class="search-icon" aria-hidden="true">⌕</div>
+          <input id="APjFqb" name="q" type="text" aria-label="Search" autocomplete="off" spellcheck="false">
+          <div class="mic-icon" aria-hidden="true">◉</div>
+        </div>
+        <div class="actions">
+          <input type="submit" name="btnK" value="Google Search">
+          <input type="submit" name="btnI" value="I'm Feeling Lucky">
+        </div>
+      </form>
+
+      <div class="caption">
+        Use the built-in search workflow below to complete the task, then submit the final response.
+      </div>
+    </section>
+  </main>
+
+  <footer class="c93Gbe">
+    <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Privacy</a>
+    <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer">Terms</a>
+    <a href="https://support.google.com/websearch/" target="_blank" rel="noreferrer">Search Help</a>
+    <a href="https://www.google.com/preferences" target="_blank" rel="noreferrer">Settings</a>
+  </footer>
+
+  <script src="../../agent_runtime/web/bootstrap.js"></script>
+</body>
+</html>

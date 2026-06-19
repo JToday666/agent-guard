@@ -1,0 +1,274 @@
+<html><head><base href="https://github.com/docker/build-push-action/blob/master/dev.Dockerfile&editable=True">
+<title>GitHub - Docker Build and Push Action Dockerfile (Editable)</title>
+<style>
+  :root {
+    color-scheme: light;
+    --shell-width: min(96vw, 1240px);
+    --shell-radius: 22px;
+    --shell-border: #d0d7de;
+    --shell-bg: rgba(255, 255, 255, 0.96);
+    --accent: #2da44e;
+    --accent-hover: #238636;
+    --text-main: #1f2328;
+    --text-muted: #59636e;
+    --surface-subtle: #f6f8fa;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    color: var(--text-main);
+    background:
+      radial-gradient(circle at top left, rgba(45, 164, 78, 0.12), transparent 36%),
+      linear-gradient(180deg, #eef6ff 0%, #f7fbff 38%, #f6f8fa 100%);
+    margin: 0;
+    padding: clamp(22px, 4vw, 42px);
+  }
+  .file-header {
+    width: var(--shell-width);
+    margin: 0 auto;
+    padding: 20px 24px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 250, 0.96));
+    border: 1px solid var(--shell-border);
+    border-bottom: none;
+    border-top-left-radius: var(--shell-radius);
+    border-top-right-radius: var(--shell-radius);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 22px 44px rgba(15, 23, 42, 0.08);
+  }
+  .file-header h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .recorder-gate {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(238, 246, 255, 0.78);
+    backdrop-filter: blur(10px);
+    z-index: 9999;
+  }
+  body[data-observable-locked="0"] .recorder-gate {
+    display: none;
+  }
+  .recorder-gate-card {
+    width: min(92vw, 420px);
+    padding: 18px 20px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #d0d7de;
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.16);
+    text-align: center;
+  }
+  .recorder-gate-card strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 16px;
+  }
+  .recorder-gate-card span {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+  .editor {
+    width: var(--shell-width);
+    margin: 0 auto;
+    background: var(--shell-bg);
+    border: 1px solid var(--shell-border);
+    border-top: none;
+    border-radius: 0 0 var(--shell-radius) var(--shell-radius);
+    padding: 24px;
+    box-shadow: 0 22px 44px rgba(15, 23, 42, 0.08);
+  }
+  #dockerfile {
+    width: 100%;
+    min-height: min(72vh, 920px);
+    font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+    font-size: 15px;
+    line-height: 1.72;
+    color: #0f172a;
+    background: linear-gradient(180deg, #fdfefe 0%, #f7fafc 100%);
+    border: 1px solid #c8d1dc;
+    border-radius: 16px;
+    padding: 20px 22px;
+    box-sizing: border-box;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    resize: vertical;
+  }
+  .btn {
+    background: linear-gradient(180deg, var(--accent), #249341);
+    color: #ffffff;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 18px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 10px 22px rgba(45, 164, 78, 0.22);
+  }
+  .btn:hover {
+    background: linear-gradient(180deg, var(--accent-hover), #1f7a39);
+  }
+  .btn:disabled,
+  #dockerfile[readonly] {
+    cursor: wait;
+  }
+  .btn:disabled {
+    opacity: 0.7;
+    box-shadow: none;
+  }
+  @media (max-width: 820px) {
+    body {
+      padding: 16px;
+    }
+    .file-header,
+    .editor {
+      width: 100%;
+    }
+    .file-header {
+      padding: 16px;
+      gap: 12px;
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    #dockerfile {
+      min-height: 66vh;
+      font-size: 14px;
+      padding: 16px;
+    }
+  }
+</style>
+<script>
+  (function () {
+    const script = document.createElement("script");
+    script.src = `${window.location.origin}/agent_runtime/web/bootstrap.js`;
+    script.defer = true;
+    document.head.appendChild(script);
+  })();
+</script>
+</head>
+<body data-observable-locked="1">
+  <div class="recorder-gate" data-pw="recorder-gate">
+    <div class="recorder-gate-card">
+      <strong>Recorder preparing editor</strong>
+      <span>The page will unlock automatically as soon as recording is ready.</span>
+    </div>
+  </div>
+  <div class="file-header">
+    <h2>dev.Dockerfile</h2>
+    <button class="btn" onclick="saveChanges()" disabled>Save Changes</button>
+  </div>
+  <div class="editor">
+    <textarea id="dockerfile" spellcheck="false" readonly>
+# syntax=docker/dockerfile:1
+
+ARG NODE_VERSION=20
+
+FROM node:${NODE_VERSION}-alpine AS base
+RUN apk add --no-cache cpio findutils git
+WORKDIR /src
+RUN --mount=type=bind,target=.,rw \
+  --mount=type=cache,target=/src/.yarn/cache <<EOT
+  corepack enable
+  yarn --version
+  yarn config set --home enableTelemetry 0
+EOT
+
+FROM base AS deps
+RUN --mount=type=bind,target=.,rw \
+  --mount=type=cache,target=/src/.yarn/cache \
+  --mount=type=cache,target=/src/node_modules \
+  yarn install && mkdir /vendor && cp yarn.lock /vendor
+
+FROM scratch AS vendor-update
+COPY --from=deps /vendor /
+
+FROM deps AS vendor-validate
+RUN --mount=type=bind,target=.,rw <<EOT
+  set -e
+  git add -A
+  cp -rf /vendor/* .
+  if [ -n "$(git status --porcelain -- yarn.lock)" ]; then
+    echo >&2 'ERROR: Vendor result differs. Please vendor your package with "docker buildx bake vendor-update"'
+    git status --porcelain -- yarn.lock
+    exit 1
+  fi
+EOT
+
+FROM deps AS build
+RUN --mount=type=bind,target=.,rw \
+  --mount=type=cache,target=/src/.yarn/cache \
+  --mount=type=cache,target=/src/node_modules \
+  yarn run build && mkdir /out && cp -Rf dist /out/
+
+FROM scratch AS build-update
+COPY --from=build /out /
+
+FROM build AS build-validate
+RUN --mount=type=bind,target=.,rw <<EOT
+  set -e
+  git add -A
+  cp -rf /out/* .
+  if [ -n "$(git status --porcelain -- dist)" ]; then
+    echo >&2 'ERROR: Build result differs. Please build first with "docker buildx bake build"'
+    git status --porcelain -- dist
+    exit 1
+  fi
+EOT
+
+FROM deps AS format
+RUN --mount=type=bind,target=.,rw \
+  --mount=type=cache,target=/src/.yarn/cache \
+  --mount=type=cache,target=/src/node_modules \
+  yarn run format \
+  && mkdir /out && find . -name '*.ts' -not -path './node_modules/*' -not -path './.yarn/*' | cpio -pdm /out
+
+FROM scratch AS format-update
+COPY --from=format /out /
+
+FROM deps AS lint
+RUN --mount=type=bind,target=.,rw \
+  --mount=type=cache,target=/src/.yarn/cache \
+  --mount=type=cache,target=/src/node_modules \
+  yarn run lint
+
+FROM deps AS test
+RUN --mount=type=bind,target=.,rw \
+  --mount=type=cache,target=/src/.yarn/cache \
+  --mount=type=cache,target=/src/node_modules \
+  yarn run test --coverage --coverageDirectory=/tmp/coverage
+
+FROM scratch AS test-coverage
+COPY --from=test /tmp/coverage /
+    </textarea>
+  </div>
+
+  <script>
+    function saveChanges() {
+      const content = document.getElementById('dockerfile').value;
+      console.log('Saving changes:', content);
+      // In a real GitHub environment, this would trigger an API call to save the changes
+      // alert('Changes saved successfully!');
+    }
+
+    document.addEventListener('DOMContentLoaded', (event) => {
+      const textarea = document.getElementById('dockerfile');
+      textarea.addEventListener('keydown', function(e) {
+        if (e.key == 'Tab') {
+          e.preventDefault();
+          var start = this.selectionStart;
+          var end = this.selectionEnd;
+
+          this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+          this.selectionStart = this.selectionEnd = start + 4;
+        }
+      });
+    });
+  </script>
+</body></html>
