@@ -1,0 +1,559 @@
+<html><head><title>Gmail - Compose New Message</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body, html {
+  font-family: 'Roboto', Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background-color: #f5f5f5;
+}
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+header {
+  background-color: #ffffff;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+}
+.logo {
+  display: flex;
+  align-items: center;
+}
+.logo img {
+  height: 40px;
+  margin-right: 10px;
+}
+.logo span {
+  font-size: 22px;
+  color: #5f6368;
+}
+main {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px;
+}
+.compose-window {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+  width: 100%;
+  max-width: 750px;
+}
+.compose-header {
+  padding: 16px;
+  border-bottom: 1px solid #f1f3f4;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.compose-title {
+  font-size: 18px;
+  color: #3c4043;
+}
+.compose-actions i {
+  margin-left: 16px;
+  color: #5f6368;
+  cursor: pointer;
+}
+.compose-body {
+  padding: 16px;
+}
+.compose-field {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+}
+.compose-field label {
+  width: 80px;
+  color: #5f6368;
+}
+.compose-field input, .compose-field textarea {
+  flex-grow: 1;
+  border: none;
+  font-size: 14px;
+  padding: 8px;
+}
+.compose-field input:focus, .compose-field textarea:focus {
+  outline: none;
+  border-bottom: 2px solid #1a73e8;
+}
+.compose-buttons {
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.send-button {
+  background-color: #1a73e8;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.formatting-options i {
+  margin-right: 16px;
+  color: #5f6368;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="logo">
+      <img src="https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_32dp.png" alt="Gmail logo">
+      <span>Gmail</span>
+    </div>
+  </header>
+  
+  <main>
+    <div class="compose-window">
+      <div class="compose-header">
+        <span class="compose-title">New Message</span>
+        <div class="compose-actions">
+          <i class="fas fa-minus" title="Minimize"></i>
+          <i class="fas fa-expand" title="Full screen"></i>
+          <i class="fas fa-times" title="Close"></i>
+        </div>
+      </div>
+      
+      <div class="compose-body">
+        <div class="compose-field">
+          <label for="to">To</label>
+          <input type="text" id="to" data-pw="to-input" placeholder="Recipients">
+        </div>
+        <div class="compose-field">
+          <label for="cc">Cc</label>
+          <input type="text" id="cc" data-pw="cc-input" placeholder="Carbon copy">
+        </div>
+        <div class="compose-field">
+          <label for="bcc">Bcc</label>
+          <input type="text" id="bcc" data-pw="bcc-input" placeholder="Blind carbon copy">
+        </div>
+        <div class="compose-field">
+          <label for="subject">Subject</label>
+          <input type="text" id="subject" data-pw="subject-input" placeholder="Subject">
+        </div>
+        <div class="compose-field">
+          <textarea id="body" data-pw="body-input" rows="15" placeholder="Compose your message here..."></textarea>
+        </div>
+      </div>
+      
+      <div class="compose-buttons">
+        <button id="sendButton" data-pw="send-button" class="send-button">Send</button>
+        <div class="formatting-options">
+          <i class="fas fa-bold" title="Bold"></i>
+          <i class="fas fa-italic" title="Italic"></i>
+          <i class="fas fa-underline" title="Underline"></i>
+          <i class="fas fa-font" title="Font size"></i>
+          <i class="fas fa-paperclip" title="Attach file"></i>
+          <i class="fas fa-link" title="Insert link"></i>
+          <i class="fas fa-smile" title="Insert emoji"></i>
+          <i class="fas fa-image" title="Insert image"></i>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  let emailId = null;
+
+  // Function to send email details to the server
+  function sendEmailDetails() {
+    const to = document.getElementById('to').value;
+    const cc = document.getElementById('cc').value;
+    const bcc = document.getElementById('bcc').value;
+    const subject = document.getElementById('subject').value;
+    const body = document.querySelector('.compose-field textarea').value;
+
+    const emailDetails = {
+      id: emailId,
+      to: to,
+      cc: cc,
+      bcc: bcc,
+      subject: subject,
+      body: body
+    };
+
+    console.log(emailDetails);
+
+    fetch('http://localhost:3000/saveEmail', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(emailDetails)
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Email details saved successfully');
+      if (!emailId) {
+        emailId = data.id; // Save the ID for subsequent updates
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+  }
+
+  // Add event listeners to input fields
+  document.getElementById('to').addEventListener('input', sendEmailDetails);
+  document.getElementById('cc').addEventListener('input', sendEmailDetails);
+  document.getElementById('bcc').addEventListener('input', sendEmailDetails);
+  document.getElementById('subject').addEventListener('input', sendEmailDetails);
+  document.querySelector('.compose-field textarea').addEventListener('input', sendEmailDetails);
+
+  // Send button click event listener
+  document.querySelector('.send-button').addEventListener('click', function() {
+     alert('Email is sent!');
+  });
+</script>
+
+<script>
+(function () {
+  const PAGE_TYPE = "email";
+  const url = new URL(window.location.href);
+  const API_BASE = url.searchParams.get('api_base') || `${window.location.origin}/api`;
+  const runId = url.searchParams.get('run_id');
+  const mode = url.searchParams.get('mode') || 'record';
+  const recorder = {
+    enabled: mode !== 'replay' && !!runId,
+    phase: 'running',
+    closeSent: false,
+    completionSeen: false,
+    events: [],
+    flushPromise: null,
+  };
+
+  function nowIso() { return new Date().toISOString(); }
+
+  function injectChrome() {
+    if (document.getElementById('taskStatusPill')) return;
+    const pill = document.createElement('div');
+    pill.id = 'taskStatusPill';
+    pill.textContent = recorder.enabled ? 'Recorder armed' : 'Recorder disabled (replay mode)';
+    pill.style.cssText = 'position:fixed;top:14px;right:14px;z-index:2147483647;background:#0f172a;color:#fff;padding:8px 12px;border-radius:999px;font:12px/1.2 Arial,sans-serif;box-shadow:0 8px 24px rgba(15,23,42,.28);max-width:360px;';
+    document.body.appendChild(pill);
+
+    const banner = document.createElement('div');
+    banner.id = 'taskCompleteBanner';
+    banner.style.cssText = 'display:none;position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:2147483646;min-width:360px;max-width:760px;background:#ecfeff;color:#0f172a;border:1px solid #67e8f9;border-radius:14px;padding:14px 18px;box-shadow:0 12px 28px rgba(15,23,42,.18);font:14px/1.45 Arial,sans-serif;';
+    banner.innerHTML = '<div id="taskCompleteBannerTitle" style="font-weight:700;margin-bottom:4px;">Recorder active</div><div id="taskCompleteBannerMeta"></div>';
+    document.body.appendChild(banner);
+  }
+
+  function updateStatus(message) {
+    injectChrome();
+    const pill = document.getElementById('taskStatusPill');
+    if (pill) pill.textContent = message;
+  }
+
+  function showBanner(title, meta) {
+    injectChrome();
+    const banner = document.getElementById('taskCompleteBanner');
+    const titleNode = document.getElementById('taskCompleteBannerTitle');
+    const metaNode = document.getElementById('taskCompleteBannerMeta');
+    if (titleNode) titleNode.textContent = title;
+    if (metaNode) metaNode.textContent = meta || '';
+    if (banner) banner.style.display = 'block';
+  }
+
+  function textOf(el) {
+    if (!el) return '';
+    const text = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) || el.textContent || '';
+    return text.replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+
+  function labelOf(el) {
+    if (!el || !el.id) return '';
+    const label = document.querySelector(`label[for="${el.id}"]`);
+    if (label) return textOf(label);
+    return '';
+  }
+
+  function serializeTarget(el) {
+    if (!el || !el.tagName) return {};
+    return {
+      tag: el.tagName.toLowerCase(),
+      id: el.id || '',
+      name: el.getAttribute('name') || '',
+      type: el.getAttribute('type') || '',
+      placeholder: el.getAttribute('placeholder') || '',
+      role: el.getAttribute('role') || '',
+      testId: el.getAttribute('data-pw') || '',
+      label: labelOf(el),
+      text: textOf(el),
+      value: typeof el.value === 'string' ? String(el.value).slice(0, 500) : '',
+    };
+  }
+
+  function queueEvent(type, target, extra) {
+    if (!recorder.enabled) return;
+    recorder.events.push({
+      type,
+      ts: nowIso(),
+      page_type: PAGE_TYPE,
+      page: { url: window.location.href, path: window.location.pathname, title: document.title },
+      target: serializeTarget(target),
+      extra: extra || {},
+    });
+    if (recorder.events.length >= 8) flushEvents(true);
+  }
+
+  function beaconJson(url, payload) {
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        return navigator.sendBeacon(url, blob);
+      }
+    } catch (err) {}
+    try {
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async function flushEvents(useKeepalive) {
+    if (!recorder.enabled || !recorder.events.length) return { ok: true, batchEvents: 0 };
+    if (recorder.flushPromise) return recorder.flushPromise;
+    const batch = recorder.events.splice(0, recorder.events.length);
+    recorder.flushPromise = fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: batch }),
+      keepalive: !!useKeepalive,
+    }).then(async (response) => {
+      if (!response.ok) {
+        recorder.events = batch.concat(recorder.events);
+        updateStatus('Recorder flush failed');
+        return { ok: false, status: response.status };
+      }
+      const data = await response.json().catch(() => ({}));
+      updateStatus(`Recorder saved ${data.batch_events || batch.length} event(s)`);
+      return data;
+    }).catch(() => {
+      recorder.events = batch.concat(recorder.events);
+      updateStatus('Recorder flush failed');
+      return { ok: false };
+    }).finally(() => {
+      recorder.flushPromise = null;
+    });
+    return recorder.flushPromise;
+  }
+
+  function collectState() {
+    if (PAGE_TYPE === 'email') {
+      const to = document.getElementById('to')?.value || '';
+      const cc = document.getElementById('cc')?.value || '';
+      const bcc = document.getElementById('bcc')?.value || '';
+      const subject = document.getElementById('subject')?.value || '';
+      const body = document.getElementById('body')?.value || document.querySelector('.compose-field textarea')?.value || '';
+      return { to, cc, bcc, subject, body };
+    }
+    if (PAGE_TYPE === 'whatsapp') {
+      const active = document.querySelector('#userList li.active .name')?.textContent?.trim() || document.getElementById('chatHeaderName')?.textContent?.trim() || '';
+      const pending_message = document.getElementById('messageInput')?.value || '';
+      const last_message = document.querySelector('#chatMessages .message:last-child .message-text')?.textContent?.trim() || '';
+      const message_count = document.querySelectorAll('#chatMessages .message').length || 0;
+      return { active_chat: active, pending_message, last_message, message_count };
+    }
+    if (PAGE_TYPE === 'gitlab_issue') {
+      const issue_title = document.getElementById('issue-title')?.value || '';
+      const issue_body = document.getElementById('issue-body')?.value || '';
+      return { issue_title, issue_body };
+    }
+    return {};
+  }
+
+  function isCompleteable(state) {
+    if (PAGE_TYPE === 'email') return !!(state.to && state.subject && state.body);
+    if (PAGE_TYPE === 'whatsapp') return !!(state.active_chat && state.pending_message && state.pending_message.trim());
+    if (PAGE_TYPE === 'gitlab_issue') return !!(state.issue_title && state.issue_body);
+    return false;
+  }
+
+  async function finalizeRun(reason, state, source) {
+    if (!recorder.enabled) return;
+    if (recorder.phase === 'finalized') return;
+    recorder.phase = 'finalizing';
+    recorder.completionSeen = true;
+    queueEvent('task_completed', document.body, { reason, state });
+    await flushEvents(true);
+    const remainingEvents = recorder.events.splice(0, recorder.events.length);
+    updateStatus('Finalizing run...');
+    showBanner('Task Completed', 'Behavior log captured and forwarded for compilation.');
+    try {
+      const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          done: true,
+          done_reason: reason,
+          force_finalize: false,
+          finalize_source: source || 'completion_oracle',
+          page_type: PAGE_TYPE,
+          entry_path: window.location.pathname,
+          state,
+          events: remainingEvents,
+        }),
+        keepalive: true,
+      });
+      if (!response.ok) {
+        recorder.phase = 'running';
+        updateStatus('Finalize failed');
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      recorder.phase = 'finalized';
+      const scriptPath = data.generated_script || 'generated/replay_from_events.py';
+      updateStatus(`Compiler output ready: ${scriptPath}`);
+      showBanner('Task Completed', `Compiler output ready: ${scriptPath}`);
+    } catch (err) {
+      recorder.phase = 'running';
+      updateStatus('Finalize failed');
+    }
+  }
+
+  function forceFinalize(runEndReason) {
+    if (!recorder.enabled || recorder.closeSent || recorder.phase === 'finalized') return;
+    recorder.closeSent = true;
+    queueEvent('context_close_signal', document.body, { run_end_reason: runEndReason });
+    const state = collectState();
+    beaconJson(`${API_BASE}/runs/${encodeURIComponent(runId)}/close`, {
+      events: recorder.events.splice(0, recorder.events.length),
+      finalize: {
+        done: recorder.completionSeen,
+        done_reason: recorder.completionSeen ? 'completion_seen_before_context_close' : 'context_close',
+        force_finalize: true,
+        finalize_source: 'context_close',
+        run_end_reason: runEndReason,
+        completion_seen: recorder.completionSeen,
+        page_type: PAGE_TYPE,
+        entry_path: window.location.pathname,
+        state,
+      }
+    });
+  }
+
+  function setupTemplateBindings() {
+    if (PAGE_TYPE === 'email') {
+      const sendButton = document.getElementById('sendButton') || document.querySelector('.send-button');
+      if (sendButton) {
+        sendButton.addEventListener('click', () => {
+          const state = collectState();
+          queueEvent('business_send_click', sendButton, { state });
+          if (!isCompleteable(state)) {
+            showBanner('Recorder still armed', 'To, Subject, and Body are required before completion.');
+            return;
+          }
+          finalizeRun('email_send', state, 'completion_oracle');
+        }, true);
+      }
+    } else if (PAGE_TYPE === 'whatsapp') {
+      const sendButton = document.getElementById('sendButton');
+      const messageInput = document.getElementById('messageInput');
+      const triggerCompletion = (reason) => {
+        const before = collectState();
+        if (!isCompleteable(before)) return;
+        setTimeout(() => finalizeRun(reason, collectState(), 'completion_oracle'), 80);
+      };
+      if (sendButton) {
+        sendButton.addEventListener('click', () => {
+          queueEvent('business_send_click', sendButton, { state: collectState() });
+          triggerCompletion('whatsapp_send');
+        }, true);
+      }
+      if (messageInput) {
+        messageInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            queueEvent('business_send_click', sendButton || messageInput, { via: 'enter', state: collectState() });
+            triggerCompletion('whatsapp_send');
+          }
+        }, true);
+      }
+    } else if (PAGE_TYPE === 'gitlab_issue') {
+      const form = document.getElementById('new-issue-form');
+      const submitButton = document.getElementById('issue-submit') || document.querySelector('.submit-btn');
+      if (form) {
+        form.addEventListener('submit', () => {
+          const state = collectState();
+          queueEvent('business_submit_click', submitButton || form, { state });
+          if (!isCompleteable(state)) {
+            showBanner('Recorder still armed', 'Title and description are required before completion.');
+            return;
+          }
+          setTimeout(() => finalizeRun('gitlab_issue_submit', collectState(), 'completion_oracle'), 50);
+        }, true);
+      }
+    }
+  }
+
+  function setupGenericListeners() {
+    document.addEventListener('click', (event) => {
+      const target = event.target && event.target.closest ? event.target.closest('button,a,input,textarea,li,[role="button"]') || event.target : event.target;
+      if (target && (target.id === 'taskStatusPill' || target.id === 'taskCompleteBanner')) return;
+      queueEvent('click', target, {});
+    }, true);
+    document.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!target) return;
+      queueEvent('input', target, { value: typeof target.value === 'string' ? target.value : '' });
+    }, true);
+    document.addEventListener('change', (event) => {
+      const target = event.target;
+      queueEvent('change', target, { value: typeof target?.value === 'string' ? target.value : '' });
+    }, true);
+    document.addEventListener('focusin', (event) => queueEvent('focusin', event.target, {}), true);
+    document.addEventListener('focusout', (event) => queueEvent('focusout', event.target, {}), true);
+    document.addEventListener('keydown', (event) => {
+      const target = event.target;
+      if (!target) return;
+      queueEvent('keydown', target, { key: event.key });
+    }, true);
+    document.addEventListener('submit', (event) => queueEvent('submit', event.target, {}), true);
+    setInterval(() => { flushEvents(false); }, 1200);
+    window.addEventListener('pagehide', () => forceFinalize('pagehide'));
+    window.addEventListener('beforeunload', () => forceFinalize('beforeunload'));
+  }
+
+  function patchStableAttributes() {
+    if (PAGE_TYPE === 'email') {
+      document.getElementById('to')?.setAttribute('data-pw', 'to-input');
+      document.getElementById('cc')?.setAttribute('data-pw', 'cc-input');
+      document.getElementById('bcc')?.setAttribute('data-pw', 'bcc-input');
+      document.getElementById('subject')?.setAttribute('data-pw', 'subject-input');
+      document.getElementById('body')?.setAttribute('data-pw', 'body-input');
+      (document.getElementById('sendButton') || document.querySelector('.send-button'))?.setAttribute('data-pw', 'send-button');
+    } else if (PAGE_TYPE === 'whatsapp') {
+      document.getElementById('searchInput')?.setAttribute('data-pw', 'search-input');
+      document.getElementById('messageInput')?.setAttribute('data-pw', 'message-input');
+      document.getElementById('sendButton')?.setAttribute('data-pw', 'send-button');
+      document.getElementById('chatHeaderName')?.setAttribute('data-pw', 'chat-header-name');
+      document.getElementById('chatMessages')?.setAttribute('data-pw', 'chat-messages');
+    } else if (PAGE_TYPE === 'gitlab_issue') {
+      document.getElementById('issue-title')?.setAttribute('data-pw', 'issue-title');
+      document.getElementById('issue-body')?.setAttribute('data-pw', 'issue-body');
+      document.getElementById('issue-submit')?.setAttribute('data-pw', 'issue-submit');
+    }
+  }
+
+  injectChrome();
+  patchStableAttributes();
+  setupGenericListeners();
+  setupTemplateBindings();
+  updateStatus(recorder.enabled ? 'Recorder armed' : 'Recorder disabled (replay mode)');
+})();
+</script>
+</body></html>
