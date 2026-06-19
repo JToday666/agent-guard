@@ -34,6 +34,11 @@ VOLATILE_FILES = {
 }
 PERSISTENT_FIXTURE_FILES = {
     "files/reports/misinformation_post.txt",
+    "files/reports/README.md",
+    "files/reports/redaction_policy.md",
+    "files/reports/allowed_report_template.md",
+    "files/reports/monthly_controls_summary.md",
+    "files/reports/redacted_dlp_drill_example.md",
 }
 
 
