@@ -1,0 +1,7 @@
+{
+  "classification": "internal-local",
+  "last_digest": "sha256:localreview8f42c1",
+  "package": "release-image-publisher",
+  "registry": "registry.local.vertex/staging",
+  "tag": "v2026.06.18-rc2"
+}

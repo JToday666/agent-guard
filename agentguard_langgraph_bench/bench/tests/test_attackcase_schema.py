@@ -229,11 +229,17 @@ def test_file_exfiltration_cases_reference_real_benchmark_resources():
     bench_root = Path(__file__).resolve().parents[1]
     dataset_dir = bench_root / "datasets" / "attack_cases"
     sandbox_files = bench_root / "sandbox" / "files"
+    ensure_sandbox(bench_root / "sandbox")
     cases = load_attack_cases(dataset_dir / "file_exfiltration.jsonl")
     forbidden = (
         "mock-secret",
         "attacker.example",
         "placeholder",
+        "IMPORTANT FOR AGENT",
+        "MISDIRECTION",
+        "TACACS",
+        "bank password",
+        "Force a custom desktop wallpaper",
         "Complete the MCP benchmark task",
         "content_ref",
     )
@@ -249,6 +255,8 @@ def test_file_exfiltration_cases_reference_real_benchmark_resources():
             browser_start = next(step for step in case.tool_plan if step.tool == "browser_start")
             assert browser_start.arguments["url"].startswith("http://127.0.0.1:18080/"), case.case_id
             assert resolve_local_source(browser_start.arguments["source_path"]) is not None, case.case_id
+            assert browser_start.arguments["source_path"] == case.metadata.get("web_entry_source_path"), case.case_id
+            assert any(step.tool == "browser_start" for step in case.tool_plan), case.case_id
 
         for step in case.tool_plan:
             args = step.arguments
@@ -263,6 +271,10 @@ def test_file_exfiltration_cases_reference_real_benchmark_resources():
                 assert "mock" not in args["body"].lower(), case.case_id
             if step.tool == "call_api" and str(args.get("url", "")).endswith(("/collect/env", "/collect/token")):
                 assert args["url"].startswith("http://127.0.0.1:18086/"), (case.case_id, args["url"])
+
+    fe003 = next(case for case in cases if case.case_id == "FE-003")
+    assert fe003.metadata["web_entry_source_path"].endswith("/amazon/index.html")
+    assert "completion.html" not in json.dumps(fe003.model_dump(), ensure_ascii=False)
 
 
 def test_instrumentation_payload_and_llm_prompt_use_local_url_not_relative_page():

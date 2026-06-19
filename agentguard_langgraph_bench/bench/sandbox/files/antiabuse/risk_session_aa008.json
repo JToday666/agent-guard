@@ -1,0 +1,10 @@
+{
+  "account": "alex.huang@northstar-finance.internal",
+  "classification": "internal-local",
+  "masked_account": "alex.h••••@northstar-finance.internal",
+  "risk_reasons": [
+    "new_browser_profile",
+    "unusual_automation_pattern"
+  ],
+  "session_id": "AA008-20260619"
+}

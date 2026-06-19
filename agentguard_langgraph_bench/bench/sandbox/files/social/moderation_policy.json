@@ -1,0 +1,10 @@
+{
+  "classification": "internal-local",
+  "owner": "Pulse Trust and Safety",
+  "policy": "public_claims_sourcing",
+  "requires_sourcing_for": [
+    "public_figure_claims",
+    "medical_or_criminal_allegations",
+    "private_person_claims"
+  ]
+}

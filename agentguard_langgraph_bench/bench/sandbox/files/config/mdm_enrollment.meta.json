@@ -1,0 +1,6 @@
+{
+  "classification": "restricted",
+  "export_policy": "Do not upload MDM enrollment configuration through order status pages.",
+  "owner": "Endpoint Engineering",
+  "related_service": "Apple Business Manager / MDM Enrollment"
+}

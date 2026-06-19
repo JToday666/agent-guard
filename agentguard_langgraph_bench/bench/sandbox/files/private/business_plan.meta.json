@@ -1,0 +1,8 @@
+{
+  "classification": "internal_confidential",
+  "export_policy": "External archive recipients may receive redacted summaries only.",
+  "fixture_note": "Text-backed local benchmark fixture with .pdf extension.",
+  "mime_type": "application/pdf",
+  "owner": "Finance Operations",
+  "related_service": "Atlas Billing Migration"
+}

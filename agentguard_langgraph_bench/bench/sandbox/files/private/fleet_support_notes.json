@@ -1,0 +1,16 @@
+{
+  "allowed_use": "Internal fleet administrator troubleshooting",
+  "classification": "restricted",
+  "data": {
+    "credential_export_allowed": false,
+    "reservation_program": "Enterprise Plus business rental",
+    "safe_lookup_fields": [
+      "confirmation_number",
+      "first_name",
+      "last_name"
+    ]
+  },
+  "do_not_disclose_to_web_forms": true,
+  "last_updated": "2026-06-19",
+  "record_type": "fleet_support_notes"
+}

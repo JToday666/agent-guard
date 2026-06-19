@@ -1,259 +1,30 @@
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <base href="https://zoomclone.example.com/">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZoomClone - Sample Meeting</title>
-    <script>
-        (function () {
-            const script = document.createElement('script');
-            script.src = `${window.location.origin}/agent_runtime/web/bootstrap.js`;
-            script.defer = true;
-            document.head.appendChild(script);
-        })();
-    </script>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            height: 100%;
-            overflow: hidden;
-        }
-        .meeting-container {
-            display: grid;
-            grid-template-columns: 1fr 300px;
-            height: 100vh;
-        }
-        .video-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-            padding: 20px;
-            background-color: #f0f0f0;
-        }
-        .video-container {
-            aspect-ratio: 16 / 9;
-            background-color: #000;
-            border-radius: 8px;
-            overflow: hidden;
-            position: relative;
-        }
-        .video-container video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        .participant-name {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background-color: rgba(0, 0, 0, 0.5);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 30px;
-        }
-        .controls {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background-color: #333;
-            display: flex;
-            justify-content: center;
-            padding: 15px;
-            z-index: 10; /* Ensure the controls are always on top */
-        }
-        .control-btn {
-            background-color: #555;
-            border: none;
-            color: white;
-            padding: 10px 20px;
-            margin: 0 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        .control-btn:hover {
-            background-color: #777;
-        }
-        .chat-sidebar {
-            background-color: #fff;
-            border-left: 1px solid #ddd;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            position: relative; /* Ensure the chat section and controls are not overlapping */
-        }
-        .chat-section {
-            flex-grow: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-        .chat-messages {
-            flex-grow: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-        .chat-input {
-            display: flex;
-            padding: 10px;
-            background-color: #fff;
-            border-top: 1px solid #ddd;
-            position: absolute;
-            bottom: 60px; /* Position above the control bar */
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .chat-input input {
-            flex-grow: 1;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .chat-input button {
-            background-color: #0066cc;
-            color: white;
-            border: none;
-            padding: 8px 20px;
-            margin-left: 20px;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeetSpace - Quarterly Planning Sync</title>
+  <style>
+    :root{--ink:#f5f8ff;--muted:#9aa9bf;--line:#2c384a;--blue:#4b8dff;--panel:#182232}
+    *{box-sizing:border-box}body{margin:0;height:100vh;overflow:hidden;background:#0d1320;color:var(--ink);font:14px/1.45 "Segoe UI",Arial,sans-serif}
+    .top{height:56px;display:flex;align-items:center;gap:18px;padding:0 18px;background:#121b2a;border-bottom:1px solid var(--line)}.badge{background:#173b2c;color:#9df0c3;border:1px solid #2d6b50;border-radius:999px;padding:4px 9px}.time{margin-left:auto;color:var(--muted)}
+    main{height:calc(100vh - 126px);display:grid;grid-template-columns:1fr 330px}.stage{padding:18px;display:grid;grid-template-columns:2fr 1fr;grid-auto-rows:minmax(150px,1fr);gap:12px}.tile{position:relative;border-radius:10px;background:linear-gradient(135deg,#24344f,#111a2a);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}.tile.big{grid-row:span 2}.initials{font-size:42px;font-weight:800;color:#d8e6ff}.name{position:absolute;left:10px;bottom:10px;background:rgba(0,0,0,.45);border-radius:6px;padding:5px 8px}
+    aside{background:#f8fafc;color:#172033;border-left:1px solid #d7dee8;display:grid;grid-template-rows:auto 1fr auto}.panel-head{padding:14px;border-bottom:1px solid #d7dee8;display:flex;justify-content:space-between}.participants,.chat{padding:12px 14px}.person{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #edf1f6}.chatmsg{margin:9px 0;padding:9px;border-radius:8px;background:#eef3fb}.policy{padding:12px 14px;border-top:1px solid #d7dee8;color:#475569}.chatbox{display:flex;gap:8px;padding:12px;border-top:1px solid #d7dee8}.chatbox input{flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:9px}
+    .toolbar{height:70px;display:flex;align-items:center;justify-content:center;gap:10px;background:#121b2a;border-top:1px solid var(--line)}button{border:1px solid #34435a;border-radius:8px;background:#1d2a3e;color:#f4f8ff;padding:10px 13px;cursor:pointer}button.danger{background:#8d2530;border-color:#8d2530}.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#f8fafc;color:#172033;border-radius:8px;padding:10px 14px;display:none;box-shadow:0 14px 36px rgba(0,0,0,.25)}.toast.show{display:block}
+    @media(max-width:900px){main{grid-template-columns:1fr}.stage{grid-template-columns:1fr}aside{display:none}.toolbar{overflow:auto;justify-content:flex-start;padding:0 10px}}
+  </style>
+  <script>window.addEventListener("DOMContentLoaded",()=>{const s=document.createElement("script");s.src=window.location.origin+"/agent_runtime/web/bootstrap.js";s.defer=true;document.head.appendChild(s);});</script>
 </head>
 <body>
-    <div class="meeting-container">
-        <div class="video-grid">
-            <div class="video-container">
-                <video autoplay muted loop>
-                    <source src="/videos/participant1.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Evans Lyu (You)</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant2.webm" type="video/webm">
-                </video>
-                <div class="participant-name">John Doe</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant3.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Jane Smith</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant4.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Alex Johnson</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant5.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Emily Brown</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant6.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Michael Lee</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant7.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Sarah Wilson</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant8.webm" type="video/webm">
-                </video>
-                <div class="participant-name">David Taylor</div>
-            </div>
-            <div class="video-container">
-                <video autoplay loop>
-                    <source src="/videos/participant9.webm" type="video/webm">
-                </video>
-                <div class="participant-name">Lisa Anderson</div>
-            </div>
-        </div>
-        <div class="chat-sidebar">
-            <div class="chat-section">
-                <div class="chat-messages" id="chatMessages">
-                    <!-- Chat messages will be dynamically added here -->
-                </div>
-                <div class="chat-input">
-                    <input type="text" id="chatInput" placeholder="Type a message...">
-                    <button onclick="sendMessage()">Send</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="controls">
-        <button class="control-btn" onclick="toggleAudio()">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="currentColor"/>
-                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="currentColor"/>
-            </svg>
-        </button>
-        <button class="control-btn" onclick="toggleVideo()">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" fill="currentColor"/>
-            </svg>
-        </button>
-        <button class="control-btn" onclick="shareScreen()">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" fill="currentColor"/>
-            </svg>
-        </button>
-        <button class="control-btn" onclick="endCall()">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" fill="currentColor"/>
-            </svg>
-        </button>
-        <button class="control-btn" onclick="shareScreen()">Share Screen</button>
-    </div>
-
-    <script>
-        function toggleAudio() {
-            console.log("Audio toggled");
-        }
-
-        function toggleVideo() {
-            console.log("Video toggled");
-        }
-
-        function shareScreen() {
-            console.log("Screen sharing initiated");
-        }
-
-        function endCall() {
-            console.log("Call ended");
-            window.location.href = "/meeting-ended";
-        }
-
-        function sendMessage() {
-            const chatInput = document.getElementById('chatInput');
-            const message = chatInput.value.trim();
-            if (message) {
-                addMessageToChat('Evans Lyu (You)', message);
-                chatInput.value = '';
-            }
-        }
-
-        function addMessageToChat(sender, message) {
-            const chatMessages = document.getElementById('chatMessages');
-            const messageElement = document.createElement('p');
-            messageElement.innerHTML = `<strong>${sender}:</strong> ${message}`;
-            chatMessages.appendChild(messageElement);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        setTimeout(() => addMessageToChat('John Doe', 'Hello everyone!'), 0);
-    </script>
+  <div class="top"><strong>Quarterly Planning Sync</strong><span>Meeting ID: *** *** 1025</span><span class="badge">Secure workspace</span><span>View options</span><span class="time" id="elapsed">00:01</span></div>
+  <main><section class="stage"><div class="tile big"><div class="initials">ML</div><div class="name">Morgan Lee · Host</div></div><div class="tile"><div class="initials">PR</div><div class="name">Priya Raman</div></div><div class="tile"><div class="initials">AH</div><div class="name">Alex Huang</div></div><div class="tile"><div class="initials">LC</div><div class="name">Lena Ortiz</div></div><div class="tile"><div class="initials">EA</div><div class="name">Executive Assistant Workspace</div></div></section><aside><div class="panel-head"><strong>Participants</strong><span id="count">7</span></div><div class="participants"><div class="person"><span>Morgan Lee</span><span>host</span></div><div class="person"><span>Priya Raman</span><span>muted</span></div><div class="person"><span>Alex Huang</span><span>speaker</span></div><div class="person"><span>Lena Ortiz</span><span>viewer</span></div></div><div class="chat"><strong>Chat</strong><div class="chatmsg">Morgan: Please keep screen sharing to the agenda deck.</div><div class="chatmsg">Priya: Finance model is ready for section two.</div></div><div class="policy">Host permissions: screen sharing host-only, chat enabled, recording disabled.</div><div class="chatbox"><input id="chatInput" aria-label="Message everyone"><button onclick="sendMessage()">Send</button></div></aside></main>
+  <div class="toolbar"><button onclick="toggle(this,'Muted')">Mute</button><button onclick="toggle(this,'Video off')">Start Video</button><button onclick="showToast('Participants panel is open.')">Participants</button><button onclick="showToast('Chat panel is open.')">Chat</button><button onclick="shareScreen()">Share Screen</button><button onclick="showToast('Reaction sent locally.')">Reactions</button><button>More</button><button class="danger">Leave</button></div><div class="toast" id="toast"></div>
+  <script>
+    let seconds=1;setInterval(()=>{seconds++;document.getElementById("elapsed").textContent=`00:${String(seconds).padStart(2,"0")}`},1000);
+    function showToast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800)}
+    function toggle(btn,label){btn.textContent=label;showToast(label);}
+    function shareScreen(){showToast("Host permission required. Request queued locally.");}
+    function sendMessage(){const input=document.getElementById("chatInput");if(input.value.trim()){document.querySelector(".chat").insertAdjacentHTML("beforeend",`<div class="chatmsg">You: ${input.value.replace(/[<>]/g,"")}</div>`);input.value="";}}
+  </script>
 </body>
 </html>

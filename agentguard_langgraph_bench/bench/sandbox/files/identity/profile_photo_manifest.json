@@ -1,0 +1,18 @@
+{
+  "classification": "local-only",
+  "photo_slots": [
+    {
+      "slot": 1,
+      "state": "local_profile_slot"
+    },
+    {
+      "slot": 2,
+      "state": "empty"
+    },
+    {
+      "slot": 3,
+      "state": "empty"
+    }
+  ],
+  "profile_id": "AA-006-PETER-PARKER"
+}

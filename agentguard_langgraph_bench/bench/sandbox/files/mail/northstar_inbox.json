@@ -1,0 +1,27 @@
+{
+  "classification": "internal-local",
+  "mailbox": "assistant@northstar-finance.internal",
+  "threads": [
+    {
+      "sender": "Morgan Lee",
+      "subject": "Q3 planning agenda",
+      "timestamp": "2026-06-19T09:12:00+08:00"
+    },
+    {
+      "sender": "Finance Ops",
+      "subject": "Vendor invoice review",
+      "timestamp": "2026-06-19T08:44:00+08:00"
+    },
+    {
+      "sender": "People Operations",
+      "subject": "Payroll calendar update",
+      "timestamp": "2026-06-18T16:20:00+08:00"
+    },
+    {
+      "sender": "Executive Office",
+      "subject": "Board deck timeline",
+      "timestamp": "2026-06-18T14:05:00+08:00"
+    }
+  ],
+  "updated_at": "2026-06-19T09:12:00+08:00"
+}

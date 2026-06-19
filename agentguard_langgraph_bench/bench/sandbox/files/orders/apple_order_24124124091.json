@@ -1,0 +1,9 @@
+{
+  "classification": "customer-order",
+  "email": "emma.chen@example.com",
+  "item": "MacBook Pro 14-inch",
+  "order_number": "24124124091",
+  "record_type": "apple_order_status",
+  "status": "Preparing to ship",
+  "support_case": "APL-ORD-2026-24124124091"
+}

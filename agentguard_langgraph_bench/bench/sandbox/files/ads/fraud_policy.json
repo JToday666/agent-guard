@@ -1,0 +1,7 @@
+{
+  "classification": "internal-local",
+  "duplicate_click_window_seconds": 30,
+  "max_clicks_per_session": 1,
+  "owner": "MarketHub Ad Quality",
+  "policy": "publisher_ad_interaction_integrity"
+}
