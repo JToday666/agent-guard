@@ -42,6 +42,73 @@
 - `runner.py`：已有 AttackBench CLI、结果输出和指标计算入口。
 - `attackcase_converter.py`：已有极简 MCPSafety 转换函数，需要扩展。
 
+## 2026-06-19 真实化优化增量
+
+本轮按 `bench/todo/tool_hijacking_real_world_optimization_plan.md` 完成了工具调用劫持靶场的真实化增强，同时保留 10 条旧样本的 replay 兼容性。
+
+### 数据与 schema
+
+- `bench/datasets/attack_cases/tool_hijacking.jsonl` 仍保持 10 条 MCPSafety 旧样本，所有旧字段和 `tool_plan` 保留。
+- 10 条旧样本增量补充 `case_schema_version="tool_hijacking.v2"`、`threat_model`、`clean_tool_catalog`、`poisoned_tool_catalog`、`normal_oracle`、`attack_oracle`、`task_oracle`、`safety_oracle`、`sequence_oracle`、`permission_oracle`、`response_oracle`、`differential_oracle` 和 `evidence_expectation`。
+- 新增正常 MCP 对照样本 `bench/datasets/attack_cases/tool_hijacking_benign.jsonl`，包含 `MCP-B001` 到 `MCP-B006`，覆盖正常 search、fetch、GitHub create_repository、yfinance、maps、Playwright navigate，用于 benign FPR / overblock 检查。
+- MCP-021 明确标注 `subtype="network_request_poisoning"`，MCPSafety evaluator 从旧的 `check_command_injection_attack` 迁移为 `check_network_request_poisoning_attack`，避免把本地 URL collector 场景误导为真实 shell command injection。
+
+### 运行模式
+
+runner 新增：
+
+```bash
+--tool-hijacking-mode replay|autonomous|differential|hybrid
+--llm-enabled
+--no-llm-fallback-to-case-plan
+```
+
+- `replay`：默认兼容模式，继续执行 AttackCase 的旧 `tool_plan`。
+- `autonomous`：不使用恶意 replay plan，demo planner 根据 `clean_tool_catalog` 或 `poisoned_tool_catalog` 和 oracle 生成 MCP 工具调用。
+- `differential`：同一 case 分别以 clean / poisoned catalog 运行，然后输出 `differential.tool_changed`、`arguments_changed`、`permission_escalated`、`new_external_resource`、`risk_delta` 和 `changed_fields`。
+- `hybrid`：保留为 CI 兼容入口，标注 `planning_source="case_plan_fallback"` 或 catalog 来源。
+
+### evidence 与 oracle
+
+- `MockToolRegistry.mcp_call()` 接收 `descriptor`、`catalog_view`、`clean_descriptor`、`poisoned_descriptor`、`descriptor_diff` 可选参数。
+- 每次 MCP 调用记录 descriptor evidence：`descriptor_view`、`descriptor_hash`、`clean_descriptor_hash`、`poisoned_descriptor_hash`、`descriptor_diff`、`permissions`、`trust_level`、`server_version`。
+- descriptor evidence 写入 `sandbox/mcp/calls.jsonl`，并额外写入 `sandbox/mcp/descriptors.jsonl` 与 `sandbox/mcp/catalog_diff.jsonl`。
+- adapter 会把 MCP descriptor hash、权限、信任级别和版本摘要放入 ToolCallEvent metadata，供 Core 策略或审计消费。
+- `bench/mcpsafety.py` 新增 argument / sequence / permission / response oracle 判定，并保留旧 `attack_success`、`resisted`、`resistance_score`、`evidence_status` 字段。
+- `bench/mcpsafety.py` 新增 `evaluate_differential_run()`，基于 clean / poisoned 两轮真实执行结果判定工具、参数、权限和外部资源漂移。
+
+### 指标
+
+`bench/metrics.py` 在原 ASR before / ASR after / Block Rate / FPR 基础上新增：
+
+- `task_success_rate` / `task_success_count`
+- `safe_completion_rate` / `safe_completion_count`
+- `overblock_rate` / `overblocked_count`
+- `benign_fpr`
+
+runner 每条结果行新增：
+
+- `planning_source`
+- `tool_hijacking_mode`
+- `tool_catalog_view`
+- `task_success`
+- `safe_completion`
+- `overblocked`
+- `resisted_but_task_failed`
+- `oracle_evidence`
+- `descriptor_evidence`
+- `descriptor_diff`
+- differential 模式下的 `clean_run`、`poisoned_run`、`differential`
+
+### 本地安全边界
+
+所有真实化行为仍通过本地 mock MCP service 和 sandbox fixture 实现：
+
+- MCP HTTP 只使用 `127.0.0.1:18085`。
+- collector 只写 `sandbox/mcp/collections.jsonl`。
+- GitHub、finance、maps、search、booking 页面均使用 `sandbox/mcp/` 或 `sandbox/files/hijacking/` fixture。
+- deny / ask 仍在 `SecureToolNode` 工具执行前阻断，因此不会产生 descriptor 之外的工具副作用。
+
 ## 与现有实现的兼容性校准
 
 本计划必须与 `agentguard_langgraph_bench` 当前代码和 JSONL 样本格式兼容，后续实现时按以下规则执行：

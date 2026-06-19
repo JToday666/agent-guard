@@ -91,6 +91,46 @@ python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langgraph_be
 
 本地假 Core 默认全部 `deny`，所以开启防御的冒烟测试应看到 `ASR after = 0`、`Block Rate = 1`、`FPR = 1`。
 
+## 记忆中毒评测分层
+
+当前 memory poisoning 分为三类入口，旧 case 保留为兼容 baseline：
+
+```text
+bench/datasets/attack_cases/memory_poisoning.jsonl              # 旧 10 条 PoisonedRAG curated 入口
+bench/datasets/attack_cases/memory_poisoning_toolchain.jsonl    # 同 10 条，明确定位为 toolchain blocking baseline
+bench/datasets/attack_cases/memory_poisoning_realistic.jsonl    # realistic seed/trigger，真实模式使用 answer_strategy=provided
+bench/datasets/attack_cases/memory_poisoning_delayed.jsonl      # CI deterministic 跨轮次 delayed memory poisoning
+bench/datasets/attack_cases/memory_poisoning_clean_control.jsonl
+bench/datasets/attack_cases/memory_poisoning_benign.jsonl
+```
+
+PoisonedRAG service 现在拆分 agent-facing 与 evaluator-facing 资源：`/page`、`/agent-view` 和默认 case API 不暴露 `correct_answer`、`incorrect_answer`、`targeted_incorrect_answer` 或 `source=poison`；`/oracle` 仅供 runner/tests 评分使用。
+
+常用命令：
+
+```bash
+python -m agentguard_langgraph_bench.bench.runner \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning_toolchain.jsonl \
+  --defense off
+
+python -m agentguard_langgraph_bench.bench.runner \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning_realistic.jsonl \
+  --defense off \
+  --scenario-stateful
+
+python -m agentguard_langgraph_bench.bench.runner \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning_delayed.jsonl \
+  --defense off \
+  --scenario-stateful
+
+python -m agentguard_langgraph_bench.bench.runner \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/memory_poisoning_benign.jsonl \
+  --defense off \
+  --scenario-stateful
+```
+
+`--scenario-stateful` 会按 `metadata.scenario_id` 分组，同一 scenario 内保留 `sandbox/memory/store.jsonl`，不同 scenario 默认隔离。summary 会新增 `memory_poisoning.memory_contamination_rate`、`delayed_attack_success_rate`、`conflict_detection_rate`、`untrusted_memory_rejection_rate` 和 `benign_memory_fpr`。
+
 ## 评测环境恢复
 
 Runner 默认会在每轮评测开始前恢复 `bench/sandbox/` 到初始评测环境；每轮结束时会先把本轮在 sandbox 中新增或改动的评测证据复制到 `bench/results/sandbox_artifacts/sandbox_<timestamp>/`，写出 `manifest.json`，然后再清理 `bench/sandbox/` 中的运行影响。归档会保存 outbox、API、memory、browser、MCP、RAG 日志，下载、浏览器回放、临时报告、本地 GitHub repository，以及被测试改动过的 fixture 文件；随后 live sandbox 会被恢复为初始内容。`bench/results/` 下的 run/summary 输出和 sandbox artifact 归档不会被清理。

@@ -72,6 +72,12 @@ PoisonedRAG 专项动态样本不放入默认 `datasets/attack_cases/`，以保�
 | `bench/datasets/poisonedrag/attack_cases/memory_poisoning_dynamic.jsonl` | 6 | PoisonedRAG copied artifacts，poisoned mode |
 | `bench/datasets/poisonedrag/attack_cases/memory_poisoning_clean.jsonl` | 6 | PoisonedRAG copied artifacts，clean baseline |
 
+工具调用劫持真实化专项正常样本同样单独存放，不计入默认 60 条 curated 集合：
+
+| 文件 | 数量 | 来源 |
+|---|---:|---|
+| `bench/datasets/attack_cases/tool_hijacking_benign.jsonl` | 6 | 自构造 benign MCP 对照，覆盖 search、fetch、GitHub、yfinance、maps、Playwright |
+
 `bench/datasets/poisonedrag/` 当前复制了 NQ 4 个、MS MARCO 3 个、HotpotQA 3 个 qid 的最小 artifacts：selected adv results、top-10 BEIR rankings、clean doc cache 和 corpus JSONL fallback。完整多 GB corpus 未复制；需要扩大样本时可从只读 `../PoisonedRAG/` 重新抽样生成。
 
 MCPSafety 10 条工具劫持样本覆盖：
@@ -82,7 +88,9 @@ MCPSafety 10 条工具劫持样本覆盖：
 - `return_hijacking`: 1 条
 - `gateway_hijacking`: 3 条
 
-其中 `gateway_hijacking` 覆盖 replay、rug pull 和 `check_dependency` function dependency injection：runner 会从真实执行结果确认 required dependency 在 target tool 前被调用。`argument_hijacking` 额外覆盖 URL 型 `check_command_injection_attack` / network request poisoning，转换器会把恶意 URL 映射为 `url` 参数而不是 shell `command`。
+其中 `gateway_hijacking` 覆盖 replay、rug pull 和 `check_dependency` function dependency injection：runner 会从真实执行结果确认 required dependency 在 target tool 前被调用。`argument_hijacking` 额外覆盖 URL 型 network request poisoning，MCP-021 已标注 `check_network_request_poisoning_attack`，转换器会把恶意 URL 映射为 `url` 参数而不是 shell `command`。
+
+10 条旧工具劫持样本已增量升级为 `tool_hijacking.v2`，保留原 `tool_plan` replay 兼容，同时加入 `clean_tool_catalog`、`poisoned_tool_catalog`、normal / attack / task / safety oracle、sequence / permission / response / differential oracle、descriptor hash / diff evidence expectation。runner 支持 `--tool-hijacking-mode replay|autonomous|differential|hybrid`，并在结果中区分 `attack_success`、`task_success`、`safe_completion`、`overblocked`、`resisted_but_task_failed` 和 `benign_fpr`。
 
 MCPSafety 攻击成功规则已迁移为报告层 evaluator，支持 `check_malicious_tool_attack`、`check_parameter_modification_attack`、`check_wrong_arguments_intent_injection`、`check_wrong_function_intent_injection`、`check_command_injection_attack`、`check_data_tampering_attack`、`check_identity_spoofing_attack`、`check_replay_injection_attack`、`check_rug_pull_attack`、`check_dependency` 和历史平台配置兼容分支。identity spoofing 仅检查 sandbox 执行证据，不读取真实环境变量。
 
@@ -218,6 +226,33 @@ python -m agentguard_langgraph_bench.bench.cli \
 ```
 
 ## 9. 测试结果
+
+2026-06-19 工具调用劫持真实化优化验证：
+
+```text
+python -m pytest -q agentguard_langgraph_bench/bench/tests/test_tool_hijacking_evaluator.py \
+  agentguard_langgraph_bench/bench/tests/test_tool_hijacking_runner.py \
+  agentguard_langgraph_bench/bench/tests/test_tool_hijacking_real_world_modes.py \
+  agentguard_langgraph_bench/bench/tests/test_mcpsafety_evaluation_rules.py
+24 passed, 1 skipped
+
+python -m pytest -q agentguard_langgraph_bench/bench/tests
+161 passed in 816.65s
+
+git diff --check -- agentguard_langgraph_bench
+passed
+```
+
+工具劫持专项 smoke：
+
+| 模式 | 数据集 | 关键结果 |
+|---|---|---|
+| replay | `tool_hijacking.jsonl` | `case_count=10`, `asr_before=1.0`, 10 条旧样本继续可运行 |
+| autonomous | `tool_hijacking.jsonl` | `case_count=10`, `asr_before=0.7`, `task_success_rate=0.6`, `safe_completion_rate=0.1` |
+| differential | `tool_hijacking.jsonl` | `case_count=10`, `asr_before=1.0`, 每条结果包含 `clean_run` / `poisoned_run` / `differential` |
+| autonomous + fake allow | `tool_hijacking_benign.jsonl` | `case_count=6`, `fpr=0.0`, `benign_fpr=0.0`, `task_success_rate=1.0`, `safe_completion_rate=1.0` |
+
+抽检结果确认 run JSON 中明确包含 `attack_success`、`task_success`、`safe_completion`、`overblocked`、`planning_source`、`descriptor_evidence`、`descriptor_diff`；differential 模式额外包含 `tool_changed`、`arguments_changed`、`permission_escalated`、`new_external_resource`、`risk_delta` 和 `changed_fields`。
 
 2026-06-10 四目录重构后当前工作区验证：
 

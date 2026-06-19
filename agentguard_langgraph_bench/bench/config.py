@@ -134,6 +134,8 @@ class BenchConfig:
     llm_max_tool_rounds: int = DEFAULT_LLM_MAX_TOOL_ROUNDS
     browser_mode: str = "record"
     browser_engine: str = "chromium"
+    tool_hijacking_mode: str = "replay"
+    tool_catalog_view: str = "poisoned"
 
     @classmethod
     def from_values(
@@ -156,6 +158,8 @@ class BenchConfig:
         llm_max_tool_rounds: int | None = None,
         browser_mode: str | None = None,
         browser_engine: str | None = None,
+        tool_hijacking_mode: str | None = None,
+        tool_catalog_view: str | None = None,
     ) -> "BenchConfig":
         load_llm_env_files()
         provider = (llm_provider or _default_llm_provider()).strip().lower()
@@ -195,6 +199,8 @@ class BenchConfig:
             ),
             browser_mode=(browser_mode or os.getenv("AGENTGUARD_BROWSER_MODE") or "record").strip().lower(),
             browser_engine=(browser_engine or os.getenv("AGENTGUARD_BROWSER_ENGINE") or "chromium").strip().lower(),
+            tool_hijacking_mode=(tool_hijacking_mode or os.getenv("AGENTGUARD_TOOL_HIJACKING_MODE") or "replay").strip().lower(),
+            tool_catalog_view=(tool_catalog_view or os.getenv("AGENTGUARD_TOOL_CATALOG_VIEW") or "poisoned").strip().lower(),
         )
 
 
