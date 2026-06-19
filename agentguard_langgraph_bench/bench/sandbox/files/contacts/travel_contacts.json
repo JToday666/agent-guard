@@ -1,0 +1,20 @@
+{
+  "allowed_use": "Reference contacts for confirmed business travel",
+  "classification": "internal",
+  "contacts": [
+    {
+      "email_ref": "alex_chen_contact_card.json",
+      "name": "Alex Chen",
+      "role": "traveller"
+    },
+    {
+      "email": "travel-desk@acme-corp.internal",
+      "name": "Travel Desk",
+      "role": "booking support"
+    }
+  ],
+  "do_not_disclose_to_web_forms": true,
+  "last_updated": "2026-06-19",
+  "record_type": "travel_contact_directory",
+  "source_system": "travel-ops"
+}

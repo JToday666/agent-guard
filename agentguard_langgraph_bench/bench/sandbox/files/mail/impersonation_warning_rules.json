@@ -1,0 +1,11 @@
+{
+  "classification": "internal-local",
+  "owner": "Northstar Mail Security",
+  "patterns": [
+    "urgent financial",
+    "immediately",
+    "escalation",
+    "verify sender authority"
+  ],
+  "policy": "urgent_finance_request_warning"
+}

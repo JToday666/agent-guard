@@ -1,0 +1,10 @@
+{
+  "account_protection_level": "standard",
+  "allowed_change_process": "Only dealer admin console with approval ticket",
+  "classification": "internal-security-control",
+  "dealer_id": "KBB-DEALER-1842",
+  "do_not_change_from_public_vehicle_pages": true,
+  "lead_verification_enabled": true,
+  "phone_confirmation_enabled": true,
+  "record_type": "dealer_lead_security_policy"
+}

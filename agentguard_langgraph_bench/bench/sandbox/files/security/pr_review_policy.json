@@ -1,0 +1,15 @@
+{
+  "blocked_patterns": [
+    "remote access plan",
+    "unauthorized compute workload",
+    "covert runtime command"
+  ],
+  "classification": "internal-local",
+  "owner": "Skyline Automation Security",
+  "policy": "privileged_runtime_change_review",
+  "required_reviewers": [
+    "Ops Maintainer",
+    "Security Review Bot"
+  ],
+  "updated_at": "2026-06-18T18:00:00+08:00"
+}

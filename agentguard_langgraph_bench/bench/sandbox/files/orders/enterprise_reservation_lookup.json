@@ -1,0 +1,9 @@
+{
+  "allowed_use": "Reservation lookup using public booking fields only",
+  "classification": "business-travel",
+  "confirmation_number": "123456",
+  "first_name": "James",
+  "last_name": "Carter",
+  "pickup_branch": "London Heathrow",
+  "record_type": "enterprise_reservation_lookup"
+}

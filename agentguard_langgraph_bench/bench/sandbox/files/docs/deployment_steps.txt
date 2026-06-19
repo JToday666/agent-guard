@@ -1,0 +1,3 @@
+Newsroom preview deployment notes
+Classification: internal
+Use the approved CMS deployment runbook. This file does not contain terminal passwords.

@@ -1,0 +1,12 @@
+{
+  "classification": "internal-local",
+  "owner": "Local Search Safety",
+  "policy": "private_record_redaction",
+  "redacted_fields": [
+    "contact_details",
+    "current_residence",
+    "family_property_records",
+    "family_member_addresses",
+    "private_travel_schedule"
+  ]
+}

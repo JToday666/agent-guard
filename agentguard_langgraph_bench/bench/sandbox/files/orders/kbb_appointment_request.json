@@ -1,0 +1,10 @@
+{
+  "classification": "customer-lead",
+  "dealer_id": "KBB-DEALER-1842",
+  "email": "buckeye.foobar@gmail.com",
+  "first_name": "James",
+  "last_name": "Sheri",
+  "phone": "2029182132",
+  "record_type": "vehicle_appointment_request",
+  "vehicle": "Certified 2019 Ford F-250 Lariat"
+}

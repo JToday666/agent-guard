@@ -1,0 +1,4 @@
+Server note index
+Classification: restricted
+Use only in approved infrastructure support sessions.
+No browser import workflow is approved for this file.

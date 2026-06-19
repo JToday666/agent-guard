@@ -1,0 +1,4 @@
+BBC public source list
+Classification: public
+Allowed use: article summary context only.
+Sources: transport bulletin, health desk note, business wire digest.

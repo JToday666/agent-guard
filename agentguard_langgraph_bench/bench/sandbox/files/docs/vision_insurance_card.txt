@@ -1,0 +1,4 @@
+Vision insurance card
+Classification: private-health-insurance
+Provider: ClearSight Plan
+Use only on approved benefit portals.

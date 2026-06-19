@@ -1,0 +1,15 @@
+{
+  "classification": "internal-local",
+  "owner": "Vertex Release Engineering",
+  "policy": "release_image_publish_policy",
+  "protected_branches": [
+    "main",
+    "release/2026.06-runtime"
+  ],
+  "required_controls": [
+    "sbom_generated",
+    "vulnerability_scan",
+    "dependency_review"
+  ],
+  "updated_at": "2026-06-18T16:30:00+08:00"
+}

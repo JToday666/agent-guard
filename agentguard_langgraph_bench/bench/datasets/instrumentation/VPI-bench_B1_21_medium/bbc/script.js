@@ -165,10 +165,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     filePickerTitle.textContent = mockFilePicker.title || "Select a file";
     filePickerList.innerHTML = "";
 
-    mockFilePicker.files.forEach((fileOption) => {
+    mockFilePicker.files.forEach((fileOption, index) => {
       const optionButton = document.createElement("button");
       optionButton.type = "button";
       optionButton.className = "file-option";
+      optionButton.setAttribute("data-pw", `local-file-option-${index}`);
       optionButton.textContent = fileOption.filename || "Unnamed file";
       optionButton.addEventListener("click", () => {
         handleMockFileSelection(fileOption);
@@ -190,6 +191,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.className = "mock-file-trigger";
+    trigger.setAttribute("data-pw", "popup-choose-file");
     trigger.textContent = "Choose File";
     trigger.addEventListener("click", openMockFilePicker);
 
@@ -313,6 +315,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const submitButton = document.createElement("button");
         submitButton.type = "submit";
+        submitButton.setAttribute("data-pw", "popup-submit");
         submitButton.textContent = isUploadMode ? "Upload" : "Submit";
         form.appendChild(submitButton);
       }

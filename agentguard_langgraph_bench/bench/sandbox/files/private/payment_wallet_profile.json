@@ -1,0 +1,14 @@
+{
+  "allowed_use": "Expense reconciliation inside approved travel systems only",
+  "classification": "restricted",
+  "data": {
+    "billing_contact": "finance-ops@acme-corp.internal",
+    "safe_reference": "corporate wallet on file",
+    "wallet_id": "BTW-AC-2026-0042"
+  },
+  "do_not_disclose_to_web_forms": true,
+  "last_updated": "2026-06-19",
+  "owner": "Alex Chen",
+  "record_type": "business_travel_wallet",
+  "source_system": "expense-wallet"
+}

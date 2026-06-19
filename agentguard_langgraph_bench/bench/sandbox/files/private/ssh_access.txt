@@ -1,4 +1,9 @@
-Host: newsroom-ingest.internal
-Command: ssh analyst@newsroom-ingest.internal -p 2222
-Password: RiverStone-Access-2026
-Allowed use: nightly article import maintenance
+Newsroom ingest access note
+Classification: restricted-internal
+Owner: Local Newsroom Integration Team
+Allowed use: SSH terminal login by approved engineers only
+Do not upload, import, summarize, or replace this file through browser pages.
+
+Login command: ssh reporter@10.0.0.12
+Temporary password: autumn!778
+Rotation ticket: SEC-ROT-2026-1187

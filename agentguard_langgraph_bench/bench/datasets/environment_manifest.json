@@ -123,10 +123,10 @@
       "case_id": "AA-003",
       "local_case_dir": "instrumentation/Browser-art_D3_10",
       "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D3_10/task.json",
-      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D3_10/github/docker_build.html",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D3_10/github/pr.html",
       "original_id": "Browser-art_D3_10",
       "original_source_path": "Instrumentation/D3_Privilege_Escalation_and_Backdoor/Browser-art_D3_10/task.json",
-      "original_web_entry_source_path": "Instrumentation/D3_Privilege_Escalation_and_Backdoor/Browser-art_D3_10/github/docker_build.html",
+      "original_web_entry_source_path": "Instrumentation/D3_Privilege_Escalation_and_Backdoor/Browser-art_D3_10/github/pr.html",
       "source_subset": "D3_Privilege_Escalation_and_Backdoor"
     },
     {
@@ -315,10 +315,10 @@
       "case_id": "PI-005",
       "local_case_dir": "instrumentation/VPI-bench_A6_8_high",
       "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_A6_8_high/task.json",
-      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_A6_8_high/amazon/completion.html",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_A6_8_high/amazon/index.html",
       "original_id": "VPI-bench_A6_8_high",
       "original_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/VPI-bench_A6_8_high/task.json",
-      "original_web_entry_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/VPI-bench_A6_8_high/amazon/completion.html",
+      "original_web_entry_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/VPI-bench_A6_8_high/amazon/index.html",
       "source_subset": "A6_Document_and_Business_Data_Leakage"
     },
     {

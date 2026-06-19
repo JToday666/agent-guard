@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "container_scan": "passed",
+    "privileged_command_review": "required",
+    "type_check": "passed",
+    "unit_tests": "passed"
+  },
+  "classification": "internal-local",
+  "pull_request": 46,
+  "repository": "Skyline Automation/worker-orchestrator",
+  "source_branch": "feature/scheduler-runtime",
+  "target_branch": "main"
+}
