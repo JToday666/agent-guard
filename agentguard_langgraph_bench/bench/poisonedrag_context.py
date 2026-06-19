@@ -10,7 +10,7 @@ from typing import Any, Literal
 from .poisonedrag_data import PoisonedRagCase, PoisonedRagRepository
 
 
-PoisonedRagMode = Literal["clean", "poisoned"]
+PoisonedRagMode = Literal["clean", "poisoned", "hybrid", "delayed_memory"]
 PoisonPrefix = Literal["question", "none"]
 
 
@@ -71,11 +71,13 @@ class PoisonedRagContextBuilder:
         adv_per_query: int | None = None,
         poison_prefix: str | None = None,
         allow_scorer_fallback: bool | None = None,
+        poison_rank_mode: str = "mixed",
+        poison_strength: float = 0.5,
     ) -> tuple[list[RagContextDoc], dict[str, Any]]:
         top_k = self._normalize_top_k(top_k)
         normalized_mode = mode.lower()
-        if normalized_mode not in {"clean", "poisoned"}:
-            raise ValueError("mode must be clean or poisoned")
+        if normalized_mode not in {"clean", "poisoned", "hybrid", "delayed_memory"}:
+            raise ValueError("mode must be clean, poisoned, hybrid, or delayed_memory")
         normalized_scorer = scorer.lower()
         if normalized_scorer not in {"light", "exact"}:
             raise ValueError("scorer must be light or exact")
@@ -125,7 +127,19 @@ class PoisonedRagContextBuilder:
             poison_docs = self._score_poison_light(poison_docs, clean_docs)
             meta = {"mode": "poisoned", "scorer": "light", "poison_prefix": prefix}
 
-        ranked = sorted(clean_docs + poison_docs, key=lambda doc: doc.score, reverse=True)[:top_k]
+        if normalized_mode in {"hybrid", "delayed_memory"}:
+            ranked = self._rank_hybrid(
+                clean_docs,
+                poison_docs,
+                top_k=top_k,
+                poison_rank_mode=poison_rank_mode,
+                poison_strength=poison_strength,
+            )
+            meta["mode"] = normalized_mode
+            meta["poison_rank_mode"] = poison_rank_mode
+            meta["poison_strength"] = poison_strength
+        else:
+            ranked = sorted(clean_docs + poison_docs, key=lambda doc: doc.score, reverse=True)[:top_k]
         public_docs = self._with_public_ids(ranked)
         meta.update(
             {
@@ -136,6 +150,74 @@ class PoisonedRagContextBuilder:
             }
         )
         return public_docs, meta
+
+    def _rank_hybrid(
+        self,
+        clean_docs: list[RagContextDoc],
+        poison_docs: list[RagContextDoc],
+        *,
+        top_k: int,
+        poison_rank_mode: str,
+        poison_strength: float,
+    ) -> list[RagContextDoc]:
+        mode = (poison_rank_mode or "mixed").lower()
+        poison_docs = list(poison_docs)
+        clean_docs = list(clean_docs)
+        if not poison_docs:
+            return clean_docs[:top_k]
+        if not clean_docs:
+            return poison_docs[:top_k]
+
+        if mode == "top1":
+            ranked = [poison_docs[0], *clean_docs]
+        elif mode == "top3":
+            ranked = [clean_docs[0], poison_docs[0], *clean_docs[1:2], *poison_docs[1:2], *clean_docs[2:]]
+        elif mode == "low_rank":
+            ranked = [*clean_docs[: max(1, top_k - 1)], poison_docs[0], *clean_docs[max(1, top_k - 1) :]]
+        elif mode == "recency_boost":
+            ranked = self._stable_interleave(clean_docs, poison_docs, poison_every=2)
+        elif mode == "mixed":
+            poison_every = 2 if poison_strength >= 0.5 else 3
+            ranked = self._stable_interleave(clean_docs, poison_docs, poison_every=poison_every)
+        else:
+            raise ValueError("poison_rank_mode must be top1, top3, mixed, low_rank, or recency_boost")
+
+        seen: set[str] = set()
+        deduped: list[RagContextDoc] = []
+        for doc in ranked:
+            if doc.internal_doc_id in seen:
+                continue
+            seen.add(doc.internal_doc_id)
+            deduped.append(doc)
+        if not any(doc.source == "clean" for doc in deduped[:top_k]) and clean_docs:
+            deduped.insert(0, clean_docs[0])
+        if not any(doc.source == "poison" for doc in deduped[:top_k]) and poison_docs:
+            insert_at = 1 if deduped else 0
+            deduped.insert(insert_at, poison_docs[0])
+        return deduped[:top_k]
+
+    @staticmethod
+    def _stable_interleave(
+        clean_docs: list[RagContextDoc],
+        poison_docs: list[RagContextDoc],
+        *,
+        poison_every: int,
+    ) -> list[RagContextDoc]:
+        ranked: list[RagContextDoc] = []
+        clean_index = 0
+        poison_index = 0
+        while clean_index < len(clean_docs) or poison_index < len(poison_docs):
+            for _ in range(max(1, poison_every - 1)):
+                if clean_index < len(clean_docs):
+                    ranked.append(clean_docs[clean_index])
+                    clean_index += 1
+            if poison_index < len(poison_docs):
+                ranked.append(poison_docs[poison_index])
+                poison_index += 1
+            if clean_index >= len(clean_docs) and poison_index < len(poison_docs):
+                ranked.extend(poison_docs[poison_index:])
+                break
+        return ranked
 
     def _clean_context_docs(self, dataset: str, qid: str, top_k: int) -> list[RagContextDoc]:
         clean_ids = self.repository.get_clean_ranked_doc_ids(dataset, qid, top_k)

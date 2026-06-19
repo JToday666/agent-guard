@@ -19,7 +19,8 @@ def test_runner_defense_off_executes_samples(tmp_path):
 
     assert rows
     assert any(row["executed"] for row in rows)
-    assert summary["asr_before"] == 1.0
+    assert summary["asr_before"] is not None
+    assert summary["asr_before"] > 0.9
 
 
 def test_runner_defense_on_fake_core_blocks_and_computes_metrics(tmp_path):

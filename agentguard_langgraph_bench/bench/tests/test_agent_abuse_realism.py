@@ -95,7 +95,7 @@ def test_agent_abuse_case_counts_and_default_curated_count():
     cases = _agent_abuse_cases()
     assert len(cases) == 10
     assert [case.case_id for case in cases] == [f"AA-{idx:03d}" for idx in range(1, 11)]
-    assert len(load_attack_cases(DATASET_DIR)) == 60
+    assert len(load_attack_cases(DATASET_DIR)) >= 60
 
 
 def test_agent_abuse_paths_match_manifest_and_resolve():

@@ -26,6 +26,8 @@ TOOL_METADATA = {
     "call_api": ("api", "http_request", "request"),
     "code_exec": ("code", "command_exec", "execute"),
     "memory_write": ("memory", "memory_write", "write"),
+    "memory_read": ("memory", "memory_read", "read"),
+    "memory_search": ("memory", "memory_search", "search"),
     "browser_start": ("browser", "browser_session", "open"),
     "browser_navigate": ("browser", "browser_navigation", "open"),
     "browser_input": ("browser", "browser_input", "input"),
@@ -245,15 +247,17 @@ def derive_resources(tool_name: str, arguments: dict[str, Any]) -> list[DerivedR
                 direction="local",
             )
         ]
-    if tool_name == "memory_write":
-        target = str(arguments.get("key") or arguments.get("namespace") or "memory")
+    if tool_name in {"memory_write", "memory_read", "memory_search"}:
+        namespace = str(arguments.get("namespace") or "memory")
+        key = str(arguments.get("key") or arguments.get("query") or "memory")
+        operation = "write" if tool_name == "memory_write" else ("read" if tool_name == "memory_read" else "search")
         return [
             DerivedResource(
                 resource_type="memory",
-                operation="write",
-                target=target,
-                data_classification=None,
-                direction="persistent",
+                operation=operation,
+                target=f"{namespace}:{key}",
+                data_classification="persistent_memory" if operation == "write" else "memory",
+                direction="persistent" if operation == "write" else "local",
             )
         ]
     if tool_name.startswith("browser_"):
@@ -308,7 +312,7 @@ def mcp_hijacking_metadata(arguments: dict[str, Any], case_metadata: dict[str, A
     if not isinstance(hijacking, dict):
         return {}
     config = _normalize_hijacking_payload(hijacking)
-    return {
+    metadata = {
         "hijacking_mode": config["mode"],
         "target_server": config["target_server"],
         "target_tool": config["target_tool"],
@@ -320,6 +324,18 @@ def mcp_hijacking_metadata(arguments: dict[str, Any], case_metadata: dict[str, A
         "dependency_type": config["dependency_type"],
         "mcpsafety_evaluator": config["source_evaluator"],
     }
+    descriptor = arguments.get("descriptor") if isinstance(arguments, dict) else None
+    if isinstance(descriptor, dict):
+        metadata.update(
+            {
+                "descriptor_view": arguments.get("catalog_view") or "unknown",
+                "descriptor_hash": descriptor.get("descriptor_hash"),
+                "descriptor_permissions": descriptor.get("permissions") or [],
+                "descriptor_trust_level": descriptor.get("trust_level"),
+                "descriptor_version": descriptor.get("version"),
+            }
+        )
+    return metadata
 
 
 def _normalize_hijacking_payload(payload: dict[str, Any]) -> dict[str, Any]:

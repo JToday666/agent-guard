@@ -4,9 +4,14 @@
       "case_id": "PR-001",
       "dataset": "nq",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-001/agent_view.json",
         "case": "files/rag/poisonedrag/PR-001/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-001/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-001/contexts.json",
-        "page": "files/rag/poisonedrag/PR-001/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-001/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-001/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-001/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-001/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/nq/test1/page",
       "question_id": "test1",
@@ -16,9 +21,14 @@
       "case_id": "PR-002",
       "dataset": "nq",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-002/agent_view.json",
         "case": "files/rag/poisonedrag/PR-002/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-002/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-002/contexts.json",
-        "page": "files/rag/poisonedrag/PR-002/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-002/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-002/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-002/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-002/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/nq/test11/page",
       "question_id": "test11",
@@ -28,9 +38,14 @@
       "case_id": "PR-003",
       "dataset": "nq",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-003/agent_view.json",
         "case": "files/rag/poisonedrag/PR-003/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-003/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-003/contexts.json",
-        "page": "files/rag/poisonedrag/PR-003/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-003/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-003/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-003/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-003/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/nq/test16/page",
       "question_id": "test16",
@@ -40,9 +55,14 @@
       "case_id": "PR-004",
       "dataset": "nq",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-004/agent_view.json",
         "case": "files/rag/poisonedrag/PR-004/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-004/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-004/contexts.json",
-        "page": "files/rag/poisonedrag/PR-004/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-004/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-004/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-004/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-004/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/nq/test19/page",
       "question_id": "test19",
@@ -52,9 +72,14 @@
       "case_id": "PR-005",
       "dataset": "msmarco",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-005/agent_view.json",
         "case": "files/rag/poisonedrag/PR-005/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-005/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-005/contexts.json",
-        "page": "files/rag/poisonedrag/PR-005/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-005/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-005/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-005/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-005/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/msmarco/1163399/page",
       "question_id": "1163399",
@@ -64,9 +89,14 @@
       "case_id": "PR-006",
       "dataset": "msmarco",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-006/agent_view.json",
         "case": "files/rag/poisonedrag/PR-006/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-006/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-006/contexts.json",
-        "page": "files/rag/poisonedrag/PR-006/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-006/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-006/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-006/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-006/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/msmarco/192017/page",
       "question_id": "192017",
@@ -76,9 +106,14 @@
       "case_id": "PR-007",
       "dataset": "msmarco",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-007/agent_view.json",
         "case": "files/rag/poisonedrag/PR-007/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-007/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-007/contexts.json",
-        "page": "files/rag/poisonedrag/PR-007/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-007/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-007/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-007/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-007/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/msmarco/1164044/page",
       "question_id": "1164044",
@@ -88,9 +123,14 @@
       "case_id": "PR-008",
       "dataset": "hotpotqa",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-008/agent_view.json",
         "case": "files/rag/poisonedrag/PR-008/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-008/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-008/contexts.json",
-        "page": "files/rag/poisonedrag/PR-008/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-008/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-008/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-008/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-008/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/hotpotqa/5adbf0a255429947ff17385a/page",
       "question_id": "5adbf0a255429947ff17385a",
@@ -100,9 +140,14 @@
       "case_id": "PR-009",
       "dataset": "hotpotqa",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-009/agent_view.json",
         "case": "files/rag/poisonedrag/PR-009/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-009/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-009/contexts.json",
-        "page": "files/rag/poisonedrag/PR-009/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-009/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-009/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-009/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-009/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/hotpotqa/5a8cb288554299585d9e3726/page",
       "question_id": "5a8cb288554299585d9e3726",
@@ -112,9 +157,14 @@
       "case_id": "PR-010",
       "dataset": "hotpotqa",
       "files": {
+        "agent_view": "files/rag/poisonedrag/PR-010/agent_view.json",
         "case": "files/rag/poisonedrag/PR-010/case.json",
+        "clean_contexts": "files/rag/poisonedrag/PR-010/clean_contexts.json",
         "contexts": "files/rag/poisonedrag/PR-010/contexts.json",
-        "page": "files/rag/poisonedrag/PR-010/page.html"
+        "evaluator_oracle": "files/rag/poisonedrag/PR-010/evaluator_oracle.json",
+        "hybrid_contexts": "files/rag/poisonedrag/PR-010/hybrid_contexts.json",
+        "page": "files/rag/poisonedrag/PR-010/page.html",
+        "poisoned_contexts": "files/rag/poisonedrag/PR-010/poisoned_contexts.json"
       },
       "page_url": "http://127.0.0.1:18082/poisonedrag/hotpotqa/5ab56e32554299637185c594/page",
       "question_id": "5ab56e32554299637185c594",

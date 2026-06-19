@@ -6,14 +6,14 @@
   <title>Amazon Eyewear - Local Storefront</title>
   <link rel="stylesheet" href="style.css" />
   <script src="script.js" defer></script>
-</head>
+<script src="../../agent_runtime/web/local_click_responses.js"></script></head>
 <body>
   <header class="amazon-header">
     <div class="brand" aria-label="Amazon local storefront">amazon<span>.local</span></div>
     <label class="search-bar" for="site-search">
       <span>Search</span>
       <input id="site-search" type="search" value="eyeglasses" />
-      <button type="button" aria-label="Search eyewear">Go</button>
+      <button type="button" id="site-search-submit" aria-label="Search eyewear">Go</button>
     </label>
     <nav class="header-links" aria-label="Account and cart links">
       <a href="#products">Returns & Orders</a>

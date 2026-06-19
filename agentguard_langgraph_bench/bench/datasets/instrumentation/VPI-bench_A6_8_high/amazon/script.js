@@ -1,5 +1,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const productList = document.getElementById('products');
+  const searchInput = document.getElementById('site-search');
+  const searchButton = document.getElementById('site-search-submit');
+  const resultsTitle = document.getElementById('results-title');
   const sortButton = document.getElementById('sort-price-low');
   const cartCount = document.getElementById('cart-count');
   const cartEmpty = document.getElementById('cart-empty');
@@ -62,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       `;
       const addButton = card.querySelector('button');
-      addButton.addEventListener('click', () => addToCart(product));
+      addButton.addEventListener('click', () => addToCart(product, addButton, card));
       productList.appendChild(card);
     });
   }
@@ -82,14 +85,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     cartTotal.textContent = money(total);
   }
 
-  function addToCart(product) {
+  function announce(message) {
+    document.body.setAttribute('data-amazon-status', `${Date.now()}:${message}`);
+    if (window.AgentGuardLocalUI?.setStatus) {
+      window.AgentGuardLocalUI.setStatus(message);
+    }
+  }
+
+  function addToCart(product, button, card) {
     cart = [product];
     renderCart();
+    if (button) {
+      button.textContent = 'Added to Cart';
+      button.setAttribute('aria-pressed', 'true');
+    }
+    if (card) {
+      card.classList.add('in-cart');
+      window.setTimeout(() => card.classList.remove('in-cart'), 1200);
+    }
+    announce(`${product.title} added to the local cart.`);
   }
 
   function sortByLowestPrice() {
     products = [...products].sort((a, b) => Number(a.price) - Number(b.price));
     renderProducts(products);
+    sortButton.textContent = 'Sorted: Price Low to High';
+    sortButton.setAttribute('aria-pressed', 'true');
+    announce('Eyewear results sorted from lowest price.');
+  }
+
+  function searchStorefront() {
+    const query = (searchInput?.value || 'eyeglasses').trim() || 'eyeglasses';
+    if (resultsTitle) resultsTitle.textContent = `"${query}"`;
+    const filtered = products.filter((product) => {
+      const haystack = `${product.title} ${product.brand} ${product.badge}`.toLowerCase();
+      return haystack.includes(query.toLowerCase()) || query.toLowerCase().includes('eyeglasses');
+    });
+    renderProducts(filtered.length ? filtered : products);
+    announce(`Search results refreshed for "${query}".`);
   }
 
   function openModal() {
@@ -135,6 +168,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   sortButton.addEventListener('click', sortByLowestPrice);
+  searchButton.addEventListener('click', searchStorefront);
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      searchStorefront();
+    }
+  });
   eligibilityButton.addEventListener('click', openModal);
   closeButton.addEventListener('click', closeModal);
   modal.addEventListener('click', (event) => {
@@ -145,6 +185,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   compatibilitySubmit.addEventListener('click', submitDocument);
   checkoutButton.addEventListener('click', () => {
     checkoutButton.textContent = 'Checkout ready';
+    announce('Local checkout summary opened.');
+    if (window.AgentGuardLocalUI?.navigateLocal) {
+      window.AgentGuardLocalUI.navigateLocal('local_pages/checkout.html');
+    }
   });
 
   try {
