@@ -6,13 +6,27 @@ from dataclasses import dataclass
 from typing import Any
 
 from .event_models import ToolExecutionResult, new_id
-from .langgraph_adapter import LangGraphAdapter, blocked_result
+from .langgraph_adapter import LangGraphAdapter
 
 
 @dataclass(slots=True)
 class SecureToolNode:
-    adapter: LangGraphAdapter
-    tool_registry: Any
+    gateway: Any
+
+    def __init__(
+        self,
+        gateway: Any | None = None,
+        *,
+        adapter: LangGraphAdapter | None = None,
+        tool_registry: Any | None = None,
+    ) -> None:
+        if gateway is None:
+            if adapter is None or tool_registry is None:
+                raise TypeError("SecureToolNode requires either gateway or adapter + tool_registry")
+            from agentguard_langgraph_bench.bench.runtime.tool_gateway import GuardedToolGateway
+
+            gateway = GuardedToolGateway(guard_adapter=adapter, tool_runtime=tool_registry)
+        self.gateway = gateway
 
     def invoke_tool(
         self,
@@ -23,57 +37,12 @@ class SecureToolNode:
         trace_id: str,
         call_id: str | None = None,
     ) -> ToolExecutionResult:
-        call_id = call_id or new_id("call")
-        event, decision = self.adapter.evaluate_before_tool(
+        return self.gateway.invoke_tool(
             tool_name=tool_name,
             arguments=arguments,
             security=security,
             trace_id=trace_id,
             call_id=call_id,
-        )
-        audit_event = self.adapter.build_audit_event(event, decision)
-        self.adapter.submit_audit_event(audit_event)
-
-        if decision.decision in {"deny", "ask"}:
-            return blocked_result(
-                tool_name=tool_name,
-                call_id=call_id,
-                event=event,
-                decision=decision,
-                audit_event=audit_event,
-            )
-
-        before = self._snapshot_side_effects()
-        try:
-            result = self.tool_registry.invoke(tool_name, arguments)
-        except Exception as exc:
-            return ToolExecutionResult(
-                tool_name=tool_name,
-                call_id=call_id,
-                executed=True,
-                blocked=False,
-                decision=decision.decision,
-                status="error",
-                result=None,
-                safe_message=None,
-                side_effects=self._side_effect_delta(before),
-                event=event.model_dump(),
-                audit_event=audit_event.model_dump(),
-                error=str(exc),
-            )
-
-        return ToolExecutionResult(
-            tool_name=tool_name,
-            call_id=call_id,
-            executed=True,
-            blocked=False,
-            decision=decision.decision,
-            status="executed",
-            result=result,
-            safe_message=None,
-            side_effects=self._side_effect_delta(before),
-            event=event.model_dump(),
-            audit_event=audit_event.model_dump(),
         )
 
     def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -114,28 +83,6 @@ class SecureToolNode:
             "last_tool_results": results,
             "tool_calls": [],
         }
-
-    def _snapshot_side_effects(self) -> dict[str, tuple[int, int]]:
-        sandbox = self.tool_registry.sandbox_dir.resolve()
-        snapshot: dict[str, tuple[int, int]] = {}
-        if not sandbox.exists():
-            return snapshot
-        for file_path in sandbox.rglob("*"):
-            if file_path.is_file():
-                stat = file_path.stat()
-                snapshot[str(file_path.resolve())] = (stat.st_size, stat.st_mtime_ns)
-        return snapshot
-
-    def _side_effect_delta(self, before: dict[str, tuple[int, int]]) -> list[dict[str, Any]]:
-        effects: list[dict[str, Any]] = []
-        after = self._snapshot_side_effects()
-        for path in sorted(set(before) | set(after)):
-            old_size, old_mtime = before.get(path, (0, 0))
-            new_size, new_mtime = after.get(path, (0, 0))
-            if new_size == old_size and new_mtime == old_mtime:
-                continue
-            effects.append({"path": path, "bytes_delta": new_size - old_size})
-        return effects
 
 
 def _rag_key(arguments: dict[str, Any]) -> tuple[str, str]:

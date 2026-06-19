@@ -34,9 +34,13 @@ class AgentGuardCoreClient:
         }
 
     def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
+        if _api_mode(self.config) == "guard-api-v0.3":
+            return self._post_json("/v1/guard/evaluate", event)
         return self._post_json("/v1/evaluate/tool-call", event)
 
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        if _api_mode(self.config) == "guard-api-v0.3":
+            return self._post_json("/v1/audit/events", event)
         return self._post_json("/v1/audit/event", event)
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -55,6 +59,10 @@ class AgentGuardCoreClient:
         if not isinstance(data, dict):
             raise CoreClientError(f"Core returned non-object JSON for {path}")
         return data
+
+
+def _api_mode(config: Any) -> str:
+    return str(getattr(config, "core_api_mode", getattr(config, "api_mode", "legacy")))
 
 
 @dataclass(slots=True)

@@ -15,11 +15,11 @@ class FakeCoreHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         payload = self._read_json()
-        if self.path == "/v1/evaluate/tool-call":
+        if self.path in {"/v1/evaluate/tool-call", "/v1/guard/evaluate"}:
             body = FakeDenyCoreClient().evaluate_tool_call(payload)
             self._send_json(200, body)
             return
-        if self.path == "/v1/audit/event":
+        if self.path in {"/v1/audit/event", "/v1/audit/events"}:
             body = {"ok": True, "audit_id": payload.get("audit_id")}
             self._send_json(200, body)
             return

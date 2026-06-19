@@ -136,6 +136,16 @@ class BenchConfig:
     browser_engine: str = "chromium"
     tool_hijacking_mode: str = "replay"
     tool_catalog_view: str = "poisoned"
+    agent_adapter: str = "langgraph-demo"
+    adapter_entrypoint: str = ""
+    adapter_config: str = ""
+    agent_endpoint: str = ""
+    agent_command: str = ""
+    tool_server_mode: str = "inprocess"
+    tool_server_host: str = "127.0.0.1"
+    tool_server_port: int = 18090
+    core_api_mode: str = "legacy"
+    strict_runtime_targets: bool = False
 
     @classmethod
     def from_values(
@@ -160,6 +170,16 @@ class BenchConfig:
         browser_engine: str | None = None,
         tool_hijacking_mode: str | None = None,
         tool_catalog_view: str | None = None,
+        agent_adapter: str | None = None,
+        adapter_entrypoint: str | None = None,
+        adapter_config: str | None = None,
+        agent_endpoint: str | None = None,
+        agent_command: str | None = None,
+        tool_server_mode: str | None = None,
+        tool_server_host: str | None = None,
+        tool_server_port: int | None = None,
+        core_api_mode: str | None = None,
+        strict_runtime_targets: bool | None = None,
     ) -> "BenchConfig":
         load_llm_env_files()
         provider = (llm_provider or _default_llm_provider()).strip().lower()
@@ -201,6 +221,20 @@ class BenchConfig:
             browser_engine=(browser_engine or os.getenv("AGENTGUARD_BROWSER_ENGINE") or "chromium").strip().lower(),
             tool_hijacking_mode=(tool_hijacking_mode or os.getenv("AGENTGUARD_TOOL_HIJACKING_MODE") or "replay").strip().lower(),
             tool_catalog_view=(tool_catalog_view or os.getenv("AGENTGUARD_TOOL_CATALOG_VIEW") or "poisoned").strip().lower(),
+            agent_adapter=(agent_adapter or os.getenv("AGENTGUARD_BENCH_AGENT_ADAPTER") or "langgraph-demo").strip(),
+            adapter_entrypoint=(adapter_entrypoint or os.getenv("AGENTGUARD_BENCH_ADAPTER_ENTRYPOINT") or "").strip(),
+            adapter_config=(adapter_config or os.getenv("AGENTGUARD_BENCH_ADAPTER_CONFIG") or "").strip(),
+            agent_endpoint=(agent_endpoint or os.getenv("AGENTGUARD_BENCH_AGENT_ENDPOINT") or "").strip(),
+            agent_command=(agent_command or os.getenv("AGENTGUARD_BENCH_AGENT_COMMAND") or "").strip(),
+            tool_server_mode=(tool_server_mode or os.getenv("AGENTGUARD_BENCH_TOOL_SERVER_MODE") or "inprocess").strip().lower(),
+            tool_server_host=(tool_server_host or os.getenv("AGENTGUARD_BENCH_TOOL_SERVER_HOST") or "127.0.0.1").strip(),
+            tool_server_port=tool_server_port if tool_server_port is not None else _env_int("AGENTGUARD_BENCH_TOOL_SERVER_PORT", 18090),
+            core_api_mode=(core_api_mode or os.getenv("AGENTGUARD_CORE_API_MODE") or "legacy").strip(),
+            strict_runtime_targets=(
+                _env_bool("AGENTGUARD_BENCH_STRICT_RUNTIME_TARGETS", False)
+                if strict_runtime_targets is None
+                else strict_runtime_targets
+            ),
         )
 
 

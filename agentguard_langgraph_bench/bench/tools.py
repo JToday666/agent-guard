@@ -2361,6 +2361,44 @@ class MockToolRegistry:
             raise KeyError(f"unknown mock tool: {name}")
         return self.functions[name](**arguments)
 
+    def list_tools(self) -> dict[str, dict[str, Any]]:
+        descriptions = {
+            "read_file": "Read a file from the benchmark sandbox.",
+            "write_file": "Write a file inside the benchmark sandbox.",
+            "send_email": "Queue an email in the benchmark outbox.",
+            "call_api": "Record a local benchmark API request.",
+            "code_exec": "Run a strictly allowlisted benchmark command.",
+            "memory_write": "Append an item to benchmark memory.",
+            "memory_read": "Read an item from benchmark memory.",
+            "memory_search": "Search benchmark memory.",
+            "browser_start": "Start a benchmark browser session.",
+            "browser_navigate": "Navigate a benchmark browser session.",
+            "browser_input": "Type into a benchmark browser element.",
+            "browser_click": "Click a benchmark browser element.",
+            "browser_extract_text": "Extract benchmark browser text.",
+            "mcp_call": "Call a benchmark MCP fixture tool.",
+            "rag_retrieve": "Retrieve benchmark RAG contexts.",
+            "rag_answer": "Record a benchmark RAG answer.",
+        }
+        return {
+            name: {
+                "name": name,
+                "description": descriptions.get(name, f"Benchmark tool: {name}."),
+                "input_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+            }
+            for name in self.functions
+        }
+
+    def snapshot(self) -> dict[str, tuple[int, int]]:
+        from .runtime.side_effects import snapshot_tree
+
+        return snapshot_tree(self.sandbox_dir)
+
+    def diff(self, before: dict[str, tuple[int, int]]) -> list[dict[str, Any]]:
+        from .runtime.side_effects import diff_snapshot
+
+        return diff_snapshot(self.sandbox_dir, before)
+
     @property
     def functions(self) -> dict[str, Callable[..., Any]]:
         return {
@@ -2437,3 +2475,6 @@ def build_mock_tools(
     browser_engine: str = "chromium",
 ) -> MockToolRegistry:
     return MockToolRegistry(sandbox_dir=sandbox_dir, browser_mode=browser_mode, browser_engine=browser_engine)
+
+
+SandboxToolRuntime = MockToolRegistry
