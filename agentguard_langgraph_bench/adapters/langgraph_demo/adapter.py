@@ -85,6 +85,8 @@ class _LangGraphRuntimeAdapter:
 
 
 def _final_answer_from_state(state: dict[str, Any]) -> str:
+    if state.get("last_model_content"):
+        return str(state["last_model_content"])
     for item in reversed(state.get("tool_results") or []):
         result = item.get("result")
         if isinstance(result, dict):

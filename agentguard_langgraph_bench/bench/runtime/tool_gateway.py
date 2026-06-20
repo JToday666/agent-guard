@@ -63,7 +63,7 @@ class GuardedToolGateway:
             return ToolExecutionResult(
                 tool_name=tool_name,
                 call_id=call_id,
-                executed=True,
+                executed=False,
                 blocked=False,
                 decision=decision.decision,
                 status="error",

@@ -16,6 +16,8 @@ DEFAULT_SANDBOX_DIR = BENCH_ROOT / "sandbox"
 DEFAULT_RESULTS_DIR = BENCH_ROOT / "results"
 DEFAULT_DATASET_DIR = BENCH_ROOT / "datasets" / "attack_cases"
 DEFAULT_LLM_MAX_TOOL_ROUNDS = 6
+DEFAULT_LLM_REQUEST_TIMEOUT = 60.0
+DEFAULT_LLM_MAX_RETRIES = 1
 DEFAULT_INSTRUMENTATION_PLAN_MODE = "guided"
 
 
@@ -88,6 +90,26 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float_strict(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float, got {value!r}") from exc
+
+
+def _env_int_strict(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from exc
+
+
 def _env_first(*names: str) -> str:
     for name in names:
         value = os.getenv(name)
@@ -133,6 +155,8 @@ class BenchConfig:
     llm_temperature: float = 0.0
     llm_fallback_to_case_plan: bool = False
     llm_max_tool_rounds: int = DEFAULT_LLM_MAX_TOOL_ROUNDS
+    llm_request_timeout: float = DEFAULT_LLM_REQUEST_TIMEOUT
+    llm_max_retries: int = DEFAULT_LLM_MAX_RETRIES
     instrumentation_plan_mode: str = DEFAULT_INSTRUMENTATION_PLAN_MODE
     browser_mode: str = "record"
     browser_engine: str = "chromium"
@@ -168,6 +192,8 @@ class BenchConfig:
         llm_temperature: float | None = None,
         llm_fallback_to_case_plan: bool | None = None,
         llm_max_tool_rounds: int | None = None,
+        llm_request_timeout: float | None = None,
+        llm_max_retries: int | None = None,
         instrumentation_plan_mode: str | None = None,
         browser_mode: str | None = None,
         browser_engine: str | None = None,
@@ -196,6 +222,21 @@ class BenchConfig:
             env_base_url = env_base_url or _env_first("OPENAI_BASE_URL")
             env_api_key = env_api_key or _env_first("OPENAI_API_KEY")
 
+        resolved_llm_request_timeout = (
+            _env_float_strict("AGENTGUARD_LLM_REQUEST_TIMEOUT", DEFAULT_LLM_REQUEST_TIMEOUT)
+            if llm_request_timeout is None
+            else llm_request_timeout
+        )
+        resolved_llm_max_retries = (
+            _env_int_strict("AGENTGUARD_LLM_MAX_RETRIES", DEFAULT_LLM_MAX_RETRIES)
+            if llm_max_retries is None
+            else llm_max_retries
+        )
+        if resolved_llm_request_timeout <= 0:
+            raise ValueError("llm_request_timeout must be greater than 0")
+        if resolved_llm_max_retries < 0:
+            raise ValueError("llm_max_retries must be greater than or equal to 0")
+
         return cls(
             core_base_url=core_base_url or cls.core_base_url,
             token=token or cls.token,
@@ -220,6 +261,8 @@ class BenchConfig:
                 if llm_max_tool_rounds is None
                 else llm_max_tool_rounds
             ),
+            llm_request_timeout=resolved_llm_request_timeout,
+            llm_max_retries=resolved_llm_max_retries,
             instrumentation_plan_mode=(
                 instrumentation_plan_mode
                 or os.getenv("AGENTGUARD_INSTRUMENTATION_PLAN_MODE")
@@ -246,32 +289,39 @@ class BenchConfig:
         )
 
 
-def ensure_sandbox(sandbox_dir: Path = DEFAULT_SANDBOX_DIR) -> None:
-    for relative in (
-        "files",
-        "files/private",
-        "files/private/meta",
-        "files/config",
-        "files/config/meta",
-        "files/contacts",
-        "files/docs",
-        "files/identity",
-        "files/orders",
-        "files/travel",
-        "files/crm",
-        "files/profile",
-        "files/reports",
-        "outbox",
-        "api",
-        "memory",
-        "browser",
-        "mcp",
-        "rag",
-        "downloads",
-        "files/rag",
-        "files/rag/poisonedrag",
-    ):
+SANDBOX_DIRECTORIES = (
+    "files",
+    "files/private",
+    "files/private/meta",
+    "files/config",
+    "files/config/meta",
+    "files/contacts",
+    "files/docs",
+    "files/identity",
+    "files/orders",
+    "files/travel",
+    "files/crm",
+    "files/profile",
+    "files/reports",
+    "outbox",
+    "api",
+    "memory",
+    "browser",
+    "mcp",
+    "rag",
+    "downloads",
+    "files/rag",
+    "files/rag/poisonedrag",
+)
+
+
+def ensure_sandbox_directories(sandbox_dir: Path = DEFAULT_SANDBOX_DIR) -> None:
+    for relative in SANDBOX_DIRECTORIES:
         (sandbox_dir / relative).mkdir(parents=True, exist_ok=True)
+
+
+def ensure_sandbox(sandbox_dir: Path = DEFAULT_SANDBOX_DIR) -> None:
+    ensure_sandbox_directories(sandbox_dir)
     from .poisonedrag_service import ensure_poisonedrag_case_resources
 
     _ensure_base_fixture_files(sandbox_dir)

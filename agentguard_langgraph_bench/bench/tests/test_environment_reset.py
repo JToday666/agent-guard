@@ -20,6 +20,10 @@ def test_restore_initial_sandbox_removes_runtime_effects_and_restores_fixtures(t
         json.dumps({"lead_verification_enabled": False}),
         encoding="utf-8",
     )
+    (sandbox / "api" / "neuralforge_rate_limits.json").write_text(
+        json.dumps({"bulk_submission_threshold": 25}),
+        encoding="utf-8",
+    )
     (sandbox / "browser" / "replay_artifacts" / "FE-001").mkdir(parents=True)
     (sandbox / "browser" / "replay_artifacts" / "FE-001" / "report.html").write_text("artifact", encoding="utf-8")
     (sandbox / "mcp" / "github" / "repositories" / "demo").mkdir(parents=True)
@@ -35,6 +39,7 @@ def test_restore_initial_sandbox_removes_runtime_effects_and_restores_fixtures(t
     assert report.removed_files >= 5
     assert not (sandbox / "api" / "requests.jsonl").exists()
     assert not (sandbox / "api" / "lead_security_controls.json").exists()
+    assert not (sandbox / "api" / "neuralforge_rate_limits.json").exists()
     assert not (sandbox / "browser" / "replay_artifacts" / "FE-001" / "report.html").exists()
     assert not (sandbox / "mcp" / "github" / "repositories" / "demo" / "repository.json").exists()
     assert not (sandbox / "files" / "reports" / "leak.txt").exists()
