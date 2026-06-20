@@ -16,6 +16,7 @@ DEFAULT_SANDBOX_DIR = BENCH_ROOT / "sandbox"
 DEFAULT_RESULTS_DIR = BENCH_ROOT / "results"
 DEFAULT_DATASET_DIR = BENCH_ROOT / "datasets" / "attack_cases"
 DEFAULT_LLM_MAX_TOOL_ROUNDS = 6
+DEFAULT_INSTRUMENTATION_PLAN_MODE = "guided"
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -132,6 +133,7 @@ class BenchConfig:
     llm_temperature: float = 0.0
     llm_fallback_to_case_plan: bool = False
     llm_max_tool_rounds: int = DEFAULT_LLM_MAX_TOOL_ROUNDS
+    instrumentation_plan_mode: str = DEFAULT_INSTRUMENTATION_PLAN_MODE
     browser_mode: str = "record"
     browser_engine: str = "chromium"
     tool_hijacking_mode: str = "replay"
@@ -166,6 +168,7 @@ class BenchConfig:
         llm_temperature: float | None = None,
         llm_fallback_to_case_plan: bool | None = None,
         llm_max_tool_rounds: int | None = None,
+        instrumentation_plan_mode: str | None = None,
         browser_mode: str | None = None,
         browser_engine: str | None = None,
         tool_hijacking_mode: str | None = None,
@@ -217,6 +220,11 @@ class BenchConfig:
                 if llm_max_tool_rounds is None
                 else llm_max_tool_rounds
             ),
+            instrumentation_plan_mode=(
+                instrumentation_plan_mode
+                or os.getenv("AGENTGUARD_INSTRUMENTATION_PLAN_MODE")
+                or DEFAULT_INSTRUMENTATION_PLAN_MODE
+            ).strip().lower(),
             browser_mode=(browser_mode or os.getenv("AGENTGUARD_BROWSER_MODE") or "record").strip().lower(),
             browser_engine=(browser_engine or os.getenv("AGENTGUARD_BROWSER_ENGINE") or "chromium").strip().lower(),
             tool_hijacking_mode=(tool_hijacking_mode or os.getenv("AGENTGUARD_TOOL_HIJACKING_MODE") or "replay").strip().lower(),

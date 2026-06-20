@@ -26,6 +26,7 @@ class DemoState(TypedDict, total=False):
     tool_results: list[dict[str, Any]]
     last_tool_results: list[dict[str, Any]]
     behavior_events: list[dict[str, Any]]
+    llm_planning_evidence: list[dict[str, Any]]
     round_index: int
     stop_reason: str
 
@@ -705,6 +706,7 @@ def _llm_messages_for_case(
     case: AttackCase,
     tool_results: list[dict[str, Any]] | None = None,
     round_index: int = 1,
+    instrumentation_plan_mode: str = "guided",
 ) -> list[tuple[str, str]]:
     tool_names = [
         "read_file",
@@ -754,13 +756,20 @@ def _llm_messages_for_case(
         f"Source trust: {case.input.source_trust}\n"
         f"User/task payload:\n{payload}"
         f"{browser_hint}"
-        f"{_guided_execution_prompt(case, tool_results or [])}"
+        f"{_guided_execution_prompt(case, tool_results or [], instrumentation_plan_mode=instrumentation_plan_mode)}"
         f"{_tool_observation_prompt(tool_results or [])}"
     )
     return [("system", system), ("user", user)]
 
 
-def _guided_execution_prompt(case: AttackCase, tool_results: list[dict[str, Any]]) -> str:
+def _guided_execution_prompt(
+    case: AttackCase,
+    tool_results: list[dict[str, Any]],
+    *,
+    instrumentation_plan_mode: str = "guided",
+) -> str:
+    if instrumentation_plan_mode != "guided":
+        return ""
     if not _is_guided_browser_case(case):
         return ""
     next_call = _next_guided_plan_call(case, tool_results)
@@ -864,7 +873,14 @@ def build_tool_plan_with_llm(
     lc_tools = tools.langchain_tools()
     if not lc_tools:
         raise RuntimeError("No LangChain tools are available for LLM binding")
-    message = llm.bind_tools(lc_tools).invoke(_llm_messages_for_case(case, tool_results=tool_results, round_index=round_index))
+    message = llm.bind_tools(lc_tools).invoke(
+        _llm_messages_for_case(
+            case,
+            tool_results=tool_results,
+            round_index=round_index,
+            instrumentation_plan_mode=config.instrumentation_plan_mode,
+        )
+    )
     return _enrich_llm_tool_calls(case, _message_tool_calls(message, tools))
 
 
@@ -875,7 +891,13 @@ def _is_guided_browser_case(case: AttackCase) -> bool:
 
 
 def _should_use_guided_case_plan(case: AttackCase, config: BenchConfig) -> bool:
+    if config.instrumentation_plan_mode != "guided":
+        return False
     return config.llm_fallback_to_case_plan and bool(_guided_case_plan(case))
+
+
+def _is_guided_instrumentation_case(case: AttackCase, config: BenchConfig) -> bool:
+    return config.instrumentation_plan_mode == "guided" and _is_guided_browser_case(case)
 
 
 def _guided_case_plan(case: AttackCase) -> list[dict[str, Any]]:
@@ -977,7 +999,7 @@ def _max_tool_rounds_for_state(state: DemoState, config: BenchConfig) -> int:
         case = AttackCase.model_validate(state["attack_case"])
     except Exception:
         return max_rounds
-    if _is_guided_browser_case(case) or _should_use_guided_case_plan(case, config):
+    if _is_guided_instrumentation_case(case, config) or _should_use_guided_case_plan(case, config):
         return max(max_rounds, len(_guided_case_plan(case)) + 1)
     return max_rounds
 
@@ -989,15 +1011,15 @@ def plan_tools_for_case(case: AttackCase, config: BenchConfig, tools: MockToolRe
         return build_tool_plan_from_case(case)
     try:
         calls = build_tool_plan_with_llm(case, config, tools)
-        if config.llm_fallback_to_case_plan:
+        if config.instrumentation_plan_mode == "guided" and config.llm_fallback_to_case_plan:
             return _select_guided_or_llm_call(case, [], calls)
         if calls:
             return calls
-        if config.llm_fallback_to_case_plan:
+        if config.instrumentation_plan_mode == "guided" and config.llm_fallback_to_case_plan:
             return build_tool_plan_from_case(case)
         return []
     except Exception:
-        if config.llm_fallback_to_case_plan:
+        if config.instrumentation_plan_mode == "guided" and config.llm_fallback_to_case_plan:
             return build_tool_plan_from_case(case)
         raise
 
@@ -1009,13 +1031,13 @@ def plan_tools_for_state(state: DemoState, config: BenchConfig, tools: MockToolR
     if not config.llm_enabled:
         return build_tool_plan_from_case(case) if round_index == 1 else []
     tool_results = state.get("tool_results") or []
-    guided = _is_guided_browser_case(case) or _should_use_guided_case_plan(case, config)
+    guided = _is_guided_instrumentation_case(case, config) or _should_use_guided_case_plan(case, config)
     if guided and _next_guided_plan_call(case, tool_results) is None:
         return []
     try:
         calls = build_tool_plan_with_llm(case, config, tools, tool_results=tool_results, round_index=round_index)
     except Exception:
-        if config.llm_fallback_to_case_plan:
+        if config.instrumentation_plan_mode == "guided" and config.llm_fallback_to_case_plan:
             if guided:
                 return _select_guided_or_llm_call(case, tool_results, [])
             return build_tool_plan_from_case(case) if round_index == 1 else []
@@ -1171,8 +1193,56 @@ def _pre_model_capture(state: DemoState) -> DemoState:
 
 def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolRegistry) -> DemoState:
     round_index = int(state.get("round_index") or 0) + 1
-    calls = plan_tools_for_state(state, config, tools, round_index)
+    planning_error = ""
+    try:
+        calls = plan_tools_for_state(state, config, tools, round_index)
+    except Exception as exc:
+        if config.instrumentation_plan_mode != "autonomous":
+            raise
+        calls = []
+        planning_error = str(exc)
+        state = {**state, "stop_reason": "llm_planning_error"}
+    case = AttackCase.model_validate(state["attack_case"])
+    guided_applied = _guided_plan_applied(calls)
+    fallback_applied = _fallback_applied(calls, config)
+    planning_source = _planning_source_for_calls(
+        calls,
+        case=case,
+        config=config,
+        planning_error=planning_error,
+        fallback_applied=fallback_applied,
+        guided_applied=guided_applied,
+    )
+    evidence = list(state.get("llm_planning_evidence") or [])
+    if config.llm_enabled:
+        evidence.append(
+            {
+                "round_index": round_index,
+                "planning_source": planning_source,
+                "llm_tool_calls": [
+                    {
+                        "tool": call.get("name"),
+                        "arguments": call.get("args") or {},
+                    }
+                    for call in calls
+                    if (call.get("source_feature") or "") == "llm_tool_call"
+                ],
+                "selected_tool_calls": [
+                    {
+                        "tool": call.get("name"),
+                        "arguments": call.get("args") or {},
+                        "source_feature": call.get("source_feature"),
+                    }
+                    for call in calls
+                ],
+                "guided_plan_applied": guided_applied,
+                "fallback_applied": fallback_applied,
+                "error": planning_error,
+            }
+        )
     state = {**state, "tool_calls": calls, "last_tool_results": [], "round_index": round_index}
+    if evidence:
+        state["llm_planning_evidence"] = evidence
     return _append_lifecycle(
         state,
         "model_output_produced",
@@ -1180,17 +1250,53 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
         "LangGraph planning node produced tool-call intent.",
         {
             "llm_enabled": config.llm_enabled,
-            "planner": (
-                f"tool_hijacking_{config.tool_hijacking_mode}_{config.tool_catalog_view}_catalog"
-                if config.tool_hijacking_mode in {"autonomous", "differential"}
-                else ("llm" if config.llm_enabled else "attackcase_tool_plan")
-            ),
+            "planner": planning_source,
+            "instrumentation_plan_mode": config.instrumentation_plan_mode,
+            "guided_plan_applied": guided_applied,
+            "fallback_applied": fallback_applied,
             "round_index": round_index,
             "tool_call_count": len(calls),
             "tool_names": [call.get("name") for call in calls],
             "max_tool_rounds": _max_tool_rounds_for_state(state, config),
+            "planning_error": planning_error,
         },
     )
+
+
+def _guided_plan_applied(calls: list[dict[str, Any]]) -> bool:
+    return any(str(call.get("source_feature") or "").startswith("llm_guided_case_plan") for call in calls)
+
+
+def _fallback_applied(calls: list[dict[str, Any]], config: BenchConfig) -> bool:
+    if not config.llm_enabled:
+        return False
+    if any((call.get("source_feature") or "") == "llm_tool_call" for call in calls):
+        return False
+    return bool(calls) and config.llm_fallback_to_case_plan
+
+
+def _planning_source_for_calls(
+    calls: list[dict[str, Any]],
+    *,
+    case: AttackCase,
+    config: BenchConfig,
+    planning_error: str,
+    fallback_applied: bool,
+    guided_applied: bool,
+) -> str:
+    if case.attack_type == "tool_hijacking" and config.tool_hijacking_mode in {"autonomous", "differential"}:
+        return f"{config.tool_catalog_view}_tool_catalog"
+    if not config.llm_enabled:
+        return "attackcase_tool_plan"
+    if fallback_applied:
+        return "case_plan_fallback"
+    if guided_applied:
+        return "llm_guided_case_plan"
+    if config.instrumentation_plan_mode == "autonomous" and case.metadata.get("source_dataset") == "Instrumentation":
+        return "llm_autonomous"
+    if planning_error:
+        return "llm_error"
+    return "llm"
 
 
 def _post_tool_capture(state: DemoState) -> DemoState:
