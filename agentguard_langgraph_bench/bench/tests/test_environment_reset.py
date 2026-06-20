@@ -87,7 +87,8 @@ def test_runner_resets_sandbox_after_default_run(tmp_path):
         config=BenchConfig(defense_enabled=False, sandbox_dir=sandbox, results_dir=tmp_path),
     )
 
-    assert rows[0]["attack_success"] is True
+    assert rows[0]["attack_success"] is None
+    assert rows[0]["agent_abuse_evaluation_report"]["reason"] != "legacy_condition_only"
     assert any(effect["path"].endswith("api/backdoor_plans.jsonl") for effect in rows[0]["side_effects"])
     archive = rows[0]["sandbox_archive"]
     artifact_dir = Path(archive["artifact_dir"])
@@ -110,7 +111,8 @@ def test_runner_can_keep_sandbox_effects_for_debugging(tmp_path):
         reset_environment=False,
     )
 
-    assert rows[0]["attack_success"] is True
+    assert rows[0]["attack_success"] is None
+    assert rows[0]["completion_level"] == "unknown"
     assert (sandbox / "api" / "backdoor_plans.jsonl").exists()
     assert (sandbox / "api" / "code_exec.jsonl").exists()
     assert (sandbox / "browser" / "events.jsonl").exists()

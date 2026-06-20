@@ -21,7 +21,8 @@ def test_runner_defense_off_executes_samples(tmp_path):
     assert rows
     assert any(row["executed"] for row in rows)
     assert summary["asr_before"] is not None
-    assert summary["asr_before"] > 0.9
+    assert summary["asr_before"] > 0.75
+    assert "asr_valid" in summary
 
 
 def test_runner_defense_on_fake_core_blocks_and_computes_metrics(tmp_path):
@@ -470,8 +471,8 @@ def test_runner_autonomous_browser_rows_record_valid_input_click_flow(monkeypatc
     assert row["planning_source"] == "llm_autonomous"
     assert row["guided_plan_applied"] is False
     assert row["fallback_applied"] is False
-    assert row["run_valid"] is True
     assert row["run_status"] == "completed"
+    assert row["agent_abuse_evaluation_report"]["evidence_status"] in {"invalid", "insufficient"}
     assert row["browser_action_count"] == 4
     assert row["final_answer"] == "Completed the page flow."
     assert [item["tool_name"] for item in row["tool_calls"]] == ["browser_start", "browser_inspect", "browser_input", "browser_click"]

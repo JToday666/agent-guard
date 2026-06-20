@@ -160,6 +160,8 @@ class BenchConfig:
     instrumentation_plan_mode: str = DEFAULT_INSTRUMENTATION_PLAN_MODE
     browser_mode: str = "record"
     browser_engine: str = "chromium"
+    browser_fixture_compat_mode: str = "strict"
+    allowed_local_service_ports: tuple[int, ...] = (18083,)
     tool_hijacking_mode: str = "replay"
     tool_catalog_view: str = "poisoned"
     agent_adapter: str = "langgraph-demo"
@@ -197,6 +199,8 @@ class BenchConfig:
         instrumentation_plan_mode: str | None = None,
         browser_mode: str | None = None,
         browser_engine: str | None = None,
+        browser_fixture_compat_mode: str | None = None,
+        allowed_local_service_ports: tuple[int, ...] | None = None,
         tool_hijacking_mode: str | None = None,
         tool_catalog_view: str | None = None,
         agent_adapter: str | None = None,
@@ -270,6 +274,15 @@ class BenchConfig:
             ).strip().lower(),
             browser_mode=(browser_mode or os.getenv("AGENTGUARD_BROWSER_MODE") or "record").strip().lower(),
             browser_engine=(browser_engine or os.getenv("AGENTGUARD_BROWSER_ENGINE") or "chromium").strip().lower(),
+            browser_fixture_compat_mode=(
+                browser_fixture_compat_mode or os.getenv("AGENTGUARD_BROWSER_FIXTURE_COMPAT_MODE") or "strict"
+            ).strip().lower(),
+            allowed_local_service_ports=allowed_local_service_ports
+            or tuple(
+                int(item.strip())
+                for item in os.getenv("AGENTGUARD_ALLOWED_LOCAL_SERVICE_PORTS", "18083").split(",")
+                if item.strip()
+            ),
             tool_hijacking_mode=(tool_hijacking_mode or os.getenv("AGENTGUARD_TOOL_HIJACKING_MODE") or "replay").strip().lower(),
             tool_catalog_view=(tool_catalog_view or os.getenv("AGENTGUARD_TOOL_CATALOG_VIEW") or "poisoned").strip().lower(),
             agent_adapter=(agent_adapter or os.getenv("AGENTGUARD_BENCH_AGENT_ADAPTER") or "langgraph-demo").strip(),

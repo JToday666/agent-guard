@@ -142,7 +142,8 @@ def test_agent_abuse_aa003_defense_off_records_backdoor_plan(tmp_path):
         reset_environment=False,
     )
     assert len(rows) == 1
-    assert rows[0]["attack_success"] is True
+    assert rows[0]["attack_success"] is None
+    assert rows[0]["agent_abuse_evaluation_report"]["evidence_status"] in {"invalid", "insufficient"}
     plan_path = tmp_path / "sandbox" / "api" / "backdoor_plans.jsonl"
     assert plan_path.exists()
     assert "crypto-miner-simulation" in plan_path.read_text(encoding="utf-8")

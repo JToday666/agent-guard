@@ -99,7 +99,13 @@ _PROMPT_SERVER_THREAD: Thread | None = None
 _PROMPT_SERVER_PORT: int | None = None
 
 
-def local_url_for_source(source_path: str | None) -> str:
+def local_url_for_source(
+    source_path: str | None,
+    *,
+    benchmark_run_id: str | None = None,
+    case_id: str | None = None,
+    attempt_id: str | None = None,
+) -> str:
     """Return a browser-accessible local HTTP URL for an Instrumentation file."""
 
     source = resolve_local_source(source_path)
@@ -122,7 +128,25 @@ def local_url_for_source(source_path: str | None) -> str:
     if _PROMPT_SERVER is not None and _PROMPT_SERVER_PORT is None:
         _PROMPT_SERVER_PORT = _PROMPT_SERVER.server_port
     prefix, relative = _source_route(source)
-    return f"http://127.0.0.1:{_PROMPT_SERVER_PORT}/{prefix}/{quote(relative, safe='/')}?mode=record&run_id=agentguard"
+    query = _runtime_query(benchmark_run_id=benchmark_run_id, case_id=case_id, attempt_id=attempt_id)
+    return f"http://127.0.0.1:{_PROMPT_SERVER_PORT}/{prefix}/{quote(relative, safe='/')}?{query}"
+
+
+def _runtime_query(
+    *,
+    benchmark_run_id: str | None = None,
+    case_id: str | None = None,
+    attempt_id: str | None = None,
+) -> str:
+    parts = ["mode=record"]
+    if benchmark_run_id:
+        parts.append(f"benchmark_run_id={quote(benchmark_run_id)}")
+    if case_id:
+        parts.append(f"case_id={quote(case_id)}")
+    if attempt_id:
+        parts.append(f"attempt_id={quote(attempt_id)}")
+    parts.append("run_id=agentguard")
+    return "&".join(parts)
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
@@ -185,17 +209,21 @@ RECORDER_SCRIPT = r"""
       return {};
     }
     const value = "value" in element ? String(element.value || "") : "";
+    const type = String(element.getAttribute("type") || "").toLowerCase();
+    const maskedValue = type === "password" ? "" : value.slice(0, 500);
     return {
       tag: String(element.tagName || "").toLowerCase(),
       id: element.id || "",
       name: element.getAttribute("name") || "",
-      type: element.getAttribute("type") || "",
+      type,
       role: element.getAttribute("role") || "",
       testId: element.getAttribute("data-pw") || element.getAttribute("data-testid") || "",
       href: element.getAttribute("href") || "",
       text: String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 180),
       selector: cssPath(element),
-      value: value.slice(0, 500),
+      value: maskedValue,
+      value_present: Boolean(value),
+      value_length: value.length,
       checked: "checked" in element ? Boolean(element.checked) : undefined
     };
   }
@@ -277,12 +305,22 @@ class RealBrowserSession:
     video_tmp_dir: Path | None = None
     step_index: int = 0
     dom_event_count: int = 0
+    dom_event_document_url: str = ""
 
 
 class RealBrowserRuntime:
-    def __init__(self, sandbox_dir: Path, browser_engine: str = "chromium") -> None:
+    def __init__(
+        self,
+        sandbox_dir: Path,
+        browser_engine: str = "chromium",
+        *,
+        fixture_compat_mode: str = "strict",
+        allowed_local_service_ports: set[int] | None = None,
+    ) -> None:
         self.sandbox_dir = sandbox_dir
         self.browser_engine = browser_engine
+        self.fixture_compat_mode = fixture_compat_mode
+        self.allowed_local_service_ports = set(allowed_local_service_ports or {18083})
         self.screenshot_dir = sandbox_dir / "browser" / "screenshots"
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._sessions: dict[str, RealBrowserSession] = {}
@@ -388,6 +426,7 @@ class RealBrowserRuntime:
             video_tmp_dir=video_tmp_dir,
             step_index=0,
             dom_event_count=0,
+            dom_event_document_url=target_url,
         )
         manifest = {
             "ok": True,
@@ -451,7 +490,7 @@ class RealBrowserRuntime:
         locator = self._locator(session, selector=selector).first
         target_position = self._center_locator(session, locator)
         locator.fill(value)
-        session.page.wait_for_timeout(120)
+        self._wait_after_action(session)
         screenshot = self._capture_step(
             session_id,
             "input",
@@ -476,6 +515,7 @@ class RealBrowserRuntime:
             target = text
         else:
             raise BrowserRuntimeError("browser_click requires selector or text in real browser mode")
+        self._wait_after_action(session)
         screenshot = self._capture_step(
             session_id,
             "click",
@@ -613,6 +653,7 @@ class RealBrowserRuntime:
         steps_dir = session.steps_dir or artifact_dir / "steps"
         trace_path = artifact_dir / "trace.zip"
         final_path = artifact_dir / "final.png"
+        final_full_path = artifact_dir / "final_full_page.png"
         state_path = artifact_dir / "replay_state.json"
         video_path = artifact_dir / "replay.webm"
         raw_video_path = artifact_dir / "raw_replay.webm"
@@ -625,6 +666,7 @@ class RealBrowserRuntime:
         try:
             self._flush_dom_events(session_id, session, "finalize")
             self._safe_screenshot(session.page, final_path)
+            self._safe_screenshot(session.page, final_full_path, full_page=True)
             try:
                 session.context.tracing.stop(path=str(trace_path))
             except Exception as exc:
@@ -683,6 +725,7 @@ class RealBrowserRuntime:
             "artifact_dir": str(artifact_dir),
             "report": str(report_path),
             "screenshot": str(final_path) if final_path.exists() else None,
+            "full_page_screenshot": str(final_full_path) if final_full_path.exists() else None,
             "steps_dir": str(steps_dir),
             "step_screenshots": [str(path) for path in sorted(steps_dir.glob("*.png"))],
             "video": str(video_path) if video_path.exists() else None,
@@ -821,6 +864,8 @@ class RealBrowserRuntime:
         return source
 
     def _prepare_page_for_action(self, session: RealBrowserSession) -> None:
+        if self.fixture_compat_mode != "legacy":
+            return
         try:
             session.page.evaluate(
                 """() => {
@@ -879,10 +924,12 @@ class RealBrowserRuntime:
 
     def _route_local_only(self, route: Any) -> None:
         parsed = urlparse(route.request.url)
+        allowed = True
         if parsed.scheme in {"http", "https"} and not self._is_allowed_local_http(parsed):
-            route.abort()
-            return
+            allowed = False
         if parsed.scheme == "file" and not _is_under(Path(parsed.path), INSTRUMENTATION_ROOT):
+            allowed = False
+        if not allowed:
             route.abort()
             return
         route.continue_()
@@ -892,22 +939,23 @@ class RealBrowserRuntime:
             return False
         if self._server is None:
             return False
-        return parsed.port == self._server.server_port
+        server_port = getattr(self._server, "server_port", None)
+        return parsed.port == server_port or parsed.port in self.allowed_local_service_ports
 
     def _with_runtime_query(self, url: str) -> str:
         separator = "&" if "?" in url else "?"
-        return f"{url}{separator}mode=record&run_id=agentguard"
+        return f"{url}{separator}{_runtime_query()}"
 
-    def _safe_screenshot(self, page: Any, path: Path) -> bool:
+    def _safe_screenshot(self, page: Any, path: Path, *, full_page: bool = False) -> bool:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             page.set_viewport_size(REPLAY_VIEWPORT)
-            page.screenshot(path=str(path), full_page=False, timeout=6000)
+            page.screenshot(path=str(path), full_page=full_page, timeout=6000)
             return True
         except Exception:
             try:
                 page.set_viewport_size(REPLAY_VIEWPORT)
-                page.screenshot(path=str(path), full_page=False, timeout=3000)
+                page.screenshot(path=str(path), full_page=full_page, timeout=3000)
                 return True
             except Exception:
                 return False
@@ -1029,10 +1077,7 @@ class RealBrowserRuntime:
         session = self._require_session(session_id)
         artifact_dir = session.artifact_dir or self._artifact_dir(session_id)
         steps_dir = session.steps_dir or artifact_dir / "steps"
-        try:
-            session.page.wait_for_timeout(150)
-        except Exception:
-            pass
+        self._wait_after_action(session)
         self._auto_follow_local_link(session)
         self._flush_dom_events(session_id, session, action)
         session.step_index += 1
@@ -1049,6 +1094,16 @@ class RealBrowserRuntime:
         _append_jsonl(artifact_dir / "events.jsonl", event)
         session.current_url = session.page.url
         return str(step_path) if ok else None
+
+    def _wait_after_action(self, session: RealBrowserSession) -> None:
+        try:
+            session.page.wait_for_load_state("networkidle", timeout=1000)
+        except Exception:
+            pass
+        try:
+            session.page.wait_for_timeout(250)
+        except Exception:
+            pass
 
     def _auto_follow_local_link(self, session: RealBrowserSession) -> None:
         parsed = urlparse(session.page.url)
@@ -1112,6 +1167,9 @@ class RealBrowserRuntime:
             return
         if not isinstance(events, list):
             return
+        if len(events) < session.dom_event_count or session.page.url != session.dom_event_document_url:
+            session.dom_event_count = 0
+            session.dom_event_document_url = session.page.url
         new_events = events[session.dom_event_count :]
         session.dom_event_count = len(events)
         for event in new_events:

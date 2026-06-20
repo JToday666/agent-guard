@@ -641,6 +641,44 @@ allow 本轮 sandbox 副作用均在隔离目录内，数量如下：
 }
 ```
 
+## 10.3 agent_abuse evidence evaluator 修复记录（2026-06-21）
+
+本次按 `docs/agent_abuse_evaluation_fix_guide.md` 对 agent_abuse 评测链路做了严格化改造：
+
+- 网页 fixture 的业务提交动作改为写入本地 `127.0.0.1:18083` sandbox 后端，邮件、社交发布、PR 修改、验证码、注册、广告点击、会议滥用、私密记录检索均有标准化证据事件。
+- `browser_runtime` 默认 strict 模式不再篡改 disabled/readonly/validation，仅保留显式 legacy 兼容开关；外连限制为本地静态服务和配置允许的本地业务端口。
+- 新增 `agent_abuse/2.0` `evaluation_spec`，每条 AA case 绑定 harm taxonomy、capability requirements、完成阈值和证据谓词。
+- 新增专用 evaluator，只根据 browser recording、sandbox 事件、artifact 和页面状态判定 `harm_attempted`、`completion_level`、`attack_success`、`blocked_before_harm`、`blocked_after_harm`；缺证据或不支持 modality 时返回 invalid/unknown，不把缺失 case 当成失败 ASR。
+- runner 为每个 case 写出 `case_result.json`、`evidence_index.json`、`evaluation_report.json`，并输出 run manifest；case 异常不会静默消失。
+- metrics 新增 `asr_valid`、`har_valid`、`partial_completion_rate_valid`、`invalid_run_rate`、`unknown_evaluation_rate`、`artifact_coverage_rate`、`blocked_before_harm_rate`、`blocked_after_harm_rate`。
+- autonomous 模式继续禁止 guided plan、case-plan fallback 和 heuristic 注入；规划来源写入结果行用于审计。
+
+验证结果：
+
+```json
+{
+  "pytest_agent_abuse_focus": "32 passed",
+  "pytest_bench_full": "190 passed, 26 skipped",
+  "compileall": "passed",
+  "git_diff_check": "passed",
+  "real_browser_autonomous_smoke": {
+    "command": "PYTHONPATH=. python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/agent_abuse.jsonl --agent-adapter langgraph-demo --browser-mode real --browser-engine chromium --defense on --fake-core --fake-core-decision allow --llm --no-llm-fallback-to-case-plan --instrumentation-plan-mode autonomous",
+    "case_count": 10,
+    "result_case_count": 10,
+    "planning_sources": ["llm_autonomous"],
+    "guided_or_fallback_count": 0,
+    "asr_valid": 0.0,
+    "har_valid": 0.0,
+    "partial_completion_rate_valid": 0.0,
+    "invalid_run_rate": 1.0,
+    "unknown_evaluation_rate": 1.0,
+    "artifact_coverage_rate": 0.0,
+    "run_integrity_failed": false,
+    "note": "当前环境没有可用外部 LLM 连接，因此 10 条 autonomous run 均以 planner_error 标为 invalid/unknown，未回退到 guided/case plan。"
+  }
+}
+```
+
 ## 11. 尚未完成或依赖平台其他成员事项
 
 - 真实 Agent Security Core 未在当前仓库中落地；当前开启防御时仅用本地假 Core 验证适配器执行决策。
