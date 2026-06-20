@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -291,6 +292,14 @@ class RealBrowserRuntime:
 
     def start(self, *, session_id: str, url: str, source_path: str | None = None) -> dict[str, Any]:
         os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(INSTRUMENTATION_ROOT / ".playwright-browsers"))
+        existing = self._sessions.get(session_id)
+        requested_source = resolve_local_source(source_path)
+        if existing is not None:
+            if requested_source is not None:
+                requested_source = self._replay_entry_source(requested_source)
+            if requested_source is not None and existing.source_path is not None and requested_source.resolve() != existing.source_path.resolve():
+                raise BrowserRuntimeError(f"browser session {session_id} already exists for a different source")
+            return self._existing_session_result(session_id, existing)
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
@@ -298,7 +307,7 @@ class RealBrowserRuntime:
                 "Playwright is required for AGENTGUARD_BROWSER_MODE=real; install requirements and browsers first."
             ) from exc
 
-        source = resolve_local_source(source_path)
+        source = requested_source
         if source is None:
             raise BrowserRuntimeError(
                 f"real browser mode requires an Instrumentation-local source_path, got: {source_path}"
@@ -306,9 +315,10 @@ class RealBrowserRuntime:
         source = self._replay_entry_source(source)
         target_url = self._local_url_for(source)
         artifact_dir = self._artifact_dir(session_id)
-        self._reset_artifact_dir(artifact_dir)
-        steps_dir = artifact_dir / "steps"
-        video_tmp_dir = artifact_dir / "video_tmp"
+        starting_dir = artifact_dir.parent / f".starting-{_safe_artifact_name(session_id)}-{uuid.uuid4().hex}"
+        self._reset_artifact_dir(starting_dir)
+        steps_dir = starting_dir / "steps"
+        video_tmp_dir = starting_dir / "video_tmp"
         steps_dir.mkdir(parents=True, exist_ok=True)
         video_tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -355,7 +365,16 @@ class RealBrowserRuntime:
                 shutil.copyfile(screenshot, start_step)
         except Exception:
             pw.stop()
+            shutil.rmtree(starting_dir, ignore_errors=True)
             raise
+
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
+        starting_dir.rename(artifact_dir)
+        steps_dir = artifact_dir / "steps"
+        video_tmp_dir = artifact_dir / "video_tmp"
+        screenshot = self.screenshot_dir / f"{_safe_artifact_name(session_id)}_start.png"
+        start_step = steps_dir / "step_000_start.png"
 
         self._sessions[session_id] = RealBrowserSession(
             page=page,
@@ -397,6 +416,18 @@ class RealBrowserRuntime:
             "screenshot": str(screenshot),
             "replay_artifact": str(artifact_dir),
             "step_screenshot": str(start_step),
+        }
+
+    def _existing_session_result(self, session_id: str, session: RealBrowserSession) -> dict[str, Any]:
+        artifact_dir = session.artifact_dir or self._artifact_dir(session_id)
+        return {
+            "session_id": session_id,
+            "url": session.current_url,
+            "source_path": str(session.source_path) if session.source_path else None,
+            "real_browser": True,
+            "reused_session": True,
+            "replay_artifact": str(artifact_dir),
+            "step_screenshot": str(artifact_dir / "steps" / "step_000_start.png"),
         }
 
     def navigate(self, *, session_id: str, url: str) -> dict[str, Any]:
@@ -466,6 +497,109 @@ class RealBrowserRuntime:
             "text": text,
             "source_path": str(session.source_path) if session.source_path else None,
             "url": session.current_url,
+            "real_browser": True,
+            "step_screenshot": screenshot,
+        }
+
+    def inspect(self, *, session_id: str, limit: int = 80) -> dict[str, Any]:
+        session = self._require_session(session_id)
+        limit = max(1, min(int(limit or 80), 200))
+        payload = session.page.evaluate(
+            """
+            (limit) => {
+              function visible(el) {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+              }
+              function cssPath(element) {
+                if (!element || !element.tagName) return "";
+                if (element.id) return `#${CSS.escape(element.id)}`;
+                const testid = element.getAttribute("data-pw") || element.getAttribute("data-testid") || element.getAttribute("data-test");
+                if (testid) return `[data-testid="${CSS.escape(testid)}"], [data-pw="${CSS.escape(testid)}"], [data-test="${CSS.escape(testid)}"]`;
+                if (element.name) return `${element.tagName.toLowerCase()}[name="${CSS.escape(element.name)}"]`;
+                const parts = [];
+                let node = element;
+                while (node && node.nodeType === Node.ELEMENT_NODE && parts.length < 5) {
+                  let part = node.tagName.toLowerCase();
+                  const parent = node.parentElement;
+                  if (parent) {
+                    const siblings = Array.from(parent.children).filter((item) => item.tagName === node.tagName);
+                    if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+                  }
+                  parts.unshift(part);
+                  node = parent;
+                }
+                return parts.join(" > ");
+              }
+              function labelFor(el) {
+                if (el.id) {
+                  const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                  if (label) return label.innerText.trim();
+                }
+                const parentLabel = el.closest("label");
+                if (parentLabel) return parentLabel.innerText.trim();
+                return el.getAttribute("aria-label") || el.getAttribute("placeholder") || "";
+              }
+              function selectorFor(el) {
+                const testid = el.getAttribute("data-pw") || el.getAttribute("data-testid") || el.getAttribute("data-test");
+                if (testid) return `testid=${testid}`;
+                if (el.id) return `id=${el.id}`;
+                if (el.name) return `name=${el.name}`;
+                return cssPath(el);
+              }
+              const query = [
+                "input",
+                "textarea",
+                "select",
+                "button",
+                "a[href]",
+                "[role=button]",
+                "[contenteditable=true]",
+                "[data-testid]",
+                "[data-pw]",
+                "[data-test]"
+              ].join(",");
+              const seen = new Set();
+              const elements = [];
+              for (const el of Array.from(document.querySelectorAll(query))) {
+                if (elements.length >= limit) break;
+                if (seen.has(el) || !visible(el)) continue;
+                seen.add(el);
+                const tag = (el.tagName || "").toLowerCase();
+                const type = el.getAttribute("type") || "";
+                const rawValue = ("value" in el && type !== "password") ? String(el.value || "") : "";
+                elements.push({
+                  tag,
+                  role: el.getAttribute("role") || (tag === "button" ? "button" : ""),
+                  label: labelFor(el).replace(/\\s+/g, " ").trim().slice(0, 160),
+                  name: el.getAttribute("name") || "",
+                  type,
+                  placeholder: el.getAttribute("placeholder") || "",
+                  testid: el.getAttribute("data-pw") || el.getAttribute("data-testid") || el.getAttribute("data-test") || "",
+                  id: el.id || "",
+                  text: String(el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 160),
+                  href: el.getAttribute("href") || "",
+                  selector: selectorFor(el),
+                  value: rawValue.slice(0, 160)
+                });
+              }
+              return {
+                title: document.title || "",
+                visible_text: String(document.body ? document.body.innerText || "" : "").replace(/\\s+/g, " ").trim().slice(0, 3000),
+                interactive_elements: elements
+              };
+            }
+            """,
+            limit,
+        )
+        screenshot = self._capture_step(session_id, "inspect", {"limit": limit})
+        return {
+            "session_id": session_id,
+            "url": session.current_url,
+            "title": payload.get("title", ""),
+            "visible_text": payload.get("visible_text", ""),
+            "interactive_elements": payload.get("interactive_elements") or [],
             "real_browser": True,
             "step_screenshot": screenshot,
         }
@@ -557,6 +691,13 @@ class RealBrowserRuntime:
             "events": str(artifact_dir / "events.jsonl"),
             "manifest": str(artifact_dir / "manifest.json"),
             "replay_state": str(state_path),
+            "dom_event_count": replay_state["dom_event_count"],
+            "step_count": replay_state["step_count"],
+            "final_url": replay_state["final_url"],
+            "video_source": replay_state["video_source"],
+            "video_save_error": replay_state["video_save_error"],
+            "raw_video_save_error": replay_state["raw_video_save_error"],
+            "stable_video_error": replay_state["stable_video_error"],
         }
         self._write_report(report_path, recording, replay_state)
         self._export_recording_to_downloads(session_id, recording)

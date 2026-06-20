@@ -5,6 +5,7 @@ from agentguard_langgraph_bench.bench.config import BenchConfig
 from agentguard_langgraph_bench.bench.dataset_loader import load_attack_cases
 from agentguard_langgraph_bench.bench.metrics import calculate_metrics
 from agentguard_langgraph_bench.demo_agent.graph import build_tool_plan_from_case
+from agentguard_langgraph_bench.demo_agent.graph import PlannerOutput
 from agentguard_langgraph_bench.bench.runner import main, run_cases, success_for_case
 
 
@@ -144,6 +145,9 @@ def test_runner_records_real_browser_replay_artifacts(monkeypatch, tmp_path):
                 "video": str(video),
                 "trace": str(trace),
                 "events": str(events),
+                "dom_event_count": 3,
+                "step_count": 2,
+                "final_url": "http://127.0.0.1:1/page.html",
             }
 
         def recordings(self, session_id=None):
@@ -173,6 +177,9 @@ def test_runner_records_real_browser_replay_artifacts(monkeypatch, tmp_path):
     assert recording["trace"].endswith("trace.zip")
     assert recording["report"].endswith("report.html")
     assert len(recording["step_screenshots"]) == 2
+    assert recording["dom_event_count"] == 3
+    assert recording["step_count"] == 2
+    assert recording["final_url"] == "http://127.0.0.1:1/page.html"
     assert ("finalize", {"session_id": "FE-001"}) in calls
 
 
@@ -231,16 +238,38 @@ def test_malicious_and_benign_metric_inputs_are_separated():
     summary = calculate_metrics(
         [
             {"is_malicious": True, "attack_type": "file_exfiltration", "attack_success": False, "blocked": True},
-            {"is_malicious": True, "attack_type": "tool_hijacking", "attack_success": True, "blocked": False},
+            {
+                "is_malicious": True,
+                "attack_type": "tool_hijacking",
+                "attack_success": True,
+                "blocked": False,
+                "llm_request_diagnostics": [{"outcome": "success", "elapsed_seconds": 1.0, "retry_count": 0}],
+            },
+            {
+                "is_malicious": True,
+                "attack_type": "agent_abuse",
+                "attack_success": True,
+                "blocked": False,
+                "run_valid": False,
+                "invalid_reasons": ["planner_error"],
+                "llm_request_diagnostics": [{"outcome": "timeout", "elapsed_seconds": 17.0, "retry_count": 1}],
+            },
             {"is_malicious": False, "attack_type": "benign", "attack_success": False, "blocked": True},
             {"is_malicious": False, "attack_type": "benign", "attack_success": False, "blocked": False},
         ],
         defense_enabled=True,
     )
 
-    assert summary["asr_after"] == 0.5
-    assert summary["block_rate"] == 0.5
+    assert summary["asr_after"] == 2 / 3
+    assert summary["asr_valid_malicious"] == 0.5
+    assert summary["invalid_malicious_success_count"] == 1
+    assert summary["block_rate"] == 1 / 3
     assert summary["fpr"] == 0.5
+    assert summary["planner_error_case_count"] == 1
+    assert summary["llm_request_count"] == 2
+    assert summary["llm_retry_count"] == 1
+    assert summary["llm_timeout_count"] == 1
+    assert summary["llm_request_latency_p50"] == 9.0
 
 
 def test_tool_executed_success_requires_matching_resource():
@@ -265,8 +294,28 @@ def test_tool_executed_success_requires_matching_resource():
     }
 
     for case_id, (matching, non_matching) in checks.items():
+        matching["status"] = "executed"
+        non_matching["status"] = "executed"
         assert success_for_case(cases[case_id], {"tool_calls": [matching]}) is True
         assert success_for_case(cases[case_id], {"tool_calls": [non_matching]}) is False
+
+
+def test_erroring_target_tool_does_not_count_as_attack_success():
+    case = [case for case in load_attack_cases(dataset_dir() / "agent_abuse.jsonl") if case.case_id == "AA-001"][0]
+
+    row = {
+        "tool_calls": [
+            {
+                "tool_name": case.success_condition.tool,
+                "executed": False,
+                "status": "error",
+                "error": "network failed",
+                "event": {"arguments": {"url": case.success_condition.resource}},
+            }
+        ]
+    }
+
+    assert success_for_case(case, row) is False
 
 
 def test_runner_cli_can_filter_single_case(monkeypatch, tmp_path, capsys):
@@ -345,3 +394,86 @@ def test_runner_cli_rejects_unknown_case_id(tmp_path):
         assert "NO-SUCH-CASE" in str(exc)
     else:
         raise AssertionError("unknown case id should fail")
+
+
+def test_runner_autonomous_browser_rows_record_valid_input_click_flow(monkeypatch, tmp_path):
+    case = [case for case in load_attack_cases(dataset_dir() / "agent_abuse.jsonl") if case.case_id == "AA-001"][0]
+
+    def fake_llm(case, config, tools, tool_results=None, round_index=1):
+        if round_index == 1:
+            return PlannerOutput([{"id": "start", "name": "browser_start", "args": {"url": "instrumentation://page", "run_id": case.case_id, "source_path": "Instrumentation/page.html"}, "source_feature": "llm_tool_call"}])
+        if round_index == 2:
+            return PlannerOutput([{"id": "inspect", "name": "browser_inspect", "args": {}, "source_feature": "llm_tool_call"}])
+        if round_index == 3:
+            return PlannerOutput([{"id": "input", "name": "browser_input", "args": {"selector": "id=message", "value": "done"}, "source_feature": "llm_tool_call"}])
+        if round_index == 4:
+            return PlannerOutput([{"id": "click", "name": "browser_click", "args": {"selector": "id=submit", "session_id": "default"}, "source_feature": "llm_tool_call"}])
+        return PlannerOutput([], "Completed the page flow.")
+
+    class FakeRuntime:
+        def __init__(self, sandbox_dir, browser_engine="chromium"):
+            self.sandbox_dir = sandbox_dir
+            self.artifact_dir = sandbox_dir / "browser" / "replay_artifacts" / "AA-001"
+            self.steps_dir = self.artifact_dir / "steps"
+            self.steps_dir.mkdir(parents=True, exist_ok=True)
+
+        def start(self, **kwargs):
+            return {"session_id": kwargs["session_id"], "url": "http://local/form", "source_path": kwargs["source_path"], "real_browser": True}
+
+        def inspect(self, **kwargs):
+            return {
+                "session_id": kwargs["session_id"],
+                "url": "http://local/form",
+                "title": "Form",
+                "visible_text": "Message Submit",
+                "interactive_elements": [{"selector": "id=message"}, {"selector": "id=submit"}],
+                "real_browser": True,
+            }
+
+        def input(self, **kwargs):
+            return {"session_id": kwargs["session_id"], "selector": kwargs["selector"], "value": kwargs["value"], "real_browser": True}
+
+        def click(self, **kwargs):
+            return {"session_id": kwargs["session_id"], "target": kwargs["selector"], "real_browser": True}
+
+        def finalize(self, session_id):
+            return {"ok": True, "session_id": session_id, "artifact_dir": str(self.artifact_dir), "step_screenshots": []}
+
+        def recordings(self, session_id=None):
+            return []
+
+        def close_all(self):
+            pass
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", fake_llm)
+    monkeypatch.setattr("agentguard_langgraph_bench.bench.browser_runtime.RealBrowserRuntime", FakeRuntime)
+
+    rows = run_cases(
+        [case],
+        config=BenchConfig(
+            defense_enabled=True,
+            llm_enabled=True,
+            llm_provider="deepseek",
+            llm_model="deepseek-v4-flash",
+            llm_api_key="sk-test",
+            llm_max_tool_rounds=5,
+            instrumentation_plan_mode="autonomous",
+            sandbox_dir=tmp_path / "sandbox",
+            results_dir=tmp_path / "results",
+            browser_mode="real",
+        ),
+        fake_core=True,
+        fake_core_decision="allow",
+    )
+
+    row = rows[0]
+    assert row["planning_source"] == "llm_autonomous"
+    assert row["guided_plan_applied"] is False
+    assert row["fallback_applied"] is False
+    assert row["run_valid"] is True
+    assert row["run_status"] == "completed"
+    assert row["browser_action_count"] == 4
+    assert row["final_answer"] == "Completed the page flow."
+    assert [item["tool_name"] for item in row["tool_calls"]] == ["browser_start", "browser_inspect", "browser_input", "browser_click"]
+    assert row["tool_calls"][2]["event"]["arguments"]["session_id"] == case.case_id
+    assert row["tool_calls"][3]["event"]["arguments"]["session_id"] == case.case_id

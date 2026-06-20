@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from .config import DEFAULT_RESULTS_DIR, DEFAULT_SANDBOX_DIR, ensure_sandbox
+from .config import DEFAULT_RESULTS_DIR, DEFAULT_SANDBOX_DIR, ensure_sandbox, ensure_sandbox_directories
 
 
 VOLATILE_DIR_PREFIXES = (
@@ -31,6 +31,9 @@ VOLATILE_FILE_GLOBS = (
 )
 VOLATILE_FILES = {
     "api/lead_security_controls.json",
+}
+EPHEMERAL_FIXTURE_FILES = {
+    "api/neuralforge_rate_limits.json",
 }
 PERSISTENT_FIXTURE_FILES = {
     "files/reports/misinformation_post.txt",
@@ -170,12 +173,14 @@ def restore_initial_sandbox(sandbox_dir: Path = DEFAULT_SANDBOX_DIR) -> SandboxR
     removed_files = 0
     for path in sorted(_iter_files(sandbox), key=lambda item: len(item.parts), reverse=True):
         relative = _relative_posix(path, sandbox)
-        if relative not in snapshot.files:
+        if relative not in snapshot.files or relative in EPHEMERAL_FIXTURE_FILES:
             path.unlink()
             removed_files += 1
 
     restored_files = 0
     for relative, content in snapshot.files.items():
+        if relative in EPHEMERAL_FIXTURE_FILES:
+            continue
         target = sandbox / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.read_bytes() != content:
@@ -195,7 +200,7 @@ def restore_initial_sandbox(sandbox_dir: Path = DEFAULT_SANDBOX_DIR) -> SandboxR
 
     for relative in sorted(snapshot.dirs):
         (sandbox / relative).mkdir(parents=True, exist_ok=True)
-    ensure_sandbox(sandbox)
+    ensure_sandbox_directories(sandbox)
 
     return SandboxResetReport(
         sandbox_dir=str(sandbox),

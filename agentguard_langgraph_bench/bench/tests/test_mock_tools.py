@@ -282,6 +282,17 @@ def test_browser_real_mode_uses_runtime_and_records_event(monkeypatch, tmp_path)
                 "real_browser": True,
             }
 
+        def inspect(self, **kwargs):
+            calls.append(("inspect", kwargs))
+            return {
+                "session_id": kwargs["session_id"],
+                "url": "file:///tmp/page.html",
+                "title": "Rendered page",
+                "visible_text": "Rendered page text",
+                "interactive_elements": [{"selector": "id=email", "tag": "input", "label": "Email"}],
+                "real_browser": True,
+            }
+
         def close_all(self):
             calls.append(("close_all", {}))
 
@@ -290,14 +301,37 @@ def test_browser_real_mode_uses_runtime_and_records_event(monkeypatch, tmp_path)
 
     start = tools.browser_start("instrumentation://page", run_id="case-1", source_path="Instrumentation/page.html")
     text = tools.browser_extract_text(session_id="case-1")
+    inspected = tools.browser_inspect(session_id="case-1")
     tools.close()
 
     assert start["real_browser"] is True
     assert text["text"] == "Rendered page text"
+    assert inspected["interactive_elements"][0]["selector"] == "id=email"
     assert ("init", {"browser_engine": "firefox"}) in calls
     assert ("start", {"session_id": "case-1", "url": "instrumentation://page", "source_path": "Instrumentation/page.html"}) in calls
     assert calls[-1] == ("close_all", {})
     assert '"real_browser": true' in (tmp_path / "browser" / "events.jsonl").read_text(encoding="utf-8")
+
+
+def test_browser_tools_require_bound_session(tmp_path):
+    ensure_sandbox(tmp_path)
+    tools = MockToolRegistry(tmp_path)
+
+    try:
+        tools.browser_extract_text()
+    except ValueError as exc:
+        assert "browser session is not initialized" in str(exc)
+    else:
+        raise AssertionError("browser_extract_text without session should fail")
+
+
+def test_browser_inspect_is_registered_in_tool_catalog(tmp_path):
+    ensure_sandbox(tmp_path)
+    tools = MockToolRegistry(tmp_path)
+
+    assert "browser_inspect" in tools.functions
+    assert "browser_inspect" in tools.list_tools()
+    assert any(getattr(tool, "name", "") == "browser_inspect" for tool in tools.langchain_tools())
 
 
 def test_mock_tools_reject_path_escape(tmp_path):

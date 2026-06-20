@@ -33,6 +33,7 @@ TOOL_METADATA = {
     "browser_input": ("browser", "browser_input", "input"),
     "browser_click": ("browser", "browser_click", "click"),
     "browser_extract_text": ("browser", "browser_extract", "extract"),
+    "browser_inspect": ("browser", "browser_inspect", "inspect"),
     "mcp_call": ("mcp", "mcp_tool_call", "call"),
     "rag_retrieve": ("rag", "rag_retrieve", "retrieve"),
     "rag_answer": ("rag", "rag_answer", "answer"),

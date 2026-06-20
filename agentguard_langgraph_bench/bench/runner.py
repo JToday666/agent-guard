@@ -165,6 +165,8 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
         "llm_temperature": config.llm_temperature,
         "llm_fallback_to_case_plan": config.llm_fallback_to_case_plan,
         "llm_max_tool_rounds": config.llm_max_tool_rounds,
+        "llm_request_timeout": config.llm_request_timeout,
+        "llm_max_retries": config.llm_max_retries,
         "instrumentation_plan_mode": config.instrumentation_plan_mode,
         "browser_mode": config.browser_mode,
         "browser_engine": config.browser_engine,
@@ -273,6 +275,8 @@ def _planning_source(state: dict[str, Any], case: AttackCase, config: BenchConfi
 
 
 def _final_answer_from_state(state: dict[str, Any]) -> str:
+    if state.get("last_model_content"):
+        return str(state["last_model_content"])
     for item in reversed(state.get("tool_results") or []):
         result = item.get("result")
         if isinstance(result, dict):
@@ -391,6 +395,19 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
             "planning_source",
             "guided_plan_applied",
             "fallback_applied",
+            "stop_reason",
+            "run_status",
+            "run_valid",
+            "invalid_reasons",
+            "successful_tool_count",
+            "tool_error_count",
+            "browser_action_count",
+            "task_terminal",
+            "task_terminal_reason",
+            "completed_round_index",
+            "llm_request_count",
+            "llm_timeout_count",
+            "llm_retry_count",
             "evidence_status",
             "mcpsafety_evaluator",
             "mcpsafety_evidence_status",
@@ -440,6 +457,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tool hijacking evaluation mode",
     )
     parser.add_argument("--llm-max-tool-rounds", type=int, default=None, help="Maximum LLM/tool/observation rounds per case")
+    parser.add_argument("--llm-request-timeout", type=float, default=None, help="Timeout in seconds for each LLM planning request.")
+    parser.add_argument("--llm-max-retries", type=int, default=None, help="Maximum retries for transient LLM request failures.")
     parser.add_argument(
         "--instrumentation-plan-mode",
         choices=["guided", "autonomous"],
@@ -521,6 +540,8 @@ def main(argv: list[str] | None = None) -> int:
             and not args.no_llm_fallback_to_case_plan
         ),
         llm_max_tool_rounds=args.llm_max_tool_rounds,
+        llm_request_timeout=args.llm_request_timeout,
+        llm_max_retries=args.llm_max_retries,
         instrumentation_plan_mode=args.instrumentation_plan_mode,
         browser_mode=args.browser_mode,
         browser_engine=args.browser_engine,

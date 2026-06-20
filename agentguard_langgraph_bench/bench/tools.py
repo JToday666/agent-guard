@@ -1873,7 +1873,8 @@ class MockToolRegistry:
         _append_jsonl(self.sandbox_dir / "browser" / "events.jsonl", record)
         return result
 
-    def browser_navigate(self, url: str, session_id: str = "default") -> dict[str, Any]:
+    def browser_navigate(self, url: str, session_id: str | None = None) -> dict[str, Any]:
+        session_id = self._require_browser_session_id(session_id)
         result = {"session_id": session_id, "url": url, "real_browser": False}
         if self.browser_mode == "real":
             result.update(self._real_browser_runtime().navigate(session_id=session_id, url=url))
@@ -1887,7 +1888,8 @@ class MockToolRegistry:
         _append_jsonl(self.sandbox_dir / "browser" / "events.jsonl", record)
         return result
 
-    def browser_input(self, selector: str, value: str, session_id: str = "default") -> dict[str, Any]:
+    def browser_input(self, selector: str, value: str, session_id: str | None = None) -> dict[str, Any]:
+        session_id = self._require_browser_session_id(session_id)
         result = {"session_id": session_id, "selector": selector, "value": value, "real_browser": False}
         if self.browser_mode == "real":
             result.update(self._real_browser_runtime().input(session_id=session_id, selector=selector, value=value))
@@ -1902,7 +1904,8 @@ class MockToolRegistry:
         _append_jsonl(self.sandbox_dir / "browser" / "events.jsonl", record)
         return result
 
-    def browser_click(self, selector: str | None = None, text: str | None = None, session_id: str = "default") -> dict[str, Any]:
+    def browser_click(self, selector: str | None = None, text: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+        session_id = self._require_browser_session_id(session_id)
         target = selector or text or ""
         result = {"session_id": session_id, "target": target, "real_browser": False}
         if self.browser_mode == "real":
@@ -1919,7 +1922,8 @@ class MockToolRegistry:
         _append_jsonl(self.sandbox_dir / "browser" / "events.jsonl", record)
         return result
 
-    def browser_extract_text(self, selector: str = "body", session_id: str = "default") -> dict[str, Any]:
+    def browser_extract_text(self, selector: str = "body", session_id: str | None = None) -> dict[str, Any]:
+        session_id = self._require_browser_session_id(session_id)
         session = self._browser_sessions.get(session_id, {})
         source_path = session.get("source_path")
         result: dict[str, Any]
@@ -1941,6 +1945,42 @@ class MockToolRegistry:
         }
         _append_jsonl(self.sandbox_dir / "browser" / "events.jsonl", record)
         return result
+
+    def browser_inspect(self, session_id: str | None = None, limit: int = 80) -> dict[str, Any]:
+        session_id = self._require_browser_session_id(session_id)
+        session = self._browser_sessions.get(session_id, {})
+        if self.browser_mode == "real":
+            result = self._real_browser_runtime().inspect(session_id=session_id, limit=limit)
+        else:
+            source_path = session.get("source_path")
+            text = _extract_html_text(_resolve_source_path(self.sandbox_dir, source_path), limit=3000)
+            result = {
+                "session_id": session_id,
+                "url": session.get("url"),
+                "title": "",
+                "visible_text": text,
+                "interactive_elements": [],
+                "real_browser": False,
+                "source_path": source_path,
+            }
+        _append_jsonl(
+            self.sandbox_dir / "browser" / "events.jsonl",
+            {
+                "action": "inspect",
+                "session_id": session_id,
+                "limit": limit,
+                "real_browser": result.get("real_browser", False),
+                "interactive_count": len(result.get("interactive_elements") or []),
+                "step_screenshot": result.get("step_screenshot"),
+            },
+        )
+        return result
+
+    def _require_browser_session_id(self, session_id: str | None) -> str:
+        candidate = str(session_id or "").strip()
+        if not candidate or candidate == "default":
+            raise ValueError("browser session is not initialized for this case")
+        return candidate
 
     def mcp_call(
         self,
@@ -2376,6 +2416,7 @@ class MockToolRegistry:
             "browser_input": "Type into a benchmark browser element.",
             "browser_click": "Click a benchmark browser element.",
             "browser_extract_text": "Extract benchmark browser text.",
+            "browser_inspect": "Inspect visible interactive browser elements.",
             "mcp_call": "Call a benchmark MCP fixture tool.",
             "rag_retrieve": "Retrieve benchmark RAG contexts.",
             "rag_answer": "Record a benchmark RAG answer.",
@@ -2415,6 +2456,7 @@ class MockToolRegistry:
             "browser_input": self.browser_input,
             "browser_click": self.browser_click,
             "browser_extract_text": self.browser_extract_text,
+            "browser_inspect": self.browser_inspect,
             "mcp_call": self.mcp_call,
             "rag_retrieve": self.rag_retrieve,
             "rag_answer": self.rag_answer,
@@ -2441,6 +2483,7 @@ class MockToolRegistry:
             StructuredTool.from_function(func=self.browser_input, name="browser_input", description="Type into a browser element."),
             StructuredTool.from_function(func=self.browser_click, name="browser_click", description="Click a browser element."),
             StructuredTool.from_function(func=self.browser_extract_text, name="browser_extract_text", description="Extract visible browser text."),
+            StructuredTool.from_function(func=self.browser_inspect, name="browser_inspect", description="Inspect visible browser elements and return stable selectors."),
             StructuredTool.from_function(func=self.mcp_call, name="mcp_call", description="Call a benchmark MCP server tool."),
             StructuredTool.from_function(func=self.rag_retrieve, name="rag_retrieve", description="Retrieve benchmark RAG contexts."),
             StructuredTool.from_function(func=self.rag_answer, name="rag_answer", description="Record a benchmark RAG answer."),
