@@ -165,6 +165,7 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
         "llm_temperature": config.llm_temperature,
         "llm_fallback_to_case_plan": config.llm_fallback_to_case_plan,
         "llm_max_tool_rounds": config.llm_max_tool_rounds,
+        "instrumentation_plan_mode": config.instrumentation_plan_mode,
         "browser_mode": config.browser_mode,
         "browser_engine": config.browser_engine,
         "tool_hijacking_mode": config.tool_hijacking_mode,
@@ -386,7 +387,10 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
             "task_success",
             "safe_completion",
             "overblocked",
+            "instrumentation_plan_mode",
             "planning_source",
+            "guided_plan_applied",
+            "fallback_applied",
             "evidence_status",
             "mcpsafety_evaluator",
             "mcpsafety_evidence_status",
@@ -436,6 +440,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tool hijacking evaluation mode",
     )
     parser.add_argument("--llm-max-tool-rounds", type=int, default=None, help="Maximum LLM/tool/observation rounds per case")
+    parser.add_argument(
+        "--instrumentation-plan-mode",
+        choices=["guided", "autonomous"],
+        default=None,
+        help="Instrumentation browser planning mode: guided replay hints or autonomous LLM tool planning.",
+    )
     parser.add_argument("--poisonedrag-mode", choices=["clean", "poisoned", "hybrid", "delayed_memory"], default=None)
     parser.add_argument("--poison-prefix", choices=["question", "none"], default=None)
     parser.add_argument("--rag-scorer", choices=["light", "exact"], default=None)
@@ -505,8 +515,13 @@ def main(argv: list[str] | None = None) -> int:
         sandbox_dir=args.sandbox_dir,
         results_dir=args.results_dir,
         llm_enabled=args.llm or args.llm_enabled,
-        llm_fallback_to_case_plan=(args.tool_hijacking_mode == "hybrid" and not args.no_llm_fallback_to_case_plan),
+        llm_fallback_to_case_plan=(
+            args.tool_hijacking_mode == "hybrid"
+            and args.instrumentation_plan_mode != "autonomous"
+            and not args.no_llm_fallback_to_case_plan
+        ),
         llm_max_tool_rounds=args.llm_max_tool_rounds,
+        instrumentation_plan_mode=args.instrumentation_plan_mode,
         browser_mode=args.browser_mode,
         browser_engine=args.browser_engine,
         tool_hijacking_mode="replay" if args.tool_hijacking_mode == "hybrid" else args.tool_hijacking_mode,
@@ -521,6 +536,9 @@ def main(argv: list[str] | None = None) -> int:
         core_api_mode=args.core_api_mode,
         strict_runtime_targets=args.strict_runtime_targets,
     )
+    if config.instrumentation_plan_mode == "autonomous" and config.llm_fallback_to_case_plan:
+        config.llm_fallback_to_case_plan = False
+        print("Warning: disabled llm_fallback_to_case_plan for instrumentation_plan_mode=autonomous")
     if args.reset_env_only:
         report = restore_initial_sandbox(config.sandbox_dir)
         print(json.dumps({"environment_reset": report.as_dict()}, ensure_ascii=False, indent=2, sort_keys=True))

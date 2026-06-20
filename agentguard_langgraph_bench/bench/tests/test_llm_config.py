@@ -1,11 +1,14 @@
 import pytest
 
-from agentguard_langgraph_bench.adapter import LangGraphAdapter
+from agentguard_langgraph_bench.adapter import FakeAllowCoreClient, LangGraphAdapter
 from agentguard_langgraph_bench.adapter.event_models import PolicyDecision
-from agentguard_langgraph_bench.bench.models import AttackCase
-from agentguard_langgraph_bench.demo_agent.graph import _enrich_llm_tool_calls, _llm_messages_for_case, plan_tools_for_case, run_demo_case
+from agentguard_langgraph_bench.adapters.langgraph_demo.adapter import LangGraphDemoAdapter
 from agentguard_langgraph_bench.bench.config import BenchConfig
+from agentguard_langgraph_bench.bench.models import AttackCase
+from agentguard_langgraph_bench.bench.runner import build_case_context, build_parser
+from agentguard_langgraph_bench.bench.runtime.tool_gateway import GuardedToolGateway
 from agentguard_langgraph_bench.bench.tools import MockToolRegistry
+from agentguard_langgraph_bench.demo_agent.graph import _enrich_llm_tool_calls, _llm_messages_for_case, plan_tools_for_case, run_demo_case
 
 
 def sample_case() -> AttackCase:
@@ -253,6 +256,76 @@ def test_llm_messages_include_guided_execution_requirement():
     assert '"tool": "browser_start"' in prompt
 
 
+def test_default_instrumentation_plan_mode_is_guided():
+    assert BenchConfig.from_values().instrumentation_plan_mode == "guided"
+
+
+def test_cli_accepts_autonomous_instrumentation_plan_mode():
+    args = build_parser().parse_args(["--instrumentation-plan-mode", "autonomous"])
+
+    assert args.instrumentation_plan_mode == "autonomous"
+
+
+def test_autonomous_messages_do_not_include_guided_execution_answer():
+    case = guided_browser_case()
+
+    prompt = _llm_messages_for_case(case, instrumentation_plan_mode="autonomous")[-1][1]
+
+    assert "Required tool sequence" not in prompt
+    assert "Next required tool call" not in prompt
+    assert "testid=to-input" not in prompt
+    assert "victim@example.com" not in prompt
+
+
+def test_autonomous_still_binds_full_tool_schema(monkeypatch, tmp_path):
+    case = guided_browser_case()
+    config = BenchConfig(
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        instrumentation_plan_mode="autonomous",
+        sandbox_dir=tmp_path,
+    )
+    captured = {}
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            captured["messages"] = messages
+
+            class Message:
+                tool_calls = []
+
+            return Message()
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            captured["tool_names"] = [tool.name for tool in tools]
+            captured["schemas"] = {tool.name: getattr(tool, "args_schema", None) for tool in tools}
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph._build_llm", lambda config: FakeLLM())
+
+    calls = plan_tools_for_case(case, config, MockToolRegistry(tmp_path))
+
+    assert calls == []
+    for tool_name in [
+        "browser_start",
+        "browser_extract_text",
+        "browser_input",
+        "browser_click",
+        "browser_navigate",
+        "send_email",
+        "call_api",
+        "read_file",
+        "write_file",
+        "code_exec",
+    ]:
+        assert tool_name in captured["tool_names"]
+        assert captured["schemas"][tool_name] is not None
+    assert "Required tool sequence" not in captured["messages"][-1][1]
+
+
 def test_llm_graph_loops_over_tool_observations_and_asks_core_each_step(monkeypatch, tmp_path):
     case = sample_case()
     (tmp_path / "files" / "docs").mkdir(parents=True)
@@ -355,3 +428,123 @@ def test_llm_guided_browser_case_executes_full_task_when_model_only_browses(monk
     assert [event["tool"]["name"] for event in core.events] == tool_names
     assert all(item["decision"] == "allow" for item in state["tool_results"])
     assert (tmp_path / "outbox" / "emails.jsonl").exists()
+
+
+def test_autonomous_executes_llm_tool_not_case_plan(monkeypatch, tmp_path):
+    case = guided_browser_case()
+    (tmp_path / "files" / "docs").mkdir(parents=True)
+    (tmp_path / "files" / "docs" / "public.txt").write_text("public document", encoding="utf-8")
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        llm_max_tool_rounds=1,
+        instrumentation_plan_mode="autonomous",
+        sandbox_dir=tmp_path,
+    )
+
+    def read_file_llm(case, config, tools, tool_results=None, round_index=1):
+        return [{"id": "llm_read", "name": "read_file", "args": {"path": "/docs/public.txt"}, "source_feature": "llm_tool_call"}]
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", read_file_llm)
+    state = run_demo_case(case, LangGraphAdapter(config=config, core_client=FakeAllowCoreClient()), MockToolRegistry(tmp_path))
+
+    assert [item["tool_name"] for item in state["tool_results"]] == ["read_file"]
+    model_event = [event for event in state["behavior_events"] if event["event_type"] == "model_output_produced"][0]
+    assert model_event["metadata"]["planner"] == "llm_autonomous"
+    assert model_event["metadata"]["guided_plan_applied"] is False
+    assert state["llm_planning_evidence"][0]["llm_tool_calls"] == [{"tool": "read_file", "arguments": {"path": "/docs/public.txt"}}]
+    assert not (tmp_path / "outbox" / "emails.jsonl").exists()
+
+
+def test_autonomous_no_tool_call_does_not_execute_case_plan(monkeypatch, tmp_path):
+    case = guided_browser_case()
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        instrumentation_plan_mode="autonomous",
+        sandbox_dir=tmp_path,
+    )
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", lambda *args, **kwargs: [])
+    state = run_demo_case(case, LangGraphAdapter(config=config, core_client=FakeAllowCoreClient()), MockToolRegistry(tmp_path))
+
+    assert state["tool_results"] == []
+    assert state["llm_planning_evidence"][0]["planning_source"] == "llm_autonomous"
+    assert state["llm_planning_evidence"][0]["guided_plan_applied"] is False
+    assert not (tmp_path / "outbox" / "emails.jsonl").exists()
+
+
+def test_autonomous_llm_error_with_no_fallback_records_failure(monkeypatch, tmp_path):
+    case = guided_browser_case()
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        llm_fallback_to_case_plan=True,
+        instrumentation_plan_mode="autonomous",
+        sandbox_dir=tmp_path,
+    )
+
+    def fail_llm(*args, **kwargs):
+        raise RuntimeError("bad llm args")
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", fail_llm)
+    state = run_demo_case(case, LangGraphAdapter(config=config, core_client=FakeAllowCoreClient()), MockToolRegistry(tmp_path))
+
+    assert state["tool_results"] == []
+    assert state["stop_reason"] == "llm_planning_error"
+    assert state["llm_planning_evidence"][0]["planning_source"] == "llm_autonomous"
+    assert state["llm_planning_evidence"][0]["error"] == "bad llm args"
+    assert state["llm_planning_evidence"][0]["fallback_applied"] is False
+    assert not (tmp_path / "outbox" / "emails.jsonl").exists()
+
+
+def test_autonomous_result_row_audit_fields(monkeypatch, tmp_path):
+    case = guided_browser_case()
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        llm_max_tool_rounds=1,
+        instrumentation_plan_mode="autonomous",
+        sandbox_dir=tmp_path,
+    )
+
+    def extract_text_llm(case, config, tools, tool_results=None, round_index=1):
+        return [
+            {
+                "id": "llm_extract",
+                "name": "browser_extract_text",
+                "args": {"session_id": case.case_id, "selector": "body"},
+                "source_feature": "llm_tool_call",
+            }
+        ]
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", extract_text_llm)
+    tools = MockToolRegistry(tmp_path)
+    adapter = LangGraphDemoAdapter()
+    guard_adapter = LangGraphAdapter(config=config, core_client=FakeAllowCoreClient())
+    gateway = GuardedToolGateway(guard_adapter=guard_adapter, tool_runtime=tools)
+    context = build_case_context(case, config, adapter, tools, gateway)
+
+    result = adapter.run_case(case, context)
+
+    assert result.raw_state["instrumentation_plan_mode"] == "autonomous"
+    assert result.raw_state["planning_source"] == "llm_autonomous"
+    assert result.raw_state["guided_plan_applied"] is False
+    assert result.raw_state["fallback_applied"] is False
+    serialized = repr(result.raw_state)
+    assert "llm_guided_case_plan" not in serialized
+    assert "instrumentation_heuristic_browser_step" not in serialized
+    assert "instrumentation_oracle_harm_oracle" not in serialized
+    assert "instrumentation_oracle_success_oracle" not in serialized

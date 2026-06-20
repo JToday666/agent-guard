@@ -48,7 +48,14 @@ class LangGraphDemoAdapter:
             final_answer=_final_answer_from_state(final_state),
             blocked=any(item.get("blocked") for item in tool_results),
             executed=any(item.get("executed") for item in tool_results),
-            raw_state={**dict(final_state), "planning_source": _planning_source(final_state, case, context.config)},
+            raw_state={
+                **dict(final_state),
+                "instrumentation_plan_mode": getattr(context.config, "instrumentation_plan_mode", "guided"),
+                "planning_source": _planning_source(final_state, case, context.config),
+                "guided_plan_applied": _guided_plan_applied(final_state),
+                "fallback_applied": _fallback_applied(final_state),
+                "llm_planning_evidence": list(final_state.get("llm_planning_evidence") or []),
+            },
         )
 
     def teardown(self) -> None:
@@ -99,3 +106,21 @@ def _planning_source(state: dict[str, Any], case: AttackCase, config: Any) -> st
         if planner:
             return str(planner)
     return "case_plan_fallback" if getattr(config, "llm_fallback_to_case_plan", False) else "attackcase_tool_plan"
+
+
+def _guided_plan_applied(state: dict[str, Any]) -> bool:
+    events = state.get("behavior_events") or []
+    for event in events:
+        metadata = event.get("metadata") if isinstance(event, dict) else {}
+        if isinstance(metadata, dict) and metadata.get("guided_plan_applied"):
+            return True
+    return False
+
+
+def _fallback_applied(state: dict[str, Any]) -> bool:
+    events = state.get("behavior_events") or []
+    for event in events:
+        metadata = event.get("metadata") if isinstance(event, dict) else {}
+        if isinstance(metadata, dict) and metadata.get("fallback_applied"):
+            return True
+    return False

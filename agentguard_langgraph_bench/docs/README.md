@@ -241,7 +241,30 @@ python -m agentguard_langgraph_bench.bench.cli \
   --llm
 ```
 
-当回退关闭时，LLM 配置错误或 API 失败会使运行失败。当回退开启时，规划节点会退回精选 AttackCase `tool_plan`。LLM 模式采用多轮 `LLM -> guarded tool -> observation -> LLM` 循环，每轮最多执行一个 LLM 规划出的工具调用，并由 `AGENTGUARD_LLM_MAX_TOOL_ROUNDS` 或 `--llm-max-tool-rounds` 限制最大轮数。无论哪种模式，LLM 输出只生成工具调用意图；每一步真正执行前仍必须经过 `SecureToolNode`、`ToolCallEvent`、Core 决策和 `allow/deny/ask` 执行链路。
+当回退关闭时，LLM 配置错误或 API 失败会使运行失败。当回退开启时，`guided` 规划节点可退回精选 AttackCase `tool_plan`。LLM 模式采用多轮 `LLM -> guarded tool -> observation -> LLM` 循环，每轮最多执行一个 LLM 规划出的工具调用，并由 `AGENTGUARD_LLM_MAX_TOOL_ROUNDS` 或 `--llm-max-tool-rounds` 限制最大轮数。无论哪种模式，LLM 输出只生成工具调用意图；每一步真正执行前仍必须经过 `SecureToolNode`、`ToolCallEvent`、Core 决策和 `allow/deny/ask` 执行链路。
+
+Instrumentation 浏览器样本支持两种规划模式：
+
+- `--instrumentation-plan-mode guided`：默认值，用于确定性回放、浏览器链路验证和防御拦截测试。该模式允许把 `case.tool_plan`、必需工具序列和下一步必需调用提示给 LLM，并在集成测试中用预设步骤保证流程完成。
+- `--instrumentation-plan-mode autonomous`：用于评测 Agent 的自主推理、工具选择和安全拒绝能力。该模式仍通过 LangChain `bind_tools` 暴露完整工具名称、描述和参数 schema，但不会向 LLM 注入 `Required tool sequence`、`Next required tool call`、`case.tool_plan` 参数、harm/success oracle 或 heuristic 浏览器步骤。LLM 没有工具调用、拒绝任务、参数错误或调用异常时，会记录真实结果，不会自动补齐预设计划。
+
+Autonomous 示例：
+
+```bash
+PYTHONPATH=. python -m agentguard_langgraph_bench.bench.cli \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases/agent_abuse.jsonl \
+  --agent-adapter langgraph-demo \
+  --browser-mode real \
+  --browser-engine chromium \
+  --defense on \
+  --fake-core \
+  --fake-core-decision allow \
+  --llm \
+  --no-llm-fallback-to-case-plan \
+  --instrumentation-plan-mode autonomous
+```
+
+`Fake Core allow` 只用于观察自主 Agent 在不被拦截时的真实工具行为，不能代表真实 AgentGuard Core 的防御能力。Autonomous 模式下攻击是否成功，应由 LLM 的实际工具选择和业务最终状态决定，而不是由预设计划保证。结果行会记录 `instrumentation_plan_mode`、`planning_source`、`guided_plan_applied`、`fallback_applied` 和 `llm_planning_evidence`，用于审计每轮工具调用是否来自 LLM。
 
 ## Instrumentation 真实浏览器模式
 
