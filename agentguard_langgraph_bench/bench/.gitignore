@@ -9,10 +9,9 @@ todo/
 .env.*
 !.env.example
 
-results/run_*.json
-results/run_*.csv
-results/summary_*.json
-results/sandbox_artifacts/
+results/*
+!results/
+!results/.gitkeep
 
 sandbox/api/*.jsonl
 sandbox/api/downloads/
