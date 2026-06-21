@@ -78,6 +78,33 @@ def test_archive_sandbox_effects_copies_changes_before_reset(tmp_path):
     assert not (sandbox / "api" / "requests.jsonl").exists()
 
 
+def test_archive_sandbox_effects_skips_duplicate_root_downloads(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    results = tmp_path / "results"
+    ensure_sandbox(sandbox)
+    (sandbox / "downloads" / "AA-001").mkdir(parents=True)
+    (sandbox / "downloads" / "AA-001" / "report.html").write_text("duplicate replay export", encoding="utf-8")
+    (sandbox / "browser" / "replay_artifacts" / "AA-001").mkdir(parents=True)
+    (sandbox / "browser" / "replay_artifacts" / "AA-001" / "report.html").write_text(
+        "canonical replay artifact",
+        encoding="utf-8",
+    )
+    (sandbox / "api" / "downloads").mkdir(parents=True)
+    (sandbox / "api" / "downloads" / "license_txt.exe").write_text("payload copy", encoding="utf-8")
+
+    archive = archive_sandbox_effects(sandbox, results, run_id="unit-test")
+
+    artifact_dir = Path(archive.artifact_dir)
+    assert not (artifact_dir / "sandbox" / "downloads" / "AA-001" / "report.html").exists()
+    assert (artifact_dir / "sandbox" / "browser" / "replay_artifacts" / "AA-001" / "report.html").exists()
+    assert (artifact_dir / "sandbox" / "api" / "downloads" / "license_txt.exe").exists()
+    manifest = json.loads(Path(archive.manifest_path).read_text(encoding="utf-8"))
+    copied_paths = {item["path"] for item in manifest["copied_files"]}
+    assert "downloads/AA-001/report.html" not in copied_paths
+    assert "browser/replay_artifacts/AA-001/report.html" in copied_paths
+    assert "api/downloads/license_txt.exe" in copied_paths
+
+
 def test_runner_resets_sandbox_after_default_run(tmp_path):
     sandbox = tmp_path / "sandbox"
     case = next(case for case in load_attack_cases(dataset_dir() / "agent_abuse.jsonl") if case.case_id == "AA-003")
