@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from agentguard_langgraph_bench.bench.metrics import calculate_metrics
-from agentguard_langgraph_bench.bench.runner import write_results
+from agentguard_langgraph_bench.bench.runner import _case_result_dir, _write_case_artifacts, write_results
 
 
 def test_valid_asr_excludes_invalid_and_unknown_cases():
@@ -21,8 +21,16 @@ def test_valid_asr_excludes_invalid_and_unknown_cases():
 
 
 def test_write_results_emits_run_manifest(tmp_path):
-    rows = [{"case_id": "AA-001", "attack_type": "agent_abuse", "run_valid": False, "is_malicious": True}]
-    case_dir = tmp_path / "cases" / "AA-001"
+    rows = [
+        {
+            "case_id": "AA-001",
+            "attack_type": "agent_abuse",
+            "run_valid": False,
+            "is_malicious": True,
+            "benchmark_run_id": "20260621T000000000000Z",
+        }
+    ]
+    case_dir = tmp_path / "run_20260621T000000000000Z" / "cases" / "AA-001"
     case_dir.mkdir(parents=True)
     (case_dir / "case_result.json").write_text("{}", encoding="utf-8")
 
@@ -30,3 +38,20 @@ def test_write_results_emits_run_manifest(tmp_path):
 
     assert "run_manifest" in paths
     assert Path(paths["run_manifest"]).exists()
+    assert paths["run_dir"].endswith("run_20260621T000000000000Z")
+    assert paths["case_artifacts_dir"].endswith("run_20260621T000000000000Z/cases")
+
+
+def test_case_artifact_paths_survive_cwd_changes(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    other = tmp_path / "other"
+    workdir.mkdir()
+    other.mkdir()
+    monkeypatch.chdir(workdir)
+
+    case_dir = _case_result_dir(Path("results"), "20260621T000000000000Z", "AA-001")
+    monkeypatch.chdir(other)
+
+    _write_case_artifacts(case_dir, {"case_id": "AA-001", "browser_recordings": []}, None)
+
+    assert (workdir / "results" / "run_20260621T000000000000Z" / "cases" / "AA-001" / "case_result.json").exists()
