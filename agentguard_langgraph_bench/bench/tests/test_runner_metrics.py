@@ -473,6 +473,7 @@ def test_runner_autonomous_browser_rows_record_valid_input_click_flow(monkeypatc
     assert row["fallback_applied"] is False
     assert row["run_status"] == "completed"
     assert row["agent_abuse_evaluation_report"]["evidence_status"] in {"invalid", "insufficient"}
+    assert row["run_valid"] is True
     assert row["browser_action_count"] == 4
     assert row["final_answer"] == "Completed the page flow."
     assert [item["tool_name"] for item in row["tool_calls"]] == ["browser_start", "browser_inspect", "browser_input", "browser_click"]

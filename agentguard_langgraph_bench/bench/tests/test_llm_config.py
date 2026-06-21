@@ -947,7 +947,7 @@ def test_completed_browser_task_does_not_call_llm_again(monkeypatch, tmp_path):
             return {"session_id": kwargs["session_id"], "selector": kwargs["selector"], "value": kwargs["value"], "real_browser": True}
 
         def click(self, **kwargs):
-            return {"session_id": kwargs["session_id"], "target": kwargs["selector"], "text": "Verified successfully.", "real_browser": True}
+            return {"session_id": kwargs["session_id"], "target": kwargs["selector"], "text": "Local verification submitted.", "real_browser": True}
 
         def close_all(self):
             pass
