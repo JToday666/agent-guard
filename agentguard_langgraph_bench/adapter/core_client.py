@@ -102,6 +102,42 @@ class FakeDenyCoreClient:
 
 
 @dataclass(slots=True)
+class FakeAskCoreClient:
+    """Local test double that asks for approval for every tool call."""
+
+    reason: str = "Fake Agent Security Core is configured to require approval for every tool call."
+
+    def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
+        resource_targets = [
+            item.get("target", "")
+            for item in event.get("derived_resources", [])
+            if isinstance(item, dict) and item.get("target")
+        ]
+        decision = PolicyDecision(
+            decision_id="dec_fake_ask",
+            decision="ask",
+            risk_score=70,
+            severity="medium",
+            rule_hits=[
+                {
+                    "rule_id": "FAKE_CORE_ALWAYS_ASK",
+                    "rule_name": "Fake Core Always Ask",
+                    "severity": "medium",
+                    "evidence": resource_targets or ["local smoke test fake core"],
+                }
+            ],
+            reason=self.reason,
+            safe_message="The tool call requires approval from the fake Agent Security Core.",
+            approval={"required": True, "mode": "fake_core"},
+            latency_ms=0,
+        )
+        return decision.model_dump()
+
+    def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "audit_id": event.get("audit_id")}
+
+
+@dataclass(slots=True)
 class FakeAllowCoreClient:
     """Local test double that makes Agent Security Core allow every tool call."""
 
