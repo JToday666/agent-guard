@@ -9,12 +9,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..adapter.core_client import FakeAllowCoreClient, FakeDenyCoreClient
+from ..adapter.core_client import FakeAllowCoreClient, FakeAskCoreClient, FakeDenyCoreClient
 from ..adapter.event_models import new_id
 from ..guard import GuardAdapter, GuardConfig
 from .config import DEFAULT_DATASET_DIR, DEFAULT_RESULTS_DIR, BenchConfig, ensure_sandbox
 from .dataset_loader import load_attack_cases
 from .environment import archive_sandbox_effects, restore_initial_sandbox
+from .evidence.artifact_integrity import build_artifact_integrity_manifest
+from .evidence.artifact_integrity import check_case_artifacts
 from .metrics import calculate_metrics
 from .memory_poisoning_metrics import calculate_memory_poisoning_metrics
 from .models import AttackCase, ToolPlanStep, supports_runtime
@@ -24,6 +26,7 @@ from .poisonedrag_metrics import calculate_poisonedrag_metrics
 from .runtime.adapter_loader import load_agent_adapter
 from .runtime.agent_protocol import AgentAdapterProtocol, CaseContext
 from .runtime.row_normalizer import normalize_case_result
+from .runtime.sandbox_diff import diff_sandbox, snapshot_sandbox
 from .runtime.tool_gateway import GuardedToolGateway
 from .runtime.tool_server import BenchmarkToolServer
 from .scoring.success import success_for_case
@@ -67,7 +70,7 @@ def run_cases(
     )
     core_client = None
     if fake_core:
-        core_client = FakeAllowCoreClient() if fake_core_decision == "allow" else FakeDenyCoreClient()
+        core_client = _fake_core_client(fake_core_decision)
     agent_adapter = agent_adapter or load_agent_adapter(config)
     guard_config = GuardConfig.from_bench_config(config, runtime=agent_adapter.runtime, agent_id=agent_adapter.name)
     guard_adapter = GuardAdapter(config=guard_config, core_client=core_client)
@@ -86,7 +89,17 @@ def run_cases(
             for case in group:
                 if tool_server is not None:
                     tool_server.reset_case()
-                row = _run_single_case(case, agent_adapter, tools, tool_gateway, config, tool_server, benchmark_run_id=benchmark_run_id)
+                row = _run_single_case(
+                    case,
+                    agent_adapter,
+                    tools,
+                    tool_gateway,
+                    config,
+                    tool_server,
+                    benchmark_run_id=benchmark_run_id,
+                    core_mode=_core_mode(fake_core=fake_core, fake_core_decision=fake_core_decision, defense_enabled=config.defense_enabled),
+                    fake_core_decision=fake_core_decision if fake_core else None,
+                )
                 rows.append(row)
     finally:
         agent_adapter.teardown()
@@ -207,6 +220,22 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
     return BenchConfig(**data)
 
 
+def _fake_core_client(decision: str) -> Any:
+    if decision == "allow":
+        return FakeAllowCoreClient()
+    if decision == "ask":
+        return FakeAskCoreClient()
+    return FakeDenyCoreClient()
+
+
+def _core_mode(*, fake_core: bool, fake_core_decision: str, defense_enabled: bool) -> str:
+    if not defense_enabled:
+        return "defense_off"
+    if fake_core:
+        return f"fake_{fake_core_decision}"
+    return "real_core"
+
+
 def _run_single_case(
     case: AttackCase,
     agent_adapter: AgentAdapterProtocol,
@@ -215,10 +244,13 @@ def _run_single_case(
     config: BenchConfig,
     tool_server: BenchmarkToolServer | None = None,
     benchmark_run_id: str | None = None,
+    core_mode: str = "real_core",
+    fake_core_decision: str | None = None,
 ) -> dict[str, Any]:
     run_id = benchmark_run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     case_result_dir = _case_result_dir(config.results_dir, run_id, case.case_id)
     case_result_dir.mkdir(parents=True, exist_ok=True)
+    sandbox_before = snapshot_sandbox(config.sandbox_dir)
     row: dict[str, Any]
     try:
         context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
@@ -231,6 +263,8 @@ def _run_single_case(
     row["benchmark_run_id"] = run_id
     row["attempt_id"] = "1"
     row["case_artifact_dir"] = str(case_result_dir)
+    row["core_mode"] = core_mode
+    row["fake_core_decision"] = fake_core_decision
     if case.attack_type == "tool_hijacking":
         hijacking_report = build_tool_hijacking_report(case, row)
         row["hijacking_report"] = hijacking_report
@@ -265,12 +299,24 @@ def _run_single_case(
         row["blocked_before_harm"] = report.blocked_before_harm
         row["blocked_after_harm"] = report.blocked_after_harm
         row["run_valid"] = row.get("run_valid", True) and report.run_valid
+        if report.reason.startswith("skipped:"):
+            row["run_status"] = "skipped"
+            row["skip_reason"] = report.reason
+            row["not_applicable"] = True
         if not report.run_valid:
             row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), *report.missing_evidence]))
-        _write_case_artifacts(case_result_dir, row, report.model_dump())
+        report_payload = report.model_dump()
     else:
         row["attack_success"] = success_for_case(case, row)
-        _write_case_artifacts(case_result_dir, row, None)
+        report_payload = None
+    sandbox_diff = diff_sandbox(config.sandbox_dir, sandbox_before)
+    row["sandbox_diff"] = sandbox_diff
+    if sandbox_diff.get("outside_sandbox_paths"):
+        row["run_valid"] = False
+        row["run_status"] = "security_failure"
+        row["security_failure"] = True
+        row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), "sandbox_escape_detected"]))
+    _write_case_artifacts(case_result_dir, row, report_payload)
     return row
 
 
@@ -304,6 +350,7 @@ def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benc
         "blocked": False,
         "executed": False,
         "side_effects": [],
+        "sandbox_diff": {"schema_version": "1.0", "added": [], "modified": [], "deleted": [], "outside_sandbox_paths": [], "empty": True},
         "final_answer": "",
         "adapter_error": error,
         "raw_logs": [error],
@@ -315,20 +362,164 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     case_result_dir.mkdir(parents=True, exist_ok=True)
     case_result = case_result_dir / "case_result.json"
     case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    evidence_index = {
-        "case_id": row.get("case_id"),
-        "finalized": True,
-        "streams": [],
-        "missing": [],
-    }
+    _write_case_jsonl(case_result_dir / "tool_call_events.jsonl", [item.get("event") for item in row.get("tool_calls") or [] if item.get("event")])
+    _write_case_jsonl(case_result_dir / "policy_decisions.jsonl", [_decision_record(item, row) for item in row.get("tool_calls") or []])
+    _write_case_jsonl(case_result_dir / "audit_events.jsonl", [item.get("audit_event") for item in row.get("tool_calls") or [] if item.get("audit_event")])
+    _write_case_jsonl(case_result_dir / "tool_results.jsonl", row.get("tool_calls") or [])
+    (case_result_dir / "browser_action_summary.json").write_text(
+        json.dumps(_browser_action_summary(row), ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (case_result_dir / "sandbox_diff.json").write_text(
+        json.dumps(row.get("sandbox_diff") or {}, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    evidence_index = _build_evidence_index(row, case_result_dir)
     for recording in row.get("browser_recordings") or []:
         if isinstance(recording, dict):
             for key in ("events", "manifest", "screenshot", "full_page_screenshot", "trace", "raw_video", "video"):
                 if recording.get(key):
-                    evidence_index["streams"].append({"type": key, "path": recording[key]})
+                    evidence_index["streams"].append(_artifact_record(key, Path(str(recording[key])), case_result_dir))
+            artifact_dir = recording.get("artifact_dir")
+            if artifact_dir:
+                integrity = check_case_artifacts(Path(str(artifact_dir)), root=Path(str(artifact_dir)).parent)
+                (case_result_dir / "artifact_integrity.json").write_text(
+                    json.dumps(integrity, ensure_ascii=False, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                evidence_index["artifact_parse_status"] = {
+                    "checked": True,
+                    "ok": integrity.get("ok"),
+                    "manifest_path": str(case_result_dir / "artifact_integrity.json"),
+                }
+    evidence_index["artifact_parse_status"] = {
+        **{"checked": False, "reason": "no browser replay artifact directory found"},
+        **evidence_index.get("artifact_parse_status", {}),
+    }
     (case_result_dir / "evidence_index.json").write_text(json.dumps(evidence_index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     if report is not None:
         (case_result_dir / "evaluation_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _write_case_jsonl(path: Path, rows: list[Any]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            if row is None:
+                continue
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _decision_record(tool_result: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    event = tool_result.get("event") if isinstance(tool_result.get("event"), dict) else {}
+    audit = tool_result.get("audit_event") if isinstance(tool_result.get("audit_event"), dict) else {}
+    return {
+        "tool_call_id": tool_result.get("call_id"),
+        "event_id": event.get("event_id"),
+        "trace_id": row.get("trace_id"),
+        "case_id": row.get("case_id"),
+        "tool_name": tool_result.get("tool_name"),
+        "decision": tool_result.get("decision"),
+        "executed": tool_result.get("executed"),
+        "blocked": tool_result.get("blocked"),
+        "side_effects": tool_result.get("side_effects") or [],
+        "audit_id": audit.get("audit_id"),
+    }
+
+
+def _browser_action_summary(row: dict[str, Any]) -> dict[str, Any]:
+    actions: list[dict[str, Any]] = []
+    for item in row.get("tool_calls") or []:
+        name = str(item.get("tool_name") or "")
+        if not name.startswith("browser_"):
+            continue
+        event = item.get("event") if isinstance(item.get("event"), dict) else {}
+        args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        value = args.get("value")
+        actions.append(
+            {
+                "tool_call_id": item.get("call_id"),
+                "event_id": event.get("event_id"),
+                "tool_name": name,
+                "action": name.removeprefix("browser_"),
+                "selector": args.get("selector"),
+                "text": args.get("text"),
+                "url": result.get("url") or args.get("url"),
+                "input_text_preview": str(value)[:160] if value is not None else None,
+                "executed": item.get("executed"),
+                "blocked": item.get("blocked"),
+                "decision": item.get("decision"),
+                "screenshot": result.get("step_screenshot") or result.get("screenshot"),
+            }
+        )
+    return {
+        "case_id": row.get("case_id"),
+        "trace_id": row.get("trace_id"),
+        "final_url": _last_value(actions, "url"),
+        "action_count": len(actions),
+        "actions": actions,
+        "last_5_actions": actions[-5:],
+    }
+
+
+def _last_value(items: list[dict[str, Any]], key: str) -> Any:
+    for item in reversed(items):
+        if item.get(key):
+            return item[key]
+    return None
+
+
+def _build_evidence_index(row: dict[str, Any], case_result_dir: Path) -> dict[str, Any]:
+    return {
+        "case_id": row.get("case_id"),
+        "finalized": True,
+        "streams": [],
+        "missing": [],
+        "path_mode": "portable",
+        "case_artifact_dir": str(case_result_dir),
+    }
+
+
+def _artifact_record(artifact_type: str, path: Path, case_result_dir: Path) -> dict[str, Any]:
+    exists = path.exists()
+    size = path.stat().st_size if exists else 0
+    return {
+        "type": artifact_type,
+        "run_relative_path": _relative_to(path, case_result_dir.parents[1]) if exists else str(path),
+        "repo_path": _relative_to(path, Path.cwd()) if exists and _is_under(path, Path.cwd()) else None,
+        "debug_local_path": str(path),
+        "exists": exists,
+        "size_bytes": size,
+        "sha256": _sha256(path) if exists and path.is_file() else None,
+        "parse_ok": None,
+        "warning": None,
+        "error": None if exists else "missing",
+    }
+
+
+def _relative_to(path: Path, root: Path) -> str:
+    try:
+        return path.expanduser().resolve().relative_to(root.expanduser().resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.expanduser().resolve().relative_to(root.expanduser().resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _case_result_dir(results_dir: Path, run_id: str, case_id: str) -> Path:
@@ -486,6 +677,7 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
     run_csv = run_dir / f"run_{stamp}.csv"
     summary_json = run_dir / f"summary_{stamp}.json"
     run_manifest_json = run_dir / f"manifest_run_{stamp}.json"
+    artifact_integrity_json = run_dir / "artifact_integrity_manifest.json"
     run_manifest = _build_run_manifest(rows, results_dir, stamp)
     summary["run_manifest"] = run_manifest
     summary["run_integrity_failed"] = not run_manifest["run_integrity_ok"]
@@ -493,6 +685,13 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
     run_json.write_text(json.dumps(rows, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     run_manifest_json.write_text(json.dumps(run_manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    artifact_manifest = build_artifact_integrity_manifest(run_dir, output_path=artifact_integrity_json)
+    summary["artifact_integrity"] = {
+        "ok": artifact_manifest.get("ok"),
+        "case_count": artifact_manifest.get("case_count"),
+        "manifest_path": str(artifact_integrity_json),
+    }
+    summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     with run_csv.open("w", encoding="utf-8", newline="") as handle:
         fields = [
             "case_id",
@@ -542,6 +741,7 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
         "run_csv": str(run_csv),
         "summary_json": str(summary_json),
         "run_manifest": str(run_manifest_json),
+        "artifact_integrity_manifest": str(artifact_integrity_json),
         "run_dir": str(run_dir),
         "case_artifacts_dir": str(run_dir / "cases"),
     }
@@ -594,7 +794,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--defense", choices=["on", "off"], default="off")
     parser.add_argument("--fail-open-debug", action="store_true", help="Allow local debug execution if Core fails")
     parser.add_argument("--fake-core", action="store_true", help="Use a local fake Core instead of HTTP Core")
-    parser.add_argument("--fake-core-decision", choices=["allow", "deny"], default="deny", help="Decision returned by local fake Core")
+    parser.add_argument("--fake-core-decision", choices=["allow", "deny", "ask"], default="deny", help="Decision returned by local fake Core")
     parser.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     parser.add_argument("--sandbox-dir", default=None, help="Sandbox directory to reset and use for mock tool side effects")
     parser.add_argument(
@@ -766,7 +966,13 @@ def main(argv: list[str] | None = None) -> int:
         scenario_stateful=args.scenario_stateful,
         isolate_scenarios=not args.share_memory_across_scenarios,
     )
-    summary = calculate_metrics(rows, defense_enabled=defense_enabled)
+    fake_core_active = args.fake_core or defense_enabled and args.core_url == "fake"
+    summary = calculate_metrics(
+        rows,
+        defense_enabled=defense_enabled,
+        core_mode=_core_mode(fake_core=fake_core_active, fake_core_decision=args.fake_core_decision, defense_enabled=defense_enabled),
+        fake_core_decision=args.fake_core_decision if fake_core_active else None,
+    )
     if skipped:
         summary["skipped_runtime_mismatch"] = len(skipped)
     poisonedrag_summary = calculate_poisonedrag_metrics(rows)

@@ -15,6 +15,7 @@ dependencies = [
   "langchain-openai>=0.2",
   "langgraph>=0.2",
   "playwright>=1.48",
+  "Pillow>=10",
 ]
 
 [project.optional-dependencies]
