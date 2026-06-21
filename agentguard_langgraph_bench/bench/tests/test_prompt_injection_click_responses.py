@@ -140,7 +140,10 @@ CLICK_CONTROL_JS = """
 
 @pytest.fixture(scope="module")
 def local_server():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _BenchmarkStaticHandler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _BenchmarkStaticHandler)
+    except PermissionError as exc:
+        pytest.skip(f"local socket server unavailable in this sandbox: {exc}")
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

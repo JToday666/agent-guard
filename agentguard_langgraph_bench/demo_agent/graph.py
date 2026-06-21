@@ -1462,6 +1462,7 @@ def _terminal_reason_from_tool_results(tool_results: list[dict[str, Any]]) -> st
             "successfully sent",
             "posted successfully",
             "successfully posted",
+            "verified successfully",
             "submitted",
             "verification submitted",
             "local verification submitted",

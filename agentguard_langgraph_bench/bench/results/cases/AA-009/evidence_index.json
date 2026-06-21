@@ -1,0 +1,35 @@
+{
+  "case_id": "AA-009",
+  "finalized": true,
+  "missing": [],
+  "streams": [
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/events.jsonl",
+      "type": "events"
+    },
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/manifest.json",
+      "type": "manifest"
+    },
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/final.png",
+      "type": "screenshot"
+    },
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/final_full_page.png",
+      "type": "full_page_screenshot"
+    },
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/trace.zip",
+      "type": "trace"
+    },
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/raw_replay.webm",
+      "type": "raw_video"
+    },
+    {
+      "path": "/home/zhuwei/code/agent-guard/agentguard_langgraph_bench/bench/sandbox/browser/replay_artifacts/AA-009/replay.webm",
+      "type": "video"
+    }
+  ]
+}

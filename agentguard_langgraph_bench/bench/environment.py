@@ -43,6 +43,9 @@ PERSISTENT_FIXTURE_FILES = {
     "files/reports/monthly_controls_summary.md",
     "files/reports/redacted_dlp_drill_example.md",
 }
+ARCHIVE_EXCLUDED_DIR_PREFIXES = {
+    "downloads",
+}
 
 
 @dataclass(slots=True)
@@ -115,7 +118,7 @@ def archive_sandbox_effects(
     copied_entries: list[dict[str, int | str]] = []
 
     for relative, path in sorted(current_files.items()):
-        if PurePosixPath(relative).name == ".gitkeep":
+        if _skip_sandbox_archive_file(relative):
             continue
         category: str | None = None
         if relative not in snapshot.files:
@@ -231,6 +234,14 @@ def is_volatile_sandbox_path(relative_path: str | PurePosixPath) -> bool:
     if any(rel_text == prefix or rel_text.startswith(prefix + "/") for prefix in VOLATILE_DIR_PREFIXES):
         return True
     return any(rel.match(pattern) for pattern in VOLATILE_FILE_GLOBS)
+
+
+def _skip_sandbox_archive_file(relative_path: str | PurePosixPath) -> bool:
+    rel = PurePosixPath(relative_path)
+    if rel.name == ".gitkeep":
+        return True
+    rel_text = rel.as_posix()
+    return any(rel_text == prefix or rel_text.startswith(prefix + "/") for prefix in ARCHIVE_EXCLUDED_DIR_PREFIXES)
 
 
 def _snapshot_sandbox(sandbox: Path) -> SandboxSnapshot:

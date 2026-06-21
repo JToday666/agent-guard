@@ -27,6 +27,7 @@ from .runtime.row_normalizer import normalize_case_result
 from .runtime.tool_gateway import GuardedToolGateway
 from .runtime.tool_server import BenchmarkToolServer
 from .scoring.success import success_for_case
+from .scoring.agent_abuse import build_agent_abuse_evaluation_report
 from .scoring.tool_hijacking import build_tool_hijacking_report, case_extra_dict, case_extra_list
 from .tools import MockToolRegistry
 
@@ -42,6 +43,7 @@ def run_cases(
     scenario_stateful: bool = False,
     isolate_scenarios: bool = True,
 ) -> list[dict[str, Any]]:
+    benchmark_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     if config.tool_hijacking_mode == "differential" and all(case.attack_type == "tool_hijacking" for case in cases):
         return _run_differential_cases(
             cases,
@@ -54,7 +56,13 @@ def run_cases(
         restore_initial_sandbox(config.sandbox_dir)
     else:
         ensure_sandbox(config.sandbox_dir)
-    tools = MockToolRegistry(config.sandbox_dir, browser_mode=config.browser_mode, browser_engine=config.browser_engine)
+    tools = MockToolRegistry(
+        config.sandbox_dir,
+        browser_mode=config.browser_mode,
+        browser_engine=config.browser_engine,
+        browser_fixture_compat_mode=config.browser_fixture_compat_mode,
+        allowed_local_service_ports=set(config.allowed_local_service_ports),
+    )
     core_client = None
     if fake_core:
         core_client = FakeAllowCoreClient() if fake_core_decision == "allow" else FakeDenyCoreClient()
@@ -76,7 +84,7 @@ def run_cases(
             for case in group:
                 if tool_server is not None:
                     tool_server.reset_case()
-                row = _run_single_case(case, agent_adapter, tools, tool_gateway, config, tool_server)
+                row = _run_single_case(case, agent_adapter, tools, tool_gateway, config, tool_server, benchmark_run_id=benchmark_run_id)
                 rows.append(row)
     finally:
         agent_adapter.teardown()
@@ -170,6 +178,8 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
         "instrumentation_plan_mode": config.instrumentation_plan_mode,
         "browser_mode": config.browser_mode,
         "browser_engine": config.browser_engine,
+        "browser_fixture_compat_mode": config.browser_fixture_compat_mode,
+        "allowed_local_service_ports": config.allowed_local_service_ports,
         "tool_hijacking_mode": config.tool_hijacking_mode,
         "tool_catalog_view": config.tool_catalog_view,
         "agent_adapter": config.agent_adapter,
@@ -194,10 +204,21 @@ def _run_single_case(
     tool_gateway: GuardedToolGateway,
     config: BenchConfig,
     tool_server: BenchmarkToolServer | None = None,
+    benchmark_run_id: str | None = None,
 ) -> dict[str, Any]:
-    context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
-    result = agent_adapter.run_case(case, context)
-    row = normalize_case_result(case, result, config, tools)
+    case_result_dir = config.results_dir / "cases" / case.case_id
+    case_result_dir.mkdir(parents=True, exist_ok=True)
+    row: dict[str, Any]
+    try:
+        context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
+        context.security["benchmark_run_id"] = benchmark_run_id or ""
+        context.security["attempt_id"] = "1"
+        result = agent_adapter.run_case(case, context)
+        row = normalize_case_result(case, result, config, tools)
+    except Exception as exc:
+        row = _invalid_case_row(case, config, str(exc), benchmark_run_id=benchmark_run_id)
+    row["benchmark_run_id"] = benchmark_run_id
+    row["attempt_id"] = "1"
     if case.attack_type == "tool_hijacking":
         hijacking_report = build_tool_hijacking_report(case, row)
         row["hijacking_report"] = hijacking_report
@@ -221,8 +242,80 @@ def _run_single_case(
             row["mcpsafety_evaluator"] = mcpsafety_report.get("evaluator")
             row["mcpsafety_attack_success"] = mcpsafety_report.get("attack_success")
             row["mcpsafety_evidence_status"] = mcpsafety_report.get("evidence_status")
-    row["attack_success"] = success_for_case(case, row)
+    if case.attack_type == "agent_abuse":
+        report = build_agent_abuse_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
+        row["agent_abuse_evaluation_report"] = report.model_dump()
+        row["evaluator"] = report.evaluator
+        row["evidence_status"] = report.evidence_status
+        row["harm_attempted"] = report.harm_attempted
+        row["completion_level"] = report.completion_level
+        row["attack_success"] = report.attack_success
+        row["blocked_before_harm"] = report.blocked_before_harm
+        row["blocked_after_harm"] = report.blocked_after_harm
+        row["run_valid"] = row.get("run_valid", True) and report.run_valid
+        if not report.run_valid:
+            row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), *report.missing_evidence]))
+        _write_case_artifacts(case_result_dir, row, report.model_dump())
+    else:
+        row["attack_success"] = success_for_case(case, row)
+        _write_case_artifacts(case_result_dir, row, None)
     return row
+
+
+def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benchmark_run_id: str | None) -> dict[str, Any]:
+    return {
+        "case_id": case.case_id,
+        "trace_id": new_id("trace"),
+        "runtime": config.runtime,
+        "adapter_name": config.agent_adapter,
+        "attack_type": case.attack_type,
+        "is_malicious": case.is_malicious,
+        "metadata": case.metadata,
+        "instrumentation_plan_mode": config.instrumentation_plan_mode,
+        "planning_source": "runtime_error",
+        "guided_plan_applied": False,
+        "fallback_applied": False,
+        "llm_planning_evidence": [],
+        "llm_request_diagnostics": [],
+        "task_terminal": False,
+        "task_terminal_reason": "",
+        "stop_reason": "runtime_error",
+        "run_status": "runtime_error",
+        "run_valid": False,
+        "invalid_reasons": ["case_runtime_exception"],
+        "defense_enabled": config.defense_enabled,
+        "expected_decision": case.expected_decision,
+        "tool_calls": [],
+        "behavior_events": [],
+        "browser_recordings": [],
+        "decisions": [],
+        "blocked": False,
+        "executed": False,
+        "side_effects": [],
+        "final_answer": "",
+        "adapter_error": error,
+        "raw_logs": [error],
+        "benchmark_run_id": benchmark_run_id,
+    }
+
+
+def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: dict[str, Any] | None) -> None:
+    case_result = case_result_dir / "case_result.json"
+    case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    evidence_index = {
+        "case_id": row.get("case_id"),
+        "finalized": True,
+        "streams": [],
+        "missing": [],
+    }
+    for recording in row.get("browser_recordings") or []:
+        if isinstance(recording, dict):
+            for key in ("events", "manifest", "screenshot", "full_page_screenshot", "trace", "raw_video", "video"):
+                if recording.get(key):
+                    evidence_index["streams"].append({"type": key, "path": recording[key]})
+    (case_result_dir / "evidence_index.json").write_text(json.dumps(evidence_index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    if report is not None:
+        (case_result_dir / "evaluation_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def build_case_context(
@@ -369,9 +462,14 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
     run_json = results_dir / f"run_{stamp}.json"
     run_csv = results_dir / f"run_{stamp}.csv"
     summary_json = results_dir / f"summary_{stamp}.json"
+    run_manifest_json = results_dir / f"manifest_run_{stamp}.json"
+    run_manifest = _build_run_manifest(rows, results_dir)
+    summary["run_manifest"] = run_manifest
+    summary["run_integrity_failed"] = not run_manifest["run_integrity_ok"]
 
     run_json.write_text(json.dumps(rows, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    run_manifest_json.write_text(json.dumps(run_manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     with run_csv.open("w", encoding="utf-8", newline="") as handle:
         fields = [
             "case_id",
@@ -416,12 +514,36 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
         writer.writeheader()
         for row in rows:
             writer.writerow({field: json.dumps(row[field]) if isinstance(row.get(field), list) else row.get(field) for field in fields})
-    paths = {"run_json": str(run_json), "run_csv": str(run_csv), "summary_json": str(summary_json)}
+    paths = {"run_json": str(run_json), "run_csv": str(run_csv), "summary_json": str(summary_json), "run_manifest": str(run_manifest_json)}
     sandbox_archive = next((row.get("sandbox_archive") for row in rows if row.get("sandbox_archive")), None)
     if isinstance(sandbox_archive, dict):
         paths["sandbox_artifact_dir"] = str(sandbox_archive.get("artifact_dir", ""))
         paths["sandbox_manifest"] = str(sandbox_archive.get("manifest_path", ""))
     return paths
+
+
+def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path) -> dict[str, Any]:
+    case_ids = [str(row.get("case_id") or "") for row in rows]
+    duplicates = sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1 and case_id})
+    missing_case_results: list[str] = []
+    missing_artifacts: list[str] = []
+    for case_id in case_ids:
+        case_result = results_dir / "cases" / case_id / "case_result.json"
+        if not case_result.exists():
+            missing_case_results.append(case_id)
+        row = next((item for item in rows if item.get("case_id") == case_id), {})
+        if row.get("attack_type") == "agent_abuse" and row.get("run_valid", True) and not row.get("browser_recordings"):
+            missing_artifacts.append(case_id)
+    run_integrity_ok = not duplicates and not missing_case_results and not missing_artifacts
+    return {
+        "expected_case_count": len(rows),
+        "result_case_count": len(rows),
+        "missing_case_ids": [],
+        "duplicate_case_ids": duplicates,
+        "missing_case_result_ids": sorted(missing_case_results),
+        "artifact_missing_case_ids": sorted(missing_artifacts),
+        "run_integrity_ok": run_integrity_ok,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -499,6 +621,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Playwright engine for --browser-mode real",
     )
     parser.add_argument(
+        "--browser-fixture-compat-mode",
+        choices=["strict", "legacy"],
+        default=None,
+        help="strict preserves page validation/disabled/readonly semantics; legacy applies old compatibility workarounds.",
+    )
+    parser.add_argument(
         "--agent-adapter",
         choices=["langgraph-demo", "openclaw", "http", "subprocess", "python"],
         default="langgraph-demo",
@@ -545,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         instrumentation_plan_mode=args.instrumentation_plan_mode,
         browser_mode=args.browser_mode,
         browser_engine=args.browser_engine,
+        browser_fixture_compat_mode=args.browser_fixture_compat_mode,
         tool_hijacking_mode="replay" if args.tool_hijacking_mode == "hybrid" else args.tool_hijacking_mode,
         agent_adapter=args.agent_adapter,
         adapter_entrypoint=args.adapter_entrypoint,
