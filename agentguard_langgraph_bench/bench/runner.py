@@ -42,8 +42,9 @@ def run_cases(
     reset_environment: bool = True,
     scenario_stateful: bool = False,
     isolate_scenarios: bool = True,
+    benchmark_run_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    benchmark_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    benchmark_run_id = benchmark_run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     if config.tool_hijacking_mode == "differential" and all(case.attack_type == "tool_hijacking" for case in cases):
         return _run_differential_cases(
             cases,
@@ -51,6 +52,7 @@ def run_cases(
             fake_core=fake_core,
             fake_core_decision=fake_core_decision,
             reset_environment=reset_environment,
+            benchmark_run_id=benchmark_run_id,
         )
     if reset_environment:
         restore_initial_sandbox(config.sandbox_dir)
@@ -92,7 +94,7 @@ def run_cases(
             tool_server.stop()
         tools.close()
         if reset_environment:
-            archive_report = archive_sandbox_effects(config.sandbox_dir, config.results_dir)
+            archive_report = archive_sandbox_effects(config.sandbox_dir, config.results_dir, run_id=benchmark_run_id)
             sandbox_archive = archive_report.as_dict()
             restore_initial_sandbox(config.sandbox_dir)
     if sandbox_archive is not None:
@@ -108,6 +110,7 @@ def _run_differential_cases(
     fake_core: bool,
     fake_core_decision: str,
     reset_environment: bool,
+    benchmark_run_id: str,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for case in cases:
@@ -129,6 +132,7 @@ def _run_differential_cases(
             fake_core=fake_core,
             fake_core_decision=fake_core_decision,
             reset_environment=reset_environment,
+            benchmark_run_id=f"{benchmark_run_id}_clean",
         )[0]
         poisoned_row = run_cases(
             [case],
@@ -136,6 +140,7 @@ def _run_differential_cases(
             fake_core=fake_core,
             fake_core_decision=fake_core_decision,
             reset_environment=reset_environment,
+            benchmark_run_id=f"{benchmark_run_id}_poisoned",
         )[0]
         differential = evaluate_differential_run(clean_row, poisoned_row, case_extra_dict(case, "differential_oracle"))
         combined = {
@@ -150,7 +155,12 @@ def _run_differential_cases(
             "task_success": bool(clean_row.get("task_success") and poisoned_row.get("task_success")),
             "safe_completion": bool(poisoned_row.get("safe_completion") and not differential.get("attack_success")),
             "overblocked": bool(clean_row.get("overblocked") or poisoned_row.get("overblocked")),
+            "benchmark_run_id": benchmark_run_id,
         }
+        combined_case_dir = _case_result_dir(config.results_dir, benchmark_run_id, case.case_id)
+        combined_case_dir.mkdir(parents=True, exist_ok=True)
+        combined["case_artifact_dir"] = str(combined_case_dir)
+        _write_case_artifacts(combined_case_dir, combined, None)
         rows.append(combined)
     return rows
 
@@ -206,19 +216,21 @@ def _run_single_case(
     tool_server: BenchmarkToolServer | None = None,
     benchmark_run_id: str | None = None,
 ) -> dict[str, Any]:
-    case_result_dir = config.results_dir / "cases" / case.case_id
+    run_id = benchmark_run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    case_result_dir = _case_result_dir(config.results_dir, run_id, case.case_id)
     case_result_dir.mkdir(parents=True, exist_ok=True)
     row: dict[str, Any]
     try:
         context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
-        context.security["benchmark_run_id"] = benchmark_run_id or ""
+        context.security["benchmark_run_id"] = run_id
         context.security["attempt_id"] = "1"
         result = agent_adapter.run_case(case, context)
         row = normalize_case_result(case, result, config, tools)
     except Exception as exc:
-        row = _invalid_case_row(case, config, str(exc), benchmark_run_id=benchmark_run_id)
-    row["benchmark_run_id"] = benchmark_run_id
+        row = _invalid_case_row(case, config, str(exc), benchmark_run_id=run_id)
+    row["benchmark_run_id"] = run_id
     row["attempt_id"] = "1"
+    row["case_artifact_dir"] = str(case_result_dir)
     if case.attack_type == "tool_hijacking":
         hijacking_report = build_tool_hijacking_report(case, row)
         row["hijacking_report"] = hijacking_report
@@ -300,6 +312,7 @@ def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benc
 
 
 def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: dict[str, Any] | None) -> None:
+    case_result_dir.mkdir(parents=True, exist_ok=True)
     case_result = case_result_dir / "case_result.json"
     case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     evidence_index = {
@@ -316,6 +329,14 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     (case_result_dir / "evidence_index.json").write_text(json.dumps(evidence_index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     if report is not None:
         (case_result_dir / "evaluation_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _case_result_dir(results_dir: Path, run_id: str, case_id: str) -> Path:
+    return _run_results_dir(results_dir, run_id) / "cases" / case_id
+
+
+def _run_results_dir(results_dir: Path, run_id: str) -> Path:
+    return results_dir.expanduser().resolve() / f"run_{run_id}"
 
 
 def build_case_context(
@@ -458,12 +479,14 @@ def _finalize_case_browser_recordings(case: AttackCase, tools: MockToolRegistry)
 
 def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_dir: Path) -> dict[str, str]:
     results_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    run_json = results_dir / f"run_{stamp}.json"
-    run_csv = results_dir / f"run_{stamp}.csv"
-    summary_json = results_dir / f"summary_{stamp}.json"
-    run_manifest_json = results_dir / f"manifest_run_{stamp}.json"
-    run_manifest = _build_run_manifest(rows, results_dir)
+    stamp = _result_stamp(rows)
+    run_dir = _run_results_dir(results_dir, stamp)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_json = run_dir / f"run_{stamp}.json"
+    run_csv = run_dir / f"run_{stamp}.csv"
+    summary_json = run_dir / f"summary_{stamp}.json"
+    run_manifest_json = run_dir / f"manifest_run_{stamp}.json"
+    run_manifest = _build_run_manifest(rows, results_dir, stamp)
     summary["run_manifest"] = run_manifest
     summary["run_integrity_failed"] = not run_manifest["run_integrity_ok"]
 
@@ -514,7 +537,14 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
         writer.writeheader()
         for row in rows:
             writer.writerow({field: json.dumps(row[field]) if isinstance(row.get(field), list) else row.get(field) for field in fields})
-    paths = {"run_json": str(run_json), "run_csv": str(run_csv), "summary_json": str(summary_json), "run_manifest": str(run_manifest_json)}
+    paths = {
+        "run_json": str(run_json),
+        "run_csv": str(run_csv),
+        "summary_json": str(summary_json),
+        "run_manifest": str(run_manifest_json),
+        "run_dir": str(run_dir),
+        "case_artifacts_dir": str(run_dir / "cases"),
+    }
     sandbox_archive = next((row.get("sandbox_archive") for row in rows if row.get("sandbox_archive")), None)
     if isinstance(sandbox_archive, dict):
         paths["sandbox_artifact_dir"] = str(sandbox_archive.get("artifact_dir", ""))
@@ -522,13 +552,20 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
     return paths
 
 
-def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path) -> dict[str, Any]:
+def _result_stamp(rows: list[dict[str, Any]]) -> str:
+    run_ids = {str(row.get("benchmark_run_id") or "") for row in rows if row.get("benchmark_run_id")}
+    if len(run_ids) == 1:
+        return next(iter(run_ids))
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: str) -> dict[str, Any]:
     case_ids = [str(row.get("case_id") or "") for row in rows]
     duplicates = sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1 and case_id})
     missing_case_results: list[str] = []
     missing_artifacts: list[str] = []
     for case_id in case_ids:
-        case_result = results_dir / "cases" / case_id / "case_result.json"
+        case_result = _case_result_dir(results_dir, run_id, case_id) / "case_result.json"
         if not case_result.exists():
             missing_case_results.append(case_id)
         row = next((item for item in rows if item.get("case_id") == case_id), {})
@@ -542,6 +579,8 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path) -> dict[s
         "duplicate_case_ids": duplicates,
         "missing_case_result_ids": sorted(missing_case_results),
         "artifact_missing_case_ids": sorted(missing_artifacts),
+        "run_dir": str(_run_results_dir(results_dir, run_id)),
+        "case_artifacts_dir": str(_run_results_dir(results_dir, run_id) / "cases"),
         "run_integrity_ok": run_integrity_ok,
     }
 

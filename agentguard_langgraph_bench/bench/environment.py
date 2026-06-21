@@ -108,7 +108,7 @@ def archive_sandbox_effects(
 
     snapshot = build_initial_sandbox_snapshot()
     run_stamp = _safe_run_id(run_id or _utc_stamp())
-    artifact_dir = (results / "sandbox_artifacts" / f"sandbox_{run_stamp}").resolve()
+    artifact_dir = (results / f"run_{run_stamp}" / "sandbox_artifacts").resolve()
     artifact_sandbox = artifact_dir / "sandbox"
     manifest_path = artifact_dir / "manifest.json"
 

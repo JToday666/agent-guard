@@ -344,7 +344,7 @@ def test_runner_cli_can_filter_single_case(monkeypatch, tmp_path, capsys):
     sandbox_manifest = Path(output["outputs"]["sandbox_manifest"])
     assert sandbox_artifact_dir.exists()
     assert sandbox_manifest.exists()
-    run_json = next(tmp_path.glob("run_*.json"))
+    run_json = next(tmp_path.glob("run_*/run_*.json"))
     run_text = run_json.read_text(encoding="utf-8")
     assert '"case_id": "FE-001"' in run_text
     assert '"case_id": "FE-002"' not in run_text
@@ -375,7 +375,7 @@ def test_runner_cli_ignores_llm_env_without_llm_flag(monkeypatch, tmp_path):
     )
 
     assert code == 0
-    summary_json = next(tmp_path.glob("summary_*.json"))
+    summary_json = next(tmp_path.glob("run_*/summary_*.json"))
     assert '"case_count": 1' in summary_json.read_text(encoding="utf-8")
 
 
