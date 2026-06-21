@@ -400,7 +400,6 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     if report is not None:
         (case_result_dir / "evaluation_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
-
 def _write_case_jsonl(path: Path, rows: list[Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
