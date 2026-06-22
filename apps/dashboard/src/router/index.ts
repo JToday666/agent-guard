@@ -4,7 +4,6 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 
-import AdvancedPage from "../pages/AdvancedPage.vue";
 import ApprovalsPage from "../pages/ApprovalsPage.vue";
 import EvaluationPage from "../pages/EvaluationPage.vue";
 import EventsPage from "../pages/EventsPage.vue";
@@ -29,7 +28,7 @@ declare module "vue-router" {
 export const routes: RouteRecordRaw[] = [
   {
     path: "/",
-    redirect: "/events",
+    redirect: "/overview",
   },
   {
     path: "/events",
@@ -56,25 +55,13 @@ export const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: "/approvals",
+    path: "/approvals/:approval_id?",
     name: "approvals",
     component: ApprovalsPage,
     meta: {
       group: "monitor",
       keepAlive: true,
       label: "审批",
-      requiredRole: "approver",
-      requiresAuth: false,
-    },
-  },
-  {
-    path: "/approvals/:approval_id",
-    name: "approval-detail",
-    component: ApprovalsPage,
-    meta: {
-      group: "monitor",
-      keepAlive: true,
-      label: "审批详情",
       requiredRole: "approver",
       requiresAuth: false,
     },
@@ -127,27 +114,9 @@ export const routes: RouteRecordRaw[] = [
       requiresAuth: false,
     },
   },
-  {
-    path: "/advanced",
-    name: "advanced",
-    component: AdvancedPage,
-    meta: {
-      group: "operations",
-      keepAlive: true,
-      label: "高级",
-      requiredRole: "operator",
-      requiresAuth: false,
-    },
-  },
 ];
 
 export const router = createRouter({
   history: createWebHistory(),
   routes,
-});
-
-router.beforeEach((to) => {
-  void to.meta.requiresAuth;
-  void to.meta.requiredRole;
-  return true;
 });

@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:mock": "vite --mode mock",
     "typecheck": "vue-tsc --build --force",
+    "test:unit": "node --test src/api/*.node.test.ts src/data/*.node.test.ts src/utils/*.node.test.ts",
     "build": "vue-tsc --build --force && vite build",
     "preview": "vite preview"
   },
