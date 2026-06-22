@@ -27,6 +27,7 @@ from .runtime.adapter_loader import load_agent_adapter
 from .runtime.agent_protocol import AgentAdapterProtocol, CaseContext
 from .runtime.row_normalizer import normalize_case_result
 from .runtime.sandbox_diff import diff_sandbox, snapshot_sandbox
+from .runtime.termination import runtime_limits_for_case
 from .runtime.tool_gateway import GuardedToolGateway
 from .runtime.tool_server import BenchmarkToolServer
 from .scoring.success import success_for_case
@@ -87,6 +88,8 @@ def run_cases(
             if scenario_stateful and isolate_scenarios and group_index > 0:
                 restore_initial_sandbox(config.sandbox_dir)
             for case in group:
+                if not scenario_stateful:
+                    _clear_case_volatile_sandbox(config.sandbox_dir)
                 if tool_server is not None:
                     tool_server.reset_case()
                 row = _run_single_case(
@@ -220,6 +223,21 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
     return BenchConfig(**data)
 
 
+def _clear_case_volatile_sandbox(sandbox_dir: Path) -> None:
+    for relative in ("api", "browser", "outbox", "identity", "social", "web_state", "ads", "platform", "records", "memory"):
+        root = sandbox_dir / relative
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.jsonl")):
+            path.unlink()
+        if relative == "browser":
+            for path in sorted(root.rglob("replay_artifacts")):
+                if path.is_dir():
+                    import shutil
+
+                    shutil.rmtree(path)
+
+
 def _fake_core_client(decision: str) -> Any:
     if decision == "allow":
         return FakeAllowCoreClient()
@@ -252,19 +270,25 @@ def _run_single_case(
     case_result_dir.mkdir(parents=True, exist_ok=True)
     sandbox_before = snapshot_sandbox(config.sandbox_dir)
     row: dict[str, Any]
-    try:
-        context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
-        context.security["benchmark_run_id"] = run_id
-        context.security["attempt_id"] = "1"
-        result = agent_adapter.run_case(case, context)
-        row = normalize_case_result(case, result, config, tools)
-    except Exception as exc:
-        row = _invalid_case_row(case, config, str(exc), benchmark_run_id=run_id)
+    preflight = _preflight_case_row(case, config, agent_adapter, benchmark_run_id=run_id)
+    if preflight is not None:
+        row = preflight
+    else:
+        try:
+            context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
+            context.security["benchmark_run_id"] = run_id
+            context.security["attempt_id"] = "1"
+            result = agent_adapter.run_case(case, context)
+            row = normalize_case_result(case, result, config, tools)
+        except Exception as exc:
+            row = _invalid_case_row(case, config, str(exc), benchmark_run_id=run_id)
     row["benchmark_run_id"] = run_id
     row["attempt_id"] = "1"
     row["case_artifact_dir"] = str(case_result_dir)
     row["core_mode"] = core_mode
     row["fake_core_decision"] = fake_core_decision
+    row["runtime_limits"] = row.get("runtime_limits") or runtime_limits_for_case(case, config).model_dump()
+    row["metric_interpretation"] = _case_metric_interpretation(core_mode, fake_core_decision)
     if case.attack_type == "tool_hijacking":
         hijacking_report = build_tool_hijacking_report(case, row)
         row["hijacking_report"] = hijacking_report
@@ -288,26 +312,10 @@ def _run_single_case(
             row["mcpsafety_evaluator"] = mcpsafety_report.get("evaluator")
             row["mcpsafety_attack_success"] = mcpsafety_report.get("attack_success")
             row["mcpsafety_evidence_status"] = mcpsafety_report.get("evidence_status")
-    if case.attack_type == "agent_abuse":
-        report = build_agent_abuse_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
-        row["agent_abuse_evaluation_report"] = report.model_dump()
-        row["evaluator"] = report.evaluator
-        row["evidence_status"] = report.evidence_status
-        row["harm_attempted"] = report.harm_attempted
-        row["completion_level"] = report.completion_level
-        row["attack_success"] = report.attack_success
-        row["blocked_before_harm"] = report.blocked_before_harm
-        row["blocked_after_harm"] = report.blocked_after_harm
-        row["run_valid"] = row.get("run_valid", True) and report.run_valid
-        if report.reason.startswith("skipped:"):
-            row["run_status"] = "skipped"
-            row["skip_reason"] = report.reason
-            row["not_applicable"] = True
-        if not report.run_valid:
-            row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), *report.missing_evidence]))
-        report_payload = report.model_dump()
-    else:
+    if case.attack_type != "agent_abuse":
         row["attack_success"] = success_for_case(case, row)
+        report_payload = None
+    else:
         report_payload = None
     sandbox_diff = diff_sandbox(config.sandbox_dir, sandbox_before)
     row["sandbox_diff"] = sandbox_diff
@@ -316,6 +324,29 @@ def _run_single_case(
         row["run_status"] = "security_failure"
         row["security_failure"] = True
         row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), "sandbox_escape_detected"]))
+    if case.attack_type == "agent_abuse":
+        report = build_agent_abuse_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
+        row["agent_abuse_evaluation_report"] = report.model_dump()
+        row["agent_abuse_verdict"] = report.agent_abuse_verdict
+        row["evaluator"] = report.evaluator
+        row["evidence_status"] = report.evidence_status
+        row["harm_attempted"] = report.harm_attempted
+        row["completion_level"] = report.completion_level
+        row["attack_success"] = report.attack_success
+        row["blocked_before_harm"] = report.blocked_before_harm
+        row["blocked_after_harm"] = report.blocked_after_harm
+        row["run_valid"] = report.run_valid if report.run_valid else row.get("run_valid", True) and report.run_valid
+        if report.reason.startswith("skipped:"):
+            row["run_status"] = "skipped"
+            row["skip_reason"] = report.reason
+            row["not_applicable"] = True
+        elif report.run_valid and row.get("run_status") not in {"blocked", "skipped"}:
+            row["run_status"] = "completed" if report.completion_level == "completed" else row.get("run_status")
+        if not report.run_valid:
+            row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), *report.missing_evidence]))
+        else:
+            row["invalid_reasons"] = []
+        report_payload = report.model_dump()
     _write_case_artifacts(case_result_dir, row, report_payload)
     return row
 
@@ -355,6 +386,74 @@ def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benc
         "adapter_error": error,
         "raw_logs": [error],
         "benchmark_run_id": benchmark_run_id,
+        "runtime_limits": runtime_limits_for_case(case, config).model_dump(),
+        "termination_decision": {},
+        "metric_interpretation": _case_metric_interpretation(_core_mode(fake_core=False, fake_core_decision="deny", defense_enabled=config.defense_enabled), None),
+    }
+
+
+def _preflight_case_row(
+    case: AttackCase,
+    config: BenchConfig,
+    agent_adapter: AgentAdapterProtocol,
+    *,
+    benchmark_run_id: str | None,
+) -> dict[str, Any] | None:
+    requirements = getattr(case, "capability_requirements", None)
+    requires_vision = bool(requirements.get("vision")) if isinstance(requirements, dict) else False
+    supports_vision = bool(getattr(agent_adapter, "supports_vision", False) or getattr(agent_adapter, "multimodal_supported", False))
+    if not requires_vision or supports_vision:
+        return None
+    row = _invalid_case_row(case, config, "requires_visual_model", benchmark_run_id=benchmark_run_id)
+    row.update(
+        {
+            "run_valid": True,
+            "run_status": "skipped",
+            "stop_reason": "unsupported_modality_preflight",
+            "invalid_reasons": [],
+            "skip_reason": "requires_visual_model",
+            "not_applicable": True,
+            "vision_supported": False,
+            "tool_calls": [],
+            "browser_recordings": [],
+            "side_effects": [],
+            "sandbox_diff": {"schema_version": "1.0", "added": [], "modified": [], "deleted": [], "outside_sandbox_paths": [], "empty": True},
+            "termination_decision": {
+                "should_stop": True,
+                "reason": "requires_visual_model",
+                "completion_level": "unsupported",
+                "runtime_limits": runtime_limits_for_case(case, config).model_dump(),
+            },
+        }
+    )
+    return row
+
+
+def _case_metric_interpretation(core_mode: str, fake_core_decision: str | None) -> dict[str, Any]:
+    fake = core_mode.startswith("fake_")
+    fake_decision = fake_core_decision or (core_mode.removeprefix("fake_") if fake else None)
+    if core_mode == "defense_off":
+        return {
+            "core_mode": core_mode,
+            "defense_effect_interpretable": False,
+            "benchmark_quality_interpretable": True,
+            "reason": "defense_off_baseline_only",
+        }
+    if fake:
+        reason = f"fake_{fake_decision}_cannot_prove_real_defense"
+        if fake_decision == "allow":
+            reason = "fake_allow_all_cannot_prove_real_defense"
+        return {
+            "core_mode": core_mode,
+            "defense_effect_interpretable": False,
+            "benchmark_quality_interpretable": True,
+            "reason": reason,
+        }
+    return {
+        "core_mode": core_mode,
+        "defense_effect_interpretable": True,
+        "benchmark_quality_interpretable": True,
+        "reason": "real_core_decisions",
     }
 
 
@@ -377,6 +476,9 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     evidence_index = _build_evidence_index(row, case_result_dir)
     for recording in row.get("browser_recordings") or []:
         if isinstance(recording, dict):
+            immutable_recording = _copy_browser_replay_artifacts(recording, case_result_dir)
+            if immutable_recording:
+                recording.update(immutable_recording)
             for key in ("events", "manifest", "screenshot", "full_page_screenshot", "trace", "raw_video", "video"):
                 if recording.get(key):
                     evidence_index["streams"].append(_artifact_record(key, Path(str(recording[key])), case_result_dir))
@@ -399,6 +501,62 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     (case_result_dir / "evidence_index.json").write_text(json.dumps(evidence_index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     if report is not None:
         (case_result_dir / "evaluation_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: Path) -> dict[str, Any]:
+    source_dir_raw = recording.get("artifact_dir") or recording.get("replay_artifact")
+    if not source_dir_raw:
+        return {}
+    source_dir = Path(str(source_dir_raw))
+    if not source_dir.exists() or not source_dir.is_dir():
+        return {}
+    dest_dir = case_result_dir / "browser_replay"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    copied: dict[str, Any] = {"artifact_dir": str(dest_dir)}
+    file_map = {
+        "events": "events.jsonl",
+        "manifest": "manifest.json",
+        "screenshot": "final.png",
+        "full_page_screenshot": "final_full_page.png",
+        "trace": "trace.zip",
+        "raw_video": "raw_replay.webm",
+        "video": "replay.webm",
+        "report": "report.html",
+        "replay_state": "replay_state.json",
+        "replay_frames": "replay_frames.txt",
+    }
+    for key, filename in file_map.items():
+        raw = recording.get(key)
+        source = Path(str(raw)) if raw else source_dir / filename
+        dest = dest_dir / filename
+        if source.exists() and source.is_file():
+            if source.resolve() != dest.resolve():
+                dest.write_bytes(source.read_bytes())
+            copied[key] = str(dest)
+    steps_source = Path(str(recording.get("steps_dir") or source_dir / "steps"))
+    steps_dest = dest_dir / "steps"
+    step_paths: list[str] = []
+    if steps_source.exists() and steps_source.is_dir():
+        steps_dest.mkdir(parents=True, exist_ok=True)
+        for path in sorted(steps_source.glob("*.png")):
+            dest = steps_dest / path.name
+            if path.resolve() != dest.resolve():
+                dest.write_bytes(path.read_bytes())
+            step_paths.append(str(dest))
+    elif recording.get("step_screenshots"):
+        steps_dest.mkdir(parents=True, exist_ok=True)
+        for raw in recording.get("step_screenshots") or []:
+            path = Path(str(raw))
+            if not path.exists() or not path.is_file():
+                continue
+            dest = steps_dest / path.name
+            if path.resolve() != dest.resolve():
+                dest.write_bytes(path.read_bytes())
+            step_paths.append(str(dest))
+    if step_paths:
+        copied["steps_dir"] = str(steps_dest)
+        copied["step_screenshots"] = step_paths
+    return copied
 
 def _write_case_jsonl(path: Path, rows: list[Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
@@ -768,7 +926,7 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
         if not case_result.exists():
             missing_case_results.append(case_id)
         row = next((item for item in rows if item.get("case_id") == case_id), {})
-        if row.get("attack_type") == "agent_abuse" and row.get("run_valid", True) and not row.get("browser_recordings"):
+        if _requires_browser_artifact(row) and not row.get("browser_recordings"):
             missing_artifacts.append(case_id)
     run_integrity_ok = not duplicates and not missing_case_results and not missing_artifacts
     return {
@@ -782,6 +940,19 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
         "case_artifacts_dir": str(_run_results_dir(results_dir, run_id) / "cases"),
         "run_integrity_ok": run_integrity_ok,
     }
+
+
+def _requires_browser_artifact(row: dict[str, Any]) -> bool:
+    if row.get("attack_type") != "agent_abuse":
+        return False
+    if not row.get("run_valid", True) or row.get("not_applicable"):
+        return False
+    if row.get("run_status") == "refused" or row.get("completion_level") in {"safe_refusal", "unsupported"}:
+        return False
+    verdict = row.get("agent_abuse_verdict") if isinstance(row.get("agent_abuse_verdict"), dict) else {}
+    if verdict.get("safe_refusal") is True:
+        return False
+    return True
 
 
 def build_parser() -> argparse.ArgumentParser:

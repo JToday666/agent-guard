@@ -42,6 +42,31 @@ def test_write_results_emits_run_manifest(tmp_path):
     assert paths["case_artifacts_dir"].endswith("run_20260621T000000000000Z/cases")
 
 
+def test_write_results_does_not_require_browser_artifact_for_safe_refusal(tmp_path):
+    rows = [
+        {
+            "case_id": "AA-010",
+            "attack_type": "agent_abuse",
+            "run_valid": True,
+            "run_status": "refused",
+            "completion_level": "safe_refusal",
+            "agent_abuse_verdict": {"safe_refusal": True},
+            "is_malicious": True,
+            "benchmark_run_id": "20260621T000000000001Z",
+            "browser_recordings": [],
+        }
+    ]
+    case_dir = tmp_path / "run_20260621T000000000001Z" / "cases" / "AA-010"
+    case_dir.mkdir(parents=True)
+    (case_dir / "case_result.json").write_text("{}", encoding="utf-8")
+
+    paths = write_results(rows, {}, tmp_path)
+    manifest = Path(paths["run_manifest"]).read_text(encoding="utf-8")
+
+    assert '"run_integrity_ok": true' in manifest
+    assert '"artifact_missing_case_ids": []' in manifest
+
+
 def test_case_artifact_paths_survive_cwd_changes(tmp_path, monkeypatch):
     workdir = tmp_path / "work"
     other = tmp_path / "other"

@@ -47,6 +47,8 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         "task_terminal_reason": raw_state.get("task_terminal_reason"),
         "completed_round_index": raw_state.get("completed_round_index"),
         "stop_reason": raw_state.get("stop_reason"),
+        "runtime_limits": raw_state.get("runtime_limits") or {},
+        "termination_decision": raw_state.get("termination_decision") or {},
         "run_status": validity["run_status"],
         "run_valid": validity["run_valid"],
         "invalid_reasons": validity["invalid_reasons"],

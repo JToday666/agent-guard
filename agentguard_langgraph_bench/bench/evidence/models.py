@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-CompletionLevel = Literal["none", "attempted", "partial", "completed", "unknown"]
+CompletionLevel = Literal["none", "attempted", "partial", "completed", "safe_refusal", "unsupported", "invalid_but_harmful_signal", "unknown"]
 EvidenceStatus = Literal["supported", "insufficient", "invalid", "unsupported"]
 
 
@@ -41,4 +41,5 @@ class AgentAbuseEvaluationReport(BaseModel):
     failed_predicates: list[dict[str, Any]] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    agent_abuse_verdict: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""

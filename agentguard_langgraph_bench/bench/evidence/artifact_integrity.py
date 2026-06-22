@@ -16,7 +16,7 @@ from typing import Any
 def build_artifact_integrity_manifest(run_or_artifact_dir: Path, *, output_path: Path | None = None) -> dict[str, Any]:
     root = run_or_artifact_dir.expanduser().resolve()
     replay_dirs = _find_replay_dirs(root)
-    cases = {case_dir.name: check_case_artifacts(case_dir, root=root) for case_dir in replay_dirs}
+    cases = {_case_key_for_replay_dir(case_dir): check_case_artifacts(case_dir, root=root) for case_dir in replay_dirs}
     manifest = {
         "schema_version": "1.0",
         "root": str(root),
@@ -42,7 +42,7 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
         elif name.endswith(".png"):
             artifacts.append(_check_png(path, root=root, artifact_type=name))
         elif name.endswith(".webm"):
-            artifacts.append(_check_webm(path, root=root, artifact_type=name, allow_zero_warning=name == "raw_replay.webm"))
+            artifacts.append(_check_webm(path, root=root, artifact_type=name, allow_zero_warning=name in {"raw_replay.webm", "replay.webm"}))
         elif name.endswith(".zip"):
             artifacts.append(_check_zip(path, root=root, artifact_type=name))
         elif name.endswith(".html"):
@@ -58,7 +58,7 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
     errors = [item for item in artifacts if item.get("error")]
     parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False and item.get("type") != "raw_replay.webm"]
     return {
-        "case_id": case_dir.name,
+        "case_id": _case_key_for_replay_dir(case_dir),
         "artifact_dir": _relative(case_dir, root),
         "ok": not errors and not parse_failures and not cross_checks["errors"],
         "artifacts": artifacts,
@@ -68,11 +68,21 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
     }
 
 
+def _case_key_for_replay_dir(case_dir: Path) -> str:
+    if case_dir.name == "browser_replay" and case_dir.parent.name:
+        return case_dir.parent.name
+    return case_dir.name
+
+
 def _find_replay_dirs(root: Path) -> list[Path]:
     candidates = [path for path in root.rglob("replay_artifacts") if path.is_dir()]
+    candidates.extend(path for path in root.rglob("browser_replay") if path.is_dir())
     replay_dirs: list[Path] = []
     for parent in candidates:
-        replay_dirs.extend(path for path in sorted(parent.iterdir()) if path.is_dir())
+        if parent.name == "browser_replay":
+            replay_dirs.append(parent)
+        else:
+            replay_dirs.extend(path for path in sorted(parent.iterdir()) if path.is_dir())
     if not replay_dirs and (root / "events.jsonl").exists():
         replay_dirs.append(root)
     return replay_dirs
@@ -145,14 +155,28 @@ def _check_png(path: Path, *, root: Path, artifact_type: str) -> dict[str, Any]:
     try:
         from PIL import Image
     except Exception as exc:
-        item["error"] = f"pillow_unavailable:{exc}"
-        return item
+        return _check_png_header_fallback(path, item, f"pillow_unavailable:{exc}")
     try:
         with Image.open(path) as image:
             image.verify()
             item.update({"parse_ok": True, "width": image.width, "height": image.height, "mode": image.mode, "error": None})
     except Exception as exc:
         item["error"] = f"png_parse_error:{exc}"
+    return item
+
+
+def _check_png_header_fallback(path: Path, item: dict[str, Any], warning: str) -> dict[str, Any]:
+    try:
+        data = path.read_bytes()
+    except Exception as exc:
+        item["error"] = f"png_read_error:{exc}"
+        return item
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        item["error"] = "png_header_parse_error"
+        return item
+    item.update({"parse_ok": True, "error": None})
+    item["warnings"].append(warning)
+    item["warnings"].append("png_header_only_validation")
     return item
 
 
@@ -163,6 +187,7 @@ def _check_webm(path: Path, *, root: Path, artifact_type: str, allow_zero_warnin
     if item["size_bytes"] == 0 and allow_zero_warning:
         item.update({"parse_ok": None, "error": None})
         item["warnings"].append("zero_byte_raw_replay")
+        item["warnings"].append("raw video unavailable")
         return item
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:

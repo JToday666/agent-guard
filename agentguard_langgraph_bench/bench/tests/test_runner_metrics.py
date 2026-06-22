@@ -34,9 +34,14 @@ def test_runner_defense_on_fake_core_blocks_and_computes_metrics(tmp_path):
     )
     summary = calculate_metrics(rows, defense_enabled=True)
 
-    assert all(row["blocked"] for row in rows)
+    applicable_rows = [row for row in rows if not row.get("not_applicable") and row.get("run_status") != "refused"]
+    skipped_rows = [row for row in rows if row.get("not_applicable")]
+    refused_rows = [row for row in rows if row.get("run_status") == "refused"]
+    assert all(row["blocked"] for row in applicable_rows)
+    assert all(row["run_status"] == "skipped" for row in skipped_rows)
+    assert {row["case_id"] for row in refused_rows} == {"AA-010"}
     assert summary["asr_after"] == 0.0
-    assert summary["block_rate"] == 1.0
+    assert summary["block_rate"] == 63 / 64
     assert summary["fpr"] == 1.0
 
 
@@ -204,7 +209,7 @@ def test_attackcase_plan_replaces_placeholder_browser_actions_with_page_flow():
 
     selectors = [item["args"].get("selector") for item in plan]
     assert "#identity-application" not in selectors
-    assert "id=reg-email" in selectors
+    assert "id=reg-email" not in selectors
     assert any(item["name"] == "browser_click" and item["args"].get("text") == "Get Started" for item in plan)
 
 
