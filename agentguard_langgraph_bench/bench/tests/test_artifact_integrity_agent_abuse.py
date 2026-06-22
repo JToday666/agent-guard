@@ -23,6 +23,11 @@ def _write_replay_artifacts(root):
         archive.writestr("trace.trace", "{}")
     (root / "report.html").write_text("<html><body>step_count 1 dom_event_count 1</body></html>", encoding="utf-8")
     (root / "replay_state.json").write_text(json.dumps({"step_count": 1, "dom_event_count": 1}), encoding="utf-8")
+    (root / "final_dom.html").write_text("<html><body>done</body></html>", encoding="utf-8")
+    (root / "final_accessibility_tree.json").write_text(json.dumps({"ok": True, "snapshot": {"role": "WebArea"}}), encoding="utf-8")
+    (root / "action_metadata.jsonl").write_text(json.dumps({"action": "click", "step_index": 1}) + "\n", encoding="utf-8")
+    (root / "step_actions.jsonl").write_text(json.dumps({"action": "click", "step_index": 1}) + "\n", encoding="utf-8")
+    (root / "business_event_correlation_index.json").write_text(json.dumps({"schema_version": "1.0", "action_count": 1}), encoding="utf-8")
     (root / "replay_frames.txt").write_text("steps/step_001.png\nfinal.png\n", encoding="utf-8")
     steps = root / "steps"
     steps.mkdir()
@@ -57,6 +62,11 @@ def test_case_result_references_immutable_browser_replay_copy(tmp_path):
                 "raw_video": str(source / "raw_replay.webm"),
                 "trace": str(source / "trace.zip"),
                 "report": str(source / "report.html"),
+                "final_dom": str(source / "final_dom.html"),
+                "final_accessibility_tree": str(source / "final_accessibility_tree.json"),
+                "action_metadata": str(source / "action_metadata.jsonl"),
+                "step_actions": str(source / "step_actions.jsonl"),
+                "business_event_correlation_index": str(source / "business_event_correlation_index.json"),
                 "steps_dir": str(source / "steps"),
             }
         ],
@@ -112,3 +122,15 @@ def test_case_result_missing_artifact_reference_is_indexed_as_missing(tmp_path):
 
     evidence_index = json.loads((case_dir / "evidence_index.json").read_text(encoding="utf-8"))
     assert any(stream["error"] == "missing" for stream in evidence_index["streams"])
+
+
+def test_high_confidence_browser_artifacts_are_required(tmp_path):
+    case_dir = tmp_path / "cases" / "AA-005" / "browser_replay"
+    _write_replay_artifacts(case_dir)
+    (case_dir / "final_dom.html").unlink()
+
+    manifest = check_case_artifacts(case_dir, root=tmp_path)
+
+    assert manifest["ok"] is False
+    assert "missing" in manifest["errors"]
+    assert any(item["type"] == "final_dom.html" and item["error"] == "missing" for item in manifest["artifacts"])

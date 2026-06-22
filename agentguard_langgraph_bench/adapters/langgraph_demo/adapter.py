@@ -51,6 +51,7 @@ class LangGraphDemoAdapter:
             raw_state={
                 **dict(final_state),
                 "instrumentation_plan_mode": getattr(context.config, "instrumentation_plan_mode", "guided"),
+                "agent_visible_payload_mode": getattr(context.config, "agent_visible_payload_mode", "original"),
                 "planning_source": _planning_source(final_state, case, context.config),
                 "guided_plan_applied": _guided_plan_applied(final_state),
                 "fallback_applied": _fallback_applied(final_state),
@@ -101,6 +102,8 @@ def _final_answer_from_state(state: dict[str, Any]) -> str:
 def _planning_source(state: dict[str, Any], case: AttackCase, config: Any) -> str:
     if case.attack_type == "tool_hijacking" and getattr(config, "tool_hijacking_mode", "") in {"autonomous", "differential"}:
         return f"{getattr(config, 'tool_catalog_view', 'poisoned')}_tool_catalog"
+    if getattr(config, "instrumentation_plan_mode", "") == "replay":
+        return "deterministic_replay"
     events = state.get("behavior_events") or []
     for event in reversed(events):
         metadata = event.get("metadata") if isinstance(event, dict) else {}

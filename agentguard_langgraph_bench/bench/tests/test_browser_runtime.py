@@ -52,3 +52,21 @@ def test_recorder_redacts_password_values():
     assert 'type === "password" ? ""' in RECORDER_SCRIPT
     assert "value_present" in RECORDER_SCRIPT
     assert "value_length" in RECORDER_SCRIPT
+
+
+def test_final_dom_relative_references_are_archived_from_source_dir(tmp_path):
+    source_dir = tmp_path / "pages"
+    artifact_dir = tmp_path / "artifacts"
+    source_dir.mkdir()
+    artifact_dir.mkdir()
+    source = source_dir / "index.html"
+    source.write_text("<html></html>", encoding="utf-8")
+    (source_dir / "styles.css").write_text("body{color:#111}", encoding="utf-8")
+    final_dom = artifact_dir / "final_dom.html"
+    final_dom.write_text('<html><head><link href="styles.css"><script src="../escape.js"></script></head></html>', encoding="utf-8")
+    runtime = RealBrowserRuntime(tmp_path)
+
+    runtime._copy_final_dom_references(final_dom, source, artifact_dir)
+
+    assert (artifact_dir / "styles.css").exists()
+    assert not (artifact_dir / "escape.js").exists()

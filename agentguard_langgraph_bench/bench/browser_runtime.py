@@ -9,6 +9,7 @@ import subprocess
 import uuid
 from dataclasses import dataclass
 from html import escape
+from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -79,10 +80,10 @@ class _BenchmarkStaticHandler(SimpleHTTPRequestHandler):
         if not parts:
             return str(LOCAL_INSTRUMENTATION_ROOT)
         prefix = parts[0]
-        if prefix == "local-instrumentation":
+        if prefix in {"local-instrumentation", "local-pages"}:
             root = LOCAL_INSTRUMENTATION_ROOT.resolve()
             relative = parts[1:]
-        elif prefix == "instrumentation":
+        elif prefix in {"instrumentation", "pages"}:
             root = INSTRUMENTATION_ROOT.resolve()
             relative = parts[1:]
         else:
@@ -130,6 +131,17 @@ def local_url_for_source(
     prefix, relative = _source_route(source)
     query = _runtime_query(benchmark_run_id=benchmark_run_id, case_id=case_id, attempt_id=attempt_id)
     return f"http://127.0.0.1:{_PROMPT_SERVER_PORT}/{prefix}/{quote(relative, safe='/')}?{query}"
+
+
+def agent_visible_url_for_source(source_path: str | None) -> str:
+    """Return a local URL that avoids benchmark-identity terms in prompts."""
+
+    url = local_url_for_source(source_path)
+    return (
+        url.replace("/local-instrumentation/", "/local-pages/")
+        .replace("/instrumentation/", "/pages/")
+        .replace("run_id=agentguard", "run_id=session")
+    )
 
 
 def _runtime_query(
@@ -378,6 +390,9 @@ class RealBrowserRuntime:
                         ],
                     }
                 )
+                executable_path = self._chromium_executable_path()
+                if executable_path:
+                    launch_kwargs["executable_path"] = str(executable_path)
             browser = browser_type.launch(**launch_kwargs)
             context = browser.new_context(
                 java_script_enabled=True,
@@ -440,6 +455,10 @@ class RealBrowserRuntime:
             "raw_video": str(artifact_dir / "raw_replay.webm"),
             "trace": str(artifact_dir / "trace.zip"),
             "final_screenshot": str(artifact_dir / "final.png"),
+            "final_dom": str(artifact_dir / "final_dom.html"),
+            "final_accessibility_tree": str(artifact_dir / "final_accessibility_tree.json"),
+            "action_metadata": str(artifact_dir / "action_metadata.jsonl"),
+            "step_actions": str(artifact_dir / "step_actions.jsonl"),
             "report": str(artifact_dir / "report.html"),
         }
         self._write_json(artifact_dir / "manifest.json", manifest)
@@ -447,6 +466,17 @@ class RealBrowserRuntime:
             artifact_dir / "events.jsonl",
             {"event_type": "browser_start", "session_id": session_id, "url": target_url, "screenshot": str(start_step)},
         )
+        start_event = {
+            "event_type": "browser_tool_action",
+            "action": "start",
+            "session_id": session_id,
+            "step_index": 0,
+            "url": target_url,
+            "screenshot": str(start_step),
+            "arguments": {"source_path": str(source)},
+        }
+        _append_jsonl(artifact_dir / "action_metadata.jsonl", start_event)
+        _append_jsonl(artifact_dir / "step_actions.jsonl", start_event)
         return {
             "session_id": session_id,
             "url": target_url,
@@ -655,6 +685,9 @@ class RealBrowserRuntime:
         final_path = artifact_dir / "final.png"
         final_full_path = artifact_dir / "final_full_page.png"
         state_path = artifact_dir / "replay_state.json"
+        final_dom_path = artifact_dir / "final_dom.html"
+        accessibility_path = artifact_dir / "final_accessibility_tree.json"
+        correlation_path = artifact_dir / "business_event_correlation_index.json"
         video_path = artifact_dir / "replay.webm"
         raw_video_path = artifact_dir / "raw_replay.webm"
         report_path = artifact_dir / "report.html"
@@ -665,6 +698,9 @@ class RealBrowserRuntime:
 
         try:
             self._flush_dom_events(session_id, session, "finalize")
+            self._write_final_dom(session.page, final_dom_path)
+            self._copy_final_dom_references(final_dom_path, session.source_path, artifact_dir)
+            self._write_accessibility_tree(session, accessibility_path)
             self._safe_screenshot(session.page, final_path)
             self._safe_screenshot(session.page, final_full_path, full_page=True)
             try:
@@ -717,15 +753,24 @@ class RealBrowserRuntime:
             "video_save_error": stable_video_error or None,
             "raw_video_save_error": raw_video_error or None,
             "stable_video_error": stable_video_error or None,
+            "final_dom": str(final_dom_path) if final_dom_path.exists() else None,
+            "final_accessibility_tree": str(accessibility_path) if accessibility_path.exists() else None,
         }
+        self._write_json(correlation_path, self._build_business_event_correlation_index(artifact_dir, session_id))
         self._write_json(state_path, replay_state)
         recording = {
             "ok": ok,
             "session_id": session_id,
             "artifact_dir": str(artifact_dir),
+            "source_path": str(session.source_path) if session.source_path else None,
             "report": str(report_path),
             "screenshot": str(final_path) if final_path.exists() else None,
             "full_page_screenshot": str(final_full_path) if final_full_path.exists() else None,
+            "final_dom": str(final_dom_path) if final_dom_path.exists() else None,
+            "final_accessibility_tree": str(accessibility_path) if accessibility_path.exists() else None,
+            "action_metadata": str(artifact_dir / "action_metadata.jsonl"),
+            "step_actions": str(artifact_dir / "step_actions.jsonl"),
+            "business_event_correlation_index": str(correlation_path),
             "steps_dir": str(steps_dir),
             "step_screenshots": [str(path) for path in sorted(steps_dir.glob("*.png"))],
             "video": str(video_path) if video_path.exists() else None,
@@ -787,6 +832,14 @@ class RealBrowserRuntime:
         if self.browser_engine not in {"chromium", "firefox", "webkit"}:
             raise BrowserRuntimeError(f"unsupported browser engine: {self.browser_engine}")
         return getattr(playwright, self.browser_engine)
+
+    def _chromium_executable_path(self) -> Path | None:
+        browser_root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or INSTRUMENTATION_ROOT / ".playwright-browsers")
+        candidates = sorted(browser_root.glob("chromium-*/chrome-linux*/chrome"), reverse=True)
+        for candidate in candidates:
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                return candidate
+        return None
 
     def _locator(self, session: RealBrowserSession, *, selector: str) -> Any:
         if selector.startswith("id="):
@@ -1087,13 +1140,82 @@ class RealBrowserRuntime:
             "event_type": "browser_tool_action",
             "action": action,
             "session_id": session_id,
+            "step_index": session.step_index,
             "url": session.page.url,
             "screenshot": str(step_path) if ok else None,
             "arguments": payload,
         }
         _append_jsonl(artifact_dir / "events.jsonl", event)
+        _append_jsonl(artifact_dir / "action_metadata.jsonl", event)
+        _append_jsonl(artifact_dir / "step_actions.jsonl", event)
         session.current_url = session.page.url
         return str(step_path) if ok else None
+
+    def _write_final_dom(self, page: Any, path: Path) -> None:
+        try:
+            html = page.content()
+        except Exception as exc:
+            html = f"<!-- final DOM capture failed: {escape(str(exc))} -->"
+        path.write_text(html, encoding="utf-8", errors="replace")
+
+    def _copy_final_dom_references(self, final_dom: Path, source_path: Path | None, artifact_dir: Path) -> None:
+        if source_path is None:
+            return
+        source_root = source_path.parent.resolve()
+        try:
+            parser = _DomReferenceParser()
+            parser.feed(final_dom.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            return
+        for ref in sorted(set(parser.refs)):
+            parsed = urlparse(ref)
+            if parsed.scheme or parsed.netloc or ref.startswith(("#", "data:")):
+                continue
+            clean_ref = unquote(parsed.path or "")
+            if not clean_ref or clean_ref.startswith(("/", "\\")) or ".." in Path(clean_ref).parts:
+                continue
+            source = (source_root / clean_ref).resolve()
+            try:
+                source.relative_to(source_root)
+            except ValueError:
+                continue
+            if not source.exists() or not source.is_file():
+                continue
+            dest = artifact_dir / clean_ref
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(source.read_bytes())
+
+    def _write_accessibility_tree(self, session: RealBrowserSession, path: Path) -> None:
+        payload: dict[str, Any]
+        try:
+            snapshot = session.page.accessibility.snapshot()
+            payload = {"ok": True, "snapshot": snapshot}
+        except Exception as exc:
+            payload = {"ok": False, "error": str(exc)}
+        self._write_json(path, payload)
+
+    def _build_business_event_correlation_index(self, artifact_dir: Path, session_id: str) -> dict[str, Any]:
+        events = []
+        events_path = artifact_dir / "events.jsonl"
+        if events_path.exists():
+            for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(item, dict):
+                    events.append(item)
+        action_events = [item for item in events if item.get("event_type") == "browser_tool_action"]
+        dom_events = [item for item in events if item.get("event_type") == "page_dom_event"]
+        return {
+            "schema_version": "1.0",
+            "session_id": session_id,
+            "action_count": len(action_events),
+            "dom_event_count": len(dom_events),
+            "last_action": action_events[-1] if action_events else None,
+            "last_dom_event": dom_events[-1] if dom_events else None,
+            "correlation_keys": ["session_id", "after_action", "step_index", "url"],
+        }
 
     def _wait_after_action(self, session: RealBrowserSession) -> None:
         try:
@@ -1292,3 +1414,14 @@ class RealBrowserRuntime:
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+class _DomReferenceParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.refs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if key in {"href", "src"} and value:
+                self.refs.append(value)

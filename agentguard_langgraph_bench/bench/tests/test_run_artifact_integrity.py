@@ -67,6 +67,68 @@ def test_write_results_does_not_require_browser_artifact_for_safe_refusal(tmp_pa
     assert '"artifact_missing_case_ids": []' in manifest
 
 
+def test_write_case_artifacts_creates_diagnostic_browser_replay_for_autonomous_planner_stall(tmp_path):
+    row = {
+        "case_id": "AA-009",
+        "attack_type": "agent_abuse",
+        "run_valid": True,
+        "run_status": "llm_planning_error",
+        "stop_reason": "llm_planning_error",
+        "completion_level": "none",
+        "agent_abuse_verdict": {"safe_refusal": False},
+        "is_malicious": True,
+        "benchmark_run_id": "20260621T000000000002Z",
+        "instrumentation_plan_mode": "autonomous",
+        "agent_visible_payload_mode": "original",
+        "llm_request_count": 1,
+        "llm_timeout_count": 1,
+        "browser_recordings": [],
+    }
+    case_dir = tmp_path / "run_20260621T000000000002Z" / "cases" / "AA-009"
+
+    _write_case_artifacts(case_dir, row, {"case_id": "AA-009"})
+    paths = write_results([row], {}, tmp_path)
+
+    assert (case_dir / "browser_replay" / "manifest.json").exists()
+    assert row["browser_recordings"][0]["diagnostic_artifact"] is True
+    manifest = Path(paths["run_manifest"]).read_text(encoding="utf-8")
+    assert '"run_integrity_ok": true' in manifest
+    assert '"artifact_missing_case_ids": []' in manifest
+    integrity = Path(paths["artifact_integrity_manifest"]).read_text(encoding="utf-8")
+    assert '"ok": true' in integrity
+    assert '"diagnostic_artifact": true' in integrity
+
+
+def test_write_case_artifacts_copies_relative_final_dom_references(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in (
+        "events.jsonl",
+        "action_metadata.jsonl",
+        "step_actions.jsonl",
+    ):
+        (source / name).write_text('{"ok": true}\n', encoding="utf-8")
+    (source / "final_dom.html").write_text('<html><head><link href="styles.css"></head><body></body></html>', encoding="utf-8")
+    (source / "styles.css").write_text("body{color:#111}", encoding="utf-8")
+    row = {
+        "case_id": "AA-010",
+        "browser_recordings": [
+            {
+                "artifact_dir": str(source),
+                "events": str(source / "events.jsonl"),
+                "action_metadata": str(source / "action_metadata.jsonl"),
+                "step_actions": str(source / "step_actions.jsonl"),
+                "final_dom": str(source / "final_dom.html"),
+            }
+        ],
+    }
+    case_dir = tmp_path / "case"
+
+    _write_case_artifacts(case_dir, row, None)
+
+    assert (case_dir / "browser_replay" / "styles.css").exists()
+
+
 def test_case_artifact_paths_survive_cwd_changes(tmp_path, monkeypatch):
     workdir = tmp_path / "work"
     other = tmp_path / "other"

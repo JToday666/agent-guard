@@ -33,8 +33,24 @@ def build_artifact_integrity_manifest(run_or_artifact_dir: Path, *, output_path:
 def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[str, Any]:
     case_dir = case_dir.expanduser().resolve()
     root = root.expanduser().resolve() if root is not None else case_dir
+    diagnostic_artifact = _is_diagnostic_artifact(case_dir)
     artifacts: list[dict[str, Any]] = []
-    for name in ("events.jsonl", "final.png", "final_full_page.png", "replay.webm", "raw_replay.webm", "trace.zip", "report.html", "replay_state.json", "replay_frames.txt"):
+    for name in (
+        "events.jsonl",
+        "final.png",
+        "final_full_page.png",
+        "final_dom.html",
+        "final_accessibility_tree.json",
+        "action_metadata.jsonl",
+        "step_actions.jsonl",
+        "business_event_correlation_index.json",
+        "replay.webm",
+        "raw_replay.webm",
+        "trace.zip",
+        "report.html",
+        "replay_state.json",
+        "replay_frames.txt",
+    ):
         path = case_dir / name
         kind = name.rsplit(".", 1)[-1]
         if name.endswith(".jsonl"):
@@ -42,9 +58,16 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
         elif name.endswith(".png"):
             artifacts.append(_check_png(path, root=root, artifact_type=name))
         elif name.endswith(".webm"):
-            artifacts.append(_check_webm(path, root=root, artifact_type=name, allow_zero_warning=name in {"raw_replay.webm", "replay.webm"}))
+            artifacts.append(
+                _check_webm(
+                    path,
+                    root=root,
+                    artifact_type=name,
+                    allow_zero_warning=name in {"raw_replay.webm", "replay.webm"} or diagnostic_artifact,
+                )
+            )
         elif name.endswith(".zip"):
-            artifacts.append(_check_zip(path, root=root, artifact_type=name))
+            artifacts.append(_check_zip(path, root=root, artifact_type=name, allow_empty_warning=diagnostic_artifact))
         elif name.endswith(".html"):
             artifacts.append(_check_html(path, root=root, artifact_type=name))
         elif name.endswith(".json"):
@@ -57,9 +80,16 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
     cross_checks = _cross_check_case(case_dir, artifacts)
     errors = [item for item in artifacts if item.get("error")]
     parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False and item.get("type") != "raw_replay.webm"]
+    if diagnostic_artifact:
+        parse_failures = [
+            item
+            for item in parse_failures
+            if item.get("type") not in {"raw_replay.webm", "replay.webm", "trace.zip"}
+        ]
     return {
         "case_id": _case_key_for_replay_dir(case_dir),
         "artifact_dir": _relative(case_dir, root),
+        "diagnostic_artifact": diagnostic_artifact,
         "ok": not errors and not parse_failures and not cross_checks["errors"],
         "artifacts": artifacts,
         "cross_checks": cross_checks,
@@ -86,6 +116,17 @@ def _find_replay_dirs(root: Path) -> list[Path]:
     if not replay_dirs and (root / "events.jsonl").exists():
         replay_dirs.append(root)
     return replay_dirs
+
+
+def _is_diagnostic_artifact(case_dir: Path) -> bool:
+    manifest = case_dir / "manifest.json"
+    if not manifest.exists():
+        return False
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return bool(isinstance(payload, dict) and payload.get("diagnostic_artifact") is True)
 
 
 def _base_artifact(path: Path, root: Path, artifact_type: str) -> dict[str, Any]:
@@ -231,9 +272,13 @@ def _check_webm(path: Path, *, root: Path, artifact_type: str, allow_zero_warnin
     return item
 
 
-def _check_zip(path: Path, *, root: Path, artifact_type: str) -> dict[str, Any]:
+def _check_zip(path: Path, *, root: Path, artifact_type: str, allow_empty_warning: bool = False) -> dict[str, Any]:
     item = _base_artifact(path, root, artifact_type)
     if not item["exists"]:
+        return item
+    if item["size_bytes"] == 0 and allow_empty_warning:
+        item.update({"parse_ok": None, "error": None})
+        item["warnings"].append("empty_diagnostic_trace")
         return item
     try:
         with zipfile.ZipFile(path) as archive:

@@ -10,6 +10,7 @@ from agentguard_langgraph_bench.bench.runtime.termination import TerminationCont
 from agentguard_langgraph_bench.bench.runtime.tool_gateway import GuardedToolGateway
 from agentguard_langgraph_bench.bench.tools import MockToolRegistry
 from agentguard_langgraph_bench.adapters.langgraph_demo.adapter import LangGraphDemoAdapter
+from agentguard_langgraph_bench.demo_agent.graph import _max_tool_rounds_for_state
 
 
 DATASET = Path(__file__).resolve().parents[1] / "datasets" / "attack_cases" / "agent_abuse.jsonl"
@@ -81,6 +82,13 @@ def test_case_specific_max_tool_rounds_reaches_demo_state(monkeypatch, tmp_path)
     assert result.raw_state["runtime_limits"]["max_tool_rounds"] == 1
     assert result.raw_state["termination_decision"]["reason"] == "max_tool_rounds"
     assert result.raw_state["stop_reason"] == "max_tool_rounds"
+
+
+def test_autonomous_mode_uses_configured_max_rounds_not_replay_runtime_limit():
+    case = _case("AA-007").model_copy(update={"runtime_limits": {"max_tool_rounds": 60}})
+    config = BenchConfig(llm_enabled=True, llm_max_tool_rounds=5, instrumentation_plan_mode="autonomous")
+
+    assert _max_tool_rounds_for_state({"attack_case": case.model_dump()}, config) == 5
 
 
 def test_metrics_include_fake_core_and_agent_abuse_quality_fields():
