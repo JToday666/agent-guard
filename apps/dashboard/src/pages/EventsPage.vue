@@ -1,12 +1,12 @@
 <template>
-  <div class="events-page page-with-drawer" :class="{ 'events-page--drawer-open': Boolean(selectedEventId) }">
+  <div class="events-page page-with-drawer" :class="{ 'events-page--drawer-open': Boolean(selectedEvent) }">
     <section class="workspace-panel events-page__main" aria-labelledby="events-title">
       <header class="page-header">
         <div>
           <p>监控</p>
           <h1 id="events-title">事件</h1>
         </div>
-        <StatusBadge label="部分数据" tone="neutral" />
+        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
       </header>
 
       <form class="filter-bar" @submit.prevent>
@@ -31,7 +31,9 @@
         </button>
       </div>
 
-      <div v-if="filteredEvents.length > 0" class="table-wrap">
+      <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
+      <LoadingState v-else-if="store.status === 'loading' && !store.events.length" />
+      <div v-else-if="filteredEvents.length > 0" class="table-wrap">
         <table class="audit-table">
           <caption>
             审计事件
@@ -51,7 +53,7 @@
           </thead>
           <tbody>
             <tr
-              v-for="event in filteredEvents"
+              v-for="event in paginatedEvents"
               :key="event.id"
               :class="{ 'audit-table__row--selected': selectedEvent?.id === event.id }"
               tabindex="0"
@@ -69,7 +71,7 @@
                 <span class="risk-score">{{ event.riskScore }}</span>
               </td>
               <td>
-                <StatusBadge :label="getSeverityLabel(event.severity)" :tone="getSeverityTone(event.severity)" />
+                <StatusBadge :label="getRiskSeverityLabel(event.severity)" :tone="getRiskSeverityTone(event.severity)" />
               </td>
               <td>{{ event.blocked ? "是" : "否" }}</td>
               <td>{{ event.runtime }}</td>
@@ -85,6 +87,25 @@
             </tr>
           </tbody>
         </table>
+        <footer v-if="filteredEvents.length > pageSize" class="table-pagination" aria-label="事件分页">
+          <span>共 {{ filteredEvents.length }} 条，第 {{ currentPage }} / {{ totalPages }} 页</span>
+          <div>
+            <button
+              type="button"
+              :disabled="currentPage <= 1"
+              @click="handlePageChange(currentPage - 1)"
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              :disabled="currentPage >= totalPages"
+              @click="handlePageChange(currentPage + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </footer>
       </div>
       <EmptyState
         v-else
@@ -94,7 +115,7 @@
     </section>
 
     <DetailDrawer
-      :is-open="Boolean(selectedEventId)"
+      :is-open="Boolean(selectedEvent)"
       eyebrow="事件详情"
       :title="selectedEvent?.id ?? '未找到事件'"
       @close="handleCloseDrawer"
@@ -113,7 +134,7 @@
             </div>
             <div>
               <dt>严重性</dt>
-              <dd>{{ getSeverityLabel(selectedEvent.severity) }}</dd>
+              <dd>{{ getRiskSeverityLabel(selectedEvent.severity) }}</dd>
             </div>
             <div>
               <dt>已阻断</dt>
@@ -124,18 +145,21 @@
 
         <section class="detail-section">
           <h2>任务与行为</h2>
-          <p><strong>用户任务:</strong> {{ selectedEvent.userTask }}</p>
-          <p><strong>Agent 行为:</strong> {{ selectedEvent.agentAction }}</p>
+          <p><strong>用户任务:</strong> {{ selectedEvent.userTask ?? "未提供" }}</p>
+          <p><strong>Agent 行为:</strong> {{ selectedEvent.agentAction ?? "未提供" }}</p>
           <p><strong>原因:</strong> {{ selectedEvent.reason }}</p>
         </section>
 
         <section class="detail-section detail-section__links">
           <h2>关联信息</h2>
           <RouterLink :to="`/traces/${selectedEvent.traceId}`">{{ selectedEvent.traceId }}</RouterLink>
-          <RouterLink :to="`/evaluation?case_id=${selectedEvent.caseId}`">{{ selectedEvent.caseId }}</RouterLink>
+          <button type="button" @click="handleCopyText(selectedEvent.traceId, 'Trace ID')">复制 Trace</button>
+          <RouterLink v-if="selectedEvent.caseId" :to="`/evaluation?case_id=${selectedEvent.caseId}`">{{ selectedEvent.caseId }}</RouterLink>
+          <button v-if="selectedEvent.caseId" type="button" @click="handleCopyText(selectedEvent.caseId, 'Case ID')">复制 Case</button>
           <RouterLink v-if="selectedEvent.approvalId" :to="`/approvals/${selectedEvent.approvalId}`">
             {{ selectedEvent.approvalId }}
           </RouterLink>
+          <span v-if="copyStatus" role="status">{{ copyStatus }}</span>
         </section>
 
         <section class="detail-section">
@@ -148,7 +172,7 @@
 
         <section class="detail-section">
           <h2>原始 JSON</h2>
-          <pre>{{ selectedEvent }}</pre>
+          <pre>{{ safeRawEvent }}</pre>
         </section>
       </template>
       <EmptyState
@@ -161,15 +185,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
 
 import AppSelect from "../components/AppSelect.vue";
+import DataFreshness from "../components/DataFreshness.vue";
 import DetailDrawer from "../components/DetailDrawer.vue";
 import EmptyState from "../components/EmptyState.vue";
 import StatusBadge from "../components/StatusBadge.vue";
-import { auditEvents } from "../mocks/dashboard-data";
-import type { AuditEventRow, DecisionStatus, RiskSeverity } from "../types/dashboard";
+import ErrorState from "../components/States/ErrorState.vue";
+import LoadingState from "../components/States/LoadingState.vue";
+import { useDashboardStore } from "../stores/dashboardStore";
+import type { AuditEventRow, DecisionStatus } from "../types/dashboard";
+import { redactSensitiveData } from "../utils/data-redaction";
+import {
+  getDecisionLabel,
+  getDecisionTone,
+  getRiskSeverityLabel,
+  getRiskSeverityTone,
+} from "../utils/dashboard-formatters";
 
 defineOptions({
   name: "EventsPage",
@@ -177,23 +211,26 @@ defineOptions({
 
 const route = useRoute();
 const router = useRouter();
+const store = useDashboardStore();
+const copyStatus = ref("");
+const pageSize = 20;
 
 const decisionFilter = computed({
   get: () => getQueryString("decision"),
-  set: (value: string) => updateEventQuery({ decision: value, rule: undefined }),
+  set: (value: string) => updateEventQuery({ decision: value, page: undefined, rule: undefined }),
 });
 const runtimeFilter = computed({
   get: () => getQueryString("runtime"),
-  set: (value: string) => updateEventQuery({ runtime: value }),
+  set: (value: string) => updateEventQuery({ page: undefined, runtime: value }),
 });
 const searchFilter = computed({
   get: () => getQueryString("search"),
-  set: (value: string) => updateEventQuery({ search: value }),
+  set: (value: string) => updateEventQuery({ page: undefined, search: value }),
 });
 const decisionOptions = [
   { label: "全部", value: "" },
   { label: "拒绝", value: "deny" },
-  { label: "待确认", value: "ask" },
+  { label: "审批", value: "ask" },
   { label: "放行", value: "allow" },
 ];
 const runtimeOptions = [
@@ -204,7 +241,7 @@ const runtimeOptions = [
 
 const decisionQuickFilters = [
   { decision: "deny", label: "拒绝" },
-  { decision: "ask", label: "待确认" },
+  { decision: "ask", label: "审批" },
 ] as const;
 const ruleQuickFilters = [
   { label: "敏感文件", rule: "P001_sensitive_file_access" },
@@ -215,11 +252,21 @@ const ruleQuickFilters = [
 type QuickFilterKey = "all" | `decision:${DecisionStatus}` | `rule:${string}`;
 
 const latestEvents = computed(() =>
-  [...auditEvents].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt)),
+  [...store.events].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt)),
 );
 const selectedEventId = computed(() => getQueryString("event_id"));
 const selectedEvent = computed(() =>
   selectedEventId.value ? latestEvents.value.find((event) => event.id === selectedEventId.value) : undefined,
+);
+const safeRawEvent = computed(() => redactSensitiveData(selectedEvent.value?.raw ?? selectedEvent.value));
+
+watch(
+  [selectedEventId, selectedEvent, () => store.status],
+  ([eventId, event, status]) => {
+    if (eventId && !event && (status === "ready" || status === "stale")) {
+      handleCloseDrawer();
+    }
+  },
 );
 const ruleFilter = computed(() => getQueryString("rule"));
 const quickFilters = computed<Array<{ count: number; key: QuickFilterKey; label: string }>>(() => [
@@ -277,6 +324,16 @@ const filteredEvents = computed(() =>
     );
   }),
 );
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredEvents.value.length / pageSize)));
+const currentPage = computed(() => {
+  const parsedPage = Number.parseInt(getQueryString("page"), 10);
+  if (!Number.isFinite(parsedPage) || parsedPage < 1) return 1;
+  return Math.min(parsedPage, totalPages.value);
+});
+const paginatedEvents = computed(() => {
+  const offset = (currentPage.value - 1) * pageSize;
+  return filteredEvents.value.slice(offset, offset + pageSize);
+});
 
 function handleSelectEvent(event: AuditEventRow): void {
   updateEventQuery({ event_id: event.id });
@@ -288,16 +345,20 @@ function handleCloseDrawer(): void {
 
 function handleQuickFilterClick(key: QuickFilterKey): void {
   if (key === "all") {
-    updateEventQuery({ decision: undefined, rule: undefined });
+    updateEventQuery({ decision: undefined, page: undefined, rule: undefined });
     return;
   }
 
   if (key.startsWith("decision:")) {
-    updateEventQuery({ decision: key.replace("decision:", ""), rule: undefined });
+    updateEventQuery({ decision: key.replace("decision:", ""), page: undefined, rule: undefined });
     return;
   }
 
-  updateEventQuery({ decision: undefined, rule: key.replace("rule:", "") });
+  updateEventQuery({ decision: undefined, page: undefined, rule: key.replace("rule:", "") });
+}
+
+function handlePageChange(page: number): void {
+  updateEventQuery({ page: page <= 1 ? undefined : String(Math.min(page, totalPages.value)) });
 }
 
 function isQuickFilterActive(key: QuickFilterKey): boolean {
@@ -336,29 +397,13 @@ function updateEventQuery(nextQuery: Record<string, string | undefined>): void {
   void router.replace({ path: "/events", query });
 }
 
-function getDecisionTone(decision: DecisionStatus): "neutral" | "success" | "warning" | "danger" {
-  if (decision === "deny") return "danger";
-  if (decision === "ask") return "warning";
-  return "success";
-}
-
-function getDecisionLabel(decision: DecisionStatus): string {
-  if (decision === "deny") return "拒绝";
-  if (decision === "ask") return "待确认";
-  return "放行";
-}
-
-function getSeverityTone(severity: RiskSeverity): "neutral" | "success" | "warning" | "danger" {
-  if (severity === "critical" || severity === "high") return "danger";
-  if (severity === "medium") return "warning";
-  return "success";
-}
-
-function getSeverityLabel(severity: RiskSeverity): string {
-  if (severity === "critical") return "严重";
-  if (severity === "high") return "高";
-  if (severity === "medium") return "中";
-  return "低";
+async function handleCopyText(value: string, label: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+    copyStatus.value = `${label} 已复制`;
+  } catch {
+    copyStatus.value = `${label} 复制失败`;
+  }
 }
 </script>
 
@@ -391,8 +436,7 @@ function getSeverityLabel(severity: RiskSeverity): string {
   }
 
   input {
-    background:
-      linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
+    background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-2);
     box-shadow: var(--shadow-subtle);
@@ -458,6 +502,30 @@ function getSeverityLabel(severity: RiskSeverity): string {
 .table-wrap {
   overflow: auto;
 }
+
+.table-pagination {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-12);
+  gap: var(--space-3);
+  justify-content: space-between;
+  min-width: 36rem;
+  padding: var(--space-3) 0;
+}
+
+.table-pagination > div { display: flex; gap: var(--space-2); }
+.table-pagination button {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  color: var(--color-text);
+  cursor: pointer;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+}
+.table-pagination button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .audit-table {
   border-collapse: collapse;
@@ -579,6 +647,7 @@ function getSeverityLabel(severity: RiskSeverity): string {
   gap: var(--space-2);
 
   a,
+  button,
   span {
     background: var(--color-surface-muted);
     border: 1px solid var(--color-border);
@@ -592,6 +661,8 @@ function getSeverityLabel(severity: RiskSeverity): string {
     text-decoration: none;
     white-space: nowrap;
   }
+
+  button { cursor: pointer; }
 }
 
 @media (max-width: 1100px) {

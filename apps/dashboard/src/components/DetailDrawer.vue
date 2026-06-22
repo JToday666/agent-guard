@@ -2,7 +2,7 @@
   <aside
     v-if="isOpen"
     aria-labelledby="detail-drawer-title"
-    aria-modal="false"
+    :aria-modal="isMobile"
     class="detail-drawer"
     role="dialog"
     tabindex="-1"
@@ -20,7 +20,7 @@
         aria-label="关闭详情"
         @click="emit('close')"
       >
-        ×
+        <X aria-hidden="true" :size="18" />
       </button>
     </header>
     <div class="detail-drawer__body">
@@ -30,7 +30,8 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { X } from "@lucide/vue";
 
 defineOptions({
   name: "DetailDrawer",
@@ -47,7 +48,21 @@ const props = defineProps<{
 }>();
 
 const closeButtonElement = ref<HTMLButtonElement | null>(null);
+const isMobile = ref(false);
 let restoreFocusElement: HTMLElement | null = null;
+let mobileQuery: MediaQueryList | null = null;
+
+function syncMobileState(event: MediaQueryList | MediaQueryListEvent): void {
+  isMobile.value = event.matches;
+}
+
+onMounted(() => {
+  mobileQuery = window.matchMedia("(max-width: 900px)");
+  syncMobileState(mobileQuery);
+  mobileQuery.addEventListener("change", syncMobileState);
+});
+
+onUnmounted(() => mobileQuery?.removeEventListener("change", syncMobileState));
 
 watch(
   () => props.isOpen,

@@ -1,19 +1,18 @@
 <template>
   <header class="top-bar">
     <div class="top-bar__brand">
-      <RouterLink class="top-bar__title" to="/events">AgentGuard</RouterLink>
+      <RouterLink class="top-bar__title" to="/overview">AgentGuard</RouterLink>
       <span class="top-bar__subtitle">运行时安全</span>
     </div>
 
     <div class="top-bar__status" aria-label="全局状态">
       <RouterLink class="top-bar__status-link" to="/system">
-        <StatusBadge label="核心在线" tone="success" />
+        <StatusBadge :label="healthLabel" :tone="healthTone" />
       </RouterLink>
       <button class="top-bar__chip" type="button" @click="handleRuntimeClick">
         运行时 LangGraph
       </button>
-      <StatusBadge label="模式 enforce" tone="warning" />
-      <span class="top-bar__chip">最近 24 小时</span>
+      <DataFreshness :status="dataStatus" :updated-at="updatedAt" />
     </div>
 
     <form class="top-bar__search" role="search" @submit.prevent="handleSearch">
@@ -35,10 +34,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 
-import { getPendingApprovalCount } from "../mocks/dashboard-data";
+import type { DataStatus, HealthStatus } from "../types/dashboard";
+import DataFreshness from "./DataFreshness.vue";
 import StatusBadge from "./StatusBadge.vue";
 
 defineOptions({
@@ -47,7 +47,14 @@ defineOptions({
 
 const router = useRouter();
 const searchText = ref("");
-const pendingCount = getPendingApprovalCount();
+const props = defineProps<{
+  apiStatus: HealthStatus["api"];
+  dataStatus: DataStatus;
+  pendingCount: number;
+  updatedAt: string | null;
+}>();
+const healthLabel = computed(() => props.apiStatus === "online" ? "Guard API 正常" : props.apiStatus === "offline" ? "Guard API 异常" : "Guard API 未知");
+const healthTone = computed(() => props.apiStatus === "online" ? "success" as const : props.apiStatus === "offline" ? "danger" as const : "neutral" as const);
 
 function handleSearch(): void {
   void router.push({ path: "/events", query: searchText.value ? { search: searchText.value } : {} });
@@ -66,9 +73,9 @@ function handleRuntimeClick(): void {
   box-shadow: var(--shadow-subtle);
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: minmax(10rem, 16rem) minmax(20rem, 1fr) minmax(16rem, 24rem) auto;
+  grid-template-columns: minmax(10rem, 14rem) minmax(22rem, 1fr) minmax(15rem, 22rem) auto;
   min-height: var(--top-bar-height);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-2) var(--space-5);
   position: sticky;
   top: 0;
   z-index: 20;

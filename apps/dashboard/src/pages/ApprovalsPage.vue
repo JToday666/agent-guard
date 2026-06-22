@@ -1,279 +1,206 @@
 <template>
   <section class="approvals-page workspace-panel" aria-labelledby="approvals-title">
     <header class="page-header">
-      <div>
-        <p>监控</p>
-        <h1 id="approvals-title">审批</h1>
+      <div><p>人工控制</p><h1 id="approvals-title">审批中心</h1></div>
+      <div class="approval-header-status">
+        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+        <StatusBadge :label="`${store.pendingCount} 待处理`" :tone="store.pendingCount ? 'warning' : 'success'" />
       </div>
-      <StatusBadge :label="`${pendingApprovals.length} 待处理`" tone="warning" />
     </header>
 
-    <div class="approvals-page__layout">
-      <section class="content-section" aria-labelledby="approval-queue-title">
-        <h2 id="approval-queue-title">审批队列</h2>
-        <div class="approval-list">
-          <button
-            v-for="approval in sortedApprovals"
-            :key="approval.id"
-            type="button"
-            :class="{ 'approval-list__item--selected': selectedApproval?.id === approval.id }"
-            @click="handleSelectApproval(approval)"
-          >
-            <strong>{{ approval.id }}</strong>
-            <span>{{ approval.tool }}</span>
-            <small>{{ approval.resource }}</small>
-          </button>
-        </div>
-      </section>
+    <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
+    <LoadingState v-else-if="store.status === 'loading' && !store.approvals.length" />
+    <div v-else-if="sortedApprovals.length" class="approvals-layout">
+      <aside class="approval-queue" aria-label="待审批队列">
+        <header><div><strong>风险队列</strong><small>高风险与临近过期优先</small></div></header>
+        <button
+          v-for="approval in sortedApprovals"
+          :key="approval.id"
+          type="button"
+          :class="{ 'approval-queue__item--active': selectedApproval?.id === approval.id }"
+          @click="handleSelectApproval(approval)"
+        >
+          <span class="approval-queue__top">
+            <StatusBadge :label="getRiskSeverityLabel(approval.severity)" :tone="getRiskSeverityTone(approval.severity)" />
+            <time>{{ formatRelativeExpiry(approval.expiresAt) }}</time>
+          </span>
+          <strong>{{ approval.tool }}</strong>
+          <small>{{ approval.resource }}</small>
+          <span class="approval-queue__score">风险 {{ approval.riskScore }}</span>
+        </button>
+      </aside>
 
-      <section
-        v-if="selectedApproval"
-        class="content-section approval-detail"
-        aria-labelledby="approval-detail-title"
-      >
-        <h2 id="approval-detail-title">审批详情</h2>
-        <StatusBadge :label="getApprovalStatusLabel(resolutionStatus)" :tone="resolutionTone" />
-        <dl>
-          <div>
-            <dt>工具</dt>
-            <dd>{{ selectedApproval.tool }}</dd>
-          </div>
-          <div>
-            <dt>目标</dt>
-            <dd>{{ selectedApproval.resource }}</dd>
-          </div>
-          <div>
-            <dt>风险分数</dt>
-            <dd>{{ selectedApproval.riskScore }}</dd>
-          </div>
-          <div>
-            <dt>严重性</dt>
-            <dd>{{ getSeverityLabel(selectedApproval.severity) }}</dd>
-          </div>
+      <article v-if="selectedApproval" class="approval-detail">
+        <header class="approval-detail__header">
+          <div><p>审批请求</p><h2>{{ selectedApproval.tool }}</h2></div>
+          <strong class="approval-detail__risk">{{ selectedApproval.riskScore }}<small>/ 100</small></strong>
+        </header>
+
+        <section class="impact-callout">
+          <strong>放行影响</strong>
+          <p>{{ selectedApproval.consequence }}</p>
+        </section>
+
+        <dl class="evidence-grid">
+          <div><dt>目标资源</dt><dd><code>{{ selectedApproval.resource }}</code></dd></div>
+          <div><dt>风险等级</dt><dd>{{ getRiskSeverityLabel(selectedApproval.severity) }}</dd></div>
+          <div><dt>请求时间</dt><dd>{{ formatDashboardDateTime(selectedApproval.createdAt) }}</dd></div>
+          <div><dt>到期时间</dt><dd>{{ selectedApproval.expiresAt ? formatDashboardDateTime(selectedApproval.expiresAt) : "未提供" }}</dd></div>
         </dl>
-        <p>{{ selectedApproval.reason }}</p>
-        <p><strong>放行后果:</strong> {{ selectedApproval.consequence }}</p>
-        <div class="approval-detail__actions">
-          <button type="button" @click="handleResolve('denied')">拒绝</button>
-          <button type="button" @click="handleResolve('allowed')">允许一次</button>
-          <RouterLink :to="`/traces/${selectedApproval.traceId}`">查看链路</RouterLink>
-          <RouterLink :to="`/events?event_id=${selectedApproval.eventId}`">查看事件</RouterLink>
-        </div>
-      </section>
-      <EmptyState
-        v-else-if="sortedApprovals.length === 0"
-        class="approvals-page__empty"
-        message="当前没有待处理或已处理的审批请求。"
-        title="暂无审批"
-        variant="empty"
-      >
-        <RouterLink to="/events">查看事件</RouterLink>
-      </EmptyState>
-      <EmptyState
-        v-else
-        class="approvals-page__empty"
-        :message="`审批 ${requestedApprovalId} 不存在或已不在可查看范围内。`"
-        title="未找到审批记录"
-        variant="not-found"
-      >
-        <RouterLink to="/approvals">返回审批队列</RouterLink>
-      </EmptyState>
+
+        <section class="approval-evidence">
+          <div><h3>判定原因</h3><p>{{ selectedApproval.reason }}</p></div>
+          <div><h3>用户任务</h3><p>{{ selectedApproval.userTask || "未提供" }}</p></div>
+          <div><h3>Agent 行为</h3><p>{{ selectedApproval.agentAction || "未提供" }}</p></div>
+        </section>
+
+        <nav class="evidence-links" aria-label="关联证据">
+          <RouterLink :to="`/traces/${selectedApproval.traceId}`">查看 Trace</RouterLink>
+          <RouterLink v-if="selectedApproval.eventId" :to="`/events?event_id=${selectedApproval.eventId}`">查看事件</RouterLink>
+        </nav>
+
+        <section v-if="confirmAllow" class="allow-confirm" role="alertdialog" aria-labelledby="allow-confirm-title">
+          <div><strong id="allow-confirm-title">确认允许一次？</strong><p>将继续执行 {{ selectedApproval.tool }}，目标为 {{ selectedApproval.resource }}。</p></div>
+          <button type="button" @click="confirmAllow = false">取消</button>
+          <button type="button" class="button-warning" :disabled="!canResolveApproval" @click="handleResolveApproval('allow_once')">确认允许</button>
+        </section>
+
+        <footer class="approval-actions">
+          <span v-if="actionMessage" role="status">{{ actionMessage }}</span>
+          <span v-else-if="resolutionDisabledReason" class="approval-disabled-reason">{{ resolutionDisabledReason }}</span>
+          <button type="button" class="button-secondary" :disabled="!canResolveApproval" :title="resolutionDisabledReason" @click="confirmAllow = true">允许一次</button>
+          <button type="button" class="button-danger" :disabled="!canResolveApproval" :title="resolutionDisabledReason" @click="handleResolveApproval('deny')">
+            {{ isSubmitting ? "提交中..." : "拒绝并阻断" }}
+          </button>
+        </footer>
+      </article>
     </div>
+    <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的工具动作。">
+      <RouterLink to="/events">查看审计事件</RouterLink>
+    </EmptyState>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-
+import DataFreshness from "../components/DataFreshness.vue";
 import EmptyState from "../components/EmptyState.vue";
 import StatusBadge from "../components/StatusBadge.vue";
-import { approvals } from "../mocks/dashboard-data";
-import type { ApprovalRequest, ApprovalStatus } from "../types/dashboard";
+import ErrorState from "../components/States/ErrorState.vue";
+import LoadingState from "../components/States/LoadingState.vue";
+import { useAuthStore } from "../stores/authStore";
+import { useDashboardStore } from "../stores/dashboardStore";
+import type { ApprovalRequest } from "../types/dashboard";
+import {
+  formatDashboardDateTime,
+  getRiskSeverityLabel,
+  getRiskSeverityTone,
+} from "../utils/dashboard-formatters";
 
-defineOptions({
-  name: "ApprovalsPage",
-});
-
+defineOptions({ name: "ApprovalsPage" });
+const store = useDashboardStore();
+const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
-
-const sortedApprovals = computed(() =>
-  [...approvals].sort((left, right) => {
-    if (left.status === "pending" && right.status !== "pending") return -1;
-    if (left.status !== "pending" && right.status === "pending") return 1;
-    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
-  }),
-);
-
-const requestedApprovalId = computed(() =>
-  typeof route.params.approval_id === "string" ? route.params.approval_id : "",
-);
-
-const selectedApproval = computed<ApprovalRequest | undefined>(() => {
-  if (requestedApprovalId.value) {
-    return sortedApprovals.value.find((approval) => approval.id === requestedApprovalId.value);
+const confirmAllow = ref(false);
+const actionMessage = ref("");
+const sortedApprovals = computed(() => [...store.approvals].sort((left, right) => {
+  if (left.riskScore !== right.riskScore) return right.riskScore - left.riskScore;
+  return Date.parse(left.expiresAt ?? left.createdAt) - Date.parse(right.expiresAt ?? right.createdAt);
+}));
+const requestedId = computed(() => typeof route.params.approval_id === "string" ? route.params.approval_id : "");
+const selectedApproval = computed(() => requestedId.value
+  ? sortedApprovals.value.find((approval) => approval.id === requestedId.value) ?? sortedApprovals.value[0]
+  : sortedApprovals.value[0]);
+const isSubmitting = computed(() => store.submittingApprovalId === selectedApproval.value?.id);
+const isExpired = computed(() => {
+  const expiresAt = selectedApproval.value?.expiresAt;
+  return Boolean(expiresAt && Date.parse(expiresAt) <= Date.now());
+});
+const resolutionDisabledReason = computed(() => {
+  if (isSubmitting.value) return "审批正在提交";
+  if (!authStore.csrfToken) return "浏览器会话未就绪，缺少 CSRF token";
+  if (!selectedApproval.value?.approvalNonce) return "审批凭证缺失，请刷新队列";
+  if (isExpired.value) return "审批已过期，不能继续处理";
+  return "";
+});
+const canResolveApproval = computed(() => Boolean(selectedApproval.value) && !resolutionDisabledReason.value);
+const approvalIds = computed(() => sortedApprovals.value.map((approval) => approval.id).join("\u0000"));
+watch([requestedId, approvalIds, () => store.status], () => {
+  if (store.status === "idle" || store.status === "loading") return;
+  const firstApprovalId = sortedApprovals.value[0]?.id;
+  if (!firstApprovalId) {
+    if (requestedId.value) void router.replace("/approvals");
+    return;
   }
-  return sortedApprovals.value[0];
-});
+  if (!requestedId.value || !store.approvals.some((approval) => approval.id === requestedId.value)) {
+    void router.replace(`/approvals/${firstApprovalId}`);
+  }
+}, { immediate: true });
+watch(() => selectedApproval.value?.id, () => { confirmAllow.value = false; actionMessage.value = ""; });
 
-const pendingApprovals = computed(() => approvals.filter((approval) => approval.status === "pending"));
-const resolvedByApprovalId = reactive(new Map<string, ApprovalStatus>());
-const resolutionStatus = computed(() => {
-  if (!selectedApproval.value) return "expired";
-  return resolvedByApprovalId.get(selectedApproval.value.id) ?? selectedApproval.value.status;
-});
-const resolutionTone = computed(() => {
-  if (resolutionStatus.value === "allowed") return "success";
-  if (resolutionStatus.value === "denied" || resolutionStatus.value === "expired") return "danger";
-  return "warning";
-});
-
-function handleResolve(status: "allowed" | "denied"): void {
-  if (!selectedApproval.value) return;
-  resolvedByApprovalId.set(selectedApproval.value.id, status);
+function handleSelectApproval(approval: ApprovalRequest) { void router.push(`/approvals/${approval.id}`); }
+async function handleResolveApproval(decision: "allow_once" | "deny") {
+  if (!selectedApproval.value || !canResolveApproval.value) return;
+  const id = selectedApproval.value.id;
+  try {
+    await store.resolveApproval(selectedApproval.value, decision);
+    actionMessage.value = decision === "deny" ? "已拒绝该动作" : "已允许该动作执行一次";
+    confirmAllow.value = false;
+    if (!store.approvals.some((approval) => approval.id === id)) void router.replace("/approvals");
+  } catch {
+    actionMessage.value = store.error ?? "审批提交失败";
+  }
 }
-
-function handleSelectApproval(approval: ApprovalRequest): void {
-  void router.push(`/approvals/${approval.id}`);
-}
-
-function getApprovalStatusLabel(status: ApprovalStatus): string {
-  if (status === "allowed") return "已允许一次";
-  if (status === "denied") return "已拒绝";
-  if (status === "expired") return "已过期";
-  return "待处理";
-}
-
-function getSeverityLabel(severity: ApprovalRequest["severity"]): string {
-  if (severity === "critical") return "严重";
-  if (severity === "high") return "高";
-  if (severity === "medium") return "中";
-  return "低";
+function formatRelativeExpiry(value?: string | null) {
+  if (!value) return "到期时间未知";
+  const minutes = Math.ceil((Date.parse(value) - Date.now()) / 60_000);
+  return minutes <= 0 ? "已过期" : `${minutes} 分钟后过期`;
 }
 </script>
 
 <style scoped lang="scss">
-.approvals-page {
-  display: grid;
-  gap: var(--space-5);
-}
-
-.approvals-page__layout {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
-}
-
-.approval-list {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.approval-list button {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
-  color: var(--color-text);
-  cursor: pointer;
-  display: grid;
-  gap: var(--space-1);
-  min-height: 5rem;
-  min-width: 0;
-  padding: var(--space-3);
-  text-align: left;
-
-  &:hover {
-    background: var(--color-row-hover);
-    border-color: var(--color-active-border);
-  }
-
-  strong {
-    font-weight: var(--font-weight-bold);
-  }
-
-  span,
-  small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  small {
-    color: var(--color-text-muted);
-  }
-}
-
-.approval-list__item--selected {
-  background: var(--color-active-soft) !important;
-  border-color: var(--color-active-border) !important;
-  box-shadow: inset 3px 0 0 var(--color-active);
-}
-
-.approval-detail {
-  align-content: start;
-  display: grid;
-  gap: var(--space-4);
-
-  dl {
-    display: grid;
-    gap: var(--space-2);
-    margin: 0;
-  }
-
-  dl > div {
-    display: flex;
-    gap: var(--space-3);
-    justify-content: space-between;
-  }
-
-  dt {
-    color: var(--color-text-subtle);
-  }
-
-  dd {
-    font-weight: var(--font-weight-semibold);
-    margin: 0;
-    overflow-wrap: anywhere;
-    text-align: right;
-  }
-
-  p {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-}
-
-.approval-detail__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-
-  button,
-  a {
-    align-items: center;
-    background: var(--color-surface-muted);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-2);
-    color: var(--color-text);
-    cursor: pointer;
-    display: inline-flex;
-    font-weight: var(--font-weight-semibold);
-    min-height: 2.5rem;
-    padding: 0 var(--space-3);
-    text-decoration: none;
-
-    &:hover {
-      background: var(--color-active-soft);
-      border-color: var(--color-active-border);
-      color: var(--color-active);
-    }
-  }
-}
-
-@media (max-width: 820px) {
-  .approvals-page__layout {
-    grid-template-columns: 1fr;
-  }
-}
+.approvals-page { display: grid; gap: var(--space-5); }
+.approval-header-status { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.approvals-layout { display: grid; gap: var(--space-4); grid-template-columns: minmax(17rem, 21rem) minmax(0, 1fr); }
+.approval-queue { align-content: start; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-2); padding: var(--space-3); }
+.approval-queue > header { padding: var(--space-2); }
+.approval-queue > header small { color: var(--color-text-subtle); display: block; margin-top: var(--space-1); }
+.approval-queue > button { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text); cursor: pointer; display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-3); text-align: left; }
+.approval-queue > button:hover { background: var(--color-row-hover); border-color: var(--color-active-border); }
+.approval-queue > button.approval-queue__item--active { background: var(--color-danger-soft); border-color: var(--color-danger-border); box-shadow: inset 3px 0 var(--color-danger); }
+.approval-queue__top { align-items: center; display: flex; justify-content: space-between; }
+.approval-queue__top time, .approval-queue > button small { color: var(--color-text-subtle); font-size: var(--font-size-11); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-queue__score { color: var(--color-danger); font-size: var(--font-size-12); font-weight: var(--font-weight-bold); }
+.approval-detail { align-content: start; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-5); min-width: 0; padding: var(--space-5); }
+.approval-detail__header { align-items: start; display: flex; justify-content: space-between; }
+.approval-detail__header p, .approval-detail__header h2 { margin: 0; }
+.approval-detail__header p { color: var(--color-text-subtle); font-size: var(--font-size-12); }
+.approval-detail__header h2 { font-size: var(--font-size-24); margin-top: var(--space-1); }
+.approval-detail__risk { color: var(--color-danger); font-size: 2rem; line-height: 1; }
+.approval-detail__risk small { color: var(--color-text-subtle); font-size: var(--font-size-12); }
+.impact-callout { background: var(--color-warning-soft); border: 1px solid var(--color-warning-border); border-radius: var(--radius-2); padding: var(--space-4); }
+.impact-callout p { color: var(--color-text-muted); margin: var(--space-1) 0 0; }
+.evidence-grid { display: grid; gap: 1px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; overflow: hidden; }
+.evidence-grid > div { background: var(--color-surface-muted); padding: var(--space-3); }
+.evidence-grid dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
+.evidence-grid dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.approval-evidence { border-top: 1px solid var(--color-border); display: grid; gap: var(--space-4); padding-top: var(--space-4); }
+.approval-evidence h3 { font-size: var(--font-size-13); margin: 0; }
+.approval-evidence p { color: var(--color-text-muted); margin: var(--space-1) 0 0; }
+.evidence-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.evidence-links a { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text); padding: var(--space-2) var(--space-3); text-decoration: none; }
+.allow-confirm { align-items: center; background: var(--color-warning-soft); border: 1px solid var(--color-warning-border); border-radius: var(--radius-2); display: grid; gap: var(--space-3); grid-template-columns: 1fr auto auto; padding: var(--space-3); }
+.allow-confirm p { color: var(--color-text-muted); margin: var(--space-1) 0 0; }
+.allow-confirm button, .approval-actions button { border: 1px solid var(--color-border); border-radius: var(--radius-2); cursor: pointer; min-height: 2.5rem; padding: 0 var(--space-4); }
+.approval-actions { align-items: center; border-top: 1px solid var(--color-border); display: flex; gap: var(--space-3); justify-content: flex-end; padding-top: var(--space-4); }
+.approval-actions span { color: var(--color-text-muted); margin-right: auto; }
+.approval-disabled-reason { color: var(--color-warning) !important; font-size: var(--font-size-12); }
+.approval-actions button:disabled, .allow-confirm button:disabled { cursor: not-allowed; opacity: 0.55; }
+.button-secondary { background: var(--color-surface-muted); color: var(--color-text); }
+.button-warning { background: var(--color-warning); border-color: var(--color-warning) !important; color: var(--color-active-text); }
+.button-danger { background: var(--color-danger); border-color: var(--color-danger) !important; color: var(--color-active-text); font-weight: var(--font-weight-bold); }
+@media (max-width: 820px) { .approvals-layout { grid-template-columns: 1fr; } .approval-queue { max-height: 20rem; overflow: auto; } }
+@media (max-width: 600px) { .evidence-grid { grid-template-columns: 1fr; } .allow-confirm { grid-template-columns: 1fr 1fr; } .allow-confirm > div { grid-column: 1 / -1; } .approval-actions { align-items: stretch; flex-direction: column; } .approval-actions span { margin: 0; } }
 </style>
