@@ -7,7 +7,10 @@
     "pnpm": "11.5.2"
   },
   "scripts": {
+    "guard-api:dev": "sh -c 'test -f .env || { echo \"缺少根目录 .env，请先复制 .env.example\" >&2; exit 1; }; set -a; . ./.env; set +a; exec uv run uvicorn guard_api.main:app --host \"${AGENTGUARD_HOST:-127.0.0.1}\" --port \"${AGENTGUARD_PORT:-8088}\"'",
+    "guard-api:launch": "sh -c 'test -f .env || { echo \"缺少根目录 .env，请先复制 .env.example\" >&2; exit 1; }; set -a; . ./.env; set +a; test -n \"${AGENTGUARD_CONTROL_TOKEN:-}\" || { echo \".env 中缺少 AGENTGUARD_CONTROL_TOKEN\" >&2; exit 1; }; response=$(curl --fail-with-body --silent --show-error -X POST -H \"Authorization: Bearer ${AGENTGUARD_CONTROL_TOKEN}\" \"http://${AGENTGUARD_HOST:-127.0.0.1}:${AGENTGUARD_PORT:-8088}/v1/auth/browser/launch\") || exit $?; launch_code=$(printf \"%s\" \"$response\" | sed -n \"s/.*\\\"launch_code\\\"[[:space:]]*:[[:space:]]*\\\"\\([^\\\"]*\\)\\\".*/\\1/p\"); test -n \"$launch_code\" || { echo \"Guard API 响应中缺少 launch_code\" >&2; exit 1; }; printf \"http://localhost:5173/?launch_code=%s\\n\" \"$launch_code\"'",
     "dashboard:dev": "pnpm --filter @agentguard/dashboard dev",
+    "dashboard:dev:mock": "pnpm --filter @agentguard/dashboard dev:mock",
     "dashboard:typecheck": "pnpm --filter @agentguard/dashboard typecheck",
     "dashboard:build": "pnpm --filter @agentguard/dashboard build"
   }

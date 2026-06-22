@@ -58,37 +58,34 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Server,
-  SlidersHorizontal,
 } from "@lucide/vue";
 import { computed, ref } from "vue";
-
-import { getPendingApprovalCount } from "../mocks/dashboard-data";
 
 defineOptions({
   name: "AppSidebar",
 });
-
-defineProps<{
-  isCollapsed: boolean;
-}>();
 
 const emit = defineEmits<{
   "toggle-collapse": [];
 }>();
 
 const isOpen = ref(false);
+const props = defineProps<{
+  isCollapsed: boolean;
+  pendingCount: number;
+}>();
 
 const navigationGroups = computed(() => [
   {
     label: "监控",
     items: [
-      { icon: Activity, label: "事件", to: "/events" },
       { icon: LayoutDashboard, label: "总览", to: "/overview" },
+      { icon: Activity, label: "事件", to: "/events" },
       {
-        count: getPendingApprovalCount(),
+        count: props.pendingCount,
         icon: CircleCheckBig,
         label: "审批",
-        meta: `${getPendingApprovalCount()} 待处理`,
+        meta: `${props.pendingCount} 待处理`,
         to: "/approvals",
       },
       { icon: GitBranch, label: "链路", to: "/traces" },
@@ -102,7 +99,6 @@ const navigationGroups = computed(() => [
     label: "运维",
     items: [
       { icon: Server, label: "系统", to: "/system" },
-      { icon: SlidersHorizontal, label: "高级", to: "/advanced" },
     ],
   },
 ]);

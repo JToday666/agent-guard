@@ -1,0 +1,74 @@
+import type {
+  DecisionStatus,
+  RiskSeverity,
+  RuntimeName,
+} from "../types/dashboard";
+
+export interface GuardAuditEventDto {
+  audit_id: string;
+  schema_version: string;
+  trace_id: string;
+  case_id: string | null;
+  runtime: RuntimeName;
+  timestamp: string;
+  stage: string;
+  event_type: string;
+  attack_type: string | null;
+  is_malicious: boolean | null;
+  summary: string;
+  decision: DecisionStatus;
+  risk_score: number;
+  severity: RiskSeverity;
+  blocked: boolean;
+  resource_targets: string[];
+  rule_hits: string[];
+  reason: string;
+  links: Record<string, string>;
+  latency_ms: number | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface GuardApprovalDto {
+  approval_id: string;
+  trace_id: string;
+  tool_call_id: string;
+  requesting_principal_id: string;
+  runtime: RuntimeName;
+  agent_id: string;
+  status: "pending" | "resolved" | "expired";
+  decision_options: Array<"allow_once" | "deny">;
+  decision: "allow_once" | "deny" | null;
+  tool: string;
+  resource: string;
+  reason: string;
+  risk_score: number;
+  severity: RiskSeverity;
+  created_at: string;
+  expires_at: string | null;
+  resolved_at: string | null;
+  approval_nonce?: string;
+}
+
+export interface GuardEvalMetricsDto {
+  event_count: number;
+  allow_count: number;
+  deny_count: number;
+  ask_count: number;
+  blocked_count: number;
+  block_rate: number | null;
+  fpr: number | null;
+  fnr: number | null;
+  average_latency_ms: number | null;
+}
+
+export interface GuardApprovalResolutionDto {
+  approval_id: string;
+  status: string;
+  decision: "allow_once" | "deny";
+}
+
+export interface BrowserSessionDto {
+  authenticated: boolean;
+  expires_at: string;
+  csrf_token: string;
+}
