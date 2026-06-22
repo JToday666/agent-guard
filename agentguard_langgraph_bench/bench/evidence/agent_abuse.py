@@ -57,6 +57,10 @@ def _load_sandbox_streams(sandbox_dir: Path, evidence: AgentAbuseEvidence) -> No
         sandbox_dir / "identity",
         sandbox_dir / "social",
         sandbox_dir / "web_state",
+        sandbox_dir / "ads",
+        sandbox_dir / "platform",
+        sandbox_dir / "records",
+        sandbox_dir / "memory",
     ]
     for root in candidates:
         if not root.exists():
