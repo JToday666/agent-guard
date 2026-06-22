@@ -159,6 +159,14 @@ class PostgresControlPlaneStore:
             rows = session.execute(stmt).scalars().all()
         return [ApprovalRequest.model_validate(row) for row in rows]
 
+    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
+        stmt = select(approval_requests.c.payload_json).order_by(approval_requests.c.created_at.asc())
+        if trace_id is not None:
+            stmt = stmt.where(approval_requests.c.payload_json.op("->>")("trace_id") == trace_id)
+        with self._session_factory() as session:
+            rows = session.execute(stmt).scalars().all()
+        return [ApprovalRequest.model_validate(row) for row in rows]
+
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         stmt = select(approval_requests.c.payload_json).where(approval_requests.c.approval_id == approval_id)
         with self._session_factory() as session:

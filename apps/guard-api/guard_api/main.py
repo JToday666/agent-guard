@@ -19,6 +19,7 @@ from guard_api.services import (
     EvaluationService,
     MetricService,
     PolicyService,
+    TraceService,
 )
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters
@@ -45,6 +46,7 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
     audit_service = AuditService(store=store)
     approval_service = ApprovalService(store=store, settings=settings)
     metric_service = MetricService(store=store)
+    trace_service = TraceService(store=store)
     evaluation_service = EvaluationService(
         policy_service=PolicyService(),
         audit_service=audit_service,
@@ -154,6 +156,11 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
         auth.verify_browser_session(agentguard_session)
         filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
         return metric_service.eval_metrics(filters)
+
+    @app.get("/v1/traces/{trace_id}")
+    def trace_detail(trace_id: str, agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        auth.verify_browser_session(agentguard_session)
+        return trace_service.get_trace(trace_id)
 
     @app.get("/v1/approvals/pending")
     def pending_approvals(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 Decision = Literal["allow", "deny", "ask"]
 ApprovalResolution = Literal["allow_once", "deny"]
+RuleOverrideDecision = Literal["ask", "deny"]
 
 
 def utc_now_iso() -> str:
@@ -141,9 +142,48 @@ class AuditEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class RuleOverride(BaseModel):
+    decision: RuleOverrideDecision | None = None
+    risk_score: int | None = Field(default=None, ge=0, le=100)
+    severity: str | None = None
+
+
 class PolicyBundle(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     bundle_id: str = "default"
     version: str = "p0"
+    disabled_rules: list[str] = Field(default_factory=list)
+    rule_overrides: dict[str, RuleOverride] = Field(default_factory=dict)
+    sensitive_resource_markers: list[str] = Field(
+        default_factory=lambda: [
+            ".env",
+            "token",
+            "secret",
+            "private",
+            "credential",
+            "id_rsa",
+            "password",
+            "payment_details",
+            "tacacs",
+            "business_plan",
+            "ssh_access",
+        ]
+    )
+    allowed_email_domains: list[str] = Field(default_factory=lambda: ["agentguard.local"])
+    allowed_api_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
+    allowed_api_paths: list[str] = Field(default_factory=lambda: ["/status"])
+    collection_path_markers: list[str] = Field(
+        default_factory=lambda: ["/collect/", "upload", "exfil", "webhook"]
+    )
+    tool_action_aliases: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "read_file": ["read"],
+            "write_file": ["write"],
+            "send_email": ["email", "send"],
+            "call_api": ["api", "call"],
+            "memory_write": ["memory", "write"],
+            "code_exec": ["execute", "run"],
+        }
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)

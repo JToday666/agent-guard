@@ -77,6 +77,9 @@ class ControlPlaneStore(Protocol):
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         ...
 
+    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
+        ...
+
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         ...
 

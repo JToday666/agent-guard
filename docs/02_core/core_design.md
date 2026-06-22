@@ -59,6 +59,8 @@ def evaluate(event: GuardEvent, policies: PolicyBundle | PolicySnapshot) -> Guar
 
 `AuditEvent` 可以由 Core 提供领域 schema 或 builder，但审计入库、查询、指标聚合和 Dashboard 展示由 Guard API / Control Plane 负责。
 
+P0 `PolicyBundle` 已经参与判定，但必须作为已加载快照传入 Core。它支持关闭内置规则、覆盖已触发规则的 `decision/risk_score/severity`，以及配置敏感资源标记、允许外发域名、允许 API host/path、collection endpoint 标记和工具动作别名。规则放行使用 `disabled_rules`；`RuleOverride` 只允许把已触发规则调整为 `ask` 或 `deny`，不承担放行语义。
+
 ## 4. 内部结构
 
 目标态 Core 结构：
@@ -141,7 +143,7 @@ Core 不创建 approval row，不生成 approval nonce，不等待审批结果�
 | 检测器 | 阶段 | 作用 |
 | ------ | ---- | ---- |
 | SensitiveFileDetector | P0 | 检测 `.env`、token、secret、key、private 路径 |
-| ToolHijackDetector | P0 | 检测工具名、工具类型和用户任务不匹配 |
+| ToolHijackDetector | P0 | 检测工具 `name/category/kind` 与内置画像不一致，或派生资源方向/操作与工具意图冲突 |
 | TaskMismatchDetector | P0 | 判断工具动作与 `user_task` 是否偏离 |
 | OutboundDLPDetector | P0-P1 | 检测邮件、消息、API 外发中的敏感数据 |
 | PromptInjectionDetector | P1 | 检测不可信内容中的注入语句 |
@@ -175,7 +177,7 @@ P1/P2 扩展：
 
 | 阶段 | Core 交付 |
 | ---- | --------- |
-| P0 | `GuardEvent` / `ToolCallEvent`、`GuardDecision`、敏感文件检测、工具劫持检测、任务偏离检测、基础风险评分、可解释规则命中 |
+| P0 | `GuardEvent` / `ToolCallEvent`、`GuardDecision`、敏感文件检测、工具劫持检测、任务偏离检测、数据外发审批、`PolicyBundle` 基础配置、基础风险评分、可解释规则命中 |
 | P1 | 上下文和模型调用审计事件 schema、消息外发检测、记忆写入检测、策略快照输入、FPR/FNR 所需证据字段 |
 | P2 | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit 所需领域模型和检测扩展 |
 

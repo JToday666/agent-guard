@@ -5,10 +5,12 @@ import os
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from agentguard_core import AuditEvent
 from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, EvalMetricFilters
@@ -65,9 +67,11 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
 
         restarted_store = PostgresControlPlaneStore(database_url)
         audits = restarted_store.list_audit_events(AuditEventFilters(trace_id=trace_id))
+        approvals = restarted_store.list_approvals(trace_id=trace_id)
         approval = restarted_store.get_approval(approval_id)
 
         assert [event.trace_id for event in audits] == [trace_id]
+        assert [item.approval_id for item in approvals] == [approval_id]
         assert approval is not None
         assert approval.status == "pending"
     finally:
@@ -191,6 +195,65 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
         _cleanup_test_rows(database_url, other_trace_id, None)
 
 
+def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
+    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+
+    run_id = uuid4().hex
+    trace_id = f"trace_pg_route_{run_id}"
+    approval_id = f"app_pg_route_{run_id}"
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        _reset_control_plane_schema(database_url)
+        store.initialize()
+        store.add_audit_event(
+            _audit_event(
+                audit_id=f"audit_pg_route_{run_id}",
+                trace_id=trace_id,
+                decision="ask",
+                runtime="langgraph",
+                blocked=True,
+                is_malicious=True,
+                latency_ms=15,
+            )
+        )
+        store.create_approval(
+            ApprovalRequest(
+                approval_id=approval_id,
+                trace_id=trace_id,
+                tool_call_id=f"call_pg_route_{run_id}",
+                requesting_principal_id="cred_adapter_main",
+                runtime="langgraph",
+                agent_id="main",
+                tool="send_email",
+                resource="external@example.com",
+                reason="approval required",
+                risk_score=62,
+                severity="medium",
+            )
+        )
+        client = TestClient(
+            create_app(
+                store=PostgresControlPlaneStore(database_url),
+                settings=GuardApiSettings(control_token="control-secret"),
+            )
+        )
+        _login_dashboard(client, control_token="control-secret")
+
+        trace_response = client.get(f"/v1/traces/{trace_id}")
+
+        assert trace_response.status_code == 200
+        trace = trace_response.json()
+        assert trace["trace_id"] == trace_id
+        assert [event["audit_id"] for event in trace["audit_events"]] == [f"audit_pg_route_{run_id}"]
+        assert [approval["approval_id"] for approval in trace["approvals"]] == [approval_id]
+        assert trace["metrics"]["event_count"] == 1
+        assert trace["metrics"]["ask_count"] == 1
+    finally:
+        _cleanup_test_rows(database_url, trace_id, approval_id)
+
+
 def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None) -> None:
     try:
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
@@ -278,3 +341,16 @@ def _audit_event(
 
 def _token_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _login_dashboard(client: TestClient, *, control_token: str) -> None:
+    launch_response = client.post(
+        "/v1/auth/browser/launch",
+        headers={"Authorization": f"Bearer {control_token}"},
+    )
+    assert launch_response.status_code == 200
+    exchange_response = client.post(
+        "/v1/auth/browser/exchange",
+        json={"launch_code": launch_response.json()["launch_code"]},
+    )
+    assert exchange_response.status_code == 200

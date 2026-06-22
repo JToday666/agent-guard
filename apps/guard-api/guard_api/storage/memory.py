@@ -50,6 +50,12 @@ class MemoryControlPlaneStore:
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         return [item for item in self.approvals.values() if item.status == "pending"]
 
+    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
+        approvals = list(self.approvals.values())
+        if trace_id is not None:
+            approvals = [item for item in approvals if item.trace_id == trace_id]
+        return sorted(approvals, key=lambda item: item.created_at)
+
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         return self.approvals.get(approval_id)
 

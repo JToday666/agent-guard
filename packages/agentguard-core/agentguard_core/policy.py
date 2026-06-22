@@ -37,7 +37,7 @@ def build_guard_decision(results: list[DetectionResult], *, started_at: float) -
         decision_id=new_id("dec"),
         decision=decision,
         risk_score=risk_score,
-        severity=_severity_for_score(risk_score),
+        severity=_decision_severity(results, risk_score),
         categories=list(dict.fromkeys(item.category for item in results)),
         rule_hits=rule_hits,
         reason="; ".join(dict.fromkeys(item.reason for item in results)),
@@ -55,6 +55,14 @@ def _severity_for_score(score: int) -> str:
     if score >= 40:
         return "medium"
     return "low"
+
+
+def _decision_severity(results: list[DetectionResult], risk_score: int) -> str:
+    severities = [item.severity for item in results if item.severity is not None]
+    if not severities:
+        return _severity_for_score(risk_score)
+    severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    return max(severities, key=lambda item: severity_order.get(item, 0))
 
 
 def _safe_message(decision: str) -> str | None:

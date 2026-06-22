@@ -125,6 +125,24 @@ class MetricService:
         return self.store.eval_metrics(filters)
 
 
+class TraceService:
+    def __init__(self, *, store: ControlPlaneStore) -> None:
+        self.store = store
+
+    def get_trace(self, trace_id: str) -> dict[str, object]:
+        return {
+            "trace_id": trace_id,
+            "audit_events": [
+                event.model_dump(mode="json")
+                for event in self.store.list_audit_events(AuditEventFilters(trace_id=trace_id, limit=1000))
+            ],
+            "approvals": [
+                approval.model_dump(mode="json") for approval in self.store.list_approvals(trace_id=trace_id)
+            ],
+            "metrics": self.store.eval_metrics(EvalMetricFilters(trace_id=trace_id)),
+        }
+
+
 class EvaluationService:
     def __init__(
         self,

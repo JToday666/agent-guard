@@ -52,7 +52,7 @@ Runtime Native Event
 | `GET /v1/approvals/pending` | P0 | Dashboard 查询待审批动作 |
 | `POST /v1/approvals/{approval_id}/resolve` | P0 | Dashboard 审批处理 |
 | `GET /v1/approvals/{approval_id}/wait` | P0 | Adapter 等待审批结果 |
-| `GET /v1/traces/{trace_id}` | P1 | 攻击链路详情 |
+| `GET /v1/traces/{trace_id}` | P0 | 攻击链路详情，聚合 audit、approval 和 metrics |
 | `POST /v1/policies` | P1 | 创建或导入策略 |
 | `GET /v1/policies` | P1 | 策略列表和策略快照查询 |
 | `POST /v1/eval/runs` | P1 | 创建评测任务 |
@@ -96,6 +96,27 @@ Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser se
 | `limit` | 返回条数，默认 500，最大 1000 |
 
 `GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
+
+`GET /v1/traces/{trace_id}` 需要 browser session，不新增 trace 表，返回结构固定为：
+
+```json
+{
+  "trace_id": "trace_001",
+  "audit_events": [],
+  "approvals": [],
+  "metrics": {
+    "event_count": 0,
+    "allow_count": 0,
+    "deny_count": 0,
+    "ask_count": 0,
+    "blocked_count": 0,
+    "block_rate": null,
+    "fpr": null,
+    "fnr": null,
+    "average_latency_ms": null
+  }
+}
+```
 
 ## 5. GuardEvent
 
@@ -194,6 +215,16 @@ P0 首个稳定事件 payload。Adapter 必须把运行时工具调用映射成�
 ## 8. GuardDecision
 
 Core 对每个评估请求返回一个 `GuardDecision`。P0 必须支持 `allow`、`deny`、`ask`。
+
+P0 内置规则 ID：
+
+| 规则 ID | 含义 |
+| ------- | ---- |
+| `P001_sensitive_file_access` | 敏感本地资源访问 |
+| `P002_tool_identity_mismatch` | 工具身份或派生资源行为与内置画像冲突 |
+| `P004_task_mismatch` | 不可信来源触发的工具动作与用户任务不一致 |
+| `P005_external_send` | 邮件/消息外发需要审批 |
+| `P006_outbound_api_review` | 外发 API collection endpoint 需要审批 |
 
 ```json
 {
@@ -330,8 +361,8 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 | 阶段 | 契约范围 |
 | ---- | -------- |
-| P0 | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、评测指标和最小 Dashboard 审批 |
-| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询、策略快照、CLI 审批和复杂审批体验 |
+| P0 | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、trace 查询、评测指标和最小 Dashboard 审批 |
+| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、策略快照持久化、CLI 审批和复杂审批体验 |
 | P2 | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展 |
 
 ## 14. 冻结规则
