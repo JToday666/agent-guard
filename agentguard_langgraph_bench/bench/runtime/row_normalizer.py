@@ -17,7 +17,7 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
     executed = bool(result.executed) or any(item.get("executed") for item in tool_results)
     behavior_events = list(result.behavior_events or [])
     raw_state = dict(result.raw_state or {})
-    validity = _run_validity(tool_results, raw_state, blocked, case)
+    validity = _run_validity(tool_results, raw_state, blocked, case, config)
     llm_request_diagnostics = _collect_llm_request_diagnostics(raw_state)
 
     return {
@@ -35,6 +35,10 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         "tool_hijacking_mode": config.tool_hijacking_mode if case.attack_type == "tool_hijacking" else None,
         "tool_catalog_view": config.tool_catalog_view if case.attack_type == "tool_hijacking" else None,
         "instrumentation_plan_mode": raw_state.get("instrumentation_plan_mode") or getattr(config, "instrumentation_plan_mode", "guided"),
+        "agent_visible_payload_mode": raw_state.get("agent_visible_payload_mode") or getattr(config, "agent_visible_payload_mode", "original"),
+        "closure_on_partial": bool(getattr(config, "closure_on_partial", False)),
+        "strict_business_validation": bool(getattr(config, "strict_business_validation", True)),
+        "prompt_contamination_check": bool(getattr(config, "prompt_contamination_check", True)),
         "planning_source": raw_state.get("planning_source") or _planning_source_from_events(behavior_events, config),
         "guided_plan_applied": bool(raw_state.get("guided_plan_applied")),
         "fallback_applied": bool(raw_state.get("fallback_applied")),
@@ -72,6 +76,8 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
 
 
 def _planning_source_from_events(events: list[dict[str, Any]], config: Any) -> str:
+    if getattr(config, "instrumentation_plan_mode", "") == "replay":
+        return "deterministic_replay"
     for event in reversed(events):
         metadata = event.get("metadata") if isinstance(event, dict) else {}
         planner = metadata.get("planner") if isinstance(metadata, dict) else None
@@ -91,7 +97,7 @@ def _collect_llm_request_diagnostics(raw_state: dict[str, Any]) -> list[dict[str
     return diagnostics
 
 
-def _run_validity(tool_results: list[dict[str, Any]], raw_state: dict[str, Any], blocked: bool, case: Any) -> dict[str, Any]:
+def _run_validity(tool_results: list[dict[str, Any]], raw_state: dict[str, Any], blocked: bool, case: Any, config: Any) -> dict[str, Any]:
     successful_tool_count = sum(1 for item in tool_results if item.get("executed") and item.get("status") == "executed" and not item.get("error"))
     error_items = [item for item in tool_results if item.get("status") == "error" or item.get("error")]
     browser_actions = [
@@ -109,11 +115,13 @@ def _run_validity(tool_results: list[dict[str, Any]], raw_state: dict[str, Any],
     if error_items and not invalid_reasons:
         invalid_reasons.append("tool_runtime_error")
     stop_reason = str(raw_state.get("stop_reason") or "")
-    if stop_reason == "llm_planning_error":
+    instrumentation_mode = str(raw_state.get("instrumentation_plan_mode") or getattr(config, "instrumentation_plan_mode", ""))
+    autonomous_planner_stop = instrumentation_mode == "autonomous" and stop_reason in {"llm_planning_error", "max_tool_rounds"}
+    if stop_reason == "llm_planning_error" and not autonomous_planner_stop:
         invalid_reasons.append("planner_error")
     if stop_reason == "model_no_output":
         invalid_reasons.append("planner_no_output")
-    if stop_reason == "max_tool_rounds" and not invalid_reasons:
+    if stop_reason == "max_tool_rounds" and not invalid_reasons and not autonomous_planner_stop:
         invalid_reasons.append("max_tool_rounds")
     if _requires_visual_modality(case) and not browser_actions:
         invalid_reasons.append("unsupported_modality")
@@ -121,6 +129,8 @@ def _run_validity(tool_results: list[dict[str, Any]], raw_state: dict[str, Any],
         run_status = "blocked"
     elif stop_reason == "model_text_response":
         run_status = "refused" if _looks_like_refusal(raw_state.get("last_model_content")) else "completed"
+    elif autonomous_planner_stop:
+        run_status = stop_reason
     elif invalid_reasons:
         run_status = invalid_reasons[0]
     elif successful_tool_count:

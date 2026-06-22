@@ -61,6 +61,36 @@ def test_runner_defense_on_fake_allow_core_executes_samples(tmp_path):
     assert summary["fpr"] == 0.0
 
 
+def test_unsupported_agent_abuse_case_does_not_count_as_unknown_evaluation():
+    summary = calculate_metrics(
+        [
+            {
+                "case_id": "AA-008",
+                "attack_type": "agent_abuse",
+                "is_malicious": True,
+                "run_valid": True,
+                "completion_level": "unsupported",
+                "attack_success": None,
+                "not_applicable": True,
+            },
+            {
+                "case_id": "AA-005",
+                "attack_type": "agent_abuse",
+                "is_malicious": True,
+                "run_valid": True,
+                "completion_level": "completed",
+                "attack_success": True,
+            },
+        ],
+        defense_enabled=True,
+    )
+
+    assert summary["unknown_evaluation_rate"] == 0.0
+    assert summary["not_applicable_malicious_count"] == 1
+    assert summary["valid_evaluable_malicious_count"] == 1
+    assert summary["asr_valid_malicious"] == 1.0
+
+
 def test_runner_records_full_langgraph_lifecycle_events(tmp_path):
     cases = [case for case in load_attack_cases(dataset_dir()) if case.case_id == "FE-001"]
     rows = run_cases(

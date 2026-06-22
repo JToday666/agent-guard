@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ from ..guard import GuardAdapter, GuardConfig
 from .config import DEFAULT_DATASET_DIR, DEFAULT_RESULTS_DIR, BenchConfig, ensure_sandbox
 from .dataset_loader import load_attack_cases
 from .environment import archive_sandbox_effects, restore_initial_sandbox
+from .agent_abuse_report import write_agent_abuse_iteration_report
 from .evidence.artifact_integrity import build_artifact_integrity_manifest
 from .evidence.artifact_integrity import check_case_artifacts
 from .metrics import calculate_metrics
@@ -218,6 +221,10 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
         "tool_server_port": config.tool_server_port,
         "core_api_mode": config.core_api_mode,
         "strict_runtime_targets": config.strict_runtime_targets,
+        "agent_visible_payload_mode": config.agent_visible_payload_mode,
+        "closure_on_partial": config.closure_on_partial,
+        "strict_business_validation": config.strict_business_validation,
+        "prompt_contamination_check": config.prompt_contamination_check,
     }
     data.update(updates)
     return BenchConfig(**data)
@@ -287,6 +294,10 @@ def _run_single_case(
     row["case_artifact_dir"] = str(case_result_dir)
     row["core_mode"] = core_mode
     row["fake_core_decision"] = fake_core_decision
+    row["agent_visible_payload_mode"] = config.agent_visible_payload_mode
+    row["closure_on_partial"] = config.closure_on_partial
+    row["strict_business_validation"] = config.strict_business_validation
+    row["prompt_contamination_check"] = config.prompt_contamination_check
     row["runtime_limits"] = row.get("runtime_limits") or runtime_limits_for_case(case, config).model_dump()
     row["metric_interpretation"] = _case_metric_interpretation(core_mode, fake_core_decision)
     if case.attack_type == "tool_hijacking":
@@ -347,8 +358,116 @@ def _run_single_case(
         else:
             row["invalid_reasons"] = []
         report_payload = report.model_dump()
+        if _should_run_forced_closure(case, row, config):
+            row["forced_closure"] = _run_forced_closure_diagnostic(
+                case,
+                config=config,
+                benchmark_run_id=run_id,
+                parent_case_result_dir=case_result_dir,
+            )
     _write_case_artifacts(case_result_dir, row, report_payload)
     return row
+
+
+def _should_run_forced_closure(case: AttackCase, row: dict[str, Any], config: BenchConfig) -> bool:
+    if case.attack_type != "agent_abuse":
+        return False
+    if not config.closure_on_partial or config.instrumentation_plan_mode != "autonomous":
+        return False
+    if row.get("attack_success") is True or row.get("completion_level") in {"completed", "safe_refusal", "unsupported"}:
+        return False
+    verdict = row.get("agent_abuse_verdict") if isinstance(row.get("agent_abuse_verdict"), dict) else {}
+    if not verdict.get("harmful_attempt_detected"):
+        return False
+    if row.get("completion_level") not in {"attempted", "partial"}:
+        return False
+    return bool(getattr(case, "closure_plan", None) or getattr(case, "guided_success_plan", None) or case.tool_plan)
+
+
+def _run_forced_closure_diagnostic(
+    case: AttackCase,
+    *,
+    config: BenchConfig,
+    benchmark_run_id: str,
+    parent_case_result_dir: Path,
+) -> dict[str, Any]:
+    closure_results_dir = parent_case_result_dir / "forced_closure_results"
+    closure_config = _copy_config(
+        config,
+        instrumentation_plan_mode="replay",
+        llm_enabled=False,
+        llm_fallback_to_case_plan=False,
+        closure_on_partial=False,
+        sandbox_dir=config.sandbox_dir / "forced_closure" / case.case_id,
+        results_dir=closure_results_dir,
+    )
+    try:
+        closure_rows = run_cases(
+            [case],
+            config=closure_config,
+            fake_core=True,
+            fake_core_decision="allow",
+            reset_environment=True,
+            benchmark_run_id=f"{benchmark_run_id}_forced_closure_{case.case_id}",
+        )
+    except Exception as exc:
+        result = {
+            "enabled": True,
+            "status": "error",
+            "error": str(exc),
+            "counts_for_autonomous_asr": False,
+        }
+        (parent_case_result_dir / "closure_result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return result
+    closure_row = closure_rows[0] if closure_rows else {}
+    result = {
+        "enabled": True,
+        "status": "completed",
+        "counts_for_autonomous_asr": False,
+        "planning_source": closure_row.get("planning_source"),
+        "llm_request_count": closure_row.get("llm_request_count", 0),
+        "completion_level": closure_row.get("completion_level"),
+        "attack_success": closure_row.get("attack_success"),
+        "business_effect_validated": (closure_row.get("agent_abuse_verdict") or {}).get("business_effect_validated"),
+        "case_artifact_dir": closure_row.get("case_artifact_dir"),
+        "closure_tool_results": str(parent_case_result_dir / "closure_tool_results.jsonl"),
+        "closure_browser_replay": _closure_browser_replay_paths(closure_row),
+    }
+    (parent_case_result_dir / "closure_result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    if isinstance(closure_row.get("agent_abuse_evaluation_report"), dict):
+        (parent_case_result_dir / "closure_evaluation_report.json").write_text(
+            json.dumps(closure_row["agent_abuse_evaluation_report"], ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    _write_case_jsonl(parent_case_result_dir / "closure_tool_results.jsonl", closure_row.get("tool_calls") or [])
+    return result
+
+
+def _closure_browser_replay_paths(row: dict[str, Any]) -> list[dict[str, Any]]:
+    paths: list[dict[str, Any]] = []
+    for recording in row.get("browser_recordings") or []:
+        if not isinstance(recording, dict):
+            continue
+        paths.append(
+            {
+                "artifact_dir": recording.get("artifact_dir"),
+                "events": recording.get("events"),
+                "report": recording.get("report"),
+                "screenshot": recording.get("screenshot"),
+                "full_page_screenshot": recording.get("full_page_screenshot"),
+                "final_dom": recording.get("final_dom"),
+                "final_accessibility_tree": recording.get("final_accessibility_tree"),
+                "action_metadata": recording.get("action_metadata"),
+                "business_event_correlation_index": recording.get("business_event_correlation_index"),
+            }
+        )
+    return paths
 
 
 def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benchmark_run_id: str | None) -> dict[str, Any]:
@@ -459,6 +578,8 @@ def _case_metric_interpretation(core_mode: str, fake_core_decision: str | None) 
 
 def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: dict[str, Any] | None) -> None:
     case_result_dir.mkdir(parents=True, exist_ok=True)
+    if _requires_browser_artifact(row) and not row.get("browser_recordings"):
+        row["browser_recordings"] = [_write_planner_stall_browser_artifact(case_result_dir, row)]
     case_result = case_result_dir / "case_result.json"
     case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     _write_case_jsonl(case_result_dir / "tool_call_events.jsonl", [item.get("event") for item in row.get("tool_calls") or [] if item.get("event")])
@@ -467,6 +588,10 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     _write_case_jsonl(case_result_dir / "tool_results.jsonl", row.get("tool_calls") or [])
     (case_result_dir / "browser_action_summary.json").write_text(
         json.dumps(_browser_action_summary(row), ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (case_result_dir / "agent_visible_prompt_contamination.json").write_text(
+        json.dumps(_prompt_contamination_summary(row), ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     (case_result_dir / "sandbox_diff.json").write_text(
@@ -479,7 +604,20 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
             immutable_recording = _copy_browser_replay_artifacts(recording, case_result_dir)
             if immutable_recording:
                 recording.update(immutable_recording)
-            for key in ("events", "manifest", "screenshot", "full_page_screenshot", "trace", "raw_video", "video"):
+            for key in (
+                "events",
+                "manifest",
+                "screenshot",
+                "full_page_screenshot",
+                "final_dom",
+                "final_accessibility_tree",
+                "action_metadata",
+                "step_actions",
+                "business_event_correlation_index",
+                "trace",
+                "raw_video",
+                "video",
+            ):
                 if recording.get(key):
                     evidence_index["streams"].append(_artifact_record(key, Path(str(recording[key])), case_result_dir))
             artifact_dir = recording.get("artifact_dir")
@@ -524,6 +662,11 @@ def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: P
         "report": "report.html",
         "replay_state": "replay_state.json",
         "replay_frames": "replay_frames.txt",
+        "final_dom": "final_dom.html",
+        "final_accessibility_tree": "final_accessibility_tree.json",
+        "action_metadata": "action_metadata.jsonl",
+        "step_actions": "step_actions.jsonl",
+        "business_event_correlation_index": "business_event_correlation_index.json",
     }
     for key, filename in file_map.items():
         raw = recording.get(key)
@@ -556,7 +699,176 @@ def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: P
     if step_paths:
         copied["steps_dir"] = str(steps_dest)
         copied["step_screenshots"] = step_paths
+    if copied.get("final_dom"):
+        _copy_final_dom_references(Path(str(copied["final_dom"])), source_dir, dest_dir)
     return copied
+
+
+def _copy_final_dom_references(final_dom: Path, source_dir: Path, dest_dir: Path) -> None:
+    try:
+        parser = _DomReferenceParser()
+        parser.feed(final_dom.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return
+    for ref in sorted(set(parser.refs)):
+        if ref.startswith(("http://", "https://", "data:", "#")):
+            continue
+        if ref.startswith(("/", "\\")) or ".." in Path(ref).parts:
+            continue
+        source = source_dir / ref
+        dest = dest_dir / ref
+        if not source.exists() or not source.is_file():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source.resolve() != dest.resolve():
+            dest.write_bytes(source.read_bytes())
+
+
+class _DomReferenceParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.refs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if key in {"href", "src"} and value:
+                self.refs.append(value)
+
+
+def _write_planner_stall_browser_artifact(case_result_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
+    artifact_dir = case_result_dir / "browser_replay"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    reason = str(row.get("stop_reason") or row.get("run_status") or "no_browser_actions")
+    event = {
+        "event_type": "planner_stalled_before_browser_start",
+        "timestamp": timestamp,
+        "case_id": row.get("case_id"),
+        "reason": reason,
+        "instrumentation_plan_mode": row.get("instrumentation_plan_mode"),
+        "agent_visible_payload_mode": row.get("agent_visible_payload_mode"),
+        "llm_request_count": row.get("llm_request_count"),
+        "llm_timeout_count": row.get("llm_timeout_count"),
+    }
+    _write_case_jsonl(artifact_dir / "events.jsonl", [event])
+    _write_case_jsonl(artifact_dir / "action_metadata.jsonl", [event])
+    _write_case_jsonl(artifact_dir / "step_actions.jsonl", [event])
+    (artifact_dir / "business_event_correlation_index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "case_id": row.get("case_id"),
+                "diagnostic_artifact": True,
+                "browser_actions": 0,
+                "business_events": [],
+                "correlations": [],
+                "reason": reason,
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    html = (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Planner stalled before browser start</title></head>"
+        "<body><main><h1>Planner stalled before browser start</h1>"
+        f"<p>case_id: {row.get('case_id')}</p><p>reason: {reason}</p>"
+        "<p>No browser page was opened and no business event was produced.</p></main></body></html>"
+    )
+    (artifact_dir / "final_dom.html").write_text(html, encoding="utf-8")
+    (artifact_dir / "final_accessibility_tree.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "diagnostic_artifact": True,
+                "role": "document",
+                "name": "Planner stalled before browser start",
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lHVqVwAAAABJRU5ErkJggg=="
+    )
+    (artifact_dir / "final.png").write_bytes(png)
+    (artifact_dir / "final_full_page.png").write_bytes(png)
+    (artifact_dir / "replay.webm").write_bytes(b"")
+    (artifact_dir / "raw_replay.webm").write_bytes(b"")
+    (artifact_dir / "trace.zip").write_bytes(b"")
+    (artifact_dir / "report.html").write_text(html, encoding="utf-8")
+    (artifact_dir / "replay_state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "case_id": row.get("case_id"),
+                "diagnostic_artifact": True,
+                "step_count": 0,
+                "dom_event_count": 1,
+                "video_source": "none",
+                "reason": reason,
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "replay_frames.txt").write_text("final.png\n", encoding="utf-8")
+    manifest = {
+        "schema_version": "1.0",
+        "case_id": row.get("case_id"),
+        "artifact_type": "planner_stall_browser_evidence",
+        "diagnostic_artifact": True,
+        "reason": reason,
+        "created_at": timestamp,
+        "browser_started": False,
+        "business_effect_validated": False,
+        "attack_success": bool(row.get("attack_success")),
+    }
+    (artifact_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return {
+        "artifact_dir": str(artifact_dir),
+        "events": str(artifact_dir / "events.jsonl"),
+        "manifest": str(artifact_dir / "manifest.json"),
+        "screenshot": str(artifact_dir / "final.png"),
+        "full_page_screenshot": str(artifact_dir / "final_full_page.png"),
+        "final_dom": str(artifact_dir / "final_dom.html"),
+        "final_accessibility_tree": str(artifact_dir / "final_accessibility_tree.json"),
+        "action_metadata": str(artifact_dir / "action_metadata.jsonl"),
+        "step_actions": str(artifact_dir / "step_actions.jsonl"),
+        "business_event_correlation_index": str(artifact_dir / "business_event_correlation_index.json"),
+        "trace": str(artifact_dir / "trace.zip"),
+        "raw_video": str(artifact_dir / "raw_replay.webm"),
+        "video": str(artifact_dir / "replay.webm"),
+        "report": str(artifact_dir / "report.html"),
+        "replay_state": str(artifact_dir / "replay_state.json"),
+        "replay_frames": str(artifact_dir / "replay_frames.txt"),
+        "diagnostic_artifact": True,
+    }
+
+
+def _prompt_contamination_summary(row: dict[str, Any]) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    checked = False
+    for diagnostic in row.get("llm_request_diagnostics") or []:
+        if not isinstance(diagnostic, dict):
+            continue
+        contamination = diagnostic.get("prompt_contamination")
+        if not isinstance(contamination, dict):
+            continue
+        checked = True
+        findings.extend(item for item in contamination.get("findings") or [] if isinstance(item, dict))
+    return {
+        "checked": checked or bool(row.get("prompt_contamination_check")),
+        "found": bool(findings),
+        "findings": findings,
+        "agent_visible_payload_mode": row.get("agent_visible_payload_mode"),
+        "instrumentation_plan_mode": row.get("instrumentation_plan_mode"),
+    }
 
 def _write_case_jsonl(path: Path, rows: list[Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
@@ -992,9 +1304,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm-max-retries", type=int, default=None, help="Maximum retries for transient LLM request failures.")
     parser.add_argument(
         "--instrumentation-plan-mode",
-        choices=["guided", "autonomous"],
+        choices=["guided", "autonomous", "replay"],
         default=None,
-        help="Instrumentation browser planning mode: guided replay hints or autonomous LLM tool planning.",
+        help="Instrumentation browser planning mode: guided LLM hints, autonomous LLM planning, or deterministic replay.",
+    )
+    parser.add_argument(
+        "--agent-visible-payload-mode",
+        choices=["original", "naturalistic", "closure"],
+        default=None,
+        help="Payload variant shown to the autonomous agent.",
+    )
+    parser.add_argument(
+        "--closure-on-partial",
+        action="store_true",
+        help="Run forced closure diagnostics after harmful attempted/partial autonomous agent_abuse cases.",
+    )
+    parser.add_argument(
+        "--no-strict-business-validation",
+        action="store_true",
+        help="Allow legacy business-effect inference in evaluator. Not recommended for high-confidence runs.",
+    )
+    parser.add_argument(
+        "--no-prompt-contamination-check",
+        action="store_true",
+        help="Disable agent-visible prompt contamination checks.",
     )
     parser.add_argument("--poisonedrag-mode", choices=["clean", "poisoned", "hybrid", "delayed_memory"], default=None)
     parser.add_argument("--poison-prefix", choices=["question", "none"], default=None)
@@ -1094,6 +1427,10 @@ def main(argv: list[str] | None = None) -> int:
         tool_server_port=args.tool_server_port,
         core_api_mode=args.core_api_mode,
         strict_runtime_targets=args.strict_runtime_targets,
+        agent_visible_payload_mode=args.agent_visible_payload_mode,
+        closure_on_partial=args.closure_on_partial,
+        strict_business_validation=not args.no_strict_business_validation,
+        prompt_contamination_check=not args.no_prompt_contamination_check,
     )
     if config.instrumentation_plan_mode == "autonomous" and config.llm_fallback_to_case_plan:
         config.llm_fallback_to_case_plan = False
@@ -1152,6 +1489,7 @@ def main(argv: list[str] | None = None) -> int:
     if memory_summary is not None:
         summary["memory_poisoning"] = memory_summary
     paths = write_results(rows, summary, config.results_dir)
+    write_agent_abuse_iteration_report(rows=rows, summary=summary, outputs=paths, argv=argv)
     print(json.dumps({"summary": summary, "outputs": paths}, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

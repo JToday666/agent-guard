@@ -20,9 +20,13 @@ AttackType = Literal[
 
 
 class InputPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     source_type: str
     source_trust: str
     payload: str
+    naturalistic_payload: str | None = None
+    closure_payload: str | None = None
 
 
 class TargetBehavior(BaseModel):
@@ -52,6 +56,16 @@ class ToolPlanStep(BaseModel):
     source_feature: str | None = None
 
 
+class ClosurePlanStep(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    tool: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    purpose: str | None = None
+    source_feature: str | None = None
+    expected_result: dict[str, Any] | None = None
+
+
 class AttackCase(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -65,6 +79,9 @@ class AttackCase(BaseModel):
     expected_decision: Decision
     success_condition: SuccessCondition
     tool_plan: list[ToolPlanStep] = Field(default_factory=list)
+    guided_success_plan: list[ClosurePlanStep] = Field(default_factory=list)
+    closure_plan: list[ClosurePlanStep] = Field(default_factory=list)
+    closure_spec: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("runtime_targets")
