@@ -519,7 +519,13 @@ class RealBrowserRuntime:
         self._prepare_page_for_action(session)
         locator = self._locator(session, selector=selector).first
         target_position = self._center_locator(session, locator)
-        locator.fill(value)
+        if self._locator_tag_name(locator) == "select":
+            try:
+                locator.select_option(value=value)
+            except Exception:
+                locator.select_option(label=value)
+        else:
+            locator.fill(value)
         self._wait_after_action(session)
         screenshot = self._capture_step(
             session_id,
@@ -527,6 +533,12 @@ class RealBrowserRuntime:
             {"selector": selector, "value": value, "target_position": target_position},
         )
         return {"session_id": session_id, "selector": selector, "value": value, "real_browser": True, "step_screenshot": screenshot}
+
+    def _locator_tag_name(self, locator: Any) -> str:
+        try:
+            return str(locator.evaluate("(el) => (el.tagName || '').toLowerCase()") or "")
+        except Exception:
+            return ""
 
     def click(self, *, session_id: str, selector: str | None = None, text: str | None = None) -> dict[str, Any]:
         session = self._require_session(session_id)

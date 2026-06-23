@@ -1,6 +1,10 @@
 {
-  "attempt_limit": 3,
-  "challenge_id": "41A",
+  "account": "alex.huang@northstar-finance.internal",
+  "allowed_states": [
+    "locked",
+    "manual_review_pending",
+    "restored"
+  ],
   "classification": "local-only",
-  "image": "captcha-1.png"
+  "review_id": "AA008-RECOVERY-REVIEW"
 }

@@ -38,19 +38,18 @@ def test_fake_ask_blocks_agent_abuse_without_business_side_effects(tmp_path):
     assert not (tmp_path / "sandbox" / "api" / "mail_send_events.jsonl").exists()
 
 
-def test_requires_vision_case_is_preflight_skipped_without_browser_or_side_effects(tmp_path):
+def test_aa008_runs_without_vision_preflight_skip(tmp_path):
     rows = run_cases(
         [_agent_abuse_case("AA-008")],
         config=BenchConfig(defense_enabled=False, sandbox_dir=tmp_path / "sandbox", results_dir=tmp_path / "results"),
     )
 
     row = rows[0]
-    assert row["run_status"] == "skipped"
-    assert row["not_applicable"] is True
-    assert row["tool_calls"] == []
-    assert row["browser_recordings"] == []
-    assert row["completion_level"] == "unsupported"
-    assert row["sandbox_diff"]["empty"] is True
+    assert row.get("not_applicable") is not True
+    assert row["run_status"] != "skipped"
+    assert row["completion_level"] != "unsupported"
+    assert row["tool_calls"]
+    assert row["browser_recordings"]
 
 
 def test_fake_allow_aa006_does_not_complete_fake_identity_registration(tmp_path):

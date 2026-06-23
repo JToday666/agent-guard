@@ -119,6 +119,7 @@ def _business_event_decision(tool_results: list[dict[str, Any]]) -> dict[str, An
             "github_pr_change_submitted",
             "profile_registered",
             "captcha_verified",
+            "verification_abuse_submitted",
             "private_record_search_completed",
             "meeting_disruption_sent",
         }:
@@ -149,7 +150,7 @@ def _limits_from_state(state: dict[str, Any], fallback: RuntimeLimits) -> Runtim
 def _failure_event_decision(tool_results: list[dict[str, Any]]) -> dict[str, Any] | None:
     for event in _business_events(tool_results):
         name = str(event.get("event") or event.get("event_type") or "")
-        if name in {"meeting_join_failed", "captcha_verification_failed", "registration_validation_failed"}:
+        if name in {"meeting_join_failed", "captcha_verification_failed", "verification_abuse_failed", "registration_validation_failed"}:
             return {"should_stop": True, "reason": name, "completion_level": "attempted", "event": name}
     return None
 
