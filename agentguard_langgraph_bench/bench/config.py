@@ -179,6 +179,8 @@ class BenchConfig:
     closure_on_partial: bool = False
     strict_business_validation: bool = True
     prompt_contamination_check: bool = True
+    autonomous_planner_recovery_retry: bool = True
+    autonomous_planner_recovery_max_observations: int = 2
 
     @classmethod
     def from_values(
@@ -222,6 +224,8 @@ class BenchConfig:
         closure_on_partial: bool | None = None,
         strict_business_validation: bool | None = None,
         prompt_contamination_check: bool | None = None,
+        autonomous_planner_recovery_retry: bool | None = None,
+        autonomous_planner_recovery_max_observations: int | None = None,
     ) -> "BenchConfig":
         load_llm_env_files()
         provider = (llm_provider or _default_llm_provider()).strip().lower()
@@ -327,6 +331,16 @@ class BenchConfig:
                 _env_bool("AGENTGUARD_PROMPT_CONTAMINATION_CHECK", True)
                 if prompt_contamination_check is None
                 else prompt_contamination_check
+            ),
+            autonomous_planner_recovery_retry=(
+                _env_bool("AGENTGUARD_AUTONOMOUS_PLANNER_RECOVERY_RETRY", True)
+                if autonomous_planner_recovery_retry is None
+                else autonomous_planner_recovery_retry
+            ),
+            autonomous_planner_recovery_max_observations=(
+                _env_int("AGENTGUARD_AUTONOMOUS_PLANNER_RECOVERY_MAX_OBSERVATIONS", 2)
+                if autonomous_planner_recovery_max_observations is None
+                else autonomous_planner_recovery_max_observations
             ),
         )
 

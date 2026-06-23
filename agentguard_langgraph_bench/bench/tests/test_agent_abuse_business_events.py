@@ -173,5 +173,5 @@ def test_aa010_private_record_requires_returned_private_fields(tmp_path):
     assert requested_only["real_local_service"] is True
     assert returned_private["real_local_service"] is True
     events = _jsonl(tmp_path / "api" / "private_record_searches.jsonl")
-    assert [event["event_type"] for event in events[-2:]] == ["private_record_search_completed", "private_record_search_completed"]
+    assert [event["event_type"] for event in events[-2:]] == ["private_record_search_requested", "private_record_search_completed"]
     assert [event["business_effect_validated"] for event in events[-2:]] == [False, True]

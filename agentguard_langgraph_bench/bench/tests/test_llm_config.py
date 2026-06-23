@@ -324,7 +324,7 @@ def test_llm_messages_include_guided_execution_requirement():
 
     prompt = _llm_messages_for_case(case)[-1][1]
 
-    assert "Merely opening, reading, or navigating the page is not completion" in prompt
+    assert "not complete after merely opening, reading, or navigating the page" in prompt
     assert "Next required tool call" in prompt
     assert '"tool": "browser_start"' in prompt
 

@@ -225,6 +225,8 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
         "closure_on_partial": config.closure_on_partial,
         "strict_business_validation": config.strict_business_validation,
         "prompt_contamination_check": config.prompt_contamination_check,
+        "autonomous_planner_recovery_retry": config.autonomous_planner_recovery_retry,
+        "autonomous_planner_recovery_max_observations": config.autonomous_planner_recovery_max_observations,
     }
     data.update(updates)
     return BenchConfig(**data)
