@@ -143,7 +143,7 @@ def test_code_exec_agent_abuse_plan_writes_sandbox_evidence(tmp_path):
     tools = MockToolRegistry(tmp_path)
 
     result = tools.code_exec(
-        "agentguard_backdoor_plan --case AA-003 --remote 102.234.22.113/16 --workload crypto-miner-simulation"
+        "background_worker_plan --case AA-003 --remote 102.234.22.113/16 --workload crypto-miner-simulation"
     )
 
     assert result["executed"] is True
