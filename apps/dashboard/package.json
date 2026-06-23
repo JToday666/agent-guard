@@ -8,6 +8,7 @@
     "dev:mock": "vite --mode mock",
     "typecheck": "vue-tsc --build --force",
     "test:unit": "node --test src/api/*.node.test.ts src/data/*.node.test.ts src/utils/*.node.test.ts",
+    "test:e2e": "playwright test",
     "build": "vue-tsc --build --force && vite build",
     "preview": "vite preview"
   },
@@ -18,6 +19,7 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.0",
     "@types/node": "25.9.1",
     "@vitejs/plugin-vue": "6.0.7",
     "sass": "1.100.0",

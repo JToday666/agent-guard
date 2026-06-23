@@ -55,8 +55,9 @@
         </section>
 
         <nav class="evidence-links" aria-label="关联证据">
-          <RouterLink :to="`/traces/${selectedApproval.traceId}`">查看 Trace</RouterLink>
-          <RouterLink v-if="selectedApproval.eventId" :to="`/events?event_id=${selectedApproval.eventId}`">查看事件</RouterLink>
+          <RouterLink v-if="selectedApprovalRoutes" :to="selectedApprovalRoutes.trace">查看完整 Trace</RouterLink>
+          <RouterLink v-if="selectedApprovalRoutes?.event" :to="selectedApprovalRoutes.event">定位关联事件</RouterLink>
+          <span v-else class="evidence-links__unavailable">未提供事件定位信息</span>
         </nav>
 
         <section v-if="confirmAllow" class="allow-confirm" role="alertdialog" aria-labelledby="allow-confirm-title">
@@ -76,7 +77,7 @@
       </article>
     </div>
     <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的工具动作。">
-      <RouterLink to="/events">查看审计事件</RouterLink>
+      <RouterLink to="/investigations">查看调查事件</RouterLink>
     </EmptyState>
   </section>
 </template>
@@ -92,6 +93,7 @@ import LoadingState from "../components/States/LoadingState.vue";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ApprovalRequest } from "../types/dashboard";
+import { getApprovalEvidenceRoutes } from "../utils/approval-evidence-route";
 import {
   formatDashboardDateTime,
   getRiskSeverityLabel,
@@ -113,6 +115,9 @@ const requestedId = computed(() => typeof route.params.approval_id === "string" 
 const selectedApproval = computed(() => requestedId.value
   ? sortedApprovals.value.find((approval) => approval.id === requestedId.value) ?? sortedApprovals.value[0]
   : sortedApprovals.value[0]);
+const selectedApprovalRoutes = computed(() => selectedApproval.value
+  ? getApprovalEvidenceRoutes(selectedApproval.value)
+  : null);
 const isSubmitting = computed(() => store.submittingApprovalId === selectedApproval.value?.id);
 const isExpired = computed(() => {
   const expiresAt = selectedApproval.value?.expiresAt;
@@ -128,13 +133,14 @@ const resolutionDisabledReason = computed(() => {
 const canResolveApproval = computed(() => Boolean(selectedApproval.value) && !resolutionDisabledReason.value);
 const approvalIds = computed(() => sortedApprovals.value.map((approval) => approval.id).join("\u0000"));
 watch([requestedId, approvalIds, () => store.status], () => {
+  if (route.name !== "approvals") return;
   if (store.status === "idle" || store.status === "loading") return;
   const firstApprovalId = sortedApprovals.value[0]?.id;
   if (!firstApprovalId) {
     if (requestedId.value) void router.replace("/approvals");
     return;
   }
-  if (!requestedId.value || !store.approvals.some((approval) => approval.id === requestedId.value)) {
+  if (requestedId.value && !store.approvals.some((approval) => approval.id === requestedId.value)) {
     void router.replace(`/approvals/${firstApprovalId}`);
   }
 }, { immediate: true });
@@ -164,16 +170,16 @@ function formatRelativeExpiry(value?: string | null) {
 .approvals-page { display: grid; gap: var(--space-5); }
 .approval-header-status { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .approvals-layout { display: grid; gap: var(--space-4); grid-template-columns: minmax(17rem, 21rem) minmax(0, 1fr); }
-.approval-queue { align-content: start; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-2); padding: var(--space-3); }
+.approval-queue { align-content: start; border-right: 1px solid var(--color-border); display: grid; gap: 0; padding-right: var(--space-4); }
 .approval-queue > header { padding: var(--space-2); }
 .approval-queue > header small { color: var(--color-text-subtle); display: block; margin-top: var(--space-1); }
-.approval-queue > button { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text); cursor: pointer; display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-3); text-align: left; }
-.approval-queue > button:hover { background: var(--color-row-hover); border-color: var(--color-active-border); }
-.approval-queue > button.approval-queue__item--active { background: var(--color-danger-soft); border-color: var(--color-danger-border); box-shadow: inset 3px 0 var(--color-danger); }
+.approval-queue > button { background: transparent; border: 0; border-bottom: 1px solid var(--color-border); color: var(--color-text); cursor: pointer; display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-4) var(--space-3); text-align: left; }
+.approval-queue > button:hover { background: var(--color-row-hover); }
+.approval-queue > button.approval-queue__item--active { background: var(--color-danger-soft); box-shadow: inset 3px 0 var(--color-danger); }
 .approval-queue__top { align-items: center; display: flex; justify-content: space-between; }
 .approval-queue__top time, .approval-queue > button small { color: var(--color-text-subtle); font-size: var(--font-size-11); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .approval-queue__score { color: var(--color-danger); font-size: var(--font-size-12); font-weight: var(--font-weight-bold); }
-.approval-detail { align-content: start; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-5); min-width: 0; padding: var(--space-5); }
+.approval-detail { align-content: start; display: grid; gap: var(--space-5); min-width: 0; }
 .approval-detail__header { align-items: start; display: flex; justify-content: space-between; }
 .approval-detail__header p, .approval-detail__header h2 { margin: 0; }
 .approval-detail__header p { color: var(--color-text-subtle); font-size: var(--font-size-12); }
@@ -191,16 +197,17 @@ function formatRelativeExpiry(value?: string | null) {
 .approval-evidence p { color: var(--color-text-muted); margin: var(--space-1) 0 0; }
 .evidence-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .evidence-links a { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text); padding: var(--space-2) var(--space-3); text-decoration: none; }
+.evidence-links__unavailable { align-self: center; color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .allow-confirm { align-items: center; background: var(--color-warning-soft); border: 1px solid var(--color-warning-border); border-radius: var(--radius-2); display: grid; gap: var(--space-3); grid-template-columns: 1fr auto auto; padding: var(--space-3); }
 .allow-confirm p { color: var(--color-text-muted); margin: var(--space-1) 0 0; }
 .allow-confirm button, .approval-actions button { border: 1px solid var(--color-border); border-radius: var(--radius-2); cursor: pointer; min-height: 2.5rem; padding: 0 var(--space-4); }
-.approval-actions { align-items: center; border-top: 1px solid var(--color-border); display: flex; gap: var(--space-3); justify-content: flex-end; padding-top: var(--space-4); }
+.approval-actions { align-items: center; background: rgb(244 247 251 / .94); border-top: 1px solid var(--color-border); bottom: 0; display: flex; gap: var(--space-3); justify-content: flex-end; margin-inline: calc(-1 * var(--space-2)); padding: var(--space-4) var(--space-2); position: sticky; }
 .approval-actions span { color: var(--color-text-muted); margin-right: auto; }
 .approval-disabled-reason { color: var(--color-warning) !important; font-size: var(--font-size-12); }
 .approval-actions button:disabled, .allow-confirm button:disabled { cursor: not-allowed; opacity: 0.55; }
 .button-secondary { background: var(--color-surface-muted); color: var(--color-text); }
 .button-warning { background: var(--color-warning); border-color: var(--color-warning) !important; color: var(--color-active-text); }
 .button-danger { background: var(--color-danger); border-color: var(--color-danger) !important; color: var(--color-active-text); font-weight: var(--font-weight-bold); }
-@media (max-width: 820px) { .approvals-layout { grid-template-columns: 1fr; } .approval-queue { max-height: 20rem; overflow: auto; } }
+@media (max-width: 820px) { .approvals-layout { grid-template-columns: 1fr; } .approval-queue { border-bottom: 1px solid var(--color-border); border-right: 0; max-height: 20rem; overflow: auto; padding: 0 0 var(--space-4); } }
 @media (max-width: 600px) { .evidence-grid { grid-template-columns: 1fr; } .allow-confirm { grid-template-columns: 1fr 1fr; } .allow-confirm > div { grid-column: 1 / -1; } .approval-actions { align-items: stretch; flex-direction: column; } .approval-actions span { margin: 0; } }
 </style>

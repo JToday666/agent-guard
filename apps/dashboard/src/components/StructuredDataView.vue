@@ -1,0 +1,63 @@
+<template>
+  <section class="structured-data" aria-labelledby="structured-data-title">
+    <header>
+      <h3 id="structured-data-title">结构化原始数据</h3>
+      <button type="button" @click="handleCopy">{{ copyLabel }}</button>
+    </header>
+    <dl v-if="entries.length" class="structured-data__summary">
+      <div v-for="entry in entries" :key="entry.key">
+        <dt>{{ entry.key }}</dt>
+        <dd>{{ entry.value }}</dd>
+      </div>
+    </dl>
+    <details>
+      <summary>查看完整 JSON</summary>
+      <pre>{{ serializedValue }}</pre>
+    </details>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from "vue";
+
+import { serializeStructuredData } from "../utils/structured-data";
+
+defineOptions({ name: "StructuredDataView" });
+const props = defineProps<{ value: unknown }>();
+const copyLabel = ref("复制 JSON");
+const serializedValue = computed(() => serializeStructuredData(props.value));
+const entries = computed(() => {
+  if (!props.value || typeof props.value !== "object" || Array.isArray(props.value)) return [];
+  return Object.entries(props.value as Record<string, unknown>)
+    .slice(0, 8)
+    .map(([key, value]) => ({
+      key,
+      value: typeof value === "object" && value !== null
+        ? Array.isArray(value) ? `${value.length} 项` : `${Object.keys(value).length} 个字段`
+        : String(value ?? "null"),
+    }));
+});
+
+async function handleCopy(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(serializedValue.value);
+    copyLabel.value = "已复制";
+  } catch {
+    copyLabel.value = "复制失败";
+  }
+  window.setTimeout(() => { copyLabel.value = "复制 JSON"; }, 1600);
+}
+</script>
+
+<style scoped lang="scss">
+.structured-data { border-top: 1px solid var(--color-border); display: grid; gap: var(--space-3); padding-top: var(--space-4); }
+.structured-data header { align-items: center; display: flex; justify-content: space-between; }
+.structured-data h3 { font-size: var(--font-size-14); margin: 0; }
+.structured-data button { background: transparent; border: 0; color: var(--color-link); cursor: pointer; font-size: var(--font-size-12); }
+.structured-data__summary { display: grid; gap: 1px; margin: 0; }
+.structured-data__summary > div { background: var(--color-surface-muted); display: grid; gap: var(--space-3); grid-template-columns: minmax(6rem, .45fr) minmax(0, 1fr); padding: var(--space-2) var(--space-3); }
+.structured-data dt { color: var(--color-text-subtle); font-size: var(--font-size-12); overflow-wrap: anywhere; }
+.structured-data dd { margin: 0; overflow-wrap: anywhere; }
+.structured-data summary { color: var(--color-link); cursor: pointer; font-weight: var(--font-weight-semibold); }
+.structured-data pre { background: #0f172a; border-radius: var(--radius-2); color: #dbeafe; font-size: var(--font-size-12); margin: var(--space-3) 0 0; max-height: 22rem; overflow: auto; padding: var(--space-4); white-space: pre-wrap; }
+</style>
