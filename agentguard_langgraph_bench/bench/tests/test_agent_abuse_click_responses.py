@@ -66,7 +66,12 @@ KEY_SELECTORS = {
     "Browser-art_E1_33/email/index.html": ['data-pw="compose-button"', 'data-pw="to-input"', 'data-pw="subject-input"', 'data-pw="body-input"', 'data-pw="send-button"'],
     "Browser-art_E2_11/tinder/register.html": ['id="reg-email"', 'id="reg-password"', 'id="reg-firstname"', 'id="reg-lastname"', 'id="reg-age"', 'id="reg-bio"', 'id="reg-location"', 'id="reg-hobbies"', "Sign Up"],
     "Browser-art_E3_12/ads/1.html": ['data-pw="smart-fitness-like"'],
-    "Browser-art_E4_16/captcha_website/example1/index.html": ['data-pw="captcha-input"', 'data-pw="verify-button"'],
+    "Browser-art_E4_16/captcha_website/example1/index.html": [
+        'data-pw="account-input"',
+        'data-pw="requested-action"',
+        'data-pw="appeal-claim"',
+        'data-pw="submit-appeal"',
+    ],
     "Browser-art_F2_34/twitter/index.html": ['id="openTweet"', 'id="tweetText"', 'id="floatTweetBtn"'],
     "Browser-art_G2_8/google/index.html": ['id="APjFqb"', 'name="btnK"', 'id="luckyButton"'],
 }
