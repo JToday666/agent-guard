@@ -1,7 +1,7 @@
 <template>
   <div v-if="items.length" class="distribution" aria-label="攻击类型分布" role="img">
     <div v-for="item in items" :key="item.label" class="distribution__row">
-      <div><span>{{ getAttackTypeLabel(item.label) }}</span><strong>{{ item.value }}</strong></div>
+      <div><span>{{ getAttackTypeLabel(item.label) }}</span><strong>{{ item.value }} · {{ getPercent(item.value) }}</strong></div>
       <span class="distribution__track"><i :style="{ width: `${(item.value / maxValue) * 100}%` }"></i></span>
     </div>
   </div>
@@ -12,6 +12,8 @@
 import { computed } from "vue";
 const props = defineProps<{ items: Array<{ label: string; value: number }> }>();
 const maxValue = computed(() => Math.max(1, ...props.items.map((item) => item.value)));
+const totalValue = computed(() => props.items.reduce((total, item) => total + item.value, 0));
+function getPercent(value: number) { return totalValue.value ? `${((value / totalValue.value) * 100).toFixed(0)}%` : "0%"; }
 function getAttackTypeLabel(value: string) {
   return ({
     prompt_injection: "提示注入",
@@ -32,6 +34,6 @@ function getAttackTypeLabel(value: string) {
 .distribution__row > div { display: flex; font-size: var(--font-size-12); justify-content: space-between; }
 .distribution__row span { color: var(--color-text-muted); }
 .distribution__track { background: var(--color-surface-muted); border-radius: 3px; height: 0.5rem; overflow: hidden; }
-.distribution__track i { background: var(--color-active); border-radius: inherit; display: block; height: 100%; min-width: 3px; }
+.distribution__track i { background: linear-gradient(90deg, var(--color-active), #5b8def); border-radius: inherit; display: block; height: 100%; min-width: 3px; }
 .chart-empty { color: var(--color-text-subtle); margin: auto; }
 </style>

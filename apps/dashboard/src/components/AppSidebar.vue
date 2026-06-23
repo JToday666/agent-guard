@@ -50,10 +50,9 @@
 
 <script setup lang="ts">
 import {
-  Activity,
   ChartNoAxesColumn,
   CircleCheckBig,
-  GitBranch,
+  ScanSearch,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
@@ -80,7 +79,7 @@ const navigationGroups = computed(() => [
     label: "监控",
     items: [
       { icon: LayoutDashboard, label: "总览", to: "/overview" },
-      { icon: Activity, label: "事件", to: "/events" },
+      { icon: ScanSearch, label: "调查", to: "/investigations" },
       {
         count: props.pendingCount,
         icon: CircleCheckBig,
@@ -88,7 +87,6 @@ const navigationGroups = computed(() => [
         meta: `${props.pendingCount} 待处理`,
         to: "/approvals",
       },
-      { icon: GitBranch, label: "链路", to: "/traces" },
     ],
   },
   {
@@ -106,11 +104,14 @@ const navigationGroups = computed(() => [
 
 <style scoped lang="scss">
 .sidebar {
-  background: var(--color-nav);
+  align-self: start;
+  background: rgb(255 255 255 / 0.72);
   border-right: 1px solid var(--color-border);
-  box-shadow: var(--shadow-subtle);
-  min-height: calc(100vh - var(--top-bar-height));
-  padding: var(--space-4);
+  height: calc(100vh - var(--top-bar-height));
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-3);
+  position: sticky;
+  top: var(--top-bar-height);
 }
 
 .sidebar__header {
@@ -132,7 +133,7 @@ const navigationGroups = computed(() => [
   align-items: center;
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   color: var(--color-text-muted);
   cursor: pointer;
   display: inline-flex;
@@ -172,7 +173,7 @@ const navigationGroups = computed(() => [
 
 .sidebar__link {
   align-items: center;
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   color: var(--color-text-muted);
   display: grid;
   gap: var(--space-2);
@@ -183,7 +184,7 @@ const navigationGroups = computed(() => [
   text-decoration: none;
 
   &:hover {
-    background: var(--color-row-hover);
+    background: var(--color-active-soft);
     color: var(--color-text);
   }
 
@@ -227,17 +228,17 @@ const navigationGroups = computed(() => [
 }
 
 .sidebar__link.router-link-active {
-  background: var(--color-active);
-  color: var(--color-active-text);
-  box-shadow: var(--shadow-subtle);
+  background: var(--color-active-soft);
+  box-shadow: inset 2px 0 var(--color-active);
+  color: var(--color-active);
   font-weight: var(--font-weight-bold);
 
   small {
-    color: rgb(255 255 255 / 0.78);
+    color: var(--color-active);
   }
 
   .sidebar__badge {
-    border-color: var(--color-active);
+    border-color: var(--color-active-soft);
     color: #ffffff !important;
   }
 }
@@ -285,10 +286,13 @@ const navigationGroups = computed(() => [
 
 @media (max-width: 768px) {
   .sidebar {
+    align-self: auto;
     border-bottom: 1px solid var(--color-border);
     border-right: 0;
-    min-height: auto;
+    height: auto;
+    overflow: visible;
     padding: var(--space-3);
+    position: static;
   }
 
   .sidebar__header {

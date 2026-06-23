@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { dashboardEnv } from "../config/dashboard-env";
 import { dashboardDataSource } from "../data/dashboard-data-source-instance";
 import { deriveMetrics, groupDecisionTrend } from "../data/dashboard-metrics";
+import { buildInvestigationIndex } from "../data/investigation-index";
 import {
   getRefreshFailureStatus,
   shouldEnterInitialLoading,
@@ -82,9 +83,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
       })),
     ),
   );
+  const investigationIndex = computed(() => buildInvestigationIndex(events.value));
   const attackDistribution = computed(() => {
     const counts = new Map<string, number>();
-    for (const event of events.value) {
+    for (const event of investigationIndex.value.latestEvents) {
       const key =
         event.attackType ||
         (event.caseId?.startsWith("BENIGN") ? "benign" : "unknown");
@@ -95,33 +97,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
       .sort((left, right) => right.value - left.value);
   });
   const traces = computed<TraceSummary[]>(() => {
-    const grouped = new Map<string, AuditEventRow[]>();
-    for (const event of events.value) {
-      grouped.set(event.traceId, [
-        ...(grouped.get(event.traceId) ?? []),
-        event,
-      ]);
-    }
-    return [...grouped.entries()]
+    return [...investigationIndex.value.byTrace.entries()]
       .map(([id, rows]): TraceSummary => {
-        const ordered = [...rows].sort(
-          (left, right) =>
-            Date.parse(left.occurredAt) - Date.parse(right.occurredAt),
-        );
-        const last = ordered.at(-1)!;
-        const isDenied = ordered.some((event) => event.decision === "deny");
+        const last = rows.at(-1)!;
+        const isDenied = rows.some((event) => event.decision === "deny");
         const isPaused =
-          !isDenied && ordered.some((event) => event.decision === "ask");
+          !isDenied && rows.some((event) => event.decision === "ask");
         return {
           id,
           lastEventAt: last.occurredAt,
           caseId: last.caseId ?? "未提供",
           title: last.reason,
           status: isDenied ? "blocked" : isPaused ? "paused" : "allowed",
-          nodes: ordered.map(
-            (event) => `${event.stage} · ${event.tool} · ${event.decision}`,
-          ),
-          eventId: last.id,
           approvalId: last.approvalId,
         };
       })
@@ -293,6 +280,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     submittingApprovalId,
     pendingCount,
     decisionTrend,
+    investigationIndex,
     attackDistribution,
     traces,
     dataSourceMode: dashboardEnv.dataSource,

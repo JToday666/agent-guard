@@ -58,8 +58,6 @@ export interface TraceSummary {
   caseId: string;
   title: string;
   status: "blocked" | "paused" | "allowed";
-  nodes: string[];
-  eventId: string;
   approvalId?: string;
 }
 

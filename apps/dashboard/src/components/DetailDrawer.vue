@@ -1,12 +1,14 @@
 <template>
   <aside
     v-if="isOpen"
+    ref="drawerElement"
     aria-labelledby="detail-drawer-title"
     :aria-modal="isMobile"
     class="detail-drawer"
     role="dialog"
     tabindex="-1"
     @keydown.esc.prevent="emit('close')"
+    @keydown.tab="handleTabKey"
   >
     <header class="detail-drawer__header">
       <div>
@@ -48,12 +50,30 @@ const props = defineProps<{
 }>();
 
 const closeButtonElement = ref<HTMLButtonElement | null>(null);
+const drawerElement = ref<HTMLElement | null>(null);
 const isMobile = ref(false);
 let restoreFocusElement: HTMLElement | null = null;
 let mobileQuery: MediaQueryList | null = null;
 
 function syncMobileState(event: MediaQueryList | MediaQueryListEvent): void {
   isMobile.value = event.matches;
+}
+
+function handleTabKey(event: KeyboardEvent): void {
+  if (!isMobile.value || !drawerElement.value) return;
+  const focusableElements = [...drawerElement.value.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )];
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements.at(-1);
+  if (!firstElement || !lastElement) return;
+  if (event.shiftKey && document.activeElement === firstElement) {
+    event.preventDefault();
+    lastElement.focus();
+  } else if (!event.shiftKey && document.activeElement === lastElement) {
+    event.preventDefault();
+    firstElement.focus();
+  }
 }
 
 onMounted(() => {
