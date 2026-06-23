@@ -4,14 +4,6 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 
-import ApprovalsPage from "../pages/ApprovalsPage.vue";
-import EvaluationPage from "../pages/EvaluationPage.vue";
-import EventsPage from "../pages/EventsPage.vue";
-import OverviewPage from "../pages/OverviewPage.vue";
-import SystemPage from "../pages/SystemPage.vue";
-import TraceDetailPage from "../pages/TraceDetailPage.vue";
-import TracesPage from "../pages/TracesPage.vue";
-
 export type DashboardRouteGroup = "monitor" | "evaluation" | "operations";
 export type DashboardRouteRole = "viewer" | "approver" | "operator";
 
@@ -31,21 +23,9 @@ export const routes: RouteRecordRaw[] = [
     redirect: "/overview",
   },
   {
-    path: "/events",
-    name: "events",
-    component: EventsPage,
-    meta: {
-      group: "monitor",
-      keepAlive: true,
-      label: "事件",
-      requiredRole: "viewer",
-      requiresAuth: false,
-    },
-  },
-  {
     path: "/overview",
     name: "overview",
-    component: OverviewPage,
+    component: () => import("../pages/OverviewPage.vue"),
     meta: {
       group: "monitor",
       keepAlive: true,
@@ -57,7 +37,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/approvals/:approval_id?",
     name: "approvals",
-    component: ApprovalsPage,
+    component: () => import("../pages/ApprovalsPage.vue"),
     meta: {
       group: "monitor",
       keepAlive: true,
@@ -67,25 +47,25 @@ export const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: "/traces",
-    name: "traces",
-    component: TracesPage,
+    path: "/investigations",
+    name: "investigations",
+    component: () => import("../pages/InvestigationsPage.vue"),
     meta: {
       group: "monitor",
       keepAlive: true,
-      label: "链路",
+      label: "调查",
       requiredRole: "viewer",
       requiresAuth: false,
     },
   },
   {
-    path: "/traces/:trace_id",
-    name: "trace-detail",
-    component: TraceDetailPage,
+    path: "/investigations/:trace_id",
+    name: "investigation-detail",
+    component: () => import("../pages/InvestigationDetailPage.vue"),
     meta: {
       group: "monitor",
       keepAlive: true,
-      label: "链路详情",
+      label: "调查详情",
       requiredRole: "viewer",
       requiresAuth: false,
     },
@@ -93,7 +73,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/evaluation",
     name: "evaluation",
-    component: EvaluationPage,
+    component: () => import("../pages/EvaluationPage.vue"),
     meta: {
       group: "evaluation",
       keepAlive: true,
@@ -105,7 +85,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/system",
     name: "system",
-    component: SystemPage,
+    component: () => import("../pages/SystemPage.vue"),
     meta: {
       group: "operations",
       keepAlive: true,

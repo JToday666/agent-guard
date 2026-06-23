@@ -18,6 +18,7 @@ AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取 Core 
 ```bash
 pnpm dashboard:dev
 pnpm dashboard:dev:mock
+pnpm dashboard:test:e2e
 pnpm dashboard:typecheck
 pnpm dashboard:build
 pnpm --filter @agentguard/dashboard test:unit
@@ -42,7 +43,25 @@ Mock 模式不需要启动 PostgreSQL 或 Guard API。在仓库根目录执行�
 pnpm dashboard:dev:mock
 ```
 
-打开终端显示的访问地址，默认是 `http://localhost:5173/`。页面会直接进入本地场景，能够查看事件、审批、链路和指标。Mock 模式不启动 PostgreSQL 或 Guard API，也不建立 browser session。
+打开终端显示的访问地址，默认是 `http://localhost:5173/`。页面会直接进入本地场景，能够查看调查、审批、Trace 和指标。Mock 模式不启动 PostgreSQL 或 Guard API，也不建立 browser session。
+
+## 浏览器测试
+
+首次准备环境时，安装固定版本的 Playwright 依赖、Chromium 和浏览器所需系统库：
+
+```bash
+pnpm --filter @agentguard/dashboard add -D -E @playwright/test
+pnpm --filter @agentguard/dashboard exec playwright install chromium
+pnpm --filter @agentguard/dashboard exec playwright install-deps chromium
+```
+
+依赖版本记录在 `package.json` 和 `pnpm-lock.yaml`；Chromium 位于用户缓存，系统库由操作系统包管理器维护。完成一次环境准备后，日常从仓库根目录运行：
+
+```bash
+pnpm dashboard:test:e2e
+```
+
+测试使用 mock 数据，在 Chromium 中覆盖桌面、平板和手机视口，不需要启动 Guard API。
 
 ## API 模式联调
 
@@ -75,9 +94,9 @@ Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批和健
 ## 比赛演示路径
 
 1. 总览确认 Guard API、指标和数据更新时间。
-2. 事件页查看阻断原因、命中规则、资源与 Trace ID。
+2. 调查页查看阻断原因、命中规则、资源与 Trace ID。
 3. 审批中心处理 `ask`，仅支持 `allow_once` 和 `deny`。
-4. 链路页按真实 AuditEvent 的 `trace_id` 展示证据序列。
+4. 调查详情按真实 AuditEvent 的 `trace_id` 展示证据序列。
 5. 评测页展示 ASR、Block Rate、FPR 和判定延迟；API 未提供的指标显示 `--`。
 
 ## 目录

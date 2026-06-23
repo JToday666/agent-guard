@@ -6,6 +6,14 @@ import type {
 
 export type StatusBadgeTone = "neutral" | "success" | "warning" | "danger";
 
+const dashboardDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
 export function getDecisionLabel(decision: DecisionStatus): string {
   if (decision === "deny") return "拒绝";
   if (decision === "ask") return "审批";
@@ -48,11 +56,5 @@ export function getTraceStatusTone(
 export function formatDashboardDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date);
+  return dashboardDateTimeFormatter.format(date);
 }

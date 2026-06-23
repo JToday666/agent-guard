@@ -1,48 +1,63 @@
 <template>
-  <div class="trend-chart">
-    <div class="chart-key" aria-label="图例">
-      <span><i class="key-allow"></i>放行</span>
-      <span><i class="key-ask"></i>审批</span>
-      <span><i class="key-deny"></i>拒绝</span>
-    </div>
-    <div v-if="points.length" class="trend-bars" :aria-label="summary" role="img">
-      <div v-for="point in points" :key="point.label" class="trend-group">
-        <div class="trend-group__bars">
-          <span class="bar bar--allow" :style="getBarHeightStyle(point.allow)" :title="`${point.label} 放行 ${point.allow}`"></span>
-          <span class="bar bar--ask" :style="getBarHeightStyle(point.ask)" :title="`${point.label} 审批 ${point.ask}`"></span>
-          <span class="bar bar--deny" :style="getBarHeightStyle(point.deny)" :title="`${point.label} 拒绝 ${point.deny}`"></span>
-        </div>
-        <small>{{ point.label }}</small>
-      </div>
-    </div>
+  <figure class="trend-chart">
+    <svg v-if="points.length" viewBox="0 0 720 240" role="img" :aria-label="summary" preserveAspectRatio="xMidYMid meet">
+      <g class="grid-lines" aria-hidden="true"><line v-for="y in [24, 72, 120, 168, 216]" :key="y" x1="24" :y1="y" x2="650" :y2="y" /></g>
+      <polyline v-for="series in chartSeries" :key="series.label" :class="series.className" :points="series.points" fill="none" vector-effect="non-scaling-stroke" />
+      <g v-for="series in chartSeries" :key="`${series.label}-label`" :class="series.className">
+        <circle :cx="series.lastX" :cy="series.lastY" r="4" vector-effect="non-scaling-stroke" />
+        <line class="label-connector" :x1="series.lastX + 6" :y1="series.lastY" x2="660" :y2="series.labelY" vector-effect="non-scaling-stroke" />
+        <text x="665" :y="series.labelY + 4">{{ series.label }} {{ series.lastValue }}</text>
+      </g>
+      <g class="x-labels"><text v-for="label in xLabels" :key="label.text" :x="label.x" y="236" text-anchor="middle">{{ label.text }}</text></g>
+    </svg>
     <p v-else class="chart-empty">暂无可绘制的时间序列</p>
-  </div>
+    <figcaption v-if="points.length">最新时间段：放行 {{ latest.allow }}、审批 {{ latest.ask }}、拒绝 {{ latest.deny }}</figcaption>
+  </figure>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
 import type { DecisionTrendPoint } from "../../types/dashboard";
 const props = defineProps<{ points: DecisionTrendPoint[] }>();
+const latest = computed(() => props.points.at(-1) ?? { allow: 0, ask: 0, deny: 0, label: "" });
 const maxValue = computed(() => Math.max(1, ...props.points.flatMap((point) => [point.allow, point.ask, point.deny])));
-const summary = computed(() => `决策趋势，共 ${props.points.length} 个时间段`);
-function getBarHeightStyle(value: number) { return { height: `${Math.max(value ? 10 : 2, (value / maxValue.value) * 100)}%` }; }
+const xStep = computed(() => props.points.length > 1 ? 626 / (props.points.length - 1) : 0);
+const xLabels = computed(() => props.points.map((point, index) => ({ text: point.label, x: 24 + index * xStep.value })));
+const chartSeries = computed(() => {
+  const seriesItems = ([
+  { className: "series-allow", key: "allow", label: "放行" },
+  { className: "series-ask", key: "ask", label: "审批" },
+  { className: "series-deny", key: "deny", label: "拒绝" },
+] as const).map((series) => {
+  const coordinates = props.points.map((point, index) => ({ x: 24 + index * xStep.value, y: 216 - (point[series.key] / maxValue.value) * 192 }));
+  const last = coordinates.at(-1) ?? { x: 24, y: 216 };
+    return { ...series, labelY: last.y, lastValue: latest.value[series.key], lastX: last.x, lastY: last.y, points: coordinates.map((point) => `${point.x},${point.y}`).join(" ") };
+  });
+  const sortedItems = [...seriesItems].sort((left, right) => left.lastY - right.lastY);
+  let previousLabelY = -16;
+  for (const item of sortedItems) {
+    item.labelY = Math.max(item.lastY, previousLabelY + 16);
+    previousLabelY = item.labelY;
+  }
+  const overflow = Math.max(0, previousLabelY - 210);
+  for (const item of sortedItems) item.labelY -= overflow;
+  return seriesItems;
+});
+const summary = computed(() => `决策趋势，共 ${props.points.length} 个时间段。最新：放行 ${latest.value.allow}，审批 ${latest.value.ask}，拒绝 ${latest.value.deny}`);
 </script>
 
 <style scoped lang="scss">
-.trend-chart { display: grid; gap: var(--space-4); min-height: 13rem; }
-.chart-key { display: flex; flex-wrap: wrap; gap: var(--space-4); }
-.chart-key span { align-items: center; color: var(--color-text-muted); display: inline-flex; font-size: var(--font-size-12); gap: var(--space-2); }
-.chart-key i { border-radius: 2px; height: 0.55rem; width: 0.55rem; }
-.key-allow { background: var(--color-active); }
-.key-ask { background: var(--color-warning); }
-.key-deny { background: var(--color-danger); }
-.trend-bars { align-items: end; border-bottom: 1px solid var(--color-border); display: flex; gap: var(--space-3); height: 9rem; padding: var(--space-2) var(--space-2) 0; }
-.trend-group { display: grid; flex: 1 1 0; gap: var(--space-2); height: 100%; min-width: 2.5rem; }
-.trend-group__bars { align-items: end; display: flex; gap: 3px; height: calc(100% - 1.5rem); justify-content: center; }
-.bar { border-radius: 3px 3px 0 0; flex: 1 1 0; max-width: 1rem; min-height: 2px; }
-.bar--allow { background: var(--color-active); }
-.bar--ask { background: var(--color-warning); }
-.bar--deny { background: var(--color-danger); }
-.trend-group small { color: var(--color-text-subtle); font-size: var(--font-size-11); text-align: center; }
-.chart-empty { color: var(--color-text-subtle); margin: auto; }
+.trend-chart { display: grid; gap: var(--space-2); margin: 0; min-height: 15rem; }
+.trend-chart svg { height: 15rem; overflow: visible; width: 100%; }
+.grid-lines line { stroke: var(--color-border); stroke-width: 1; }
+.trend-chart polyline { stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; }
+.label-connector { opacity: .45; stroke-width: 1; }
+.trend-chart circle { fill: var(--color-surface); stroke-width: 2; }
+.series-allow { fill: var(--color-active); stroke: var(--color-active); }
+.series-ask { fill: var(--color-warning); stroke: var(--color-warning); }
+.series-deny { fill: var(--color-danger); stroke: var(--color-danger); }
+.trend-chart text { font-size: 11px; font-weight: var(--font-weight-semibold); }
+.x-labels { fill: var(--color-text-subtle); stroke: none; }
+.trend-chart figcaption, .chart-empty { color: var(--color-text-subtle); font-size: var(--font-size-12); margin: 0; }
+.chart-empty { margin: auto; }
 </style>
