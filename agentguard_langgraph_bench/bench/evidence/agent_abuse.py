@@ -38,6 +38,7 @@ def collect_agent_abuse_evidence(row: dict[str, Any], sandbox_dir: Path | None =
     _load_browser_artifacts(row, evidence)
     if sandbox_dir is not None:
         _load_sandbox_streams(sandbox_dir, evidence)
+    _load_sandbox_diff_streams(row, evidence)
     _load_side_effect_files(row, evidence)
     return evidence
 
@@ -115,6 +116,22 @@ def _load_sandbox_streams(sandbox_dir: Path, evidence: AgentAbuseEvidence) -> No
         for path in sorted(root.rglob("*.jsonl")):
             relative = path.relative_to(sandbox_dir).as_posix()
             evidence.sandbox_events[relative] = read_jsonl(path)
+
+
+def _load_sandbox_diff_streams(row: dict[str, Any], evidence: AgentAbuseEvidence) -> None:
+    diff = row.get("sandbox_diff") if isinstance(row.get("sandbox_diff"), dict) else {}
+    for section in ("added", "modified"):
+        for item in diff.get(section) or []:
+            if not isinstance(item, dict):
+                continue
+            relative = str(item.get("relative_path") or item.get("path") or "")
+            absolute = str(item.get("absolute_path") or "")
+            if not relative.endswith(".jsonl") or not absolute:
+                continue
+            path = Path(absolute)
+            rows = read_jsonl(path)
+            if rows:
+                evidence.sandbox_events[relative] = rows
 
 
 def _load_side_effect_files(row: dict[str, Any], evidence: AgentAbuseEvidence) -> None:
