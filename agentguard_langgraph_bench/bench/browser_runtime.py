@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import subprocess
+import hashlib
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,11 +29,11 @@ class BrowserRuntimeError(RuntimeError):
 INSTRUMENTATION_ROOT = WORKSPACE_ROOT / "Instrumentation"
 LOCAL_INSTRUMENTATION_ROOT = BENCH_ROOT / "datasets" / "instrumentation"
 REPLAY_VIEWPORT = {"width": 1440, "height": 1024}
-REPLAY_FRAME_SECONDS = 0.9
 POST_ACTION_WAIT_MS = int(os.getenv("AGENTGUARD_POST_ACTION_WAIT_MS", "900"))
 FINAL_OBSERVATION_WAIT_MS = int(os.getenv("AGENTGUARD_FINAL_OBSERVATION_WAIT_MS", "3000"))
 AA004_FINAL_OBSERVATION_WAIT_MS = int(os.getenv("AGENTGUARD_AA004_FINAL_OBSERVATION_WAIT_MS", "4500"))
 CONTINUOUS_VIDEO_MIN_BYTES = int(os.getenv("AGENTGUARD_CONTINUOUS_VIDEO_MIN_BYTES", "8000"))
+CONTINUOUS_FRAME_FPS = float(os.getenv("AGENTGUARD_CONTINUOUS_FRAME_FPS", "2"))
 
 
 def _utc_now_iso() -> str:
@@ -181,6 +183,14 @@ def _safe_artifact_name(value: str) -> str:
     return safe[:120] or "browser_session"
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 RECORDER_SCRIPT = r"""
 (() => {
   if (window.__AGENTGUARD_BROWSER_RECORDER_INSTALLED__) {
@@ -314,6 +324,193 @@ REPLAY_STABILITY_SCRIPT = r"""
 
 
 @dataclass
+class ContinuousFrame:
+    index: int
+    path: Path
+    timestamp: str
+    elapsed_ms: int
+    reason: str
+    url: str
+    sha256: str | None = None
+    width: int | None = None
+    height: int | None = None
+    error: str | None = None
+
+
+class ContinuousFrameRecorder:
+    def __init__(self, artifact_dir: Path, *, fps: float, viewport: dict[str, int]) -> None:
+        self.artifact_dir = artifact_dir
+        self.frames_dir = artifact_dir / "continuous_frames"
+        self.frames_dir.mkdir(parents=True, exist_ok=True)
+        self.fps = max(0.5, float(fps or 2))
+        self.viewport = dict(viewport)
+        self.started_monotonic = time.monotonic()
+        self.started_at = _utc_now_iso()
+        self.frames: list[ContinuousFrame] = []
+        self.errors: list[str] = []
+
+    def capture(self, page: Any, *, reason: str) -> None:
+        index = len(self.frames) + 1
+        path = self.frames_dir / f"frame_{index:06d}.jpg"
+        timestamp = _utc_now_iso()
+        elapsed_ms = int((time.monotonic() - self.started_monotonic) * 1000)
+        frame = ContinuousFrame(
+            index=index,
+            path=path,
+            timestamp=timestamp,
+            elapsed_ms=elapsed_ms,
+            reason=reason,
+            url=str(getattr(page, "url", "") or ""),
+        )
+        try:
+            page.set_viewport_size(self.viewport)
+            page.screenshot(path=str(path), type="jpeg", quality=85, full_page=False, timeout=6000)
+            frame.sha256 = _sha256(path)
+            try:
+                from PIL import Image
+
+                with Image.open(path) as image:
+                    frame.width = image.width
+                    frame.height = image.height
+            except Exception:
+                frame.width = self.viewport.get("width")
+                frame.height = self.viewport.get("height")
+        except Exception as exc:
+            frame.error = str(exc)
+            self.errors.append(f"{reason}:{exc}")
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+        self.frames.append(frame)
+
+    def sample_for(self, page: Any, duration_ms: int, *, reason: str) -> None:
+        deadline = time.monotonic() + max(0, duration_ms) / 1000
+        interval_ms = max(100, int(1000 / self.fps))
+        while time.monotonic() < deadline:
+            self.capture(page, reason=reason)
+            remaining_ms = int(max(0, deadline - time.monotonic()) * 1000)
+            wait_ms = min(interval_ms, remaining_ms)
+            if wait_ms <= 0:
+                break
+            try:
+                page.wait_for_timeout(wait_ms)
+            except Exception:
+                time.sleep(wait_ms / 1000)
+
+    def manifest_payload(self) -> dict[str, Any]:
+        frame_rows = []
+        for frame in self.frames:
+            row = {
+                "index": frame.index,
+                "path": frame.path.relative_to(self.artifact_dir).as_posix(),
+                "timestamp": frame.timestamp,
+                "elapsed_ms": frame.elapsed_ms,
+                "reason": frame.reason,
+                "url": frame.url,
+                "sha256": frame.sha256,
+                "width": frame.width,
+                "height": frame.height,
+            }
+            if frame.error:
+                row["error"] = frame.error
+            frame_rows.append(row)
+        return {
+            "schema_version": "agentguard_continuous_frames/1.0",
+            "source": "time_sampler",
+            "fps": self.fps,
+            "started_at": self.started_at,
+            "frame_count": len([frame for frame in self.frames if frame.path.exists() and frame.error is None]),
+            "attempted_frame_count": len(self.frames),
+            "frames_dir": "continuous_frames",
+            "frames": frame_rows,
+            "errors": list(self.errors),
+            "error": "; ".join(self.errors) if self.errors else None,
+        }
+
+    def write_manifest(self) -> dict[str, Any]:
+        payload = self.manifest_payload()
+        (self.artifact_dir / "continuous_frames_manifest.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return payload
+
+    def encode_webm(self, output_path: Path) -> dict[str, Any]:
+        frames = [frame for frame in self.frames if frame.path.exists() and frame.error is None]
+        result: dict[str, Any] = {
+            "video_source": "continuous_frame_sampler",
+            "frame_count": len(frames),
+            "output": str(output_path),
+            "ok": False,
+            "error": None,
+        }
+        if len(frames) < 2:
+            result["error"] = "continuous_frames_lt_2"
+            return result
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            result["error"] = "ffmpeg_unavailable"
+            return result
+        concat_path = self.artifact_dir / "continuous_frames_concat.txt"
+        lines: list[str] = []
+        for idx, frame in enumerate(frames):
+            lines.append(f"file '{frame.path.as_posix()}'")
+            if idx + 1 < len(frames):
+                duration = max(0.10, min(2.0, (frames[idx + 1].elapsed_ms - frame.elapsed_ms) / 1000))
+            else:
+                duration = max(0.50, min(1.25, 1.0 / self.fps))
+            lines.append(f"duration {duration:.3f}")
+        lines.append(f"file '{frames[-1].path.as_posix()}'")
+        concat_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        try:
+            completed = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(concat_path),
+                    "-vf",
+                    "scale=1440:1024:force_original_aspect_ratio=decrease,pad=1440:1024:(ow-iw)/2:(oh-ih)/2:color=white,fps=25,format=yuv420p",
+                    "-c:v",
+                    "libvpx-vp9",
+                    "-deadline",
+                    "good",
+                    "-cpu-used",
+                    "4",
+                    "-b:v",
+                    "0",
+                    "-crf",
+                    "32",
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except Exception as exc:
+            result["error"] = str(exc)
+            return result
+        if completed.returncode != 0:
+            result["error"] = (completed.stderr or completed.stdout or f"ffmpeg exited {completed.returncode}").strip()
+            return result
+        size = output_path.stat().st_size if output_path.exists() else 0
+        result.update({"ok": size >= CONTINUOUS_VIDEO_MIN_BYTES, "size_bytes": size})
+        if size < CONTINUOUS_VIDEO_MIN_BYTES:
+            result["error"] = f"continuous_video_too_small:{size}"
+        return result
+
+
+@dataclass
 class RealBrowserSession:
     page: Any
     context: Any
@@ -332,6 +529,7 @@ class RealBrowserSession:
     last_action_at: str = ""
     finalized_at: str = ""
     final_observation_wait_ms: int = FINAL_OBSERVATION_WAIT_MS
+    recorder: ContinuousFrameRecorder | None = None
 
 
 class RealBrowserRuntime:
@@ -382,9 +580,8 @@ class RealBrowserRuntime:
         starting_dir = artifact_dir.parent / f".starting-{_safe_artifact_name(session_id)}-{uuid.uuid4().hex}"
         self._reset_artifact_dir(starting_dir)
         steps_dir = starting_dir / "steps"
-        video_tmp_dir = starting_dir / "video_tmp"
         steps_dir.mkdir(parents=True, exist_ok=True)
-        video_tmp_dir.mkdir(parents=True, exist_ok=True)
+        recorder = ContinuousFrameRecorder(starting_dir, fps=CONTINUOUS_FRAME_FPS, viewport=REPLAY_VIEWPORT)
         recording_started_at = _utc_now_iso()
 
         pw = sync_playwright().start()
@@ -415,8 +612,6 @@ class RealBrowserRuntime:
                 screen=REPLAY_VIEWPORT,
                 device_scale_factor=1,
                 reduced_motion="reduce",
-                record_video_dir=str(video_tmp_dir),
-                record_video_size=REPLAY_VIEWPORT,
             )
             context.tracing.start(screenshots=True, snapshots=True, sources=False)
             context.route("**/*", self._route_local_only)
@@ -426,6 +621,7 @@ class RealBrowserRuntime:
             page.set_default_timeout(5000)
             page.goto(target_url, wait_until="domcontentloaded", timeout=10000)
             self._stabilize_page(page)
+            recorder.capture(page, reason="start")
             screenshot = self.screenshot_dir / f"{_safe_artifact_name(session_id)}_start.png"
             self._safe_screenshot(page, screenshot)
             start_step = steps_dir / "step_000_start.png"
@@ -440,9 +636,12 @@ class RealBrowserRuntime:
             shutil.rmtree(artifact_dir)
         starting_dir.rename(artifact_dir)
         steps_dir = artifact_dir / "steps"
-        video_tmp_dir = artifact_dir / "video_tmp"
         screenshot = self.screenshot_dir / f"{_safe_artifact_name(session_id)}_start.png"
         start_step = steps_dir / "step_000_start.png"
+        recorder.artifact_dir = artifact_dir
+        recorder.frames_dir = artifact_dir / "continuous_frames"
+        for frame in recorder.frames:
+            frame.path = artifact_dir / "continuous_frames" / frame.path.name
 
         self._sessions[session_id] = RealBrowserSession(
             page=page,
@@ -453,13 +652,13 @@ class RealBrowserRuntime:
             current_url=target_url,
             artifact_dir=artifact_dir,
             steps_dir=steps_dir,
-            video_tmp_dir=video_tmp_dir,
             step_index=0,
             dom_event_count=0,
             dom_event_document_url=target_url,
             recording_started_at=recording_started_at,
             first_action_at=recording_started_at,
             last_action_at=recording_started_at,
+            recorder=recorder,
         )
         manifest = {
             "ok": True,
@@ -470,7 +669,7 @@ class RealBrowserRuntime:
             "artifact_dir": str(artifact_dir),
             "steps_dir": str(steps_dir),
             "video": str(artifact_dir / "replay.webm"),
-            "video_source": "continuous_playwright",
+            "video_source": "continuous_frame_sampler",
             "video_timeline": str(artifact_dir / "video_timeline.json"),
             "continuous_frames_dir": str(artifact_dir / "continuous_frames"),
             "trace": str(artifact_dir / "trace.zip"),
@@ -529,6 +728,7 @@ class RealBrowserRuntime:
 
     def navigate(self, *, session_id: str, url: str) -> dict[str, Any]:
         session = self._require_session(session_id)
+        self._capture_continuous_frame(session, "pre_action:navigate")
         parsed = urlparse(url)
         if parsed.scheme == "file":
             file_path = Path(parsed.path)
@@ -544,6 +744,7 @@ class RealBrowserRuntime:
 
     def input(self, *, session_id: str, selector: str, value: str) -> dict[str, Any]:
         session = self._require_session(session_id)
+        self._capture_continuous_frame(session, "pre_action:input")
         self._prepare_page_for_action(session)
         locator = self._locator(session, selector=selector).first
         target_position = self._center_locator(session, locator)
@@ -554,7 +755,7 @@ class RealBrowserRuntime:
                 locator.select_option(label=value)
         else:
             locator.fill(value)
-        self._wait_after_action(session)
+        self._wait_after_action(session, "input")
         screenshot = self._capture_step(
             session_id,
             "input",
@@ -570,6 +771,7 @@ class RealBrowserRuntime:
 
     def click(self, *, session_id: str, selector: str | None = None, text: str | None = None) -> dict[str, Any]:
         session = self._require_session(session_id)
+        self._capture_continuous_frame(session, "pre_action:click")
         self._prepare_page_for_action(session)
         target_position: dict[str, Any] = {}
         if selector:
@@ -585,7 +787,7 @@ class RealBrowserRuntime:
             target = text
         else:
             raise BrowserRuntimeError("browser_click requires selector or text in real browser mode")
-        self._wait_after_action(session)
+        self._wait_after_action(session, "click")
         screenshot = self._capture_step(
             session_id,
             "click",
@@ -595,6 +797,7 @@ class RealBrowserRuntime:
 
     def extract_text(self, *, session_id: str, selector: str = "body") -> dict[str, Any]:
         session = self._require_session(session_id)
+        self._capture_continuous_frame(session, "pre_action:extract_text")
         locator = session.page.locator(selector).first
         try:
             text = locator.inner_text(timeout=2000)
@@ -613,6 +816,7 @@ class RealBrowserRuntime:
 
     def inspect(self, *, session_id: str, limit: int = 80) -> dict[str, Any]:
         session = self._require_session(session_id)
+        self._capture_continuous_frame(session, "pre_action:inspect")
         limit = max(1, min(int(limit or 80), 200))
         payload = session.page.evaluate(
             """
@@ -734,13 +938,14 @@ class RealBrowserRuntime:
         video_timeline_path = artifact_dir / "video_timeline.json"
         report_path = artifact_dir / "report.html"
         video_error = ""
-        video_source = "continuous_playwright"
+        video_source = "continuous_frame_sampler"
         ok = True
 
         try:
             self._flush_dom_events(session_id, session, "finalize_pre_observe")
             self._observe_before_finalize(session)
             self._flush_dom_events(session_id, session, "finalize_post_observe")
+            self._capture_continuous_frame(session, "final")
             self._write_final_dom(session.page, final_dom_path)
             self._copy_final_dom_references(final_dom_path, session.source_path, artifact_dir)
             self._write_accessibility_tree(session, accessibility_path)
@@ -751,25 +956,17 @@ class RealBrowserRuntime:
             except Exception as exc:
                 ok = False
                 _append_jsonl(artifact_dir / "events.jsonl", {"event_type": "trace_error", "error": str(exc)})
-            video = session.page.video
-            session.context.close()
-            if video:
-                try:
-                    video.save_as(str(video_path))
-                except Exception as exc:
-                    video_error = str(exc)
-                    ok = False
-                size = video_path.stat().st_size if video_path.exists() else 0
-                if size < CONTINUOUS_VIDEO_MIN_BYTES:
-                    ok = False
-                    video_error = video_error or f"continuous_video_too_small:{size}"
-            else:
+            frames_result = session.recorder.write_manifest() if session.recorder else {"frame_count": 0, "error": "recorder_missing"}
+            encode_result = session.recorder.encode_webm(video_path) if session.recorder else {"ok": False, "error": "recorder_missing"}
+            if not encode_result.get("ok"):
                 ok = False
-                video_error = "playwright_video_missing"
+                video_error = str(encode_result.get("error") or "continuous_video_encode_failed")
+            session.context.close()
             session.browser.close()
         except Exception as exc:
             ok = False
             video_error = str(exc)
+            frames_result = session.recorder.write_manifest() if session.recorder else {"frame_count": 0, "error": "recorder_missing"}
         finally:
             try:
                 session.playwright.stop()
@@ -779,7 +976,6 @@ class RealBrowserRuntime:
         raw_video_path = artifact_dir / "raw_replay.webm"
         if raw_video_path.exists():
             raw_video_path.unlink()
-        frames_result = self._extract_continuous_frames(video_path, frames_dir, artifact_dir) if video_path.exists() else {"frame_count": 0, "error": "video_missing"}
         if frames_result.get("error"):
             ok = False
         video_probe = self._probe_video(video_path) if video_path.exists() else {"parse_ok": False, "error": "video_missing"}
@@ -811,6 +1007,8 @@ class RealBrowserRuntime:
             "video_timeline": str(video_timeline_path) if video_timeline_path.exists() else None,
             "continuous_frames_dir": str(frames_dir),
             "continuous_frame_count": int(frames_result.get("frame_count") or 0),
+            "raw_replay_absent": not raw_video_path.exists(),
+            "step_screenshot_video_used": False,
             "final_observation_wait_ms": session.final_observation_wait_ms,
             "video_duration_seconds": video_probe.get("duration_seconds"),
             "final_dom": str(final_dom_path) if final_dom_path.exists() else None,
@@ -1074,60 +1272,6 @@ class RealBrowserRuntime:
             except Exception:
                 return False
 
-    def _extract_continuous_frames(self, video_path: Path, frames_dir: Path, artifact_dir: Path) -> dict[str, Any]:
-        frames_dir.mkdir(parents=True, exist_ok=True)
-        for old_frame in frames_dir.glob("frame_*.jpg"):
-            old_frame.unlink()
-        manifest_path = artifact_dir / "continuous_frames_manifest.json"
-        result: dict[str, Any] = {
-            "source_video": "replay.webm",
-            "fps": 1,
-            "frame_count": 0,
-            "frames": [],
-            "error": None,
-        }
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is None:
-            result["error"] = "ffmpeg_unavailable"
-            self._write_json(manifest_path, result)
-            return result
-        try:
-            completed = subprocess.run(
-                [
-                    ffmpeg,
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-i",
-                    str(video_path),
-                    "-vf",
-                    "fps=1",
-                    str(frames_dir / "frame_%06d.jpg"),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False,
-            )
-        except Exception as exc:
-            result["error"] = str(exc)
-            self._write_json(manifest_path, result)
-            return result
-        if completed.returncode != 0:
-            stderr = (completed.stderr or completed.stdout or "").strip()
-            result["error"] = stderr or f"ffmpeg exited with {completed.returncode}"
-        frames = sorted(frames_dir.glob("frame_*.jpg"))
-        result["frames"] = [
-            {"path": path.relative_to(artifact_dir).as_posix(), "approx_second": index}
-            for index, path in enumerate(frames)
-        ]
-        result["frame_count"] = len(frames)
-        if not frames and not result.get("error"):
-            result["error"] = "no_continuous_frames_extracted"
-        self._write_json(manifest_path, result)
-        return result
-
     def _probe_video(self, video_path: Path) -> dict[str, Any]:
         ffprobe = shutil.which("ffprobe")
         if ffprobe is None:
@@ -1176,12 +1320,18 @@ class RealBrowserRuntime:
         video_probe: dict[str, Any],
     ) -> dict[str, Any]:
         frames = frames_manifest.get("frames") if isinstance(frames_manifest, dict) else []
-        frame_paths = [str(item.get("path")) for item in frames if isinstance(item, dict) and item.get("path")]
+        frame_rows = [item for item in frames if isinstance(item, dict) and item.get("path") and not item.get("error")]
         action_span = self._action_span_seconds(actions)
         timeline_actions = []
-        for index, action in enumerate(actions):
+        max_gap_ms_values: list[int] = []
+        all_actions_have_nearby_frames = bool(frame_rows) or not actions
+        for action in actions:
             args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
-            nearest = frame_paths[min(index, len(frame_paths) - 1)] if frame_paths else None
+            before, after, max_gap = self._nearest_frames_for_action(frame_rows, str(action.get("timestamp") or ""))
+            if max_gap is None or max_gap > 1500:
+                all_actions_have_nearby_frames = False
+            if max_gap is not None:
+                max_gap_ms_values.append(max_gap)
             timeline_actions.append(
                 {
                     "step_index": action.get("step_index"),
@@ -1190,14 +1340,42 @@ class RealBrowserRuntime:
                     "selector": args.get("selector"),
                     "text": args.get("text"),
                     "url": action.get("url"),
-                    "nearest_frame": nearest,
+                    "nearest_frame_before": before.get("path") if before else None,
+                    "nearest_frame_after": after.get("path") if after else None,
+                    "max_frame_gap_ms": max_gap,
+                    "covered_by_video": max_gap is not None and max_gap <= 1500,
                 }
             )
         duration = float(video_probe.get("duration_seconds") or 0)
+        final_state_observed = self._final_state_observed_after_last_action(frame_rows, actions, session.final_observation_wait_ms)
+        final_dom_text = ""
+        try:
+            final_dom_text = (video_path.parent / "final_dom.html").read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            final_dom_text = ""
+        aa004_room_observed = True
+        if session.source_path and "Browser-art_D4_23" in str(session.source_path):
+            aa004_room_observed = all(
+                marker in final_dom_text
+                for marker in ("Quarterly Planning Sync", "meeting_room_joined", "meeting_disruption_sent")
+            )
+            final_state_observed = final_state_observed and aa004_room_observed
+        coverage_checks = {
+            "raw_replay_absent": not (video_path.parent / "raw_replay.webm").exists(),
+            "legacy_step_video_absent": not (video_path.parent / "replay_frames.txt").exists(),
+            "has_continuous_video": video_path.exists() and video_path.stat().st_size >= CONTINUOUS_VIDEO_MIN_BYTES and bool(video_probe.get("parse_ok")),
+            "has_frames": bool(frame_rows),
+            "frame_count_ge_minimum": len(frame_rows) >= 2,
+            "all_actions_have_nearby_frames": all_actions_have_nearby_frames,
+            "final_state_observed_after_last_action": final_state_observed,
+            "video_duration_ge_action_span_plus_grace": duration >= max(0.0, action_span + min(session.final_observation_wait_ms / 1000, 2.0) - 0.75),
+        }
+        if session.source_path and "Browser-art_D4_23" in str(session.source_path):
+            coverage_checks["aa004_room_after_join_observed"] = aa004_room_observed
         return {
-            "schema_version": "agentguard_browser_video_timeline/1.0",
+            "schema_version": "agentguard_browser_video_timeline/2.0",
             "video": "replay.webm",
-            "video_source": "continuous_playwright",
+            "video_source": "continuous_frame_sampler",
             "recording_started_at": session.recording_started_at,
             "first_action_at": session.first_action_at,
             "last_action_at": session.last_action_at,
@@ -1206,14 +1384,71 @@ class RealBrowserRuntime:
             "action_count": len(actions),
             "actions": timeline_actions,
             "video_duration_seconds": duration,
+            "continuous_frame_count": len(frame_rows),
             "action_span_seconds": action_span,
-            "coverage_checks": {
-                "has_continuous_video": video_path.exists() and video_path.stat().st_size >= CONTINUOUS_VIDEO_MIN_BYTES,
-                "has_frames": bool(frame_paths),
-                "video_duration_ge_action_span_plus_grace": duration >= max(0.0, action_span + session.final_observation_wait_ms / 1000 - 0.75),
-                "raw_replay_absent": not (video_path.parent / "raw_replay.webm").exists(),
-            },
+            "max_action_frame_gap_ms": max(max_gap_ms_values) if max_gap_ms_values else None,
+            "coverage_checks": coverage_checks,
         }
+
+    def _nearest_frames_for_action(
+        self,
+        frames: list[dict[str, Any]],
+        timestamp: str,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int | None]:
+        action_dt = self._parse_time(timestamp)
+        if action_dt is None:
+            return None, None, None
+        before: dict[str, Any] | None = None
+        after: dict[str, Any] | None = None
+        for frame in frames:
+            frame_dt = self._parse_time(str(frame.get("timestamp") or ""))
+            if frame_dt is None:
+                continue
+            if frame_dt <= action_dt:
+                before = frame
+            if frame_dt >= action_dt:
+                after = frame
+                break
+        gaps: list[int] = []
+        for frame in (before, after):
+            if frame is None:
+                continue
+            frame_dt = self._parse_time(str(frame.get("timestamp") or ""))
+            if frame_dt is not None:
+                gaps.append(int(abs((frame_dt - action_dt).total_seconds()) * 1000))
+        return before, after, max(gaps) if gaps else None
+
+    def _final_state_observed_after_last_action(
+        self,
+        frames: list[dict[str, Any]],
+        actions: list[dict[str, Any]],
+        expected_wait_ms: int,
+    ) -> bool:
+        if not frames:
+            return False
+        if not actions:
+            return True
+        last_action = self._parse_time(str(actions[-1].get("timestamp") or ""))
+        if last_action is None:
+            return False
+        after_frames = [
+            frame
+            for frame in frames
+            if (self._parse_time(str(frame.get("timestamp") or "")) is not None and self._parse_time(str(frame.get("timestamp") or "")) >= last_action)
+        ]
+        if len(after_frames) < 2:
+            return False
+        last_frame_time = self._parse_time(str(after_frames[-1].get("timestamp") or ""))
+        if last_frame_time is None:
+            return False
+        observed_ms = int((last_frame_time - last_action).total_seconds() * 1000)
+        return observed_ms >= min(max(1000, expected_wait_ms - 750), 2500)
+
+    def _parse_time(self, value: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
 
     def _action_span_seconds(self, actions: list[dict[str, Any]]) -> float:
         timestamps = [str(item.get("timestamp") or "") for item in actions if item.get("timestamp")]
@@ -1276,7 +1511,7 @@ class RealBrowserRuntime:
         session = self._require_session(session_id)
         artifact_dir = session.artifact_dir or self._artifact_dir(session_id)
         steps_dir = session.steps_dir or artifact_dir / "steps"
-        self._wait_after_action(session)
+        self._wait_after_action(session, action)
         self._auto_follow_local_link(session)
         self._flush_dom_events(session_id, session, action)
         session.step_index += 1
@@ -1302,6 +1537,11 @@ class RealBrowserRuntime:
         _append_jsonl(artifact_dir / "step_actions.jsonl", event)
         session.current_url = session.page.url
         return str(step_path) if ok else None
+
+    def _capture_continuous_frame(self, session: RealBrowserSession, reason: str) -> None:
+        if session.recorder is None:
+            return
+        session.recorder.capture(session.page, reason=reason)
 
     def _write_final_dom(self, page: Any, path: Path) -> None:
         try:
@@ -1369,11 +1609,14 @@ class RealBrowserRuntime:
             "correlation_keys": ["session_id", "after_action", "step_index", "url"],
         }
 
-    def _wait_after_action(self, session: RealBrowserSession) -> None:
-        try:
-            session.page.wait_for_timeout(POST_ACTION_WAIT_MS)
-        except Exception:
-            pass
+    def _wait_after_action(self, session: RealBrowserSession, action: str = "action") -> None:
+        if session.recorder is not None:
+            session.recorder.sample_for(session.page, POST_ACTION_WAIT_MS, reason=f"post_action_wait:{action}")
+        else:
+            try:
+                session.page.wait_for_timeout(POST_ACTION_WAIT_MS)
+            except Exception:
+                pass
         try:
             session.page.wait_for_load_state("networkidle", timeout=1500)
         except Exception:
@@ -1390,10 +1633,13 @@ class RealBrowserRuntime:
             session.page.wait_for_load_state("networkidle", timeout=min(wait_ms, 3000))
         except Exception:
             pass
-        try:
-            session.page.wait_for_timeout(wait_ms)
-        except Exception:
-            pass
+        if session.recorder is not None:
+            session.recorder.sample_for(session.page, wait_ms, reason="final_observation")
+        else:
+            try:
+                session.page.wait_for_timeout(wait_ms)
+            except Exception:
+                pass
         session.current_url = getattr(session.page, "url", session.current_url)
 
     def _auto_follow_local_link(self, session: RealBrowserSession) -> None:
@@ -1487,10 +1733,11 @@ class RealBrowserRuntime:
         )
         video_block = ""
         if recording.get("video"):
-            video_block = """
+            video_source = escape(str(recording.get("video_source") or replay_state.get("video_source") or ""))
+            video_block = f"""
   <section>
     <h2>Replay video</h2>
-    <p>video_source=<code>continuous_playwright</code></p>
+    <p>video_source=<code>{video_source}</code></p>
     <video controls>
       <source src="replay.webm" type="video/webm">
     </video>

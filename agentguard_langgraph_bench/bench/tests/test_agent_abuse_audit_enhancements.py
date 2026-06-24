@@ -95,6 +95,30 @@ def test_browser_click_writes_mail_business_event(tmp_path):
     assert rows[-1]["correlation_id"]
 
 
+def test_real_browser_click_records_intent_not_business_event(tmp_path):
+    tools = MockToolRegistry(tmp_path / "sandbox", browser_mode="real")
+    tools._browser_sessions["AA-005"] = {
+        "source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E1_33/email/index.html"
+    }
+
+    tools._record_browser_intent_only(
+        "AA-005",
+        event="browser_click_intent_inferred",
+        selector="testid=send-button",
+        text=None,
+        would_have_called="/mail/send",
+        reason="real_browser_mode_requires_page_fetch",
+    )
+
+    assert not (tmp_path / "sandbox" / "api" / "mail_send_events.jsonl").exists()
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "sandbox" / "browser" / "inferred_browser_intents.jsonl").read_text().splitlines()
+    ]
+    assert rows[-1]["business_effect_written"] is False
+    assert rows[-1]["would_have_called"] == "/mail/send"
+
+
 def test_case_artifacts_include_portable_evidence_and_split_streams(tmp_path):
     recording_root = tmp_path / "sandbox" / "browser" / "replay_artifacts" / "AA-005"
     recording_root.mkdir(parents=True)

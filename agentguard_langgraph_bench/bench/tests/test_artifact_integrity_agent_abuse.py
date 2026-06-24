@@ -11,6 +11,16 @@ PNG_1X1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de"
     "0000000c49444154789c6360000000020001e221bc330000000049454e44ae426082"
 )
+JPG_1X1 = bytes.fromhex(
+    "ffd8ffe000104a46494600010101006000600000ffdb004300030202030202030303"
+    "0304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e0b"
+    "0b1016101113141515150c0f171816141812141514ffdb004301030404050405090505"
+    "09140d0b0d1414141414141414141414141414141414141414141414141414141414"
+    "141414141414141414141414141414141414141414141414ffc0001108000100010301"
+    "2200021101031101ffc4001400010000000000000000000000000000000000000008"
+    "ffc4001410010000000000000000000000000000000000000000ffda000c03010002"
+    "110311003f00b2c001ffd9"
+)
 
 
 def _write_replay_artifacts(root):
@@ -21,13 +31,16 @@ def _write_replay_artifacts(root):
     (root / "replay.webm").write_bytes(b"webm" * 2500)
     with zipfile.ZipFile(root / "trace.zip", "w") as archive:
         archive.writestr("trace.trace", "{}")
-    (root / "report.html").write_text("<html><body>step_count 1 dom_event_count 1 continuous_playwright</body></html>", encoding="utf-8")
+    (root / "report.html").write_text("<html><body>step_count 1 dom_event_count 1 continuous_frame_sampler</body></html>", encoding="utf-8")
     (root / "replay_state.json").write_text(
         json.dumps(
             {
                 "step_count": 1,
                 "dom_event_count": 1,
-                "video_source": "continuous_playwright",
+                "video_source": "continuous_frame_sampler",
+                "raw_replay_absent": True,
+                "step_screenshot_video_used": False,
+                "continuous_frame_count": 4,
                 "final_observation_wait_ms": 3000,
                 "video_duration_seconds": 5.0,
             }
@@ -40,22 +53,43 @@ def _write_replay_artifacts(root):
     (root / "action_metadata.jsonl").write_text(json.dumps(action) + "\n", encoding="utf-8")
     (root / "step_actions.jsonl").write_text(json.dumps(action) + "\n", encoding="utf-8")
     (root / "business_event_correlation_index.json").write_text(json.dumps({"schema_version": "1.0", "action_count": 1}), encoding="utf-8")
+    frame_rows = [
+        {
+            "path": f"continuous_frames/frame_{index:06d}.jpg",
+            "timestamp": f"2026-06-23T00:00:0{index}.000000Z",
+            "elapsed_ms": index * 1000,
+            "reason": "time_sample",
+        }
+        for index in range(4)
+    ]
     (root / "video_timeline.json").write_text(
         json.dumps(
             {
-                "schema_version": "agentguard_browser_video_timeline/1.0",
+                "schema_version": "agentguard_browser_video_timeline/2.0",
                 "video": "replay.webm",
-                "video_source": "continuous_playwright",
+                "video_source": "continuous_frame_sampler",
                 "action_count": 1,
-                "actions": [action],
+                "actions": [
+                    {
+                        **action,
+                        "nearest_frame_before": "continuous_frames/frame_000000.jpg",
+                        "nearest_frame_after": "continuous_frames/frame_000000.jpg",
+                        "max_frame_gap_ms": 0,
+                        "covered_by_video": True,
+                    }
+                ],
                 "video_duration_seconds": 5.0,
                 "action_span_seconds": 0.0,
                 "final_observation_wait_ms": 3000,
                 "coverage_checks": {
+                    "raw_replay_absent": True,
+                    "legacy_step_video_absent": True,
                     "has_continuous_video": True,
                     "has_frames": True,
+                    "frame_count_ge_minimum": True,
+                    "all_actions_have_nearby_frames": True,
+                    "final_state_observed_after_last_action": True,
                     "video_duration_ge_action_span_plus_grace": True,
-                    "raw_replay_absent": True,
                 },
             }
         ),
@@ -64,14 +98,14 @@ def _write_replay_artifacts(root):
     frames = root / "continuous_frames"
     frames.mkdir()
     for index in range(4):
-        (frames / f"frame_{index:06d}.jpg").write_bytes(b"jpg")
+        (frames / f"frame_{index:06d}.jpg").write_bytes(JPG_1X1)
     (root / "continuous_frames_manifest.json").write_text(
         json.dumps(
             {
-                "source_video": "replay.webm",
+                "source": "time_sampler",
                 "fps": 1,
                 "frame_count": 4,
-                "frames": [{"path": f"continuous_frames/frame_{index:06d}.jpg", "approx_second": index} for index in range(4)],
+                "frames": frame_rows,
             }
         ),
         encoding="utf-8",

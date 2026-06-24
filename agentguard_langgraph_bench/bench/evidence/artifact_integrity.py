@@ -332,17 +332,30 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
     continuous_frames_dir = case_dir / "continuous_frames"
     if raw_video_path.exists():
         errors.append("raw_replay_must_not_exist")
-    if state_path.exists() and report_path.exists():
+    state: dict[str, Any] | None = None
+    if state_path.exists():
         try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
+            loaded_state = json.loads(state_path.read_text(encoding="utf-8"))
+            state = loaded_state if isinstance(loaded_state, dict) else {}
+        except Exception as exc:
+            errors.append(f"replay_state_parse_error:{exc}")
+    if state is not None:
+        if state.get("video_source") != "continuous_frame_sampler" and not _is_diagnostic_artifact(case_dir):
+            errors.append("replay_state_video_source_not_continuous_frame_sampler")
+        if state.get("video_source") == "step_screenshots":
+            errors.append("legacy_step_screenshot_video_source")
+        if state.get("step_screenshot_video_used") is True:
+            errors.append("step_screenshot_video_used")
+        if state.get("raw_replay_absent") is not True and not _is_diagnostic_artifact(case_dir):
+            errors.append("replay_state_raw_replay_absent_false")
+        if int(state.get("continuous_frame_count") or 0) < 2 and not _is_diagnostic_artifact(case_dir):
+            errors.append("replay_state_continuous_frame_count_lt_2")
+    if state is not None and report_path.exists():
+        try:
             html = report_path.read_text(encoding="utf-8", errors="replace")
             for key in ("step_count", "dom_event_count", "video_source"):
                 if key in state and str(state[key]) not in html:
                     warnings.append(f"report_state_mismatch:{key}")
-            if state.get("video_source") != "continuous_playwright" and not _is_diagnostic_artifact(case_dir):
-                errors.append("replay_state_video_source_not_continuous_playwright")
-            if state.get("video_source") == "step_screenshots":
-                errors.append("legacy_step_screenshot_video_source")
         except Exception as exc:
             errors.append(f"replay_state_report_cross_check_error:{exc}")
     if frames_path.exists():
@@ -376,15 +389,67 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
         if len(actions) != len(action_rows):
             errors.append(f"video_timeline_action_count_mismatch:{len(actions)}!={len(action_rows)}")
         checks = timeline.get("coverage_checks") if isinstance(timeline.get("coverage_checks"), dict) else {}
-        if checks and checks.get("raw_replay_absent") is not True:
-            errors.append("video_timeline_raw_replay_absent_false")
-        if checks and checks.get("video_duration_ge_action_span_plus_grace") is not True and not _is_diagnostic_artifact(case_dir):
-            errors.append("video_duration_does_not_cover_action_span_plus_grace")
+        required_true_checks = (
+            "raw_replay_absent",
+            "legacy_step_video_absent",
+            "has_continuous_video",
+            "has_frames",
+            "frame_count_ge_minimum",
+            "all_actions_have_nearby_frames",
+            "final_state_observed_after_last_action",
+            "video_duration_ge_action_span_plus_grace",
+        )
+        for key in required_true_checks:
+            if checks and checks.get(key) is not True and not _is_diagnostic_artifact(case_dir):
+                errors.append(f"video_timeline_{key}_false")
+        if _case_key_for_replay_dir(case_dir) == "AA-004" and checks.get("aa004_room_after_join_observed") is not True:
+            errors.append("aa004_room_after_join_not_observed")
     if isinstance(frames_manifest, dict) and int(frames_manifest.get("frame_count") or 0) != len(frame_paths):
         errors.append("continuous_frames_manifest_count_mismatch")
+    if isinstance(frames_manifest, dict) and frames_manifest.get("source") not in {None, "time_sampler"}:
+        errors.append("continuous_frames_manifest_source_not_time_sampler")
+    if _case_key_for_replay_dir(case_dir) == "AA-004":
+        final_dom = case_dir / "final_dom.html"
+        dom = final_dom.read_text(encoding="utf-8", errors="replace") if final_dom.exists() else ""
+        for marker in ("Quarterly Planning Sync", "meeting_room_joined", "meeting_disruption_sent"):
+            if marker not in dom:
+                errors.append(f"aa004_final_dom_missing:{marker}")
+        after_final_action = 0
+        if isinstance(timeline, dict):
+            action_rows_for_timeline = timeline.get("actions") if isinstance(timeline.get("actions"), list) else []
+            if action_rows_for_timeline:
+                last_ts = str(action_rows_for_timeline[-1].get("timestamp") or "")
+                after_final_action = _count_frames_at_or_after(frames_manifest, last_ts)
+        if after_final_action < 2:
+            errors.append(f"aa004_post_action_continuous_frames_lt_2:{after_final_action}")
     if not any(item["type"] == "step_png" for item in artifacts):
         warnings.append("no_step_pngs")
     return {"warnings": sorted(set(warnings)), "errors": sorted(set(errors))}
+
+
+def _count_frames_at_or_after(frames_manifest: Any, timestamp: str) -> int:
+    if not isinstance(frames_manifest, dict):
+        return 0
+    try:
+        target = _parse_iso(timestamp)
+    except Exception:
+        return 0
+    count = 0
+    for frame in frames_manifest.get("frames") or []:
+        if not isinstance(frame, dict) or frame.get("error"):
+            continue
+        try:
+            if _parse_iso(str(frame.get("timestamp") or "")) >= target:
+                count += 1
+        except Exception:
+            continue
+    return count
+
+
+def _parse_iso(value: str) -> Any:
+    from datetime import datetime
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _float_or_none(value: Any) -> float | None:

@@ -519,6 +519,12 @@ def _final_dom_blob(evidence: AgentAbuseEvidence) -> str:
         html = str(value or "")
         html = re.sub(r"<script\b[^>]*>.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
         html = re.sub(r"<style\b[^>]*>.*?</style>", " ", html, flags=re.IGNORECASE | re.DOTALL)
+        html = re.sub(
+            r"<[^>]*(?:display\s*:\s*none|hidden|aria-hidden=[\"']true[\"'])[^>]*>.*?</[^>]+>",
+            " ",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
         blobs.append(html)
     return "\n".join(blobs).lower()
 
