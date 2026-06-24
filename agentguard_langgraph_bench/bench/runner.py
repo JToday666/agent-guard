@@ -617,8 +617,9 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
                 "step_actions",
                 "business_event_correlation_index",
                 "trace",
-                "raw_video",
                 "video",
+                "video_timeline",
+                "continuous_frames_manifest",
             ):
                 if recording.get(key):
                     evidence_index["streams"].append(_artifact_record(key, Path(str(recording[key])), case_result_dir))
@@ -659,11 +660,11 @@ def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: P
         "screenshot": "final.png",
         "full_page_screenshot": "final_full_page.png",
         "trace": "trace.zip",
-        "raw_video": "raw_replay.webm",
         "video": "replay.webm",
+        "video_timeline": "video_timeline.json",
+        "continuous_frames_manifest": "continuous_frames_manifest.json",
         "report": "report.html",
         "replay_state": "replay_state.json",
-        "replay_frames": "replay_frames.txt",
         "final_dom": "final_dom.html",
         "final_accessibility_tree": "final_accessibility_tree.json",
         "action_metadata": "action_metadata.jsonl",
@@ -701,6 +702,29 @@ def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: P
     if step_paths:
         copied["steps_dir"] = str(steps_dest)
         copied["step_screenshots"] = step_paths
+    frames_source = Path(str(recording.get("continuous_frames_dir") or source_dir / "continuous_frames"))
+    frames_dest = dest_dir / "continuous_frames"
+    frame_paths: list[str] = []
+    if frames_source.exists() and frames_source.is_dir():
+        frames_dest.mkdir(parents=True, exist_ok=True)
+        for path in sorted(frames_source.glob("*.jpg")):
+            dest = frames_dest / path.name
+            if path.resolve() != dest.resolve():
+                dest.write_bytes(path.read_bytes())
+            frame_paths.append(str(dest))
+    elif recording.get("continuous_frames"):
+        frames_dest.mkdir(parents=True, exist_ok=True)
+        for raw in recording.get("continuous_frames") or []:
+            path = Path(str(raw))
+            if not path.exists() or not path.is_file():
+                continue
+            dest = frames_dest / path.name
+            if path.resolve() != dest.resolve():
+                dest.write_bytes(path.read_bytes())
+            frame_paths.append(str(dest))
+    if frame_paths:
+        copied["continuous_frames_dir"] = str(frames_dest)
+        copied["continuous_frames"] = frame_paths
     if copied.get("final_dom"):
         _copy_final_dom_references(Path(str(copied["final_dom"])), source_dir, dest_dir)
     return copied
@@ -799,7 +823,6 @@ def _write_planner_stall_browser_artifact(case_result_dir: Path, row: dict[str, 
     (artifact_dir / "final.png").write_bytes(png)
     (artifact_dir / "final_full_page.png").write_bytes(png)
     (artifact_dir / "replay.webm").write_bytes(b"")
-    (artifact_dir / "raw_replay.webm").write_bytes(b"")
     (artifact_dir / "trace.zip").write_bytes(b"")
     (artifact_dir / "report.html").write_text(html, encoding="utf-8")
     (artifact_dir / "replay_state.json").write_text(
@@ -819,7 +842,6 @@ def _write_planner_stall_browser_artifact(case_result_dir: Path, row: dict[str, 
         ),
         encoding="utf-8",
     )
-    (artifact_dir / "replay_frames.txt").write_text("final.png\n", encoding="utf-8")
     manifest = {
         "schema_version": "1.0",
         "case_id": row.get("case_id"),
@@ -844,11 +866,9 @@ def _write_planner_stall_browser_artifact(case_result_dir: Path, row: dict[str, 
         "step_actions": str(artifact_dir / "step_actions.jsonl"),
         "business_event_correlation_index": str(artifact_dir / "business_event_correlation_index.json"),
         "trace": str(artifact_dir / "trace.zip"),
-        "raw_video": str(artifact_dir / "raw_replay.webm"),
         "video": str(artifact_dir / "replay.webm"),
         "report": str(artifact_dir / "report.html"),
         "replay_state": str(artifact_dir / "replay_state.json"),
-        "replay_frames": str(artifact_dir / "replay_frames.txt"),
         "diagnostic_artifact": True,
     }
 

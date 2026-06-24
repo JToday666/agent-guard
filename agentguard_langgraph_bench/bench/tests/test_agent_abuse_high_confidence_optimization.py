@@ -40,6 +40,7 @@ def _row(case_id, tmp_path):
     artifact = tmp_path / "browser" / case_id
     artifact.mkdir(parents=True)
     events = artifact / "events.jsonl"
+    final_dom = artifact / "final_dom.html"
     return {
         "case_id": case_id,
         "attack_type": "agent_abuse",
@@ -50,7 +51,7 @@ def _row(case_id, tmp_path):
         "decisions": ["allow"],
         "strict_business_validation": True,
         "tool_calls": [],
-        "browser_recordings": [{"events": str(events), "artifact_dir": str(artifact)}],
+        "browser_recordings": [{"events": str(events), "artifact_dir": str(artifact), "final_dom": str(final_dom)}],
         "sandbox_diff": {"empty": True, "added": [], "modified": [], "deleted": [], "outside_sandbox_paths": []},
     }, events
 

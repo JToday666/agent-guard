@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from html import escape
 from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +28,14 @@ INSTRUMENTATION_ROOT = WORKSPACE_ROOT / "Instrumentation"
 LOCAL_INSTRUMENTATION_ROOT = BENCH_ROOT / "datasets" / "instrumentation"
 REPLAY_VIEWPORT = {"width": 1440, "height": 1024}
 REPLAY_FRAME_SECONDS = 0.9
+POST_ACTION_WAIT_MS = int(os.getenv("AGENTGUARD_POST_ACTION_WAIT_MS", "900"))
+FINAL_OBSERVATION_WAIT_MS = int(os.getenv("AGENTGUARD_FINAL_OBSERVATION_WAIT_MS", "3000"))
+AA004_FINAL_OBSERVATION_WAIT_MS = int(os.getenv("AGENTGUARD_AA004_FINAL_OBSERVATION_WAIT_MS", "4500"))
+CONTINUOUS_VIDEO_MIN_BYTES = int(os.getenv("AGENTGUARD_CONTINUOUS_VIDEO_MIN_BYTES", "8000"))
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _is_under(path: Path, root: Path) -> bool:
@@ -318,6 +327,11 @@ class RealBrowserSession:
     step_index: int = 0
     dom_event_count: int = 0
     dom_event_document_url: str = ""
+    recording_started_at: str = ""
+    first_action_at: str = ""
+    last_action_at: str = ""
+    finalized_at: str = ""
+    final_observation_wait_ms: int = FINAL_OBSERVATION_WAIT_MS
 
 
 class RealBrowserRuntime:
@@ -371,6 +385,7 @@ class RealBrowserRuntime:
         video_tmp_dir = starting_dir / "video_tmp"
         steps_dir.mkdir(parents=True, exist_ok=True)
         video_tmp_dir.mkdir(parents=True, exist_ok=True)
+        recording_started_at = _utc_now_iso()
 
         pw = sync_playwright().start()
         try:
@@ -442,6 +457,9 @@ class RealBrowserRuntime:
             step_index=0,
             dom_event_count=0,
             dom_event_document_url=target_url,
+            recording_started_at=recording_started_at,
+            first_action_at=recording_started_at,
+            last_action_at=recording_started_at,
         )
         manifest = {
             "ok": True,
@@ -452,7 +470,9 @@ class RealBrowserRuntime:
             "artifact_dir": str(artifact_dir),
             "steps_dir": str(steps_dir),
             "video": str(artifact_dir / "replay.webm"),
-            "raw_video": str(artifact_dir / "raw_replay.webm"),
+            "video_source": "continuous_playwright",
+            "video_timeline": str(artifact_dir / "video_timeline.json"),
+            "continuous_frames_dir": str(artifact_dir / "continuous_frames"),
             "trace": str(artifact_dir / "trace.zip"),
             "final_screenshot": str(artifact_dir / "final.png"),
             "final_dom": str(artifact_dir / "final_dom.html"),
@@ -464,15 +484,23 @@ class RealBrowserRuntime:
         self._write_json(artifact_dir / "manifest.json", manifest)
         _append_jsonl(
             artifact_dir / "events.jsonl",
-            {"event_type": "browser_start", "session_id": session_id, "url": target_url, "screenshot": str(start_step)},
+            {
+                "event_type": "browser_start",
+                "timestamp": recording_started_at,
+                "session_id": session_id,
+                "url": target_url,
+                "screenshot": str(start_step),
+            },
         )
         start_event = {
             "event_type": "browser_tool_action",
             "action": "start",
+            "timestamp": recording_started_at,
             "session_id": session_id,
             "step_index": 0,
             "url": target_url,
             "screenshot": str(start_step),
+            "video_expected_visible": True,
             "arguments": {"source_path": str(source)},
         }
         _append_jsonl(artifact_dir / "action_metadata.jsonl", start_event)
@@ -701,15 +729,18 @@ class RealBrowserRuntime:
         accessibility_path = artifact_dir / "final_accessibility_tree.json"
         correlation_path = artifact_dir / "business_event_correlation_index.json"
         video_path = artifact_dir / "replay.webm"
-        raw_video_path = artifact_dir / "raw_replay.webm"
+        frames_dir = artifact_dir / "continuous_frames"
+        frames_manifest_path = artifact_dir / "continuous_frames_manifest.json"
+        video_timeline_path = artifact_dir / "video_timeline.json"
         report_path = artifact_dir / "report.html"
-        raw_video_error = ""
-        stable_video_error = ""
-        video_source = "step_screenshots"
+        video_error = ""
+        video_source = "continuous_playwright"
         ok = True
 
         try:
-            self._flush_dom_events(session_id, session, "finalize")
+            self._flush_dom_events(session_id, session, "finalize_pre_observe")
+            self._observe_before_finalize(session)
+            self._flush_dom_events(session_id, session, "finalize_post_observe")
             self._write_final_dom(session.page, final_dom_path)
             self._copy_final_dom_references(final_dom_path, session.source_path, artifact_dir)
             self._write_accessibility_tree(session, accessibility_path)
@@ -724,34 +755,48 @@ class RealBrowserRuntime:
             session.context.close()
             if video:
                 try:
-                    video.save_as(str(raw_video_path))
+                    video.save_as(str(video_path))
                 except Exception as exc:
-                    raw_video_error = str(exc)
+                    video_error = str(exc)
+                    ok = False
+                size = video_path.stat().st_size if video_path.exists() else 0
+                if size < CONTINUOUS_VIDEO_MIN_BYTES:
+                    ok = False
+                    video_error = video_error or f"continuous_video_too_small:{size}"
+            else:
+                ok = False
+                video_error = "playwright_video_missing"
             session.browser.close()
         except Exception as exc:
             ok = False
-            raw_video_error = str(exc)
+            video_error = str(exc)
         finally:
             try:
                 session.playwright.stop()
             except Exception:
                 pass
-
-        stable_frames = [*sorted(steps_dir.glob("*.png"))]
-        if final_path.exists():
-            stable_frames.append(final_path)
-        stable_video_error = self._build_stable_video(stable_frames, video_path, artifact_dir)
-        if stable_video_error and raw_video_path.exists() and not video_path.exists():
-            video_source = "raw_playwright_fallback"
-            try:
-                shutil.copyfile(raw_video_path, video_path)
-            except OSError as exc:
-                ok = False
-                stable_video_error = f"{stable_video_error}; fallback copy failed: {exc}"
-        elif stable_video_error:
+        session.finalized_at = _utc_now_iso()
+        raw_video_path = artifact_dir / "raw_replay.webm"
+        if raw_video_path.exists():
+            raw_video_path.unlink()
+        frames_result = self._extract_continuous_frames(video_path, frames_dir, artifact_dir) if video_path.exists() else {"frame_count": 0, "error": "video_missing"}
+        if frames_result.get("error"):
             ok = False
-        elif video_path.exists():
-            video_source = "step_screenshots"
+        video_probe = self._probe_video(video_path) if video_path.exists() else {"parse_ok": False, "error": "video_missing"}
+        if not video_probe.get("parse_ok"):
+            ok = False
+            video_error = video_error or str(video_probe.get("error") or "ffprobe_parse_failed")
+        actions = self._read_jsonl(artifact_dir / "action_metadata.jsonl")
+        self._write_json(
+            video_timeline_path,
+            self._build_video_timeline(
+                session,
+                video_path=video_path,
+                actions=actions,
+                frames_manifest=frames_result,
+                video_probe=video_probe,
+            ),
+        )
 
         replay_state = {
             "ok": ok,
@@ -762,9 +807,12 @@ class RealBrowserRuntime:
             "step_count": len(list(steps_dir.glob("*.png"))) if steps_dir.exists() else 0,
             "dom_event_count": session.dom_event_count,
             "video_source": video_source if video_path.exists() else None,
-            "video_save_error": stable_video_error or None,
-            "raw_video_save_error": raw_video_error or None,
-            "stable_video_error": stable_video_error or None,
+            "video_save_error": video_error or None,
+            "video_timeline": str(video_timeline_path) if video_timeline_path.exists() else None,
+            "continuous_frames_dir": str(frames_dir),
+            "continuous_frame_count": int(frames_result.get("frame_count") or 0),
+            "final_observation_wait_ms": session.final_observation_wait_ms,
+            "video_duration_seconds": video_probe.get("duration_seconds"),
             "final_dom": str(final_dom_path) if final_dom_path.exists() else None,
             "final_accessibility_tree": str(accessibility_path) if accessibility_path.exists() else None,
         }
@@ -786,7 +834,11 @@ class RealBrowserRuntime:
             "steps_dir": str(steps_dir),
             "step_screenshots": [str(path) for path in sorted(steps_dir.glob("*.png"))],
             "video": str(video_path) if video_path.exists() else None,
-            "raw_video": str(raw_video_path) if raw_video_path.exists() else None,
+            "video_source": replay_state["video_source"],
+            "video_timeline": str(video_timeline_path) if video_timeline_path.exists() else None,
+            "continuous_frames_dir": str(frames_dir),
+            "continuous_frames_manifest": str(frames_manifest_path) if frames_manifest_path.exists() else None,
+            "continuous_frames": [str(path) for path in sorted(frames_dir.glob("*.jpg"))],
             "trace": str(trace_path) if trace_path.exists() else None,
             "events": str(artifact_dir / "events.jsonl"),
             "manifest": str(artifact_dir / "manifest.json"),
@@ -794,10 +846,7 @@ class RealBrowserRuntime:
             "dom_event_count": replay_state["dom_event_count"],
             "step_count": replay_state["step_count"],
             "final_url": replay_state["final_url"],
-            "video_source": replay_state["video_source"],
             "video_save_error": replay_state["video_save_error"],
-            "raw_video_save_error": replay_state["raw_video_save_error"],
-            "stable_video_error": replay_state["stable_video_error"],
         }
         self._write_report(report_path, recording, replay_state)
         self._export_recording_to_downloads(session_id, recording)
@@ -1025,29 +1074,24 @@ class RealBrowserRuntime:
             except Exception:
                 return False
 
-    def _build_stable_video(self, frame_paths: list[Path], output_path: Path, artifact_dir: Path) -> str:
-        if not frame_paths:
-            return "no replay frames available"
+    def _extract_continuous_frames(self, video_path: Path, frames_dir: Path, artifact_dir: Path) -> dict[str, Any]:
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        for old_frame in frames_dir.glob("frame_*.jpg"):
+            old_frame.unlink()
+        manifest_path = artifact_dir / "continuous_frames_manifest.json"
+        result: dict[str, Any] = {
+            "source_video": "replay.webm",
+            "fps": 1,
+            "frame_count": 0,
+            "frames": [],
+            "error": None,
+        }
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
-            return "ffmpeg is not available"
-        concat_path = artifact_dir / "replay_frames.txt"
+            result["error"] = "ffmpeg_unavailable"
+            self._write_json(manifest_path, result)
+            return result
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            if output_path.exists():
-                output_path.unlink()
-            lines: list[str] = []
-            for frame_path in frame_paths:
-                lines.append(f"file '{self._ffmpeg_concat_path(frame_path)}'")
-                lines.append(f"duration {REPLAY_FRAME_SECONDS}")
-            lines.append(f"file '{self._ffmpeg_concat_path(frame_paths[-1])}'")
-            concat_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            filter_spec = (
-                f"scale={REPLAY_VIEWPORT['width']}:{REPLAY_VIEWPORT['height']}:"
-                f"force_original_aspect_ratio=decrease,"
-                f"pad={REPLAY_VIEWPORT['width']}:{REPLAY_VIEWPORT['height']}:(ow-iw)/2:(oh-ih)/2:color=white,"
-                "fps=25,format=yuv420p"
-            )
             completed = subprocess.run(
                 [
                     ffmpeg,
@@ -1055,25 +1099,11 @@ class RealBrowserRuntime:
                     "-hide_banner",
                     "-loglevel",
                     "error",
-                    "-f",
-                    "concat",
-                    "-safe",
-                    "0",
                     "-i",
-                    str(concat_path),
+                    str(video_path),
                     "-vf",
-                    filter_spec,
-                    "-c:v",
-                    "libvpx-vp9",
-                    "-deadline",
-                    "good",
-                    "-cpu-used",
-                    "4",
-                    "-b:v",
-                    "0",
-                    "-crf",
-                    "32",
-                    str(output_path),
+                    "fps=1",
+                    str(frames_dir / "frame_%06d.jpg"),
                 ],
                 capture_output=True,
                 text=True,
@@ -1081,16 +1111,120 @@ class RealBrowserRuntime:
                 check=False,
             )
         except Exception as exc:
-            return str(exc)
+            result["error"] = str(exc)
+            self._write_json(manifest_path, result)
+            return result
         if completed.returncode != 0:
             stderr = (completed.stderr or completed.stdout or "").strip()
-            return stderr or f"ffmpeg exited with {completed.returncode}"
-        if not output_path.exists() or output_path.stat().st_size == 0:
-            return "ffmpeg produced an empty replay video"
-        return ""
+            result["error"] = stderr or f"ffmpeg exited with {completed.returncode}"
+        frames = sorted(frames_dir.glob("frame_*.jpg"))
+        result["frames"] = [
+            {"path": path.relative_to(artifact_dir).as_posix(), "approx_second": index}
+            for index, path in enumerate(frames)
+        ]
+        result["frame_count"] = len(frames)
+        if not frames and not result.get("error"):
+            result["error"] = "no_continuous_frames_extracted"
+        self._write_json(manifest_path, result)
+        return result
 
-    def _ffmpeg_concat_path(self, path: Path) -> str:
-        return path.resolve().as_posix().replace("'", "'\\''")
+    def _probe_video(self, video_path: Path) -> dict[str, Any]:
+        ffprobe = shutil.which("ffprobe")
+        if ffprobe is None:
+            return {"parse_ok": False, "error": "ffprobe_unavailable"}
+        try:
+            completed = subprocess.run(
+                [
+                    ffprobe,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "stream=codec_name,width,height,duration",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
+                    str(video_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+            data = json.loads(completed.stdout or "{}")
+            streams = data.get("streams") or []
+            stream = next((item for item in streams if item.get("codec_name")), {})
+            fmt = data.get("format") if isinstance(data.get("format"), dict) else {}
+            duration = stream.get("duration") or fmt.get("duration") or 0
+            return {
+                "parse_ok": True,
+                "codec": stream.get("codec_name"),
+                "width": stream.get("width"),
+                "height": stream.get("height"),
+                "duration_seconds": float(duration or 0),
+            }
+        except Exception as exc:
+            return {"parse_ok": False, "error": str(exc)}
+
+    def _build_video_timeline(
+        self,
+        session: RealBrowserSession,
+        *,
+        video_path: Path,
+        actions: list[dict[str, Any]],
+        frames_manifest: dict[str, Any],
+        video_probe: dict[str, Any],
+    ) -> dict[str, Any]:
+        frames = frames_manifest.get("frames") if isinstance(frames_manifest, dict) else []
+        frame_paths = [str(item.get("path")) for item in frames if isinstance(item, dict) and item.get("path")]
+        action_span = self._action_span_seconds(actions)
+        timeline_actions = []
+        for index, action in enumerate(actions):
+            args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+            nearest = frame_paths[min(index, len(frame_paths) - 1)] if frame_paths else None
+            timeline_actions.append(
+                {
+                    "step_index": action.get("step_index"),
+                    "action": action.get("action"),
+                    "timestamp": action.get("timestamp"),
+                    "selector": args.get("selector"),
+                    "text": args.get("text"),
+                    "url": action.get("url"),
+                    "nearest_frame": nearest,
+                }
+            )
+        duration = float(video_probe.get("duration_seconds") or 0)
+        return {
+            "schema_version": "agentguard_browser_video_timeline/1.0",
+            "video": "replay.webm",
+            "video_source": "continuous_playwright",
+            "recording_started_at": session.recording_started_at,
+            "first_action_at": session.first_action_at,
+            "last_action_at": session.last_action_at,
+            "finalized_at": session.finalized_at,
+            "final_observation_wait_ms": session.final_observation_wait_ms,
+            "action_count": len(actions),
+            "actions": timeline_actions,
+            "video_duration_seconds": duration,
+            "action_span_seconds": action_span,
+            "coverage_checks": {
+                "has_continuous_video": video_path.exists() and video_path.stat().st_size >= CONTINUOUS_VIDEO_MIN_BYTES,
+                "has_frames": bool(frame_paths),
+                "video_duration_ge_action_span_plus_grace": duration >= max(0.0, action_span + session.final_observation_wait_ms / 1000 - 0.75),
+                "raw_replay_absent": not (video_path.parent / "raw_replay.webm").exists(),
+            },
+        }
+
+    def _action_span_seconds(self, actions: list[dict[str, Any]]) -> float:
+        timestamps = [str(item.get("timestamp") or "") for item in actions if item.get("timestamp")]
+        if len(timestamps) < 2:
+            return 0.0
+        try:
+            start = datetime.fromisoformat(timestamps[0].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(timestamps[-1].replace("Z", "+00:00"))
+            return max(0.0, (end - start).total_seconds())
+        except Exception:
+            return 0.0
 
     def _center_locator(self, session: RealBrowserSession, locator: Any) -> dict[str, Any]:
         try:
@@ -1146,15 +1280,21 @@ class RealBrowserRuntime:
         self._auto_follow_local_link(session)
         self._flush_dom_events(session_id, session, action)
         session.step_index += 1
+        timestamp = _utc_now_iso()
+        if not session.first_action_at:
+            session.first_action_at = timestamp
+        session.last_action_at = timestamp
         step_path = steps_dir / f"step_{session.step_index:03d}_{action}.png"
         ok = self._safe_screenshot(session.page, step_path)
         event = {
             "event_type": "browser_tool_action",
             "action": action,
+            "timestamp": timestamp,
             "session_id": session_id,
             "step_index": session.step_index,
             "url": session.page.url,
             "screenshot": str(step_path) if ok else None,
+            "video_expected_visible": True,
             "arguments": payload,
         }
         _append_jsonl(artifact_dir / "events.jsonl", event)
@@ -1231,13 +1371,30 @@ class RealBrowserRuntime:
 
     def _wait_after_action(self, session: RealBrowserSession) -> None:
         try:
-            session.page.wait_for_load_state("networkidle", timeout=1000)
+            session.page.wait_for_timeout(POST_ACTION_WAIT_MS)
         except Exception:
             pass
         try:
-            session.page.wait_for_timeout(250)
+            session.page.wait_for_load_state("networkidle", timeout=1500)
         except Exception:
             pass
+        session.current_url = getattr(session.page, "url", session.current_url)
+
+    def _observe_before_finalize(self, session: RealBrowserSession) -> None:
+        wait_ms = FINAL_OBSERVATION_WAIT_MS
+        source = str(session.source_path or "")
+        if "Browser-art_D4_23" in source:
+            wait_ms = max(wait_ms, AA004_FINAL_OBSERVATION_WAIT_MS)
+        session.final_observation_wait_ms = wait_ms
+        try:
+            session.page.wait_for_load_state("networkidle", timeout=min(wait_ms, 3000))
+        except Exception:
+            pass
+        try:
+            session.page.wait_for_timeout(wait_ms)
+        except Exception:
+            pass
+        session.current_url = getattr(session.page, "url", session.current_url)
 
     def _auto_follow_local_link(self, session: RealBrowserSession) -> None:
         parsed = urlparse(session.page.url)
@@ -1319,6 +1476,11 @@ class RealBrowserRuntime:
             f'<figure><img src="steps/{escape(img.name)}" alt="{escape(img.name)}"><figcaption>{escape(img.name)}</figcaption></figure>'
             for img in step_images
         )
+        continuous_images = [Path(item) for item in recording.get("continuous_frames", [])]
+        continuous_gallery = "".join(
+            f'<figure><img src="continuous_frames/{escape(img.name)}" alt="{escape(img.name)}"><figcaption>{escape(img.name)}</figcaption></figure>'
+            for img in continuous_images
+        )
         rows = "".join(
             f"<tr><th>{escape(str(key))}</th><td><pre>{escape(json.dumps(value, ensure_ascii=False, indent=2) if isinstance(value, (dict, list)) else str(value))}</pre></td></tr>"
             for key, value in replay_state.items()
@@ -1328,13 +1490,11 @@ class RealBrowserRuntime:
             video_block = """
   <section>
     <h2>Replay video</h2>
+    <p>video_source=<code>continuous_playwright</code></p>
     <video controls>
       <source src="replay.webm" type="video/webm">
     </video>
   </section>"""
-        raw_video_item = ""
-        if recording.get("raw_video"):
-            raw_video_item = '<li><a href="raw_replay.webm">raw_replay.webm</a></li>'
         html = f"""<!doctype html>
 <html>
 <head>
@@ -1367,6 +1527,10 @@ class RealBrowserRuntime:
     <h2>Step screenshots</h2>
     <div class="gallery">{gallery}</div>
   </section>
+  <section>
+    <h2>Continuous frames</h2>
+    <div class="gallery">{continuous_gallery}</div>
+  </section>
 {video_block}
   <section>
     <h2>Artifacts</h2>
@@ -1374,9 +1538,11 @@ class RealBrowserRuntime:
       <li><a href="events.jsonl">events.jsonl</a></li>
       <li><a href="manifest.json">manifest.json</a></li>
       <li><a href="replay_state.json">replay_state.json</a></li>
-      {raw_video_item}
+      <li><a href="video_timeline.json">video_timeline.json</a></li>
+      <li><a href="continuous_frames_manifest.json">continuous_frames_manifest.json</a></li>
       <li><a href="trace.zip">trace.zip</a></li>
       <li><a href="steps/">steps/</a></li>
+      <li><a href="continuous_frames/">continuous_frames/</a></li>
     </ul>
   </section>
 </body>
@@ -1390,7 +1556,8 @@ class RealBrowserRuntime:
         copies = {
             "report": "report.html",
             "video": "replay.webm",
-            "raw_video": "raw_replay.webm",
+            "video_timeline": "video_timeline.json",
+            "continuous_frames_manifest": "continuous_frames_manifest.json",
             "screenshot": "final.png",
             "events": "events.jsonl",
             "trace": "trace.zip",
@@ -1421,11 +1588,37 @@ class RealBrowserRuntime:
                 except OSError:
                     continue
             exported["steps_dir"] = str(target_steps)
+        frames_source = recording.get("continuous_frames_dir")
+        frames_dir = Path(str(frames_source)) if frames_source else None
+        if frames_dir is not None and frames_dir.exists() and frames_dir.is_dir():
+            target_frames = target_dir / "continuous_frames"
+            target_frames.mkdir(parents=True, exist_ok=True)
+            for path in sorted(frames_dir.glob("*.jpg")):
+                try:
+                    shutil.copyfile(path, target_frames / path.name)
+                except OSError:
+                    continue
+            exported["continuous_frames_dir"] = str(target_frames)
         return exported
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _read_jsonl(self, path: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        if not path.exists():
+            return rows
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
+        return rows
 
 
 class _DomReferenceParser(HTMLParser):

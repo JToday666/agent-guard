@@ -12,6 +12,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+CONTINUOUS_VIDEO_MIN_BYTES = 8000
+
 
 def build_artifact_integrity_manifest(run_or_artifact_dir: Path, *, output_path: Path | None = None) -> dict[str, Any]:
     root = run_or_artifact_dir.expanduser().resolve()
@@ -45,11 +47,11 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
         "step_actions.jsonl",
         "business_event_correlation_index.json",
         "replay.webm",
-        "raw_replay.webm",
         "trace.zip",
         "report.html",
         "replay_state.json",
-        "replay_frames.txt",
+        "video_timeline.json",
+        "continuous_frames_manifest.json",
     ):
         path = case_dir / name
         kind = name.rsplit(".", 1)[-1]
@@ -63,7 +65,7 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
                     path,
                     root=root,
                     artifact_type=name,
-                    allow_zero_warning=name in {"raw_replay.webm", "replay.webm"} or diagnostic_artifact,
+                    allow_zero_warning=diagnostic_artifact,
                 )
             )
         elif name.endswith(".zip"):
@@ -79,12 +81,18 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
     artifacts.extend(step_artifacts)
     cross_checks = _cross_check_case(case_dir, artifacts)
     errors = [item for item in artifacts if item.get("error")]
-    parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False and item.get("type") != "raw_replay.webm"]
+    if diagnostic_artifact:
+        errors = [
+            item
+            for item in errors
+            if item.get("type") not in {"video_timeline.json", "continuous_frames_manifest.json"}
+        ]
+    parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False]
     if diagnostic_artifact:
         parse_failures = [
             item
             for item in parse_failures
-            if item.get("type") not in {"raw_replay.webm", "replay.webm", "trace.zip"}
+            if item.get("type") not in {"replay.webm", "trace.zip", "video_timeline.json", "continuous_frames_manifest.json"}
         ]
     return {
         "case_id": _case_key_for_replay_dir(case_dir),
@@ -227,8 +235,10 @@ def _check_webm(path: Path, *, root: Path, artifact_type: str, allow_zero_warnin
         return item
     if item["size_bytes"] == 0 and allow_zero_warning:
         item.update({"parse_ok": None, "error": None})
-        item["warnings"].append("zero_byte_raw_replay")
-        item["warnings"].append("raw video unavailable")
+        item["warnings"].append("empty_diagnostic_video")
+        return item
+    if item["size_bytes"] < CONTINUOUS_VIDEO_MIN_BYTES:
+        item["error"] = f"webm_too_small:{item['size_bytes']}"
         return item
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
@@ -316,6 +326,12 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
     state_path = case_dir / "replay_state.json"
     report_path = case_dir / "report.html"
     frames_path = case_dir / "replay_frames.txt"
+    raw_video_path = case_dir / "raw_replay.webm"
+    timeline_path = case_dir / "video_timeline.json"
+    continuous_manifest_path = case_dir / "continuous_frames_manifest.json"
+    continuous_frames_dir = case_dir / "continuous_frames"
+    if raw_video_path.exists():
+        errors.append("raw_replay_must_not_exist")
     if state_path.exists() and report_path.exists():
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -323,24 +339,84 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
             for key in ("step_count", "dom_event_count", "video_source"):
                 if key in state and str(state[key]) not in html:
                     warnings.append(f"report_state_mismatch:{key}")
+            if state.get("video_source") != "continuous_playwright" and not _is_diagnostic_artifact(case_dir):
+                errors.append("replay_state_video_source_not_continuous_playwright")
+            if state.get("video_source") == "step_screenshots":
+                errors.append("legacy_step_screenshot_video_source")
         except Exception as exc:
             errors.append(f"replay_state_report_cross_check_error:{exc}")
     if frames_path.exists():
-        for raw_line in frames_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            match = re.search(r"([A-Za-z0-9_./-]+\.png)", raw_line)
-            if not match:
-                continue
-            raw_frame = Path(match.group(1))
-            frame = raw_frame if raw_frame.is_absolute() else case_dir / raw_frame
-            if not frame.exists() and raw_frame.name:
-                frame = case_dir / "steps" / raw_frame.name
-            if not frame.exists() and raw_frame.name == "final.png":
-                frame = case_dir / "final.png"
-            if not frame.exists():
-                errors.append(f"missing_replay_frame:{match.group(1)}")
+        warnings.append("legacy_step_replay_manifest_present")
+    replay_item = next((item for item in artifacts if item.get("type") == "replay.webm"), {})
+    duration = _float_or_none(replay_item.get("duration"))
+    if replay_item.get("exists") and replay_item.get("parse_ok") is True:
+        if duration is None or duration < 1.0:
+            errors.append("continuous_video_duration_lt_1s")
+        width = int(replay_item.get("width") or 0)
+        height = int(replay_item.get("height") or 0)
+        if width and height and (abs(width - 1440) > 32 or abs(height - 1024) > 32):
+            warnings.append(f"continuous_video_unexpected_size:{width}x{height}")
+    timeline = _read_json(timeline_path)
+    frames_manifest = _read_json(continuous_manifest_path)
+    if not timeline_path.exists() and not _is_diagnostic_artifact(case_dir):
+        errors.append("video_timeline_missing")
+    if not continuous_manifest_path.exists() and not _is_diagnostic_artifact(case_dir):
+        errors.append("continuous_frames_manifest_missing")
+    frame_paths = sorted(continuous_frames_dir.glob("*.jpg")) if continuous_frames_dir.exists() else []
+    if not _is_diagnostic_artifact(case_dir):
+        if len(frame_paths) < 2:
+            errors.append("continuous_frames_lt_2")
+        if duration is not None and duration >= 3 and len(frame_paths) < max(2, int(duration) - 1):
+            errors.append(f"continuous_frames_insufficient_for_duration:{len(frame_paths)}<{max(2, int(duration) - 1)}")
+    action_rows = _read_jsonl(case_dir / "action_metadata.jsonl")
+    if any(not item.get("timestamp") for item in action_rows):
+        errors.append("action_metadata_missing_timestamp")
+    if isinstance(timeline, dict):
+        actions = timeline.get("actions") if isinstance(timeline.get("actions"), list) else []
+        if len(actions) != len(action_rows):
+            errors.append(f"video_timeline_action_count_mismatch:{len(actions)}!={len(action_rows)}")
+        checks = timeline.get("coverage_checks") if isinstance(timeline.get("coverage_checks"), dict) else {}
+        if checks and checks.get("raw_replay_absent") is not True:
+            errors.append("video_timeline_raw_replay_absent_false")
+        if checks and checks.get("video_duration_ge_action_span_plus_grace") is not True and not _is_diagnostic_artifact(case_dir):
+            errors.append("video_duration_does_not_cover_action_span_plus_grace")
+    if isinstance(frames_manifest, dict) and int(frames_manifest.get("frame_count") or 0) != len(frame_paths):
+        errors.append("continuous_frames_manifest_count_mismatch")
     if not any(item["type"] == "step_png" for item in artifacts):
         warnings.append("no_step_pngs")
     return {"warnings": sorted(set(warnings)), "errors": sorted(set(errors))}
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        return rows
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
 
 
 class _LinkParser(HTMLParser):
