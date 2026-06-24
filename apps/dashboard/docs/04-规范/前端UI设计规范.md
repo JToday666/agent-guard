@@ -22,10 +22,10 @@
 ## 1.2 阶段能力原则
 
 - UI 必须区分 P0、P1、P2 能力，不能把 P1/P2 API 或页面写成 P0 必备功能。
-- P0 只承诺已在接口契约中列为 P0 的 Core API、AuditEvent 展示能力和最小 Dashboard 审批能力。
+- P0 只承诺已在接口契约中列为 P0 的 Guard API、AuditEvent 展示能力和最小 Dashboard 审批能力。
 - P1/P2 能力未启用时，不显示为可点击的主操作；如需要保留上下文，使用禁用态或阶段说明状态。
 - 阶段未启用、API 不存在、权限不足、数据未生成、数据过期时，使用 `empty`、`disabled`、`stale`、`forbidden`、`partial` 等状态，不写 `Mock`、`Coming Soon` 或演示占位文案。
-- Dashboard 不推断 redteam ground truth；评测结果必须来自 AttackBench 报告或 Core API。
+- Dashboard 不推断 AttackBench ground truth；评测结果必须来自 AttackBench 报告或 Guard API。
 
 ## 2. 命名规范
 

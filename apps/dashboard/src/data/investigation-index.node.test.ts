@@ -43,9 +43,15 @@ test("builds reusable latest-first event and trace indexes", () => {
 
   const index = buildInvestigationIndex([older, newer, other]);
 
-  assert.deepEqual(index.latestEvents.map((item) => item.id), ["newer", "older", "other"]);
+  assert.deepEqual(
+    index.latestEvents.map((item) => item.id),
+    ["newer", "older", "other"],
+  );
   assert.equal(index.byId.get("newer"), newer);
-  assert.deepEqual(index.byTrace.get("trace-1")?.map((item) => item.id), ["older", "newer"]);
+  assert.deepEqual(
+    index.byTrace.get("trace-1")?.map((item) => item.id),
+    ["older", "newer"],
+  );
 });
 
 test("filters indexed events by combined URL-backed criteria", () => {
@@ -73,7 +79,10 @@ test("filters indexed events by combined URL-backed criteria", () => {
     severity: "high",
   });
 
-  assert.deepEqual(result.map((item) => item.id), ["deny"]);
+  assert.deepEqual(
+    result.map((item) => item.id),
+    ["deny"],
+  );
 });
 
 test("distinguishes an absent event request from a missing event", () => {
@@ -86,7 +95,9 @@ test("distinguishes an absent event request from a missing event", () => {
 });
 
 test("rejects an event that does not belong to the requested trace", () => {
-  const index = buildInvestigationIndex([event({ id: "event-1", traceId: "trace-1" })]);
+  const index = buildInvestigationIndex([
+    event({ id: "event-1", traceId: "trace-1" }),
+  ]);
 
   assert.deepEqual(resolveInvestigationEvent(index, "event-1", "trace-2"), {
     status: "not-found",

@@ -31,7 +31,9 @@
           v-for="item in group.items"
           :key="item.to"
           class="sidebar__link"
+          :class="{ 'sidebar__link--active': isNavigationItemActive(item.to) }"
           :to="item.to"
+          :aria-current="isNavigationItemActive(item.to) ? 'page' : undefined"
           :title="isCollapsed ? item.label : undefined"
           :aria-label="item.meta ? `${item.label}，${item.meta}` : item.label"
           @click="isOpen = false"
@@ -59,6 +61,7 @@ import {
   Server,
 } from "@lucide/vue";
 import { computed, ref } from "vue";
+import { useRoute } from "vue-router";
 
 defineOptions({
   name: "AppSidebar",
@@ -68,6 +71,7 @@ const emit = defineEmits<{
   "toggle-collapse": [];
 }>();
 
+const route = useRoute();
 const isOpen = ref(false);
 const props = defineProps<{
   isCollapsed: boolean;
@@ -100,6 +104,10 @@ const navigationGroups = computed(() => [
     ],
   },
 ]);
+
+function isNavigationItemActive(path: string): boolean {
+  return route.path === path || route.path.startsWith(`${path}/`);
+}
 </script>
 
 <style scoped lang="scss">
@@ -227,7 +235,8 @@ const navigationGroups = computed(() => [
   top: 0.125rem;
 }
 
-.sidebar__link.router-link-active {
+.sidebar__link.router-link-active,
+.sidebar__link--active {
   background: var(--color-active-soft);
   box-shadow: inset 2px 0 var(--color-active);
   color: var(--color-active);

@@ -39,12 +39,12 @@ AgentGuard 采用四层目标架构：
                          Agent Runtime
 ```
 
-| 层级 | 核心职责 | 部署形态 |
-| ---- | -------- | -------- |
-| Runtime Adapter | 接入 Agent runtime，拦截工具调用、文件访问、代码执行、记忆写入，映射标准事件并执行 `allow` / `deny` / `ask` 等决策 | 嵌入 Agent 进程 |
+| 层级                      | 核心职责                                                                                                                         | 部署形态                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Runtime Adapter           | 接入 Agent runtime，拦截工具调用、文件访问、代码执行、记忆写入，映射标准事件并执行 `allow` / `deny` / `ask` 等决策               | 嵌入 Agent 进程                       |
 | Guard API / Control Plane | 对外提供统一 API；负责鉴权、策略快照加载、审计入库、告警生成、审批状态、指标聚合、调用链查询、Agent 注册、API Key 管理和评测任务 | MVP 阶段作为 `guard-api` 单体后端运行 |
-| agentguard-core | 纯 Python 安全判定库；只处理事件、检测器、策略匹配、风险评分、证据生成和决策输出 | 被 `guard-api` 或离线评测进程引用 |
-| Dashboard / Evaluation | 展示审计、告警、阻断、审批、指标和攻击链路；AttackBench 可走 `guard-api` 完整链路或直接调用 core 做无状态评测 | Web 前端 / 评测进程 |
+| agentguard-core           | 纯 Python 安全判定库；只处理事件、检测器、策略匹配、风险评分、证据生成和决策输出                                                 | 被 `guard-api` 或离线评测进程引用     |
+| Dashboard / Evaluation    | 展示审计、告警、阻断、审批、指标和攻击链路；AttackBench 可走 `guard-api` 完整链路或直接调用 core 做无状态评测                    | Web 前端 / 评测进程                   |
 
 ## 3. 状态归属
 
@@ -87,11 +87,11 @@ Agent Runtime
 
 ## 5. P0/P1/P2 开发边界
 
-| 阶段 | 必须实现的架构能力 | 不做或延后 |
-| ---- | ------------------ | ---------- |
-| P0 | 统一 `POST /v1/guard/evaluate` 判定入口、LangGraph Adapter、ToolCallEvent、GuardDecision、AuditEvent、基础审批、Dashboard 事件页、AttackBench runner | OpenClaw 完整接入、多渠道审批、复杂模型检测、独立 Control Plane 微服务 |
-| P1 | ContextBuildEvent、ToolResultEvent、MemoryEvent、输入输出过滤、攻击链路页、FPR/FNR 指标、策略快照管理 | Tamper-Evident Audit、复杂 provenance 图 |
-| P2 | OpenClaw Config Audit、Memory Guard、Action Critic、Provenance Graph、消融实验 | 生产级多租户、安全沙箱逃逸检测 |
+| 阶段 | 必须实现的架构能力                                                                                                                                   | 不做或延后                                                             |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| P0   | 统一 `POST /v1/guard/evaluate` 判定入口、LangGraph Adapter、ToolCallEvent、GuardDecision、AuditEvent、基础审批、Dashboard 事件页、AttackBench runner | OpenClaw 完整接入、多渠道审批、复杂模型检测、独立 Control Plane 微服务 |
+| P1   | ContextBuildEvent、ToolResultEvent、MemoryEvent、输入输出过滤、攻击链路页、FPR/FNR 指标、策略快照管理                                                | Tamper-Evident Audit、复杂 provenance 图                               |
+| P2   | OpenClaw Config Audit、Memory Guard、Action Critic、Provenance Graph、消融实验                                                                       | 生产级多租户、安全沙箱逃逸检测                                         |
 
 ## 6. 验收证据
 

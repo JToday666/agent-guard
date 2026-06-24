@@ -47,10 +47,7 @@ export function hasSameEventWindow(
   );
 }
 
-export function hasSameMetrics(
-  left: EvalMetrics,
-  right: EvalMetrics,
-): boolean {
+export function hasSameMetrics(left: EvalMetrics, right: EvalMetrics): boolean {
   return (
     left.eventCount === right.eventCount &&
     left.allowCount === right.allowCount &&

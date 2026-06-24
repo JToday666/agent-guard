@@ -8,9 +8,6 @@
 apps/dashboard/docs/
 ├── 02-architecture/
 │   └── data-flow.md
-├── 03-delivery/
-│   ├── dashboard-change-summary.md
-│   └── dashboard-validation-report.md
 └── 04-规范/
     ├── 前端UI设计规范.md
     └── 文档维护约定.md
@@ -21,8 +18,6 @@ apps/dashboard/docs/
 - [前端 UI 设计规范](04-规范/前端UI设计规范.md)
 - [文档维护约定](04-规范/文档维护约定.md)
 - [Dashboard 数据流与状态](02-architecture/data-flow.md)
-- [Dashboard 改动说明](03-delivery/dashboard-change-summary.md)
-- [Dashboard 测试与页面验证报告](03-delivery/dashboard-validation-report.md)
 
 ## 维护原则
 

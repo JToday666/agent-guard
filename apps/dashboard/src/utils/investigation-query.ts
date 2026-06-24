@@ -67,12 +67,17 @@ export function mergeInvestigationQuery(
   const nextQuery: LocationQueryRaw = {};
 
   for (const [key, value] of Object.entries(currentQuery)) {
-    if (typeof value === "string" && value.trim()) nextQuery[key] = value.trim();
+    if (typeof value === "string" && value.trim())
+      nextQuery[key] = value.trim();
   }
 
   for (const [key, value] of Object.entries(patch)) {
     const normalizedValue = typeof value === "string" ? value.trim() : value;
-    if (normalizedValue === undefined || normalizedValue === "" || (key === "page" && normalizedValue === 1)) {
+    if (
+      normalizedValue === undefined ||
+      normalizedValue === "" ||
+      (key === "page" && normalizedValue === 1)
+    ) {
       delete nextQuery[key];
     } else {
       nextQuery[key] = String(normalizedValue);
