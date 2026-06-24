@@ -93,10 +93,7 @@ test("detects a visible audit event change", () => {
 
 test("compares evaluation metrics by value", () => {
   assert.equal(hasSameMetrics(metrics, { ...metrics }), true);
-  assert.equal(
-    hasSameMetrics(metrics, { ...metrics, blockedCount: 0 }),
-    false,
-  );
+  assert.equal(hasSameMetrics(metrics, { ...metrics, blockedCount: 0 }), false);
 });
 
 test("compares evaluation summaries by value", () => {

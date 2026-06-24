@@ -16,7 +16,7 @@
         <footer>
           <StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" />
           <span>风险 {{ event.riskScore }}</span>
-          <RouterLink :to="eventLink(event.id)">查看证据</RouterLink>
+          <RouterLink class="page-action" :to="eventLink(event.id)">查看证据</RouterLink>
         </footer>
       </article>
     </li>
@@ -52,5 +52,5 @@ function eventLink(eventId: string) {
 .trace-timeline h3 { font-size: var(--font-size-16); }
 .trace-timeline p, .trace-timeline time { color: var(--color-text-muted); }
 .trace-timeline code { color: var(--color-text-subtle); overflow-wrap: anywhere; }
-.trace-timeline footer a { color: var(--color-link); margin-left: auto; }
+.trace-timeline footer .page-action { margin-left: auto; }
 </style>

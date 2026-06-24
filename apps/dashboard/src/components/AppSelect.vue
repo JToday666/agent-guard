@@ -6,6 +6,7 @@
   >
     <label class="app-select__label" :id="labelId" :for="triggerId">{{ label }}</label>
     <button
+      ref="triggerElement"
       :id="triggerId"
       class="app-select__trigger"
       type="button"
@@ -15,12 +16,9 @@
       :aria-expanded="isOpen"
       :aria-labelledby="`${labelId} ${valueId}`"
       :disabled="disabled"
+      role="combobox"
       @click="handleTriggerClick"
-      @keydown.down.prevent="handleOpenAndMove(1)"
-      @keydown.enter.prevent="handleTriggerEnter"
-      @keydown.esc.prevent="handleClose"
-      @keydown.space.prevent="handleTriggerEnter"
-      @keydown.up.prevent="handleOpenAndMove(-1)"
+      @keydown="handleKeydown"
     >
       <span :id="valueId" class="app-select__value" :class="{ 'app-select__value--placeholder': !selectedOption }">
         {{ selectedOption?.label ?? placeholder }}
@@ -60,7 +58,15 @@
 
 <script setup lang="ts">
 import { Check, ChevronDown } from "@lucide/vue";
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onDeactivated,
+  ref,
+  useId,
+  watch,
+} from "vue";
 
 defineOptions({
   name: "AppSelect",
@@ -89,9 +95,10 @@ const props = withDefaults(defineProps<{
 });
 
 const rootElement = ref<HTMLElement | null>(null);
+const triggerElement = ref<HTMLButtonElement | null>(null);
 const isOpen = ref(false);
 const activeIndex = ref(0);
-const instanceId = `select-${Math.random().toString(36).slice(2, 9)}`;
+const instanceId = useId();
 const baseId = computed(() => props.id ?? instanceId);
 const triggerId = computed(() => `${baseId.value}-trigger`);
 const labelId = computed(() => `${baseId.value}-label`);
@@ -99,18 +106,20 @@ const valueId = computed(() => `${baseId.value}-value`);
 const listboxId = computed(() => `${baseId.value}-listbox`);
 const activeOptionId = computed(() => getOptionId(activeIndex.value));
 const selectedOption = computed(() => props.options.find((option) => option.value === props.modelValue));
+let typeaheadBuffer = "";
+let typeaheadTimer: number | undefined;
 
 watch(
-  () => props.modelValue,
+  [() => props.modelValue, () => props.options, () => props.disabled],
   () => {
+    if (props.disabled || props.options.length === 0) handleClose();
     activeIndex.value = getSelectedIndex();
   },
   { immediate: true },
 );
 
-onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", handleDocumentPointerDown);
-});
+onDeactivated(handleClose);
+onBeforeUnmount(handleClose);
 
 function handleTriggerClick(): void {
   if (props.disabled) return;
@@ -119,22 +128,6 @@ function handleTriggerClick(): void {
     return;
   }
   handleOpen();
-}
-
-function handleTriggerEnter(): void {
-  if (isOpen.value) {
-    handleSelectActive();
-    return;
-  }
-  handleOpen();
-}
-
-function handleOpenAndMove(direction: number): void {
-  if (!isOpen.value) {
-    handleOpen();
-    return;
-  }
-  handleMove(direction);
 }
 
 function handleOpen(): void {
@@ -147,6 +140,9 @@ function handleOpen(): void {
 function handleClose(): void {
   isOpen.value = false;
   document.removeEventListener("pointerdown", handleDocumentPointerDown);
+  window.clearTimeout(typeaheadTimer);
+  typeaheadBuffer = "";
+  typeaheadTimer = undefined;
 }
 
 function handleMove(direction: number): void {
@@ -163,9 +159,71 @@ function handleSelectActive(): void {
 function handleSelect(value: string): void {
   emit("update:modelValue", value);
   handleClose();
-  void nextTick(() => {
-    rootElement.value?.querySelector<HTMLButtonElement>(".app-select__trigger")?.focus();
-  });
+  void nextTick(() => triggerElement.value?.focus());
+}
+
+function handleKeydown(event: KeyboardEvent): void {
+  if (event.key === "Tab") {
+    handleClose();
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    handleClose();
+    return;
+  }
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    if (isOpen.value) handleSelectActive();
+    else handleOpen();
+    return;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (isOpen.value) handleMove(event.key === "ArrowDown" ? 1 : -1);
+    else handleOpen();
+    return;
+  }
+  if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    if (props.options.length === 0) return;
+    if (!isOpen.value) handleOpen();
+    activeIndex.value = event.key === "Home" ? 0 : props.options.length - 1;
+    return;
+  }
+  if (
+    isOpen.value &&
+    event.key.length === 1 &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey
+  ) {
+    event.preventDefault();
+    handleTypeahead(event.key);
+  }
+}
+
+function handleTypeahead(key: string): void {
+  window.clearTimeout(typeaheadTimer);
+  const normalizedKey = key.toLocaleLowerCase("zh-CN");
+  const isRepeatedKey =
+    typeaheadBuffer.length > 0 &&
+    [...typeaheadBuffer].every((character) => character === normalizedKey);
+  typeaheadBuffer = isRepeatedKey
+    ? normalizedKey
+    : `${typeaheadBuffer}${normalizedKey}`;
+
+  for (let offset = 1; offset <= props.options.length; offset += 1) {
+    const index = (activeIndex.value + offset) % props.options.length;
+    if (props.options[index]?.label.toLocaleLowerCase("zh-CN").startsWith(typeaheadBuffer)) {
+      activeIndex.value = index;
+      break;
+    }
+  }
+  typeaheadTimer = window.setTimeout(() => {
+    typeaheadBuffer = "";
+    typeaheadTimer = undefined;
+  }, 500);
 }
 
 function handleDocumentPointerDown(event: PointerEvent): void {

@@ -12,7 +12,7 @@
 
       <div class="analysis-grid section-divider">
         <section class="analysis-panel analysis-panel--trend" aria-labelledby="trend-title">
-          <header><div><h2 id="trend-title">决策趋势</h2><p>当前事件窗口内的放行、审批与拒绝变化</p></div><RouterLink to="/investigations">进入调查</RouterLink></header>
+          <header><div><h2 id="trend-title">决策趋势</h2><p>当前事件窗口内的放行、审批与拒绝变化</p></div><RouterLink class="page-action" to="/investigations">进入调查</RouterLink></header>
           <DecisionTrendChart :points="store.decisionTrend" />
         </section>
         <section class="analysis-panel" aria-labelledby="distribution-title">
@@ -22,7 +22,7 @@
       </div>
 
       <section class="risk-feed section-divider" aria-labelledby="risk-feed-title">
-        <header><div><h2 id="risk-feed-title">需要关注的高风险事件</h2><p>严重与高风险事件按最新时间排列</p></div><RouterLink to="/investigations?severity=high">查看全部</RouterLink></header>
+        <header><div><h2 id="risk-feed-title">需要关注的高风险事件</h2><p>严重与高风险事件按最新时间排列</p></div><RouterLink class="page-action" to="/investigations?severity=high">查看全部</RouterLink></header>
         <div v-if="highRiskEvents.length" class="risk-feed__rows">
           <RouterLink v-for="event in highRiskEvents" :key="event.id" :to="{ path: '/investigations', query: { event_id: event.id } }">
             <time>{{ event.time }}</time><StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" /><code>{{ event.tool }}</code><span>{{ event.resource }}</span><span class="risk-rail"><i :style="{ width: `${event.riskScore}%` }"></i></span><strong>{{ event.riskScore }}</strong>
@@ -73,10 +73,10 @@ function handleRefresh() { void store.refresh(); }
 .analysis-panel > header, .risk-feed > header { align-items: start; display: flex; gap: var(--space-4); justify-content: space-between; }
 .analysis-panel h2, .analysis-panel p, .risk-feed h2, .risk-feed p { margin: 0; }
 .analysis-panel p, .risk-feed p { color: var(--color-text-subtle); font-size: var(--font-size-12); margin-top: var(--space-1); }
-.analysis-panel a, .risk-feed a { color: var(--color-link); font-size: var(--font-size-13); }
+.analysis-panel > header .page-action, .risk-feed > header .page-action { font-size: var(--font-size-13); }
 .risk-feed { display: grid; gap: var(--space-4); }
 .risk-feed__rows { display: grid; }
-.risk-feed__rows > a { align-items: center; border-bottom: 1px solid var(--color-border); color: var(--color-text); display: grid; gap: var(--space-3); grid-template-columns: 5rem 5rem 8rem minmax(10rem, 1fr) minmax(4rem, 8rem) 2.5rem; min-height: 3.5rem; padding: 0 var(--space-2); text-decoration: none; }
+.risk-feed__rows > a { align-items: center; border-bottom: 1px solid var(--color-border); color: var(--color-text); display: grid; font-size: var(--font-size-13); gap: var(--space-3); grid-template-columns: 5rem 5rem 8rem minmax(10rem, 1fr) minmax(4rem, 8rem) 2.5rem; min-height: 3.5rem; padding: 0 var(--space-2); text-decoration: none; }
 .risk-feed__rows > a:hover { background: var(--color-row-hover); }
 .risk-feed time { color: var(--color-text-subtle); }
 .risk-feed__rows span:not(.risk-rail) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

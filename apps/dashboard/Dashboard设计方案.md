@@ -1,5 +1,7 @@
 # AgentGuard Dashboard 完整设计方案
 
+> 本文保留 Dashboard 的 P1/P2 目标设计。当前已落地的路由是 `/overview`、`/approvals/:approval_id?`、`/investigations`、`/investigations/:trace_id`、`/evaluation` 和 `/system`；独立 Events、Traces 和 Advanced 页仍是未来规划。调查详情当前从 AuditEvent 中按 `trace_id` 聚合，不依赖独立 Trace API。
+
 ## 1. 产品定位
 
 AgentGuard Dashboard 不是普通后台管理系统，也不是大屏展示页，而是 **Agent 运行时安全监督工作台**。
@@ -22,7 +24,7 @@ Agent 正在执行什么任务
 
 ---
 
-# 2. 总体页面结构
+# 2. 目标页面结构
 
 Dashboard 采用 **7 个主页面**：
 
@@ -59,7 +61,7 @@ Advanced 是高级扩展能力的地方
 
 ## 2.1 阶段可用性
 
-Dashboard 保留 7 个主页面作为目标态，但实现和验收必须按阶段收敛，不能把 P1/P2 能力写成 P0 必备功能。
+Dashboard 保留 7 个主页面作为目标态，但实现和验收必须按阶段收敛，不能把 P1/P2 能力写成 P0 必备功能。当前 P0 将 Events 和 Traces 的核心能力收敛为“调查”列表与详情，与总览、审批、评测和系统状态共同构成当前导航。
 
 | 阶段 | 可用页面 / 能力                                                                               | 不在本阶段承诺                                                               |
 | ---- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -188,9 +190,9 @@ Raw JSON
 
 ---
 
-# 4. 路由与闭环跳转
+# 4. 目标路由与闭环跳转
 
-## 4.1 主路由
+## 4.1 目标主路由
 
 ```text
 /events
@@ -345,7 +347,7 @@ Events 是默认首页和核心工作台。它承担三个任务：
 
 P0 最重要的信息都要放在 Events 首屏：`time`、`decision`、`risk_score`、`severity`、`blocked`、`runtime`、`tool`、`resource_targets`、`reason`。
 
-P0 默认表格只承诺展示 AuditEvent 字段。`trace_id`、`case_id` 可以展示和复制，但 Trace 详情链接只在 P1 `GET /v1/audit/traces/{trace_id}` 可用后启用。P1 扩展 stage 包括 `memory_write`、`message_sending`、`tool_result`、`context_build` 和 `model_call`。
+P0 默认表格只承诺展示 AuditEvent 字段。`trace_id`、`case_id` 可以展示和复制，当前可进入 `/investigations/:trace_id` 查看由已加载 AuditEvent 聚合的调查详情。P1 扩展 stage 包括 `memory_write`、`message_sending`、`tool_result`、`context_build` 和 `model_call`。
 
 Dashboard 文档要求实时事件页展示 AuditEvent 列表、决策、风险分数和阻断原因，并要求阻断记录显示工具名、参数、资源目标、命中规则和用户任务。仓库接口契约也把 AuditEvent 定义为 Dashboard、指标和答辩证据的共同输入。
 
@@ -648,7 +650,7 @@ Traces 负责解释“为什么这条事件发生”。它把单条事件扩展�
 → AuditEvent 写入
 ```
 
-Trace 页面整体是 P1 能力。P0 只在 Events 中展示和复制 `trace_id`，不承诺调用 `GET /v1/audit/traces/{trace_id}`。当 P1 API 未启用时，Trace 链接不显示为可点击操作。
+独立 Traces 列表和 Provenance 图是 P1 能力。P0 已提供 `/investigations/:trace_id` 调查详情，从 AuditEvent 中聚合同一 `trace_id` 的时间线；当前不调用独立 Trace API。
 
 ## 8.2 布局
 
@@ -851,22 +853,22 @@ Expected deny     1    5   37
 
 ## 10.1 页面定位
 
-System 用于确认数据链路是否正常。演示时如果 Events 没有数据，用户能快速判断是 Core 离线、session 失效、SSE 中断、Adapter 未上报，还是指标尚未生成。
+System 用于确认数据链路是否正常。演示时如果调查列表没有数据，用户能快速判断是 Guard API 离线、session 失效、轮询中断、Adapter 未上报，还是指标尚未生成。
 
 阶段边界：
 
-| 阶段 | System 能力                                                                |
-| ---- | -------------------------------------------------------------------------- |
-| P0   | Core API 状态、browser session 状态、最近 AuditEvent 时间、数据 stale 提示 |
-| P1   | runtime metrics、SSE / polling 连接状态、Adapter errors、schema version    |
-| P2   | Audit Integrity、hash chain、missing events、tamper evidence               |
+| 阶段 | System 能力                                                                 |
+| ---- | --------------------------------------------------------------------------- |
+| P0   | Guard API 状态、browser session 状态、最近 AuditEvent 时间、数据 stale 提示 |
+| P1   | runtime metrics、SSE / polling 连接状态、Adapter errors、schema version     |
+| P2   | Audit Integrity、hash chain、missing events、tamper evidence                |
 
 ## 10.2 布局
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ Runtime Health                                                               │
-│ Core API Online | Browser Session Valid | CSRF Ready                         │
+│ Guard API Online | Browser Session Valid | CSRF Ready                        │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Data Pipeline                                                                │
 │ Adapter → Core → Audit Log → Dashboard                                       │
@@ -886,7 +888,7 @@ System 用于确认数据链路是否正常。演示时如果 Events 没有数�
 
 | 信息                  | 形式                           |
 | --------------------- | ------------------------------ |
-| Core API 状态         | status card                    |
+| Guard API 状态        | status card                    |
 | browser session 状态  | status card                    |
 | CSRF 状态             | status card，不显示 token 原文 |
 | SSE / polling 状态    | P1 status card                 |
@@ -1074,7 +1076,7 @@ approval nonce 原文
 真实 API 响应正文
 真实敏感文件内容
 runtime 内部私有状态
-redteam ground truth 的前端推断结果
+AttackBench ground truth 的前端推断结果
 ```
 
 脱敏示例：
@@ -1086,7 +1088,7 @@ Authorization = Bearer ****
 email = a****@example.com
 ```
 
-Dashboard 不直接读取 LangGraph、OpenClaw、Mock Tools 或 redteam runner 的内部状态，不根据前端事件自行判断攻击是否成功。
+Dashboard 不直接读取 LangGraph、OpenClaw、沙箱工具或 AttackBench runner 的内部状态，不根据前端事件自行判断攻击是否成功。
 
 ---
 
@@ -1189,7 +1191,7 @@ launch code
 真实 API 数据
 真实敏感文件内容
 runtime 内部私有状态
-redteam ground truth 的前端推断结果
+AttackBench ground truth 的前端推断结果
 ```
 
 敏感内容展示方式：

@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 开发顺序、模块边界和验收标准。实现时优先完成 P0 最小闭环，不提前实现 P2 亮点。
+本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环已有可运行实现；P1/P2 开发项与优先级保持不变。
 
 关联入口：
 
@@ -13,15 +13,15 @@
 
 ## 2. 阶段目标
 
-| 阶段 | 目标                | 验收口径                                                               |
-| ---- | ------------------- | ---------------------------------------------------------------------- |
+| 阶段 | 目标                | 验收口径                                                                       |
+| ---- | ------------------- | ------------------------------------------------------------------------------ |
 | P0   | LangGraph 保底闭环  | 攻击样本能触发危险工具调用，Guard API 调用 Core 得到阻断决策，Dashboard 能展示 |
-| P1   | 完整可解释链路      | 上下文、模型、工具结果、记忆和消息链路可追踪，可计算 FPR/FNR           |
-| P2   | OpenClaw 与冲奖增强 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、消融实验 |
+| P1   | 完整可解释链路      | 上下文、模型、工具结果、记忆和消息链路可追踪，可计算 FPR/FNR                   |
+| P2   | OpenClaw 与冲奖增强 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、消融实验         |
 
-## 3. P0 最小实现顺序
+## 3. P0 当前实现
 
-必须按以下顺序推进，避免先做 UI 或增强项导致闭环不稳。
+P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapper、Mock Tools、AttackBench runner 和 Dashboard 均已有可运行实现。下列顺序表示运行链路和模块依赖，不再表示待实现任务。
 
 1. Guard API / Control Plane event flow
    - 实现 `GuardEvent`、`GuardDecision`、`AuditEvent`。
@@ -56,14 +56,14 @@
    - `call_api`
    - 副作用只写入沙箱或 mock outbox。
 
-6. Redteam runner
+6. AttackBench runner
    - 读取 AttackCase JSONL。
    - 支持 defense before / after 重放。
    - 统计 ASR before、ASR after、Block Rate、FPR。
 
-7. Dashboard event page
-   - 使用 Vue 3 + TypeScript + Sass + Pinia 初始化前端工程。
-   - 展示 AuditEvent。
+7. Dashboard
+   - 使用 Vue 3 + TypeScript + Sass + Pinia。
+   - 在总览、调查、调查详情、审批、评测和系统状态页消费 Guard API 数据。
    - 展示阻断原因、命中规则、风险分数、资源目标。
    - 展示 pending approval，并支持 `allow_once` / `deny`。
    - 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
@@ -89,11 +89,11 @@
 
 ## 6. 分工建议
 
-| 成员 | 负责                                    |
-| ---- | --------------------------------------- |
+| 成员 | 负责                                                      |
+| ---- | --------------------------------------------------------- |
 | A    | 无状态 Core、Guard API、schemas、policies、contract tests |
-| B    | LangGraph、Mock Tools、Redteam runner                    |
-| C    | Dashboard、OpenClaw Plugin、文档、Demo                   |
+| B    | LangGraph、沙箱工具、AttackBench runner                   |
+| C    | Dashboard、OpenClaw Plugin、文档、Demo                    |
 
 ## 7. P0 验收标准
 
