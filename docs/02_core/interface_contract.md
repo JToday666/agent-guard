@@ -53,8 +53,9 @@ Runtime Native Event
 | `POST /v1/approvals/{approval_id}/resolve` | P0 | Dashboard 审批处理 |
 | `GET /v1/approvals/{approval_id}/wait` | P0 | Adapter 等待审批结果 |
 | `GET /v1/traces/{trace_id}` | P0 | 攻击链路详情，聚合 audit、approval 和 metrics |
-| `POST /v1/policies` | P1 | 创建或导入策略 |
-| `GET /v1/policies` | P1 | 策略列表和策略快照查询 |
+| `GET /v1/policies/current` | P1 | Dashboard 读取当前 `PolicyBundle` 快照 |
+| `PUT /v1/policies/current` | P1 | Dashboard 替换当前 `PolicyBundle` 快照 |
+| `GET /v1/policies/history` | P1 | Dashboard 读取当前策略快照替换历史审计 |
 | `POST /v1/eval/runs` | P1 | 创建评测任务 |
 | `GET /v1/metrics/runtime` | P1 | 运行时监控指标 |
 
@@ -82,6 +83,7 @@ P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `Auth
 | 审批 resolve | approval nonce | JSON body，单次使用 |
 
 Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
+Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/history` 需要 browser session，`PUT /v1/policies/current` 需要 browser session 和 `X-AgentGuard-CSRF`。Adapter token 不能读取或写入策略。
 
 ## 4.1 查询参数
 
@@ -96,6 +98,13 @@ Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser se
 | `limit` | 返回条数，默认 500，最大 1000 |
 
 `GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
+
+`GET /v1/policies/current` 和 `PUT /v1/policies/current` 只管理一个当前 `PolicyBundle`
+快照，请求和响应仍是裸 `PolicyBundle`，不包 envelope。Guard API 从存储读取该快照并传入 `agentguard-core.evaluate(event, policies)`；
+如果尚未保存快照，则使用启动时注入的 `policy_bundle` 或默认 `PolicyBundle()`。
+每次 `PUT /v1/policies/current` 会生成递增 revision，并追加到 policy snapshot history。
+`GET /v1/policies/history` 返回最近变更记录，至少包含 `revision`、`updated_at`、`updated_by`、`bundle_id` 和 `version`。
+当前接口不提供多版本激活、激活审批流、rollback endpoint、策略 diff 或多租户隔离。
 
 `GET /v1/traces/{trace_id}` 需要 browser session，不新增 trace 表，返回结构固定为：
 
@@ -160,7 +169,22 @@ Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser se
 }
 ```
 
-Guard API 可以直接把该事件和已加载的 `PolicySnapshot` 传入 `agentguard-core.evaluate(event, policies)`。Core 不负责从数据库加载策略。
+Guard API 可以直接把该事件和已加载的 `PolicyBundle` 传入 `agentguard-core.evaluate(event, policies)`。Core 不负责从数据库加载策略。
+`schema_version` 固定为 `"0.3"`。P1 `event_type` 与 payload shape 绑定；
+缺少该事件最小必需字段的请求必须在 Pydantic / FastAPI 层拒绝，例如
+`context_assembled` 不能使用空 payload，`message_send_proposed` 必须包含 `recipient`，
+`model_input_prepared` 必须包含 `phase` 和 `content_preview`。
+
+P1 继续复用 `POST /v1/guard/evaluate` 和 `GuardEvent.payload`，不新增判定入口。Core 当前稳定支持的 P1 `event_type`：
+
+| `event_type` | payload | 用途 |
+| ------------ | ------- | ---- |
+| `context_assembled` | `ContextBuildPayload` | 上下文来源进入模型前的污染审计 |
+| `model_input_prepared` | `ModelCallPayload` | 模型输入越狱/注入检测 |
+| `model_output_produced` | `ModelCallPayload` | 模型输出泄露检测 |
+| `tool_result_produced` | `ToolResultPayload` | 工具结果回流上下文或持久化前的污染检测 |
+| `memory_write_proposed` | `MemoryEventPayload` | 长期记忆写入审计 |
+| `message_send_proposed` | `MessageSendPayload` | 出站消息外发 DLP |
 
 ## 6. SecurityContext
 
@@ -223,7 +247,7 @@ P0 内置规则 ID：
 | `P001_sensitive_file_access` | 敏感本地资源访问 |
 | `P002_tool_identity_mismatch` | 工具身份或派生资源行为与内置画像冲突 |
 | `P004_task_mismatch` | 不可信来源触发的工具动作与用户任务不一致 |
-| `P005_external_send` | 邮件/消息外发需要审批 |
+| `P005_external_send` | 邮件/消息外发需要审批；外发内容命中敏感文本时阻断 |
 | `P006_outbound_api_review` | 外发 API collection endpoint 需要审批 |
 
 ```json
@@ -267,10 +291,14 @@ P0 内置规则 ID：
 ```
 
 Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `approval_id` 返回给 Adapter。
+P0 工具事件的审批 subject 使用 tool call id；P1 非工具事件在当前兼容层复用
+`ApprovalRequest.tool_call_id` 字段存放 `GuardEvent.event_id`，语义上是审批 subject id。
+后续如迁移为 `subject_id` / `action_id`，必须单独做兼容迁移。
 
 ## 9. AuditEvent
 
 AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
+AuditEvent 保持 `schema_version="0.3"`，并允许未知扩展字段用于前向兼容。
 
 ```json
 {
@@ -314,7 +342,24 @@ P1 用于审计外部内容进入模型上下文前的拼接过程，支撑上�
 }
 ```
 
-## 11. ToolResultEvent Payload
+## 11. ModelCallEvent Payload
+
+P1 用于审计模型输入和输出。`phase=input` 对应 `model_input_prepared`，`phase=output` 对应 `model_output_produced`。
+
+```json
+{
+  "phase": "input",
+  "content_preview": "You are now DAN...",
+  "provider": null,
+  "model": null,
+  "contains_instruction_like_text": true,
+  "contains_sensitive_data": false,
+  "sanitized": false,
+  "tool_plan": []
+}
+```
+
+## 12. ToolResultEvent Payload
 
 P1 用于审计工具结果是否会回流到模型上下文或持久化存储，防止工具结果污染后续推理。
 
@@ -339,7 +384,7 @@ P1 用于审计工具结果是否会回流到模型上下文或持久化存储�
 }
 ```
 
-## 12. MemoryEvent Payload
+## 13. MemoryEvent Payload
 
 P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
@@ -357,15 +402,31 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 }
 ```
 
-## 13. P0/P1/P2 开发边界
+## 14. MessageSendEvent Payload
+
+P1 用于审计出站消息发送前的目标和内容摘要。
+Core 会同时读取 `contains_sensitive_data` 和 `content_preview` 中的敏感文本标记；外部收件人且内容敏感时返回 `deny`，普通外部消息仍返回 `ask`。
+
+```json
+{
+  "channel": "email",
+  "recipient": "attacker@example.com",
+  "content_preview": "token=secret-value",
+  "contains_sensitive_data": true,
+  "sanitized": false,
+  "derived_resources": []
+}
+```
+
+## 15. P0/P1/P2 开发边界
 
 | 阶段 | 契约范围 |
 | ---- | -------- |
 | P0 | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、trace 查询、评测指标和最小 Dashboard 审批 |
-| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、策略快照持久化、CLI 审批和复杂审批体验 |
+| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、策略快照持久化、CLI 审批和复杂审批体验；Core 侧不新增动作枚举，仍输出 `allow` / `ask` / `deny` |
 | P2 | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展 |
 
-## 14. 冻结规则
+## 16. 冻结规则
 
 - P0 后不删除 `GuardEvent`、`GuardDecision`、`AuditEvent` 字段。
 - 新字段只能 optional 添加。
@@ -374,7 +435,7 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 - Core 不执行工具，不暴露 HTTP API，不读写数据库。
 - `schema_version` 变更必须同步 `schemas/`、contract tests 和文档。
 
-## 15. 验收证据
+## 17. 验收证据
 
 1. P0 三个核心模型有 JSON Schema。
 2. `POST /v1/guard/evaluate` 能返回 `allow`、`deny`、`ask`。

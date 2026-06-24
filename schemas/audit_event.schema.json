@@ -26,5 +26,5 @@
     "latency_ms": { "type": ["integer", "null"] },
     "metadata": { "type": "object" }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }

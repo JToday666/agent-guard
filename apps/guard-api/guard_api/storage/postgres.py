@@ -13,12 +13,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from agentguard_core import AuditEvent, utc_now_iso
+from agentguard_core import AuditEvent, PolicyBundle, utc_now_iso
 from guard_api.models import ApprovalRequest
 from guard_api.storage.base import (
     AuditEventFilters,
     EvalMetricFilters,
     EvalMetrics,
+    PolicySnapshotRecord,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
@@ -29,6 +30,8 @@ from guard_api.storage.sqlalchemy_models import (
     audit_events,
     browser_sessions,
     launch_codes,
+    policy_snapshot_history,
+    policy_snapshots,
 )
 
 
@@ -131,6 +134,102 @@ class PostgresControlPlaneStore:
             "fnr": (false_negative_count / malicious_count) if malicious_count else None,
             "average_latency_ms": float(average_latency) if average_latency is not None else None,
         }
+
+    def get_policy_snapshot(self) -> PolicyBundle | None:
+        record = self.get_policy_snapshot_record()
+        if record is None:
+            return None
+        return record.policy_bundle
+
+    def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None:
+        stmt = (
+            select(
+                policy_snapshots.c.revision,
+                policy_snapshots.c.payload_json,
+                policy_snapshots.c.updated_at,
+                policy_snapshots.c.updated_by,
+            )
+            .where(policy_snapshots.c.policy_id == "current")
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        if row is None:
+            return None
+        return PolicySnapshotRecord(
+            revision=int(row["revision"]),
+            policy_bundle=PolicyBundle.model_validate(row["payload_json"]),
+            updated_at=str(row["updated_at"]),
+            updated_by=str(row["updated_by"]),
+        )
+
+    def save_policy_snapshot(
+        self,
+        policy_bundle: PolicyBundle,
+        *,
+        updated_by: str = "system",
+    ) -> PolicySnapshotRecord:
+        payload = policy_bundle.model_dump(mode="json")
+        updated_at = utc_now_iso()
+        with self._session_factory() as session:
+            current_revision = session.execute(
+                select(policy_snapshots.c.revision).where(policy_snapshots.c.policy_id == "current")
+            ).scalar_one_or_none()
+            revision = int(current_revision) + 1 if current_revision is not None else 1
+            stmt = pg_insert(policy_snapshots).values(
+                policy_id="current",
+                payload_json=payload,
+                revision=revision,
+                updated_at=updated_at,
+                updated_by=updated_by,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[policy_snapshots.c.policy_id],
+                set_={
+                    "payload_json": stmt.excluded.payload_json,
+                    "revision": stmt.excluded.revision,
+                    "updated_at": stmt.excluded.updated_at,
+                    "updated_by": stmt.excluded.updated_by,
+                },
+            )
+            session.execute(stmt)
+            session.execute(
+                pg_insert(policy_snapshot_history).values(
+                    revision=revision,
+                    payload_json=payload,
+                    updated_at=updated_at,
+                    updated_by=updated_by,
+                )
+            )
+            session.commit()
+        return PolicySnapshotRecord(
+            revision=revision,
+            policy_bundle=policy_bundle,
+            updated_at=updated_at,
+            updated_by=updated_by,
+        )
+
+    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
+        stmt = (
+            select(
+                policy_snapshot_history.c.revision,
+                policy_snapshot_history.c.payload_json,
+                policy_snapshot_history.c.updated_at,
+                policy_snapshot_history.c.updated_by,
+            )
+            .order_by(desc(policy_snapshot_history.c.revision))
+            .limit(_bounded_limit(limit))
+        )
+        with self._session_factory() as session:
+            rows = session.execute(stmt).mappings().all()
+        return [
+            PolicySnapshotRecord(
+                revision=int(row["revision"]),
+                policy_bundle=PolicyBundle.model_validate(row["payload_json"]),
+                updated_at=str(row["updated_at"]),
+                updated_by=str(row["updated_by"]),
+            )
+            for row in rows
+        ]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         payload = approval.model_dump(mode="json")

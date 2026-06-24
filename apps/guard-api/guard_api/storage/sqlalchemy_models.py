@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Index, MetaData, Table, Text
+from sqlalchemy import Column, Index, Integer, MetaData, Table, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 metadata = MetaData()
@@ -24,6 +24,27 @@ approval_requests = Table(
     Column("status", Text, nullable=False),
     Column("created_at", Text, nullable=False),
     Index("ix_approval_requests_status_created_at", "status", "created_at"),
+)
+
+policy_snapshots = Table(
+    "policy_snapshots",
+    metadata,
+    Column("policy_id", Text, primary_key=True),
+    Column("payload_json", JSONB, nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Column("updated_by", Text, nullable=False),
+    Index("ix_policy_snapshots_updated_at", "updated_at"),
+)
+
+policy_snapshot_history = Table(
+    "policy_snapshot_history",
+    metadata,
+    Column("revision", Integer, primary_key=True),
+    Column("payload_json", JSONB, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Column("updated_by", Text, nullable=False),
+    Index("ix_policy_snapshot_history_updated_at", "updated_at"),
 )
 
 launch_codes = Table(

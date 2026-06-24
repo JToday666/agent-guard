@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from agentguard_core import AuditEvent, utc_now_iso
+from agentguard_core import AuditEvent, PolicyBundle, utc_now_iso
 
 from guard_api.models import ApprovalRequest
 from guard_api.storage.base import (
     AuditEventFilters,
     EvalMetricFilters,
     EvalMetrics,
+    PolicySnapshotRecord,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
@@ -24,6 +25,8 @@ class MemoryControlPlaneStore:
     launch_codes: dict[str, StoredLaunchCode] = field(default_factory=dict)
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
     approval_nonces: dict[str, StoredApprovalNonce] = field(default_factory=dict)
+    policy_snapshot: PolicySnapshotRecord | None = None
+    policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
 
     def initialize(self) -> None:
         return None
@@ -42,6 +45,31 @@ class MemoryControlPlaneStore:
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         events = _filter_audit_events(list(reversed(self.audit_events)), filters or EvalMetricFilters())
         return _aggregate_metrics(events)
+
+    def get_policy_snapshot(self) -> PolicyBundle | None:
+        if self.policy_snapshot is None:
+            return None
+        return self.policy_snapshot.policy_bundle
+
+    def save_policy_snapshot(
+        self,
+        policy_bundle: PolicyBundle,
+        *,
+        updated_by: str = "system",
+    ) -> PolicySnapshotRecord:
+        revision = (self.policy_snapshot.revision + 1) if self.policy_snapshot is not None else 1
+        record = PolicySnapshotRecord(
+            revision=revision,
+            policy_bundle=policy_bundle,
+            updated_at=utc_now_iso(),
+            updated_by=updated_by,
+        )
+        self.policy_snapshot = record
+        self.policy_snapshot_history.append(record)
+        return record
+
+    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
+        return list(reversed(self.policy_snapshot_history))[: _bounded_limit(limit)]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         self.approvals[approval.approval_id] = approval

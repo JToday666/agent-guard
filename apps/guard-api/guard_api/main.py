@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -10,7 +10,7 @@ from fastapi import Cookie, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from agentguard_core import AuditEvent, GuardEvent
+from agentguard_core import AuditEvent, GuardEvent, PolicyBundle
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.services import (
@@ -22,7 +22,7 @@ from guard_api.services import (
     TraceService,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters
+from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters, PolicySnapshotRecord
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
 
@@ -39,7 +39,23 @@ def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
 
 
-def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSettings | None = None) -> FastAPI:
+def _policy_snapshot_record_payload(record: PolicySnapshotRecord) -> dict[str, Any]:
+    return {
+        "revision": record.revision,
+        "updated_at": record.updated_at,
+        "updated_by": record.updated_by,
+        "bundle_id": record.policy_bundle.bundle_id,
+        "version": record.policy_bundle.version,
+    }
+
+
+def create_app(
+    *,
+    store: ControlPlaneStore | None = None,
+    settings: GuardApiSettings | None = None,
+    policy_bundle: PolicyBundle | None = None,
+    policy_provider: Callable[[], PolicyBundle] | None = None,
+) -> FastAPI:
     settings = settings or GuardApiSettings()
     store = store or PostgresControlPlaneStore(settings.database_url)
     auth = CapabilityAuthService(settings=settings, store=store)
@@ -47,8 +63,13 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
     approval_service = ApprovalService(store=store, settings=settings)
     metric_service = MetricService(store=store)
     trace_service = TraceService(store=store)
+    policy_service = PolicyService(
+        store=store,
+        policy_bundle=policy_bundle,
+        policy_provider=policy_provider,
+    )
     evaluation_service = EvaluationService(
-        policy_service=PolicyService(),
+        policy_service=policy_service,
         audit_service=audit_service,
         approval_service=approval_service,
     )
@@ -120,6 +141,32 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
         context = auth.verify_bearer(authorization, "event:evaluate")
         response = evaluation_service.evaluate(payload, requesting_principal_id=context.principal_id)
         return response.model_dump(mode="json")
+
+    @app.get("/v1/policies/current")
+    def current_policy(agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        auth.verify_browser_session(agentguard_session)
+        return policy_service.current_snapshot().model_dump(mode="json")
+
+    @app.put("/v1/policies/current")
+    def update_current_policy(
+        payload: PolicyBundle,
+        x_agentguard_csrf: str | None = Header(default=None, alias="X-AgentGuard-CSRF"),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        session = auth.verify_browser_session(agentguard_session)
+        auth.verify_csrf(session, x_agentguard_csrf)
+        return policy_service.save_snapshot(payload, updated_by="dashboard").model_dump(mode="json")
+
+    @app.get("/v1/policies/history")
+    def policy_history(
+        limit: int = 100,
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
+        auth.verify_browser_session(agentguard_session)
+        return [
+            _policy_snapshot_record_payload(record)
+            for record in policy_service.list_history(limit=_bounded_limit(limit))
+        ]
 
     @app.post("/v1/audit/events")
     def audit_event(payload: AuditEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:

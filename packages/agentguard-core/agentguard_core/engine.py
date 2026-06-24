@@ -4,9 +4,21 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from .detectors import Detector, OutboundDetector, SensitiveResourceDetector, TaskMismatchDetector, ToolHijackDetector
-from .models import GuardDecision, GuardEvent, PolicyBundle
-from .policy import build_guard_decision
+from .detectors import (
+    CodeExecDetector,
+    Detector,
+    EnvironmentPoisoningDetector,
+    JailbreakDetector,
+    MemoryPoisoningDetector,
+    OutboundDetector,
+    PromptInjectionDetector,
+    SensitiveResourceDetector,
+    TaskMismatchDetector,
+    ToolHijackDetector,
+)
+from .decisions import GuardDecision, build_guard_decision
+from .events import GuardEvent
+from .policies import PolicyBundle
 
 
 class GuardEngine:
@@ -16,6 +28,11 @@ class GuardEngine:
             ToolHijackDetector(),
             OutboundDetector(),
             TaskMismatchDetector(),
+            PromptInjectionDetector(),
+            JailbreakDetector(),
+            CodeExecDetector(),
+            MemoryPoisoningDetector(),
+            EnvironmentPoisoningDetector(),
         ]
 
     def evaluate(self, event: GuardEvent, policies: PolicyBundle | None = None) -> GuardDecision:

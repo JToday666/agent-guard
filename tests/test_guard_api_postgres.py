@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from agentguard_core import AuditEvent
+from agentguard_core import AuditEvent, PolicyBundle
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
@@ -195,6 +195,84 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
         _cleanup_test_rows(database_url, other_trace_id, None)
 
 
+def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
+    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        _reset_control_plane_schema(database_url)
+        store.initialize()
+        first_record = store.save_policy_snapshot(
+            PolicyBundle(
+                bundle_id="pg-policy-1",
+                allowed_email_domains=["pg.example"],
+                sensitive_text_markers=["pg-secret="],
+            ),
+            updated_by="tester",
+        )
+        second_record = store.save_policy_snapshot(
+            PolicyBundle(
+                bundle_id="pg-policy-2",
+                allowed_email_domains=["pg.example"],
+                sensitive_text_markers=["pg-secret="],
+            ),
+            updated_by="tester",
+        )
+
+        restarted_store = PostgresControlPlaneStore(database_url)
+        snapshot = restarted_store.get_policy_snapshot()
+        history = restarted_store.list_policy_snapshot_history()
+
+        assert first_record.revision == 1
+        assert second_record.revision == 2
+        assert snapshot is not None
+        assert snapshot.bundle_id == "pg-policy-2"
+        assert snapshot.allowed_email_domains == ["pg.example"]
+        assert snapshot.sensitive_text_markers == ["pg-secret="]
+        assert [record.revision for record in history] == [2, 1]
+        assert [record.policy_bundle.bundle_id for record in history] == ["pg-policy-2", "pg-policy-1"]
+        assert {record.updated_by for record in history} == {"tester"}
+    finally:
+        _cleanup_policy_snapshot(database_url)
+
+
+def test_postgres_migration_creates_policy_snapshots_table() -> None:
+    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        _reset_control_plane_schema(database_url)
+        store.initialize()
+        engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
+        with engine.begin() as conn:
+            exists = conn.execute(text("SELECT to_regclass('public.policy_snapshots')")).scalar_one()
+            history_exists = conn.execute(
+                text("SELECT to_regclass('public.policy_snapshot_history')")
+            ).scalar_one()
+            columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'policy_snapshots'
+                        """
+                    )
+                )
+            }
+
+        assert exists == "policy_snapshots"
+        assert history_exists == "policy_snapshot_history"
+        assert {"revision", "updated_by"}.issubset(columns)
+    finally:
+        _cleanup_policy_snapshot(database_url)
+
+
 def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
     database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
     if not database_url:
@@ -275,6 +353,8 @@ def _reset_control_plane_schema(database_url: str) -> None:
     engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
     with engine.begin() as conn:
         for table in [
+            "policy_snapshot_history",
+            "policy_snapshots",
             "approval_nonces",
             "browser_sessions",
             "launch_codes",
@@ -309,6 +389,16 @@ def _cleanup_auth_rows(
                     text("DELETE FROM browser_sessions WHERE session_hash = :session_hash"),
                     {"session_hash": _token_hash(session_id)},
                 )
+    except Exception:
+        return None
+
+
+def _cleanup_policy_snapshot(database_url: str) -> None:
+    try:
+        engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM policy_snapshot_history"))
+            conn.execute(text("DELETE FROM policy_snapshots"))
     except Exception:
         return None
 

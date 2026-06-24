@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentguard_core import AuditEvent
+from agentguard_core import AuditEvent, PolicyBundle
 
 from guard_api.models import ApprovalRequest
 
@@ -52,6 +52,14 @@ class StoredApprovalNonce:
     used_at: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PolicySnapshotRecord:
+    revision: int
+    policy_bundle: PolicyBundle
+    updated_at: str
+    updated_by: str
+
+
 EvalMetrics = dict[str, int | float | None]
 
 
@@ -69,6 +77,20 @@ class ControlPlaneStore(Protocol):
         ...
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
+        ...
+
+    def get_policy_snapshot(self) -> PolicyBundle | None:
+        ...
+
+    def save_policy_snapshot(
+        self,
+        policy_bundle: PolicyBundle,
+        *,
+        updated_by: str = "system",
+    ) -> PolicySnapshotRecord:
+        ...
+
+    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
         ...
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
