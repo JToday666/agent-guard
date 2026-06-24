@@ -1,5 +1,6 @@
 import json
 import builtins
+import subprocess
 import zipfile
 
 from agentguard_langgraph_bench.bench.evidence.artifact_integrity import check_case_artifacts
@@ -17,32 +18,93 @@ def _write_replay_artifacts(root):
     (root / "events.jsonl").write_text(json.dumps({"event_type": "click"}) + "\n", encoding="utf-8")
     (root / "final.png").write_bytes(PNG_1X1)
     (root / "final_full_page.png").write_bytes(PNG_1X1)
-    (root / "replay.webm").write_bytes(b"webm")
-    (root / "raw_replay.webm").write_bytes(b"")
+    (root / "replay.webm").write_bytes(b"webm" * 2500)
     with zipfile.ZipFile(root / "trace.zip", "w") as archive:
         archive.writestr("trace.trace", "{}")
-    (root / "report.html").write_text("<html><body>step_count 1 dom_event_count 1</body></html>", encoding="utf-8")
-    (root / "replay_state.json").write_text(json.dumps({"step_count": 1, "dom_event_count": 1}), encoding="utf-8")
+    (root / "report.html").write_text("<html><body>step_count 1 dom_event_count 1 continuous_playwright</body></html>", encoding="utf-8")
+    (root / "replay_state.json").write_text(
+        json.dumps(
+            {
+                "step_count": 1,
+                "dom_event_count": 1,
+                "video_source": "continuous_playwright",
+                "final_observation_wait_ms": 3000,
+                "video_duration_seconds": 5.0,
+            }
+        ),
+        encoding="utf-8",
+    )
     (root / "final_dom.html").write_text("<html><body>done</body></html>", encoding="utf-8")
     (root / "final_accessibility_tree.json").write_text(json.dumps({"ok": True, "snapshot": {"role": "WebArea"}}), encoding="utf-8")
-    (root / "action_metadata.jsonl").write_text(json.dumps({"action": "click", "step_index": 1}) + "\n", encoding="utf-8")
-    (root / "step_actions.jsonl").write_text(json.dumps({"action": "click", "step_index": 1}) + "\n", encoding="utf-8")
+    action = {"action": "click", "step_index": 1, "timestamp": "2026-06-23T00:00:00.000000Z"}
+    (root / "action_metadata.jsonl").write_text(json.dumps(action) + "\n", encoding="utf-8")
+    (root / "step_actions.jsonl").write_text(json.dumps(action) + "\n", encoding="utf-8")
     (root / "business_event_correlation_index.json").write_text(json.dumps({"schema_version": "1.0", "action_count": 1}), encoding="utf-8")
-    (root / "replay_frames.txt").write_text("steps/step_001.png\nfinal.png\n", encoding="utf-8")
+    (root / "video_timeline.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "agentguard_browser_video_timeline/1.0",
+                "video": "replay.webm",
+                "video_source": "continuous_playwright",
+                "action_count": 1,
+                "actions": [action],
+                "video_duration_seconds": 5.0,
+                "action_span_seconds": 0.0,
+                "final_observation_wait_ms": 3000,
+                "coverage_checks": {
+                    "has_continuous_video": True,
+                    "has_frames": True,
+                    "video_duration_ge_action_span_plus_grace": True,
+                    "raw_replay_absent": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    frames = root / "continuous_frames"
+    frames.mkdir()
+    for index in range(4):
+        (frames / f"frame_{index:06d}.jpg").write_bytes(b"jpg")
+    (root / "continuous_frames_manifest.json").write_text(
+        json.dumps(
+            {
+                "source_video": "replay.webm",
+                "fps": 1,
+                "frame_count": 4,
+                "frames": [{"path": f"continuous_frames/frame_{index:06d}.jpg", "approx_second": index} for index in range(4)],
+            }
+        ),
+        encoding="utf-8",
+    )
     steps = root / "steps"
     steps.mkdir()
     (steps / "step_001.png").write_bytes(PNG_1X1)
 
 
-def test_case_artifact_integrity_accepts_replay_files_and_raw_video_warning(tmp_path, monkeypatch):
+def _mock_ffprobe(monkeypatch):
+    monkeypatch.setattr("agentguard_langgraph_bench.bench.evidence.artifact_integrity.shutil.which", lambda name: "/usr/bin/ffprobe" if name == "ffprobe" else None)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=json.dumps({"streams": [{"codec_name": "vp8", "width": 1440, "height": 1024}], "format": {"duration": "5.0"}}),
+            stderr="",
+        )
+
+    monkeypatch.setattr("agentguard_langgraph_bench.bench.evidence.artifact_integrity.subprocess.run", fake_run)
+
+
+def test_case_artifact_integrity_accepts_continuous_replay_contract(tmp_path, monkeypatch):
     case_dir = tmp_path / "cases" / "AA-005" / "browser_replay"
     _write_replay_artifacts(case_dir)
-    monkeypatch.setattr("agentguard_langgraph_bench.bench.evidence.artifact_integrity.shutil.which", lambda name: None)
+    _mock_ffprobe(monkeypatch)
 
     manifest = check_case_artifacts(case_dir, root=tmp_path)
 
-    assert any(error == "ffprobe_unavailable" for error in manifest["errors"])
-    assert any("raw video unavailable" in warning for warning in manifest["warnings"])
+    assert manifest["ok"] is True
+    assert not (case_dir / "raw_replay.webm").exists()
+    assert not (case_dir / "replay_frames.txt").exists()
     assert all(not artifact["run_relative_path"].startswith("/") for artifact in manifest["artifacts"])
 
 
@@ -59,7 +121,9 @@ def test_case_result_references_immutable_browser_replay_copy(tmp_path):
                 "screenshot": str(source / "final.png"),
                 "full_page_screenshot": str(source / "final_full_page.png"),
                 "video": str(source / "replay.webm"),
-                "raw_video": str(source / "raw_replay.webm"),
+                "video_timeline": str(source / "video_timeline.json"),
+                "continuous_frames_manifest": str(source / "continuous_frames_manifest.json"),
+                "continuous_frames_dir": str(source / "continuous_frames"),
                 "trace": str(source / "trace.zip"),
                 "report": str(source / "report.html"),
                 "final_dom": str(source / "final_dom.html"),
@@ -105,12 +169,12 @@ def test_png_header_fallback_when_pillow_unavailable(tmp_path, monkeypatch):
 def test_replay_frames_missing_reference_fails_integrity(tmp_path):
     case_dir = tmp_path / "cases" / "AA-005" / "browser_replay"
     _write_replay_artifacts(case_dir)
-    (case_dir / "replay_frames.txt").write_text("steps/missing.png\n", encoding="utf-8")
+    (case_dir / "raw_replay.webm").write_bytes(b"")
 
     manifest = check_case_artifacts(case_dir, root=tmp_path)
 
     assert manifest["ok"] is False
-    assert "missing_replay_frame:steps/missing.png" in manifest["errors"]
+    assert "raw_replay_must_not_exist" in manifest["errors"]
 
 
 def test_case_result_missing_artifact_reference_is_indexed_as_missing(tmp_path):
