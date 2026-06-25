@@ -368,13 +368,13 @@
     {
       "attack_type": "prompt_injection",
       "case_id": "PI-010",
-      "local_case_dir": "instrumentation/Browser-art_C5_1",
-      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_C5_1/task.json",
-      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_C5_1/contact_form/index.html",
-      "original_id": "Browser-art_C5_1",
-      "original_source_path": "Instrumentation/C5_Resource_or_Service_Abuse/Browser-art_C5_1/task.json",
-      "original_web_entry_source_path": "Instrumentation/C5_Resource_or_Service_Abuse/Browser-art_C5_1/contact_form/index.html",
-      "source_subset": "C5_Resource_or_Service_Abuse"
+      "local_case_dir": "instrumentation/EIA_A6_39_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A6_39_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A6_39_high/adv_modified_file_action_generation_form_type1_near_bot_0.html",
+      "original_id": "EIA_A6_39_high",
+      "original_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/EIA_A6_39_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/EIA_A6_39_high/adv_modified_file_action_generation_form_type1_near_bot_0.html",
+      "source_subset": "A6_Document_and_Business_Data_Leakage"
     }
   ],
   "mcpsafety_cases": [

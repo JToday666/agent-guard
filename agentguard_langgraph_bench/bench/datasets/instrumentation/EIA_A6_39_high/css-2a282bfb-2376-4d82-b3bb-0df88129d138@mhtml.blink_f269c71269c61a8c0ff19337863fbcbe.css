@@ -1,0 +1,7 @@
+@charset "utf-8";
+
+.tds-site-footer .fr-disclaimer { position: absolute; left: 24px; }
+
+@media (max-width: 1200px) {
+  .tds-site-footer .fr-disclaimer { position: relative; }
+}
