@@ -12,6 +12,8 @@
 
 ## 2. 目标结构
 
+本节是 P1/P2 目标结构，包含当前尚未创建的独立 SDK、Adapter、OpenClaw Plugin、`redteam/` 和 `policies/` 目录。当前实现中，LangGraph demo、适配器、AttackBench 数据集与 runner 集中在 `agentguard_langgraph_bench/`，策略引擎在 `packages/agentguard-core/`。
+
 ```text
 agent-guard/
 ├── README.md
@@ -59,22 +61,22 @@ docs/
 
 文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。
 
-## 4. 目录职责
+## 4. 目标目录职责
 
-| 目录                                  | 职责                                                 |
-| ------------------------------------- | ---------------------------------------------------- |
+| 目录                                  | 职责                                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------- |
 | `apps/guard-api`                      | Guard API / Control Plane 后端，负责 HTTP、鉴权、审计、审批、指标和状态服务 |
-| `apps/dashboard`                      | Vue 3 监督端页面，只通过 Guard API 获取数据和提交审批 |
-| `apps/demo-agent`                     | 被保护的 LangGraph 示例 Agent 和 Mock Tools          |
-| `packages/agentguard-core`            | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出 |
-| `packages/agentguard-sdk`             | Guard API 客户端、事件构造、运行时接入辅助           |
-| `packages/agentguard-adapters`        | LangGraph 等运行时适配层                             |
-| `packages/agentguard-openclaw-plugin` | OpenClaw 插件包                                      |
-| `redteam/`                            | 攻击样本、正常样本、runner、成功条件、报告           |
-| `policies/`                           | 策略、规则、权限配置                                 |
-| `schemas/`                            | JSON Schema 与 OpenAPI                               |
-| `tests/`                              | 单元测试、契约测试、集成测试                         |
-| `artifacts/`                          | 截图、trace、视频、大结果，默认不入库                |
+| `apps/dashboard`                      | Vue 3 监督端页面，只通过 Guard API 获取数据和提交审批                       |
+| `apps/demo-agent`                     | 被保护的 LangGraph 示例 Agent 和 Mock Tools                                 |
+| `packages/agentguard-core`            | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出        |
+| `packages/agentguard-sdk`             | Guard API 客户端、事件构造、运行时接入辅助                                  |
+| `packages/agentguard-adapters`        | LangGraph 等运行时适配层                                                    |
+| `packages/agentguard-openclaw-plugin` | OpenClaw 插件包                                                             |
+| `redteam/`                            | 攻击样本、正常样本、runner、成功条件、报告                                  |
+| `policies/`                           | 策略、规则、权限配置                                                        |
+| `schemas/`                            | JSON Schema 与 OpenAPI                                                      |
+| `tests/`                              | 单元测试、契约测试、集成测试                                                |
+| `artifacts/`                          | 截图、trace、视频、大结果，默认不入库                                       |
 
 ## 5. 边界规则
 

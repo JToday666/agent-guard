@@ -13,14 +13,56 @@ AgentGuard 是面向大模型智能体的运行时行为监督与攻击检测系
 
 LangGraph 和 OpenClaw 是四层架构下的运行时接入与演示场景，不再作为总体架构层级。
 
+## 本地开发启动
+
+以下命令均在仓库根目录执行。首次启动前，从示例创建本地后端配置，并确认配置的 PostgreSQL 用户和数据库已经存在：
+
+```bash
+cp .env.example .env
+```
+
+`.env` 已被 Git 忽略，不得提交真实数据库密码、adapter token 或 control token。
+
+### 真实 API 模式
+
+在第一个终端启动 Guard API。该命令会自动加载根 `.env`，无需显式传入 `--env-file`：
+
+```bash
+pnpm guard-api:dev
+```
+
+在第二个终端启动 Dashboard：
+
+```bash
+pnpm dashboard:dev
+```
+
+在第三个终端创建一次性 launch code：
+
+```bash
+pnpm guard-api:launch
+```
+
+命令会输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的完整地址。将该地址直接粘贴到目标浏览器后，Dashboard 使用 launch code 换取 browser session，并从地址栏移除 code。launch code 只能使用一次；VS Code 内置浏览器、外部浏览器和不同浏览器配置文件需要分别生成新地址。始终使用 `localhost`，不要与 `127.0.0.1` 混用，否则 cookie 不共享。直接访问 `http://localhost:5173/` 时没有可恢复的 session，`GET /v1/auth/browser/me` 返回 `401` 属于预期行为。
+
+### Mock 模式
+
+Mock 模式只需启动 Dashboard：
+
+```bash
+pnpm dashboard:dev:mock
+```
+
+直接访问 `http://localhost:5173/`。该模式使用本地场景数据，不需要 PostgreSQL、Guard API、launch code 或 browser session。
+
 ## 开发入口
 
-| 入口                                                                               | 说明                         |
-| ---------------------------------------------------------------------------------- | ---------------------------- |
-| [docs/README.md](docs/README.md)                                                   | 完整文档地图和开发阅读路径   |
-| [docs/01_overview/architecture.md](docs/01_overview/architecture.md)               | 总体架构和运行链路           |
+| 入口                                                                               | 说明                                              |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------- |
+| [docs/README.md](docs/README.md)                                                   | 完整文档地图和开发阅读路径                        |
+| [docs/01_overview/architecture.md](docs/01_overview/architecture.md)               | 总体架构和运行链路                                |
 | [docs/02_core/interface_contract.md](docs/02_core/interface_contract.md)           | Guard API / Control Plane API、事件模型和决策契约 |
-| [docs/06_delivery/implementation_plan.md](docs/06_delivery/implementation_plan.md) | P0/P1/P2 开发顺序和验收标准  |
+| [docs/06_delivery/implementation_plan.md](docs/06_delivery/implementation_plan.md) | P0/P1/P2 开发顺序和验收标准                       |
 
 ## 答辩入口
 

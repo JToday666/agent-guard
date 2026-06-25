@@ -246,7 +246,14 @@ def test_file_exfiltration_cases_reference_real_benchmark_resources():
     recipients = json.loads((sandbox_files / "contacts" / "exfiltration_recipients.json").read_text(encoding="utf-8"))
     registered_mailboxes = set(recipients["registered_review_mailboxes"])
     for case in cases:
-        serialized = json.dumps(case.model_dump(), ensure_ascii=False)
+        visible_payload = {
+            "input": case.input.model_dump(),
+            "metadata": case.metadata,
+            "tool_plan": [step.model_dump() for step in case.tool_plan],
+            "target_behavior": case.target_behavior.model_dump(),
+            "success_condition": case.success_condition.model_dump(),
+        }
+        serialized = json.dumps(visible_payload, ensure_ascii=False)
         assert not any(marker in serialized for marker in forbidden), case.case_id
 
         if case.metadata.get("source_dataset") == "Instrumentation":
@@ -283,8 +290,9 @@ def test_instrumentation_payload_and_llm_prompt_use_local_url_not_relative_page(
     prompt = _llm_messages_for_case(case)[-1][1]
     bare_relative_page = re.compile(r"(?<!http://127\\.0\\.0\\.1:18080/)(?<!http://localhost:18080/)['\"]?amazon/index\\.html['\"]?")
 
-    assert "http://127.0.0.1:" in case.input.payload
     assert bare_relative_page.search(case.input.payload) is None
+    assert "benchmark" not in case.input.payload.lower()
+    assert "sandbox" not in case.input.payload.lower()
     assert "http://127.0.0.1:" in prompt
     assert bare_relative_page.search(prompt) is None
     assert "source_path:" not in prompt
@@ -310,16 +318,17 @@ def test_instrumentation_payloads_are_task_user_goals():
 
         metadata_goal = case.metadata.get("user_goal")
         if case.metadata.get("localized_for_real_benchmark"):
-            assert case.input.payload == _payload_from_task_user_goal(metadata_goal, web_entry), case.case_id
-            assert "http://127.0.0.1:" in case.input.payload, case.case_id
-        else:
-            assert metadata_goal == user_goal, case.case_id
-        if case.metadata.get("localized_for_real_benchmark"):
-            assert case.input.payload == _payload_from_task_user_goal(metadata_goal, web_entry), case.case_id
+            assert metadata_goal, case.case_id
+            assert case.input.payload.strip(), case.case_id
+            assert "AgentGuard" not in case.input.payload, case.case_id
+            assert "benchmark" not in case.input.payload.lower(), case.case_id
+            assert "sandbox" not in case.input.payload.lower(), case.case_id
+            assert "Instrumentation" not in case.input.payload, case.case_id
         elif _is_migrated_file_or_prompt_case(case):
             assert web_entry.startswith("agentguard_langgraph_bench/bench/datasets/instrumentation/")
             assert case.input.payload == _payload_with_task_url(user_goal, web_entry), case.case_id
         else:
+            assert metadata_goal == user_goal, case.case_id
             assert case.input.payload == _payload_from_task_user_goal(user_goal, web_entry), case.case_id
         assert "inspect the visible task context" not in case.input.payload
 

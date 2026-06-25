@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-AttackBench 负责攻击样本、正常样本、攻击脚本、批量执行、成功条件判断和评测指标。它是证明 AgentGuard 有效性的核心证据来源。
+AttackBench 实现位于 `agentguard_langgraph_bench/`，负责攻击样本、正常样本、批量执行、成功条件判断和评测指标。它是证明 AgentGuard 有效性的核心证据来源。
 
 关联入口：
 
@@ -12,26 +12,28 @@ AttackBench 负责攻击样本、正常样本、攻击脚本、批量执行、�
 
 ## 2. 模块职责
 
-| 模块     | 职责                        |
-| -------- | --------------------------- |
-| datasets | 攻击样本和 benign 正常样本  |
-| scripts  | 单场景攻击脚本              |
-| runners  | 批量执行、防御前后重放      |
-| checkers | 攻击成功条件判断            |
-| reports  | 指标、trace、截图和结果摘要 |
+| 实现                                    | 职责                                                     |
+| --------------------------------------- | -------------------------------------------------------- |
+| `bench/datasets/`                       | AttackCase、benign 样本及外部数据集资源                  |
+| `bench/runner.py` 与 `bench/cli.py`     | 批量执行、防御前后对比和结果输出                         |
+| `bench/scoring/` 与 `bench/checkers.py` | 攻击成功条件和分类指标计算                               |
+| `bench/evidence/`                       | 评测证据、产物完整性和 JSONL 输出                        |
+| `adapters/`                             | LangGraph demo、OpenClaw、HTTP Agent 和子进程 Agent 适配 |
 
 ## 3. 样本类别
 
-| 文件                          | 内容         | 阶段  |
-| ----------------------------- | ------------ | ----- |
-| `prompt_injection.jsonl`      | 提示注入     | P0    |
-| `tool_hijacking.jsonl`        | 工具劫持     | P0    |
-| `file_exfiltration.jsonl`     | 文件泄露     | P0    |
-| `benign.jsonl`                | 正常任务     | P0    |
-| `jailbreak.jsonl`             | 越狱         | P1    |
-| `code_execution_abuse.jsonl`  | 代码执行滥用 | P1    |
-| `memory_poisoning.jsonl`      | 记忆中毒     | P1    |
-| `environment_pollution.jsonl` | 环境污染     | P1-P2 |
+当前 AttackCase 位于 `agentguard_langgraph_bench/bench/datasets/attack_cases/`：
+
+| 文件                                                    | 内容                         |
+| ------------------------------------------------------- | ---------------------------- |
+| `prompt_injection.jsonl`                                | 提示注入                     |
+| `tool_hijacking.jsonl` 与 `tool_hijacking_benign.jsonl` | 工具劫持及正常对照           |
+| `file_exfiltration.jsonl`                               | 文件泄露                     |
+| `agent_abuse.jsonl`                                     | Agent 滥用                   |
+| `memory_poisoning*.jsonl`                               | 记忆中毒、延迟触发和正常对照 |
+| `benign.jsonl`                                          | 通用正常任务                 |
+
+PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/poisonedrag/`、`bench/datasets/mcpsafety/` 和 `bench/datasets/instrumentation/`。需要外部源树的用例，只在对应资源可用时参与完整兼容性验证。
 
 ## 4. AttackCase 格式
 
@@ -62,13 +64,13 @@ AttackBench 负责攻击样本、正常样本、攻击脚本、批量执行、�
 ## 5. Runner 流程
 
 ```text
-读取 AttackCase
+读取 AttackCase JSONL
 → 运行无防御 Agent
 → 判断攻击是否成功
 → 开启 AgentGuard
 → 重放同一 AttackCase
 → 判断是否阻断
-→ 汇总 ASR / Block Rate / FPR / FNR / Latency
+→ 写入评测证据并汇总 ASR / Block Rate / FPR / FNR / Latency
 ```
 
 ## 6. 指标

@@ -245,8 +245,8 @@ python -m agentguard_langgraph_bench.bench.cli \
 
 Instrumentation 浏览器样本支持两种规划模式：
 
-- `--instrumentation-plan-mode guided`：默认值，用于确定性回放、浏览器链路验证和防御拦截测试。该模式允许把 `case.tool_plan`、必需工具序列和下一步必需调用提示给 LLM，并在集成测试中用预设步骤保证流程完成。
-- `--instrumentation-plan-mode autonomous`：用于评测 Agent 的自主推理、工具选择和安全拒绝能力。该模式仍通过 LangChain `bind_tools` 暴露完整工具名称、描述和参数 schema，但不会向 LLM 注入 `Required tool sequence`、`Next required tool call`、`case.tool_plan` 参数、harm/success oracle 或 heuristic 浏览器步骤。LLM 没有工具调用、拒绝任务、参数错误或调用异常时，会记录真实结果，不会自动补齐预设计划。
+- `--instrumentation-plan-mode guided`：用于确定性回放、浏览器链路验证和防御拦截测试。该模式允许把 `case.tool_plan`、必需工具序列和下一步必需调用提示给 LLM，并在集成测试中用预设步骤保证流程完成。
+- `--instrumentation-plan-mode autonomous`：默认值，用于评测 Agent 的自主推理、工具选择和安全拒绝能力。该模式仍通过 LangChain `bind_tools` 暴露完整工具名称、描述和参数 schema，但不会向 LLM 注入 `Required tool sequence`、`Next required tool call`、`case.tool_plan` 参数、harm/success oracle 或 heuristic 浏览器步骤。LLM 没有工具调用、拒绝任务、参数错误或调用异常时，会记录真实结果，不会自动补齐预设计划。
 
 Autonomous 示例：
 

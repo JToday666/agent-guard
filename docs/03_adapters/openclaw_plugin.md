@@ -2,7 +2,9 @@
 
 ## 1. 文档定位
 
-OpenClaw 侧用于开源智能化应用接入和正式演示。P1 前必须先验证 OpenClaw 插件机制和 Hook 可用性，再实现完整拦截链路。
+当前仓库在 `agentguard_langgraph_bench/adapters/openclaw/` 提供 AttackBench 外部 Agent 适配器，通过 benchmark HTTP Tool Server 执行工具并保持统一评分。该适配器不等同于真实 OpenClaw Security Plugin。
+
+本文其余内容定义 P1/P2 目标插件。实现前必须先验证 OpenClaw 插件机制和 Hook 可用性，不在未验证 Hook 的情况下承诺完整拦截链路。
 
 关联入口：
 
@@ -10,17 +12,17 @@ OpenClaw 侧用于开源智能化应用接入和正式演示。P1 前必须先�
 - [Dashboard 与审批流](../04_apps/dashboard_design.md)
 - [演示脚本](../06_delivery/demo_script.md)
 
-## 2. 模块职责
+## 2. 目标插件职责
 
-| 模块                 | 职责                                           |
-| -------------------- | ---------------------------------------------- |
-| Plugin Entry         | 注册 OpenClaw 插件和 Hook                      |
+| 模块             | 职责                                                                |
+| ---------------- | ------------------------------------------------------------------- |
+| Plugin Entry     | 注册 OpenClaw 插件和 Hook                                           |
 | Guard API Client | 调用 Guard API / Control Plane API 并处理超时、失败和 adapter token |
-| Hook Mapping         | 将 OpenClaw 原生事件映射成 AgentGuard Event    |
-| Approval Adapter     | 将 `ask` 映射为 OpenClaw 审批或阻断提示        |
-| Config Audit         | 检查 OpenClaw 高风险配置                       |
+| Hook Mapping     | 将 OpenClaw 原生事件映射成 AgentGuard Event                         |
+| Approval Adapter | 将 `ask` 映射为 OpenClaw 审批或阻断提示                             |
+| Config Audit     | 检查 OpenClaw 高风险配置                                            |
 
-## 3. 插件目录
+## 3. 目标插件目录
 
 ```text
 packages/agentguard-openclaw-plugin/
@@ -34,6 +36,8 @@ packages/agentguard-openclaw-plugin/
     ├── approval/
     └── config_audit/
 ```
+
+上述目录是未来插件包的目标结构，当前仓库中不存在该包。
 
 ## 4. Hook 优先级
 
@@ -92,16 +96,16 @@ OpenClaw 接入在 P1 前必须先做 Hook 兼容性验证。验证结果决定�
 ## 6. 决策映射
 
 | GuardDecision | OpenClaw 行为      |
-| ------------ | ------------------ |
-| `allow`      | 放行               |
-| `deny`       | block              |
-| `ask`        | requireApproval    |
-| `modify`     | 改写 params 后执行 |
-| `audit_only` | 仅记录             |
+| ------------- | ------------------ |
+| `allow`       | 放行               |
+| `deny`        | block              |
+| `ask`         | requireApproval    |
+| `modify`      | 改写 params 后执行 |
+| `audit_only`  | 仅记录             |
 
 ## 7. 鉴权边界
 
-OpenClaw Plugin 使用 adapter token 调用 Guard API：
+目标 OpenClaw Plugin 使用 adapter token 调用 Guard API：
 
 ```http
 Authorization: Bearer <AGENTGUARD_ADAPTER_TOKEN>

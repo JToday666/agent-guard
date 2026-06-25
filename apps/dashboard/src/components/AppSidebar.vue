@@ -31,7 +31,9 @@
           v-for="item in group.items"
           :key="item.to"
           class="sidebar__link"
+          :class="{ 'sidebar__link--active': isNavigationItemActive(item.to) }"
           :to="item.to"
+          :aria-current="isNavigationItemActive(item.to) ? 'page' : undefined"
           :title="isCollapsed ? item.label : undefined"
           :aria-label="item.meta ? `${item.label}，${item.meta}` : item.label"
           @click="isOpen = false"
@@ -50,48 +52,45 @@
 
 <script setup lang="ts">
 import {
-  Activity,
   ChartNoAxesColumn,
   CircleCheckBig,
-  GitBranch,
+  ScanSearch,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
   Server,
-  SlidersHorizontal,
 } from "@lucide/vue";
 import { computed, ref } from "vue";
-
-import { getPendingApprovalCount } from "../mocks/dashboard-data";
+import { useRoute } from "vue-router";
 
 defineOptions({
   name: "AppSidebar",
 });
 
-defineProps<{
-  isCollapsed: boolean;
-}>();
-
 const emit = defineEmits<{
   "toggle-collapse": [];
 }>();
 
+const route = useRoute();
 const isOpen = ref(false);
+const props = defineProps<{
+  isCollapsed: boolean;
+  pendingCount: number;
+}>();
 
 const navigationGroups = computed(() => [
   {
     label: "监控",
     items: [
-      { icon: Activity, label: "事件", to: "/events" },
       { icon: LayoutDashboard, label: "总览", to: "/overview" },
+      { icon: ScanSearch, label: "调查", to: "/investigations" },
       {
-        count: getPendingApprovalCount(),
+        count: props.pendingCount,
         icon: CircleCheckBig,
         label: "审批",
-        meta: `${getPendingApprovalCount()} 待处理`,
+        meta: `${props.pendingCount} 待处理`,
         to: "/approvals",
       },
-      { icon: GitBranch, label: "链路", to: "/traces" },
     ],
   },
   {
@@ -102,19 +101,25 @@ const navigationGroups = computed(() => [
     label: "运维",
     items: [
       { icon: Server, label: "系统", to: "/system" },
-      { icon: SlidersHorizontal, label: "高级", to: "/advanced" },
     ],
   },
 ]);
+
+function isNavigationItemActive(path: string): boolean {
+  return route.path === path || route.path.startsWith(`${path}/`);
+}
 </script>
 
 <style scoped lang="scss">
 .sidebar {
-  background: var(--color-nav);
+  align-self: start;
+  background: rgb(255 255 255 / 0.72);
   border-right: 1px solid var(--color-border);
-  box-shadow: var(--shadow-subtle);
-  min-height: calc(100vh - var(--top-bar-height));
-  padding: var(--space-4);
+  height: calc(100vh - var(--top-bar-height));
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-3);
+  position: sticky;
+  top: var(--top-bar-height);
 }
 
 .sidebar__header {
@@ -136,7 +141,7 @@ const navigationGroups = computed(() => [
   align-items: center;
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   color: var(--color-text-muted);
   cursor: pointer;
   display: inline-flex;
@@ -176,7 +181,7 @@ const navigationGroups = computed(() => [
 
 .sidebar__link {
   align-items: center;
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   color: var(--color-text-muted);
   display: grid;
   gap: var(--space-2);
@@ -187,7 +192,7 @@ const navigationGroups = computed(() => [
   text-decoration: none;
 
   &:hover {
-    background: var(--color-row-hover);
+    background: var(--color-active-soft);
     color: var(--color-text);
   }
 
@@ -230,18 +235,19 @@ const navigationGroups = computed(() => [
   top: 0.125rem;
 }
 
-.sidebar__link.router-link-active {
-  background: var(--color-active);
-  color: var(--color-active-text);
-  box-shadow: var(--shadow-subtle);
+.sidebar__link.router-link-active,
+.sidebar__link--active {
+  background: var(--color-active-soft);
+  box-shadow: inset 2px 0 var(--color-active);
+  color: var(--color-active);
   font-weight: var(--font-weight-bold);
 
   small {
-    color: rgb(255 255 255 / 0.78);
+    color: var(--color-active);
   }
 
   .sidebar__badge {
-    border-color: var(--color-active);
+    border-color: var(--color-active-soft);
     color: #ffffff !important;
   }
 }
@@ -289,10 +295,13 @@ const navigationGroups = computed(() => [
 
 @media (max-width: 768px) {
   .sidebar {
+    align-self: auto;
     border-bottom: 1px solid var(--color-border);
     border-right: 0;
-    min-height: auto;
+    height: auto;
+    overflow: visible;
     padding: var(--space-3);
+    position: static;
   }
 
   .sidebar__header {

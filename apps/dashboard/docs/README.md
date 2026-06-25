@@ -6,6 +6,8 @@
 
 ```text
 apps/dashboard/docs/
+├── 02-architecture/
+│   └── data-flow.md
 └── 04-规范/
     ├── 前端UI设计规范.md
     └── 文档维护约定.md
@@ -15,6 +17,7 @@ apps/dashboard/docs/
 
 - [前端 UI 设计规范](04-规范/前端UI设计规范.md)
 - [文档维护约定](04-规范/文档维护约定.md)
+- [Dashboard 数据流与状态](02-architecture/data-flow.md)
 
 ## 维护原则
 

@@ -7,7 +7,7 @@ const dashboardRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, dashboardRoot, "");
-  const backendTarget = env.VITE_BACKEND_TARGET || "http://127.0.0.1:8000";
+  const backendTarget = env.VITE_BACKEND_TARGET || "http://127.0.0.1:8088";
 
   return {
     envDir: dashboardRoot,
@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/api": {
           changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, ""),
           target: backendTarget,
         },
         "/uploads": {

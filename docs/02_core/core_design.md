@@ -50,11 +50,11 @@ def evaluate(event: GuardEvent, policies: PolicyBundle | None = None) -> GuardDe
 
 | 输入 | 来源 | 说明 |
 | ---- | ---- | ---- |
-| `GuardEvent` | Adapter 或离线评测 runner | 统一安全事件封装，内部可承载 `ToolCallPayload`、`ContextBuildPayload`、`ModelCallPayload`、`ToolResultPayload`、`MemoryEventPayload`、`MessageSendPayload` |
-| `PolicyBundle` | Guard API / Control Plane 或离线评测配置 | 已加载、已解析的策略快照；Core 不在判定链路中实时查询数据库 |
+| `GuardEvent` | Adapter 或离线评测 runner | 统一安全事件封装，内部可承载 `ToolCallEvent`、`ContextBuildEvent`、`ModelCallEvent`、`ToolResultEvent`、`MemoryEvent` 等具体事件 |
+| `PolicyBundle` / `PolicySnapshot` | Guard API / Control Plane 或离线评测配置 | 已加载、已解析的策略快照；Core 不在判定链路中实时查询数据库 |
 
-| 输出 | 消费方 | 说明 |
-| ---- | ------ | ---- |
+| 输出            | 消费方                      | 说明                                                             |
+| --------------- | --------------------------- | ---------------------------------------------------------------- |
 | `GuardDecision` | Guard API 或离线评测 runner | 安全判定结果，包含动作、风险分数、严重等级、命中规则、原因和证据 |
 
 `AuditEvent` 可以由 Core 提供领域 schema 或 builder，但审计入库、查询、指标聚合和 Dashboard 展示由 Guard API / Control Plane 负责。
@@ -106,7 +106,7 @@ packages/agentguard-core/
 - 审批状态机；
 - 指标查询服务。
 
-`agentguard_core.__init__`、`agentguard_core.models`、`agentguard_core.policy`、`agentguard_core.resources`、`agentguard_core.results` 和 `agentguard_core.detectors` 继续作为兼容 facade 导出旧符号；新代码优先从 `events`、`decisions`、`policies` 和具体 detector 域模块导入。
+如果为了兼容历史实现短期保留这些文件，应在文档和代码命名中标记为迁移遗留，不作为目标态架构边界。
 
 ## 5. 决策流程
 
@@ -155,7 +155,7 @@ Core 不创建 approval row，不生成 approval nonce，不等待审批结果�
 | 检测器 | 阶段 | 作用 |
 | ------ | ---- | ---- |
 | SensitiveFileDetector | P0 | 检测 `.env`、token、secret、key、private 路径 |
-| ToolHijackDetector | P0 | 检测工具 `name/category/kind` 与内置画像不一致，或派生资源方向/操作与工具意图冲突 |
+| ToolHijackDetector | P0 | 检测工具名、工具类型和用户任务不匹配 |
 | TaskMismatchDetector | P0 | 判断工具动作与 `user_task` 是否偏离 |
 | OutboundDLPDetector | P0-P1 | 检测邮件、消息、API 外发中的敏感数据 |
 | PromptInjectionDetector | P1 | 检测不可信内容中的注入语句 |
@@ -182,26 +182,26 @@ Core 不创建 approval row，不生成 approval nonce，不等待审批结果�
 
 P0 决策：
 
-| 决策 | 含义 | Adapter 行为 |
-| ---- | ---- | ------------ |
-| `allow` | 低风险 | 执行工具 |
-| `deny` | 高风险 | 阻断工具并记录审计 |
-| `ask` | 中风险或上下文不足 | 暂停动作并等待 Guard API / Control Plane 审批 |
+| 决策    | 含义               | Adapter 行为                                  |
+| ------- | ------------------ | --------------------------------------------- |
+| `allow` | 低风险             | 执行工具                                      |
+| `deny`  | 高风险             | 阻断工具并记录审计                            |
+| `ask`   | 中风险或上下文不足 | 暂停动作并等待 Guard API / Control Plane 审批 |
 
 P2 目标态扩展（当前不支持）：
 
-| 决策 | 含义 |
-| ---- | ---- |
-| `modify` | 改写参数后放行 |
-| `audit_only` | 仅记录，不影响执行 |
-| `shadow_deny` | 影子模式模拟阻断 |
+| 决策          | 含义               |
+| ------------- | ------------------ |
+| `modify`      | 改写参数后放行     |
+| `audit_only`  | 仅记录，不影响执行 |
+| `shadow_deny` | 影子模式模拟阻断   |
 
 ## 9. P0/P1/P2 开发边界
 
 | 阶段 | Core 交付 |
 | ---- | --------- |
-| P0 | `GuardEvent` / `ToolCallEvent`、`GuardDecision`、敏感文件检测、工具劫持检测、任务偏离检测、数据外发审批、`PolicyBundle` 基础配置、基础风险评分、可解释规则命中 |
-| P1 | 上下文、模型调用、工具结果、消息外发和记忆写入 payload；确定性 P1 检测器；消息外发检测；FPR/FNR 所需的解释证据字段 |
+| P0 | `GuardEvent` / `ToolCallEvent`、`GuardDecision`、敏感文件检测、工具劫持检测、任务偏离检测、基础风险评分、可解释规则命中 |
+| P1 | 上下文和模型调用审计事件 schema、消息外发检测、记忆写入检测、策略快照输入、FPR/FNR 所需证据字段 |
 | P2 | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit 所需领域模型和检测扩展 |
 
 审批服务、审计入库、指标聚合、Trace 查询、PostgreSQL migration、Redis/WebSocket 推送不属于 Core 交付，它们属于 Guard API / Control Plane。

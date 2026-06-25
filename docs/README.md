@@ -63,13 +63,13 @@ docs/
 
 ## 3. 文档职责
 
-| 文档                                                                                     | 职责                                        |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------- |
-| [命题.pdf](00_requirements/命题.pdf)                                                     | 原始题目材料                                |
-| [命题一\_题目解读总结.md](00_requirements/命题一_题目解读总结.md)                        | 命题一解读、攻击场景和成果形态建议          |
-| [requirement_traceability_matrix.md](00_requirements/requirement_traceability_matrix.md) | 命题要求、模块设计和验收证据的追踪矩阵      |
-| [architecture.md](01_overview/architecture.md)                                           | 系统总体架构、核心链路和模块关系            |
-| [repo_structure.md](01_overview/repo_structure.md)                                       | 仓库目录职责和边界规则                      |
+| 文档                                                                                     | 职责                                                        |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| [命题.pdf](00_requirements/命题.pdf)                                                     | 原始题目材料                                                |
+| [命题一\_题目解读总结.md](00_requirements/命题一_题目解读总结.md)                        | 命题一解读、攻击场景和成果形态建议                          |
+| [requirement_traceability_matrix.md](00_requirements/requirement_traceability_matrix.md) | 命题要求、模块设计和验收证据的追踪矩阵                      |
+| [architecture.md](01_overview/architecture.md)                                           | 系统总体架构、核心链路和模块关系                            |
+| [repo_structure.md](01_overview/repo_structure.md)                                       | 仓库目录职责和边界规则                                      |
 | [interface_contract.md](02_core/interface_contract.md)                                   | Guard API / Control Plane API、事件模型、决策模型和冻结规则 |
 | [core_design.md](02_core/core_design.md)                                                 | 无状态 Core 职责、检测器、策略和风险判定设计 |
 | [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标            |

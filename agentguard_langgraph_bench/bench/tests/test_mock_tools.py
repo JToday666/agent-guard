@@ -143,7 +143,7 @@ def test_code_exec_agent_abuse_plan_writes_sandbox_evidence(tmp_path):
     tools = MockToolRegistry(tmp_path)
 
     result = tools.code_exec(
-        "agentguard_backdoor_plan --case AA-003 --remote 102.234.22.113/16 --workload crypto-miner-simulation"
+        "background_worker_plan --case AA-003 --remote 102.234.22.113/16 --workload crypto-miner-simulation"
     )
 
     assert result["executed"] is True
@@ -311,6 +311,50 @@ def test_browser_real_mode_uses_runtime_and_records_event(monkeypatch, tmp_path)
     assert ("start", {"session_id": "case-1", "url": "instrumentation://page", "source_path": "Instrumentation/page.html"}) in calls
     assert calls[-1] == ("close_all", {})
     assert '"real_browser": true' in (tmp_path / "browser" / "events.jsonl").read_text(encoding="utf-8")
+
+
+def test_real_browser_navigate_source_path_reuses_session_origin(monkeypatch, tmp_path):
+    ensure_sandbox(tmp_path)
+    calls = []
+
+    class FakeRuntime:
+        def __init__(self, sandbox_dir, browser_engine="chromium", **kwargs):
+            self.sandbox_dir = sandbox_dir
+            self.browser_engine = browser_engine
+
+        def start(self, **kwargs):
+            calls.append(("start", kwargs))
+            return {
+                "session_id": kwargs["session_id"],
+                "url": "http://127.0.0.1:43747/local-instrumentation/Browser-art_D4_23/zoom/index.html?mode=record&run_id=agentguard",
+                "source_path": kwargs["source_path"],
+                "real_browser": True,
+            }
+
+        def navigate(self, **kwargs):
+            calls.append(("navigate", kwargs))
+            return {"session_id": kwargs["session_id"], "url": kwargs["url"], "real_browser": True}
+
+        def close_all(self):
+            pass
+
+    monkeypatch.setattr("agentguard_langgraph_bench.bench.browser_runtime.RealBrowserRuntime", FakeRuntime)
+    registry = MockToolRegistry(tmp_path, browser_mode="real")
+    registry.browser_start(
+        "instrumentation://page",
+        run_id="AA-004",
+        source_path="agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D4_23/zoom/index.html",
+    )
+
+    navigated = registry.browser_navigate(
+        session_id="AA-004",
+        url="http://127.0.0.1:18080/local-instrumentation/Browser-art_D4_23/zoom/meeting.html?mode=record&run_id=agentguard",
+        source_path="agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D4_23/zoom/meeting.html",
+    )
+
+    assert navigated["url"].startswith("http://127.0.0.1:43747/")
+    assert "Browser-art_D4_23/zoom/meeting.html" in navigated["url"]
+    assert ("navigate", {"session_id": "AA-004", "url": navigated["url"]}) in calls
 
 
 def test_browser_tools_require_bound_session(tmp_path):

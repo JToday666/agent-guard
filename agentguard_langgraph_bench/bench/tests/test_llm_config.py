@@ -177,6 +177,7 @@ def test_llm_failure_can_fallback_to_case_plan(monkeypatch, tmp_path):
         llm_api_key="sk-test",
         llm_base_url="https://api.deepseek.com",
         llm_fallback_to_case_plan=True,
+        instrumentation_plan_mode="guided",
         sandbox_dir=tmp_path,
     )
 
@@ -324,13 +325,13 @@ def test_llm_messages_include_guided_execution_requirement():
 
     prompt = _llm_messages_for_case(case)[-1][1]
 
-    assert "Merely opening, reading, or navigating the page is not completion" in prompt
+    assert "not complete after merely opening, reading, or navigating the page" in prompt
     assert "Next required tool call" in prompt
     assert '"tool": "browser_start"' in prompt
 
 
-def test_default_instrumentation_plan_mode_is_guided():
-    assert BenchConfig.from_values().instrumentation_plan_mode == "guided"
+def test_default_instrumentation_plan_mode_is_autonomous():
+    assert BenchConfig.from_values().instrumentation_plan_mode == "autonomous"
 
 
 def test_cli_accepts_autonomous_instrumentation_plan_mode():
@@ -350,7 +351,7 @@ def test_autonomous_messages_do_not_include_guided_execution_answer():
     assert "victim@example.com" not in prompt
 
 
-def test_autonomous_still_binds_full_tool_schema(monkeypatch, tmp_path):
+def test_autonomous_agent_abuse_uses_json_planner_without_tool_schema(monkeypatch, tmp_path):
     case = guided_browser_case()
     config = BenchConfig(
         llm_enabled=True,
@@ -362,41 +363,25 @@ def test_autonomous_still_binds_full_tool_schema(monkeypatch, tmp_path):
     )
     captured = {}
 
-    class FakeBoundLLM:
+    class FakeLLM:
         def invoke(self, messages):
             captured["messages"] = messages
 
             class Message:
-                tool_calls = []
+                content = '{"tool":null,"arguments":{}}'
 
             return Message()
 
-    class FakeLLM:
         def bind_tools(self, tools):
-            captured["tool_names"] = [tool.name for tool in tools]
-            captured["schemas"] = {tool.name: getattr(tool, "args_schema", None) for tool in tools}
-            return FakeBoundLLM()
+            raise AssertionError("agent_abuse autonomous JSON planner must not bind provider tool schemas")
 
     monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph._build_llm", lambda config: FakeLLM())
 
     calls = plan_tools_for_case(case, config, MockToolRegistry(tmp_path))
 
     assert calls == []
-    for tool_name in [
-        "browser_start",
-        "browser_extract_text",
-        "browser_input",
-        "browser_click",
-        "browser_navigate",
-        "send_email",
-        "call_api",
-        "read_file",
-        "write_file",
-        "code_exec",
-    ]:
-        assert tool_name in captured["tool_names"]
-        assert captured["schemas"][tool_name] is not None
     assert "Required tool sequence" not in captured["messages"][-1][1]
+    assert '{"tool":null' in captured["messages"][0][1]
 
 
 def test_llm_graph_loops_over_tool_observations_and_asks_core_each_step(monkeypatch, tmp_path):
@@ -467,6 +452,7 @@ def test_llm_guided_browser_case_executes_full_task_when_model_only_browses(monk
         llm_api_key="sk-test",
         llm_base_url="https://api.deepseek.com",
         llm_max_tool_rounds=2,
+        instrumentation_plan_mode="guided",
         sandbox_dir=tmp_path,
     )
 
