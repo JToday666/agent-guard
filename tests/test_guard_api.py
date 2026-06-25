@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from agentguard_core import AuditEvent, PolicyBundle, ToolProfile
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
+from guard_api.models import ApprovalRequest
 from guard_api.services import PolicyService
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
@@ -268,6 +269,69 @@ def test_auth_state_survives_new_auth_service_instance() -> None:
         )
     assert reused_nonce.value.code == "APPROVAL_NONCE_INVALID"
 
+    subject_nonce = third_auth.issue_approval_nonce(
+        approval_id="app_subject_instance",
+        session_id=session.session_id,
+        subject_id="subject_cross_instance",
+    )
+    with pytest.raises(ApiAuthError) as wrong_subject:
+        third_auth.consume_approval_nonce(
+            nonce=subject_nonce,
+            approval_id="app_subject_instance",
+            session_id=session.session_id,
+            subject_id="subject_wrong",
+        )
+    assert wrong_subject.value.code == "APPROVAL_NONCE_INVALID"
+    third_auth.consume_approval_nonce(
+        nonce=subject_nonce,
+        approval_id="app_subject_instance",
+        session_id=session.session_id,
+        subject_id="subject_cross_instance",
+    )
+
+
+def test_approval_request_backfills_subject_fields_from_legacy_tool_call_id() -> None:
+    approval = ApprovalRequest(
+        trace_id="trace_legacy_approval",
+        tool_call_id="call_legacy",
+        requesting_principal_id="cred_adapter_main",
+        tool="send_email",
+        resource="external@example.com",
+        reason="approval required",
+        risk_score=62,
+        severity="medium",
+    )
+
+    assert approval.subject_id == "call_legacy"
+    assert approval.subject_type == "tool_call"
+    assert approval.action_id == "call_legacy"
+    assert approval.action_name == "send_email"
+    assert approval.tool_call_id == "call_legacy"
+
+
+def test_approval_request_serializes_legacy_tool_call_alias_for_new_subject_fields() -> None:
+    approval = ApprovalRequest(
+        trace_id="trace_subject_approval",
+        subject_id="evt_subject",
+        subject_type="message_send_proposed",
+        action_name="message_send_proposed",
+        requesting_principal_id="cred_adapter_main",
+        tool="message_send_proposed",
+        resource="external@example.com",
+        reason="approval required",
+        risk_score=62,
+        severity="medium",
+    )
+    payload = approval.model_dump(mode="json")
+
+    assert approval.action_id == "evt_subject"
+    assert approval.tool_call_id == "evt_subject"
+    assert payload["subject_id"] == "evt_subject"
+    assert payload["subject_type"] == "message_send_proposed"
+    assert payload["action_id"] == "evt_subject"
+    assert payload["action_name"] == "message_send_proposed"
+    assert payload["tool_call_id"] == "evt_subject"
+
 
 def test_startup_initializes_control_plane_store() -> None:
     store = TrackingInitializeStore()
@@ -316,6 +380,11 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     assert pending_response.status_code == 200
     pending = pending_response.json()
     assert pending[0]["approval_id"] == approval_id
+    assert pending[0]["subject_id"] == "call_api"
+    assert pending[0]["subject_type"] == "tool_call"
+    assert pending[0]["action_id"] == "call_api"
+    assert pending[0]["action_name"] == "send_email"
+    assert pending[0]["tool_call_id"] == "call_api"
     approval_nonce = pending[0]["approval_nonce"]
 
     rejected_response = client.post(
@@ -969,6 +1038,10 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
     pending_response = client.get("/v1/approvals/pending")
     pending = pending_response.json()
     approval = next(item for item in pending if item["approval_id"] == approval_id)
+    assert approval["subject_id"] == "evt_message_ask_flow"
+    assert approval["subject_type"] == "message_send_proposed"
+    assert approval["action_id"] == "evt_message_ask_flow"
+    assert approval["action_name"] == "message_send_proposed"
     assert approval["tool_call_id"] == "evt_message_ask_flow"
     approval_nonce = approval["approval_nonce"]
     resolve_response = client.post(

@@ -218,7 +218,7 @@ def create_app(
             payload["approval_nonce"] = auth.issue_approval_nonce(
                 approval_id=approval.approval_id,
                 session_id=session.session_id,
-                tool_call_id=approval.tool_call_id,
+                subject_id=approval.subject_id,
             )
             rows.append(payload)
         return rows
@@ -239,7 +239,7 @@ def create_app(
             nonce=payload.approval_nonce,
             approval_id=approval_id,
             session_id=session.session_id,
-            tool_call_id=approval.tool_call_id,
+            subject_id=approval.subject_id,
         )
         if payload.decision not in approval.decision_options:
             raise ApiAuthError("APPROVAL_DECISION_INVALID", status_code=403)

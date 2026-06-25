@@ -47,6 +47,7 @@ class StoredApprovalNonce:
     nonce_hash: str
     approval_id: str
     session_hash: str
+    subject_id: str
     tool_call_id: str
     expires_at: str
     used_at: str | None = None
@@ -138,7 +139,8 @@ class ControlPlaneStore(Protocol):
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
         ...
@@ -149,7 +151,8 @@ class ControlPlaneStore(Protocol):
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
         ...

@@ -29,6 +29,8 @@ from guard_api.storage.base import (
 
 @dataclass(frozen=True, slots=True)
 class EventDescription:
+    subject_id: str
+    subject_type: str
     action_id: str
     action_name: str
     resource_targets: list[str]
@@ -111,7 +113,11 @@ class ApprovalService:
         description = describe_guard_event(event)
         approval = ApprovalRequest(
             trace_id=event.trace_id,
-            tool_call_id=description.action_id,
+            subject_id=description.subject_id,
+            subject_type=description.subject_type,
+            action_id=description.action_id,
+            action_name=description.action_name,
+            tool_call_id=description.subject_id,
             requesting_principal_id=requesting_principal_id,
             runtime=event.runtime,
             agent_id=event.security_context.agent_id,
@@ -269,12 +275,16 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
         action_id = payload.tool.call_id
         action_name = payload.tool.name
         return EventDescription(
+            subject_id=action_id,
+            subject_type="tool_call",
             action_id=action_id,
             action_name=action_name,
             resource_targets=resource_targets,
             summary=f"Agent attempted to call {action_name}",
             metadata={
                 "event_type": event.event_type,
+                "subject_id": action_id,
+                "subject_type": "tool_call",
                 "action_id": action_id,
                 "action_name": action_name,
                 "tool": payload.tool.name,
@@ -286,6 +296,8 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
     action_name = event.event_type
     metadata = {
         "event_type": event.event_type,
+        "subject_id": action_id,
+        "subject_type": event.event_type,
         "action_id": action_id,
         "action_name": action_name,
     }
@@ -311,6 +323,8 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
         metadata["memory_key"] = payload_memory.key
 
     return EventDescription(
+        subject_id=action_id,
+        subject_type=event.event_type,
         action_id=action_id,
         action_name=action_name,
         resource_targets=resource_targets,

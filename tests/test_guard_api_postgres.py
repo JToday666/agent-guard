@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from uuid import uuid4
 
@@ -129,6 +130,148 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
         assert nonce_error.value.code == "APPROVAL_NONCE_INVALID"
     finally:
         _cleanup_auth_rows(database_url, approval_id, launch_code, session_id)
+
+
+def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_payload() -> None:
+    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+
+    run_id = uuid4().hex
+    approval_id = f"app_pg_legacy_subject_{run_id}"
+    trace_id = f"trace_pg_legacy_subject_{run_id}"
+    nonce = f"nonce_pg_legacy_subject_{run_id}"
+    session_id = f"sess_pg_legacy_subject_{run_id}"
+    subject_id = f"call_pg_legacy_subject_{run_id}"
+    engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
+    try:
+        _reset_control_plane_schema(database_url)
+        legacy_payload = {
+            "approval_id": approval_id,
+            "trace_id": trace_id,
+            "tool_call_id": subject_id,
+            "requesting_principal_id": "cred_adapter_main",
+            "runtime": "langgraph",
+            "agent_id": "main",
+            "status": "pending",
+            "decision_options": ["allow_once", "deny"],
+            "decision": None,
+            "tool": "send_email",
+            "resource": "external@example.com",
+            "reason": "legacy approval required",
+            "risk_score": 62,
+            "severity": "medium",
+            "created_at": "2026-06-25T00:00:00+00:00",
+            "expires_at": "2999-01-01T00:00:00+00:00",
+            "resolved_at": None,
+        }
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE approval_nonces (
+                        nonce_hash TEXT PRIMARY KEY,
+                        approval_id TEXT NOT NULL,
+                        session_hash TEXT NOT NULL,
+                        tool_call_id TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        used_at TEXT NULL
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE approval_requests (
+                        approval_id TEXT PRIMARY KEY,
+                        payload_json JSONB NOT NULL,
+                        status TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
+            conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0002_policy_snapshots')"))
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO approval_nonces (
+                        nonce_hash, approval_id, session_hash, tool_call_id, expires_at, used_at
+                    )
+                    VALUES (:nonce_hash, :approval_id, :session_hash, :tool_call_id, :expires_at, NULL)
+                    """
+                ),
+                {
+                    "nonce_hash": _token_hash(nonce),
+                    "approval_id": approval_id,
+                    "session_hash": _token_hash(session_id),
+                    "tool_call_id": subject_id,
+                    "expires_at": "2999-01-01T00:00:00+00:00",
+                },
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO approval_requests (approval_id, payload_json, status, created_at)
+                    VALUES (:approval_id, CAST(:payload_json AS jsonb), 'pending', :created_at)
+                    """
+                ),
+                {
+                    "approval_id": approval_id,
+                    "payload_json": json.dumps(legacy_payload),
+                    "created_at": "2026-06-25T00:00:00+00:00",
+                },
+            )
+
+        store = PostgresControlPlaneStore(database_url)
+        store.initialize()
+
+        with engine.begin() as conn:
+            columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'approval_nonces'
+                        """
+                    )
+                )
+            }
+            nonce_row = conn.execute(
+                text(
+                    """
+                    SELECT subject_id, tool_call_id
+                    FROM approval_nonces
+                    WHERE approval_id = :approval_id
+                    """
+                ),
+                {"approval_id": approval_id},
+            ).mappings().one()
+
+        approval = store.get_approval(approval_id)
+        auth = CapabilityAuthService(settings=GuardApiSettings(), store=store)
+        auth.consume_approval_nonce(
+            nonce=nonce,
+            approval_id=approval_id,
+            session_id=session_id,
+            subject_id=subject_id,
+        )
+
+        assert "subject_id" in columns
+        assert nonce_row["subject_id"] == subject_id
+        assert nonce_row["tool_call_id"] == subject_id
+        assert approval is not None
+        assert approval.subject_id == subject_id
+        assert approval.subject_type == "tool_call"
+        assert approval.action_id == subject_id
+        assert approval.action_name == "send_email"
+        assert approval.tool_call_id == subject_id
+    finally:
+        _reset_control_plane_schema(database_url)
 
 
 def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:

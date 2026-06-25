@@ -146,14 +146,17 @@ class MemoryControlPlaneStore:
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         nonce = StoredApprovalNonce(
             nonce_hash=nonce_hash,
             approval_id=approval_id,
             session_hash=session_hash,
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             expires_at=expires_at,
         )
         self.approval_nonces[nonce_hash] = nonce
@@ -165,22 +168,25 @@ class MemoryControlPlaneStore:
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         nonce = self.approval_nonces.get(nonce_hash)
         if (
             nonce is None
             or nonce.used_at is not None
             or nonce.approval_id != approval_id
             or nonce.session_hash != session_hash
-            or nonce.tool_call_id != tool_call_id
+            or nonce.subject_id != approval_subject_id
         ):
             return None
         consumed = StoredApprovalNonce(
             nonce_hash=nonce.nonce_hash,
             approval_id=nonce.approval_id,
             session_hash=nonce.session_hash,
+            subject_id=nonce.subject_id,
             tool_call_id=nonce.tool_call_id,
             expires_at=nonce.expires_at,
             used_at=used_at,
@@ -226,3 +232,10 @@ def _aggregate_metrics(events: list[AuditEvent]) -> EvalMetrics:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
+    approval_subject_id = subject_id or tool_call_id
+    if approval_subject_id is None:
+        raise ValueError("approval nonce requires subject_id or tool_call_id")
+    return approval_subject_id

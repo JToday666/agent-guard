@@ -374,14 +374,17 @@ class PostgresControlPlaneStore:
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         stmt = pg_insert(approval_nonces).values(
             nonce_hash=nonce_hash,
             approval_id=approval_id,
             session_hash=session_hash,
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             expires_at=expires_at,
             used_at=None,
         )
@@ -390,6 +393,7 @@ class PostgresControlPlaneStore:
             set_={
                 "approval_id": stmt.excluded.approval_id,
                 "session_hash": stmt.excluded.session_hash,
+                "subject_id": stmt.excluded.subject_id,
                 "tool_call_id": stmt.excluded.tool_call_id,
                 "expires_at": stmt.excluded.expires_at,
                 "used_at": None,
@@ -402,7 +406,8 @@ class PostgresControlPlaneStore:
             nonce_hash=nonce_hash,
             approval_id=approval_id,
             session_hash=session_hash,
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             expires_at=expires_at,
         )
 
@@ -412,9 +417,11 @@ class PostgresControlPlaneStore:
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         stmt = (
             update(approval_nonces)
             .where(
@@ -422,13 +429,14 @@ class PostgresControlPlaneStore:
                 approval_nonces.c.used_at.is_(None),
                 approval_nonces.c.approval_id == approval_id,
                 approval_nonces.c.session_hash == session_hash,
-                approval_nonces.c.tool_call_id == tool_call_id,
+                approval_nonces.c.subject_id == approval_subject_id,
             )
             .values(used_at=used_at)
             .returning(
                 approval_nonces.c.nonce_hash,
                 approval_nonces.c.approval_id,
                 approval_nonces.c.session_hash,
+                approval_nonces.c.subject_id,
                 approval_nonces.c.tool_call_id,
                 approval_nonces.c.expires_at,
                 approval_nonces.c.used_at,
@@ -443,6 +451,7 @@ class PostgresControlPlaneStore:
             nonce_hash=row["nonce_hash"],
             approval_id=row["approval_id"],
             session_hash=row["session_hash"],
+            subject_id=row["subject_id"],
             tool_call_id=row["tool_call_id"],
             expires_at=row["expires_at"],
             used_at=row["used_at"],
@@ -498,6 +507,13 @@ def _json_text(key: str) -> Any:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
+    approval_subject_id = subject_id or tool_call_id
+    if approval_subject_id is None:
+        raise ValueError("approval nonce requires subject_id or tool_call_id")
+    return approval_subject_id
 
 
 def _normalize_database_url(database_url: str) -> str:

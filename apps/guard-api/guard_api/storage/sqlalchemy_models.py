@@ -74,11 +74,13 @@ approval_nonces = Table(
     Column("nonce_hash", Text, primary_key=True),
     Column("approval_id", Text, nullable=False),
     Column("session_hash", Text, nullable=False),
+    Column("subject_id", Text, nullable=False),
     Column("tool_call_id", Text, nullable=False),
     Column("expires_at", Text, nullable=False),
     Column("used_at", Text, nullable=True),
     Index("ix_approval_nonces_approval_id", "approval_id"),
     Index("ix_approval_nonces_session_hash", "session_hash"),
+    Index("ix_approval_nonces_subject_id", "subject_id"),
     Index("ix_approval_nonces_expires_at", "expires_at"),
     Index("ix_approval_nonces_used_at", "used_at"),
 )

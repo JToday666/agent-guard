@@ -147,8 +147,8 @@ Core 只负责返回审批意图和必要证据，例如：
 ```
 
 Core 不创建 approval row，不生成 approval nonce，不等待审批结果。Guard API / Control Plane 根据 `ask` 决策创建审批记录、发布 Dashboard 待办，并向 Adapter 提供 wait 接口。
-P1 非工具事件的审批 subject 由 Guard API 兼容层映射；当前实现复用
-`ApprovalRequest.tool_call_id` 存放 `GuardEvent.event_id`，后续字段重命名应作为独立兼容迁移处理。
+审批记录使用 `subject_id` 绑定 nonce 和 resolve：P0 工具事件的 `subject_id` 是 tool call id，P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。
+`ApprovalRequest.tool_call_id` 仍保留为兼容别名，当前等于 `subject_id`；后续删除该字段应作为单独破坏性迁移处理。
 
 ## 7. 检测器
 

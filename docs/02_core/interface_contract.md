@@ -291,9 +291,8 @@ P0 内置规则 ID：
 ```
 
 Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `approval_id` 返回给 Adapter。
-P0 工具事件的审批 subject 使用 tool call id；P1 非工具事件在当前兼容层复用
-`ApprovalRequest.tool_call_id` 字段存放 `GuardEvent.event_id`，语义上是审批 subject id。
-后续如迁移为 `subject_id` / `action_id`，必须单独做兼容迁移。
+审批记录使用 `subject_id` 绑定 approval nonce 和 resolve 操作。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。
+审批响应同时包含 `subject_id`、`subject_type`、`action_id` 和 `action_name`。`tool_call_id` 是兼容别名，当前等于 `subject_id`，后续删除该字段必须单独做破坏性迁移。
 
 ## 9. AuditEvent
 
