@@ -29,18 +29,18 @@ AgentGuard 保护大模型 Agent 的运行时高风险行为：
 
 ## 3. 攻击面
 
-| 攻击面       | 示例                                 | 防御入口                                 |
-| ------------ | ------------------------------------ | ---------------------------------------- |
-| 提示注入     | 恶意邮件、文档、网页要求模型忽略规则 | 输入检测、上下文隔离、工具调用审计       |
-| 模型越狱     | 角色扮演、指令覆盖、多轮诱导         | 输入输出过滤、模型行为监测               |
+| 攻击面       | 示例                                 | 防御入口                                                 |
+| ------------ | ------------------------------------ | -------------------------------------------------------- |
+| 提示注入     | 恶意邮件、文档、网页要求模型忽略规则 | 输入检测、上下文隔离、工具调用审计                       |
+| 模型越狱     | 角色扮演、指令覆盖、多轮诱导         | 输入输出过滤、模型行为监测                               |
 | 工具调用劫持 | 诱导调用非任务所需工具               | GuardEvent / ToolCallEvent payload、TaskMismatchDetector |
-| 文件泄露     | 读取 `.env`、token、secret           | SensitiveFileDetector                    |
-| API 滥用     | 上传敏感数据、SSRF、越权调用         | OutboundDLPDetector、NetworkSSRFDetector |
-| 代码执行滥用 | 执行 shell、读取环境变量             | CodeExecDetector                         |
-| 记忆中毒     | 写入恶意长期规则                     | MemoryPoisoningDetector、Memory Guard    |
-| 环境感知污染 | README、日志、API 返回污染           | ContextBuildEvent、ToolResultEvent       |
-| 工具结果污染 | 工具返回结果中夹带指令               | ToolResultEvent、上下文来源标记          |
-| 外发泄露     | 邮件、消息、API 上传敏感数据         | OutboundDLPDetector                      |
+| 文件泄露     | 读取 `.env`、token、secret           | SensitiveFileDetector                                    |
+| API 滥用     | 上传敏感数据、SSRF、越权调用         | OutboundDLPDetector、NetworkSSRFDetector                 |
+| 代码执行滥用 | 执行 shell、读取环境变量             | CodeExecDetector                                         |
+| 记忆中毒     | 写入恶意长期规则                     | MemoryPoisoningDetector、Memory Guard                    |
+| 环境感知污染 | README、日志、API 返回污染           | ContextBuildEvent、ToolResultEvent                       |
+| 工具结果污染 | 工具返回结果中夹带指令               | ToolResultEvent、上下文来源标记                          |
+| 外发泄露     | 邮件、消息、API 上传敏感数据         | OutboundDLPDetector                                      |
 
 ## 4. 攻击链示例
 

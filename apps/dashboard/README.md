@@ -1,6 +1,6 @@
 # AgentGuard Dashboard
 
-AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取 Core 产生的审计事件、审批项、trace 和指标数据，不直接访问 LangGraph、OpenClaw、Mock Tools 或 redteam runner 的内部状态。
+AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取审计事件、审批项和评测指标，再从审计事件聚合 trace；不直接访问 LangGraph、OpenClaw、沙箱工具或 AttackBench runner 的内部状态。
 
 ## 技术栈
 
@@ -33,7 +33,7 @@ cp apps/dashboard/.env.example apps/dashboard/.env.local
 ```
 
 `.env.local` 和 `.env.*.local` 已被 Git 忽略，只用于本机地址和延迟配置，不得写入长期 token。
-数据源不通过环境变量切换：`dashboard:dev` 使用 Guard API，`dashboard:dev:mock` 使用本地场景数据。
+数据源不通过环境变量切换：`dashboard:dev` 使用 Guard API，`dashboard:dev:mock` 使用本地场景数据。`VITE_API_BASE_URL` 控制浏览器 API 前缀，`VITE_BACKEND_TARGET` 只由 Vite 开发代理使用。
 
 ## Mock 模式测试
 
@@ -47,10 +47,9 @@ pnpm dashboard:dev:mock
 
 ## 浏览器测试
 
-首次准备环境时，安装固定版本的 Playwright 依赖、Chromium 和浏览器所需系统库：
+项目依赖已声明固定版本的 Playwright。首次准备浏览器环境时安装 Chromium 和所需系统库：
 
 ```bash
-pnpm --filter @agentguard/dashboard add -D -E @playwright/test
 pnpm --filter @agentguard/dashboard exec playwright install chromium
 pnpm --filter @agentguard/dashboard exec playwright install-deps chromium
 ```

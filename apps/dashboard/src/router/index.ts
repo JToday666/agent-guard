@@ -4,16 +4,9 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 
-export type DashboardRouteGroup = "monitor" | "evaluation" | "operations";
-export type DashboardRouteRole = "viewer" | "approver" | "operator";
-
 declare module "vue-router" {
   interface RouteMeta {
-    group?: DashboardRouteGroup;
     keepAlive?: boolean;
-    label?: string;
-    requiredRole?: DashboardRouteRole;
-    requiresAuth?: boolean;
   }
 }
 
@@ -27,11 +20,7 @@ export const routes: RouteRecordRaw[] = [
     name: "overview",
     component: () => import("../pages/OverviewPage.vue"),
     meta: {
-      group: "monitor",
       keepAlive: true,
-      label: "总览",
-      requiredRole: "viewer",
-      requiresAuth: false,
     },
   },
   {
@@ -39,11 +28,7 @@ export const routes: RouteRecordRaw[] = [
     name: "approvals",
     component: () => import("../pages/ApprovalsPage.vue"),
     meta: {
-      group: "monitor",
       keepAlive: true,
-      label: "审批",
-      requiredRole: "approver",
-      requiresAuth: false,
     },
   },
   {
@@ -51,11 +36,7 @@ export const routes: RouteRecordRaw[] = [
     name: "investigations",
     component: () => import("../pages/InvestigationsPage.vue"),
     meta: {
-      group: "monitor",
       keepAlive: true,
-      label: "调查",
-      requiredRole: "viewer",
-      requiresAuth: false,
     },
   },
   {
@@ -63,11 +44,7 @@ export const routes: RouteRecordRaw[] = [
     name: "investigation-detail",
     component: () => import("../pages/InvestigationDetailPage.vue"),
     meta: {
-      group: "monitor",
       keepAlive: true,
-      label: "调查详情",
-      requiredRole: "viewer",
-      requiresAuth: false,
     },
   },
   {
@@ -75,11 +52,7 @@ export const routes: RouteRecordRaw[] = [
     name: "evaluation",
     component: () => import("../pages/EvaluationPage.vue"),
     meta: {
-      group: "evaluation",
       keepAlive: true,
-      label: "评测",
-      requiredRole: "viewer",
-      requiresAuth: false,
     },
   },
   {
@@ -87,11 +60,7 @@ export const routes: RouteRecordRaw[] = [
     name: "system",
     component: () => import("../pages/SystemPage.vue"),
     meta: {
-      group: "operations",
       keepAlive: true,
-      label: "系统",
-      requiredRole: "operator",
-      requiresAuth: false,
     },
   },
 ];

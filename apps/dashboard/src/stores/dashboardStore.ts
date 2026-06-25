@@ -83,7 +83,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
       })),
     ),
   );
-  const investigationIndex = computed(() => buildInvestigationIndex(events.value));
+  const investigationIndex = computed(() =>
+    buildInvestigationIndex(events.value),
+  );
   const attackDistribution = computed(() => {
     const counts = new Map<string, number>();
     for (const event of investigationIndex.value.latestEvents) {

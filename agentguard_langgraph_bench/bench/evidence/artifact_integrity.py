@@ -458,7 +458,7 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
         )
         for key in required_true_checks:
             if checks and checks.get(key) is not True and not _is_diagnostic_artifact(case_dir):
-                warnings.append(f"video_timeline_{key}_false")
+                errors.append(f"video_timeline_{key}_false")
         for key in drift_checks:
             if checks and checks.get(key) is not True and not _is_diagnostic_artifact(case_dir):
                 warnings.append(f"video_timeline_{key}_false")

@@ -91,17 +91,23 @@ def test_raw_replay_and_step_screenshot_source_fail(tmp_path):
     assert "step_screenshot_video_used" in report["errors"]
 
 
-def test_timeline_coverage_false_fails(tmp_path):
+def test_timeline_coverage_false_is_warning(tmp_path, monkeypatch):
+    from agentguard_langgraph_bench.bench.tests.test_artifact_integrity_agent_abuse import (
+        _mock_ffprobe,
+        _write_replay_artifacts,
+    )
+
     case_dir = tmp_path / "AA-006" / "browser_replay"
-    _write_base_case(case_dir)
+    _write_replay_artifacts(case_dir)
     timeline = json.loads((case_dir / "video_timeline.json").read_text(encoding="utf-8"))
     timeline["coverage_checks"]["all_actions_have_nearby_frames"] = False
     (case_dir / "video_timeline.json").write_text(json.dumps(timeline), encoding="utf-8")
+    _mock_ffprobe(monkeypatch)
 
     report = check_case_artifacts(case_dir, root=tmp_path)
 
     assert "video_timeline_all_actions_have_nearby_frames_false" in report["warnings"]
-    assert report["critical_ok"] is False
+    assert report["critical_ok"] is True
 
 
 def test_timeline_drift_is_warning_when_core_artifacts_are_auditable(tmp_path, monkeypatch):

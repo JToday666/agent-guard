@@ -37,26 +37,26 @@ Runtime Native Event
 
 ## 3. Guard API / Control Plane API
 
-| API | 阶段 | 用途 |
-| --- | ---- | ---- |
-| `GET /health` | P0 | `guard-api` 进程健康检查 |
-| `GET /health?check_db=true` | P0 | Control Plane 数据库连接健康检查 |
-| `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
-| `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
-| `GET /v1/audit/events` | P0 | Dashboard 事件列表，可按 query 过滤 |
-| `GET /v1/metrics/eval` | P0 | 评测指标，可按 query 过滤 |
-| `POST /v1/auth/browser/launch` | P0 | 创建 Dashboard launch code |
-| `POST /v1/auth/browser/exchange` | P0 | launch code 换 browser session |
-| `GET /v1/auth/browser/me` | P0 | Dashboard 会话恢复 |
-| `POST /v1/auth/browser/logout` | P0 | Dashboard 会话退出 |
-| `GET /v1/approvals/pending` | P0 | Dashboard 查询待审批动作 |
-| `POST /v1/approvals/{approval_id}/resolve` | P0 | Dashboard 审批处理 |
-| `GET /v1/approvals/{approval_id}/wait` | P0 | Adapter 等待审批结果 |
-| `GET /v1/traces/{trace_id}` | P1 | 攻击链路详情 |
-| `POST /v1/policies` | P1 | 创建或导入策略 |
-| `GET /v1/policies` | P1 | 策略列表和策略快照查询 |
-| `POST /v1/eval/runs` | P1 | 创建评测任务 |
-| `GET /v1/metrics/runtime` | P1 | 运行时监控指标 |
+| API                                        | 阶段 | 用途                                                                                     |
+| ------------------------------------------ | ---- | ---------------------------------------------------------------------------------------- |
+| `GET /health`                              | P0   | `guard-api` 进程健康检查                                                                 |
+| `GET /health?check_db=true`                | P0   | Control Plane 数据库连接健康检查                                                         |
+| `POST /v1/guard/evaluate`                  | P0   | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
+| `POST /v1/audit/events`                    | P0   | Adapter 上报 after-event 或 audit-only 事件                                              |
+| `GET /v1/audit/events`                     | P0   | Dashboard 事件列表，可按 query 过滤                                                      |
+| `GET /v1/metrics/eval`                     | P0   | 评测指标，可按 query 过滤                                                                |
+| `POST /v1/auth/browser/launch`             | P0   | 创建 Dashboard launch code                                                               |
+| `POST /v1/auth/browser/exchange`           | P0   | launch code 换 browser session                                                           |
+| `GET /v1/auth/browser/me`                  | P0   | Dashboard 会话恢复                                                                       |
+| `POST /v1/auth/browser/logout`             | P0   | Dashboard 会话退出                                                                       |
+| `GET /v1/approvals/pending`                | P0   | Dashboard 查询待审批动作                                                                 |
+| `POST /v1/approvals/{approval_id}/resolve` | P0   | Dashboard 审批处理                                                                       |
+| `GET /v1/approvals/{approval_id}/wait`     | P0   | Adapter 等待审批结果                                                                     |
+| `GET /v1/traces/{trace_id}`                | P1   | 攻击链路详情                                                                             |
+| `POST /v1/policies`                        | P1   | 创建或导入策略                                                                           |
+| `GET /v1/policies`                         | P1   | 策略列表和策略快照查询                                                                   |
+| `POST /v1/eval/runs`                       | P1   | 创建评测任务                                                                             |
+| `GET /v1/metrics/runtime`                  | P1   | 运行时监控指标                                                                           |
 
 目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
 
@@ -73,13 +73,13 @@ Runtime Native Event
 
 P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。Core 不参与鉴权，不读取 token，不管理 session。
 
-| 调用方 | 凭证 | 要求 |
-| ------ | ---- | ---- |
-| CLI / Launcher | control token | `Authorization: Bearer`，仅用于 `auth:launch` 和控制面管理能力 |
-| Adapter / Plugin | adapter token | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
-| Vue Dashboard | browser session | HttpOnly Cookie，用于 Dashboard API |
-| Vue 状态改变请求 | CSRF token | `X-AgentGuard-CSRF` |
-| 审批 resolve | approval nonce | JSON body，单次使用 |
+| 调用方           | 凭证            | 要求                                                                                 |
+| ---------------- | --------------- | ------------------------------------------------------------------------------------ |
+| CLI / Launcher   | control token   | `Authorization: Bearer`，仅用于 `auth:launch` 和控制面管理能力                       |
+| Adapter / Plugin | adapter token   | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
+| Vue Dashboard    | browser session | HttpOnly Cookie，用于 Dashboard API                                                  |
+| Vue 状态改变请求 | CSRF token      | `X-AgentGuard-CSRF`                                                                  |
+| 审批 resolve     | approval nonce  | JSON body，单次使用                                                                  |
 
 Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
 
@@ -87,13 +87,13 @@ Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser se
 
 `GET /v1/audit/events` 支持以下可选 query 参数：
 
-| 参数 | 含义 |
-| ---- | ---- |
-| `trace_id` | 只返回指定 trace 的审计事件 |
-| `case_id` | 只返回指定 case 的审计事件 |
-| `runtime` | 只返回指定 runtime 的审计事件 |
-| `decision` | 只返回指定决策的审计事件 |
-| `limit` | 返回条数，默认 500，最大 1000 |
+| 参数       | 含义                          |
+| ---------- | ----------------------------- |
+| `trace_id` | 只返回指定 trace 的审计事件   |
+| `case_id`  | 只返回指定 case 的审计事件    |
+| `runtime`  | 只返回指定 runtime 的审计事件 |
+| `decision` | 只返回指定决策的审计事件      |
+| `limit`    | 返回条数，默认 500，最大 1000 |
 
 `GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
 
@@ -328,11 +328,11 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 ## 13. P0/P1/P2 开发边界
 
-| 阶段 | 契约范围 |
-| ---- | -------- |
-| P0 | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、评测指标和最小 Dashboard 审批 |
-| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询、策略快照、CLI 审批和复杂审批体验 |
-| P2 | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展 |
+| 阶段 | 契约范围                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------- |
+| P0   | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、评测指标和最小 Dashboard 审批 |
+| P1   | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询、策略快照、CLI 审批和复杂审批体验                                    |
+| P2   | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展                                                              |
 
 ## 14. 冻结规则
 

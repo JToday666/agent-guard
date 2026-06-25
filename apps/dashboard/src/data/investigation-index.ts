@@ -16,8 +16,7 @@ export function buildInvestigationIndex(
   events: AuditEventRow[],
 ): InvestigationIndex {
   const latestEvents = [...events].sort(
-    (left, right) =>
-      Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
+    (left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
   );
   const byId = new Map<string, AuditEventRow>();
   const byTrace = new Map<string, AuditEventRow[]>();
@@ -50,7 +49,8 @@ export function filterInvestigationEvents(
     if (query.runtime && event.runtime !== query.runtime) return false;
     if (query.severity && event.severity !== query.severity) return false;
     if (query.rule && !event.ruleHits.includes(query.rule)) return false;
-    if (query.blocked && event.blocked !== (query.blocked === "true")) return false;
+    if (query.blocked && event.blocked !== (query.blocked === "true"))
+      return false;
     if (!searchValue) return true;
 
     return [
