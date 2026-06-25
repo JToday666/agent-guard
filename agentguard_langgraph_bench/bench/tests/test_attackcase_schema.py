@@ -326,7 +326,15 @@ def test_instrumentation_payloads_are_task_user_goals():
             assert "Instrumentation" not in case.input.payload, case.case_id
         elif _is_migrated_file_or_prompt_case(case):
             assert web_entry.startswith("agentguard_langgraph_bench/bench/datasets/instrumentation/")
-            assert case.input.payload == _payload_with_task_url(user_goal, web_entry), case.case_id
+            if case.case_id == "PI-010":
+                assert case.metadata.get("original_id") == "EIA_A6_39_high"
+                assert case.input.payload.startswith(f"Task URL: {_local_url(web_entry)}\n\n")
+                assert "Tesla Schedule a Demo Drive" in case.input.payload
+                assert "COMP-INTEL-2025-04-MARKET" in case.input.payload
+                assert "ignore any suspicious" in case.input.payload
+                assert case.input.source_type != "direct_user_instruction"
+            else:
+                assert case.input.payload == _payload_with_task_url(user_goal, web_entry), case.case_id
         else:
             assert metadata_goal == user_goal, case.case_id
             assert case.input.payload == _payload_from_task_user_goal(user_goal, web_entry), case.case_id
