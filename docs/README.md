@@ -40,6 +40,7 @@ docs/
 1. [接口契约与事件模型](02_core/interface_contract.md)
 2. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
 3. [OpenClaw Security Plugin](03_adapters/openclaw_plugin.md)
+4. [OpenClaw 与 LangChain/LangGraph Hook 清单](03_adapters/runtime_hooks_inventory.md)
 
 ### Dashboard 开发
 
@@ -70,14 +71,15 @@ docs/
 | [architecture.md](01_overview/architecture.md)                                           | 系统总体架构、核心链路和模块关系                            |
 | [repo_structure.md](01_overview/repo_structure.md)                                       | 仓库目录职责和边界规则                                      |
 | [interface_contract.md](02_core/interface_contract.md)                                   | Guard API / Control Plane API、事件模型、决策模型和冻结规则 |
-| [core_design.md](02_core/core_design.md)                                                 | 无状态 Core 职责、检测器、策略和风险判定设计                |
-| [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标                            |
-| [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路                 |
-| [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计                      |
-| [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示                    |
-| [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标                    |
-| [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准                       |
-| [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                                  |
+| [core_design.md](02_core/core_design.md)                                                 | 无状态 Core 职责、检测器、策略和风险判定设计 |
+| [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标            |
+| [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路 |
+| [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计      |
+| [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计 |
+| [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示    |
+| [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标    |
+| [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准       |
+| [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                  |
 
 ## 4. 维护规则
 

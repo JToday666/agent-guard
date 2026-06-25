@@ -13,12 +13,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from agentguard_core import AuditEvent, utc_now_iso
+from agentguard_core import AuditEvent, PolicyBundle, utc_now_iso
 from guard_api.models import ApprovalRequest
 from guard_api.storage.base import (
     AuditEventFilters,
     EvalMetricFilters,
     EvalMetrics,
+    PolicySnapshotRecord,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
@@ -29,7 +30,12 @@ from guard_api.storage.sqlalchemy_models import (
     audit_events,
     browser_sessions,
     launch_codes,
+    policy_snapshot_history,
+    policy_snapshots,
 )
+
+
+_POLICY_SNAPSHOT_ADVISORY_LOCK_ID = 427001030001
 
 
 @dataclass(slots=True)
@@ -132,6 +138,106 @@ class PostgresControlPlaneStore:
             "average_latency_ms": float(average_latency) if average_latency is not None else None,
         }
 
+    def get_policy_snapshot(self) -> PolicyBundle | None:
+        record = self.get_policy_snapshot_record()
+        if record is None:
+            return None
+        return record.policy_bundle
+
+    def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None:
+        stmt = (
+            select(
+                policy_snapshots.c.revision,
+                policy_snapshots.c.payload_json,
+                policy_snapshots.c.updated_at,
+                policy_snapshots.c.updated_by,
+            )
+            .where(policy_snapshots.c.policy_id == "current")
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        if row is None:
+            return None
+        return PolicySnapshotRecord(
+            revision=int(row["revision"]),
+            policy_bundle=PolicyBundle.model_validate(row["payload_json"]),
+            updated_at=str(row["updated_at"]),
+            updated_by=str(row["updated_by"]),
+        )
+
+    def save_policy_snapshot(
+        self,
+        policy_bundle: PolicyBundle,
+        *,
+        updated_by: str = "system",
+    ) -> PolicySnapshotRecord:
+        payload = policy_bundle.model_dump(mode="json")
+        updated_at = utc_now_iso()
+        with self._session_factory() as session:
+            with session.begin():
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                    {"lock_id": _POLICY_SNAPSHOT_ADVISORY_LOCK_ID},
+                )
+                current_revision = session.execute(
+                    select(policy_snapshots.c.revision).where(policy_snapshots.c.policy_id == "current")
+                ).scalar_one_or_none()
+                revision = int(current_revision) + 1 if current_revision is not None else 1
+                stmt = pg_insert(policy_snapshots).values(
+                    policy_id="current",
+                    payload_json=payload,
+                    revision=revision,
+                    updated_at=updated_at,
+                    updated_by=updated_by,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[policy_snapshots.c.policy_id],
+                    set_={
+                        "payload_json": stmt.excluded.payload_json,
+                        "revision": stmt.excluded.revision,
+                        "updated_at": stmt.excluded.updated_at,
+                        "updated_by": stmt.excluded.updated_by,
+                    },
+                )
+                session.execute(stmt)
+                session.execute(
+                    pg_insert(policy_snapshot_history).values(
+                        revision=revision,
+                        payload_json=payload,
+                        updated_at=updated_at,
+                        updated_by=updated_by,
+                    )
+                )
+        return PolicySnapshotRecord(
+            revision=revision,
+            policy_bundle=policy_bundle,
+            updated_at=updated_at,
+            updated_by=updated_by,
+        )
+
+    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
+        stmt = (
+            select(
+                policy_snapshot_history.c.revision,
+                policy_snapshot_history.c.payload_json,
+                policy_snapshot_history.c.updated_at,
+                policy_snapshot_history.c.updated_by,
+            )
+            .order_by(desc(policy_snapshot_history.c.revision))
+            .limit(_bounded_limit(limit))
+        )
+        with self._session_factory() as session:
+            rows = session.execute(stmt).mappings().all()
+        return [
+            PolicySnapshotRecord(
+                revision=int(row["revision"]),
+                policy_bundle=PolicyBundle.model_validate(row["payload_json"]),
+                updated_at=str(row["updated_at"]),
+                updated_by=str(row["updated_by"]),
+            )
+            for row in rows
+        ]
+
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         payload = approval.model_dump(mode="json")
         stmt = pg_insert(approval_requests).values(
@@ -155,6 +261,14 @@ class PostgresControlPlaneStore:
             .where(approval_requests.c.status == "pending")
             .order_by(approval_requests.c.created_at.asc())
         )
+        with self._session_factory() as session:
+            rows = session.execute(stmt).scalars().all()
+        return [ApprovalRequest.model_validate(row) for row in rows]
+
+    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
+        stmt = select(approval_requests.c.payload_json).order_by(approval_requests.c.created_at.asc())
+        if trace_id is not None:
+            stmt = stmt.where(approval_requests.c.payload_json.op("->>")("trace_id") == trace_id)
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
         return [ApprovalRequest.model_validate(row) for row in rows]
@@ -267,14 +381,17 @@ class PostgresControlPlaneStore:
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         stmt = pg_insert(approval_nonces).values(
             nonce_hash=nonce_hash,
             approval_id=approval_id,
             session_hash=session_hash,
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             expires_at=expires_at,
             used_at=None,
         )
@@ -283,6 +400,7 @@ class PostgresControlPlaneStore:
             set_={
                 "approval_id": stmt.excluded.approval_id,
                 "session_hash": stmt.excluded.session_hash,
+                "subject_id": stmt.excluded.subject_id,
                 "tool_call_id": stmt.excluded.tool_call_id,
                 "expires_at": stmt.excluded.expires_at,
                 "used_at": None,
@@ -295,7 +413,8 @@ class PostgresControlPlaneStore:
             nonce_hash=nonce_hash,
             approval_id=approval_id,
             session_hash=session_hash,
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             expires_at=expires_at,
         )
 
@@ -305,9 +424,11 @@ class PostgresControlPlaneStore:
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         stmt = (
             update(approval_nonces)
             .where(
@@ -315,13 +436,14 @@ class PostgresControlPlaneStore:
                 approval_nonces.c.used_at.is_(None),
                 approval_nonces.c.approval_id == approval_id,
                 approval_nonces.c.session_hash == session_hash,
-                approval_nonces.c.tool_call_id == tool_call_id,
+                approval_nonces.c.subject_id == approval_subject_id,
             )
             .values(used_at=used_at)
             .returning(
                 approval_nonces.c.nonce_hash,
                 approval_nonces.c.approval_id,
                 approval_nonces.c.session_hash,
+                approval_nonces.c.subject_id,
                 approval_nonces.c.tool_call_id,
                 approval_nonces.c.expires_at,
                 approval_nonces.c.used_at,
@@ -336,6 +458,7 @@ class PostgresControlPlaneStore:
             nonce_hash=row["nonce_hash"],
             approval_id=row["approval_id"],
             session_hash=row["session_hash"],
+            subject_id=row["subject_id"],
             tool_call_id=row["tool_call_id"],
             expires_at=row["expires_at"],
             used_at=row["used_at"],
@@ -391,6 +514,13 @@ def _json_text(key: str) -> Any:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
+    approval_subject_id = subject_id or tool_call_id
+    if approval_subject_id is None:
+        raise ValueError("approval nonce requires subject_id or tool_call_id")
+    return approval_subject_id
 
 
 def _normalize_database_url(database_url: str) -> str:

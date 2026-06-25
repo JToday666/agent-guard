@@ -4,25 +4,43 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from .detectors import Detector, OutboundDetector, SensitiveResourceDetector, TaskMismatchDetector
-from .models import GuardDecision, GuardEvent, PolicyBundle
-from .policy import build_guard_decision
+from .detectors import (
+    CodeExecDetector,
+    Detector,
+    EnvironmentPoisoningDetector,
+    JailbreakDetector,
+    MemoryPoisoningDetector,
+    OutboundDetector,
+    PromptInjectionDetector,
+    SensitiveResourceDetector,
+    TaskMismatchDetector,
+    ToolHijackDetector,
+)
+from .decisions import GuardDecision, build_guard_decision
+from .events import GuardEvent
+from .policies import PolicyBundle
 
 
 class GuardEngine:
     def __init__(self, *, detectors: list[Detector] | None = None) -> None:
         self.detectors = detectors or [
             SensitiveResourceDetector(),
+            ToolHijackDetector(),
             OutboundDetector(),
             TaskMismatchDetector(),
+            PromptInjectionDetector(),
+            JailbreakDetector(),
+            CodeExecDetector(),
+            MemoryPoisoningDetector(),
+            EnvironmentPoisoningDetector(),
         ]
 
     def evaluate(self, event: GuardEvent, policies: PolicyBundle | None = None) -> GuardDecision:
-        _ = policies or PolicyBundle()
+        policy_bundle = policies or PolicyBundle()
         started_at = perf_counter()
         detections = []
         for detector in self.detectors:
-            detections.extend(detector.evaluate(event))
+            detections.extend(detector.evaluate(event, policy_bundle))
         return build_guard_decision(detections, started_at=started_at)
 
 

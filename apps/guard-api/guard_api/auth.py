@@ -115,14 +115,23 @@ class CapabilityAuthService:
         if not csrf_token or not hmac.compare_digest(csrf_token, session.csrf_token):
             raise ApiAuthError("CSRF_INVALID", status_code=403)
 
-    def issue_approval_nonce(self, *, approval_id: str, session_id: str, tool_call_id: str) -> str:
+    def issue_approval_nonce(
+        self,
+        *,
+        approval_id: str,
+        session_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
+    ) -> str:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         nonce = new_id("nonce")
         expires_at = _now() + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
         self.store.create_approval_nonce(
             _token_hash(nonce),
             approval_id=approval_id,
             session_hash=_token_hash(session_id),
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             expires_at=expires_at.isoformat(),
         )
         return nonce
@@ -133,13 +142,16 @@ class CapabilityAuthService:
         nonce: str,
         approval_id: str,
         session_id: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
     ) -> None:
+        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
         approval_nonce = self.store.consume_approval_nonce(
             _token_hash(nonce),
             approval_id=approval_id,
             session_hash=_token_hash(session_id),
-            tool_call_id=tool_call_id,
+            subject_id=approval_subject_id,
+            tool_call_id=tool_call_id or approval_subject_id,
             used_at=_now().isoformat(),
         )
         if approval_nonce is None:
@@ -161,3 +173,10 @@ def _parse_datetime(value: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
+    approval_subject_id = subject_id or tool_call_id
+    if approval_subject_id is None:
+        raise ApiAuthError("APPROVAL_SUBJECT_MISSING", status_code=403)
+    return approval_subject_id
