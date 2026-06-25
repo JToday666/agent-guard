@@ -100,7 +100,30 @@ def test_timeline_coverage_false_fails(tmp_path):
 
     report = check_case_artifacts(case_dir, root=tmp_path)
 
-    assert "video_timeline_all_actions_have_nearby_frames_false" in report["errors"]
+    assert "video_timeline_all_actions_have_nearby_frames_false" in report["warnings"]
+    assert report["critical_ok"] is False
+
+
+def test_timeline_drift_is_warning_when_core_artifacts_are_auditable(tmp_path, monkeypatch):
+    from agentguard_langgraph_bench.bench.tests.test_artifact_integrity_agent_abuse import (
+        _mock_ffprobe,
+        _write_replay_artifacts,
+    )
+
+    case_dir = tmp_path / "FE-001" / "browser_replay"
+    _write_replay_artifacts(case_dir)
+    timeline = json.loads((case_dir / "video_timeline.json").read_text(encoding="utf-8"))
+    timeline["coverage_checks"]["all_actions_have_nearby_frames"] = False
+    timeline["coverage_checks"]["video_duration_ge_action_span_plus_grace"] = False
+    (case_dir / "video_timeline.json").write_text(json.dumps(timeline), encoding="utf-8")
+    _mock_ffprobe(monkeypatch)
+
+    report = check_case_artifacts(case_dir, root=tmp_path)
+
+    assert report["critical_ok"] is True
+    assert report["ok"] is True
+    assert "video_timeline_all_actions_have_nearby_frames_false" in report["warnings"]
+    assert "video_timeline_video_duration_ge_action_span_plus_grace_false" in report["warnings"]
 
 
 def test_aa004_room_markers_required(tmp_path):

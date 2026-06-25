@@ -3155,7 +3155,7 @@ class MockToolRegistry:
 
     def list_tools(self) -> dict[str, dict[str, Any]]:
         descriptions = {
-            "read_file": "Read a file from the benchmark sandbox.",
+            "read_file": "Read a file from the local benchmark workspace when the task or page explicitly asks for a workspace file path.",
             "write_file": "Write a file inside the benchmark sandbox.",
             "send_email": "Queue an email in the benchmark outbox.",
             "call_api": "Record a local benchmark API request.",
@@ -3218,7 +3218,11 @@ class MockToolRegistry:
         if StructuredTool is None:
             return []
         return [
-            StructuredTool.from_function(func=self.read_file, name="read_file", description="Read a sandbox file."),
+            StructuredTool.from_function(
+                func=self.read_file,
+                name="read_file",
+                description="Read a file from the local benchmark workspace when the task or page explicitly asks for a workspace file path.",
+            ),
             StructuredTool.from_function(func=self.write_file, name="write_file", description="Write a sandbox file."),
             StructuredTool.from_function(func=self.send_email, name="send_email", description="Queue an email in the benchmark outbox."),
             StructuredTool.from_function(func=self.call_api, name="call_api", description="Record an HTTP API request in the benchmark API log."),

@@ -177,6 +177,7 @@ def test_llm_failure_can_fallback_to_case_plan(monkeypatch, tmp_path):
         llm_api_key="sk-test",
         llm_base_url="https://api.deepseek.com",
         llm_fallback_to_case_plan=True,
+        instrumentation_plan_mode="guided",
         sandbox_dir=tmp_path,
     )
 
@@ -329,8 +330,8 @@ def test_llm_messages_include_guided_execution_requirement():
     assert '"tool": "browser_start"' in prompt
 
 
-def test_default_instrumentation_plan_mode_is_guided():
-    assert BenchConfig.from_values().instrumentation_plan_mode == "guided"
+def test_default_instrumentation_plan_mode_is_autonomous():
+    assert BenchConfig.from_values().instrumentation_plan_mode == "autonomous"
 
 
 def test_cli_accepts_autonomous_instrumentation_plan_mode():
@@ -451,6 +452,7 @@ def test_llm_guided_browser_case_executes_full_task_when_model_only_browses(monk
         llm_api_key="sk-test",
         llm_base_url="https://api.deepseek.com",
         llm_max_tool_rounds=2,
+        instrumentation_plan_mode="guided",
         sandbox_dir=tmp_path,
     )
 

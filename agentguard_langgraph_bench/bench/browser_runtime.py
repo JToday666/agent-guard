@@ -34,6 +34,8 @@ FINAL_OBSERVATION_WAIT_MS = int(os.getenv("AGENTGUARD_FINAL_OBSERVATION_WAIT_MS"
 AA004_FINAL_OBSERVATION_WAIT_MS = int(os.getenv("AGENTGUARD_AA004_FINAL_OBSERVATION_WAIT_MS", "4500"))
 CONTINUOUS_VIDEO_MIN_BYTES = int(os.getenv("AGENTGUARD_CONTINUOUS_VIDEO_MIN_BYTES", "8000"))
 CONTINUOUS_FRAME_FPS = float(os.getenv("AGENTGUARD_CONTINUOUS_FRAME_FPS", "2"))
+ACTION_FRAME_MAX_GAP_MS = int(os.getenv("AGENTGUARD_ACTION_FRAME_MAX_GAP_MS", "3500"))
+CONTINUOUS_FRAME_MAX_DURATION_SECONDS = float(os.getenv("AGENTGUARD_CONTINUOUS_FRAME_MAX_DURATION_SECONDS", "15"))
 
 
 def _utc_now_iso() -> str:
@@ -458,7 +460,10 @@ class ContinuousFrameRecorder:
         for idx, frame in enumerate(frames):
             lines.append(f"file '{frame.path.as_posix()}'")
             if idx + 1 < len(frames):
-                duration = max(0.10, min(2.0, (frames[idx + 1].elapsed_ms - frame.elapsed_ms) / 1000))
+                duration = max(
+                    0.10,
+                    min(CONTINUOUS_FRAME_MAX_DURATION_SECONDS, (frames[idx + 1].elapsed_ms - frame.elapsed_ms) / 1000),
+                )
             else:
                 duration = max(0.50, min(1.25, 1.0 / self.fps))
             lines.append(f"duration {duration:.3f}")
@@ -622,6 +627,7 @@ class RealBrowserRuntime:
             page.goto(target_url, wait_until="domcontentloaded", timeout=10000)
             self._stabilize_page(page)
             recorder.capture(page, reason="start")
+            start_observed_at = _utc_now_iso()
             screenshot = self.screenshot_dir / f"{_safe_artifact_name(session_id)}_start.png"
             self._safe_screenshot(page, screenshot)
             start_step = steps_dir / "step_000_start.png"
@@ -685,7 +691,7 @@ class RealBrowserRuntime:
             artifact_dir / "events.jsonl",
             {
                 "event_type": "browser_start",
-                "timestamp": recording_started_at,
+                "timestamp": start_observed_at,
                 "session_id": session_id,
                 "url": target_url,
                 "screenshot": str(start_step),
@@ -694,7 +700,7 @@ class RealBrowserRuntime:
         start_event = {
             "event_type": "browser_tool_action",
             "action": "start",
-            "timestamp": recording_started_at,
+            "timestamp": start_observed_at,
             "session_id": session_id,
             "step_index": 0,
             "url": target_url,
@@ -1328,7 +1334,7 @@ class RealBrowserRuntime:
         for action in actions:
             args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
             before, after, max_gap = self._nearest_frames_for_action(frame_rows, str(action.get("timestamp") or ""))
-            if max_gap is None or max_gap > 1500:
+            if max_gap is None or max_gap > ACTION_FRAME_MAX_GAP_MS:
                 all_actions_have_nearby_frames = False
             if max_gap is not None:
                 max_gap_ms_values.append(max_gap)
@@ -1343,7 +1349,7 @@ class RealBrowserRuntime:
                     "nearest_frame_before": before.get("path") if before else None,
                     "nearest_frame_after": after.get("path") if after else None,
                     "max_frame_gap_ms": max_gap,
-                    "covered_by_video": max_gap is not None and max_gap <= 1500,
+                    "covered_by_video": max_gap is not None and max_gap <= ACTION_FRAME_MAX_GAP_MS,
                 }
             )
         duration = float(video_probe.get("duration_seconds") or 0)
@@ -1521,6 +1527,8 @@ class RealBrowserRuntime:
         session.last_action_at = timestamp
         step_path = steps_dir / f"step_{session.step_index:03d}_{action}.png"
         ok = self._safe_screenshot(session.page, step_path)
+        if session.recorder is not None:
+            session.recorder.capture(session.page, reason=f"action_event:{action}")
         event = {
             "event_type": "browser_tool_action",
             "action": action,
@@ -1580,10 +1588,27 @@ class RealBrowserRuntime:
     def _write_accessibility_tree(self, session: RealBrowserSession, path: Path) -> None:
         payload: dict[str, Any]
         try:
-            snapshot = session.page.accessibility.snapshot()
+            accessibility = getattr(session.page, "accessibility", None)
+            if accessibility is None:
+                accessibility = getattr(session.playwright, "accessibility", None)
+            if accessibility is None:
+                payload = {
+                    "ok": False,
+                    "status": "unsupported_by_playwright_version",
+                    "does_not_invalidate_browser_recording": True,
+                    "error": "accessibility API unavailable on page/playwright object",
+                }
+                self._write_json(path, payload)
+                return
+            snapshot = accessibility.snapshot(root=session.page.locator("body").element_handle())
             payload = {"ok": True, "snapshot": snapshot}
         except Exception as exc:
-            payload = {"ok": False, "error": str(exc)}
+            payload = {
+                "ok": False,
+                "status": "unsupported_by_playwright_version",
+                "does_not_invalidate_browser_recording": True,
+                "error": str(exc),
+            }
         self._write_json(path, payload)
 
     def _build_business_event_correlation_index(self, artifact_dir: Path, session_id: str) -> dict[str, Any]:
