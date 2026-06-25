@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +12,7 @@ from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
 from guard_api.services import PolicyService
 from guard_api.settings import GuardApiSettings
+import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
 
 
@@ -113,9 +117,12 @@ def test_guard_evaluate_requires_adapter_token() -> None:
     client = TestClient(app)
 
     response = client.post("/v1/guard/evaluate", json=_guard_event_payload())
+    payload = response.json()
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "AUTH_MISSING"
+    assert payload["error"]["code"] == "AUTH_MISSING"
+    assert payload["error"]["message"] == "Authentication is required."
+    assert payload["error"]["details"] == []
 
 
 def test_guard_evaluate_rejects_wrong_schema_version() -> None:
@@ -129,8 +136,13 @@ def test_guard_evaluate_rejects_wrong_schema_version() -> None:
         headers={"Authorization": "Bearer adapter-secret"},
         json=payload,
     )
+    body = response.json()
 
     assert response.status_code == 422
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert body["error"]["message"] == "Request validation failed."
+    assert isinstance(body["error"]["details"], list)
+    assert {"loc", "msg", "type"}.issubset(body["error"]["details"][0])
 
 
 def test_audit_events_reject_wrong_schema_version() -> None:
@@ -149,8 +161,13 @@ def test_audit_events_reject_wrong_schema_version() -> None:
         headers={"Authorization": "Bearer adapter-secret"},
         json=payload,
     )
+    body = response.json()
 
     assert response.status_code == 422
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert body["error"]["message"] == "Request validation failed."
+    assert isinstance(body["error"]["details"], list)
+    assert {"loc", "msg", "type"}.issubset(body["error"]["details"][0])
 
 
 @pytest.mark.parametrize(
@@ -185,8 +202,11 @@ def test_guard_evaluate_rejects_invalid_p1_payload_contracts(event: dict) -> Non
         headers={"Authorization": "Bearer adapter-secret"},
         json=event,
     )
+    body = response.json()
 
     assert response.status_code == 422
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert isinstance(body["error"]["details"], list)
 
 
 def test_old_evaluate_and_single_audit_routes_are_not_registered() -> None:
@@ -989,6 +1009,36 @@ def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
     assert all(item["updated_at"] for item in history)
 
 
+def test_memory_policy_snapshot_concurrent_writes_have_contiguous_revisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = MemoryControlPlaneStore()
+    worker_count = 20
+
+    def slow_timestamp() -> str:
+        time.sleep(0.002)
+        return "2026-06-25T00:00:00+00:00"
+
+    monkeypatch.setattr(memory_store_module, "utc_now_iso", slow_timestamp)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        records = list(
+            executor.map(
+                lambda index: store.save_policy_snapshot(
+                    PolicyBundle(bundle_id=f"runtime-concurrent-{index}"),
+                    updated_by="tester",
+                ),
+                range(worker_count),
+            )
+        )
+
+    history = store.list_policy_snapshot_history(limit=worker_count)
+
+    assert sorted(record.revision for record in records) == list(range(1, worker_count + 1))
+    assert [record.revision for record in history] == list(range(worker_count, 0, -1))
+    assert len({record.policy_bundle.bundle_id for record in history}) == worker_count
+
+
 def test_policy_current_update_requires_csrf() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(store=MemoryControlPlaneStore(), settings=settings)
@@ -1002,6 +1052,8 @@ def test_policy_current_update_requires_csrf() -> None:
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "CSRF_INVALID"
+    assert response.json()["error"]["message"] == "CSRF token is invalid."
+    assert response.json()["error"]["details"] == []
 
 
 def test_p1_message_send_approval_can_resolve_and_wait() -> None:

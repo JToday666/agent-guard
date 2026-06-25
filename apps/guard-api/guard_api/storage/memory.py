@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
+from typing import Any
 
 from agentguard_core import AuditEvent, PolicyBundle, utc_now_iso
 
@@ -27,6 +29,7 @@ class MemoryControlPlaneStore:
     approval_nonces: dict[str, StoredApprovalNonce] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
+    policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
 
     def initialize(self) -> None:
         return None
@@ -57,16 +60,17 @@ class MemoryControlPlaneStore:
         *,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord:
-        revision = (self.policy_snapshot.revision + 1) if self.policy_snapshot is not None else 1
-        record = PolicySnapshotRecord(
-            revision=revision,
-            policy_bundle=policy_bundle,
-            updated_at=utc_now_iso(),
-            updated_by=updated_by,
-        )
-        self.policy_snapshot = record
-        self.policy_snapshot_history.append(record)
-        return record
+        with self.policy_snapshot_lock:
+            revision = (self.policy_snapshot.revision + 1) if self.policy_snapshot is not None else 1
+            record = PolicySnapshotRecord(
+                revision=revision,
+                policy_bundle=policy_bundle,
+                updated_at=utc_now_iso(),
+                updated_by=updated_by,
+            )
+            self.policy_snapshot = record
+            self.policy_snapshot_history.append(record)
+            return record
 
     def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
         return list(reversed(self.policy_snapshot_history))[: _bounded_limit(limit)]

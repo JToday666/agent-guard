@@ -35,6 +35,9 @@ from guard_api.storage.sqlalchemy_models import (
 )
 
 
+_POLICY_SNAPSHOT_ADVISORY_LOCK_ID = 427001030001
+
+
 @dataclass(slots=True)
 class PostgresControlPlaneStore:
     database_url: str
@@ -171,36 +174,40 @@ class PostgresControlPlaneStore:
         payload = policy_bundle.model_dump(mode="json")
         updated_at = utc_now_iso()
         with self._session_factory() as session:
-            current_revision = session.execute(
-                select(policy_snapshots.c.revision).where(policy_snapshots.c.policy_id == "current")
-            ).scalar_one_or_none()
-            revision = int(current_revision) + 1 if current_revision is not None else 1
-            stmt = pg_insert(policy_snapshots).values(
-                policy_id="current",
-                payload_json=payload,
-                revision=revision,
-                updated_at=updated_at,
-                updated_by=updated_by,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[policy_snapshots.c.policy_id],
-                set_={
-                    "payload_json": stmt.excluded.payload_json,
-                    "revision": stmt.excluded.revision,
-                    "updated_at": stmt.excluded.updated_at,
-                    "updated_by": stmt.excluded.updated_by,
-                },
-            )
-            session.execute(stmt)
-            session.execute(
-                pg_insert(policy_snapshot_history).values(
-                    revision=revision,
+            with session.begin():
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                    {"lock_id": _POLICY_SNAPSHOT_ADVISORY_LOCK_ID},
+                )
+                current_revision = session.execute(
+                    select(policy_snapshots.c.revision).where(policy_snapshots.c.policy_id == "current")
+                ).scalar_one_or_none()
+                revision = int(current_revision) + 1 if current_revision is not None else 1
+                stmt = pg_insert(policy_snapshots).values(
+                    policy_id="current",
                     payload_json=payload,
+                    revision=revision,
                     updated_at=updated_at,
                     updated_by=updated_by,
                 )
-            )
-            session.commit()
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[policy_snapshots.c.policy_id],
+                    set_={
+                        "payload_json": stmt.excluded.payload_json,
+                        "revision": stmt.excluded.revision,
+                        "updated_at": stmt.excluded.updated_at,
+                        "updated_by": stmt.excluded.updated_by,
+                    },
+                )
+                session.execute(stmt)
+                session.execute(
+                    pg_insert(policy_snapshot_history).values(
+                        revision=revision,
+                        payload_json=payload,
+                        updated_at=updated_at,
+                        updated_by=updated_by,
+                    )
+                )
         return PolicySnapshotRecord(
             revision=revision,
             policy_bundle=policy_bundle,

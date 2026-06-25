@@ -7,12 +7,15 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Cookie, FastAPI, Header, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agentguard_core import AuditEvent, GuardEvent, PolicyBundle
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.errors import error_response, http_error_code, validation_error_details
 from guard_api.services import (
     ApprovalService,
     AuditService,
@@ -84,7 +87,24 @@ def create_app(
 
     @app.exception_handler(ApiAuthError)
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code}})
+        return error_response(exc.code, status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        return error_response(
+            "VALIDATION_ERROR",
+            status_code=422,
+            details=validation_error_details(exc.errors()),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        return error_response(
+            http_error_code(exc.status_code),
+            status_code=exc.status_code,
+            message=str(exc.detail) if exc.detail else None,
+            details={"detail": exc.detail} if exc.detail else [],
+        )
 
     @app.get("/health", response_model=None)
     def health(check_db: bool = False) -> dict[str, str] | JSONResponse:

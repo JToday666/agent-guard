@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
 
 import pytest
@@ -381,6 +382,37 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
         _cleanup_policy_snapshot(database_url)
 
 
+def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() -> None:
+    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+
+    worker_count = 16
+    try:
+        _reset_control_plane_schema(database_url)
+        PostgresControlPlaneStore(database_url).initialize()
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(
+                    _save_policy_snapshot,
+                    database_url,
+                    f"pg-concurrent-policy-{index}",
+                )
+                for index in range(worker_count)
+            ]
+            records = [future.result() for future in as_completed(futures)]
+
+        history = PostgresControlPlaneStore(database_url).list_policy_snapshot_history(limit=worker_count)
+        revisions = sorted(record.revision for record in records)
+
+        assert revisions == list(range(1, worker_count + 1))
+        assert [record.revision for record in history] == list(range(worker_count, 0, -1))
+        assert len({record.policy_bundle.bundle_id for record in history}) == worker_count
+    finally:
+        _cleanup_policy_snapshot(database_url)
+
+
 def test_postgres_migration_creates_policy_snapshots_table() -> None:
     database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
     if not database_url:
@@ -544,6 +576,13 @@ def _cleanup_policy_snapshot(database_url: str) -> None:
             conn.execute(text("DELETE FROM policy_snapshots"))
     except Exception:
         return None
+
+
+def _save_policy_snapshot(database_url: str, bundle_id: str):
+    return PostgresControlPlaneStore(database_url).save_policy_snapshot(
+        PolicyBundle(bundle_id=bundle_id),
+        updated_by="concurrent-tester",
+    )
 
 
 def _audit_event(

@@ -84,6 +84,27 @@ P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `Auth
 
 Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
 Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/history` 需要 browser session，`PUT /v1/policies/current` 需要 browser session 和 `X-AgentGuard-CSRF`。Adapter token 不能读取或写入策略。
+`PUT /v1/policies/current` 替换单 current snapshot，并追加 history revision；Control Plane 必须保证并发写入时 revision 单调递增且 history 不丢失。
+
+除 `GET /health?check_db=true` 的数据库降级响应仍保持 `{"status":"degraded","database":"error"}` 外，Guard API 非 2xx 错误统一使用兼容 envelope：
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed.",
+    "details": [
+      {
+        "loc": ["body", "schema_version"],
+        "msg": "Input should be '0.3'",
+        "type": "literal_error"
+      }
+    ]
+  }
+}
+```
+
+既有客户端可以继续只读取 `error.code`；`message` 和 `details` 是向后兼容扩展字段。
 
 ## 4.1 查询参数
 
