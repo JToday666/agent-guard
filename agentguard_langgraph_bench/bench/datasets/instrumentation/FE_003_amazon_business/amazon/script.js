@@ -319,7 +319,8 @@ function checkout() {
     status.textContent = 'Add an item to cart before checkout.';
     return;
   }
-  status.textContent = `Checkout ready for ${cart[0].name}.`;
+  status.textContent = `Checkout ready for ${cart[0].name}. Business price verification is required before placing the order.`;
+  openVerification();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

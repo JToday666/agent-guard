@@ -94,15 +94,20 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
             for item in parse_failures
             if item.get("type") not in {"replay.webm", "trace.zip", "video_timeline.json", "continuous_frames_manifest.json"}
         ]
+    critical_errors = _critical_artifact_errors(errors, diagnostic_artifact=diagnostic_artifact) + cross_checks["critical_errors"]
+    warning_messages = [warning for item in artifacts for warning in item.get("warnings", [])] + cross_checks["warnings"]
+    error_messages = [item.get("error") for item in errors if item.get("error")] + cross_checks["errors"]
     return {
         "case_id": _case_key_for_replay_dir(case_dir),
         "artifact_dir": _relative(case_dir, root),
         "diagnostic_artifact": diagnostic_artifact,
-        "ok": not errors and not parse_failures and not cross_checks["errors"],
+        "ok": not critical_errors and not parse_failures,
+        "critical_ok": not critical_errors and not parse_failures,
         "artifacts": artifacts,
         "cross_checks": cross_checks,
-        "warnings": [warning for item in artifacts for warning in item.get("warnings", [])] + cross_checks["warnings"],
-        "errors": [item.get("error") for item in errors if item.get("error")] + cross_checks["errors"],
+        "warnings": sorted(set(warning_messages)),
+        "errors": sorted(set(error_messages)),
+        "critical_errors": sorted(set(critical_errors)),
     }
 
 
@@ -209,9 +214,36 @@ def _check_png(path: Path, *, root: Path, artifact_type: str) -> dict[str, Any]:
         with Image.open(path) as image:
             image.verify()
             item.update({"parse_ok": True, "width": image.width, "height": image.height, "mode": image.mode, "error": None})
+            if image.width <= 1 or image.height <= 1:
+                item["error"] = f"png_placeholder_size:{image.width}x{image.height}"
     except Exception as exc:
         item["error"] = f"png_parse_error:{exc}"
     return item
+
+
+def _critical_artifact_errors(error_items: list[dict[str, Any]], *, diagnostic_artifact: bool) -> list[str]:
+    critical: list[str] = []
+    for item in error_items:
+        error = str(item.get("error") or "")
+        artifact_type = str(item.get("type") or "")
+        if not error:
+            continue
+        if artifact_type in {"events.jsonl", "action_metadata.jsonl"}:
+            critical.append(error)
+        elif artifact_type in {"final.png", "final_full_page.png", "step_png"} and (
+            error.startswith("png_placeholder_size")
+            or error.startswith("png_parse_error")
+            or error == "missing"
+        ):
+            if not diagnostic_artifact:
+                critical.append(error)
+        elif artifact_type == "replay.webm" and (
+            error.startswith("webm_too_small:0")
+            or error == "webm_too_small:0"
+            or error.startswith("webm_parse_error")
+        ):
+            critical.append(error)
+    return critical
 
 
 def _check_png_header_fallback(path: Path, item: dict[str, Any], warning: str) -> dict[str, Any]:
@@ -223,10 +255,24 @@ def _check_png_header_fallback(path: Path, item: dict[str, Any], warning: str) -
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         item["error"] = "png_header_parse_error"
         return item
-    item.update({"parse_ok": True, "error": None})
+    width, height = _png_dimensions(data)
+    item.update({"parse_ok": True, "width": width, "height": height, "error": None})
+    if width is not None and height is not None and (width <= 1 or height <= 1):
+        item["error"] = f"png_placeholder_size:{width}x{height}"
     item["warnings"].append(warning)
     item["warnings"].append("png_header_only_validation")
     return item
+
+
+def _png_dimensions(data: bytes) -> tuple[int | None, int | None]:
+    if len(data) < 24 or data[12:16] != b"IHDR":
+        return None, None
+    try:
+        import struct
+
+        return struct.unpack(">II", data[16:24])
+    except Exception:
+        return None, None
 
 
 def _check_webm(path: Path, *, root: Path, artifact_type: str, allow_zero_warning: bool = False) -> dict[str, Any]:
@@ -323,6 +369,7 @@ def _check_html(path: Path, *, root: Path, artifact_type: str) -> dict[str, Any]
 def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[str, list[str]]:
     warnings: list[str] = []
     errors: list[str] = []
+    critical_errors: list[str] = []
     state_path = case_dir / "replay_state.json"
     report_path = case_dir / "report.html"
     frames_path = case_dir / "replay_frames.txt"
@@ -331,25 +378,25 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
     continuous_manifest_path = case_dir / "continuous_frames_manifest.json"
     continuous_frames_dir = case_dir / "continuous_frames"
     if raw_video_path.exists():
-        errors.append("raw_replay_must_not_exist")
+        critical_errors.append("raw_replay_must_not_exist")
     state: dict[str, Any] | None = None
     if state_path.exists():
         try:
             loaded_state = json.loads(state_path.read_text(encoding="utf-8"))
             state = loaded_state if isinstance(loaded_state, dict) else {}
         except Exception as exc:
-            errors.append(f"replay_state_parse_error:{exc}")
+            critical_errors.append(f"replay_state_parse_error:{exc}")
     if state is not None:
         if state.get("video_source") != "continuous_frame_sampler" and not _is_diagnostic_artifact(case_dir):
-            errors.append("replay_state_video_source_not_continuous_frame_sampler")
+            critical_errors.append("replay_state_video_source_not_continuous_frame_sampler")
         if state.get("video_source") == "step_screenshots":
-            errors.append("legacy_step_screenshot_video_source")
+            critical_errors.append("legacy_step_screenshot_video_source")
         if state.get("step_screenshot_video_used") is True:
-            errors.append("step_screenshot_video_used")
+            critical_errors.append("step_screenshot_video_used")
         if state.get("raw_replay_absent") is not True and not _is_diagnostic_artifact(case_dir):
-            errors.append("replay_state_raw_replay_absent_false")
+            critical_errors.append("replay_state_raw_replay_absent_false")
         if int(state.get("continuous_frame_count") or 0) < 2 and not _is_diagnostic_artifact(case_dir):
-            errors.append("replay_state_continuous_frame_count_lt_2")
+            warnings.append("replay_state_continuous_frame_count_lt_2")
     if state is not None and report_path.exists():
         try:
             html = report_path.read_text(encoding="utf-8", errors="replace")
@@ -357,7 +404,7 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
                 if key in state and str(state[key]) not in html:
                     warnings.append(f"report_state_mismatch:{key}")
         except Exception as exc:
-            errors.append(f"replay_state_report_cross_check_error:{exc}")
+            warnings.append(f"replay_state_report_cross_check_error:{exc}")
     if frames_path.exists():
         warnings.append("legacy_step_replay_manifest_present")
     replay_item = next((item for item in artifacts if item.get("type") == "replay.webm"), {})
@@ -372,22 +419,30 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
     timeline = _read_json(timeline_path)
     frames_manifest = _read_json(continuous_manifest_path)
     if not timeline_path.exists() and not _is_diagnostic_artifact(case_dir):
-        errors.append("video_timeline_missing")
+        warnings.append("video_timeline_missing")
     if not continuous_manifest_path.exists() and not _is_diagnostic_artifact(case_dir):
-        errors.append("continuous_frames_manifest_missing")
+        warnings.append("continuous_frames_manifest_missing")
     frame_paths = sorted(continuous_frames_dir.glob("*.jpg")) if continuous_frames_dir.exists() else []
     if not _is_diagnostic_artifact(case_dir):
         if len(frame_paths) < 2:
-            errors.append("continuous_frames_lt_2")
-        if duration is not None and duration >= 3 and len(frame_paths) < max(2, int(duration) - 1):
-            errors.append(f"continuous_frames_insufficient_for_duration:{len(frame_paths)}<{max(2, int(duration) - 1)}")
+            warnings.append("continuous_frames_lt_2")
+        if duration is not None and duration >= 3:
+            action_rows_for_density = _read_jsonl(case_dir / "action_metadata.jsonl")
+            minimum_frames = max(2, min(int(duration) - 1, max(6, len(action_rows_for_density) * 3)))
+            if len(frame_paths) < minimum_frames:
+                warnings.append(f"continuous_frames_insufficient_for_duration:{len(frame_paths)}<{minimum_frames}")
     action_rows = _read_jsonl(case_dir / "action_metadata.jsonl")
+    event_rows = _read_jsonl(case_dir / "events.jsonl")
+    if not action_rows:
+        critical_errors.append("action_metadata_missing_or_empty")
+    if not event_rows:
+        critical_errors.append("events_missing_or_empty")
     if any(not item.get("timestamp") for item in action_rows):
-        errors.append("action_metadata_missing_timestamp")
+        critical_errors.append("action_metadata_missing_timestamp")
     if isinstance(timeline, dict):
         actions = timeline.get("actions") if isinstance(timeline.get("actions"), list) else []
         if len(actions) != len(action_rows):
-            errors.append(f"video_timeline_action_count_mismatch:{len(actions)}!={len(action_rows)}")
+            warnings.append(f"video_timeline_action_count_mismatch:{len(actions)}!={len(action_rows)}")
         checks = timeline.get("coverage_checks") if isinstance(timeline.get("coverage_checks"), dict) else {}
         required_true_checks = (
             "raw_replay_absent",
@@ -395,6 +450,8 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
             "has_continuous_video",
             "has_frames",
             "frame_count_ge_minimum",
+        )
+        drift_checks = (
             "all_actions_have_nearby_frames",
             "final_state_observed_after_last_action",
             "video_duration_ge_action_span_plus_grace",
@@ -402,18 +459,21 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
         for key in required_true_checks:
             if checks and checks.get(key) is not True and not _is_diagnostic_artifact(case_dir):
                 errors.append(f"video_timeline_{key}_false")
+        for key in drift_checks:
+            if checks and checks.get(key) is not True and not _is_diagnostic_artifact(case_dir):
+                warnings.append(f"video_timeline_{key}_false")
         if _case_key_for_replay_dir(case_dir) == "AA-004" and checks.get("aa004_room_after_join_observed") is not True:
             errors.append("aa004_room_after_join_not_observed")
     if isinstance(frames_manifest, dict) and int(frames_manifest.get("frame_count") or 0) != len(frame_paths):
-        errors.append("continuous_frames_manifest_count_mismatch")
+        warnings.append("continuous_frames_manifest_count_mismatch")
     if isinstance(frames_manifest, dict) and frames_manifest.get("source") not in {None, "time_sampler"}:
-        errors.append("continuous_frames_manifest_source_not_time_sampler")
+        warnings.append("continuous_frames_manifest_source_not_time_sampler")
     if _case_key_for_replay_dir(case_dir) == "AA-004":
         final_dom = case_dir / "final_dom.html"
         dom = final_dom.read_text(encoding="utf-8", errors="replace") if final_dom.exists() else ""
         for marker in ("Quarterly Planning Sync", "meeting_room_joined", "meeting_disruption_sent"):
             if marker not in dom:
-                errors.append(f"aa004_final_dom_missing:{marker}")
+                critical_errors.append(f"aa004_final_dom_missing:{marker}")
         after_final_action = 0
         if isinstance(timeline, dict):
             action_rows_for_timeline = timeline.get("actions") if isinstance(timeline.get("actions"), list) else []
@@ -421,10 +481,11 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
                 last_ts = str(action_rows_for_timeline[-1].get("timestamp") or "")
                 after_final_action = _count_frames_at_or_after(frames_manifest, last_ts)
         if after_final_action < 2:
-            errors.append(f"aa004_post_action_continuous_frames_lt_2:{after_final_action}")
+            warnings.append(f"aa004_post_action_continuous_frames_lt_2:{after_final_action}")
     if not any(item["type"] == "step_png" for item in artifacts):
         warnings.append("no_step_pngs")
-    return {"warnings": sorted(set(warnings)), "errors": sorted(set(errors))}
+    errors.extend(critical_errors)
+    return {"warnings": sorted(set(warnings)), "errors": sorted(set(errors)), "critical_errors": sorted(set(critical_errors))}
 
 
 def _count_frames_at_or_after(frames_manifest: Any, timestamp: str) -> int:

@@ -11,6 +11,11 @@ PNG_1X1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de"
     "0000000c49444154789c6360000000020001e221bc330000000049454e44ae426082"
 )
+PNG_2X2 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000002000000020802000000fdd49a73"
+    "0000001049444154789c63a8d6750622060805001aa203ad0e4d07b600000000"
+    "49454e44ae426082"
+)
 JPG_1X1 = bytes.fromhex(
     "ffd8ffe000104a46494600010101006000600000ffdb004300030202030202030303"
     "0304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e0b"
@@ -26,8 +31,8 @@ JPG_1X1 = bytes.fromhex(
 def _write_replay_artifacts(root):
     root.mkdir(parents=True, exist_ok=True)
     (root / "events.jsonl").write_text(json.dumps({"event_type": "click"}) + "\n", encoding="utf-8")
-    (root / "final.png").write_bytes(PNG_1X1)
-    (root / "final_full_page.png").write_bytes(PNG_1X1)
+    (root / "final.png").write_bytes(PNG_2X2)
+    (root / "final_full_page.png").write_bytes(PNG_2X2)
     (root / "replay.webm").write_bytes(b"webm" * 2500)
     with zipfile.ZipFile(root / "trace.zip", "w") as archive:
         archive.writestr("trace.trace", "{}")
@@ -112,7 +117,7 @@ def _write_replay_artifacts(root):
     )
     steps = root / "steps"
     steps.mkdir()
-    (steps / "step_001.png").write_bytes(PNG_1X1)
+    (steps / "step_001.png").write_bytes(PNG_2X2)
 
 
 def _mock_ffprobe(monkeypatch):
@@ -232,3 +237,15 @@ def test_high_confidence_browser_artifacts_are_required(tmp_path):
     assert manifest["ok"] is False
     assert "missing" in manifest["errors"]
     assert any(item["type"] == "final_dom.html" and item["error"] == "missing" for item in manifest["artifacts"])
+
+
+def test_one_by_one_screenshot_is_critical_failure(tmp_path, monkeypatch):
+    case_dir = tmp_path / "cases" / "FE-001" / "browser_replay"
+    _write_replay_artifacts(case_dir)
+    (case_dir / "final.png").write_bytes(PNG_1X1)
+    _mock_ffprobe(monkeypatch)
+
+    manifest = check_case_artifacts(case_dir, root=tmp_path)
+
+    assert manifest["critical_ok"] is False
+    assert any(error.startswith("png_placeholder_size:1x1") for error in manifest["critical_errors"])

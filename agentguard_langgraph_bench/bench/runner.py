@@ -6,6 +6,7 @@ import argparse
 import base64
 import csv
 import json
+import shutil
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -35,6 +36,7 @@ from .runtime.tool_gateway import GuardedToolGateway
 from .runtime.tool_server import BenchmarkToolServer
 from .scoring.success import success_for_case
 from .scoring.agent_abuse import build_agent_abuse_evaluation_report
+from .scoring.file_exfiltration import build_file_exfiltration_evaluation_report
 from .scoring.tool_hijacking import build_tool_hijacking_report, case_extra_dict, case_extra_list
 from .tools import MockToolRegistry
 
@@ -325,7 +327,7 @@ def _run_single_case(
             row["mcpsafety_evaluator"] = mcpsafety_report.get("evaluator")
             row["mcpsafety_attack_success"] = mcpsafety_report.get("attack_success")
             row["mcpsafety_evidence_status"] = mcpsafety_report.get("evidence_status")
-    if case.attack_type != "agent_abuse":
+    if case.attack_type not in {"agent_abuse", "file_exfiltration"}:
         row["attack_success"] = success_for_case(case, row)
         report_payload = None
     else:
@@ -367,6 +369,21 @@ def _run_single_case(
                 benchmark_run_id=run_id,
                 parent_case_result_dir=case_result_dir,
             )
+    if case.attack_type == "file_exfiltration":
+        report = build_file_exfiltration_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
+        row["file_exfiltration_evaluation_report"] = report.model_dump()
+        row["file_exfiltration_attack_success"] = report.attack_success
+        row["evaluator"] = "file_exfiltration_chain_v1"
+        row["evidence_status"] = report.evidence_status
+        row["completion_level"] = report.completion_level
+        row["attack_success"] = report.attack_success
+        row["task_success"] = report.normal_task_success
+        row["run_valid"] = False if row.get("security_failure") else report.run_valid
+        if not report.run_valid:
+            row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), *report.missing_evidence]))
+        elif not row.get("security_failure"):
+            row["invalid_reasons"] = []
+        report_payload = report.model_dump()
     _write_case_artifacts(case_result_dir, row, report_payload)
     return row
 
@@ -580,10 +597,16 @@ def _case_metric_interpretation(core_mode: str, fake_core_decision: str | None) 
 
 def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: dict[str, Any] | None) -> None:
     case_result_dir.mkdir(parents=True, exist_ok=True)
-    if _requires_browser_artifact(row) and not row.get("browser_recordings"):
+    if _should_create_diagnostic_browser_artifact(row) and not row.get("browser_recordings"):
         row["browser_recordings"] = [_write_planner_stall_browser_artifact(case_result_dir, row)]
-    case_result = case_result_dir / "case_result.json"
-    case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    for recording in row.get("browser_recordings") or []:
+        if isinstance(recording, dict):
+            immutable_recording = _copy_browser_replay_artifacts(recording, case_result_dir)
+            if immutable_recording:
+                recording.update(immutable_recording)
+    sandbox_snapshot = _archive_case_side_effects(case_result_dir, row)
+    if sandbox_snapshot:
+        row["case_side_effect_artifacts"] = sandbox_snapshot
     _write_case_jsonl(case_result_dir / "tool_call_events.jsonl", [item.get("event") for item in row.get("tool_calls") or [] if item.get("event")])
     _write_case_jsonl(case_result_dir / "policy_decisions.jsonl", [_decision_record(item, row) for item in row.get("tool_calls") or []])
     _write_case_jsonl(case_result_dir / "audit_events.jsonl", [item.get("audit_event") for item in row.get("tool_calls") or [] if item.get("audit_event")])
@@ -603,9 +626,6 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     evidence_index = _build_evidence_index(row, case_result_dir)
     for recording in row.get("browser_recordings") or []:
         if isinstance(recording, dict):
-            immutable_recording = _copy_browser_replay_artifacts(recording, case_result_dir)
-            if immutable_recording:
-                recording.update(immutable_recording)
             for key in (
                 "events",
                 "manifest",
@@ -642,6 +662,110 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     (case_result_dir / "evidence_index.json").write_text(json.dumps(evidence_index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     if report is not None:
         (case_result_dir / "evaluation_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    if isinstance(row.get("file_exfiltration_evaluation_report"), dict):
+        (case_result_dir / "file_exfiltration_evaluation_report.json").write_text(
+            json.dumps(row["file_exfiltration_evaluation_report"], ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    case_result = case_result_dir / "case_result.json"
+    case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _archive_case_side_effects(case_result_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
+    sandbox_root = _sandbox_root_from_row(row)
+    if sandbox_root is None or not sandbox_root.exists():
+        return {}
+    targets = {
+        "side_effects": ["outbox", "api", "browser", "web_state", "records", "memory", "identity", "social", "ads", "platform"],
+        "outbox_snapshot": ["outbox"],
+        "api_snapshot": ["api"],
+        "reports_snapshot": ["files/reports"],
+        "browser_snapshot": ["browser", "web_state", "records"],
+    }
+    changed_files = _changed_sandbox_files(row, sandbox_root)
+    if not changed_files:
+        return {}
+    archived: dict[str, Any] = {}
+    for dest_name, relatives in targets.items():
+        dest_root = case_result_dir / dest_name
+        copied: list[dict[str, Any]] = []
+        prefixes = tuple(f"{relative.rstrip('/')}/" for relative in relatives)
+        exact = {relative.rstrip("/") for relative in relatives}
+        for item in changed_files:
+            relative = str(item.get("relative_path") or item.get("path") or "")
+            if not relative or (relative not in exact and not relative.startswith(prefixes)):
+                continue
+            source = Path(str(item.get("absolute_path") or ""))
+            if not source.exists() or not source.is_file() or not _is_under(source, sandbox_root):
+                continue
+            dest = dest_root / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+            copied.append(
+                {
+                    "case_id": row.get("case_id"),
+                    "relative_path": relative,
+                    "state": item.get("state"),
+                    "sha256": item.get("sha256"),
+                    "size": item.get("size"),
+                    "artifact_path": str(dest),
+                }
+            )
+        if copied:
+            manifest = {
+                "case_id": row.get("case_id"),
+                "sandbox_root": str(sandbox_root),
+                "copied_count": len(copied),
+                "files": copied,
+            }
+            dest_root.mkdir(parents=True, exist_ok=True)
+            (dest_root / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            archived[dest_name] = {"root": str(dest_root), "manifest": str(dest_root / "manifest.json"), "files": copied}
+    return archived
+
+
+def _changed_sandbox_files(row: dict[str, Any], sandbox_root: Path) -> list[dict[str, Any]]:
+    diff = row.get("sandbox_diff") if isinstance(row.get("sandbox_diff"), dict) else {}
+    changed: list[dict[str, Any]] = []
+    for state, group in (("added", diff.get("added")), ("modified", diff.get("modified"))):
+        if not isinstance(group, list):
+            continue
+        for raw in group:
+            if not isinstance(raw, dict):
+                continue
+            item = raw.get("after") if state == "modified" and isinstance(raw.get("after"), dict) else raw
+            relative = str(item.get("relative_path") or item.get("path") or "")
+            absolute = str(item.get("absolute_path") or (sandbox_root / relative))
+            changed.append(
+                {
+                    "state": state,
+                    "relative_path": relative,
+                    "absolute_path": absolute,
+                    "size": item.get("size") or raw.get("size"),
+                    "sha256": item.get("sha256") or raw.get("sha256"),
+                }
+            )
+    return changed
+
+
+def _sandbox_root_from_row(row: dict[str, Any]) -> Path | None:
+    diff = row.get("sandbox_diff") if isinstance(row.get("sandbox_diff"), dict) else {}
+    root = diff.get("root")
+    if root:
+        return Path(str(root))
+    for item in row.get("tool_calls") or []:
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        evidence_path = result.get("evidence_path")
+        if not evidence_path:
+            continue
+        path = Path(str(evidence_path)).expanduser()
+        for parent in [path, *path.parents]:
+            if parent.name == "sandbox":
+                return parent
+    return None
 
 
 def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: Path) -> dict[str, Any]:
@@ -1277,6 +1401,8 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
 
 
 def _requires_browser_artifact(row: dict[str, Any]) -> bool:
+    if _is_file_exfiltration_browser_case(row):
+        return not row.get("not_applicable")
     if row.get("attack_type") != "agent_abuse":
         return False
     if not row.get("run_valid", True) or row.get("not_applicable"):
@@ -1287,6 +1413,15 @@ def _requires_browser_artifact(row: dict[str, Any]) -> bool:
     if verdict.get("safe_refusal") is True:
         return False
     return True
+
+
+def _should_create_diagnostic_browser_artifact(row: dict[str, Any]) -> bool:
+    return row.get("attack_type") == "agent_abuse" and _requires_browser_artifact(row)
+
+
+def _is_file_exfiltration_browser_case(row: dict[str, Any]) -> bool:
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return row.get("attack_type") == "file_exfiltration" and bool(metadata.get("web_entry_source_path"))
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -99,6 +99,75 @@ def test_write_case_artifacts_creates_diagnostic_browser_replay_for_autonomous_p
     assert '"diagnostic_artifact": true' in integrity
 
 
+def test_file_exfiltration_browser_case_missing_replay_is_reported_not_masked(tmp_path):
+    row = {
+        "case_id": "FE-001",
+        "attack_type": "file_exfiltration",
+        "run_valid": False,
+        "run_status": "llm_planning_error",
+        "completion_level": "invalid",
+        "is_malicious": True,
+        "benchmark_run_id": "20260621T000000000003Z",
+        "metadata": {"web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_001_booking_business/booking_business_taxi.html"},
+        "browser_recordings": [],
+    }
+    case_dir = tmp_path / "run_20260621T000000000003Z" / "cases" / "FE-001"
+
+    _write_case_artifacts(case_dir, row, {"case_id": "FE-001"})
+    paths = write_results([row], {}, tmp_path)
+    manifest = Path(paths["run_manifest"]).read_text(encoding="utf-8")
+
+    assert not (case_dir / "browser_replay" / "manifest.json").exists()
+    assert '"run_integrity_ok": false' in manifest
+    assert '"artifact_missing_case_ids": [' in manifest
+    assert '"FE-001"' in manifest
+
+
+def test_case_side_effect_archive_uses_only_current_sandbox_diff(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    inherited = sandbox / "files" / "reports" / "old_case_report.json"
+    current = sandbox / "files" / "reports" / "current_case_report.json"
+    api = sandbox / "api" / "exfiltration_collector.jsonl"
+    inherited.parent.mkdir(parents=True, exist_ok=True)
+    api.parent.mkdir(parents=True, exist_ok=True)
+    inherited.write_text("old", encoding="utf-8")
+    current.write_text("current", encoding="utf-8")
+    api.write_text('{"case_id":"FE-009"}\n', encoding="utf-8")
+    row = {
+        "case_id": "FE-009",
+        "attack_type": "file_exfiltration",
+        "sandbox_diff": {
+            "root": str(sandbox),
+            "added": [
+                {
+                    "relative_path": "files/reports/current_case_report.json",
+                    "absolute_path": str(current),
+                    "size": current.stat().st_size,
+                    "sha256": "current-sha",
+                },
+                {
+                    "relative_path": "api/exfiltration_collector.jsonl",
+                    "absolute_path": str(api),
+                    "size": api.stat().st_size,
+                    "sha256": "api-sha",
+                },
+            ],
+            "modified": [],
+        },
+        "browser_recordings": [],
+    }
+    case_dir = tmp_path / "case"
+
+    _write_case_artifacts(case_dir, row, None)
+
+    assert (case_dir / "reports_snapshot" / "files" / "reports" / "current_case_report.json").exists()
+    assert not (case_dir / "reports_snapshot" / "files" / "reports" / "old_case_report.json").exists()
+    manifest = (case_dir / "reports_snapshot" / "manifest.json").read_text(encoding="utf-8")
+    assert "current_case_report.json" in manifest
+    assert "old_case_report.json" not in manifest
+    assert (case_dir / "api_snapshot" / "api" / "exfiltration_collector.jsonl").exists()
+
+
 def test_write_case_artifacts_copies_relative_final_dom_references(tmp_path):
     source = tmp_path / "source"
     source.mkdir()

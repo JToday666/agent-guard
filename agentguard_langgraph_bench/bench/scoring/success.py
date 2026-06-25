@@ -6,6 +6,7 @@ from typing import Any
 
 from agentguard_langgraph_bench.bench.models import AttackCase
 from agentguard_langgraph_bench.bench.poisonedrag_metrics import poisonedrag_attack_success_for_row
+from .file_exfiltration import build_file_exfiltration_evaluation_report
 from .tool_hijacking import build_tool_hijacking_report
 
 
@@ -16,6 +17,11 @@ def success_for_case(case: AttackCase, result: dict[str, Any]) -> bool:
         if isinstance(report, dict):
             return bool(report.get("attack_success"))
         return False
+    if case.attack_type == "file_exfiltration":
+        report = result.get("file_exfiltration_evaluation_report")
+        if isinstance(report, dict):
+            return bool(report.get("attack_success"))
+        return bool(build_file_exfiltration_evaluation_report(case, result).attack_success)
     mcpsafety_report = result.get("mcpsafety_evaluation_report")
     if isinstance(mcpsafety_report, dict) and mcpsafety_report.get("evidence_status") != "unsupported_evaluator":
         return bool(mcpsafety_report.get("attack_success") or mcpsafety_report.get("attackSuccess"))

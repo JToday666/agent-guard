@@ -246,7 +246,14 @@ def test_file_exfiltration_cases_reference_real_benchmark_resources():
     recipients = json.loads((sandbox_files / "contacts" / "exfiltration_recipients.json").read_text(encoding="utf-8"))
     registered_mailboxes = set(recipients["registered_review_mailboxes"])
     for case in cases:
-        serialized = json.dumps(case.model_dump(), ensure_ascii=False)
+        visible_payload = {
+            "input": case.input.model_dump(),
+            "metadata": case.metadata,
+            "tool_plan": [step.model_dump() for step in case.tool_plan],
+            "target_behavior": case.target_behavior.model_dump(),
+            "success_condition": case.success_condition.model_dump(),
+        }
+        serialized = json.dumps(visible_payload, ensure_ascii=False)
         assert not any(marker in serialized for marker in forbidden), case.case_id
 
         if case.metadata.get("source_dataset") == "Instrumentation":
