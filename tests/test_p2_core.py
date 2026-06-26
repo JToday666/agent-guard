@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+
 from agentguard_core import (
     ActionCritic,
     ActionCriticReview,
@@ -16,6 +18,52 @@ from agentguard_core import (
     ToolCallPayload,
     evaluate_config_audit,
 )
+
+
+def test_p2_domain_modules_are_direct_public_import_paths() -> None:
+    from agentguard_core.action_critic import ActionCritic as DirectActionCritic
+    from agentguard_core.audit_integrity import AuditIntegrityMetadata as DirectAuditIntegrityMetadata
+    from agentguard_core.config_audit import ConfigAuditEvent as DirectConfigAuditEvent
+    from agentguard_core.config_audit import ConfigAuditFinding as DirectConfigAuditFinding
+    from agentguard_core.config_audit import evaluate_config_audit as direct_evaluate_config_audit
+    from agentguard_core.memory_guard import MemoryGuardChange as DirectMemoryGuardChange
+    from agentguard_core.provenance import ProvenanceEdge as DirectProvenanceEdge
+    from agentguard_core.provenance import ProvenanceNode as DirectProvenanceNode
+
+    finding = DirectConfigAuditFinding(
+        severity="high",
+        category="openclaw.plugin",
+        title="Unsafe plugin configuration",
+        subject="hooks.allowConversationAccess",
+        description="Plugin can read raw conversation content.",
+    )
+    event = DirectConfigAuditEvent(
+        runtime="openclaw",
+        target_type="plugin_config",
+        target_id="third-party",
+        action="before_install",
+        findings=[finding],
+    )
+
+    assert direct_evaluate_config_audit(event).decision == "block"
+    assert DirectProvenanceNode(trace_id="trace_direct", kind="event", ref_id="evt", label="event").kind == "event"
+    assert DirectProvenanceEdge(
+        trace_id="trace_direct",
+        source_node_id="event:evt",
+        target_node_id="audit:audit",
+        relation="recorded_as",
+    ).relation == "recorded_as"
+    assert DirectAuditIntegrityMetadata(sequence=1, event_hash="abc").sequence == 1
+    assert DirectMemoryGuardChange(trace_id="trace_direct", namespace="agent", key="k").status == "proposed"
+    assert DirectActionCritic().review(
+        _tool_event(trace_id="trace_direct"),
+        GuardDecision(decision="allow", risk_score=0, severity="low", rule_hits=[], categories=[], reason="ok"),
+    ).reviewer == "deterministic"
+
+
+def test_p2_aggregate_module_is_removed() -> None:
+    module_name = "agentguard_core." + "p2"
+    assert importlib.util.find_spec(module_name) is None
 
 
 def _tool_event(*, trace_id: str = "trace_p2", source_trust: str = "untrusted") -> GuardEvent:

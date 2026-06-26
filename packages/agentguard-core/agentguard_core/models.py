@@ -7,6 +7,9 @@ keeps the pre-package public import path stable for existing callers.
 
 from __future__ import annotations
 
+from .action_critic import ActionCritic, ActionCriticReview
+from .audit_integrity import AuditIntegrityMetadata
+from .config_audit import ConfigAuditEvent, ConfigAuditFinding, ConfigAuditResult, evaluate_config_audit
 from .decisions import (
     ApprovalIntent,
     ApprovalResolution,
@@ -38,19 +41,9 @@ from .events import (
     guard_event_raw_payload_contracts,
 )
 from .ids import new_id, utc_now_iso
-from .p2 import (
-    ActionCritic,
-    ActionCriticReview,
-    AuditIntegrityMetadata,
-    ConfigAuditEvent,
-    ConfigAuditFinding,
-    ConfigAuditResult,
-    MemoryGuardChange,
-    ProvenanceEdge,
-    ProvenanceNode,
-    evaluate_config_audit,
-)
+from .memory_guard import MemoryGuardChange
 from .policies import PolicyBundle, RuleOverride, ToolProfile, default_tool_profiles
+from .provenance import ProvenanceEdge, ProvenanceNode
 
 __all__ = [
     "ActionCritic",
