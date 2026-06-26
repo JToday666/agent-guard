@@ -20,8 +20,7 @@
       <nav class="quick-filters" aria-label="快速筛选">
         <button type="button" :aria-pressed="!query.blocked && !query.rule" @click="handleQuickFilter({ blocked: '', rule: '' })">全部 {{ index.latestEvents.length }}</button>
         <button type="button" :aria-pressed="query.blocked === 'true'" @click="handleQuickFilter({ blocked: query.blocked === 'true' ? '' : 'true', rule: '' })">已阻断 {{ blockedCount }}</button>
-        <button type="button" :aria-pressed="query.rule === 'P001_sensitive_file_access'" @click="handleQuickFilter({ blocked: '', rule: query.rule === 'P001_sensitive_file_access' ? '' : 'P001_sensitive_file_access' })">敏感文件 {{ sensitiveFileCount }}</button>
-        <button type="button" :aria-pressed="query.rule === 'P005_external_send'" @click="handleQuickFilter({ blocked: '', rule: query.rule === 'P005_external_send' ? '' : 'P005_external_send' })">外部发送 {{ externalSendCount }}</button>
+        <button v-for="rule in ruleOptions" :key="rule.value" type="button" :aria-pressed="query.rule === rule.value" :title="rule.value" @click="handleQuickFilter({ blocked: '', rule: query.rule === rule.value ? '' : rule.value })">{{ rule.label }} {{ rule.count }}</button>
       </nav>
 
       <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
@@ -84,7 +83,7 @@ import EmptyState from "../components/EmptyState.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import ErrorState from "../components/States/ErrorState.vue";
 import LoadingState from "../components/States/LoadingState.vue";
-import { filterInvestigationEvents, resolveInvestigationEvent } from "../data/investigation-index";
+import { filterInvestigationEvents, getRuleFilterOptions, resolveInvestigationEvent } from "../data/investigation-index";
 import { useDashboardStore } from "../stores/dashboardStore";
 import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery, normalizeInvestigationQuery } from "../utils/investigation-query";
@@ -108,8 +107,7 @@ const eventResolution = computed(() => resolveInvestigationEvent(index.value, qu
 const selectedEvent = computed(() => eventResolution.value.status === "found" ? eventResolution.value.event : undefined);
 const selectedTraceEvents = computed(() => selectedEvent.value ? index.value.byTrace.get(selectedEvent.value.traceId) ?? [] : []);
 const blockedCount = computed(() => index.value.latestEvents.filter((event) => event.blocked).length);
-const sensitiveFileCount = computed(() => countRule("P001_sensitive_file_access"));
-const externalSendCount = computed(() => countRule("P005_external_send"));
+const ruleOptions = computed(() => getRuleFilterOptions(index.value.latestEvents).slice(0, 6));
 const hasFilters = computed(() => Boolean(query.value.search || query.value.decision || query.value.runtime || query.value.severity || query.value.blocked || query.value.rule));
 
 const decisionOptions = [{ label: "全部", value: "" }, { label: "拒绝", value: "deny" }, { label: "审批", value: "ask" }, { label: "放行", value: "allow" }];
@@ -145,7 +143,6 @@ function handleCloseEvent() { updateQuery({ event_id: undefined }); }
 function handlePage(page: number) { updateQuery({ page }); }
 function handleQuickFilter(patch: { blocked: string; rule: string }) { updateQuery({ ...patch, page: 1 }); }
 function handleClearFilters() { searchDraft.value = ""; void router.replace({ path: "/investigations", query: query.value.eventId ? { event_id: query.value.eventId } : {} }); }
-function countRule(rule: string) { return index.value.latestEvents.filter((event) => event.ruleHits.includes(rule)).length; }
 </script>
 
 <style scoped lang="scss">
@@ -157,7 +154,7 @@ function countRule(rule: string) { return index.value.latestEvents.filter((event
 .investigation-search input { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); min-height: 2.5rem; padding: 0 var(--space-3); width: 100%; }
 .clear-filters { background: transparent; border: 0; color: var(--color-link); cursor: pointer; min-height: 2.5rem; }
 .quick-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) 0 var(--space-5); }
-.quick-filters button { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); cursor: pointer; font-size: var(--font-size-12); min-height: 2rem; padding: 0 var(--space-3); }
+.quick-filters button { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); cursor: pointer; font-size: var(--font-size-12); max-width: 16rem; min-height: 2rem; overflow: hidden; padding: 0 var(--space-3); text-overflow: ellipsis; white-space: nowrap; }
 .quick-filters button[aria-pressed="true"] { background: var(--color-active-soft); border-color: var(--color-active-border); color: var(--color-active); }
 .result-summary { align-items: baseline; display: flex; gap: var(--space-2); padding-bottom: var(--space-2); }
 .result-summary span { color: var(--color-text-subtle); font-size: var(--font-size-12); }

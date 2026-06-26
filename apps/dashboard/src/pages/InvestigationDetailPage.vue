@@ -5,8 +5,12 @@
         <div><p>调查证据链</p><h1 id="trace-title">{{ trace?.id ?? traceId }}</h1></div>
         <RouterLink class="page-action" to="/investigations">返回调查</RouterLink>
       </header>
-      <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
-      <LoadingState v-else-if="store.status === 'loading' && !store.events.length" />
+      <section v-if="traceDetailError && traceEvents.length" class="trace-detail-alert" role="status">
+        <strong>Trace 详情加载失败</strong><p>{{ traceDetailError }}，当前显示已加载事件窗口中的证据。</p>
+      </section>
+      <ErrorState v-if="traceDetailError && !traceEvents.length" :is-retrying="isTraceLoading" :message="traceDetailError" @retry="handleTraceRetry" />
+      <ErrorState v-else-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
+      <LoadingState v-else-if="(store.status === 'loading' && !store.events.length) || (isTraceLoading && !traceEvents.length)" />
       <template v-else-if="trace">
         <MetricStrip :items="summaryItems" />
         <div class="trace-layout section-divider">
@@ -17,8 +21,8 @@
           <aside class="trace-context" aria-label="Trace 上下文">
             <h2>调查上下文</h2>
             <dl><div><dt>Case</dt><dd>{{ trace.caseId }}</dd></div><div><dt>最终状态</dt><dd><StatusBadge :label="getTraceStatusLabel(trace.status)" :tone="getTraceStatusTone(trace.status)" /></dd></div><div><dt>最后事件</dt><dd>{{ formatDashboardDateTime(trace.lastEventAt) }}</dd></div></dl>
-            <RouterLink v-if="trace.approvalId" :to="`/approvals/${trace.approvalId}`">查看关联审批</RouterLink>
-            <RouterLink v-if="trace.caseId !== '未提供'" :to="{ path: '/evaluation', query: { case_id: trace.caseId } }">查看评测样本</RouterLink>
+            <RouterLink v-if="trace.approvalId" class="page-action trace-context__action" :to="`/approvals/${trace.approvalId}`">查看关联审批</RouterLink>
+            <RouterLink v-if="trace.caseId !== '未提供'" class="page-action trace-context__action" :to="{ path: '/evaluation', query: { case_id: trace.caseId } }">查看评测样本</RouterLink>
           </aside>
         </div>
       </template>
@@ -43,8 +47,9 @@ import StatusBadge from "../components/StatusBadge.vue";
 import ErrorState from "../components/States/ErrorState.vue";
 import LoadingState from "../components/States/LoadingState.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
-import { resolveInvestigationEvent } from "../data/investigation-index";
+import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigation-index";
 import { useDashboardStore } from "../stores/dashboardStore";
+import type { TraceSummary } from "../types/dashboard";
 import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
 
@@ -53,10 +58,14 @@ const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
 const traceId = computed(() => String(route.params.trace_id));
-const trace = computed(() => store.traces.find((item) => item.id === traceId.value));
-const traceEvents = computed(() => store.investigationIndex.byTrace.get(traceId.value) ?? []);
+const traceDetail = computed(() => store.traceDetails[traceId.value]);
+const traceDetailError = computed(() => store.traceDetailErrors[traceId.value]);
+const isTraceLoading = computed(() => store.traceDetailLoadingId === traceId.value);
+const traceEvents = computed(() => traceDetail.value?.events.length ? traceDetail.value.events : store.investigationIndex.byTrace.get(traceId.value) ?? []);
+const detailIndex = computed(() => buildInvestigationIndex(traceEvents.value));
+const trace = computed(() => buildTraceSummary(traceId.value, traceEvents.value) ?? store.traces.find((item) => item.id === traceId.value));
 const selectedEventId = computed(() => typeof route.query.event_id === "string" ? route.query.event_id : "");
-const eventResolution = computed(() => resolveInvestigationEvent(store.investigationIndex, selectedEventId.value, traceId.value));
+const eventResolution = computed(() => resolveInvestigationEvent(detailIndex.value, selectedEventId.value, traceId.value));
 const selectedEvent = computed(() => eventResolution.value.status === "found" ? eventResolution.value.event : undefined);
 const summaryItems = computed(() => [
   { detail: "关联评测样本", label: "Case", value: trace.value?.caseId ?? "--" },
@@ -71,10 +80,40 @@ watch([selectedEventId, traceEvents], async ([eventId]) => {
   const eventElement = document.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(eventId)}"]`);
   eventElement?.scrollIntoView({ block: "center" });
 }, { immediate: true });
+watch(traceId, (value) => {
+  if (value) void store.loadTraceDetail(value);
+}, { immediate: true });
 
 function handleCloseEvidence() {
   void router.replace({ path: `/investigations/${traceId.value}`, query: mergeInvestigationQuery(route.query, { event_id: undefined }) });
 }
+
+function handleTraceRetry() {
+  void store.loadTraceDetail(traceId.value);
+}
+
+function buildTraceSummary(id: string, events: TraceSummaryEvent[]): TraceSummary | undefined {
+  if (!events.length) return undefined;
+  const last = events.at(-1)!;
+  const isDenied = events.some((event) => event.decision === "deny");
+  const isPaused = !isDenied && events.some((event) => event.decision === "ask");
+  return {
+    id,
+    lastEventAt: last.occurredAt,
+    caseId: last.caseId ?? "未提供",
+    title: last.reason,
+    status: isDenied ? "blocked" : isPaused ? "paused" : "allowed",
+    approvalId: last.approvalId,
+  };
+}
+
+type TraceSummaryEvent = {
+  approvalId?: string;
+  caseId: string | null;
+  decision: "allow" | "deny" | "ask";
+  occurredAt: string;
+  reason: string;
+};
 </script>
 
 <style scoped lang="scss">
@@ -92,6 +131,8 @@ function handleCloseEvidence() {
 .trace-context dl > div { display: grid; gap: var(--space-1); }
 .trace-context dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .trace-context dd { margin: 0; overflow-wrap: anywhere; }
-.trace-context a { color: var(--color-link); font-size: var(--font-size-13); }
+.trace-context__action { justify-self: start; }
+.trace-detail-alert { background: var(--color-warning-soft); border-left: 3px solid var(--color-warning); display: grid; gap: var(--space-1); margin-bottom: var(--space-4); padding: var(--space-3); }
+.trace-detail-alert p { color: var(--color-text-muted); margin: 0; }
 @media (max-width: 1100px) { .investigation-detail, .investigation-detail--evidence { grid-template-columns: 1fr; } .trace-layout { grid-template-columns: 1fr; } .trace-context { border-left: 0; border-top: 1px solid var(--color-border); padding: var(--space-5) 0 0; position: static; } }
 </style>

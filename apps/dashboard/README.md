@@ -1,6 +1,6 @@
 # AgentGuard Dashboard
 
-AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取审计事件、审批项和评测指标，再从审计事件聚合 trace；不直接访问 LangGraph、OpenClaw、沙箱工具或 AttackBench runner 的内部状态。
+AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取审计事件、审批项、Trace 详情、评测指标、健康状态和只读策略快照；不直接访问 LangGraph、OpenClaw、沙箱工具或 AttackBench runner 的内部状态。
 
 ## 技术栈
 
@@ -88,15 +88,20 @@ pnpm guard-api:launch
 
 如果直接访问 `http://localhost:5173/`，浏览器尚无 session，`GET /v1/auth/browser/me` 返回 `401` 属于预期行为。API 请求失败时不会自动切换到 Mock 数据。
 
-Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批和健康状态；上一轮完成后才会安排下一轮。页面隐藏时暂停轮询，恢复可见后立即刷新。Skeleton 仅在首次加载显示，后台刷新和短暂连接异常会保留当前页面与用户选择。
+Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批、健康状态和只读策略状态；上一轮完成后才会安排下一轮。页面隐藏时暂停轮询，恢复可见后立即刷新。调查详情页会按需读取 `GET /v1/traces/{trace_id}`，失败时回退到已加载审计事件窗口。Skeleton 仅在首次加载显示，后台刷新和短暂连接异常会保留当前页面与用户选择。
 
 ## 比赛演示路径
 
 1. 总览确认 Guard API、指标和数据更新时间。
 2. 调查页查看阻断原因、命中规则、资源与 Trace ID。
 3. 审批中心处理 `ask`，仅支持 `allow_once` 和 `deny`。
-4. 调查详情按真实 AuditEvent 的 `trace_id` 展示证据序列。
-5. 评测页展示 ASR、Block Rate、FPR 和判定延迟；API 未提供的指标显示 `--`。
+4. 调查详情优先读取 Trace detail，展示完整证据序列和 `event_id` 定位。
+5. 评测页展示 Block Rate、FPR、FNR 和判定延迟；ASR 仅在 API 提供 before / after 数据时展示。
+6. 系统页查看 Guard API 健康状态、browser session、轮询状态和只读策略快照。
+
+## 测试文件边界
+
+`src/**/*.node.test.ts` 覆盖 mapper、状态快照、审批证据关联、调查筛选、格式化和鉴权错误等长期逻辑，`e2e/*.spec.ts` 覆盖 mock 模式下的页面导航和视口行为。这些测试文件属于长期维护资产。`apps/dashboard/test-results/` 是 Playwright 运行产物，已被 `.gitignore` 忽略，可随时清理并由测试重新生成。
 
 ## 目录
 

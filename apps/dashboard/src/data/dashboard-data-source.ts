@@ -5,6 +5,9 @@ import type {
   EvalMetrics,
   EvaluationSummary,
   HealthStatus,
+  PolicyHistoryEntry,
+  PolicySummary,
+  TraceDetail,
 } from "../types/dashboard";
 
 export interface EventFilters {
@@ -31,4 +34,7 @@ export interface DashboardDataSource {
   ): Promise<ApprovalResolution>;
   getHealth(signal?: AbortSignal): Promise<HealthStatus>;
   getEvaluation(metrics: EvalMetrics): Promise<EvaluationSummary>;
+  getTraceDetail(traceId: string, signal?: AbortSignal): Promise<TraceDetail>;
+  getCurrentPolicy(signal?: AbortSignal): Promise<PolicySummary>;
+  getPolicyHistory(signal?: AbortSignal): Promise<PolicyHistoryEntry[]>;
 }

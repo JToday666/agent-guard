@@ -12,6 +12,13 @@ function hasSameRuleHits(left: readonly string[], right: readonly string[]) {
   );
 }
 
+function hasSameStringList(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
 function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
   return (
     left.id === right.id &&
@@ -25,6 +32,7 @@ function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
     left.stage === right.stage &&
     left.tool === right.tool &&
     left.resource === right.resource &&
+    hasSameStringList(left.resourceTargets, right.resourceTargets) &&
     left.reason === right.reason &&
     left.traceId === right.traceId &&
     left.caseId === right.caseId &&
@@ -70,6 +78,7 @@ export function hasSameEvaluation(
     left.asrAfter === right.asrAfter &&
     left.blockRate === right.blockRate &&
     left.fpr === right.fpr &&
+    left.fnr === right.fnr &&
     left.averageLatencyMs === right.averageLatencyMs
   );
 }
@@ -89,6 +98,10 @@ function hasSameApproval(
     left.reason === right.reason &&
     left.eventId === right.eventId &&
     left.traceId === right.traceId &&
+    left.subjectId === right.subjectId &&
+    left.subjectType === right.subjectType &&
+    left.actionId === right.actionId &&
+    left.actionName === right.actionName &&
     left.userTask === right.userTask &&
     left.agentAction === right.agentAction &&
     left.consequence === right.consequence &&

@@ -6,6 +6,9 @@ import type {
   ApprovalRequest,
   EvalMetrics,
   EvaluationSummary,
+  PolicyHistoryEntry,
+  PolicySummary,
+  TraceDetail,
 } from "../types/dashboard";
 import type {
   DashboardDataSource,
@@ -45,6 +48,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .map((event) => ({
         ...event,
         resource: maskSensitiveText(event.resource),
+        resourceTargets: event.resourceTargets.map(maskSensitiveText),
         agentAction: event.agentAction
           ? maskSensitiveText(event.agentAction)
           : null,
@@ -98,7 +102,63 @@ export class MockDashboardDataSource implements DashboardDataSource {
       asrAfter: 0.048,
       blockRate: metrics.blockRate,
       fpr: metrics.fpr,
+      fnr: metrics.fnr,
       averageLatencyMs: metrics.averageLatencyMs,
     };
+  }
+
+  async getTraceDetail(traceId: string): Promise<TraceDetail> {
+    await wait(this.delayMs);
+    const events = (await this.getEvents({ traceId })).map((event) => ({
+      ...event,
+    }));
+    return {
+      id: traceId,
+      events,
+      approvals: this.approvals
+        .filter((approval) => approval.traceId === traceId)
+        .map((approval) => ({ ...approval })),
+      metrics: deriveMetrics(
+        events.map((event) => ({
+          ...event,
+          latencyMs: event.latencyMs ?? null,
+        })),
+      ),
+      loadedAt: new Date().toISOString(),
+    };
+  }
+
+  async getCurrentPolicy(): Promise<PolicySummary> {
+    await wait(this.delayMs);
+    return {
+      bundleId: "default",
+      version: "p1",
+      revision: 2,
+      updatedAt: "2026-06-07T11:50:00+08:00",
+      updatedBy: "dashboard",
+      disabledRuleCount: 0,
+      ruleOverrideCount: 1,
+      toolProfileCount: 5,
+    };
+  }
+
+  async getPolicyHistory(): Promise<PolicyHistoryEntry[]> {
+    await wait(this.delayMs);
+    return [
+      {
+        revision: 2,
+        updatedAt: "2026-06-07T11:50:00+08:00",
+        updatedBy: "dashboard",
+        bundleId: "default",
+        version: "p1",
+      },
+      {
+        revision: 1,
+        updatedAt: "2026-06-07T10:00:00+08:00",
+        updatedBy: "system",
+        bundleId: "default",
+        version: "p0",
+      },
+    ];
   }
 }

@@ -4,7 +4,8 @@
     <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
     <LoadingState v-else-if="store.status === 'loading' && !store.events.length" />
     <template v-else>
-      <AsrComparisonChart :before="store.evaluation.asrBefore" :after="store.evaluation.asrAfter" />
+      <AsrComparisonChart v-if="hasAsrData" :before="store.evaluation.asrBefore" :after="store.evaluation.asrAfter" />
+      <section v-else class="evaluation-empty-asr" aria-labelledby="asr-empty-title"><h2 id="asr-empty-title">ASR 数据未提供</h2><p>当前评测结果未包含防护前后攻击成功率。</p></section>
       <MetricStrip :items="metricItems" />
       <section class="evaluation-evidence section-divider" aria-labelledby="sample-title">
       <header><div><h2 id="sample-title">样本证据</h2><p>评测结论可追溯到对应的 Trace 与审计事件</p></div><span>{{ store.traces.length }} 个样本</span></header>
@@ -36,9 +37,11 @@ defineOptions({ name: "EvaluationPage" });
 const store = useDashboardStore();
 const route = useRoute();
 const selectedCaseId = computed(() => typeof route.query.case_id === "string" ? route.query.case_id : "");
+const hasAsrData = computed(() => store.evaluation.asrBefore !== null && store.evaluation.asrAfter !== null);
 const metricItems = computed(() => [
   { detail: "deny 与 ask", label: "阻断率", route: "/investigations?blocked=true", tone: "success" as const, value: percent(store.evaluation.blockRate) },
   { detail: "正常样本被阻断", label: "误报率 FPR", route: "/investigations", value: percent(store.evaluation.fpr) },
+  { detail: "恶意样本被放行", label: "漏报率 FNR", route: "/investigations?decision=allow", value: percent(store.evaluation.fnr) },
   { detail: "安全判定", label: "平均判定延迟", route: "/system", value: store.evaluation.averageLatencyMs === null ? "--" : `${store.evaluation.averageLatencyMs.toFixed(1)} ms` },
   { detail: "当前数据窗口", label: "审计事件", route: "/investigations", value: String(store.metrics.eventCount) },
 ]);
@@ -48,6 +51,10 @@ watch([selectedCaseId, () => store.traces.length], async ([caseId]) => { if (!ca
 
 <style scoped lang="scss">
 .evaluation-page { display: grid; gap: var(--space-6); }
+.evaluation-empty-asr { border-block: 1px solid var(--color-border); display: grid; gap: var(--space-1); padding: var(--space-5) 0; }
+.evaluation-empty-asr h2, .evaluation-empty-asr p { margin: 0; }
+.evaluation-empty-asr h2 { font-size: var(--font-size-16); }
+.evaluation-empty-asr p { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .evaluation-evidence { display: grid; gap: var(--space-4); }
 .evaluation-evidence > header { align-items: start; display: flex; justify-content: space-between; }
 .evaluation-evidence h2, .evaluation-evidence p { margin: 0; }
