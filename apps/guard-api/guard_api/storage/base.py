@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentguard_core import AuditEvent
+from agentguard_core import AuditEvent, PolicyBundle
 
 from guard_api.models import ApprovalRequest
 
@@ -47,9 +47,18 @@ class StoredApprovalNonce:
     nonce_hash: str
     approval_id: str
     session_hash: str
+    subject_id: str
     tool_call_id: str
     expires_at: str
     used_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PolicySnapshotRecord:
+    revision: int
+    policy_bundle: PolicyBundle
+    updated_at: str
+    updated_by: str
 
 
 EvalMetrics = dict[str, int | float | None]
@@ -71,10 +80,27 @@ class ControlPlaneStore(Protocol):
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         ...
 
+    def get_policy_snapshot(self) -> PolicyBundle | None:
+        ...
+
+    def save_policy_snapshot(
+        self,
+        policy_bundle: PolicyBundle,
+        *,
+        updated_by: str = "system",
+    ) -> PolicySnapshotRecord:
+        ...
+
+    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
+        ...
+
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         ...
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
+        ...
+
+    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
         ...
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
@@ -113,7 +139,8 @@ class ControlPlaneStore(Protocol):
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
         ...
@@ -124,7 +151,8 @@ class ControlPlaneStore(Protocol):
         *,
         approval_id: str,
         session_hash: str,
-        tool_call_id: str,
+        subject_id: str | None = None,
+        tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
         ...

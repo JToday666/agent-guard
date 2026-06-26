@@ -2,26 +2,30 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Cookie, FastAPI, Header, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from agentguard_core import AuditEvent, GuardEvent
+from agentguard_core import AuditEvent, GuardEvent, PolicyBundle
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.errors import error_response, http_error_code, validation_error_details
 from guard_api.services import (
     ApprovalService,
     AuditService,
     EvaluationService,
     MetricService,
     PolicyService,
+    TraceService,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters
+from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters, PolicySnapshotRecord
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
 
@@ -38,15 +42,37 @@ def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
 
 
-def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSettings | None = None) -> FastAPI:
+def _policy_snapshot_record_payload(record: PolicySnapshotRecord) -> dict[str, Any]:
+    return {
+        "revision": record.revision,
+        "updated_at": record.updated_at,
+        "updated_by": record.updated_by,
+        "bundle_id": record.policy_bundle.bundle_id,
+        "version": record.policy_bundle.version,
+    }
+
+
+def create_app(
+    *,
+    store: ControlPlaneStore | None = None,
+    settings: GuardApiSettings | None = None,
+    policy_bundle: PolicyBundle | None = None,
+    policy_provider: Callable[[], PolicyBundle] | None = None,
+) -> FastAPI:
     settings = settings or GuardApiSettings()
     store = store or PostgresControlPlaneStore(settings.database_url)
     auth = CapabilityAuthService(settings=settings, store=store)
     audit_service = AuditService(store=store)
     approval_service = ApprovalService(store=store, settings=settings)
     metric_service = MetricService(store=store)
+    trace_service = TraceService(store=store)
+    policy_service = PolicyService(
+        store=store,
+        policy_bundle=policy_bundle,
+        policy_provider=policy_provider,
+    )
     evaluation_service = EvaluationService(
-        policy_service=PolicyService(),
+        policy_service=policy_service,
         audit_service=audit_service,
         approval_service=approval_service,
     )
@@ -61,7 +87,24 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
 
     @app.exception_handler(ApiAuthError)
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code}})
+        return error_response(exc.code, status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        return error_response(
+            "VALIDATION_ERROR",
+            status_code=422,
+            details=validation_error_details(exc.errors()),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        return error_response(
+            http_error_code(exc.status_code),
+            status_code=exc.status_code,
+            message=str(exc.detail) if exc.detail else None,
+            details={"detail": exc.detail} if exc.detail else [],
+        )
 
     @app.get("/health", response_model=None)
     def health(check_db: bool = False) -> dict[str, str] | JSONResponse:
@@ -119,6 +162,32 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
         response = evaluation_service.evaluate(payload, requesting_principal_id=context.principal_id)
         return response.model_dump(mode="json")
 
+    @app.get("/v1/policies/current")
+    def current_policy(agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        auth.verify_browser_session(agentguard_session)
+        return policy_service.current_snapshot().model_dump(mode="json")
+
+    @app.put("/v1/policies/current")
+    def update_current_policy(
+        payload: PolicyBundle,
+        x_agentguard_csrf: str | None = Header(default=None, alias="X-AgentGuard-CSRF"),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        session = auth.verify_browser_session(agentguard_session)
+        auth.verify_csrf(session, x_agentguard_csrf)
+        return policy_service.save_snapshot(payload, updated_by="dashboard").model_dump(mode="json")
+
+    @app.get("/v1/policies/history")
+    def policy_history(
+        limit: int = 100,
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
+        auth.verify_browser_session(agentguard_session)
+        return [
+            _policy_snapshot_record_payload(record)
+            for record in policy_service.list_history(limit=_bounded_limit(limit))
+        ]
+
     @app.post("/v1/audit/events")
     def audit_event(payload: AuditEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:audit:write")
@@ -155,6 +224,11 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
         filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
         return metric_service.eval_metrics(filters)
 
+    @app.get("/v1/traces/{trace_id}")
+    def trace_detail(trace_id: str, agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        auth.verify_browser_session(agentguard_session)
+        return trace_service.get_trace(trace_id)
+
     @app.get("/v1/approvals/pending")
     def pending_approvals(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:
         session = auth.verify_browser_session(agentguard_session)
@@ -164,7 +238,7 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
             payload["approval_nonce"] = auth.issue_approval_nonce(
                 approval_id=approval.approval_id,
                 session_id=session.session_id,
-                tool_call_id=approval.tool_call_id,
+                subject_id=approval.subject_id,
             )
             rows.append(payload)
         return rows
@@ -185,7 +259,7 @@ def create_app(*, store: ControlPlaneStore | None = None, settings: GuardApiSett
             nonce=payload.approval_nonce,
             approval_id=approval_id,
             session_id=session.session_id,
-            tool_call_id=approval.tool_call_id,
+            subject_id=approval.subject_id,
         )
         if payload.decision not in approval.decision_options:
             raise ApiAuthError("APPROVAL_DECISION_INVALID", status_code=403)
