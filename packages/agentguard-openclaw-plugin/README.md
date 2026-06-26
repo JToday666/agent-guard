@@ -27,19 +27,17 @@ pnpm --filter @agentguard/openclaw-plugin test
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 ```
 
-For local OpenClaw runtime validation, install from a clean staging directory
-that contains `dist/`, `openclaw.plugin.json`, `package.json`, and `README.md`.
-Do not install directly from the pnpm workspace package directory because its
-`node_modules` symlinks are rejected by OpenClaw's local install safety scan.
+For local OpenClaw runtime validation, use the repository-level development
+installer:
 
 ```bash
-openclaw plugins validate --root packages/agentguard-openclaw-plugin --entry dist/index.js
-openclaw plugins install -l /tmp/agentguard-openclaw-plugin-install-p2
-openclaw plugins inspect agentguard-security --runtime --json
-openclaw plugins doctor
-openclaw gateway restart --safe
-openclaw gateway status
+pnpm openclaw:plugin:install
+pnpm openclaw:plugin:verify
 ```
+
+The complete deployment, install, configuration, verification, uninstall, and
+troubleshooting guide is maintained in
+[`docs/03_adapters/openclaw_plugin_deployment.md`](../../docs/03_adapters/openclaw_plugin_deployment.md).
 
 `openclaw plugins validate --root ... --entry ...` in OpenClaw 2026.6.6
 validates simple tool plugin metadata exposed by `defineToolPlugin`. This
@@ -56,6 +54,12 @@ Expected runtime hooks after install:
   `after_compaction`, `subagent_spawned`, `subagent_ended`,
   `model_call_started`, `model_call_ended`, `cron_changed`,
   `resolve_exec_env`
+
+To remove the development install from the local OpenClaw profile:
+
+```bash
+pnpm openclaw:plugin:uninstall
+```
 
 Dashboard/API acceptance uses the Dashboard/browser session cookie:
 

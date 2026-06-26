@@ -40,7 +40,8 @@ docs/
 1. [接口契约与事件模型](02_core/interface_contract.md)
 2. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
 3. [OpenClaw Security Plugin](03_adapters/openclaw_plugin.md)
-4. [OpenClaw 与 LangChain/LangGraph Hook 清单](03_adapters/runtime_hooks_inventory.md)
+4. [OpenClaw 插件部署、安装与配置](03_adapters/openclaw_plugin_deployment.md)
+5. [OpenClaw 与 LangChain/LangGraph Hook 清单](03_adapters/runtime_hooks_inventory.md)
 
 ### Dashboard 开发
 
@@ -75,6 +76,7 @@ docs/
 | [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标            |
 | [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路 |
 | [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计      |
+| [openclaw_plugin_deployment.md](03_adapters/openclaw_plugin_deployment.md)               | OpenClaw 插件部署、安装、配置、验证和卸载   |
 | [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计 |
 | [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示    |
 | [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标    |

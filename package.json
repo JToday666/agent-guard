@@ -13,6 +13,9 @@
     "dashboard:dev:mock": "pnpm --filter @agentguard/dashboard dev:mock",
     "dashboard:test:e2e": "pnpm --filter @agentguard/dashboard test:e2e",
     "dashboard:typecheck": "pnpm --filter @agentguard/dashboard typecheck",
-    "dashboard:build": "pnpm --filter @agentguard/dashboard build"
+    "dashboard:build": "pnpm --filter @agentguard/dashboard build",
+    "openclaw:plugin:install": "node scripts/openclaw-plugin-dev.mjs install",
+    "openclaw:plugin:verify": "node scripts/openclaw-plugin-dev.mjs verify",
+    "openclaw:plugin:uninstall": "node scripts/openclaw-plugin-dev.mjs uninstall"
   }
 }
