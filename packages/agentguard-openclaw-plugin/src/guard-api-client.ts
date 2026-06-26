@@ -1,6 +1,9 @@
 import type {
   AgentGuardPluginConfig,
+  AuditEvent,
   ApprovalWaitResponse,
+  ConfigAuditEvent,
+  ConfigAuditResult,
   GuardEvaluationResponse,
   GuardEvent,
   MessageHookResult,
@@ -53,6 +56,30 @@ export class GuardApiClient {
       body: JSON.stringify(event),
     });
     return (await response.json()) as GuardEvaluationResponse;
+  }
+
+  async evaluateConfigAudit(event: ConfigAuditEvent): Promise<ConfigAuditResult> {
+    if (!this.config.adapterToken) {
+      throw new GuardApiError("AgentGuard adapter token is not configured");
+    }
+
+    const response = await this.request("/v1/config-audit/evaluate", {
+      method: "POST",
+      body: JSON.stringify(event),
+    });
+    return (await response.json()) as ConfigAuditResult;
+  }
+
+  async submitRuntimeObservation(event: AuditEvent): Promise<{ ok: boolean; audit_id: string }> {
+    if (!this.config.adapterToken) {
+      throw new GuardApiError("AgentGuard adapter token is not configured");
+    }
+
+    const response = await this.request("/v1/audit/events", {
+      method: "POST",
+      body: JSON.stringify(event),
+    });
+    return (await response.json()) as { ok: boolean; audit_id: string };
   }
 
   async waitForApproval(approvalId: string): Promise<ApprovalWaitResponse> {

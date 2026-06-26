@@ -12,14 +12,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from agentguard_core import AuditEvent, GuardEvent, PolicyBundle
+from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent, MemoryGuardChange, PolicyBundle
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.errors import error_response, http_error_code, validation_error_details
 from guard_api.services import (
     ApprovalService,
     AuditService,
+    ConfigAuditService,
     EvaluationService,
+    MemoryGuardService,
     MetricService,
     PolicyService,
     TraceService,
@@ -63,6 +65,8 @@ def create_app(
     store = store or PostgresControlPlaneStore(settings.database_url)
     auth = CapabilityAuthService(settings=settings, store=store)
     audit_service = AuditService(store=store)
+    config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
+    memory_guard_service = MemoryGuardService(store=store)
     approval_service = ApprovalService(store=store, settings=settings)
     metric_service = MetricService(store=store)
     trace_service = TraceService(store=store)
@@ -212,6 +216,11 @@ def create_app(
         )
         return [event.model_dump(mode="json") for event in audit_service.list_events(filters)]
 
+    @app.get("/v1/audit/integrity")
+    def audit_integrity(agentguard_session: str | None = Cookie(default=None)) -> dict[str, object]:
+        auth.verify_browser_session(agentguard_session)
+        return audit_service.integrity()
+
     @app.get("/v1/metrics/eval")
     def eval_metrics(
         trace_id: str | None = None,
@@ -228,6 +237,43 @@ def create_app(
     def trace_detail(trace_id: str, agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
         auth.verify_browser_session(agentguard_session)
         return trace_service.get_trace(trace_id)
+
+    @app.get("/v1/traces/{trace_id}/provenance")
+    def trace_provenance(trace_id: str, agentguard_session: str | None = Cookie(default=None)) -> dict[str, object]:
+        auth.verify_browser_session(agentguard_session)
+        return trace_service.get_provenance(trace_id)
+
+    @app.post("/v1/config-audit/evaluate")
+    def evaluate_config_audit_event(
+        payload: ConfigAuditEvent,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "event:evaluate")
+        return config_audit_service.evaluate(payload).model_dump(mode="json")
+
+    @app.post("/v1/memory/changes/propose")
+    def propose_memory_change(
+        payload: MemoryGuardChange,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "event:evaluate")
+        return memory_guard_service.propose(payload).model_dump(mode="json")
+
+    @app.post("/v1/memory/changes/{change_id}/commit")
+    def commit_memory_change(change_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "event:evaluate")
+        try:
+            return memory_guard_service.commit(change_id).model_dump(mode="json")
+        except KeyError:
+            raise ApiAuthError("MEMORY_CHANGE_NOT_FOUND", status_code=404)
+
+    @app.post("/v1/memory/changes/{change_id}/rollback")
+    def rollback_memory_change(change_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "event:evaluate")
+        try:
+            return memory_guard_service.rollback(change_id).model_dump(mode="json")
+        except KeyError:
+            raise ApiAuthError("MEMORY_CHANGE_NOT_FOUND", status_code=404)
 
     @app.get("/v1/approvals/pending")
     def pending_approvals(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:

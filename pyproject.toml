@@ -13,6 +13,7 @@ dependencies = [
 dev = [
   "jsonschema>=4.26",
   "pytest>=9",
+  "ruff>=0.15.20",
 ]
 
 [tool.uv]

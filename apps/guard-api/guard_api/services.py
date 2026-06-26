@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 from agentguard_core import (
+    ActionCritic,
+    ActionCriticReview,
     AuditEvent,
+    ConfigAuditEvent,
+    ConfigAuditResult,
     GuardDecision,
     GuardEvent,
+    MemoryGuardChange,
     PolicyBundle,
+    ProvenanceEdge,
+    ProvenanceNode,
     ToolCallPayload,
     evaluate as core_evaluate,
+    evaluate_config_audit,
+    utc_now_iso,
 )
 from agentguard_core.resources import derive_resources
 
@@ -79,6 +88,7 @@ class AuditService:
 
     def submit(self, event: AuditEvent) -> dict[str, str | bool]:
         self.store.add_audit_event(event)
+        self._record_audit_provenance(event)
         return {"ok": True, "audit_id": event.audit_id}
 
     def list_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
@@ -90,10 +100,167 @@ class AuditService:
         decision: GuardDecision,
         *,
         approval_id: str | None = None,
+        critic_review: ActionCriticReview | None = None,
     ) -> AuditEvent:
-        audit_event = build_audit_event(event, decision, approval_id=approval_id)
+        audit_event = build_audit_event(
+            event,
+            decision,
+            approval_id=approval_id,
+            critic_review_id=critic_review.review_id if critic_review is not None else None,
+        )
         self.store.add_audit_event(audit_event)
+        if critic_review is not None:
+            self.store.add_action_critic_review(critic_review)
+        self._record_evaluation_provenance(event, decision, audit_event, critic_review=critic_review)
         return audit_event
+
+    def integrity(self) -> dict[str, object]:
+        return asdict(self.store.verify_audit_integrity())
+
+    def _record_audit_provenance(self, event: AuditEvent) -> None:
+        audit_node = ProvenanceNode(
+            node_id=f"audit:{event.audit_id}",
+            trace_id=event.trace_id,
+            kind="audit",
+            ref_id=event.audit_id,
+            label=event.event_type,
+            timestamp=event.timestamp,
+            metadata={"runtime": event.runtime, "stage": event.stage},
+        )
+        self.store.add_provenance_node(audit_node)
+        source_id = event.links.get("config_audit_event_id") or event.links.get("event_id")
+        if source_id is None:
+            return
+        source_kind = "config_audit" if event.event_type == "config_audit" else "event"
+        source_node = ProvenanceNode(
+            node_id=f"{source_kind}:{source_id}",
+            trace_id=event.trace_id,
+            kind=source_kind,
+            ref_id=source_id,
+            label=event.event_type,
+            timestamp=event.timestamp,
+            metadata={"runtime": event.runtime, "stage": event.stage},
+        )
+        self.store.add_provenance_node(source_node)
+        self.store.add_provenance_edge(
+            ProvenanceEdge(
+                edge_id=f"edge:{source_node.node_id}:{audit_node.node_id}",
+                trace_id=event.trace_id,
+                source_node_id=source_node.node_id,
+                target_node_id=audit_node.node_id,
+                relation="recorded_as",
+            )
+        )
+
+    def _record_evaluation_provenance(
+        self,
+        event: GuardEvent,
+        decision: GuardDecision,
+        audit_event: AuditEvent,
+        *,
+        critic_review: ActionCriticReview | None = None,
+    ) -> None:
+        event_node = ProvenanceNode(
+            node_id=f"event:{event.event_id}",
+            trace_id=event.trace_id,
+            kind="event",
+            ref_id=event.event_id,
+            label=event.event_type,
+            timestamp=event.timestamp,
+            metadata={"runtime": event.runtime},
+        )
+        decision_node = ProvenanceNode(
+            node_id=f"decision:{decision.decision_id}",
+            trace_id=event.trace_id,
+            kind="decision",
+            ref_id=decision.decision_id,
+            label=decision.decision,
+            metadata={"severity": decision.severity, "risk_score": decision.risk_score},
+        )
+        audit_node = ProvenanceNode(
+            node_id=f"audit:{audit_event.audit_id}",
+            trace_id=event.trace_id,
+            kind="audit",
+            ref_id=audit_event.audit_id,
+            label=audit_event.event_type,
+            timestamp=audit_event.timestamp,
+            metadata={"runtime": audit_event.runtime, "stage": audit_event.stage},
+        )
+        self.store.add_provenance_node(event_node)
+        self.store.add_provenance_node(decision_node)
+        self.store.add_provenance_node(audit_node)
+        if critic_review is not None:
+            critic_node = ProvenanceNode(
+                node_id=f"action_critic:{critic_review.review_id}",
+                trace_id=event.trace_id,
+                kind="action_critic",
+                ref_id=critic_review.review_id,
+                label=critic_review.verdict,
+                timestamp=critic_review.created_at,
+                metadata={
+                    "reviewer": critic_review.reviewer,
+                    "confidence": critic_review.confidence,
+                    "degraded": critic_review.degraded,
+                },
+            )
+            self.store.add_provenance_node(critic_node)
+        self.store.add_provenance_edge(
+            ProvenanceEdge(
+                edge_id=f"edge:{event.event_id}:{decision.decision_id}",
+                trace_id=event.trace_id,
+                source_node_id=event_node.node_id,
+                target_node_id=decision_node.node_id,
+                relation="evaluated_to",
+            )
+        )
+        self.store.add_provenance_edge(
+            ProvenanceEdge(
+                edge_id=f"edge:{decision.decision_id}:{audit_event.audit_id}",
+                trace_id=event.trace_id,
+                source_node_id=decision_node.node_id,
+                target_node_id=audit_node.node_id,
+                relation="recorded_as",
+            )
+        )
+        if critic_review is not None:
+            self.store.add_provenance_edge(
+                ProvenanceEdge(
+                    edge_id=f"edge:{decision.decision_id}:{critic_review.review_id}",
+                    trace_id=event.trace_id,
+                    source_node_id=decision_node.node_id,
+                    target_node_id=f"action_critic:{critic_review.review_id}",
+                    relation="reviewed_by",
+                )
+            )
+
+
+class ConfigAuditService:
+    def __init__(self, *, store: ControlPlaneStore, audit_service: AuditService | None = None) -> None:
+        self.store = store
+        self.audit_service = audit_service or AuditService(store=store)
+
+    def evaluate(self, event: ConfigAuditEvent) -> ConfigAuditResult:
+        result = evaluate_config_audit(event)
+        for finding in result.findings:
+            self.store.add_config_audit_finding(event, finding)
+        self.audit_service.submit(_config_audit_event(event, result))
+        return result
+
+
+class MemoryGuardService:
+    def __init__(self, *, store: ControlPlaneStore) -> None:
+        self.store = store
+
+    def propose(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        status = "quarantined" if _should_quarantine_memory_change(change) else "proposed"
+        proposed = change.model_copy(update={"status": status, "updated_at": utc_now_iso()})
+        return self.store.create_memory_change(proposed)
+
+    def commit(self, change_id: str) -> MemoryGuardChange:
+        return self.store.update_memory_change_status(change_id, "committed")
+
+    def rollback(self, change_id: str) -> MemoryGuardChange:
+        return self.store.update_memory_change_status(change_id, "rolled_back")
 
 
 class ApprovalService:
@@ -197,6 +364,14 @@ class TraceService:
             "metrics": self.store.eval_metrics(EvalMetricFilters(trace_id=trace_id)),
         }
 
+    def get_provenance(self, trace_id: str) -> dict[str, object]:
+        nodes, edges = self.store.list_provenance(trace_id)
+        return {
+            "trace_id": trace_id,
+            "nodes": [node.model_dump(mode="json") for node in nodes],
+            "edges": [edge.model_dump(mode="json") for edge in edges],
+        }
+
 
 class EvaluationService:
     def __init__(
@@ -205,13 +380,16 @@ class EvaluationService:
         policy_service: PolicyService,
         audit_service: AuditService,
         approval_service: ApprovalService,
+        action_critic: ActionCritic | None = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
         self.approval_service = approval_service
+        self.action_critic = action_critic or ActionCritic()
 
     def evaluate(self, event: GuardEvent, *, requesting_principal_id: str) -> GuardEvaluationResponse:
         decision = core_evaluate(event, self.policy_service.current_snapshot())
+        critic_review = self.action_critic.review(event, decision)
         approval = self.approval_service.create_for_decision(
             event,
             decision,
@@ -221,6 +399,7 @@ class EvaluationService:
             event,
             decision,
             approval_id=approval.approval_id if approval is not None else None,
+            critic_review=critic_review,
         )
         return GuardEvaluationResponse(
             decision=decision,
@@ -241,11 +420,14 @@ def build_audit_event(
     decision: GuardDecision,
     *,
     approval_id: str | None = None,
+    critic_review_id: str | None = None,
 ) -> AuditEvent:
     description = describe_guard_event(event)
     links = {"event_id": event.event_id, "decision_id": decision.decision_id}
     if approval_id is not None:
         links["approval_id"] = approval_id
+    if critic_review_id is not None:
+        links["critic_review_id"] = critic_review_id
     return AuditEvent(
         trace_id=event.trace_id,
         case_id=event.case_id,
@@ -265,6 +447,48 @@ def build_audit_event(
         latency_ms=decision.latency_ms,
         metadata=description.metadata,
     )
+
+
+def _config_audit_event(event: ConfigAuditEvent, result: ConfigAuditResult) -> AuditEvent:
+    worst = _worst_finding_severity(result.findings)
+    risk_score = {"low": 15, "medium": 45, "high": 80, "critical": 95}[worst]
+    return AuditEvent(
+        trace_id=str(event.metadata.get("trace_id") or event.event_id),
+        runtime=event.runtime,
+        stage=event.action,
+        event_type="config_audit",
+        summary=f"Configuration audit for {event.target_type}:{event.target_id}",
+        decision="deny" if result.decision == "block" else "allow",
+        risk_score=risk_score,
+        severity=worst,
+        blocked=result.decision == "block",
+        resource_targets=[event.target_id],
+        rule_hits=[finding.category for finding in result.findings],
+        reason=result.reason,
+        links={"config_audit_event_id": event.event_id},
+        metadata={
+            "target_type": event.target_type,
+            "target_id": event.target_id,
+            "finding_count": len(result.findings),
+        },
+    )
+
+
+def _worst_finding_severity(findings: list[object]) -> str:
+    rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    worst = "low"
+    for finding in findings:
+        severity = getattr(finding, "severity", "low")
+        if severity in rank and rank[severity] > rank[worst]:
+            worst = severity
+    return worst
+
+
+def _should_quarantine_memory_change(change: MemoryGuardChange) -> bool:
+    preview = change.value_preview.lower()
+    if change.source_trust != "trusted":
+        return True
+    return any(marker in preview for marker in ("secret", "token", "password", "always send"))
 
 
 def describe_guard_event(event: GuardEvent) -> EventDescription:
