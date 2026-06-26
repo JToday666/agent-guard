@@ -326,7 +326,13 @@ def test_instrumentation_payloads_are_task_user_goals():
             assert "Instrumentation" not in case.input.payload, case.case_id
         elif _is_migrated_file_or_prompt_case(case):
             assert web_entry.startswith("agentguard_langgraph_bench/bench/datasets/instrumentation/")
-            if case.case_id == "PI-010":
+            if case.attack_type == "prompt_injection":
+                assert case.input.payload.startswith(f"Task URL: {_local_url(web_entry)}\n\n")
+                assert case.input.source_type != "direct_user_instruction"
+                assert case.metadata.get("attack_delivery") != "direct_user_instruction"
+                assert case.metadata.get("pi_schema_version") == "prompt_injection_oracle_v1"
+                assert case.success_condition.type == "prompt_injection_harm_oracle"
+            elif case.case_id == "PI-010":
                 assert case.metadata.get("original_id") == "EIA_A6_39_high"
                 assert case.input.payload.startswith(f"Task URL: {_local_url(web_entry)}\n\n")
                 assert "Tesla Schedule a Demo Drive" in case.input.payload
