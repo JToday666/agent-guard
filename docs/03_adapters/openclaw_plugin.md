@@ -14,6 +14,7 @@ packages/agentguard-openclaw-plugin/
 
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [Dashboard 与审批流](../04_apps/dashboard_design.md)
+- [OpenClaw 插件部署、安装与配置](openclaw_plugin_deployment.md)
 - [演示脚本](../06_delivery/demo_script.md)
 
 ## 2. 当前实现
@@ -50,6 +51,8 @@ packages/agentguard-openclaw-plugin/
 | `approvalTimeoutMs` | `120000` | 审批总等待超时 |
 
 `adapterToken` 也可从 `AGENTGUARD_ADAPTER_TOKEN` 读取。token 只进入 HTTP `Authorization` header，不写入 GuardEvent、metadata、审计内容、错误消息或日志。
+
+本机开发安装、OpenClaw profile patch、persisted plugin registry refresh、Gateway restart 和卸载流程见 [OpenClaw 插件部署、安装与配置](openclaw_plugin_deployment.md)。
 
 ## 4. Hook 状态
 
@@ -128,12 +131,8 @@ uv run pytest \
 OpenClaw 2026.6.6 验证：
 
 ```bash
-openclaw plugins validate --root packages/agentguard-openclaw-plugin --entry dist/index.js
-openclaw plugins install -l /tmp/agentguard-openclaw-plugin-install-p2
-openclaw plugins inspect agentguard-security --runtime --json
-openclaw plugins doctor
-openclaw gateway restart --safe
-openclaw gateway status
+pnpm openclaw:plugin:install
+pnpm openclaw:plugin:verify
 ```
 
 `inspect --runtime --json` 验证结果包含：
@@ -165,52 +164,28 @@ openclaw gateway status
 
 Gateway 重启后日志包含 `http server listening (14 plugins: agentguard-security, ...)`，说明本机长驻 OpenClaw gateway 已加载该插件。
 
-### OpenClaw validate 说明
+### 部署安装入口
 
-OpenClaw 2026.6.6 的 `openclaw plugins validate --root ... --entry ...` 是 simple tool plugin 元数据验证命令，要求入口由 `defineToolPlugin` 生成 metadata。当前插件是 hook-only `definePluginEntry`，因此该命令会返回：
+本机安装、配置、验证、卸载、回滚和故障排查步骤统一维护在 [OpenClaw 插件部署、安装与配置](openclaw_plugin_deployment.md)。设计文档只保留 hook-only 插件的行为契约和验收摘要，避免安装流程重复分散。
 
-```text
-plugin entry does not expose defineToolPlugin metadata
-```
+OpenClaw 2026.6.6 的 `openclaw plugins validate --root ... --entry ...` 面向 simple tool plugin；当前插件是 hook-only `definePluginEntry`，真实验证以 `pnpm openclaw:plugin:verify`、runtime inspect、Gateway status 和 hook runner/E2E 结果为准。
 
-hook-only 插件的真实验证命令以 `plugins install -l`、`plugins inspect --runtime --json`、`plugins doctor`、gateway restart/status 和 hook runner 触发测试为准。
+### 本机 live API 验收摘要
 
-### 本机 live API 验收
-
-启动 Guard API：
-
-```bash
-uv run uvicorn guard_api.main:app --host 127.0.0.1 --port 8088
-```
-
-通过本机 OpenClaw runtime hook runner 触发 `before_tool_call` 和 `message_sending`，插件调用真实 Guard API 后返回：
-
-```json
-{
-  "toolResult": { "block": true },
-  "messageResult": { "cancel": true }
-}
-```
-
-随后用 Dashboard 同源 browser session 查询：
-
-```http
-GET /v1/audit/events?runtime=openclaw
-GET /v1/audit/integrity
-GET /v1/traces/<trace_id>/provenance
-```
-
-能看到两条 `runtime=openclaw` 审计事件：
-
-| event_type | trace_id | decision | rule_hits |
-| --- | --- | --- | --- |
-| `tool_call_proposed` | `run_openclaw_live_api` | `deny` | `P001_sensitive_file_access`, `P002_tool_identity_mismatch` |
-| `message_send_proposed` | `agent:main:openclaw-live-api` | `deny` | `P005_external_send` |
-| `tool_result_produced` | `<run_id>` | `allow/deny` | 取决于 Core policy |
-| `runtime_observation` | `<session/run id>` | `allow` | observation-only |
+已通过本机 OpenClaw runtime hook runner 触发 `before_tool_call`、`message_sending`、`before_install` 和 `tool_result_persist`，并通过 Guard API 查询 audit、integrity 和 provenance 证据。详细复查入口和操作命令见 [部署文档](openclaw_plugin_deployment.md) 与 E2E 报告。
 
 ## 9. 当前限制
 
-- 本仓库 pnpm workspace 包目录内有 `node_modules` symlink。直接 `openclaw plugins install -l packages/agentguard-openclaw-plugin` 会被 OpenClaw install safety scan 拦截。真实本机测试使用不含 `node_modules` 的 staging 目录 `/tmp/agentguard-openclaw-plugin-install-p2`。
+- 本仓库 pnpm workspace 包目录内可能有 `node_modules` symlink。直接 `openclaw plugins install -l packages/agentguard-openclaw-plugin` 会被 OpenClaw install safety scan 拦截。正式开发安装使用不含 `node_modules` 的 `.openclaw-dev/agentguard-security` staging 目录，流程见 [部署文档](openclaw_plugin_deployment.md)。
 - 当前仍不实现消息改写、参数改写、prompt/model content hooks、OpenClaw 原生 `requireApproval` 审批 UI 接管。
-- 本机 OpenClaw 持久配置已启用 `agentguard-security` 并指向 staging 路径；正式联调时需在 OpenClaw 插件配置或进程环境中提供真实 `adapterToken`。
+- 本机 OpenClaw 持久配置通过 `pnpm openclaw:plugin:install` 启用 `agentguard-security` 并指向 `.openclaw-dev/agentguard-security`；正式联调时需在 `.env` 中提供真实 `AGENTGUARD_ADAPTER_TOKEN`。
+
+## 10. E2E 验收报告
+
+最近一次本机真实 E2E 验收报告保存在：
+
+```text
+/tmp/agentguard-openclaw-e2e-acceptance-report.md
+```
+
+该验收使用 OpenClaw 2026.6.6、Guard API、独立 PostgreSQL 测试库和确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。
