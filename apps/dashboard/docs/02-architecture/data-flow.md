@@ -23,6 +23,17 @@ Page / Layout
 
 API 请求失败时不会自动切换数据源。场景模式和 API 模式使用相同的 `DashboardDataSource` 接口。
 
+API 模式当前读取的监督端接口包括：
+
+- `GET /v1/audit/events`
+- `GET /v1/metrics/eval`
+- `GET /v1/approvals/pending`
+- `GET /v1/traces/{trace_id}`
+- `GET /v1/policies/current`
+- `GET /v1/policies/history`
+- `GET /health?check_db=true`
+- `POST /v1/approvals/{approval_id}/resolve`
+
 ## 3. 浏览器会话
 
 API 模式的初始化顺序：
@@ -38,7 +49,7 @@ Dashboard 不生成 launch code，不保存长期 token，也不将鉴权状态�
 
 ## 4. 刷新与失败恢复
 
-`dashboardStore` 在上一轮完成后等待 10 秒，再串行请求事件、指标、审批和健康状态。页面不可见时暂停轮询，恢复可见后立即刷新；审批提交后立即刷新。Skeleton 只在首次请求时显示，合法空数据不重复进入 loading。后台刷新和短暂失败保留现有页面、筛选、选择和详情状态；相同事件、指标、评测和审批数据保留现有响应式引用。
+`dashboardStore` 在上一轮完成后等待 10 秒，再串行请求事件、指标、审批、健康状态和只读策略状态。页面不可见时暂停轮询，恢复可见后立即刷新；审批提交后立即刷新。Trace 详情只在打开 `/investigations/:trace_id` 时按需请求。Skeleton 只在首次请求时显示，合法空数据不重复进入 loading。后台刷新和短暂失败保留现有页面、筛选、选择和详情状态；相同事件、指标、评测和审批数据保留现有响应式引用。
 
 Store 状态包括：
 
@@ -51,11 +62,13 @@ Browser session 无效或过期时不属于普通 stale：Dashboard 停止轮询
 
 事件接口成功而指标接口失败时，只使用同一批真实审计事件派生基础计数；FPR、FNR 等依赖标注的数据保持不可用。
 
+Trace detail 请求失败时，详情页回退到已加载审计事件窗口中同一 `trace_id` 的局部证据，并显示局部失败状态。策略接口失败只影响系统页策略区块，不触发全局鉴权错误态，除非 Guard API 返回 session 失效。
+
 ## 5. 页面消费
 
 - 总览：指标、决策趋势、攻击类型分布和高风险事件。
-- 调查：审计列表、筛选和脱敏详情。
-- 审批：pending 队列和 `allow_once` / `deny`。
-- 调查详情：按相同 `trace_id` 的真实事件排序展示，并按 `event_id` 定位证据。
-- 评测：展示接口或场景数据已提供的指标，不推断 ground truth。
-- 系统：展示会话、健康检查、轮询和数据新鲜度。
+- 调查：审计列表、搜索、动态规则筛选和脱敏详情，规则选项只来自真实 `rule_hits`。
+- 审批：pending 队列、`allow_once` / `deny`，并用已加载审计事件按 `approval_id` 补齐关联事件、规则命中和 Agent 行为。
+- 调查详情：优先读取 Trace detail 接口，按真实事件时间排序展示；接口失败时回退到当前审计事件窗口，并按 `event_id` 定位证据。
+- 评测：展示接口或场景数据已提供的 Block Rate、FPR、FNR 和平均判定延迟；ASR 仅在 before / after 数据同时存在时展示。
+- 系统：展示会话、健康检查、轮询、数据新鲜度和只读策略快照 / 历史。

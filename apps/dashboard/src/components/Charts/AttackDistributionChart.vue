@@ -21,7 +21,7 @@ function getAttackTypeLabel(value: string) {
     tool_hijacking: "工具调用劫持",
     memory_poisoning: "记忆中毒",
     sensitive_file_access: "敏感文件访问",
-    adapter_error: "适配器异常",
+    code_execution_abuse: "危险代码执行",
     benign: "正常样本",
     unknown: "未分类",
   } as Record<string, string>)[value] ?? value;

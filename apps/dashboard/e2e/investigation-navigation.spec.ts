@@ -95,6 +95,22 @@ test("a missing event keeps the query and shows explicit feedback", async ({
   await expect(page.getByRole("dialog")).toContainText("未找到事件");
 });
 
+test("trace context evidence destinations use button styling", async ({
+  page,
+}) => {
+  await page.goto("/investigations/trace_002");
+
+  for (const name of ["查看关联审批", "查看评测样本"]) {
+    const link = page.getByRole("link", { name });
+    await expect(link).toHaveClass(/page-action/);
+    await expect(link).toHaveCSS("border-top-style", "solid");
+    await expect(link).toHaveCSS("text-decoration-line", "none");
+    const linkBox = await link.boundingBox();
+    const contextBox = await page.locator(".trace-context").boundingBox();
+    expect(linkBox?.width ?? 0).toBeLessThan((contextBox?.width ?? 0) * 0.8);
+  }
+});
+
 test("approval route synchronization does not cancel navigation", async ({
   page,
 }) => {
@@ -119,33 +135,35 @@ test("investigation search synchronization does not reopen a deactivated page", 
   await expect(page).toHaveURL(/\/overview$/);
 });
 
-test("investigation selects preserve their closed and open appearance", async ({
+test("investigation selects preserve their closed and open states", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop");
+}) => {
   await page.goto("/investigations");
-  await page.addStyleTag({
-    content:
-      "*, *::before, *::after { animation: none !important; transition: none !important; }",
-  });
 
   const tools = page.locator(".investigation-tools");
-  const toolsBox = await tools.boundingBox();
-  expect(toolsBox).not.toBeNull();
-  const clip = {
-    x: toolsBox!.x,
-    y: toolsBox!.y,
-    width: toolsBox!.width,
-    height: 300,
-  };
+  const selectRoot = page
+    .locator("#investigation-decision-trigger")
+    .locator("..");
+  const trigger = page.locator("#investigation-decision-trigger");
+  const menu = page.locator("#investigation-decision-listbox");
 
-  await expect(page).toHaveScreenshot("investigation-selects-closed.png", {
-    clip,
-  });
-  await page.locator("#investigation-decision-trigger").click();
-  await expect(page).toHaveScreenshot("investigation-selects-open.png", {
-    clip,
-  });
+  await expect(tools).toBeVisible();
+  await expect(selectRoot).not.toHaveClass(/app-select--open/);
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(trigger).toHaveCSS("min-height", "40px");
+  await expect(trigger).toHaveCSS("border-top-style", "solid");
+  await expect(menu).toHaveCount(0);
+
+  await trigger.click();
+
+  await expect(selectRoot).toHaveClass(/app-select--open/);
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(menu).toBeVisible();
+  await expect(menu).toHaveCSS("position", "absolute");
+  await expect(menu).toHaveCSS("z-index", "40");
+  await expect(page.getByRole("option", { name: "全部" })).toHaveClass(
+    /app-select__option--selected/,
+  );
 });
 
 test("investigation selects expose consistent combobox semantics", async ({

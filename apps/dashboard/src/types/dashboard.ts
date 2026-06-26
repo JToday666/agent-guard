@@ -20,6 +20,7 @@ export interface AuditEventRow {
   stage: string;
   tool: string;
   resource: string;
+  resourceTargets: string[];
   reason: string;
   traceId: string;
   caseId: string | null;
@@ -43,6 +44,10 @@ export interface ApprovalRequest {
   reason: string;
   eventId: string;
   traceId: string;
+  subjectId?: string;
+  subjectType?: string;
+  actionId?: string;
+  actionName?: string;
   userTask: string;
   agentAction: string;
   consequence: string;
@@ -97,5 +102,33 @@ export interface EvaluationSummary {
   asrAfter: number | null;
   blockRate: number | null;
   fpr: number | null;
+  fnr: number | null;
   averageLatencyMs: number | null;
+}
+
+export interface TraceDetail {
+  id: string;
+  events: AuditEventRow[];
+  approvals: ApprovalRequest[];
+  metrics: EvalMetrics;
+  loadedAt: string;
+}
+
+export interface PolicyHistoryEntry {
+  revision: number;
+  updatedAt: string;
+  updatedBy: string;
+  bundleId: string;
+  version: string;
+}
+
+export interface PolicySummary {
+  bundleId: string;
+  version: string;
+  revision: number | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  disabledRuleCount: number;
+  ruleOverrideCount: number;
+  toolProfileCount: number;
 }

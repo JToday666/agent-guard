@@ -7,6 +7,12 @@ export interface InvestigationIndex {
   latestEvents: AuditEventRow[];
 }
 
+export interface RuleFilterOption {
+  count: number;
+  label: string;
+  value: string;
+}
+
 export type InvestigationEventResolution =
   | { status: "idle" }
   | { event: AuditEventRow; status: "found" }
@@ -60,6 +66,7 @@ export function filterInvestigationEvents(
       event.caseId,
       event.traceId,
       event.stage,
+      ...event.resourceTargets,
       ...event.ruleHits,
     ]
       .join(" ")
@@ -79,4 +86,21 @@ export function resolveInvestigationEvent(
     return { status: "not-found" };
   }
   return { event, status: "found" };
+}
+
+export function getRuleFilterOptions(
+  events: readonly AuditEventRow[],
+): RuleFilterOption[] {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    for (const rule of event.ruleHits) {
+      counts.set(rule, (counts.get(rule) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ count, label: value, value }))
+    .sort((left, right) => {
+      if (right.count !== left.count) return right.count - left.count;
+      return left.value.localeCompare(right.value);
+    });
 }
