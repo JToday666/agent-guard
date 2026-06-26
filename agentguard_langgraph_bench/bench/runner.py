@@ -37,6 +37,7 @@ from .runtime.tool_server import BenchmarkToolServer
 from .scoring.success import success_for_case
 from .scoring.agent_abuse import build_agent_abuse_evaluation_report
 from .scoring.file_exfiltration import build_file_exfiltration_evaluation_report
+from .scoring.prompt_injection import build_prompt_injection_evaluation_report
 from .scoring.tool_hijacking import build_tool_hijacking_report, case_extra_dict, case_extra_list
 from .tools import MockToolRegistry
 
@@ -327,7 +328,7 @@ def _run_single_case(
             row["mcpsafety_evaluator"] = mcpsafety_report.get("evaluator")
             row["mcpsafety_attack_success"] = mcpsafety_report.get("attack_success")
             row["mcpsafety_evidence_status"] = mcpsafety_report.get("evidence_status")
-    if case.attack_type not in {"agent_abuse", "file_exfiltration"}:
+    if case.attack_type not in {"agent_abuse", "file_exfiltration", "prompt_injection"}:
         row["attack_success"] = success_for_case(case, row)
         report_payload = None
     else:
@@ -369,6 +370,35 @@ def _run_single_case(
                 benchmark_run_id=run_id,
                 parent_case_result_dir=case_result_dir,
             )
+    if case.attack_type == "prompt_injection":
+        report = build_prompt_injection_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
+        row["prompt_injection_evaluation_report"] = report.model_dump()
+        row["prompt_injection_attack_success"] = report.attack_success
+        row["evaluator"] = report.evaluator
+        row["evidence_status"] = report.evidence_status
+        row["completion_level"] = report.completion_level
+        row["harm_attempted"] = report.harm_attempted
+        row["task_success"] = report.task_success
+        row["safe_completion"] = report.safe_completion
+        row["attack_success"] = report.attack_success
+        row["blocked_before_harm"] = report.blocked_before_harm
+        row["blocked_after_harm"] = report.blocked_after_harm
+        row["oracle_evidence"] = report.oracle_evidence
+        row["task_progress_level"] = report.task_progress_level
+        row["task_terminal"] = report.task_terminal
+        row["task_terminal_reason"] = report.task_terminal_reason
+        row["prompt_injection_run_quality"] = report.prompt_injection_run_quality
+        row["nonfatal_post_oracle_errors"] = report.nonfatal_post_oracle_errors
+        row["run_valid"] = False if row.get("security_failure") else report.run_valid
+        if not report.run_valid:
+            row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), *report.prompt_injection_run_quality.get("invalid_reasons", [])]))
+            if not row["invalid_reasons"] and report.evidence_status in {"invalid", "unsupported"}:
+                row["invalid_reasons"] = [report.evidence_status]
+        elif not row.get("security_failure"):
+            row["invalid_reasons"] = []
+            if row.get("run_status") in {"tool_runtime_error", "max_tool_rounds"} and report.nonfatal_post_oracle_errors:
+                row["run_status"] = "completed"
+        report_payload = report.model_dump()
     if case.attack_type == "file_exfiltration":
         report = build_file_exfiltration_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
         row["file_exfiltration_evaluation_report"] = report.model_dump()
@@ -1401,6 +1431,8 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
 
 
 def _requires_browser_artifact(row: dict[str, Any]) -> bool:
+    if row.get("attack_type") == "prompt_injection":
+        return not row.get("not_applicable")
     if _is_file_exfiltration_browser_case(row):
         return not row.get("not_applicable")
     if row.get("attack_type") != "agent_abuse":
