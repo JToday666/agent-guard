@@ -6,11 +6,22 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
-from agentguard_core import AuditEvent, PolicyBundle, utc_now_iso
+from agentguard_core import (
+    ActionCriticReview,
+    AuditEvent,
+    ConfigAuditEvent,
+    ConfigAuditFinding,
+    MemoryGuardChange,
+    PolicyBundle,
+    ProvenanceEdge,
+    ProvenanceNode,
+    utc_now_iso,
+)
 
 from guard_api.models import ApprovalRequest
 from guard_api.storage.base import (
     AuditEventFilters,
+    AuditIntegrityStatus,
     EvalMetricFilters,
     EvalMetrics,
     PolicySnapshotRecord,
@@ -18,17 +29,24 @@ from guard_api.storage.base import (
     StoredBrowserSession,
     StoredLaunchCode,
 )
+from guard_api.storage.integrity import attach_audit_integrity, read_audit_integrity, verify_audit_chain
 
 
 @dataclass(slots=True)
 class MemoryControlPlaneStore:
     audit_events: list[AuditEvent] = field(default_factory=list)
+    provenance_nodes: dict[str, ProvenanceNode] = field(default_factory=dict)
+    provenance_edges: dict[str, ProvenanceEdge] = field(default_factory=dict)
+    config_audit_findings: list[dict[str, Any]] = field(default_factory=list)
+    action_critic_reviews: dict[str, ActionCriticReview] = field(default_factory=dict)
+    memory_changes: dict[str, MemoryGuardChange] = field(default_factory=dict)
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
     launch_codes: dict[str, StoredLaunchCode] = field(default_factory=dict)
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
     approval_nonces: dict[str, StoredApprovalNonce] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
+    audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
 
     def initialize(self) -> None:
@@ -38,16 +56,76 @@ class MemoryControlPlaneStore:
         return True
 
     def add_audit_event(self, event: AuditEvent) -> None:
-        self.audit_events.append(event)
+        with self.audit_integrity_lock:
+            prev = read_audit_integrity(self.audit_events[-1]) if self.audit_events else None
+            event_with_integrity = attach_audit_integrity(
+                event,
+                sequence=len(self.audit_events) + 1,
+                prev_hash=prev.event_hash if prev is not None else None,
+            )
+            self.audit_events.append(event_with_integrity)
 
     def list_audit_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
         filters = filters or AuditEventFilters()
         events = _filter_audit_events(list(reversed(self.audit_events)), filters)
         return events[: _bounded_limit(filters.limit)]
 
+    def verify_audit_integrity(self) -> AuditIntegrityStatus:
+        with self.audit_integrity_lock:
+            return verify_audit_chain(list(self.audit_events))
+
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         events = _filter_audit_events(list(reversed(self.audit_events)), filters or EvalMetricFilters())
         return _aggregate_metrics(events)
+
+    def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
+        self.provenance_nodes[node.node_id] = node
+        return node
+
+    def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge:
+        self.provenance_edges[edge.edge_id] = edge
+        return edge
+
+    def list_provenance(self, trace_id: str) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
+        nodes = [node for node in self.provenance_nodes.values() if node.trace_id == trace_id]
+        edges = [edge for edge in self.provenance_edges.values() if edge.trace_id == trace_id]
+        nodes.sort(key=lambda node: (node.timestamp, node.node_id))
+        edges.sort(key=lambda edge: (edge.timestamp, edge.edge_id))
+        return nodes, edges
+
+    def add_config_audit_finding(
+        self,
+        event: ConfigAuditEvent,
+        finding: ConfigAuditFinding,
+    ) -> ConfigAuditFinding:
+        self.config_audit_findings.append(
+            {
+                "event": event.model_dump(mode="json"),
+                "finding": finding.model_dump(mode="json"),
+            }
+        )
+        return finding
+
+    def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
+        self.action_critic_reviews[review.review_id] = review
+        return review
+
+    def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]:
+        reviews = [review for review in self.action_critic_reviews.values() if review.trace_id == trace_id]
+        return sorted(reviews, key=lambda review: (review.created_at, review.review_id))
+
+    def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        self.memory_changes[change.change_id] = change
+        return change
+
+    def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
+        return self.memory_changes.get(change_id)
+
+    def update_memory_change_status(self, change_id: str, status: str) -> MemoryGuardChange:
+        current = self.memory_changes[change_id]
+        updated = current.model_copy(update={"status": status, "updated_at": utc_now_iso()})
+        self.memory_changes[change_id] = updated
+        return updated
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         if self.policy_snapshot is None:

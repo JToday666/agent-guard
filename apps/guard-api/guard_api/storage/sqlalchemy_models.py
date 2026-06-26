@@ -13,7 +13,94 @@ audit_events = Table(
     Column("audit_id", Text, primary_key=True),
     Column("payload_json", JSONB, nullable=False),
     Column("created_at", Text, nullable=False),
+    Column("chain_id", Text, nullable=False),
+    Column("sequence", Integer, nullable=False),
+    Column("prev_hash", Text, nullable=True),
+    Column("event_hash", Text, nullable=False),
     Index("ix_audit_events_created_at", "created_at"),
+    Index("ix_audit_events_chain_sequence", "chain_id", "sequence"),
+    Index("ix_audit_events_event_hash", "event_hash"),
+)
+
+audit_integrity_heads = Table(
+    "audit_integrity_heads",
+    metadata,
+    Column("chain_id", Text, primary_key=True),
+    Column("sequence", Integer, nullable=False),
+    Column("event_hash", Text, nullable=True),
+    Column("updated_at", Text, nullable=False),
+)
+
+provenance_nodes = Table(
+    "provenance_nodes",
+    metadata,
+    Column("node_id", Text, primary_key=True),
+    Column("trace_id", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("ref_id", Text, nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Index("ix_provenance_nodes_trace_id", "trace_id"),
+    Index("ix_provenance_nodes_kind", "kind"),
+)
+
+provenance_edges = Table(
+    "provenance_edges",
+    metadata,
+    Column("edge_id", Text, primary_key=True),
+    Column("trace_id", Text, nullable=False),
+    Column("source_node_id", Text, nullable=False),
+    Column("target_node_id", Text, nullable=False),
+    Column("relation", Text, nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Index("ix_provenance_edges_trace_id", "trace_id"),
+    Index("ix_provenance_edges_relation", "relation"),
+)
+
+config_audit_findings = Table(
+    "config_audit_findings",
+    metadata,
+    Column("finding_id", Text, primary_key=True),
+    Column("runtime", Text, nullable=False),
+    Column("target_type", Text, nullable=False),
+    Column("target_id", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Index("ix_config_audit_findings_runtime", "runtime"),
+    Index("ix_config_audit_findings_target", "target_type", "target_id"),
+    Index("ix_config_audit_findings_severity", "severity"),
+)
+
+memory_guard_changes = Table(
+    "memory_guard_changes",
+    metadata,
+    Column("change_id", Text, primary_key=True),
+    Column("trace_id", Text, nullable=False),
+    Column("namespace", Text, nullable=False),
+    Column("key", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Index("ix_memory_guard_changes_trace_id", "trace_id"),
+    Index("ix_memory_guard_changes_status", "status"),
+    Index("ix_memory_guard_changes_namespace_key", "namespace", "key"),
+)
+
+action_critic_reviews = Table(
+    "action_critic_reviews",
+    metadata,
+    Column("review_id", Text, primary_key=True),
+    Column("trace_id", Text, nullable=False),
+    Column("event_id", Text, nullable=False),
+    Column("verdict", Text, nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Index("ix_action_critic_reviews_trace_id", "trace_id"),
+    Index("ix_action_critic_reviews_event_id", "event_id"),
+    Index("ix_action_critic_reviews_verdict", "verdict"),
 )
 
 approval_requests = Table(

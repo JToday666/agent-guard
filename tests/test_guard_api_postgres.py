@@ -528,6 +528,12 @@ def _reset_control_plane_schema(database_url: str) -> None:
     engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
     with engine.begin() as conn:
         for table in [
+            "action_critic_reviews",
+            "memory_guard_changes",
+            "config_audit_findings",
+            "provenance_edges",
+            "provenance_nodes",
+            "audit_integrity_heads",
             "policy_snapshot_history",
             "policy_snapshots",
             "approval_nonces",
