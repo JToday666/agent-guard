@@ -98,7 +98,15 @@ pnpm openclaw:plugin:install
 
 ## 6. 验证
 
-运行：
+首选通过 AgentGuard CLI 验证：
+
+```bash
+uv run agentguardctl openclaw verify
+```
+
+该命令只封装现有 OpenClaw 插件验证脚本，不重写 runtime 检查逻辑，不负责安装或卸载插件。
+
+等价底层命令：
 
 ```bash
 pnpm openclaw:plugin:verify
@@ -136,6 +144,7 @@ resolve_exec_env
 需要人工复查时可直接运行：
 
 ```bash
+uv run agentguardctl openclaw verify
 openclaw plugins inspect agentguard-security --runtime --json
 openclaw gateway status
 ```

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Formal AgentGuard Core and API service"
 requires-python = ">=3.12"
 dependencies = [
+  "agentguard-cli",
   "agentguard-core",
   "agentguard-guard-api",
   "httpx>=0.28",
@@ -20,6 +21,7 @@ dev = [
 package = false
 
 [tool.uv.sources]
+agentguard-cli = { path = "apps/cli", editable = true }
 agentguard-core = { path = "packages/agentguard-core", editable = true }
 agentguard-guard-api = { path = "apps/guard-api", editable = true }
 

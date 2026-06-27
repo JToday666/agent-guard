@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentguard-cli"
+version = "0.1.0"
+description = "Headless command-line control utility for AgentGuard"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.28",
+]
+
+[project.scripts]
+agentguardctl = "agentguard_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentguard_cli*"]
