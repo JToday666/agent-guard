@@ -11,7 +11,7 @@ from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
 from guard_api.services import PolicyService
-from guard_api.settings import GuardApiSettings
+from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
 
@@ -249,6 +249,18 @@ def test_health_can_check_database_status() -> None:
     assert success_response.json() == {"status": "ok", "database": "ok"}
     assert failure_response.status_code == 503
     assert failure_response.json() == {"status": "degraded", "database": "error"}
+
+
+def test_production_startup_rejects_default_database_and_tokens() -> None:
+    settings = GuardApiSettings(environment="production")
+
+    with pytest.raises(GuardApiConfigurationError) as error:
+        settings.validate_for_startup()
+
+    message = str(error.value)
+    assert "AGENTGUARD_DATABASE_URL" in message
+    assert "AGENTGUARD_ADAPTER_TOKEN" in message
+    assert "AGENTGUARD_CONTROL_TOKEN" in message
 
 
 def test_auth_state_survives_new_auth_service_instance() -> None:

@@ -160,7 +160,7 @@ function eventSummary(event) {
     decision: event.decision,
     blocked: event.blocked,
     rule_hits: event.rule_hits,
-    resource_targets: (event.resources ?? []).map((resource) => resource.target),
+    resource_targets: event.resource_targets ?? [],
   };
 }
 
@@ -352,6 +352,7 @@ async function main() {
   const configProvenance = await authedGet("/v1/traces/third-party-e2e/provenance", cookie).catch(() => null);
 
   const eventTypes = new Set(auditEvents.map((event) => event.event_type));
+  const traceIds = new Set(auditEvents.map((event) => event.trace_id));
   const requiredEventTypes = [
     "tool_call_proposed",
     "message_send_proposed",
@@ -362,6 +363,9 @@ async function main() {
   for (const eventType of requiredEventTypes) {
     assertCondition(eventTypes.has(eventType), `missing audit event type ${eventType}`);
   }
+  for (const traceId of [toolTraceId, messageTraceId, resultTraceId, observationTraceId]) {
+    assertCondition(traceIds.has(traceId), `missing audit trace ${traceId}`);
+  }
   assertCondition(
     auditEvents.every((event) => event.runtime === "openclaw"),
     "non-openclaw audit event returned",
@@ -371,6 +375,13 @@ async function main() {
   const toolKinds = nodeKinds(toolProvenance);
   for (const kind of ["event", "decision", "audit"]) {
     assertCondition(toolKinds.includes(kind), `tool provenance missing ${kind} node`, toolKinds);
+  }
+  if (configProvenance === null) {
+    recordFailure("config audit provenance query failed");
+  } else {
+    const configKinds = nodeKinds(configProvenance);
+    assertCondition(configKinds.includes("config_audit"), "config provenance missing config_audit node", configKinds);
+    assertCondition(configKinds.includes("audit"), "config provenance missing audit node", configKinds);
   }
 
   const report = {

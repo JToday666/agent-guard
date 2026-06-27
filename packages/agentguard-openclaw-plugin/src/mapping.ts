@@ -296,6 +296,7 @@ export function buildBeforeInstallConfigAuditEvent(event: BeforeInstallEventInpu
     findings,
     metadata: {
       manifest_id: stringValue(manifest.id, targetId),
+      trace_id: targetId,
     },
   };
 }

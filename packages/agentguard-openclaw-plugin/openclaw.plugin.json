@@ -30,6 +30,14 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 600000
+      },
+      "approvalWaitBudgetMs": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 600000
+      },
+      "diagnosticLogging": {
+        "type": "boolean"
       }
     }
   },
@@ -41,6 +49,9 @@
     "adapterToken": {
       "label": "AgentGuard adapter token",
       "sensitive": true
+    },
+    "diagnosticLogging": {
+      "label": "Diagnostic logging"
     }
   }
 }

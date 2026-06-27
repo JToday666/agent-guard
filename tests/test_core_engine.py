@@ -186,6 +186,47 @@ def test_tool_resource_direction_mismatch_is_denied() -> None:
     assert decision.rule_hits[0].rule_id == "P002_tool_identity_mismatch"
 
 
+def test_unprofiled_tool_with_high_risk_resource_requires_approval() -> None:
+    decision = evaluate(
+        _event(
+            tool_name="mcp_search_and_send",
+            tool_category="tool",
+            tool_kind="mcp_tool",
+            arguments={"query": "send report"},
+            user_task="Search public documentation only",
+            derived_resources=[
+                DerivedResource(
+                    resource_type="message",
+                    operation="send",
+                    target="external@example.invalid",
+                    direction="outbound",
+                )
+            ],
+        )
+    )
+
+    assert decision.decision == "ask"
+    assert "unprofiled_tool_resource_review" in decision.categories
+    assert decision.rule_hits[0].rule_id == "P007_unprofiled_tool_resource_review"
+    assert decision.approval_intent is not None
+    assert decision.approval_intent.resource == "external@example.invalid"
+
+
+def test_task_mismatch_treats_negated_action_as_not_aligned() -> None:
+    decision = evaluate(
+        _event(
+            tool_name="send_email",
+            arguments={"to": "user@agentguard.local", "subject": "status", "body": "ok"},
+            user_task="Do not send email; only draft a local summary",
+            source_trust="untrusted",
+        )
+    )
+
+    assert decision.decision == "ask"
+    assert "task_mismatch" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == ["P004_task_mismatch"]
+
+
 def test_policy_bundle_can_disable_builtin_rule() -> None:
     decision = evaluate(
         _event(
@@ -618,7 +659,8 @@ def test_policy_bundle_can_add_tool_profile_for_hijack_detection() -> None:
         ),
     )
 
-    assert default_decision.decision == "allow"
+    assert default_decision.decision == "ask"
+    assert [hit.rule_id for hit in default_decision.rule_hits] == ["P007_unprofiled_tool_resource_review"]
     assert custom_decision.decision == "deny"
     assert [hit.rule_id for hit in custom_decision.rule_hits] == ["P002_tool_identity_mismatch"]
 
