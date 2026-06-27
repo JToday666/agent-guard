@@ -30,6 +30,12 @@ cp .env.example .env
 
 `.env` 已被 Git 忽略，不得提交真实数据库密码、adapter token 或 control token。
 
+PostgreSQL 集成测试使用独立测试库，默认示例为：
+
+```dotenv
+AGENTGUARD_TEST_DATABASE_URL=postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+```
+
 完整部署、安装、使用和故障排查说明见 [部署、安装与使用说明](docs/06_delivery/deployment_install_usage.md)。
 
 ## 本地真实 API 模式
@@ -70,9 +76,12 @@ uv run agentguardctl metrics --json
 uv run agentguardctl trace get <trace_id> --provenance
 uv run agentguardctl openclaw verify
 uv run agentguardctl eval run --help
+pnpm openclaw:plugin:e2e
 ```
 
 需要鉴权的命令读取 `AGENTGUARD_CONTROL_TOKEN`。CLI 默认连接 `AGENTGUARD_API_URL`，未设置时使用 `http://${AGENTGUARD_HOST:-127.0.0.1}:${AGENTGUARD_PORT:-8088}`。
+
+OpenClaw E2E 会读取根 `.env`，触发 `before_tool_call`、`message_sending`、`before_install`、`tool_result_persist` 和 `session_start`，并输出 `/tmp/agentguard-openclaw-e2e-report.json` 与 `/tmp/agentguard-openclaw-e2e-acceptance-report.md`。
 
 ## Mock 模式
 

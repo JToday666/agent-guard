@@ -37,6 +37,7 @@ cp .env.example .env
 ```dotenv
 AGENTGUARD_ENV=development
 AGENTGUARD_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/agent_guard
+AGENTGUARD_TEST_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/agent_guard_test
 AGENTGUARD_ADAPTER_TOKEN=ag_adapter_xxx
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
 AGENTGUARD_HOST=127.0.0.1
@@ -46,6 +47,8 @@ AGENTGUARD_PORT=8088
 `.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、launch code、CSRF token、approval nonce 或 browser session。
 
 Guard API 需要 PostgreSQL，并要求 `AGENTGUARD_DATABASE_URL` 指向的用户和数据库已存在。启动 API 时会执行当前 migration。
+
+PostgreSQL 集成测试要求 `AGENTGUARD_TEST_DATABASE_URL` 指向独立测试库，例如 `agent_guard_test`。不要把该变量指向开发库或生产库。
 
 ## 3. Core 使用与验证
 
@@ -117,6 +120,7 @@ http://localhost:5173/?launch_code=lc_xxx
 
 ```bash
 uv run agentguardctl health --check-db
+pnpm openclaw:plugin:e2e
 ```
 
 也可以直接访问：
