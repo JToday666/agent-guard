@@ -4,10 +4,12 @@ import {
 } from "../mocks/dashboard-data";
 import type {
   ApprovalRequest,
+  AuditIntegrity,
   EvalMetrics,
   EvaluationSummary,
   PolicyHistoryEntry,
   PolicySummary,
+  ProvenanceGraph,
   TraceDetail,
 } from "../types/dashboard";
 import type {
@@ -160,5 +162,20 @@ export class MockDashboardDataSource implements DashboardDataSource {
         version: "p0",
       },
     ];
+  }
+
+  async getAuditIntegrity(): Promise<AuditIntegrity> {
+    await wait(this.delayMs);
+    return {
+      valid: true,
+      eventCount: fixtureEvents.length,
+      headHash: "a3f9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+      firstBrokenAuditId: null,
+    };
+  }
+
+  async getTraceProvenance(traceId: string): Promise<ProvenanceGraph> {
+    await wait(this.delayMs);
+    return { traceId, nodes: [], edges: [] };
   }
 }

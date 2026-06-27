@@ -26,6 +26,7 @@ function event(overrides: Partial<AuditEventRow>): AuditEventRow {
     runtime: "langgraph",
     severity: "low",
     stage: "pre_tool",
+    eventType: "tool_call_proposed",
     time: "10:00:00",
     tool: "read_file",
     traceId: "trace-1",
@@ -114,6 +115,9 @@ test("filters indexed events by combined URL-backed criteria", () => {
     runtime: "",
     search: "ssh",
     severity: "high",
+    eventType: "",
+    stage: "",
+    attackType: "",
   });
 
   assert.deepEqual(

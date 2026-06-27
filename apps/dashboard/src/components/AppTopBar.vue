@@ -82,16 +82,15 @@ function handleSearch(): void {
 }
 
 .top-bar__title {
-  color: var(--color-text);
+  background: linear-gradient(135deg, #101828 30%, #155eef);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   display: block;
   font-size: var(--font-size-18);
   font-weight: var(--font-weight-bold);
   line-height: var(--line-height-tight);
   text-decoration: none;
-
-  &:hover {
-    color: var(--color-active);
-  }
 }
 
 .top-bar__subtitle {

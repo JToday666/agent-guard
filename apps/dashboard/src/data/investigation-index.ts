@@ -57,6 +57,9 @@ export function filterInvestigationEvents(
     if (query.rule && !event.ruleHits.includes(query.rule)) return false;
     if (query.blocked && event.blocked !== (query.blocked === "true"))
       return false;
+    if (query.eventType && event.eventType !== query.eventType) return false;
+    if (query.stage && event.stage !== query.stage) return false;
+    if (query.attackType && event.attackType !== query.attackType) return false;
     if (!searchValue) return true;
 
     return [

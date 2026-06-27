@@ -25,6 +25,7 @@ function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
     blocked: true,
     runtime: "langgraph",
     stage: "before_tool_call",
+    eventType: "tool_call_proposed",
     tool: "read_file",
     resource: "/private/token.txt",
     resourceTargets: ["/private/token.txt"],

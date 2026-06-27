@@ -16,29 +16,31 @@ Dashboard 不做用户登录，不保存长期 token，不生成 launch code，�
 
 ## 2. 模块职责
 
-| 当前页面 | 职责                                                                                      |
-| -------- | ----------------------------------------------------------------------------------------- |
-| 总览     | 展示事件、风险、阻断、审批和评测概况                                                      |
-| 调查     | 筛选 AuditEvent，按 `trace_id` 进入调查详情                                               |
-| 调查详情 | 优先读取 Trace 详情接口生成时间线，失败时回退已加载审计事件窗口，并按 `event_id` 定位证据 |
-| 审批     | 展示 pending approval，处理 `allow_once` 和 `deny`                                        |
-| 评测     | 展示 Block Rate、FPR、FNR、Latency；ASR 仅在接口提供 before / after 数据时展示            |
-| 系统状态 | 展示 Guard API、数据源健康状态和只读策略快照                                              |
+| 当前页面 | 路由                        | 职责                                                                                                               |
+| -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 安全总览 | `/overview`                 | 展示事件、风险、阻断、审批、评测概况、规则命中 TopN、审计完整性摘要                                                |
+| 事件调查 | `/investigations`           | 筛选 AuditEvent，支持按 decision/runtime/severity/event_type/attack_type/rule 筛选，导出 CSV，点击行进入证据链     |
+| 证据链   | `/investigations/:trace_id` | 优先读取 Trace 详情接口生成时间线，展示溯源图与节点证据抽屉，时间线与溯源图联动，失败时回退已加载审计事件窗口      |
+| 人工审批 | `/approvals/:approval_id?`  | 展示 pending approval，处理 `allow_once` 和 `deny`                                                                 |
+| 安全评测 | `/evaluation`               | 展示 Block Rate、FPR、FNR、Latency、混淆矩阵、运行时延迟对比；ASR 仅在接口提供 before / after 数据时展示           |
+| 系统状态 | `/system`                   | 展示 Guard API 健康、数据库、browser session、轮询状态、只读策略快照、审计链完整性、运行时适配器活动、配置审计摘要 |
 
 ## 3. 数据来源
 
 ```text
 GET  /v1/audit/events
+GET  /v1/audit/integrity
 GET  /v1/metrics/eval
 GET  /v1/approvals/pending
 GET  /v1/traces/{trace_id}
+GET  /v1/traces/{trace_id}/provenance
 GET  /v1/policies/current
 GET  /v1/policies/history
 GET  /health?check_db=true
 POST /v1/approvals/{id}/resolve
 ```
 
-Dashboard 不直接读取 LangGraph、OpenClaw、Mock Tools 或 AttackBench runner 的内部状态。调查详情优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载的 `GET /v1/audit/events` 事件窗口按 `trace_id` 做局部回退，不补造链路事实。
+Dashboard 不直接读取 LangGraph、OpenClaw、Mock Tools 或 AttackBench runner 的内部状态。证据链页优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载的 `GET /v1/audit/events` 事件窗口按 `trace_id` 做局部回退，不补造链路事实。溯源图读取 `GET /v1/traces/{trace_id}/provenance`，失败时不影响审计时间线显示。
 
 ## 4. 鉴权边界
 
@@ -52,13 +54,9 @@ AGENTGUARD_ADAPTER_TOKEN
 Authorization Bearer token
 ```
 
-## 5. 页面优先级
+## 5. 页面现状
 
-| 阶段    | 页面                                       |
-| ------- | ------------------------------------------ |
-| 当前    | 总览、调查、调查详情、审批、评测、系统状态 |
-| P1 规划 | 扩展 trace 和运行时指标能力                |
-| P2 规划 | OpenClaw 配置审计、审计完整性              |
+全部六个页面均已实现：安全总览、事件调查、证据链（隐藏详情页）、人工审批、安全评测、系统状态。
 
 ## 6. 展示原则
 
@@ -67,27 +65,15 @@ Authorization Bearer token
 - 指标页必须区分 defense before / after。
 - 审批页必须说明放行风险，避免只提供按钮。
 
-## 7. P0/P1/P2 开发边界
+## 7. 已交付边界
 
-| 阶段 | 交付                                         |
-| ---- | -------------------------------------------- |
-| P0   | 调查列表、阻断记录、基础总览、Dashboard 审批 |
-| P1   | trace 时间线、指标评测、CLI 审批             |
-| P2   | OpenClaw 社交审批、配置审计、审计完整性      |
+P0、P1 关键路径和部分 P2 功能均已交付：
 
-P0 Dashboard 审批是最小人工审批闭环：
+- P0：事件调查列表、阻断记录、基础总览、Dashboard 审批、审计完整性
+- P1：证据链时间线、溯源图、指标评测、混淆矩阵
+- P2（已完成）：OpenClaw 配置审计摘要、审计完整性完整展示、运行时适配器活动、规则命中 TopN、runtime 延迟对比
 
-```text
-Core 返回 ask
-→ Core 创建 pending approval
-→ Dashboard 展示待审批
-→ 用户 allow_once / deny
-→ Adapter wait 收到结果
-→ 工具继续或取消
-→ AuditEvent 更新
-```
-
-P0 不做永久放行、多渠道审批、审批策略配置或 OpenClaw 社交审批。
+P2 待办：OpenClaw verify 报告导入、永久审批策略配置、多渠道审批。
 
 ## 8. 验收证据
 

@@ -7,3 +7,4 @@ allowBuilds:
   openclaw: true
   protobufjs: true
   tree-sitter-bash: true
+  vue-demi: true

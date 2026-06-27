@@ -315,7 +315,7 @@ function getOptionId(index: number): string {
 }
 
 .app-select__menu {
-  background: var(--color-surface-raised);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-raised);

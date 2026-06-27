@@ -3,7 +3,6 @@
   --color-page-strong: #edf2f8;
   --color-surface: #ffffff;
   --color-surface-muted: #f1f5f9;
-  --color-surface-raised: #ffffff;
   --color-nav: #ffffff;
   --color-text: #101828;
   --color-text-muted: #405168;
@@ -27,6 +26,13 @@
   --color-focus: #7aa7ff;
   --color-row-hover: #f8fbff;
 
+  /* 新增：节点图颜色 */
+  --color-node-event: #155eef;
+  --color-node-decision: #b42318;
+  --color-node-audit: #718096;
+  --color-node-config-audit: #7c3aed;
+  --color-node-action-critic: #d97706;
+
   --font-size-11: 0.6875rem;
   --font-size-12: 0.75rem;
   --font-size-13: 0.8125rem;
@@ -36,6 +42,7 @@
   --font-size-20: 1.25rem;
   --font-size-24: 1.5rem;
   --font-size-28: 1.75rem;
+  --font-size-32: 2rem;
 
   --line-height-tight: 1.15;
   --line-height-body: 1.5;

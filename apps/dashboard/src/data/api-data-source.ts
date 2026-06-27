@@ -2,26 +2,32 @@ import type {
   GuardApprovalDto,
   GuardApprovalResolutionDto,
   GuardAuditEventDto,
+  GuardAuditIntegrityDto,
   GuardEvalMetricsDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
+  GuardProvenanceDto,
   GuardTraceDetailDto,
 } from "../api/guard-api-types";
 import { requestHealth, requestJson } from "../api/guard-http-client";
 import {
   mapApproval,
   mapAuditEvent,
+  mapAuditIntegrity,
   mapMetrics,
   mapPolicyHistory,
   mapPolicySummary,
+  mapProvenance,
   mapTraceDetail,
 } from "../api/guard-api-mappers";
 import { mergeApprovalsWithAuditEvidence } from "./approval-evidence";
 import type {
   ApprovalRequest,
   ApprovalResolution,
+  AuditIntegrity,
   EvalMetrics,
   EvaluationSummary,
+  ProvenanceGraph,
 } from "../types/dashboard";
 import type {
   DashboardDataSource,
@@ -143,6 +149,25 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     return mapPolicyHistory(
       await requestJson<GuardPolicyHistoryDto[]>(
         "/policies/history?limit=10",
+        {},
+        signal,
+      ),
+    );
+  }
+
+  async getAuditIntegrity(signal?: AbortSignal): Promise<AuditIntegrity> {
+    return mapAuditIntegrity(
+      await requestJson<GuardAuditIntegrityDto>("/audit/integrity", {}, signal),
+    );
+  }
+
+  async getTraceProvenance(
+    traceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProvenanceGraph> {
+    return mapProvenance(
+      await requestJson<GuardProvenanceDto>(
+        `/traces/${encodeURIComponent(traceId)}/provenance`,
         {},
         signal,
       ),

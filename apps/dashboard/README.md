@@ -97,12 +97,12 @@ Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批、健
 
 ## 比赛演示路径
 
-1. 总览确认 Guard API、指标和数据更新时间。
-2. 调查页查看阻断原因、命中规则、资源与 Trace ID。
-3. 审批中心处理 `ask`，仅支持 `allow_once` 和 `deny`。
-4. 调查详情优先读取 Trace detail，展示完整证据序列和 `event_id` 定位。
-5. 评测页展示 Block Rate、FPR、FNR 和判定延迟；ASR 仅在 API 提供 before / after 数据时展示。
-6. 系统页查看 Guard API 健康状态、browser session、轮询状态和只读策略快照。
+1. 安全总览：确认 Guard API 在线、指标正常、审计链有效、规则命中分布和高风险事件。
+2. 事件调查：筛选阻断事件，查看原因、命中规则、资源与 Trace ID，导出 CSV。
+3. 证据链：进入 Trace 详情，查看审计事件时间线、溯源图与节点证据，点击节点联动时间线。
+4. 人工审批：处理 `ask` 决策，仅支持 `allow_once` 和 `deny`。
+5. 安全评测：查看 Block Rate、FPR、FNR、判定延迟、混淆矩阵和 runtime 延迟对比；ASR 仅在 API 提供 before / after 数据时展示。
+6. 系统状态：查看 Guard API 健康、browser session、轮询状态、审计链完整性、运行时适配器活动、配置审计摘要和只读策略快照。
 
 ## 测试文件边界
 

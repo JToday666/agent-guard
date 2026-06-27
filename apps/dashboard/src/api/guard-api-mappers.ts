@@ -1,17 +1,23 @@
 import type {
   GuardApprovalDto,
   GuardAuditEventDto,
+  GuardAuditIntegrityDto,
   GuardEvalMetricsDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
+  GuardProvenanceDto,
   GuardTraceDetailDto,
 } from "./guard-api-types.ts";
 import type {
   ApprovalRequest,
   AuditEventRow,
+  AuditIntegrity,
   EvalMetrics,
   PolicyHistoryEntry,
   PolicySummary,
+  ProvenanceEdge,
+  ProvenanceGraph,
+  ProvenanceNode,
   TraceDetail,
 } from "../types/dashboard.ts";
 import { maskSensitiveText } from "../utils/data-redaction.ts";
@@ -97,6 +103,7 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
     blocked: dto.blocked,
     runtime: dto.runtime,
     stage: stageName(dto),
+    eventType: dto.event_type,
     tool: action,
     resource: summarizeTargets(resourceTargets),
     resourceTargets,
@@ -111,6 +118,7 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
         : null,
     agentAction: dto.summary ? maskSensitiveText(dto.summary) : action,
     attackType: dto.attack_type,
+    isMalicious: dto.is_malicious,
     latencyMs: dto.latency_ms,
     raw: dto,
   };
@@ -222,5 +230,42 @@ export function mapPolicySummary(
       dto.tool_profiles && typeof dto.tool_profiles === "object"
         ? Object.keys(dto.tool_profiles).length
         : 0,
+  };
+}
+
+export function mapAuditIntegrity(dto: GuardAuditIntegrityDto): AuditIntegrity {
+  return {
+    valid: dto.valid,
+    eventCount: dto.event_count,
+    headHash: dto.head_hash,
+    firstBrokenAuditId: dto.first_broken_audit_id,
+  };
+}
+
+export function mapProvenance(dto: GuardProvenanceDto): ProvenanceGraph {
+  return {
+    traceId: dto.trace_id,
+    nodes: dto.nodes.map(
+      (n): ProvenanceNode => ({
+        nodeId: n.node_id,
+        traceId: n.trace_id,
+        kind: n.kind,
+        refId: n.ref_id,
+        label: n.label,
+        timestamp: n.timestamp,
+        metadata: n.metadata,
+      }),
+    ),
+    edges: dto.edges.map(
+      (e): ProvenanceEdge => ({
+        edgeId: e.edge_id,
+        traceId: e.trace_id,
+        sourceNodeId: e.source_node_id,
+        targetNodeId: e.target_node_id,
+        relation: e.relation,
+        timestamp: e.timestamp,
+        metadata: e.metadata,
+      }),
+    ),
   };
 }

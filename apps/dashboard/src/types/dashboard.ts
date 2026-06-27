@@ -18,6 +18,7 @@ export interface AuditEventRow {
   blocked: boolean;
   runtime: RuntimeName;
   stage: string;
+  eventType: string;
   tool: string;
   resource: string;
   resourceTargets: string[];
@@ -29,6 +30,7 @@ export interface AuditEventRow {
   userTask: string | null;
   agentAction: string | null;
   attackType?: string | null;
+  isMalicious?: boolean | null;
   latencyMs?: number | null;
   raw?: unknown;
 }
@@ -131,4 +133,37 @@ export interface PolicySummary {
   disabledRuleCount: number;
   ruleOverrideCount: number;
   toolProfileCount: number;
+}
+
+export interface AuditIntegrity {
+  valid: boolean;
+  eventCount: number;
+  headHash: string;
+  firstBrokenAuditId: string | null;
+}
+
+export interface ProvenanceNode {
+  nodeId: string;
+  traceId: string;
+  kind: string;
+  refId: string;
+  label: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ProvenanceEdge {
+  edgeId: string;
+  traceId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  relation: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ProvenanceGraph {
+  traceId: string;
+  nodes: ProvenanceNode[];
+  edges: ProvenanceEdge[];
 }
