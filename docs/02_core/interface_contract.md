@@ -43,7 +43,8 @@ Runtime Native Event
 | `GET /health?check_db=true` | P0 | Control Plane 数据库连接健康检查 |
 | `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
 | `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
-| `GET /v1/audit/events` | P0 | Dashboard 事件列表，可按 query 过滤 |
+| `GET /v1/audit/events` | P0 | Dashboard/CLI 事件列表，可按 query 过滤 |
+| `GET /v1/audit/integrity` | P0 | Dashboard/CLI 审计完整性状态 |
 | `GET /v1/metrics/eval` | P0 | 评测指标，可按 query 过滤 |
 | `POST /v1/auth/browser/launch` | P0 | 创建 Dashboard launch code |
 | `POST /v1/auth/browser/exchange` | P0 | launch code 换 browser session |
@@ -53,8 +54,10 @@ Runtime Native Event
 | `POST /v1/approvals/{approval_id}/resolve` | P0 | Dashboard 审批处理 |
 | `GET /v1/approvals/{approval_id}/wait` | P0 | Adapter 等待审批结果 |
 | `GET /v1/traces/{trace_id}` | P1 | 攻击链路详情 |
-| `POST /v1/policies` | P1 | 创建或导入策略 |
-| `GET /v1/policies` | P1 | 策略列表和策略快照查询 |
+| `GET /v1/traces/{trace_id}/provenance` | P1 | 攻击链路 provenance |
+| `GET /v1/policies/current` | P0 | 当前策略快照查询 |
+| `PUT /v1/policies/current` | P0 | 替换当前策略快照 |
+| `GET /v1/policies/history` | P0 | 策略快照历史 |
 | `POST /v1/eval/runs` | P1 | 创建评测任务 |
 | `GET /v1/metrics/runtime` | P1 | 运行时监控指标 |
 
@@ -75,14 +78,14 @@ P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `Auth
 
 | 调用方           | 凭证            | 要求                                                                                 |
 | ---------------- | --------------- | ------------------------------------------------------------------------------------ |
-| CLI / Launcher   | control token   | `Authorization: Bearer`，仅用于 `auth:launch` 和控制面管理能力                       |
+| CLI / Launcher   | control token   | `Authorization: Bearer`，用于 `auth:launch` 和 `audit:read`、`metrics:read`、`trace:read`、`policy:read` |
 | Adapter / Plugin | adapter token   | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
 | Vue Dashboard    | browser session | HttpOnly Cookie，用于 Dashboard API                                                  |
 | Vue 状态改变请求 | CSRF token      | `X-AgentGuard-CSRF`                                                                  |
 | 审批 resolve     | approval nonce  | JSON body，单次使用                                                                  |
 
-Adapter 不得拥有 `approval:resolve`。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
-Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/history` 需要 browser session，`PUT /v1/policies/current` 需要 browser session 和 `X-AgentGuard-CSRF`。Adapter token 不能读取或写入策略。
+Adapter 不得拥有 `approval:resolve`、`auth:launch` 或 CLI/Dashboard 只读 scope。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
+Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/history` 接受 browser session 或 control token + `policy:read`，`PUT /v1/policies/current` 需要 browser session 和 `X-AgentGuard-CSRF`。Adapter token 不能读取或写入策略。
 `PUT /v1/policies/current` 替换单 current snapshot，并追加 history revision；Control Plane 必须保证并发写入时 revision 单调递增且 history 不丢失。
 
 除 `GET /health?check_db=true` 的数据库降级响应仍保持 `{"status":"degraded","database":"error"}` 外，Guard API 非 2xx 错误统一使用兼容 envelope：
@@ -126,7 +129,7 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 `GET /v1/policies/history` 返回最近变更记录，至少包含 `revision`、`updated_at`、`updated_by`、`bundle_id` 和 `version`。
 当前接口不提供多版本激活、激活审批流、rollback endpoint、策略 diff 或多租户隔离。
 
-`GET /v1/traces/{trace_id}` 需要 browser session，不新增 trace 表，返回结构固定为：
+`GET /v1/traces/{trace_id}` 接受 browser session 或 control token + `trace:read`，不新增 trace 表，返回结构固定为：
 
 ```json
 {

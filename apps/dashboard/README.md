@@ -78,13 +78,18 @@ pnpm guard-api:dev
 pnpm dashboard:dev
 ```
 
-在第三个终端创建一次性 launch code：
+在第三个终端加载根 `.env` 并创建一次性 launch code：
 
 ```bash
-pnpm guard-api:launch
+set -a
+. ./.env
+set +a
+uv run agentguardctl launch
 ```
 
-命令只输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的完整地址，不输出 control token。将该地址直接粘贴到目标浏览器后，前端通过 Vite 代理交换 browser session，并从地址栏移除 launch code。launch code 只能使用一次；VS Code 内置浏览器、外部浏览器和不同浏览器配置文件需要分别运行一次 `pnpm guard-api:launch`。始终使用 `localhost`，不要与 `127.0.0.1` 混用。
+命令只输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的完整地址，不输出 control token。将该地址直接粘贴到目标浏览器后，前端通过 Vite 代理交换 browser session，并从地址栏移除 launch code。launch code 只能使用一次；VS Code 内置浏览器、外部浏览器和不同浏览器配置文件需要分别运行一次 `uv run agentguardctl launch`。始终使用 `localhost`，不要与 `127.0.0.1` 混用。
+
+`uv run agentguardctl launch` 只创建登录地址，不启动 Vite 页面服务。如果浏览器显示 `ERR_CONNECTION_REFUSED localhost:5173`，说明 `pnpm dashboard:dev` 没有运行或端口不是 `5173`。`pnpm guard-api:launch` 仍保留为兼容脚本。
 
 如果直接访问 `http://localhost:5173/`，浏览器尚无 session，`GET /v1/auth/browser/me` 返回 `401` 属于预期行为。API 请求失败时不会自动切换到 Mock 数据。
 
@@ -122,6 +127,7 @@ apps/dashboard/
 - [前端文档索引](docs/README.md)
 - [前端 UI 设计规范](docs/04-规范/前端UI设计规范.md)
 - [文档维护约定](docs/04-规范/文档维护约定.md)
+- [根部署、安装与使用说明](../../docs/06_delivery/deployment_install_usage.md)
 
 ## 边界
 

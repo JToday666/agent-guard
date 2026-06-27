@@ -54,6 +54,19 @@ def _policy_snapshot_record_payload(record: PolicySnapshotRecord) -> dict[str, A
     }
 
 
+def _verify_browser_or_bearer_read(
+    auth: CapabilityAuthService,
+    *,
+    required_scope: str,
+    authorization: str | None,
+    agentguard_session: str | None,
+) -> None:
+    if authorization:
+        auth.verify_bearer(authorization, required_scope)
+        return
+    auth.verify_browser_session(agentguard_session)
+
+
 def create_app(
     *,
     store: ControlPlaneStore | None = None,
@@ -167,8 +180,16 @@ def create_app(
         return response.model_dump(mode="json")
 
     @app.get("/v1/policies/current")
-    def current_policy(agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
-        auth.verify_browser_session(agentguard_session)
+    def current_policy(
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="policy:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         return policy_service.current_snapshot().model_dump(mode="json")
 
     @app.put("/v1/policies/current")
@@ -184,9 +205,15 @@ def create_app(
     @app.get("/v1/policies/history")
     def policy_history(
         limit: int = 100,
+        authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
     ) -> list[dict[str, Any]]:
-        auth.verify_browser_session(agentguard_session)
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="policy:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         return [
             _policy_snapshot_record_payload(record)
             for record in policy_service.list_history(limit=_bounded_limit(limit))
@@ -204,9 +231,15 @@ def create_app(
         runtime: str | None = None,
         decision: str | None = None,
         limit: int = 500,
+        authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
     ) -> list[dict[str, Any]]:
-        auth.verify_browser_session(agentguard_session)
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="audit:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         filters = AuditEventFilters(
             trace_id=trace_id,
             case_id=case_id,
@@ -217,8 +250,16 @@ def create_app(
         return [event.model_dump(mode="json") for event in audit_service.list_events(filters)]
 
     @app.get("/v1/audit/integrity")
-    def audit_integrity(agentguard_session: str | None = Cookie(default=None)) -> dict[str, object]:
-        auth.verify_browser_session(agentguard_session)
+    def audit_integrity(
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, object]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="audit:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         return audit_service.integrity()
 
     @app.get("/v1/metrics/eval")
@@ -227,20 +268,44 @@ def create_app(
         case_id: str | None = None,
         runtime: str | None = None,
         decision: str | None = None,
+        authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
-        auth.verify_browser_session(agentguard_session)
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="metrics:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
         return metric_service.eval_metrics(filters)
 
     @app.get("/v1/traces/{trace_id}")
-    def trace_detail(trace_id: str, agentguard_session: str | None = Cookie(default=None)) -> dict[str, Any]:
-        auth.verify_browser_session(agentguard_session)
+    def trace_detail(
+        trace_id: str,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="trace:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         return trace_service.get_trace(trace_id)
 
     @app.get("/v1/traces/{trace_id}/provenance")
-    def trace_provenance(trace_id: str, agentguard_session: str | None = Cookie(default=None)) -> dict[str, object]:
-        auth.verify_browser_session(agentguard_session)
+    def trace_provenance(
+        trace_id: str,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, object]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="trace:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
         return trace_service.get_provenance(trace_id)
 
     @app.post("/v1/config-audit/evaluate")
