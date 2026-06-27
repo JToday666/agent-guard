@@ -15,20 +15,22 @@ body {
   );
   color: var(--color-text);
   font-family:
+    "Inter Variable",
     Inter,
     -apple-system,
     BlinkMacSystemFont,
     "SF Pro Text",
-    "SF Pro Display",
     "PingFang SC",
     "Hiragino Sans GB",
     "Microsoft YaHei UI",
     "Microsoft YaHei",
     "Noto Sans CJK SC",
-    "Segoe UI",
     ui-sans-serif,
     system-ui,
     sans-serif;
+  font-feature-settings:
+    "cv05" 1,
+    "cv11" 1;
   font-synthesis: none;
   line-height: var(--line-height-body);
   margin: 0;
@@ -79,6 +81,17 @@ button {
 ::selection {
   background: var(--color-active-border);
   color: var(--color-text);
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

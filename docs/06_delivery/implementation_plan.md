@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环已有可运行实现；P1/P2 开发项与优先级保持不变。
+本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环和 P1 核心路径均已有可运行实现；P2 部分功能已完成，余下开发项保持不变。
 
 关联入口：
 
@@ -68,24 +68,38 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
    - 展示 pending approval，并支持 `allow_once` / `deny`。
    - 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
 
-## 4. P1 开发项
+## 4. P1 已完成项
+
+- `GET /v1/traces/{trace_id}` 已接入，证据链页展示 Trace 时间线与详情。
+- `GET /v1/traces/{trace_id}/provenance` 已接入，证据链页展示溯源图，时间线与节点联动。
+- `GET /v1/audit/integrity` 已接入，系统状态页与安全总览展示审计链完整性。
+- FPR、FNR、Block Rate、Latency 已在安全评测页展示；混淆矩阵由 `is_malicious + blocked` 派生。
+- Dashboard 运行时延迟对比（LangGraph / OpenClaw）由 `latency_ms` 字段前端派生。
+
+## 5. P1 待完成项
 
 - `ContextBuildEvent`、`ToolResultEvent`、`MemoryEvent`。
 - `pre_model_hook`、`post_model_hook`。
 - 消息外发和记忆写入审计。
-- 攻击链路页。
-- FPR、FNR、Precision、Recall、Latency。
-- OpenClaw `before_tool_call` 和 `message_sending` Hook 验证。
+- `POST /v1/eval/runs` 评测任务接口。
+- `GET /v1/metrics/runtime` 运行时监控指标。
 
-## 5. P2 增强项
+## 6. P2 已完成项
 
-- Provenance Graph。
+- Provenance Graph（前端接入）。
+- Tamper-Evident Audit / 审计完整性（前端接入）。
+- OpenClaw Config Audit 摘要（前端展示，基于 `event_type=config_audit` 派生）。
+- 运行时适配器活动（LangGraph / OpenClaw 审计统计）。
+- Dashboard 规则命中 TopN。
+
+## 7. P2 待完成项
+
 - Memory Guard。
 - Action Critic。
-- Tamper-Evident Audit。
-- OpenClaw Config Audit。
 - 多渠道审批。
 - 消融实验。
+- OpenClaw verify 报告导入或后端状态接口（见 `docs/TODO.md`）。
+- 安全评测 ASR before/after 后端接口（见 `docs/TODO.md`）。
 
 ## 6. 分工建议
 

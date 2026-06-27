@@ -18,6 +18,7 @@ import {
 } from "../data/dashboard-snapshot";
 import type {
   ApprovalRequest,
+  AuditIntegrity,
   AuditEventRow,
   DataStatus,
   EvalMetrics,
@@ -25,6 +26,7 @@ import type {
   HealthStatus,
   PolicyHistoryEntry,
   PolicySummary,
+  ProvenanceGraph,
   TraceDetail,
   TraceSummary,
 } from "../types/dashboard";
@@ -80,6 +82,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const policySummary = ref<PolicySummary | null>(null);
   const policyHistory = ref<PolicyHistoryEntry[]>([]);
   const policyError = ref<string | null>(null);
+  const auditIntegrity = ref<AuditIntegrity | null>(null);
+  const provenanceByTrace = ref<Record<string, ProvenanceGraph>>({});
+  const provenanceErrors = ref<Record<string, string>>({});
   const health = ref<HealthStatus>({
     api: "unknown",
     database: "unknown",
@@ -122,6 +127,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return [...counts.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((left, right) => right.value - left.value);
+  });
+  const ruleDistribution = computed(() => {
+    const counts = new Map<string, number>();
+    for (const event of investigationIndex.value.latestEvents) {
+      for (const rule of event.ruleHits) {
+        counts.set(rule, (counts.get(rule) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
   });
   const traces = computed<TraceSummary[]>(() => {
     return [...investigationIndex.value.byTrace.entries()]
@@ -221,6 +238,15 @@ export const useDashboardStore = defineStore("dashboard", () => {
         policyResult.reason instanceof Error
           ? policyResult.reason.message
           : "策略数据加载失败";
+    }
+
+    // 审计完整性（non-critical，失败不影响主状态）
+    try {
+      auditIntegrity.value = await dashboardDataSource.getAuditIntegrity(
+        controller.signal,
+      );
+    } catch {
+      // 忽略，不影响主刷新状态
     }
 
     const failures = [
@@ -357,6 +383,22 @@ export const useDashboardStore = defineStore("dashboard", () => {
     activeController?.abort();
   }
 
+  async function loadTraceProvenance(traceId: string): Promise<void> {
+    if (!traceId || provenanceByTrace.value[traceId]) return;
+    try {
+      const graph = await dashboardDataSource.getTraceProvenance(traceId);
+      provenanceByTrace.value = {
+        ...provenanceByTrace.value,
+        [traceId]: graph,
+      };
+    } catch (reason) {
+      provenanceErrors.value = {
+        ...provenanceErrors.value,
+        [traceId]: reason instanceof Error ? reason.message : "溯源图加载失败",
+      };
+    }
+  }
+
   return {
     events,
     approvals,
@@ -368,6 +410,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
     policySummary,
     policyHistory,
     policyError,
+    auditIntegrity,
+    provenanceByTrace,
+    provenanceErrors,
     health,
     status,
     error,
@@ -379,9 +424,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
     investigationIndex,
     attackDistribution,
     traces,
+    ruleDistribution,
     dataSourceMode: dashboardEnv.dataSource,
     refresh,
     loadTraceDetail,
+    loadTraceProvenance,
     resolveApproval,
     startPolling,
     stopPolling,

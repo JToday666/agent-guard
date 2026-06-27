@@ -26,9 +26,11 @@ API 请求失败时不会自动切换数据源。场景模式和 API 模式使�
 API 模式当前读取的监督端接口包括：
 
 - `GET /v1/audit/events`
+- `GET /v1/audit/integrity`
 - `GET /v1/metrics/eval`
 - `GET /v1/approvals/pending`
 - `GET /v1/traces/{trace_id}`
+- `GET /v1/traces/{trace_id}/provenance`
 - `GET /v1/policies/current`
 - `GET /v1/policies/history`
 - `GET /health?check_db=true`
@@ -66,9 +68,9 @@ Trace detail 请求失败时，详情页回退到已加载审计事件窗口中�
 
 ## 5. 页面消费
 
-- 总览：指标、决策趋势、攻击类型分布和高风险事件。
-- 调查：审计列表、搜索、动态规则筛选和脱敏详情，规则选项只来自真实 `rule_hits`。
-- 审批：pending 队列、`allow_once` / `deny`，并用已加载审计事件按 `approval_id` 补齐关联事件、规则命中和 Agent 行为。
-- 调查详情：优先读取 Trace detail 接口，按真实事件时间排序展示；接口失败时回退到当前审计事件窗口，并按 `event_id` 定位证据。
-- 评测：展示接口或场景数据已提供的 Block Rate、FPR、FNR 和平均判定延迟；ASR 仅在 before / after 数据同时存在时展示。
-- 系统：展示会话、健康检查、轮询、数据新鲜度和只读策略快照 / 历史。
+- 安全总览：指标、决策趋势、攻击类型分布、规则命中 TopN、防御效果摘要、审计完整性摘要、高风险事件。
+- 事件调查：审计列表、搜索、多维筛选（decision/runtime/severity/event_type/attack_type/rule）、脱敏详情、CSV 导出，规则选项只来自真实 `rule_hits`。
+- 人工审批：pending 队列、`allow_once` / `deny`，并用已加载审计事件按 `approval_id` 补齐关联事件、规则命中和 Agent 行为。
+- 证据链：优先读取 Trace detail 接口，按真实事件时间排序展示；展示溯源图与节点证据抽屉，时间线与溯源图联动；接口失败时回退到当前审计事件窗口，并按 `event_id` 定位证据。
+- 安全评测：展示接口或场景数据已提供的 Block Rate、FPR、FNR 和平均判定延迟；混淆矩阵由 `is_malicious + blocked` 派生；runtime 延迟对比由 `latency_ms` 字段派生；ASR 仅在 before / after 数据同时存在时展示。
+- 系统状态：展示会话、健康检查、轮询、数据新鲜度、只读策略快照 / 历史、审计链完整性、运行时适配器活动（LangGraph/OpenClaw）、配置审计摘要。

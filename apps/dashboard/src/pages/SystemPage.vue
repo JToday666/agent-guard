@@ -34,6 +34,69 @@
       </template>
       <EmptyState v-else title="暂无策略快照" message="当前没有可展示的策略数据。" />
     </section>
+
+    <section id="audit-integrity" class="system-ledger" aria-labelledby="integrity-title">
+      <header><div><h2 id="integrity-title">审计链完整性</h2><p>审计事件哈希链验证状态</p></div></header>
+      <template v-if="store.auditIntegrity">
+        <div class="integrity-status">
+          <span class="status-ledger__icon" :class="`status-ledger__icon--${store.auditIntegrity.valid ? 'success' : 'danger'}`" aria-hidden="true"></span>
+          <StatusBadge :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'" :tone="store.auditIntegrity.valid ? 'success' : 'danger'" />
+          <span class="integrity-count">{{ store.auditIntegrity.eventCount }} 条审计事件</span>
+        </div>
+        <dl class="integrity-detail">
+          <div><dt>链头哈希</dt><dd><code class="hash-short">{{ store.auditIntegrity.headHash.slice(0, 12) }}…</code></dd></div>
+          <div v-if="store.auditIntegrity.firstBrokenAuditId"><dt>首个异常审计</dt><dd><RouterLink :to="`/investigations?search=${store.auditIntegrity.firstBrokenAuditId}`">{{ store.auditIntegrity.firstBrokenAuditId }}</RouterLink></dd></div>
+        </dl>
+      </template>
+      <EmptyState v-else title="暂无完整性数据" message="审计完整性信息加载中或不可用。" />
+    </section>
+
+    <section class="system-ledger" aria-labelledby="adapters-title">
+      <header><div><h2 id="adapters-title">运行时适配器</h2><p>审计活动来源，基于已记录审计事件派生</p></div></header>
+      <div class="adapter-grid">
+        <article class="adapter-card">
+          <h3>LangGraph</h3>
+          <dl>
+            <div><dt>审计事件</dt><dd>{{ langraphStats.count }}</dd></div>
+            <div><dt>阻断数</dt><dd>{{ langraphStats.blocked }}</dd></div>
+            <div><dt>最近活动</dt><dd>{{ langraphStats.lastSeen ?? "暂无记录" }}</dd></div>
+          </dl>
+          <RouterLink v-if="langraphStats.count > 0" class="page-action adapter-card__link" to="/investigations?runtime=langgraph">查看事件</RouterLink>
+        </article>
+        <article class="adapter-card">
+          <h3>OpenClaw</h3>
+          <dl>
+            <div><dt>审计事件</dt><dd>{{ openclawStats.count }}</dd></div>
+            <div><dt>阻断数</dt><dd>{{ openclawStats.blocked }}</dd></div>
+            <div><dt>最近活动</dt><dd>{{ openclawStats.lastSeen ?? "暂无记录" }}</dd></div>
+          </dl>
+          <RouterLink v-if="openclawStats.count > 0" class="page-action adapter-card__link" to="/investigations?runtime=openclaw">查看事件</RouterLink>
+        </article>
+      </div>
+    </section>
+
+    <!-- 配置审计摘要 -->
+    <section class="system-ledger" aria-labelledby="config-audit-title">
+      <header><div><h2 id="config-audit-title">配置审计</h2><p>基于 event_type=config_audit 的审计事件派生</p></div><RouterLink class="page-action" to="/investigations?event_type=config_audit">查看全部</RouterLink></header>
+      <template v-if="configAuditEvents.length">
+        <div class="event-table-wrap">
+          <table class="event-table">
+            <caption>配置审计事件</caption>
+            <thead><tr><th>时间</th><th>目标类型</th><th>目标 ID</th><th>决策</th><th>发现数</th></tr></thead>
+            <tbody>
+              <tr v-for="evt in configAuditEvents.slice(0, 5)" :key="evt.id">
+                <td><time>{{ evt.time }}</time></td>
+                <td>{{ getRawMeta(evt, 'target_type') ?? "—" }}</td>
+                <td class="truncate-cell">{{ getRawMeta(evt, 'target_id') ?? "—" }}</td>
+                <td><StatusBadge :label="getDecisionLabel(evt.decision)" :tone="getDecisionTone(evt.decision)" /></td>
+                <td>{{ getRawMeta(evt, 'finding_count') ?? "—" }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+      <EmptyState v-else title="暂无配置审计事件" message="配置审计结果将在运行后自动写入审计事件。" />
+    </section>
   </section>
 </template>
 
@@ -44,9 +107,16 @@ import EmptyState from "../components/EmptyState.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
+import type { AuditEventRow } from "../types/dashboard";
+import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 defineOptions({ name: "SystemPage" });
 const store = useDashboardStore();
 const auth = useAuthStore();
+
+function getRawMeta(evt: AuditEventRow, key: string): unknown {
+  const raw = evt.raw as { metadata?: Record<string, unknown> } | null;
+  return raw?.metadata?.[key];
+}
 const systemDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 const statusItems = computed(() => [
   { checkedAt: formatTime(store.health.checkedAt), detail: "核心审计、指标与审批接口", label: "Guard API", tone: stateTone(store.health.api), value: stateLabel(store.health.api) },
@@ -56,6 +126,21 @@ const statusItems = computed(() => [
   { checkedAt: "当前配置", detail: "当前 Dashboard 数据连接", label: "数据源", tone: "neutral" as const, value: store.dataSourceMode === "api" ? "Guard API" : "本地场景" },
   { checkedAt: formatTime(store.lastUpdatedAt), detail: "允许一次或拒绝的人工决策", label: "审批队列", tone: store.pendingCount ? "warning" as const : "success" as const, value: `${store.pendingCount} 待处理` },
 ]);
+
+function runtimeStats(runtime: string) {
+  const evts = store.events.filter((e) => e.runtime === runtime);
+  const last = evts.reduce<string | null>((m, e) => (!m || e.occurredAt > m ? e.occurredAt : m), null);
+  return {
+    count: evts.length,
+    blocked: evts.filter((e) => e.blocked).length,
+    lastSeen: last ? systemDateTimeFormatter.format(new Date(last)) : null,
+  };
+}
+
+const langraphStats = computed(() => runtimeStats("langgraph"));
+const openclawStats = computed(() => runtimeStats("openclaw"));
+const configAuditEvents = computed(() => store.events.filter((e) => e.eventType === "config_audit").slice(0, 5));
+
 function stateLabel(value: "online" | "offline" | "unknown") { return value === "online" ? "正常" : value === "offline" ? "异常" : "未知"; }
 function stateTone(value: "online" | "offline" | "unknown") { return value === "online" ? "success" as const : value === "offline" ? "danger" as const : "neutral" as const; }
 function formatTime(value: string | null) { return value ? systemDateTimeFormatter.format(new Date(value)) : "尚未记录"; }
@@ -93,4 +178,28 @@ function handleRefresh() { void store.refresh(); }
 .policy-history span, .policy-history time, .policy-history small { color: var(--color-text-subtle); font-size: var(--font-size-12); overflow-wrap: anywhere; }
 @media (max-width: 640px) { .status-ledger > header { align-items: start; flex-direction: column; gap: var(--space-3); } .status-ledger__rows article { grid-template-columns: .75rem minmax(0, 1fr) auto; } .status-ledger time { grid-column: 2 / -1; } }
 @media (max-width: 760px) { .policy-summary { grid-template-columns: 1fr 1fr; } .policy-history article { grid-template-columns: 1fr auto; padding: var(--space-3) 0; } .policy-history span { grid-column: 1 / -1; } }
+.system-ledger { border-block: 1px solid var(--color-border); display: grid; gap: var(--space-4); padding: var(--space-5) 0; }
+.system-ledger > header { align-items: center; display: flex; gap: var(--space-4); justify-content: space-between; flex-wrap: wrap; }
+.system-ledger h2, .system-ledger p { margin: 0; }
+.system-ledger > header > div > p { color: var(--color-text-subtle); font-size: var(--font-size-12); margin-top: var(--space-1); }
+.integrity-status { align-items: center; display: flex; gap: var(--space-3); }
+.integrity-count { color: var(--color-text-subtle); font-size: var(--font-size-13); }
+.integrity-detail { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); margin: 0; }
+.integrity-detail > div { background: var(--color-surface-muted); display: grid; gap: var(--space-1); padding: var(--space-3); }
+.integrity-detail dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
+.integrity-detail dd { margin: 0; }
+.hash-short { font-size: var(--font-size-12); }
+.adapter-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.adapter-card { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-3); padding: var(--space-4); }
+.adapter-card h3 { font-size: var(--font-size-14); margin: 0; }
+.adapter-card dl { display: grid; gap: var(--space-2); grid-template-columns: 1fr 1fr 1fr; margin: 0; }
+.adapter-card dl > div { display: grid; gap: var(--space-1); }
+.adapter-card dt { color: var(--color-text-subtle); font-size: var(--font-size-11); }
+.adapter-card dd { font-size: var(--font-size-16); font-weight: var(--font-weight-semibold); margin: 0; }
+.adapter-card__link { justify-self: start; }
+.event-table-wrap { overflow: auto; }
+.event-table { border-collapse: collapse; min-width: 38rem; width: 100%; }
+.event-table caption { clip: rect(0,0,0,0); height: 1px; overflow: hidden; position: absolute; width: 1px; }
+.event-table th, .event-table td { border-bottom: 1px solid var(--color-border); font-size: var(--font-size-13); padding: var(--space-3); text-align: left; vertical-align: middle; }
+.event-table th { color: var(--color-text-subtle); font-size: var(--font-size-11); letter-spacing: .03em; text-transform: uppercase; }
 </style>

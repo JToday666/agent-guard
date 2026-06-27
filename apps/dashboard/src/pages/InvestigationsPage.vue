@@ -2,8 +2,11 @@
   <div class="investigations-page" :class="{ 'investigations-page--detail': Boolean(selectedEvent) }">
     <main class="workspace-panel investigations-page__main" aria-labelledby="investigations-title">
       <header class="page-header">
-        <div><p>监控与取证</p><h1 id="investigations-title">调查</h1></div>
-        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+        <div><p>监控与取证</p><h1 id="investigations-title">事件调查</h1></div>
+        <div class="page-header-actions">
+          <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+          <button type="button" class="page-action" :disabled="!filteredEvents.length" @click="handleExport">导出 CSV</button>
+        </div>
       </header>
 
       <form class="investigation-tools" role="search" @submit.prevent>
@@ -14,6 +17,8 @@
         <AppSelect id="investigation-decision" v-model="decisionFilter" label="决策" :options="decisionOptions" />
         <AppSelect id="investigation-runtime" v-model="runtimeFilter" label="运行时" :options="runtimeOptions" />
         <AppSelect id="investigation-severity" v-model="severityFilter" label="严重性" :options="severityOptions" />
+        <AppSelect id="investigation-event-type" v-model="eventTypeFilter" label="事件类型" :options="eventTypeOptions" />
+        <AppSelect id="investigation-attack-type" v-model="attackTypeFilter" label="攻击类型" :options="attackTypeOptions" />
         <button v-if="hasFilters" type="button" class="clear-filters" @click="handleClearFilters">清除筛选</button>
       </form>
 
@@ -108,18 +113,32 @@ const selectedEvent = computed(() => eventResolution.value.status === "found" ? 
 const selectedTraceEvents = computed(() => selectedEvent.value ? index.value.byTrace.get(selectedEvent.value.traceId) ?? [] : []);
 const blockedCount = computed(() => index.value.latestEvents.filter((event) => event.blocked).length);
 const ruleOptions = computed(() => getRuleFilterOptions(index.value.latestEvents).slice(0, 6));
-const hasFilters = computed(() => Boolean(query.value.search || query.value.decision || query.value.runtime || query.value.severity || query.value.blocked || query.value.rule));
+const hasFilters = computed(() => Boolean(
+  query.value.search || query.value.decision || query.value.runtime ||
+  query.value.severity || query.value.blocked || query.value.rule ||
+  query.value.eventType || query.value.attackType
+));
 
 const decisionOptions = [{ label: "全部", value: "" }, { label: "拒绝", value: "deny" }, { label: "审批", value: "ask" }, { label: "放行", value: "allow" }];
 const runtimeOptions = [{ label: "全部", value: "" }, { label: "LangGraph", value: "langgraph" }, { label: "OpenClaw", value: "openclaw" }];
 const severityOptions = [{ label: "全部", value: "" }, { label: "严重", value: "critical" }, { label: "高", value: "high" }, { label: "中", value: "medium" }, { label: "低", value: "low" }];
+const eventTypeOptions = computed(() => {
+  const types = new Set(index.value.latestEvents.map((e) => e.eventType).filter(Boolean));
+  return [{ label: "全部", value: "" }, ...([...types].map((v) => ({ label: v, value: v })))];
+});
+const attackTypeOptions = computed(() => {
+  const types = new Set(index.value.latestEvents.map((e) => e.attackType).filter((v): v is string => Boolean(v)));
+  return [{ label: "全部", value: "" }, ...([...types].map((v) => ({ label: v, value: v })))];
+});
 
-function queryModel(key: "decision" | "runtime" | "severity") {
+function queryModel(key: "decision" | "runtime" | "severity" | "eventType" | "attackType") {
   return computed({ get: () => query.value[key], set: (value: string) => updateQuery({ [key]: value, page: 1 }) });
 }
 const decisionFilter = queryModel("decision");
 const runtimeFilter = queryModel("runtime");
 const severityFilter = queryModel("severity");
+const eventTypeFilter = queryModel("eventType");
+const attackTypeFilter = queryModel("attackType");
 
 watch(() => query.value.search, (value) => {
   if (route.name === "investigations" && value !== searchDraft.value) searchDraft.value = value;
@@ -143,13 +162,32 @@ function handleCloseEvent() { updateQuery({ event_id: undefined }); }
 function handlePage(page: number) { updateQuery({ page }); }
 function handleQuickFilter(patch: { blocked: string; rule: string }) { updateQuery({ ...patch, page: 1 }); }
 function handleClearFilters() { searchDraft.value = ""; void router.replace({ path: "/investigations", query: query.value.eventId ? { event_id: query.value.eventId } : {} }); }
+function handleExport() {
+  const headers = ["时间", "决策", "严重性", "风险分", "运行时", "阶段", "事件类型", "工具", "资源", "原因", "Trace ID", "Case ID", "规则命中"];
+  const rows = filteredEvents.value.map((e) => [
+    e.occurredAt, e.decision, e.severity, e.riskScore, e.runtime, e.stage,
+    e.eventType, e.tool, e.resource, e.reason, e.traceId, e.caseId ?? "",
+    e.ruleHits.join("|"),
+  ]);
+  const csv = [headers, ...rows].map((row) =>
+    row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+  ).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
 </script>
 
 <style scoped lang="scss">
 .investigations-page { display: grid; grid-template-columns: minmax(0, 1fr); }
 .investigations-page--detail { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); }
 .investigations-page__main { min-width: 0; }
-.investigation-tools { align-items: end; border-block: 1px solid var(--color-border); display: grid; gap: var(--space-3); grid-template-columns: minmax(16rem, 1fr) repeat(3, minmax(8rem, .45fr)) auto; padding: var(--space-4) 0; }
+.investigation-tools { align-items: end; border-block: 1px solid var(--color-border); display: grid; gap: var(--space-3); grid-template-columns: minmax(16rem, 1fr) repeat(5, minmax(7rem, .4fr)) auto; padding: var(--space-4) 0; }
+@media (max-width: 1280px) { .investigation-tools { grid-template-columns: 1fr repeat(3, minmax(7rem, .4fr)) auto; } .investigation-tools > :nth-child(5), .investigation-tools > :nth-child(6) { grid-column: auto; } }
+@media (max-width: 1180px) { .investigation-tools { grid-template-columns: repeat(3, 1fr); } .investigation-search { grid-column: 1 / -1; } }
+.page-header-actions { align-items: center; display: flex; gap: var(--space-3); }
 .investigation-search { color: var(--color-text-muted); display: grid; font-size: var(--font-size-12); font-weight: var(--font-weight-semibold); gap: var(--space-1); }
 .investigation-search input { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); min-height: 2.5rem; padding: 0 var(--space-3); width: 100%; }
 .clear-filters { background: transparent; border: 0; color: var(--color-link); cursor: pointer; min-height: 2.5rem; }

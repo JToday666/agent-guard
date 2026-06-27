@@ -1,3 +1,5 @@
+// @ts-ignore — no type declarations needed for font side-effect import
+import "@fontsource-variable/inter";
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 

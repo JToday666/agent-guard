@@ -7,6 +7,7 @@
         <span v-else>{{ item.value }}</span>
       </dd>
       <small>{{ item.detail }}</small>
+      <span class="metric-strip__bar" aria-hidden="true"></span>
     </div>
   </dl>
 </template>
@@ -37,19 +38,31 @@ defineProps<{
   min-width: 0;
   padding: var(--space-4);
   position: relative;
+
+  &:not(:last-child)::after {
+    background: var(--color-border);
+    content: "";
+    inset-block: var(--space-4);
+    position: absolute;
+    right: 0;
+    width: 1px;
+  }
+
+  &:hover { background: var(--color-row-hover); }
 }
 
-.metric-strip__item:not(:last-child)::after {
-  background: var(--color-border);
-  content: "";
-  inset-block: var(--space-4);
+.metric-strip__bar {
+  bottom: 0;
+  height: 3px;
+  left: 0;
   position: absolute;
   right: 0;
-  width: 1px;
+  border-radius: 0 0 var(--radius-2) var(--radius-2);
+  background: var(--color-border);
+  transition: opacity var(--transition-fast);
 }
 
-dt,
-small {
+dt, small {
   color: var(--color-text-subtle);
   display: block;
   font-size: var(--font-size-12);
@@ -57,17 +70,28 @@ small {
 
 dd {
   font-size: clamp(1.35rem, 2.2vw, 1.875rem);
+  font-variant-numeric: tabular-nums;
   font-weight: var(--font-weight-bold);
   line-height: 1.15;
   margin: var(--space-2) 0 var(--space-1);
 }
 
-dd a,
-dd span { color: inherit; text-decoration: none; }
+dd a, dd span { color: inherit; text-decoration: none; }
 dd a:hover { color: var(--color-active); }
-.metric-strip__item--success dd { color: var(--color-success); }
-.metric-strip__item--warning dd { color: var(--color-warning); }
-.metric-strip__item--danger dd { color: var(--color-danger); }
+
+.metric-strip__item--success {
+  dd { color: var(--color-success); }
+  .metric-strip__bar { background: var(--color-success); opacity: 0.6; }
+}
+.metric-strip__item--warning {
+  dd { color: var(--color-warning); }
+  .metric-strip__bar { background: var(--color-warning); opacity: 0.7; }
+}
+.metric-strip__item--danger {
+  dd { color: var(--color-danger); }
+  .metric-strip__bar { background: var(--color-danger); opacity: 0.7; }
+}
+.metric-strip__item--neutral .metric-strip__bar { opacity: 0; }
 
 @media (max-width: 640px) {
   .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -75,3 +99,5 @@ dd a:hover { color: var(--color-active); }
   .metric-strip__item { border-bottom: 1px solid var(--color-border); }
 }
 </style>
+
+

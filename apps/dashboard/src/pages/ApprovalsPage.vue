@@ -1,7 +1,7 @@
 <template>
   <section class="approvals-page workspace-panel" aria-labelledby="approvals-title">
     <header class="page-header">
-      <div><p>人工控制</p><h1 id="approvals-title">审批中心</h1></div>
+      <div><p>人工控制</p><h1 id="approvals-title">人工审批</h1></div>
       <div class="approval-header-status">
         <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
         <StatusBadge :label="`${store.pendingCount} 待处理`" :tone="store.pendingCount ? 'warning' : 'success'" />

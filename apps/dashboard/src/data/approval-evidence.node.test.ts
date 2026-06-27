@@ -24,6 +24,7 @@ function event(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
     runtime: "langgraph",
     severity: "medium",
     stage: "tool_call_proposed",
+    eventType: "tool_call_proposed",
     time: "14:30:00",
     tool: "send_email",
     traceId: "trace_1",
