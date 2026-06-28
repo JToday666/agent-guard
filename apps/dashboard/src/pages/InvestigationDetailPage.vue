@@ -3,13 +3,12 @@
     <main class="workspace-panel investigation-detail__main" aria-labelledby="trace-title">
       <header class="page-header">
         <div>
-          <p>事件溯源</p>
           <h1 id="trace-title">证据链</h1>
         </div>
         <RouterLink class="page-action" to="/investigations">返回事件调查</RouterLink>
       </header>
       <section v-if="traceDetailError && traceEvents.length" class="trace-detail-alert" role="status">
-        <strong>Trace 详情加载失败</strong><p>{{ traceDetailError }}，当前显示已加载事件窗口中的证据。</p>
+        <strong>证据链加载失败</strong><p>{{ traceDetailError }}，当前显示已加载事件窗口中的证据。</p>
       </section>
       <ErrorState v-if="traceDetailError && !traceEvents.length" :is-retrying="isTraceLoading" :message="traceDetailError" @retry="handleTraceRetry" />
       <ErrorState v-else-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
@@ -19,7 +18,7 @@
         <div class="trace-body section-divider">
           <section class="trace-provenance" aria-labelledby="provenance-title">
             <header>
-              <div><h2 id="provenance-title">溯源图</h2><p>节点关系与因果链，点击节点查看详情</p></div>
+              <div><h2 id="provenance-title">溯源图</h2><p>点击节点可定位对应事件证据</p></div>
             </header>
             <ProvenanceGraph v-if="provenance" :graph="provenance" :selected-node-id="selectedProvenanceNodeId" @select-node="handleSelectProvenanceNode" />
             <p v-else-if="provenanceError" class="provenance-error">溯源图加载失败：{{ provenanceError }}</p>
@@ -30,10 +29,10 @@
               <header><div><h2 id="trace-events-title">审计事件链路</h2><p>按发生顺序还原 Agent 行为与安全决策</p></div><span>{{ traceEvents.length }} 个节点</span></header>
               <TraceTimeline :events="traceEvents" :selected-event-id="selectedEventId" :trace-id="traceId" @select-event="handleTimelineSelectEvent" />
             </section>
-            <aside class="trace-context" aria-label="Trace 上下文">
+            <aside class="trace-context" aria-label="证据链上下文">
               <h2>调查上下文</h2>
               <dl>
-                <div><dt>Trace ID</dt><dd><code>{{ traceId }}</code></dd></div>
+                <div><dt>证据链 ID</dt><dd><code>{{ traceId }}</code></dd></div>
                 <div><dt>Case</dt><dd>{{ trace.caseId }}</dd></div>
                 <div><dt>最终状态</dt><dd><StatusBadge :label="getTraceStatusLabel(trace.status)" :tone="getTraceStatusTone(trace.status)" /></dd></div>
                 <div><dt>最后事件</dt><dd>{{ formatDashboardDateTime(trace.lastEventAt) }}</dd></div>
@@ -54,11 +53,11 @@
           </div>
         </div>
       </template>
-      <EmptyState v-else title="未找到证据链" message="该 Trace 不存在，或已经离开当前数据窗口。"><RouterLink to="/investigations">返回事件调查</RouterLink></EmptyState>
+      <EmptyState v-else title="未找到证据链" message="该证据链不存在，或已经离开当前数据窗口。"><RouterLink to="/investigations">返回事件调查</RouterLink></EmptyState>
     </main>
     <DetailDrawer :is-open="Boolean(selectedEventId)" eyebrow="节点证据" :title="selectedEvent?.tool ?? '事件未找到'" @close="handleCloseEvidence">
       <EventEvidence v-if="selectedEvent" :event="selectedEvent" />
-      <EmptyState v-else title="未找到事件" message="该事件不存在、已离开当前数据窗口，或不属于当前 Trace。" />
+      <EmptyState v-else title="未找到事件" message="该事件不存在、已离开当前数据窗口，或不属于当前证据链。" />
     </DetailDrawer>
   </div>
 </template>
@@ -100,7 +99,12 @@ const provenanceError = computed(() => store.provenanceErrors[traceId.value] ?? 
 const selectedProvenanceNodeId = computed<string | undefined>(() => typeof route.query.prov_node === "string" ? route.query.prov_node : undefined);
 const selectedProvenanceNode = computed<ProvenanceNode | undefined>(() => provenance.value?.nodes.find((n) => n.nodeId === selectedProvenanceNodeId.value));
 function handleSelectProvenanceNode(nodeId: string) {
-  void router.replace({ path: `/investigations/${traceId.value}`, query: mergeInvestigationQuery(route.query, { prov_node: nodeId }) });
+  const node = provenance.value?.nodes.find((item) => item.nodeId === nodeId);
+  const eventId = node?.refId.startsWith("event:") ? node.refId.slice("event:".length) : undefined;
+  void router.replace({
+    path: `/evidence/${traceId.value}`,
+    query: mergeInvestigationQuery(route.query, { prov_node: nodeId, event_id: eventId }),
+  });
 }
 const summaryItems = computed(() => [
   { detail: "关联评测样本", label: "Case", value: trace.value?.caseId ?? "--" },
@@ -117,19 +121,19 @@ watch(traceId, (value) => {
   if (value) { void store.loadTraceDetail(value); void store.loadTraceProvenance(value); }
 }, { immediate: true });
 function handleTimelineSelectEvent(eventId: string) {
-  // 时间线事件点击→高亮溯源图：通过 ref_id 前缀 "event:" 匹配
+  // 时间线事件点击后，通过 ref_id 前缀 "event:" 匹配并高亮溯源图节点。
   const matchNode = provenance.value?.nodes.find(
     (n) => n.refId === `event:${eventId}` || n.refId === eventId
   );
   if (matchNode) {
     void router.replace({
-      path: `/investigations/${traceId.value}`,
-      query: mergeInvestigationQuery(route.query, { prov_node: matchNode.nodeId }),
+      path: `/evidence/${traceId.value}`,
+      query: mergeInvestigationQuery(route.query, { prov_node: matchNode.nodeId, event_id: eventId }),
     });
   }
 }
 function handleCloseEvidence() {
-  void router.replace({ path: `/investigations/${traceId.value}`, query: mergeInvestigationQuery(route.query, { event_id: undefined }) });
+  void router.replace({ path: `/evidence/${traceId.value}`, query: mergeInvestigationQuery(route.query, { event_id: undefined }) });
 }
 function handleTraceRetry() { void store.loadTraceDetail(traceId.value); }
 function buildTraceSummary(id: string, events: TraceSummaryEvent[]): TraceSummary | undefined {

@@ -2,7 +2,7 @@
   <div class="investigations-page" :class="{ 'investigations-page--detail': Boolean(selectedEvent) }">
     <main class="workspace-panel investigations-page__main" aria-labelledby="investigations-title">
       <header class="page-header">
-        <div><p>监控与取证</p><h1 id="investigations-title">事件调查</h1></div>
+        <div><h1 id="investigations-title">事件调查</h1></div>
         <div class="page-header-actions">
           <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
           <button type="button" class="page-action" :disabled="!filteredEvents.length" @click="handleExport">导出 CSV</button>
@@ -12,7 +12,7 @@
       <form class="investigation-tools" role="search" @submit.prevent>
         <label class="investigation-search">
           <span>搜索事件</span>
-          <input v-model.trim="searchDraft" type="search" placeholder="资源、规则、原因、Trace 或 Case" />
+          <input v-model.trim="searchDraft" type="search" placeholder="资源、规则名称、原因、证据链或 Case" />
         </label>
         <AppSelect id="investigation-decision" v-model="decisionFilter" label="决策" :options="decisionOptions" />
         <AppSelect id="investigation-runtime" v-model="runtimeFilter" label="运行时" :options="runtimeOptions" />
@@ -25,7 +25,7 @@
       <nav class="quick-filters" aria-label="快速筛选">
         <button type="button" :aria-pressed="!query.blocked && !query.rule" @click="handleQuickFilter({ blocked: '', rule: '' })">全部 {{ index.latestEvents.length }}</button>
         <button type="button" :aria-pressed="query.blocked === 'true'" @click="handleQuickFilter({ blocked: query.blocked === 'true' ? '' : 'true', rule: '' })">已阻断 {{ blockedCount }}</button>
-        <button v-for="rule in ruleOptions" :key="rule.value" type="button" :aria-pressed="query.rule === rule.value" :title="rule.value" @click="handleQuickFilter({ blocked: '', rule: query.rule === rule.value ? '' : rule.value })">{{ rule.label }} {{ rule.count }}</button>
+        <button v-for="rule in ruleOptions" :key="rule.value" type="button" :aria-pressed="query.rule === rule.value" :title="ruleLabel(rule.value)" @click="handleQuickFilter({ blocked: '', rule: query.rule === rule.value ? '' : rule.value })">{{ ruleOptionLabel(rule.value, rule.count) }}</button>
       </nav>
 
       <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
@@ -68,7 +68,7 @@
     <DetailDrawer :is-open="Boolean(query.eventId)" eyebrow="事件证据" :title="selectedEvent?.tool ?? '事件未找到'" @close="handleCloseEvent">
       <EventEvidence v-if="selectedEvent" :event="selectedEvent">
         <section v-if="selectedTraceEvents.length > 1" class="trace-preview">
-          <header><div><h3>关联 Trace</h3><span>{{ selectedTraceEvents.length }} 个事件节点</span></div><RouterLink :to="`/investigations/${selectedEvent.traceId}`">展开完整链路</RouterLink></header>
+          <header><div><h3>关联证据链</h3><span>{{ selectedTraceEvents.length }} 个事件节点</span></div><RouterLink :to="`/evidence/${selectedEvent.traceId}`">查看完整证据链</RouterLink></header>
           <TraceTimeline :events="selectedTraceEvents.slice(0, 4)" />
         </section>
       </EventEvidence>
@@ -92,6 +92,7 @@ import { filterInvestigationEvents, getRuleFilterOptions, resolveInvestigationEv
 import { useDashboardStore } from "../stores/dashboardStore";
 import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery, normalizeInvestigationQuery } from "../utils/investigation-query";
+import { formatRuleListForDisplay, ruleLabel, ruleOptionLabel } from "../utils/rule-display";
 
 defineOptions({ name: "InvestigationsPage" });
 const EventEvidence = defineAsyncComponent(() => import("../components/EventEvidence.vue"));
@@ -163,11 +164,11 @@ function handlePage(page: number) { updateQuery({ page }); }
 function handleQuickFilter(patch: { blocked: string; rule: string }) { updateQuery({ ...patch, page: 1 }); }
 function handleClearFilters() { searchDraft.value = ""; void router.replace({ path: "/investigations", query: query.value.eventId ? { event_id: query.value.eventId } : {} }); }
 function handleExport() {
-  const headers = ["时间", "决策", "严重性", "风险分", "运行时", "阶段", "事件类型", "工具", "资源", "原因", "Trace ID", "Case ID", "规则命中"];
+  const headers = ["时间", "决策", "严重性", "风险分", "运行时", "阶段", "事件类型", "工具", "资源", "原因", "证据链 ID", "Case ID", "规则命中"];
   const rows = filteredEvents.value.map((e) => [
     e.occurredAt, e.decision, e.severity, e.riskScore, e.runtime, e.stage,
     e.eventType, e.tool, e.resource, e.reason, e.traceId, e.caseId ?? "",
-    e.ruleHits.join("|"),
+    formatRuleListForDisplay(e.ruleHits),
   ]);
   const csv = [headers, ...rows].map((row) =>
     row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")

@@ -10,7 +10,7 @@ export interface ApprovalEvidenceRoutes {
 export function getApprovalEvidenceRoutes(
   approval: ApprovalRequest,
 ): ApprovalEvidenceRoutes {
-  const path = `/investigations/${encodeURIComponent(approval.traceId)}`;
+  const path = `/evidence/${encodeURIComponent(approval.traceId)}`;
   return {
     event: approval.eventId
       ? { path, query: { event_id: approval.eventId } }

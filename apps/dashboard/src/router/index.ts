@@ -41,6 +41,21 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: "/investigations/:trace_id",
+    redirect: (to) => ({
+      path: `/evidence/${encodeURIComponent(String(to.params.trace_id ?? ""))}`,
+      query: to.query,
+    }),
+  },
+  {
+    path: "/evidence",
+    name: "evidence",
+    component: () => import("../pages/EvidencePage.vue"),
+    meta: {
+      keepAlive: true,
+    },
+  },
+  {
+    path: "/evidence/:trace_id",
     name: "investigation-detail",
     component: () => import("../pages/InvestigationDetailPage.vue"),
     meta: {

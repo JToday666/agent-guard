@@ -113,7 +113,8 @@ function handleRefreshDashboard(): void {
 
 .dashboard-shell__workspace {
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .session-error {

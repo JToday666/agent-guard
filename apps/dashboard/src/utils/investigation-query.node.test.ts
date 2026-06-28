@@ -19,14 +19,17 @@ test("normalizes supported investigation query values", () => {
       severity: "high",
     }),
     {
+      attackType: "",
       blocked: "true",
       decision: "deny",
       eventId: "event-1",
+      eventType: "",
       page: 3,
       rule: "P001_sensitive_file_access",
       runtime: "langgraph",
       search: "sensitive file",
       severity: "high",
+      stage: "",
     },
   );
 });
@@ -41,14 +44,17 @@ test("drops unsupported filters and clamps invalid pages", () => {
       severity: "urgent",
     }),
     {
+      attackType: "",
       blocked: "",
       decision: "",
       eventId: "",
+      eventType: "",
       page: 1,
       runtime: "",
       rule: "",
       search: "",
       severity: "",
+      stage: "",
     },
   );
 });

