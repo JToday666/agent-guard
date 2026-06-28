@@ -19,6 +19,8 @@ import {
 } from "./mapping.js";
 import type { OpenClawPluginConfigInput } from "./types.js";
 
+const PLUGIN_VERSION = "0.1.0";
+
 const OBSERVATION_HOOKS = [
   "gateway_start",
   "gateway_stop",
@@ -34,6 +36,9 @@ const OBSERVATION_HOOKS = [
   "resolve_exec_env",
 ] as const;
 
+const BLOCKING_HOOKS = ["before_tool_call", "message_sending", "before_install"] as const;
+const ALL_REGISTERED_HOOKS = [...BLOCKING_HOOKS, "tool_result_persist", ...OBSERVATION_HOOKS] as const;
+
 const plugin: OpenClawPluginDefinition = definePluginEntry({
   id: "agentguard-security",
   name: "AgentGuard Security",
@@ -41,6 +46,8 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
   register(api) {
     const config = buildPluginConfig(api.pluginConfig as OpenClawPluginConfigInput);
     const makeClient = () => new GuardApiClient({ config });
+
+    scheduleHeartbeat(config, makeClient);
 
     api.on(
       "before_tool_call",
@@ -150,5 +157,51 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     }
   },
 });
+
+function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeClient: () => GuardApiClient): void {
+  if (!config.adapterToken) {
+    return;
+  }
+  const submit = () => {
+    void makeClient()
+      .submitHeartbeat({
+        pluginVersion: PLUGIN_VERSION,
+        runtimeVersion: runtimeVersion(),
+        hooks: [...ALL_REGISTERED_HOOKS],
+        capabilities: {
+          event_types: [
+            "tool_call_proposed",
+            "context_assembled",
+            "model_input_prepared",
+            "model_output_produced",
+            "tool_result_produced",
+            "memory_write_proposed",
+            "message_send_proposed",
+          ],
+          blocking_hooks: [...BLOCKING_HOOKS],
+          observation_hooks: [...OBSERVATION_HOOKS],
+          fail_closed_stages: config.failClosedStages,
+          redaction: config.redaction,
+        },
+      })
+      .catch((error) => {
+        logDiagnostic(config, "heartbeat submit failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  };
+  unrefTimer(setTimeout(submit, 0));
+  unrefTimer(setInterval(submit, config.heartbeatIntervalMs));
+}
+
+function runtimeVersion(): string {
+  return "2026.6.6";
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout> | ReturnType<typeof setInterval>): void {
+  if (typeof timer === "object" && timer !== null && "unref" in timer) {
+    (timer as { unref: () => void }).unref();
+  }
+}
 
 export default plugin;
