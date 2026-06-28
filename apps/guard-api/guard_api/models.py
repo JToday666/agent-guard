@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_iso
 from agentguard_core.models import ApprovalResolution
@@ -77,11 +77,17 @@ class EvaluationCase(BaseModel):
 
 
 class EvaluationRun(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     run_id: str
     run_at: str
+    dataset_id: str | None = None
+    dataset_version: str | None = None
     asr_before: float | None = Field(default=None, ge=0, le=1)
     asr_after: float | None = Field(default=None, ge=0, le=1)
     per_attack: dict[str, EvaluationAttackSummary] = Field(default_factory=dict)
+    per_family: dict[str, Any] = Field(default_factory=dict)
+    per_rule: dict[str, Any] = Field(default_factory=dict)
     cases: list[EvaluationCase] = Field(default_factory=list)
 
 
@@ -96,14 +102,54 @@ class ConfigAuditFindingRecord(BaseModel):
 
 
 AdapterStatus = Literal["loaded", "not_loaded", "error", "unknown"]
-AdapterStatusSource = Literal["agentguardctl", "openclaw-plugin-dev"]
+AdapterStatusSource = Literal["agentguardctl", "openclaw-plugin-dev", "openclaw-plugin"]
 
 
 class AdapterStatusRecord(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     status: AdapterStatus = "unknown"
     loaded: bool = False
     hook_count: int | None = None
     expected_hook_count: int = 16
     last_verified_at: str | None = None
+    last_heartbeat_at: str | None = None
     error: str | None = None
     source: AdapterStatusSource | None = None
+    runtime: str | None = None
+    runtime_id: str | None = None
+    agent_id: str | None = None
+    plugin_version: str | None = None
+    runtime_version: str | None = None
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    hooks: list[str] = Field(default_factory=list)
+    fail_closed_stages: list[str] = Field(default_factory=list)
+
+
+class CredentialRecord(BaseModel):
+    credential_id: str = Field(default_factory=lambda: new_id("cred"))
+    token_hash: str
+    principal_type: str
+    principal_id: str
+    role: str
+    scopes: list[str] = Field(default_factory=list)
+    runtime: str | None = None
+    agent_id: str | None = None
+    created_at: str = Field(default_factory=utc_now_iso)
+    expires_at: str | None = None
+    revoked_at: str | None = None
+
+    def public_dump(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json")
+        payload["token_hash"] = "[redacted]"
+        return payload
+
+
+class CredentialCreateRequest(BaseModel):
+    principal_type: str
+    principal_id: str
+    role: str
+    scopes: list[str] = Field(default_factory=list)
+    runtime: str | None = None
+    agent_id: str | None = None
+    expires_at: str | None = None

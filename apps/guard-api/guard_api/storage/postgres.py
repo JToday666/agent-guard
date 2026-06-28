@@ -24,7 +24,13 @@ from agentguard_core import (
     ProvenanceNode,
     utc_now_iso,
 )
-from guard_api.models import AdapterStatusRecord, ApprovalRequest, ConfigAuditFindingRecord, EvaluationRun
+from guard_api.models import (
+    AdapterStatusRecord,
+    ApprovalRequest,
+    ConfigAuditFindingRecord,
+    CredentialRecord,
+    EvaluationRun,
+)
 from guard_api.storage.base import (
     AuditEventFilters,
     AuditIntegrityStatus,
@@ -45,6 +51,7 @@ from guard_api.storage.sqlalchemy_models import (
     audit_events,
     browser_sessions,
     config_audit_findings,
+    credentials,
     evaluation_runs,
     launch_codes,
     memory_guard_changes,
@@ -373,6 +380,34 @@ class PostgresControlPlaneStore:
             return None
         return EvaluationRun.model_validate(row).model_dump(mode="json")
 
+    def get_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
+        stmt = select(evaluation_runs.c.payload_json).where(evaluation_runs.c.run_id == run_id)
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return EvaluationRun.model_validate(row).model_dump(mode="json")
+
+    def list_evaluation_runs(
+        self,
+        *,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        stmt = select(evaluation_runs.c.payload_json).order_by(
+            desc(evaluation_runs.c.run_at),
+            desc(evaluation_runs.c.run_id),
+        )
+        if dataset_id is not None:
+            stmt = stmt.where(evaluation_runs.c.payload_json.op("->>")("dataset_id") == dataset_id)
+        if dataset_version is not None:
+            stmt = stmt.where(evaluation_runs.c.payload_json.op("->>")("dataset_version") == dataset_version)
+        stmt = stmt.limit(_bounded_limit(limit))
+        with self._session_factory() as session:
+            rows = session.execute(stmt).scalars().all()
+        return [EvaluationRun.model_validate(row).model_dump(mode="json") for row in rows]
+
     def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
         stmt = pg_insert(adapter_statuses).values(
@@ -399,6 +434,77 @@ class PostgresControlPlaneStore:
         if row is None:
             return None
         return AdapterStatusRecord.model_validate(row).model_dump(mode="json")
+
+    def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
+        record = CredentialRecord.model_validate(credential)
+        payload = record.model_dump(mode="json")
+        stmt = pg_insert(credentials).values(
+            credential_id=record.credential_id,
+            token_hash=record.token_hash,
+            principal_type=record.principal_type,
+            principal_id=record.principal_id,
+            role=record.role,
+            runtime=record.runtime,
+            agent_id=record.agent_id,
+            payload_json=payload,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+            revoked_at=record.revoked_at,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[credentials.c.credential_id],
+            set_={
+                "token_hash": stmt.excluded.token_hash,
+                "principal_type": stmt.excluded.principal_type,
+                "principal_id": stmt.excluded.principal_id,
+                "role": stmt.excluded.role,
+                "runtime": stmt.excluded.runtime,
+                "agent_id": stmt.excluded.agent_id,
+                "payload_json": stmt.excluded.payload_json,
+                "created_at": stmt.excluded.created_at,
+                "expires_at": stmt.excluded.expires_at,
+                "revoked_at": stmt.excluded.revoked_at,
+            },
+        )
+        with self._session_factory() as session:
+            session.execute(stmt)
+            session.commit()
+        return record
+
+    def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
+        stmt = select(credentials.c.payload_json).where(
+            credentials.c.token_hash == token_hash,
+            credentials.c.revoked_at.is_(None),
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return CredentialRecord.model_validate(row)
+
+    def list_credentials(self) -> list[CredentialRecord]:
+        stmt = select(credentials.c.payload_json).order_by(credentials.c.created_at.asc())
+        with self._session_factory() as session:
+            rows = session.execute(stmt).scalars().all()
+        return [CredentialRecord.model_validate(row) for row in rows]
+
+    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
+        current_stmt = select(credentials.c.payload_json).where(credentials.c.credential_id == credential_id)
+        with self._session_factory() as session:
+            current = session.execute(current_stmt).scalar_one_or_none()
+            if current is None:
+                raise KeyError(credential_id)
+            record = CredentialRecord.model_validate(current).model_copy(update={"revoked_at": revoked_at})
+            session.execute(
+                update(credentials)
+                .where(credentials.c.credential_id == credential_id)
+                .values(
+                    payload_json=record.model_dump(mode="json"),
+                    revoked_at=revoked_at,
+                )
+            )
+            session.commit()
+        return record
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
         payload = review.model_dump(mode="json")

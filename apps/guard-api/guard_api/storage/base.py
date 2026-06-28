@@ -16,7 +16,13 @@ from agentguard_core import (
     ProvenanceNode,
 )
 
-from guard_api.models import AdapterStatusRecord, ApprovalRequest, ConfigAuditFindingRecord, EvaluationRun
+from guard_api.models import (
+    AdapterStatusRecord,
+    ApprovalRequest,
+    ConfigAuditFindingRecord,
+    CredentialRecord,
+    EvaluationRun,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,10 +139,34 @@ class ControlPlaneStore(Protocol):
     def get_latest_evaluation_run(self) -> dict | None:
         ...
 
+    def get_evaluation_run(self, run_id: str) -> dict | None:
+        ...
+
+    def list_evaluation_runs(
+        self,
+        *,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        ...
+
     def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict) -> dict:
         ...
 
     def get_adapter_status(self, adapter_id: str) -> dict | None:
+        ...
+
+    def create_credential(self, credential: CredentialRecord | dict) -> CredentialRecord:
+        ...
+
+    def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
+        ...
+
+    def list_credentials(self) -> list[CredentialRecord]:
+        ...
+
+    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
         ...
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:

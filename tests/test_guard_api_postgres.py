@@ -576,6 +576,72 @@ def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
         _cleanup_test_rows(database_url, trace_id, approval_id)
 
 
+def test_postgres_store_persists_terminal_control_plane_registry_state() -> None:
+    database_url = get_test_database_url()
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        credential = {
+            "credential_id": "cred_pg_openclaw",
+            "token_hash": _token_hash("pg-generated-token"),
+            "principal_type": "component",
+            "principal_id": "openclaw-main",
+            "role": "adapter",
+            "scopes": ["adapter:status:write"],
+            "runtime": "openclaw",
+            "agent_id": "main",
+        }
+        store.create_credential(credential)
+        store.save_adapter_status(
+            "openclaw",
+            {
+                "status": "loaded",
+                "loaded": True,
+                "runtime": "openclaw",
+                "agent_id": "main",
+                "plugin_version": "0.1.0",
+                "runtime_version": "2026.6.6",
+                "capabilities": {"event_types": ["tool_call_proposed"]},
+                "hooks": ["before_tool_call"],
+                "last_heartbeat_at": "2026-06-28T00:03:00+00:00",
+            },
+        )
+        store.save_evaluation_run(
+            {
+                "run_id": "eval_pg_terminal",
+                "run_at": "2026-06-28T00:04:00+00:00",
+                "dataset_id": "attackbench",
+                "dataset_version": "v1",
+                "per_family": {"prompt_injection": {"case_count": 1}},
+                "per_rule": {"P101_prompt_injection": {"hit_count": 1}},
+                "cases": [],
+            }
+        )
+
+        restarted = PostgresControlPlaneStore(database_url)
+        stored_credential = restarted.get_credential_by_token_hash(_token_hash("pg-generated-token"))
+        listed_credentials = restarted.list_credentials()
+        status = restarted.get_adapter_status("openclaw")
+        runs = restarted.list_evaluation_runs(dataset_id="attackbench", dataset_version="v1")
+        run = restarted.get_evaluation_run("eval_pg_terminal")
+        revoked = restarted.revoke_credential("cred_pg_openclaw", revoked_at="2026-06-28T00:05:00+00:00")
+
+        assert stored_credential is not None
+        assert stored_credential.principal_id == "openclaw-main"
+        assert [item.credential_id for item in listed_credentials] == ["cred_pg_openclaw"]
+        assert status is not None
+        assert status["last_heartbeat_at"] == "2026-06-28T00:03:00+00:00"
+        assert status["capabilities"]["event_types"] == ["tool_call_proposed"]
+        assert [item["run_id"] for item in runs] == ["eval_pg_terminal"]
+        assert run is not None
+        assert run["per_rule"]["P101_prompt_injection"]["hit_count"] == 1
+        assert revoked.revoked_at == "2026-06-28T00:05:00+00:00"
+        assert restarted.get_credential_by_token_hash(_token_hash("pg-generated-token")) is None
+    finally:
+        reset_control_plane_schema(database_url)
+
+
 def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None) -> None:
     try:
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)

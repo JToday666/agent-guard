@@ -12,11 +12,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent, MemoryGuardChange, PolicyBundle
+from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent, MemoryGuardChange, PolicyBundle, utc_now_iso
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.errors import error_response, http_error_code, validation_error_details
-from guard_api.models import AdapterStatusRecord, EvaluationRun
+from guard_api.models import AdapterStatusRecord, CredentialCreateRequest, EvaluationRun
 from guard_api.services import (
     ApprovalService,
     AuditService,
@@ -53,6 +53,16 @@ def _policy_snapshot_record_payload(record: PolicySnapshotRecord) -> dict[str, A
         "bundle_id": record.policy_bundle.bundle_id,
         "version": record.policy_bundle.version,
     }
+
+
+def _changed_policy_fields(current: PolicyBundle, candidate: PolicyBundle) -> list[str]:
+    current_payload = current.model_dump(mode="json")
+    candidate_payload = candidate.model_dump(mode="json")
+    return sorted(
+        key
+        for key in set(current_payload) | set(candidate_payload)
+        if current_payload.get(key) != candidate_payload.get(key)
+    )
 
 
 def _verify_browser_or_bearer_read(
@@ -220,6 +230,52 @@ def create_app(
             for record in policy_service.list_history(limit=_bounded_limit(limit))
         ]
 
+    @app.post("/v1/policies/validate")
+    def validate_policy(
+        payload: PolicyBundle,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="policy:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        return {"valid": True, "bundle_id": payload.bundle_id, "version": payload.version}
+
+    @app.post("/v1/policies/diff")
+    def diff_policy(
+        payload: PolicyBundle,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="policy:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        current = policy_service.current_snapshot()
+        return {
+            "current": current.model_dump(mode="json"),
+            "candidate": payload.model_dump(mode="json"),
+            "changed_fields": _changed_policy_fields(current, payload),
+        }
+
+    @app.post("/v1/policies/rollback/{revision}")
+    def rollback_policy(
+        revision: int,
+        x_agentguard_csrf: str | None = Header(default=None, alias="X-AgentGuard-CSRF"),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        session = auth.verify_browser_session(agentguard_session)
+        auth.verify_csrf(session, x_agentguard_csrf)
+        for record in policy_service.list_history(limit=1000):
+            if record.revision == revision:
+                return policy_service.save_snapshot(record.policy_bundle, updated_by="rollback").model_dump(mode="json")
+        raise ApiAuthError("POLICY_REVISION_NOT_FOUND", status_code=404)
+
     @app.post("/v1/audit/events")
     def audit_event(payload: AuditEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:audit:write")
@@ -289,6 +345,26 @@ def create_app(
         auth.verify_bearer(authorization, "evaluation:write")
         return store.save_evaluation_run(payload)
 
+    @app.get("/v1/evaluations")
+    def list_evaluation_runs(
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        limit: int = 100,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="evaluation:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        return store.list_evaluation_runs(
+            dataset_id=dataset_id,
+            dataset_version=dataset_version,
+            limit=_bounded_limit(limit),
+        )
+
     @app.get("/v1/evaluations/latest")
     def latest_evaluation_run(
         authorization: str | None = Header(default=None),
@@ -301,6 +377,23 @@ def create_app(
             agentguard_session=agentguard_session,
         )
         run = store.get_latest_evaluation_run()
+        if run is None:
+            raise ApiAuthError("EVALUATION_NOT_FOUND", status_code=404)
+        return run
+
+    @app.get("/v1/evaluations/{run_id}")
+    def get_evaluation_run(
+        run_id: str,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="evaluation:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        run = store.get_evaluation_run(run_id)
         if run is None:
             raise ApiAuthError("EVALUATION_NOT_FOUND", status_code=404)
         return run
@@ -368,16 +461,32 @@ def create_app(
         auth.verify_bearer(authorization, "event:evaluate")
         return config_audit_service.evaluate(payload).model_dump(mode="json")
 
-    @app.put("/v1/adapters/openclaw/status")
+    @app.put("/v1/adapters/{adapter_id}/status")
     def save_openclaw_adapter_status(
+        adapter_id: str,
         payload: AdapterStatusRecord,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "adapter:status:write")
-        return store.save_adapter_status("openclaw", payload)
+        return store.save_adapter_status(adapter_id, payload)
 
-    @app.get("/v1/adapters/openclaw/status")
+    @app.post("/v1/adapters/{adapter_id}/heartbeat")
+    def save_adapter_heartbeat(
+        adapter_id: str,
+        payload: AdapterStatusRecord,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "adapter:status:write")
+        heartbeat = payload.model_copy(
+            update={
+                "last_heartbeat_at": payload.last_heartbeat_at or utc_now_iso(),
+            }
+        )
+        return store.save_adapter_status(adapter_id, heartbeat)
+
+    @app.get("/v1/adapters/{adapter_id}/status")
     def openclaw_adapter_status(
+        adapter_id: str,
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
@@ -387,10 +496,32 @@ def create_app(
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        status = store.get_adapter_status("openclaw")
+        status = store.get_adapter_status(adapter_id)
         if status is None:
             return AdapterStatusRecord().model_dump(mode="json")
         return status
+
+    @app.post("/v1/credentials")
+    def create_credential(
+        payload: CredentialCreateRequest,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "credential:write")
+        token, credential = auth.create_credential(payload)
+        return {"token": token, "credential": credential.public_dump()}
+
+    @app.get("/v1/credentials")
+    def list_credentials(authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+        auth.verify_bearer(authorization, "credential:read")
+        return [credential.public_dump() for credential in auth.list_credentials()]
+
+    @app.post("/v1/credentials/{credential_id}/revoke")
+    def revoke_credential(credential_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "credential:revoke")
+        try:
+            return auth.revoke_credential(credential_id).public_dump()
+        except KeyError:
+            raise ApiAuthError("CREDENTIAL_NOT_FOUND", status_code=404)
 
     @app.post("/v1/memory/changes/propose")
     def propose_memory_change(
