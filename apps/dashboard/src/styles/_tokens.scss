@@ -9,11 +9,11 @@
   --color-text-subtle: #718096;
   --color-border: #dce4ee;
   --color-border-strong: #b9c7d8;
-  --color-link: #174ea6;
-  --color-active: #155eef;
+  --color-link: #6d28d9;
+  --color-active: #7c3aed;
   --color-active-text: #ffffff;
-  --color-active-soft: #eaf2ff;
-  --color-active-border: #a9c7ff;
+  --color-active-soft: #f3f0ff;
+  --color-active-border: #c4b5fd;
   --color-success: #08775b;
   --color-success-soft: #e6f7f0;
   --color-success-border: #9edcc8;
@@ -23,11 +23,11 @@
   --color-danger: #b42318;
   --color-danger-soft: #fff1ef;
   --color-danger-border: #efb7b1;
-  --color-focus: #7aa7ff;
+  --color-focus: #a78bfa;
   --color-row-hover: #f8fbff;
 
   /* 新增：节点图颜色 */
-  --color-node-event: #155eef;
+  --color-node-event: #7c3aed;
   --color-node-decision: #b42318;
   --color-node-audit: #718096;
   --color-node-config-audit: #7c3aed;
@@ -65,7 +65,7 @@
 
   --shadow-subtle: 0 1px 2px rgb(15 23 42 / 0.04);
   --shadow-raised: 0 18px 48px rgb(15 23 42 / 0.12);
-  --shadow-focus: 0 0 0 3px rgb(122 167 255 / 0.28);
+  --shadow-focus: 0 0 0 3px rgb(167 139 250 / 0.28);
 
   --transition-fast: 140ms ease;
   --transition-base: 180ms ease;

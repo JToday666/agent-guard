@@ -5,13 +5,6 @@ import type {
   EvaluationSummary,
 } from "../types/dashboard.ts";
 
-function hasSameRuleHits(left: readonly string[], right: readonly string[]) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
-}
-
 function hasSameStringList(left: readonly string[], right: readonly string[]) {
   return (
     left.length === right.length &&
@@ -41,7 +34,7 @@ function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
     left.agentAction === right.agentAction &&
     left.attackType === right.attackType &&
     left.latencyMs === right.latencyMs &&
-    hasSameRuleHits(left.ruleHits, right.ruleHits)
+    hasSameStringList(left.ruleHits, right.ruleHits)
   );
 }
 
@@ -107,7 +100,7 @@ function hasSameApproval(
     left.consequence === right.consequence &&
     left.expiresAt === right.expiresAt &&
     left.resolvedAt === right.resolvedAt &&
-    hasSameRuleHits(left.ruleHits, right.ruleHits)
+    hasSameStringList(left.ruleHits, right.ruleHits)
   );
 }
 

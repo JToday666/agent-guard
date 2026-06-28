@@ -39,10 +39,23 @@
   }
 
   h1 {
+    align-items: center;
+    color: #6d28d9;
+    display: inline-flex;
     font-size: var(--font-size-28);
     font-weight: var(--font-weight-bold);
+    gap: var(--space-3);
+    letter-spacing: -0.01em;
     line-height: var(--line-height-tight);
     overflow-wrap: anywhere;
+
+    &::before {
+      background: linear-gradient(160deg, #7c3aed 0%, #c026d3 100%);
+      border-radius: var(--radius-pill);
+      content: "";
+      flex: 0 0 0.25rem;
+      height: 1.35em;
+    }
   }
 }
 

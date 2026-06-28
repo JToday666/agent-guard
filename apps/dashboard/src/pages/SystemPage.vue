@@ -1,20 +1,19 @@
 <template>
   <section class="system-page workspace-panel" aria-labelledby="system-title">
-    <header class="page-header"><div><p>运行状态</p><h1 id="system-title">系统状态</h1></div><button class="page-action" type="button" :aria-busy="store.isRefreshing" :disabled="store.isRefreshing" @click="handleRefresh">{{ store.isRefreshing ? "检查中" : "立即检查" }}</button></header>
+    <header class="page-header"><div><h1 id="system-title">系统状态</h1></div><button class="page-action" type="button" :aria-busy="store.isRefreshing" :disabled="store.isRefreshing" @click="handleRefresh">{{ store.isRefreshing ? "检查中" : "立即检查" }}</button></header>
     <section class="status-ledger" aria-labelledby="status-ledger-title">
       <header><div><h2 id="status-ledger-title">服务与会话</h2><p>当前监督端依赖及数据同步状态</p></div><DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" /></header>
       <div class="status-ledger__rows">
         <article v-for="item in statusItems" :key="item.label">
           <span class="status-ledger__icon" :class="`status-ledger__icon--${item.tone}`" aria-hidden="true"></span>
           <div><strong>{{ item.label }}</strong><small>{{ item.detail }}</small></div>
-          <StatusBadge :label="item.value" :tone="item.tone" />
-          <time>{{ item.checkedAt }}</time>
+          <StatusBadge :label="item.value" :tone="item.tone" /><time>{{ item.checkedAt }}</time>
         </article>
       </div>
     </section>
     <section v-if="store.status === 'error' && store.error" class="system-alert" role="alert"><strong>最近一次检查失败</strong><p>{{ store.error }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
     <section class="policy-ledger" aria-labelledby="policy-ledger-title">
-      <header><div><h2 id="policy-ledger-title">策略快照</h2><p>当前只读策略与最近变更记录</p></div></header>
+      <header><div><h2 id="policy-ledger-title">策略状态</h2><p>查看当前生效的风险判断配置</p></div></header>
       <section v-if="store.policyError" class="system-alert" role="alert"><strong>策略数据加载失败</strong><p>{{ store.policyError }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
       <template v-else-if="store.policySummary">
         <dl class="policy-summary">
@@ -22,17 +21,11 @@
           <div><dt>版本</dt><dd>{{ store.policySummary.version }}</dd></div>
           <div><dt>修订号</dt><dd>{{ store.policySummary.revision ?? "未提供" }}</dd></div>
           <div><dt>更新时间</dt><dd>{{ formatTime(store.policySummary.updatedAt) }}</dd></div>
-          <div><dt>禁用规则</dt><dd>{{ store.policySummary.disabledRuleCount }}</dd></div>
-          <div><dt>规则覆盖</dt><dd>{{ store.policySummary.ruleOverrideCount }}</dd></div>
-          <div><dt>工具画像</dt><dd>{{ store.policySummary.toolProfileCount }}</dd></div>
+          <div><dt>停用判断</dt><dd>{{ store.policySummary.disabledRuleCount }}</dd></div>
+          <div><dt>自定义判断</dt><dd>{{ store.policySummary.ruleOverrideCount }}</dd></div><div><dt>工具画像</dt><dd>{{ store.policySummary.toolProfileCount }}</dd></div>
         </dl>
-        <div v-if="store.policyHistory.length" class="policy-history" role="list" aria-label="策略历史">
-          <article v-for="item in store.policyHistory.slice(0, 5)" :key="item.revision" role="listitem">
-            <strong>修订 {{ item.revision }}</strong><span>{{ item.bundleId }} / {{ item.version }}</span><time>{{ formatTime(item.updatedAt) }}</time><small>{{ item.updatedBy }}</small>
-          </article>
-        </div>
       </template>
-      <EmptyState v-else title="暂无策略快照" message="当前没有可展示的策略数据。" />
+      <EmptyState v-else title="暂无策略状态" message="当前没有可展示的策略数据。" />
     </section>
 
     <section id="audit-integrity" class="system-ledger" aria-labelledby="integrity-title">
@@ -41,26 +34,23 @@
         <div class="integrity-status">
           <span class="status-ledger__icon" :class="`status-ledger__icon--${store.auditIntegrity.valid ? 'success' : 'danger'}`" aria-hidden="true"></span>
           <StatusBadge :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'" :tone="store.auditIntegrity.valid ? 'success' : 'danger'" />
-          <span class="integrity-count">{{ store.auditIntegrity.eventCount }} 条审计事件</span>
-        </div>
+          <span class="integrity-count">{{ store.auditIntegrity.eventCount }} 条审计事件</span></div>
         <dl class="integrity-detail">
           <div><dt>链头哈希</dt><dd><code class="hash-short">{{ store.auditIntegrity.headHash.slice(0, 12) }}…</code></dd></div>
-          <div v-if="store.auditIntegrity.firstBrokenAuditId"><dt>首个异常审计</dt><dd><RouterLink :to="`/investigations?search=${store.auditIntegrity.firstBrokenAuditId}`">{{ store.auditIntegrity.firstBrokenAuditId }}</RouterLink></dd></div>
-        </dl>
+          <div v-if="store.auditIntegrity.firstBrokenAuditId"><dt>首个异常审计</dt><dd><RouterLink :to="`/investigations?search=${store.auditIntegrity.firstBrokenAuditId}`">{{ store.auditIntegrity.firstBrokenAuditId }}</RouterLink></dd></div></dl>
       </template>
       <EmptyState v-else title="暂无完整性数据" message="审计完整性信息加载中或不可用。" />
     </section>
 
     <section class="system-ledger" aria-labelledby="adapters-title">
-      <header><div><h2 id="adapters-title">运行时适配器</h2><p>审计活动来源，基于已记录审计事件派生</p></div></header>
+      <header><div><h2 id="adapters-title">运行时适配器</h2><p>查看哪些运行时正在写入审计事件</p></div></header>
       <div class="adapter-grid">
         <article class="adapter-card">
           <h3>LangGraph</h3>
           <dl>
             <div><dt>审计事件</dt><dd>{{ langraphStats.count }}</dd></div>
             <div><dt>阻断数</dt><dd>{{ langraphStats.blocked }}</dd></div>
-            <div><dt>最近活动</dt><dd>{{ langraphStats.lastSeen ?? "暂无记录" }}</dd></div>
-          </dl>
+            <div><dt>最近活动</dt><dd>{{ langraphStats.lastSeen ?? "暂无记录" }}</dd></div></dl>
           <RouterLink v-if="langraphStats.count > 0" class="page-action adapter-card__link" to="/investigations?runtime=langgraph">查看事件</RouterLink>
         </article>
         <article class="adapter-card">
@@ -77,14 +67,14 @@
 
     <!-- 配置审计摘要 -->
     <section class="system-ledger" aria-labelledby="config-audit-title">
-      <header><div><h2 id="config-audit-title">配置审计</h2><p>基于 event_type=config_audit 的审计事件派生</p></div><RouterLink class="page-action" to="/investigations?event_type=config_audit">查看全部</RouterLink></header>
+      <header><div><h2 id="config-audit-title">配置审计</h2><p>查看配置检查发现的风险项</p></div><RouterLink class="page-action" to="/investigations?event_type=config_audit">查看全部</RouterLink></header>
       <template v-if="configAuditEvents.length">
         <div class="event-table-wrap">
           <table class="event-table">
             <caption>配置审计事件</caption>
             <thead><tr><th>时间</th><th>目标类型</th><th>目标 ID</th><th>决策</th><th>发现数</th></tr></thead>
             <tbody>
-              <tr v-for="evt in configAuditEvents.slice(0, 5)" :key="evt.id">
+              <tr v-for="evt in configAuditEvents" :key="evt.id">
                 <td><time>{{ evt.time }}</time></td>
                 <td>{{ getRawMeta(evt, 'target_type') ?? "—" }}</td>
                 <td class="truncate-cell">{{ getRawMeta(evt, 'target_id') ?? "—" }}</td>
@@ -172,12 +162,8 @@ function handleRefresh() { void store.refresh(); }
 .policy-summary > div { background: var(--color-surface-muted); display: grid; gap: var(--space-1); min-width: 0; padding: var(--space-3); }
 .policy-summary dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .policy-summary dd { margin: 0; overflow-wrap: anywhere; }
-.policy-history { display: grid; }
-.policy-history article { align-items: center; border-bottom: 1px solid var(--color-border); display: grid; gap: var(--space-3); grid-template-columns: minmax(8rem, .6fr) minmax(0, 1fr) 9rem 7rem; min-height: 3.25rem; padding: 0 var(--space-2); }
-.policy-history article:last-child { border-bottom: 0; }
-.policy-history span, .policy-history time, .policy-history small { color: var(--color-text-subtle); font-size: var(--font-size-12); overflow-wrap: anywhere; }
 @media (max-width: 640px) { .status-ledger > header { align-items: start; flex-direction: column; gap: var(--space-3); } .status-ledger__rows article { grid-template-columns: .75rem minmax(0, 1fr) auto; } .status-ledger time { grid-column: 2 / -1; } }
-@media (max-width: 760px) { .policy-summary { grid-template-columns: 1fr 1fr; } .policy-history article { grid-template-columns: 1fr auto; padding: var(--space-3) 0; } .policy-history span { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .policy-summary { grid-template-columns: 1fr 1fr; } }
 .system-ledger { border-block: 1px solid var(--color-border); display: grid; gap: var(--space-4); padding: var(--space-5) 0; }
 .system-ledger > header { align-items: center; display: flex; gap: var(--space-4); justify-content: space-between; flex-wrap: wrap; }
 .system-ledger h2, .system-ledger p { margin: 0; }
@@ -189,7 +175,7 @@ function handleRefresh() { void store.refresh(); }
 .integrity-detail dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .integrity-detail dd { margin: 0; }
 .hash-short { font-size: var(--font-size-12); }
-.adapter-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.adapter-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); }
 .adapter-card { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-3); padding: var(--space-4); }
 .adapter-card h3 { font-size: var(--font-size-14); margin: 0; }
 .adapter-card dl { display: grid; gap: var(--space-2); grid-template-columns: 1fr 1fr 1fr; margin: 0; }

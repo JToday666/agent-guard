@@ -1,12 +1,17 @@
 <template>
   <figure class="trend-chart">
+    <div v-if="points.length" class="trend-legend" aria-hidden="true">
+      <span class="series-allow"><i></i>放行</span>
+      <span class="series-ask"><i></i>审批</span>
+      <span class="series-deny"><i></i>拒绝</span>
+    </div>
     <svg v-if="points.length" viewBox="0 0 720 240" role="img" :aria-label="summary" preserveAspectRatio="xMidYMid meet">
       <g class="grid-lines" aria-hidden="true"><line v-for="y in [24, 72, 120, 168, 216]" :key="y" x1="24" :y1="y" x2="650" :y2="y" /></g>
       <polyline v-for="series in chartSeries" :key="series.label" :class="series.className" :points="series.points" fill="none" vector-effect="non-scaling-stroke" />
       <g v-for="series in chartSeries" :key="`${series.label}-label`" :class="series.className">
         <circle :cx="series.lastX" :cy="series.lastY" r="4" vector-effect="non-scaling-stroke" />
         <line class="label-connector" :x1="series.lastX + 6" :y1="series.lastY" x2="660" :y2="series.labelY" vector-effect="non-scaling-stroke" />
-        <text x="665" :y="series.labelY + 4">{{ series.label }} {{ series.lastValue }}</text>
+        <text x="665" :y="series.labelY + 4">{{ series.lastValue }}</text>
       </g>
       <g class="x-labels"><text v-for="label in xLabels" :key="label.text" :x="label.x" y="236" text-anchor="middle">{{ label.text }}</text></g>
     </svg>
@@ -47,7 +52,13 @@ const summary = computed(() => `决策趋势，共 ${props.points.length} 个时
 </script>
 
 <style scoped lang="scss">
-.trend-chart { display: grid; gap: var(--space-2); margin: 0; min-height: 15rem; }
+.trend-chart { display: grid; gap: var(--space-3); margin: 0; min-height: 15rem; }
+.trend-legend { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.trend-legend span { align-items: center; display: inline-flex; font-size: var(--font-size-13); font-weight: var(--font-weight-semibold); gap: var(--space-1); }
+.trend-legend i { border-radius: 999px; display: inline-block; height: .625rem; width: .625rem; }
+.trend-legend .series-allow i { background: var(--color-active); }
+.trend-legend .series-ask i { background: var(--color-warning); }
+.trend-legend .series-deny i { background: var(--color-danger); }
 .trend-chart svg { height: 15rem; overflow: visible; width: 100%; }
 .grid-lines line { stroke: var(--color-border); stroke-width: 1; }
 .trend-chart polyline { stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; }
@@ -56,7 +67,7 @@ const summary = computed(() => `决策趋势，共 ${props.points.length} 个时
 .series-allow { fill: var(--color-active); stroke: var(--color-active); }
 .series-ask { fill: var(--color-warning); stroke: var(--color-warning); }
 .series-deny { fill: var(--color-danger); stroke: var(--color-danger); }
-.trend-chart text { font-size: 11px; font-weight: var(--font-weight-semibold); }
+.trend-chart text { font-size: 12px; font-weight: var(--font-weight-semibold); }
 .x-labels { fill: var(--color-text-subtle); stroke: none; }
 .trend-chart figcaption, .chart-empty { color: var(--color-text-subtle); font-size: var(--font-size-12); margin: 0; }
 .chart-empty { margin: auto; }

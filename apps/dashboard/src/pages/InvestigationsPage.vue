@@ -2,7 +2,7 @@
   <div class="investigations-page" :class="{ 'investigations-page--detail': Boolean(selectedEvent) }">
     <main class="workspace-panel investigations-page__main" aria-labelledby="investigations-title">
       <header class="page-header">
-        <div><p>监控与取证</p><h1 id="investigations-title">事件调查</h1></div>
+        <div><h1 id="investigations-title">事件调查</h1></div>
         <div class="page-header-actions">
           <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
           <button type="button" class="page-action" :disabled="!filteredEvents.length" @click="handleExport">导出 CSV</button>
@@ -12,7 +12,7 @@
       <form class="investigation-tools" role="search" @submit.prevent>
         <label class="investigation-search">
           <span>搜索事件</span>
-          <input v-model.trim="searchDraft" type="search" placeholder="资源、规则、原因、Trace 或 Case" />
+          <input v-model.trim="searchDraft" type="search" placeholder="资源、规则名称、原因、证据链或 Case" />
         </label>
         <AppSelect id="investigation-decision" v-model="decisionFilter" label="决策" :options="decisionOptions" />
         <AppSelect id="investigation-runtime" v-model="runtimeFilter" label="运行时" :options="runtimeOptions" />
@@ -25,7 +25,7 @@
       <nav class="quick-filters" aria-label="快速筛选">
         <button type="button" :aria-pressed="!query.blocked && !query.rule" @click="handleQuickFilter({ blocked: '', rule: '' })">全部 {{ index.latestEvents.length }}</button>
         <button type="button" :aria-pressed="query.blocked === 'true'" @click="handleQuickFilter({ blocked: query.blocked === 'true' ? '' : 'true', rule: '' })">已阻断 {{ blockedCount }}</button>
-        <button v-for="rule in ruleOptions" :key="rule.value" type="button" :aria-pressed="query.rule === rule.value" :title="rule.value" @click="handleQuickFilter({ blocked: '', rule: query.rule === rule.value ? '' : rule.value })">{{ rule.label }} {{ rule.count }}</button>
+        <button v-for="rule in ruleOptions" :key="rule.value" type="button" :aria-pressed="query.rule === rule.value" :title="ruleLabel(rule.value)" @click="handleQuickFilter({ blocked: '', rule: query.rule === rule.value ? '' : rule.value })">{{ ruleOptionLabel(rule.value, rule.count) }}</button>
       </nav>
 
       <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
@@ -61,14 +61,13 @@
           <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
           <div><button type="button" :disabled="currentPage === 1" @click="handlePage(currentPage - 1)">上一页</button><button type="button" :disabled="currentPage === totalPages" @click="handlePage(currentPage + 1)">下一页</button></div>
         </footer>
-      </template>
-      <EmptyState v-else title="没有匹配事件" message="当前条件下没有审计事件，清除筛选后可查看完整记录。"><button type="button" @click="handleClearFilters">清除筛选</button></EmptyState>
+      </template><EmptyState v-else title="没有匹配事件" message="当前条件下没有审计事件，清除筛选后可查看完整记录。"><button type="button" @click="handleClearFilters">清除筛选</button></EmptyState>
     </main>
 
     <DetailDrawer :is-open="Boolean(query.eventId)" eyebrow="事件证据" :title="selectedEvent?.tool ?? '事件未找到'" @close="handleCloseEvent">
       <EventEvidence v-if="selectedEvent" :event="selectedEvent">
         <section v-if="selectedTraceEvents.length > 1" class="trace-preview">
-          <header><div><h3>关联 Trace</h3><span>{{ selectedTraceEvents.length }} 个事件节点</span></div><RouterLink :to="`/investigations/${selectedEvent.traceId}`">展开完整链路</RouterLink></header>
+          <header><div><h3>关联证据链</h3><span>{{ selectedTraceEvents.length }} 个事件节点</span></div><RouterLink :to="`/evidence/${selectedEvent.traceId}`">查看完整证据链</RouterLink></header>
           <TraceTimeline :events="selectedTraceEvents.slice(0, 4)" />
         </section>
       </EventEvidence>
@@ -92,6 +91,7 @@ import { filterInvestigationEvents, getRuleFilterOptions, resolveInvestigationEv
 import { useDashboardStore } from "../stores/dashboardStore";
 import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery, normalizeInvestigationQuery } from "../utils/investigation-query";
+import { formatRuleListForDisplay, ruleLabel, ruleOptionLabel } from "../utils/rule-display";
 
 defineOptions({ name: "InvestigationsPage" });
 const EventEvidence = defineAsyncComponent(() => import("../components/EventEvidence.vue"));
@@ -122,14 +122,12 @@ const hasFilters = computed(() => Boolean(
 const decisionOptions = [{ label: "全部", value: "" }, { label: "拒绝", value: "deny" }, { label: "审批", value: "ask" }, { label: "放行", value: "allow" }];
 const runtimeOptions = [{ label: "全部", value: "" }, { label: "LangGraph", value: "langgraph" }, { label: "OpenClaw", value: "openclaw" }];
 const severityOptions = [{ label: "全部", value: "" }, { label: "严重", value: "critical" }, { label: "高", value: "high" }, { label: "中", value: "medium" }, { label: "低", value: "low" }];
-const eventTypeOptions = computed(() => {
-  const types = new Set(index.value.latestEvents.map((e) => e.eventType).filter(Boolean));
-  return [{ label: "全部", value: "" }, ...([...types].map((v) => ({ label: v, value: v })))];
-});
-const attackTypeOptions = computed(() => {
-  const types = new Set(index.value.latestEvents.map((e) => e.attackType).filter((v): v is string => Boolean(v)));
-  return [{ label: "全部", value: "" }, ...([...types].map((v) => ({ label: v, value: v })))];
-});
+function buildDynamicOptions(events: typeof index.value.latestEvents, key: "eventType" | "attackType") {
+  const types = new Set(events.map((e) => e[key]).filter((v): v is string => Boolean(v)));
+  return [{ label: "全部", value: "" }, ...[...types].map((v) => ({ label: v, value: v }))];
+}
+const eventTypeOptions = computed(() => buildDynamicOptions(index.value.latestEvents, "eventType"));
+const attackTypeOptions = computed(() => buildDynamicOptions(index.value.latestEvents, "attackType"));
 
 function queryModel(key: "decision" | "runtime" | "severity" | "eventType" | "attackType") {
   return computed({ get: () => query.value[key], set: (value: string) => updateQuery({ [key]: value, page: 1 }) });
@@ -163,27 +161,30 @@ function handlePage(page: number) { updateQuery({ page }); }
 function handleQuickFilter(patch: { blocked: string; rule: string }) { updateQuery({ ...patch, page: 1 }); }
 function handleClearFilters() { searchDraft.value = ""; void router.replace({ path: "/investigations", query: query.value.eventId ? { event_id: query.value.eventId } : {} }); }
 function handleExport() {
-  const headers = ["时间", "决策", "严重性", "风险分", "运行时", "阶段", "事件类型", "工具", "资源", "原因", "Trace ID", "Case ID", "规则命中"];
+  const headers = ["时间", "决策", "严重性", "风险分", "运行时", "阶段", "事件类型", "工具", "资源", "原因", "证据链 ID", "Case ID", "规则命中"];
   const rows = filteredEvents.value.map((e) => [
     e.occurredAt, e.decision, e.severity, e.riskScore, e.runtime, e.stage,
     e.eventType, e.tool, e.resource, e.reason, e.traceId, e.caseId ?? "",
-    e.ruleHits.join("|"),
-  ]);
+    formatRuleListForDisplay(e.ruleHits),]);
   const csv = [headers, ...rows].map((row) =>
     row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
   ).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click(); URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 </script>
 
 <style scoped lang="scss">
 .investigations-page { display: grid; grid-template-columns: minmax(0, 1fr); }
-.investigations-page--detail { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); }
-.investigations-page__main { min-width: 0; }
+.investigations-page--detail { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); height: calc(100vh - var(--top-bar-height)); overflow: hidden; }
+.investigations-page__main { min-width: 0; overflow-y: auto; min-height: 0; }
 .investigation-tools { align-items: end; border-block: 1px solid var(--color-border); display: grid; gap: var(--space-3); grid-template-columns: minmax(16rem, 1fr) repeat(5, minmax(7rem, .4fr)) auto; padding: var(--space-4) 0; }
 @media (max-width: 1280px) { .investigation-tools { grid-template-columns: 1fr repeat(3, minmax(7rem, .4fr)) auto; } .investigation-tools > :nth-child(5), .investigation-tools > :nth-child(6) { grid-column: auto; } }
 @media (max-width: 1180px) { .investigation-tools { grid-template-columns: repeat(3, 1fr); } .investigation-search { grid-column: 1 / -1; } }
@@ -221,7 +222,6 @@ function handleExport() {
 .trace-preview > header { align-items: start; display: flex; justify-content: space-between; }
 .trace-preview h3 { margin: 0; }
 .trace-preview header span { color: var(--color-text-subtle); font-size: var(--font-size-12); }
-@media (max-width: 1180px) { .investigation-tools { grid-template-columns: repeat(3, 1fr); } .investigation-search { grid-column: 1 / -1; } }
 @media (max-width: 900px) { .investigations-page, .investigations-page--detail { grid-template-columns: 1fr; } }
 @media (max-width: 640px) {
   .investigation-tools { grid-template-columns: 1fr; }

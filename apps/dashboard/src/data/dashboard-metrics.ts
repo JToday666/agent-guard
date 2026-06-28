@@ -8,13 +8,13 @@ interface MetricEvent {
   decision: DecisionStatus;
   blocked: boolean;
   occurredAt: string;
-  latencyMs: number | null;
+  latencyMs?: number | null;
 }
 
 export function deriveMetrics(events: readonly MetricEvent[]): EvalMetrics {
   const latencyValues = events
     .map((event) => event.latencyMs)
-    .filter((value): value is number => value !== null);
+    .filter((value): value is number => value != null);
   const blockedCount = events.filter(
     (event) => event.blocked || event.decision !== "allow",
   ).length;

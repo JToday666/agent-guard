@@ -1,5 +1,5 @@
 <template>
-  <ol class="trace-timeline" aria-label="Trace 审计事件">
+  <ol class="trace-timeline" aria-label="证据链审计事件">
     <li
       v-for="(event, index) in events"
       :key="event.id"
@@ -16,7 +16,7 @@
         <footer>
           <StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" />
           <span>风险 {{ event.riskScore }}</span>
-          <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">联动溯源图</button>
+          <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">定位溯源节点</button>
           <RouterLink class="page-action" :to="eventLink(event.id)">查看证据</RouterLink>
         </footer>
       </article>
@@ -34,7 +34,7 @@ const props = defineProps<{ events: AuditEventRow[]; selectedEventId?: string; t
 const emit = defineEmits<{ "select-event": [eventId: string] }>();
 function eventLink(eventId: string) {
   return props.traceId
-    ? { path: `/investigations/${props.traceId}`, query: { event_id: eventId } }
+    ? { path: `/evidence/${props.traceId}`, query: { event_id: eventId } }
     : { path: "/investigations", query: { event_id: eventId } };
 }
 </script>
@@ -46,7 +46,7 @@ function eventLink(eventId: string) {
 .trace-timeline__marker { align-items: center; background: var(--color-surface); border: 2px solid var(--color-active); border-radius: 50%; display: flex; font-size: var(--font-size-11); font-weight: var(--font-weight-bold); height: 2rem; justify-content: center; position: relative; width: 2rem; z-index: 1; }
 .trace-timeline__item--deny .trace-timeline__marker { border-color: var(--color-danger); color: var(--color-danger); }
 .trace-timeline__item--ask .trace-timeline__marker { border-color: var(--color-warning); color: var(--color-warning); }
-.trace-timeline article { border-bottom: 1px solid var(--color-border); display: grid; gap: var(--space-2); margin-bottom: var(--space-4); padding: 0 0 var(--space-4); }
+.trace-timeline article { border-bottom: 1px solid var(--color-border); display: grid; gap: var(--space-2); margin-bottom: var(--space-2); padding: 0 0 var(--space-3); }
 .trace-timeline__item--selected article { background: var(--color-active-soft); box-shadow: inset 2px 0 var(--color-active); margin-inline: calc(-1 * var(--space-3)); padding: var(--space-3); }
 .trace-timeline article header, .trace-timeline article footer { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .trace-timeline article header { justify-content: space-between; }
@@ -58,5 +58,4 @@ function eventLink(eventId: string) {
 .timeline-select-btn { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text-subtle); cursor: pointer; font-size: var(--font-size-11); min-height: 1.75rem; padding: 0 var(--space-2); transition: border-color var(--transition-fast), color var(--transition-fast); }
 .timeline-select-btn:hover { border-color: var(--color-active); color: var(--color-active); }
 </style>
-
 

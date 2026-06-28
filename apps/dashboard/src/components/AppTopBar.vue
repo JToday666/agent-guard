@@ -9,17 +9,16 @@
       <RouterLink class="top-bar__status-link" to="/system">
         <StatusBadge :label="healthLabel" :tone="healthTone" />
       </RouterLink>
-      <RouterLink class="top-bar__chip" to="/investigations?runtime=langgraph">LangGraph</RouterLink>
       <DataFreshness :status="dataStatus" :updated-at="updatedAt" />
     </div>
 
     <form class="top-bar__search" role="search" @submit.prevent="handleSearch">
-      <label class="sr-only" for="global-search">搜索 Trace、Case、资源或规则</label>
+      <label class="sr-only" for="global-search">搜索证据链、Case、资源或规则</label>
       <input
         id="global-search"
         v-model.trim="searchText"
         name="search"
-        placeholder="搜索 Trace / Case / 资源 / 规则"
+        placeholder="搜索证据链 / Case / 资源 / 规则"
         type="search"
       />
     </form>
@@ -67,7 +66,7 @@ function handleSearch(): void {
   border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: minmax(11rem, 14rem) minmax(18rem, 1fr) minmax(15rem, 22rem) auto;
+  grid-template-columns: minmax(10rem, 14rem) minmax(13rem, 1fr) minmax(12rem, 22rem) auto;
   height: var(--top-bar-height);
   min-height: var(--top-bar-height);
   padding: var(--space-2) var(--space-5);
@@ -112,7 +111,6 @@ function handleSearch(): void {
   text-decoration: none;
 }
 
-.top-bar__chip,
 .top-bar__pending {
   align-items: center;
   background: var(--color-surface-muted);
@@ -169,7 +167,7 @@ function handleSearch(): void {
 
 @media (max-width: 1024px) {
   .top-bar {
-    grid-template-columns: minmax(10rem, 1fr) minmax(15rem, 22rem) auto;
+    grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 22rem) auto;
   }
 
   .top-bar__status {
