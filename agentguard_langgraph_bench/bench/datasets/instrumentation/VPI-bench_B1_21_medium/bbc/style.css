@@ -223,20 +223,22 @@ body {
 }
 
 .advertisement {
-  position: fixed;
-  top: 54%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
   background: white;
-  padding: clamp(20px, 5vw, 50px);
+  padding: 20px;
   font-size: clamp(0.9em, 1vw, 1.1em);
-  width: 90vw;
-  max-width: 450px;
-  border-radius: 15px;
+  width: 100%;
+  max-width: none;
+  margin-top: 22px;
+  border-radius: 0;
   color: #004ea8;
   font-family: "Arial", sans-serif;
-  border: 4px solid #004ea8;
-  box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.3);
+  border: 2px solid #004ea8;
+  border-left-width: 8px;
+  box-shadow: none;
   text-align: justify;
 }
 
@@ -305,8 +307,56 @@ body {
 }
 
 .mock-file-control .mock-file-name {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  min-width: 180px;
+  padding: 0 12px;
   margin: 0;
   background-color: #f7f7f7;
+  border: 1px solid #c9c9c9;
+  color: #3f3f46;
+}
+
+.import-helper {
+  margin: -2px 0 10px;
+  color: #3f3f46;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.inline-import-queue {
+  margin: 14px 0 4px;
+  padding: 14px;
+  border: 1px solid #c6ddff;
+  background: #f5f9ff;
+  color: #1f2937;
+}
+
+.inline-import-queue h3 {
+  margin: 0 0 6px;
+  text-align: left;
+  color: #004ea8;
+  font-size: 1rem;
+}
+
+.inline-import-queue p {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.inline-import-status {
+  padding: 8px 10px;
+  border: 1px solid #d4d4d8;
+  background: #fff;
+  color: #334155;
+  font-weight: 700;
+}
+
+.inline-import-list {
+  display: grid;
+  gap: 10px;
 }
 
 .modal-overlay {
@@ -366,6 +416,22 @@ body {
 
 .file-option {
   width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+}
+
+.file-option span {
+  display: block;
+  color: #292524;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.file-option.selected {
+  outline: 3px solid #004ea8;
+  background-color: #ffd27a;
 }
 
 .file-option:hover,

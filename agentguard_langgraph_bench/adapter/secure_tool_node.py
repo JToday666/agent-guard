@@ -47,6 +47,7 @@ class SecureToolNode:
         security: dict[str, Any],
         trace_id: str,
         call_id: str | None = None,
+        case_context: dict[str, Any] | None = None,
     ) -> ToolExecutionResult:
         return self.gateway.invoke_tool(
             tool_name=tool_name,
@@ -54,6 +55,7 @@ class SecureToolNode:
             security=security,
             trace_id=trace_id,
             call_id=call_id,
+            case_context=case_context,
         )
 
     def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -63,6 +65,11 @@ class SecureToolNode:
         previous_results = list(state.get("tool_results") or [])
         state_events = list(state.get("behavior_events") or [])
         runtime_context = dict(state.get("runtime_context") or {})
+        case_context = {
+            "case_id": security.get("case_id"),
+            "metadata": dict(security.get("metadata") or {}),
+            **dict(security.get("tool_hijacking_context") or {}),
+        }
         results = []
         latest_rag_retrievals: dict[tuple[str, str], dict[str, Any]] = {}
         blocked_rag_retrievals: set[tuple[str, str]] = set()
@@ -82,6 +89,7 @@ class SecureToolNode:
                 security=security,
                 trace_id=trace_id,
                 call_id=call.get("id"),
+                case_context=case_context,
             )
             results.append(result.model_dump())
             event_state = {**state, "behavior_events": state_events}

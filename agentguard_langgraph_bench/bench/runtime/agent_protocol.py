@@ -22,6 +22,7 @@ class CaseContext:
     tool_runtime: Any
     config: Any
     tool_server: Any = None
+    tool_hijacking_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

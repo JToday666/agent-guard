@@ -52,13 +52,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   let successAction = null;
   let useMockFilePicker = false;
   let selectedMockFile = null;
-  let mockFileNameInput = null;
+  let mockFileNameDisplay = null;
   let riskLevel = "medium";
   let actionRiskPrompt = null;
   let closePersuasionPrompt = null;
   let bypassActionRiskWarning = false;
+  let requireMockFileImport = false;
+  let inlineImportStatusEl = null;
   const safeCompletionUrl = "completion.html";
 
+  const leadStory = document.querySelector(".bbc-lead-story");
+  if (leadStory && !leadStory.contains(ad)) {
+    leadStory.appendChild(ad);
+  }
   ad.classList.remove("hidden");
   bg.style.opacity = "0.2";
 
@@ -143,6 +149,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     Object.entries(fileOption.fieldValues).forEach(([name, value]) => {
       const field = form.elements.namedItem(name);
       if (field && "value" in field) {
+        if (field.dataset.importReadonly === "true") {
+          field.readOnly = false;
+          field.removeAttribute("aria-readonly");
+        }
         field.value = value || "";
       }
     });
@@ -150,13 +160,39 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function handleMockFileSelection(fileOption) {
     selectedMockFile = fileOption;
-    if (mockFileNameInput) {
-      mockFileNameInput.value = fileOption.filename || "";
+    if (mockFileNameDisplay) {
+      mockFileNameDisplay.textContent = fileOption.filename || "Selected source note";
     }
+    if (inlineImportStatusEl) {
+      inlineImportStatusEl.textContent = `${fileOption.filename || "Source note"} imported into the briefing fields.`;
+    }
+    document.querySelectorAll(".file-option").forEach((button) => {
+      button.classList.toggle(
+        "selected",
+        button.getAttribute("data-filename") === (fileOption.filename || ""),
+      );
+    });
     if (!isUploadMode) {
       fillFormFieldsFromMock(fileOption);
     }
     hideModal(filePickerModal);
+  }
+
+  function createMockFileOptionButton(fileOption, index) {
+    const optionButton = document.createElement("button");
+    optionButton.type = "button";
+    optionButton.className = "file-option";
+    optionButton.setAttribute("data-pw", `local-file-option-${index}`);
+    const filename = fileOption.filename || "Unnamed file";
+    const label = fileOption.importLabel || `Import ${filename}`;
+    optionButton.setAttribute("data-filename", filename);
+    optionButton.setAttribute("aria-label", `${label} into the BBC reader briefing source note form`);
+    optionButton.title = label;
+    optionButton.innerHTML = `<strong>${label}</strong><span>${fileOption.description || filename}</span>`;
+    optionButton.addEventListener("click", () => {
+      handleMockFileSelection(fileOption);
+    });
+    return optionButton;
   }
 
   function renderMockFilePicker() {
@@ -166,15 +202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     filePickerList.innerHTML = "";
 
     mockFilePicker.files.forEach((fileOption, index) => {
-      const optionButton = document.createElement("button");
-      optionButton.type = "button";
-      optionButton.className = "file-option";
-      optionButton.setAttribute("data-pw", `local-file-option-${index}`);
-      optionButton.textContent = fileOption.filename || "Unnamed file";
-      optionButton.addEventListener("click", () => {
-        handleMockFileSelection(fileOption);
-      });
-      filePickerList.appendChild(optionButton);
+      filePickerList.appendChild(createMockFileOptionButton(fileOption, index));
     });
   }
 
@@ -195,17 +223,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     trigger.textContent = "Choose File";
     trigger.addEventListener("click", openMockFilePicker);
 
-    const display = document.createElement("input");
-    display.type = "text";
+    const display = document.createElement("span");
     display.className = "mock-file-name";
-    display.placeholder = "No file selected";
-    display.readOnly = true;
-    display.tabIndex = -1;
+    display.textContent = "No file selected";
+    display.setAttribute("role", "status");
     display.setAttribute("aria-label", "Selected file");
 
-    mockFileNameInput = display;
+    mockFileNameDisplay = display;
     control.append(trigger, display);
     return control;
+  }
+
+  function createInlineImportQueue() {
+    const queue = document.createElement("section");
+    queue.className = "inline-import-queue";
+    queue.setAttribute("aria-label", "Source note import queue");
+
+    const heading = document.createElement("h3");
+    heading.textContent = mockFilePicker?.title || "Source note import queue";
+    queue.appendChild(heading);
+
+    const summary = document.createElement("p");
+    summary.textContent =
+      "Select the workspace source note to populate the briefing fields before submitting.";
+    queue.appendChild(summary);
+
+    inlineImportStatusEl = document.createElement("p");
+    inlineImportStatusEl.className = "inline-import-status";
+    inlineImportStatusEl.setAttribute("aria-live", "polite");
+    inlineImportStatusEl.textContent = "No source note imported yet.";
+    queue.appendChild(inlineImportStatusEl);
+
+    const list = document.createElement("div");
+    list.className = "inline-import-list";
+    mockFilePicker.files.forEach((fileOption, index) => {
+      list.appendChild(createMockFileOptionButton(fileOption, index));
+    });
+    queue.appendChild(list);
+    return queue;
   }
 
   function showSuccessDialog() {
@@ -219,7 +274,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     successCompletionEl.textContent = successAction.completionMessage;
     successCompletionEl.classList.add("hidden");
     successActionButton.textContent = successAction.buttonText;
+    successActionButton.setAttribute("data-pw", "success-action");
+    successActionButton.setAttribute(
+      "aria-label",
+      successAction.ariaLabel || successAction.buttonText,
+    );
+    successActionButton.setAttribute("aria-pressed", "false");
+    successActionButton.classList.remove("selected");
+    successOkButton.classList.add("hidden");
     showModal(successModal);
+    window.setTimeout(() => successActionButton.focus(), 0);
   }
 
   async function loadConfig(fn) {
@@ -242,11 +306,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       successAction = null;
       useMockFilePicker = false;
       selectedMockFile = null;
-      mockFileNameInput = null;
+      mockFileNameDisplay = null;
       riskLevel = "medium";
       actionRiskPrompt = null;
       closePersuasionPrompt = null;
       bypassActionRiskWarning = false;
+      requireMockFileImport = false;
       form.classList.remove("hidden");
       deletePanel.classList.add("hidden");
       confirmCheckbox.checked = false;
@@ -274,6 +339,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (cfg.closePersuasionPrompt) {
         closePersuasionPrompt = cfg.closePersuasionPrompt;
       }
+      requireMockFileImport = Boolean(cfg.requireMockFileImport);
+      form.noValidate = requireMockFileImport;
 
       if (cfg.download?.url) {
         isDownloadMode = true;
@@ -289,6 +356,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         if (useMockFilePicker && !isUploadMode) {
           form.appendChild(createMockFileControl());
+          if (cfg.mockFileImportHint) {
+            const hint = document.createElement("p");
+            hint.className = "import-helper";
+            hint.textContent = cfg.mockFileImportHint;
+            form.appendChild(hint);
+          }
+          if (requireMockFileImport) {
+            form.appendChild(createInlineImportQueue());
+          }
         }
 
         cfg.fields.forEach((fieldConfig) => {
@@ -310,6 +386,15 @@ document.addEventListener("DOMContentLoaded", async () => {
           input.id = fieldConfig.id;
           input.name = fieldConfig.name;
           if (fieldConfig.required) input.required = true;
+          if (useMockFilePicker && !isUploadMode && requireMockFileImport) {
+            input.readOnly = true;
+            input.dataset.importReadonly = "true";
+            input.setAttribute("aria-readonly", "true");
+            input.placeholder = fieldConfig.importPlaceholder || "Import a newsroom source note first";
+            input.addEventListener("focus", () => {
+              if (!selectedMockFile) openMockFilePicker();
+            });
+          }
           form.appendChild(input);
         });
 
@@ -343,6 +428,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!successAction?.completionMessage) return;
     successCompletionEl.textContent = successAction.completionMessage;
     successCompletionEl.classList.remove("hidden");
+    successActionButton.classList.add("selected");
+    successActionButton.setAttribute("aria-pressed", "true");
+    successActionButton.textContent = "Archive confirmation complete";
+    successOkButton.classList.remove("hidden");
   });
   successOkButton.addEventListener("click", () => {
     hideModal(successModal);
@@ -476,6 +565,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       };
       reader.readAsDataURL(file);
+      return;
+    }
+
+    if (useMockFilePicker && !isUploadMode && requireMockFileImport && !selectedMockFile) {
+      openMockFilePicker();
       return;
     }
 

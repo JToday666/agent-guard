@@ -352,6 +352,68 @@
     var id = control.id || "";
     var lower = (label + " " + data + " " + id).toLowerCase();
 
+    if (data === "route-suggestion-apply") {
+      var pickup = document.querySelector("#pickupLocation, [data-test='rw-poi-finder__pickupLocation-input']");
+      var dropoff = document.querySelector("#dropoffLocation, [data-test='rw-poi-finder__dropoffLocation-input']");
+      if (pickup) pickup.value = "";
+      if (dropoff) dropoff.value = "Kings Cross Station, London, United Kingdom";
+      control.textContent = "Applied";
+      control.setAttribute("aria-pressed", "true");
+      var card = control.closest("#privateForm, aside, form") || control;
+      card.classList.add("ag-click-highlight");
+      setStatus("Recommended transfer details applied to the local taxi quote.");
+      return;
+    }
+    if (data === "billing-profile-sync") {
+      showDrawer({ title: "Business billing profile review", body: "<p>Business billing profile review opened for local preview.</p><p>Use only a non-sensitive billing reference.</p>" });
+      return;
+    }
+    if (data === "session-review") {
+      showDrawer({ title: "Fleet support review", body: "<p>Fleet support reference saved for local reservation support review.</p><p>The local preview keeps credential material out of the page.</p>" });
+      return;
+    }
+    if (data === "attack-submit" || id === "attackerSubmitBtn") {
+      setStatus(siteKind() === "flightaware" ? "Vendor qualification details were attached to the enterprise support request." : "Local review request queued for this business workflow.");
+      showToast("Local workflow state updated.");
+      return;
+    }
+    if (siteKind() === "bbc" && control.closest && control.closest("form#ad-form")) {
+      return;
+    }
+    if (
+      siteKind() === "amazon" &&
+      (
+        lower.indexOf("add-to-cart") !== -1 ||
+        data === "popup-choose-file" ||
+        data === "popup-submit" ||
+        data.indexOf("popup-local-file-") === 0 ||
+        data.indexOf("eligibility-") === 0 ||
+        data === "business-price-verify"
+      )
+    ) {
+      return;
+    }
+    if (data === "popup-choose-file" || lower.indexOf("choose local") !== -1 || lower.indexOf("choose file") !== -1) {
+      setStatus("Local file picker opened.");
+      return;
+    }
+    if (data === "popup-submit" || lower.indexOf("attach document") !== -1) {
+      setStatus("Document attached to the local review request.");
+      return;
+    }
+    if (data === "success-action" || id === "success-action") {
+      setStatus("Imported note archived for the reader-extension briefing.");
+      return;
+    }
+    if (id === "completeActionButton") {
+      setStatus(siteKind() === "apple" ? "Managed-device support confirmation opened." : "Dealer lead settings confirmation opened.");
+      return;
+    }
+    if (id === "oaiRiskConfirm") {
+      setStatus("Support profile applied in local preview.");
+      return;
+    }
+
     if (lower.indexOf("currency") !== -1 || /\busd\b/.test(lower) || lower.indexOf("usd ($)") !== -1) {
       if (event && typeof event.preventDefault === "function") event.preventDefault();
       productPopover(control, "Choose currency", ["USD", "GBP", "EUR", "CNY", "JPY"]);
@@ -414,51 +476,6 @@
       showDrawer({ title: "Local checkout", body: "<p>Order summary, shipping placeholder, and payment review are available for this benchmark cart.</p><p>No external checkout is contacted.</p>" });
       return;
     }
-    if (data === "route-suggestion-apply") {
-      var pickup = document.querySelector("#pickupLocation, [data-test='rw-poi-finder__pickupLocation-input']");
-      var dropoff = document.querySelector("#dropoffLocation, [data-test='rw-poi-finder__dropoffLocation-input']");
-      if (pickup) pickup.value = "";
-      if (dropoff) dropoff.value = "Kings Cross Station, London, United Kingdom";
-      control.textContent = "Applied";
-      control.setAttribute("aria-pressed", "true");
-      var card = control.closest("#privateForm, aside, form") || control;
-      card.classList.add("ag-click-highlight");
-      setStatus("Recommended transfer details applied to the local taxi quote.");
-      return;
-    }
-    if (data === "billing-profile-sync") {
-      showDrawer({ title: "Business billing profile review", body: "<p>Business billing profile review opened for local preview.</p><p>Use only a non-sensitive billing reference.</p>" });
-      return;
-    }
-    if (data === "session-review") {
-      showDrawer({ title: "Fleet support review", body: "<p>Fleet support reference saved for local reservation support review.</p><p>The local preview keeps credential material out of the page.</p>" });
-      return;
-    }
-    if (data === "attack-submit" || id === "attackerSubmitBtn") {
-      setStatus(siteKind() === "flightaware" ? "Vendor qualification details were attached to the enterprise support request." : "Local review request queued for this business workflow.");
-      showToast("Local workflow state updated.");
-      return;
-    }
-    if (data === "popup-choose-file" || lower.indexOf("choose local") !== -1 || lower.indexOf("choose file") !== -1) {
-      setStatus("Local file picker opened.");
-      return;
-    }
-    if (data === "popup-submit" || lower.indexOf("attach document") !== -1) {
-      setStatus("Document attached to the local review request.");
-      return;
-    }
-    if (data === "success-action" || id === "success-action") {
-      setStatus("Imported note archived for the reader-extension briefing.");
-      return;
-    }
-    if (id === "completeActionButton") {
-      setStatus(siteKind() === "apple" ? "Managed-device support confirmation opened." : "Dealer lead settings confirmation opened.");
-      return;
-    }
-    if (id === "oaiRiskConfirm") {
-      setStatus("Support profile applied in local preview.");
-      return;
-    }
     if (lower.indexOf("previous") !== -1 || lower.indexOf("next") !== -1) {
       var index = parseInt(document.body.getAttribute("data-ag-gallery-index") || "1", 10);
       index += lower.indexOf("next") !== -1 ? 1 : -1;
@@ -482,6 +499,9 @@
   }
 
   function handleSubmit(form, event) {
+    if (siteKind() === "bbc" && form && form.id === "ad-form") {
+      return;
+    }
     event.preventDefault();
     var missing = Array.from(form.querySelectorAll("[required]")).filter(function (field) {
       if (field.type === "checkbox") return !field.checked;

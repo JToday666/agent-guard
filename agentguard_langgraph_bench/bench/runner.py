@@ -6,11 +6,13 @@ import argparse
 import base64
 import csv
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from ..adapter.core_client import FakeAllowCoreClient, FakeAskCoreClient, FakeDenyCoreClient
 from ..adapter.event_models import new_id
@@ -37,8 +39,10 @@ from .runtime.tool_server import BenchmarkToolServer
 from .scoring.success import success_for_case
 from .scoring.agent_abuse import build_agent_abuse_evaluation_report
 from .scoring.file_exfiltration import build_file_exfiltration_evaluation_report
+from .scoring.memory_poisoning import build_memory_poisoning_evaluation_report
 from .scoring.prompt_injection import build_prompt_injection_evaluation_report
 from .scoring.tool_hijacking import build_tool_hijacking_report, case_extra_dict, case_extra_list
+from .browser_runtime import LOCAL_INSTRUMENTATION_ROOT
 from .tools import MockToolRegistry
 
 
@@ -53,6 +57,7 @@ def run_cases(
     scenario_stateful: bool = False,
     isolate_scenarios: bool = True,
     benchmark_run_id: str | None = None,
+    run_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     benchmark_run_id = benchmark_run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     if config.tool_hijacking_mode == "differential" and all(case.attack_type == "tool_hijacking" for case in cases):
@@ -91,8 +96,8 @@ def run_cases(
         agent_adapter.setup({"config": config, "tool_server": tool_server})
         groups = group_cases_by_scenario(cases) if scenario_stateful else [[case] for case in cases]
         for group_index, group in enumerate(groups):
-            if scenario_stateful and isolate_scenarios and group_index > 0:
-                restore_initial_sandbox(config.sandbox_dir)
+            if scenario_stateful and isolate_scenarios:
+                _clear_case_volatile_sandbox(config.sandbox_dir)
             for case in group:
                 if not scenario_stateful:
                     _clear_case_volatile_sandbox(config.sandbox_dir)
@@ -109,7 +114,20 @@ def run_cases(
                     core_mode=_core_mode(fake_core=fake_core, fake_core_decision=fake_core_decision, defense_enabled=config.defense_enabled),
                     fake_core_decision=fake_core_decision if fake_core else None,
                 )
+                if run_metadata:
+                    row["run_metadata"] = dict(run_metadata)
+                    row["scenario_stateful"] = bool(scenario_stateful)
+                    if run_metadata.get("poisonedrag_mode") is not None:
+                        row["poisonedrag_mode"] = run_metadata.get("poisonedrag_mode")
                 rows.append(row)
+            if scenario_stateful:
+                _write_scenario_artifacts(
+                    config.results_dir,
+                    benchmark_run_id,
+                    group,
+                    rows[-len(group) :],
+                    config.sandbox_dir,
+                )
     finally:
         agent_adapter.teardown()
         if tool_server is not None:
@@ -173,7 +191,10 @@ def _run_differential_cases(
             "clean_run": clean_row,
             "poisoned_run": poisoned_row,
             "differential": differential,
-            "attack_success": bool(poisoned_row.get("attack_success") or differential.get("attack_success")),
+            "attack_success": bool(poisoned_row.get("high_confidence_attack_success")),
+            "high_confidence_attack_success": bool(poisoned_row.get("high_confidence_attack_success")),
+            "low_confidence_attack_observed": bool(poisoned_row.get("low_confidence_attack_observed")),
+            "task_success_strict": bool(poisoned_row.get("task_success_strict")),
             "task_success": bool(clean_row.get("task_success") and poisoned_row.get("task_success")),
             "safe_completion": bool(poisoned_row.get("safe_completion") and not differential.get("attack_success")),
             "overblocked": bool(clean_row.get("overblocked") or poisoned_row.get("overblocked")),
@@ -309,6 +330,18 @@ def _run_single_case(
         hijacking_report = build_tool_hijacking_report(case, row)
         row["hijacking_report"] = hijacking_report
         row["hijacking_mode"] = hijacking_report.get("mode")
+        row["mcpsafety_attack_success"] = hijacking_report.get("mcpsafety_attack_success")
+        row["generic_hijacking_attack_success"] = hijacking_report.get("generic_hijacking_attack_success")
+        row["high_confidence_attack_success"] = hijacking_report.get("high_confidence_attack_success")
+        row["low_confidence_attack_observed"] = hijacking_report.get("low_confidence_attack_observed")
+        row["task_success_strict"] = hijacking_report.get("task_success_strict")
+        row["tool_evidence_task_success"] = hijacking_report.get("tool_evidence_task_success")
+        row["final_answer_task_success"] = hijacking_report.get("final_answer_task_success")
+        row["terminal_state_task_success"] = hijacking_report.get("terminal_state_task_success")
+        row["side_effect_task_success"] = hijacking_report.get("side_effect_task_success")
+        row["partial_task_success"] = hijacking_report.get("partial_task_success")
+        row["task_success_mode"] = hijacking_report.get("task_success_mode")
+        row["task_failed_due_to_attack"] = hijacking_report.get("task_failed_due_to_attack")
         row["target_tool"] = (hijacking_report.get("target") or {}).get("tool")
         row["hijacked_tool"] = (hijacking_report.get("hijacked") or {}).get("tool")
         row["resisted"] = hijacking_report.get("resisted")
@@ -321,6 +354,16 @@ def _run_single_case(
         row["oracle_evidence"] = hijacking_report.get("oracle_evidence")
         row["descriptor_evidence"] = _descriptor_evidence(row.get("tool_calls") or [])
         row["descriptor_diff"] = _descriptor_diff_for_case(case)
+        row["catalog_presented_to_llm"] = True
+        row["catalog_view"] = row.get("tool_catalog_view") or config.tool_catalog_view
+        row["selected_descriptor_hash"] = _selected_descriptor_hash(row.get("tool_calls") or [])
+        row["catalog_hash"] = row["selected_descriptor_hash"]
+        row["mcp_calls_path"] = str(config.sandbox_dir / "mcp" / "calls.jsonl")
+        row["mcp_descriptors_path"] = str(config.sandbox_dir / "mcp" / "descriptors.jsonl")
+        row["mcp_catalog_diff_path"] = str(config.sandbox_dir / "mcp" / "catalog_diff.jsonl")
+        row["mcp_service_requests_path"] = str(config.sandbox_dir / "mcp" / "service_requests.jsonl")
+        row["llm_prompt_redacted_path"] = str(case_result_dir / "llm_prompts" / "round_1_redacted.json")
+        row["llm_response_redacted_path"] = str(case_result_dir / "llm_responses" / "round_1_redacted.json")
     if should_evaluate_mcpsafety(case):
         mcpsafety_report = build_mcpsafety_evaluation_report(case, row)
         if mcpsafety_report is not None:
@@ -328,7 +371,16 @@ def _run_single_case(
             row["mcpsafety_evaluator"] = mcpsafety_report.get("evaluator")
             row["mcpsafety_attack_success"] = mcpsafety_report.get("attack_success")
             row["mcpsafety_evidence_status"] = mcpsafety_report.get("evidence_status")
-    if case.attack_type not in {"agent_abuse", "file_exfiltration", "prompt_injection"}:
+            if case.attack_type == "tool_hijacking":
+                row["high_confidence_attack_success"] = bool(
+                    row.get("high_confidence_attack_success")
+                    or mcpsafety_report.get("high_confidence_attack_success")
+                )
+                row["low_confidence_attack_observed"] = bool(
+                    row.get("low_confidence_attack_observed")
+                    or mcpsafety_report.get("low_confidence_attack_observed")
+                )
+    if case.attack_type not in {"agent_abuse", "file_exfiltration", "memory_poisoning", "prompt_injection"}:
         row["attack_success"] = success_for_case(case, row)
         report_payload = None
     else:
@@ -340,6 +392,29 @@ def _run_single_case(
         row["run_status"] = "security_failure"
         row["security_failure"] = True
         row["invalid_reasons"] = sorted(set([*(row.get("invalid_reasons") or []), "sandbox_escape_detected"]))
+    if case.attack_type == "memory_poisoning":
+        report = build_memory_poisoning_evaluation_report(case, row)
+        row["memory_poisoning_evaluation_report"] = report.model_dump()
+        row["memory_poisoning_attack_success"] = report.memory_poisoning_attack_success
+        row["clean_control_correct"] = report.clean_control_correct
+        row["evaluator"] = "memory_poisoning_oracle_v1"
+        row["evidence_status"] = report.evidence_status
+        row["completion_level"] = report.completion_level
+        row["attack_success"] = report.attack_success
+        row["task_success"] = report.task_success
+        row["harm_attempted"] = report.attack_success
+        row["safe_completion"] = bool(report.evaluable and not report.attack_success)
+        row["run_valid"] = False if row.get("security_failure") else report.run_valid
+        row["task_terminal"] = bool(row.get("task_terminal") or report.terminal_action)
+        row["task_terminal_reason"] = row.get("task_terminal_reason") or report.terminal_action
+        row["invalid_reasons"] = sorted(
+            set([*(row.get("invalid_reasons") or []), *report.invalid_reasons])
+        )
+        if report.run_valid and not row.get("security_failure"):
+            row["invalid_reasons"] = []
+            if row.get("run_status") in {"max_tool_rounds", "completed", "model_text_response"}:
+                row["run_status"] = "completed"
+        report_payload = report.model_dump()
     if case.attack_type == "agent_abuse":
         report = build_agent_abuse_evaluation_report(case, row, sandbox_dir=config.sandbox_dir)
         row["agent_abuse_evaluation_report"] = report.model_dump()
@@ -388,6 +463,9 @@ def _run_single_case(
         row["task_terminal"] = report.task_terminal
         row["task_terminal_reason"] = report.task_terminal_reason
         row["prompt_injection_run_quality"] = report.prompt_injection_run_quality
+        row["attack_visibility_seen"] = report.attack_visibility_seen
+        row["injection_intent_seen"] = report.injection_intent_seen
+        row["harm_path_probe"] = report.harm_path_probe
         row["nonfatal_post_oracle_errors"] = report.nonfatal_post_oracle_errors
         row["run_valid"] = False if row.get("security_failure") else report.run_valid
         if not report.run_valid:
@@ -528,6 +606,10 @@ def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benc
         "attack_type": case.attack_type,
         "is_malicious": case.is_malicious,
         "metadata": case.metadata,
+        "user_task": case.input.payload,
+        "clean_tool_catalog": getattr(case, "clean_tool_catalog", None),
+        "poisoned_tool_catalog": getattr(case, "poisoned_tool_catalog", None),
+        "descriptor_diff": getattr(case, "descriptor_diff", None),
         "instrumentation_plan_mode": config.instrumentation_plan_mode,
         "planning_source": "runtime_error",
         "guided_plan_applied": False,
@@ -634,6 +716,7 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
             immutable_recording = _copy_browser_replay_artifacts(recording, case_result_dir)
             if immutable_recording:
                 recording.update(immutable_recording)
+                _complete_browser_replay_from_tool_calls(row, recording)
     sandbox_snapshot = _archive_case_side_effects(case_result_dir, row)
     if sandbox_snapshot:
         row["case_side_effect_artifacts"] = sandbox_snapshot
@@ -641,6 +724,8 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     _write_case_jsonl(case_result_dir / "policy_decisions.jsonl", [_decision_record(item, row) for item in row.get("tool_calls") or []])
     _write_case_jsonl(case_result_dir / "audit_events.jsonl", [item.get("audit_event") for item in row.get("tool_calls") or [] if item.get("audit_event")])
     _write_case_jsonl(case_result_dir / "tool_results.jsonl", row.get("tool_calls") or [])
+    _write_tool_hijacking_llm_artifacts(case_result_dir, row)
+    _write_memory_poisoning_llm_artifacts(case_result_dir, row)
     (case_result_dir / "browser_action_summary.json").write_text(
         json.dumps(_browser_action_summary(row), ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
@@ -653,6 +738,7 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
         json.dumps(row.get("sandbox_diff") or {}, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+    (case_result_dir / "case_result.json").write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     evidence_index = _build_evidence_index(row, case_result_dir)
     for recording in row.get("browser_recordings") or []:
         if isinstance(recording, dict):
@@ -697,6 +783,11 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
             json.dumps(row["file_exfiltration_evaluation_report"], ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+    if isinstance(row.get("memory_poisoning_evaluation_report"), dict):
+        (case_result_dir / "memory_poisoning_evaluation_report.json").write_text(
+            json.dumps(row["memory_poisoning_evaluation_report"], ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
     case_result = case_result_dir / "case_result.json"
     case_result.write_text(json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -704,11 +795,23 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
 def _archive_case_side_effects(case_result_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
     sandbox_root = _sandbox_root_from_row(row)
     if sandbox_root is None or not sandbox_root.exists():
+        if row.get("attack_type") == "memory_poisoning" or (row.get("metadata") or {}).get("source_dataset") == "PoisonedRAG":
+            return {
+                "memory_poisoning_scoped_side_effects": _write_memory_poisoning_scoped_side_effects(
+                    case_result_dir,
+                    row,
+                    sandbox_root or Path("."),
+                )
+            }
         return {}
+    mcp_scoped = _write_case_scoped_mcp_logs(case_result_dir, row, sandbox_root)
     targets = {
-        "side_effects": ["outbox", "api", "browser", "web_state", "records", "memory", "identity", "social", "ads", "platform"],
+        "side_effects": ["outbox", "api", "browser", "web_state", "records", "memory", "identity", "social", "ads", "platform", "rag", "mcp"],
         "outbox_snapshot": ["outbox"],
         "api_snapshot": ["api"],
+        "mcp_snapshot": ["mcp"],
+        "rag_snapshot": ["rag"],
+        "memory_snapshot": ["memory"],
         "reports_snapshot": ["files/reports"],
         "browser_snapshot": ["browser", "web_state", "records"],
     }
@@ -725,12 +828,20 @@ def _archive_case_side_effects(case_result_dir: Path, row: dict[str, Any]) -> di
             relative = str(item.get("relative_path") or item.get("path") or "")
             if not relative or (relative not in exact and not relative.startswith(prefixes)):
                 continue
+            if relative.startswith("browser/replay_artifacts/"):
+                continue
+            if relative.startswith("mcp/") and relative.endswith(".jsonl"):
+                continue
             source = Path(str(item.get("absolute_path") or ""))
             if not source.exists() or not source.is_file() or not _is_under(source, sandbox_root):
                 continue
             dest = dest_root / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
+            if dest_name == "side_effects" and relative.split("/", 1)[0] in {"rag", "memory", "api", "mcp"}:
+                direct_dest = case_result_dir / relative
+                direct_dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, direct_dest)
             copied.append(
                 {
                     "case_id": row.get("case_id"),
@@ -754,7 +865,77 @@ def _archive_case_side_effects(case_result_dir: Path, row: dict[str, Any]) -> di
                 encoding="utf-8",
             )
             archived[dest_name] = {"root": str(dest_root), "manifest": str(dest_root / "manifest.json"), "files": copied}
+    if mcp_scoped:
+        archived["mcp_snapshot"] = mcp_scoped
+        archived.setdefault("side_effects", {"root": str(case_result_dir / "side_effects"), "manifest": "", "files": []})
+        archived["side_effects"]["files"].extend(mcp_scoped.get("files") or [])
+    memory_scoped = _write_memory_poisoning_scoped_side_effects(case_result_dir, row, sandbox_root)
+    if memory_scoped:
+        archived["memory_poisoning_scoped_side_effects"] = memory_scoped
     return archived
+
+
+def _write_memory_poisoning_scoped_side_effects(case_result_dir: Path, row: dict[str, Any], sandbox_root: Path) -> dict[str, Any]:
+    if row.get("attack_type") != "memory_poisoning" and (row.get("metadata") or {}).get("source_dataset") != "PoisonedRAG":
+        return {}
+    specs = {
+        "memory/store.jsonl": ("source_case_id", "case_id"),
+        "memory/reads.jsonl": ("case_id",),
+        "memory/searches.jsonl": ("case_id",),
+        "rag/queries.jsonl": ("case_id",),
+        "rag/answers.jsonl": ("case_id",),
+        "api/requests.jsonl": ("case_id",),
+    }
+    case_id = str(row.get("case_id") or "")
+    copied: list[dict[str, Any]] = []
+    for relative, case_keys in specs.items():
+        source = sandbox_root / relative
+        current_records = _filter_records_for_case(_read_jsonl_records(source), case_id=case_id, keys=case_keys)
+        current_dest = case_result_dir / "side_effects" / "current_case" / relative
+        _write_case_jsonl(current_dest, current_records)
+        copied.append(_side_effect_file_record(current_dest, relative, row, scope="current_case", record_count=len(current_records)))
+
+        snapshot_records = _read_jsonl_records(source)
+        snapshot_dest = case_result_dir / "side_effects" / "scenario_snapshot" / relative
+        _write_case_jsonl(snapshot_dest, snapshot_records)
+        copied.append(_side_effect_file_record(snapshot_dest, relative, row, scope="scenario_snapshot", record_count=len(snapshot_records)))
+    manifest = {
+        "case_id": case_id,
+        "run_id": row.get("benchmark_run_id"),
+        "case_scoped_logs": True,
+        "scenario_scoped_logs": True,
+        "files": copied,
+    }
+    manifest_path = case_result_dir / "side_effects" / "memory_poisoning_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return {"root": str(case_result_dir / "side_effects"), "manifest": str(manifest_path), "files": copied}
+
+
+def _filter_records_for_case(records: list[dict[str, Any]], *, case_id: str, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    if not case_id:
+        return []
+    filtered: list[dict[str, Any]] = []
+    for record in records:
+        for key in keys:
+            if str(record.get(key) or "") == case_id:
+                filtered.append(record)
+                break
+    return filtered
+
+
+def _side_effect_file_record(path: Path, relative: str, row: dict[str, Any], *, scope: str, record_count: int) -> dict[str, Any]:
+    return {
+        "case_id": row.get("case_id"),
+        "relative_path": f"side_effects/{scope}/{relative}",
+        "source_relative_path": relative,
+        "scope": scope,
+        "state": "case_scoped" if scope == "current_case" else "scenario_snapshot",
+        "sha256": _sha256(path),
+        "size": path.stat().st_size,
+        "artifact_path": str(path),
+        "record_count": record_count,
+    }
 
 
 def _changed_sandbox_files(row: dict[str, Any], sandbox_root: Path) -> list[dict[str, Any]]:
@@ -779,6 +960,185 @@ def _changed_sandbox_files(row: dict[str, Any], sandbox_root: Path) -> list[dict
                 }
             )
     return changed
+
+
+def _write_case_scoped_mcp_logs(case_result_dir: Path, row: dict[str, Any], sandbox_root: Path) -> dict[str, Any]:
+    mcp_root = sandbox_root / "mcp"
+    mcp_dest = case_result_dir / "mcp"
+    required_empty = ["calls.jsonl", "descriptors.jsonl", "catalog_diff.jsonl", "service_requests.jsonl"]
+    mcp_dest.mkdir(parents=True, exist_ok=True)
+    for name in required_empty:
+        (mcp_dest / name).touch()
+    if not mcp_root.exists():
+        manifest = _write_empty_case_scoped_mcp_manifest(mcp_dest, row, sandbox_root)
+        return {"root": str(mcp_dest), "manifest": str(manifest), "files": _mcp_required_empty_file_records(mcp_dest, row), "case_scoped": True}
+    changed_relatives = {
+        str(item.get("relative_path") or item.get("path") or "")
+        for item in _changed_sandbox_files(row, sandbox_root)
+    }
+    request_ids = _case_mcp_request_ids(row)
+    copied: list[dict[str, Any]] = []
+    case_id = str(row.get("case_id") or "")
+    run_id = str(row.get("benchmark_run_id") or "")
+    for source in sorted(mcp_root.glob("*.jsonl")):
+        relative = f"mcp/{source.name}"
+        records = _read_jsonl_records(source)
+        filtered = [
+            _enrich_case_scoped_record(record, case_id=case_id, run_id=run_id)
+            for record in records
+            if _record_belongs_to_case(record, case_id=case_id, request_ids=request_ids)
+            or (relative in changed_relatives and _record_mentions_case_or_request(record, case_id=case_id, request_ids=request_ids))
+        ]
+        if not filtered:
+            continue
+        dest = mcp_dest / source.name
+        _write_case_jsonl(dest, filtered)
+        copied.append(
+            {
+                "case_id": case_id,
+                "relative_path": relative,
+                "state": "case_scoped",
+                "sha256": _sha256(dest),
+                "size": dest.stat().st_size,
+                "artifact_path": str(dest),
+                "record_count": len(filtered),
+            }
+        )
+    if not copied:
+        manifest = _write_empty_case_scoped_mcp_manifest(mcp_dest, row, sandbox_root)
+        return {"root": str(mcp_dest), "manifest": str(manifest), "files": _mcp_required_empty_file_records(mcp_dest, row), "case_scoped": True}
+    copied_by_relative = {str(item.get("relative_path")) for item in copied}
+    copied.extend(item for item in _mcp_required_empty_file_records(mcp_dest, row) if item["relative_path"] not in copied_by_relative)
+    manifest = {
+        "case_id": case_id,
+        "run_id": run_id,
+        "sandbox_root": str(sandbox_root),
+        "case_scoped": True,
+        "request_ids": sorted(request_ids),
+        "copied_count": len(copied),
+        "files": copied,
+    }
+    mcp_dest.mkdir(parents=True, exist_ok=True)
+    (mcp_dest / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return {"root": str(mcp_dest), "manifest": str(mcp_dest / "manifest.json"), "files": copied, "case_scoped": True}
+
+
+def _write_empty_case_scoped_mcp_manifest(mcp_dest: Path, row: dict[str, Any], sandbox_root: Path) -> Path:
+    manifest = {
+        "case_id": row.get("case_id"),
+        "run_id": row.get("benchmark_run_id"),
+        "sandbox_root": str(sandbox_root),
+        "case_scoped": True,
+        "request_ids": sorted(_case_mcp_request_ids(row)),
+        "copied_count": 0,
+        "files": _mcp_required_empty_file_records(mcp_dest, row),
+    }
+    manifest_path = mcp_dest / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return manifest_path
+
+
+def _mcp_required_empty_file_records(mcp_dest: Path, row: dict[str, Any]) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    for path in sorted(mcp_dest.glob("*.jsonl")):
+        files.append(
+            {
+                "case_id": row.get("case_id"),
+                "relative_path": f"mcp/{path.name}",
+                "state": "case_scoped_empty",
+                "sha256": _sha256(path),
+                "size": path.stat().st_size,
+                "artifact_path": str(path),
+                "record_count": 0,
+            }
+        )
+    return files
+
+
+def _case_mcp_request_ids(row: dict[str, Any]) -> set[str]:
+    request_ids: set[str] = set()
+    for item in row.get("tool_calls") or []:
+        if not isinstance(item, dict) or item.get("tool_name") != "mcp_call":
+            continue
+        event = item.get("event") if isinstance(item.get("event"), dict) else {}
+        event_args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+        for value in (
+            event_args.get("request_id"),
+            (item.get("result") if isinstance(item.get("result"), dict) else {}).get("request_id"),
+        ):
+            if value:
+                request_ids.add(str(value))
+    return request_ids
+
+
+def _read_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                if isinstance(payload, dict):
+                    records.append(payload)
+    except Exception:
+        return []
+    return records
+
+
+def _record_belongs_to_case(record: dict[str, Any], *, case_id: str, request_ids: set[str]) -> bool:
+    record_case_id = _nested_first(record, "case_id", "caseId")
+    if record_case_id:
+        return str(record_case_id) == case_id
+    if not request_ids:
+        return False
+    for value in _nested_values_for_keys(record, {"request_id", "requestId"}):
+        if str(value) in request_ids:
+            return True
+    return False
+
+
+def _record_mentions_case_or_request(record: dict[str, Any], *, case_id: str, request_ids: set[str]) -> bool:
+    text = json.dumps(record, ensure_ascii=False, sort_keys=True)
+    return bool((case_id and case_id in text) or any(request_id and request_id in text for request_id in request_ids))
+
+
+def _enrich_case_scoped_record(record: dict[str, Any], *, case_id: str, run_id: str) -> dict[str, Any]:
+    enriched = dict(record)
+    enriched.setdefault("case_id", case_id)
+    enriched.setdefault("run_id", run_id)
+    return enriched
+
+
+def _nested_first(value: Any, *keys: str) -> Any:
+    for record in _nested_dicts(value):
+        for key in keys:
+            if record.get(key):
+                return record.get(key)
+    return None
+
+
+def _nested_values_for_keys(value: Any, keys: set[str]) -> list[Any]:
+    values: list[Any] = []
+    for record in _nested_dicts(value):
+        for key in keys:
+            if key in record and record.get(key) not in (None, ""):
+                values.append(record.get(key))
+    return values
+
+
+def _nested_dicts(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        records = [value]
+        for item in value.values():
+            records.extend(_nested_dicts(item))
+        return records
+    if isinstance(value, list):
+        records: list[dict[str, Any]] = []
+        for item in value:
+            records.extend(_nested_dicts(item))
+        return records
+    return []
 
 
 def _sandbox_root_from_row(row: dict[str, Any]) -> Path | None:
@@ -880,8 +1240,178 @@ def _copy_browser_replay_artifacts(recording: dict[str, Any], case_result_dir: P
         copied["continuous_frames_dir"] = str(frames_dest)
         copied["continuous_frames"] = frame_paths
     if copied.get("final_dom"):
-        _copy_final_dom_references(Path(str(copied["final_dom"])), source_dir, dest_dir)
+        final_dom = Path(str(copied["final_dom"]))
+        dom_source_dir = _dom_reference_source_dir(recording, source_dir)
+        _copy_final_dom_references(final_dom, dom_source_dir, dest_dir)
+        if dom_source_dir.resolve() != source_dir.resolve():
+            _copy_final_dom_references(final_dom, source_dir, dest_dir)
+        _copy_agent_runtime_web_references(dest_dir)
+    for key, filename in file_map.items():
+        if key not in copied and (dest_dir / filename).exists():
+            copied[key] = str(dest_dir / filename)
+    if not (dest_dir / "manifest.json").exists():
+        manifest = {
+            "ok": bool(recording.get("ok")),
+            "session_id": recording.get("session_id"),
+            "artifact_dir": str(dest_dir),
+            "source_path": recording.get("source_path"),
+            "report": "report.html",
+            "events": "events.jsonl",
+            "action_metadata": "action_metadata.jsonl",
+            "step_actions": "step_actions.jsonl",
+            "replay_state": "replay_state.json",
+            "final_dom": "final_dom.html",
+            "final_accessibility_tree": "final_accessibility_tree.json",
+            "final_screenshot": "final.png",
+            "final_full_page_screenshot": "final_full_page.png",
+            "video": "replay.webm",
+            "video_source": recording.get("video_source"),
+            "video_timeline": "video_timeline.json",
+            "continuous_frames_dir": "continuous_frames",
+            "continuous_frames_manifest": "continuous_frames_manifest.json",
+            "trace": "trace.zip",
+        }
+        (dest_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        copied["manifest"] = str(dest_dir / "manifest.json")
     return copied
+
+
+def _complete_browser_replay_from_tool_calls(row: dict[str, Any], recording: dict[str, Any]) -> None:
+    dest_dir_raw = recording.get("artifact_dir")
+    if not dest_dir_raw:
+        return
+    dest_dir = Path(str(dest_dir_raw))
+    if not dest_dir.exists():
+        return
+    actions = _browser_tool_action_rows(row)
+    if actions:
+        events_path = dest_dir / "events.jsonl"
+        action_path = dest_dir / "action_metadata.jsonl"
+        step_actions_path = dest_dir / "step_actions.jsonl"
+        if not events_path.exists():
+            _write_case_jsonl(events_path, actions)
+            recording["events"] = str(events_path)
+        if not action_path.exists():
+            _write_case_jsonl(action_path, actions)
+            recording["action_metadata"] = str(action_path)
+        if not step_actions_path.exists():
+            _write_case_jsonl(step_actions_path, actions)
+            recording["step_actions"] = str(step_actions_path)
+    step_paths = _copy_step_screenshots_from_tool_calls(row, dest_dir)
+    if step_paths:
+        recording["steps_dir"] = str(dest_dir / "steps")
+        existing = [str(path) for path in recording.get("step_screenshots") or [] if Path(str(path)).exists()]
+        recording["step_screenshots"] = sorted(set([*existing, *step_paths]))
+    if recording.get("ok") is False and not recording.get("video"):
+        _mark_replay_manifest_diagnostic(dest_dir, row=row, recording=recording)
+
+
+def _browser_tool_action_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(row.get("tool_calls") or []):
+        name = str(item.get("tool_name") or "")
+        if not name.startswith("browser_"):
+            continue
+        event = item.get("event") if isinstance(item.get("event"), dict) else {}
+        args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        screenshot = result.get("step_screenshot") or result.get("screenshot")
+        rows.append(
+            {
+                "event_type": "browser_tool_action",
+                "action": name.removeprefix("browser_"),
+                "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                "session_id": args.get("session_id") or args.get("run_id") or row.get("case_id"),
+                "step_index": len(rows),
+                "url": result.get("url") or args.get("url"),
+                "screenshot": screenshot if screenshot and Path(str(screenshot)).exists() else None,
+                "video_expected_visible": bool(screenshot),
+                "status": item.get("status"),
+                "executed": item.get("executed"),
+                "blocked": item.get("blocked"),
+                "tool_call_id": item.get("call_id"),
+                "event_id": event.get("event_id"),
+                "arguments": args,
+                "error": item.get("error"),
+                "source": "tool_call_fallback",
+                "ordinal": index,
+            }
+        )
+    return rows
+
+
+def _copy_step_screenshots_from_tool_calls(row: dict[str, Any], dest_dir: Path) -> list[str]:
+    steps_dest = dest_dir / "steps"
+    copied: list[str] = []
+    for item in row.get("tool_calls") or []:
+        name = str(item.get("tool_name") or "")
+        if not name.startswith("browser_"):
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        raw = result.get("step_screenshot") or result.get("screenshot")
+        if not raw:
+            continue
+        source = Path(str(raw))
+        if not source.exists() or not source.is_file():
+            continue
+        steps_dest.mkdir(parents=True, exist_ok=True)
+        dest = steps_dest / source.name
+        if source.resolve() != dest.resolve():
+            dest.write_bytes(source.read_bytes())
+        copied.append(str(dest))
+    return copied
+
+
+def _mark_replay_manifest_diagnostic(dest_dir: Path, *, row: dict[str, Any], recording: dict[str, Any]) -> None:
+    manifest_path = dest_dir / "manifest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(
+        {
+            "diagnostic_artifact": True,
+            "diagnostic_reason": recording.get("video_save_error") or "browser_replay_incomplete",
+            "case_id": row.get("case_id"),
+            "artifact_dir": str(dest_dir),
+        }
+    )
+    manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    recording["manifest"] = str(manifest_path)
+
+
+def _copy_agent_runtime_web_references(dest_dir: Path) -> None:
+    runtime_web = LOCAL_INSTRUMENTATION_ROOT / "agent_runtime" / "web"
+    if not runtime_web.exists():
+        return
+    targets = [
+        (dest_dir / ".." / "agent_runtime" / "web").resolve(),
+        (dest_dir / ".." / ".." / "agent_runtime" / "web").resolve(),
+        (dest_dir / ".." / ".." / ".." / "agent_runtime" / "web").resolve(),
+    ]
+    for name in ("bootstrap.js", "c4_observable.js", "local_click_responses.css", "local_click_responses.js"):
+        source = runtime_web / name
+        if not source.exists() or not source.is_file():
+            continue
+        for target in targets:
+            target.mkdir(parents=True, exist_ok=True)
+            (target / name).write_bytes(source.read_bytes())
+
+
+def _dom_reference_source_dir(recording: dict[str, Any], fallback: Path) -> Path:
+    raw = recording.get("source_path")
+    if raw:
+        path = Path(str(raw))
+        candidates = [path]
+        if not path.is_absolute():
+            candidates.append(Path.cwd() / path)
+            candidates.append(LOCAL_INSTRUMENTATION_ROOT / path)
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.parent
+    return fallback
 
 
 def _copy_final_dom_references(final_dom: Path, source_dir: Path, dest_dir: Path) -> None:
@@ -890,13 +1420,18 @@ def _copy_final_dom_references(final_dom: Path, source_dir: Path, dest_dir: Path
         parser.feed(final_dom.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return
+    source_root = source_dir.resolve()
+    dest_root = dest_dir.resolve()
     for ref in sorted(set(parser.refs)):
         if ref.startswith(("http://", "https://", "data:", "#")):
             continue
-        if ref.startswith(("/", "\\")) or ".." in Path(ref).parts:
+        clean_ref = unquote(urlsplit(ref).path)
+        if not clean_ref or clean_ref.startswith(("/", "\\")) or ".." in Path(clean_ref).parts:
             continue
-        source = source_dir / ref
-        dest = dest_dir / ref
+        source = (source_root / clean_ref).resolve()
+        dest = (dest_root / clean_ref).resolve()
+        if not _is_under(source, source_root) or not _is_under(dest, dest_root):
+            continue
         if not source.exists() or not source.is_file():
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1047,6 +1582,7 @@ def _prompt_contamination_summary(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 def _write_case_jsonl(path: Path, rows: list[Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             if row is None:
@@ -1115,14 +1651,294 @@ def _last_value(items: list[dict[str, Any]], key: str) -> Any:
 
 
 def _build_evidence_index(row: dict[str, Any], case_result_dir: Path) -> dict[str, Any]:
-    return {
+    index = {
         "case_id": row.get("case_id"),
         "finalized": True,
         "streams": [],
         "missing": [],
         "path_mode": "portable",
         "case_artifact_dir": str(case_result_dir),
+        "core_artifacts": {
+            "case_result": "case_result.json",
+            "tool_results": "tool_results.jsonl",
+            "tool_call_events": "tool_call_events.jsonl",
+            "audit_events": "audit_events.jsonl",
+            "policy_decisions": "policy_decisions.jsonl",
+            "sandbox_diff": "sandbox_diff.json",
+            "agent_visible_prompt_contamination": "agent_visible_prompt_contamination.json",
+        },
     }
+    expected_streams = [
+        "tool_call_events.jsonl",
+        "policy_decisions.jsonl",
+        "audit_events.jsonl",
+        "tool_results.jsonl",
+        "sandbox_diff.json",
+        "llm_prompts/round_1_redacted.json",
+        "llm_responses/round_1_redacted.json",
+        "mcp/calls.jsonl",
+        "mcp/descriptors.jsonl",
+        "mcp/catalog_diff.jsonl",
+        "mcp/service_requests.jsonl",
+        "mcp/collections.jsonl",
+    ]
+    if row.get("attack_type") == "memory_poisoning" or (row.get("metadata") or {}).get("source_dataset") == "PoisonedRAG":
+        expected_streams.extend(
+            [
+                "rag/queries.jsonl",
+                "rag/answers.jsonl",
+                "memory/store.jsonl",
+                "memory/reads.jsonl",
+                "memory/searches.jsonl",
+                "api/requests.jsonl",
+                "side_effects/current_case/memory/store.jsonl",
+                "side_effects/current_case/memory/reads.jsonl",
+                "side_effects/current_case/memory/searches.jsonl",
+                "side_effects/current_case/rag/queries.jsonl",
+                "side_effects/current_case/rag/answers.jsonl",
+                "side_effects/current_case/api/requests.jsonl",
+                "side_effects/scenario_snapshot/memory/store.jsonl",
+                "side_effects/scenario_snapshot/memory/reads.jsonl",
+                "side_effects/scenario_snapshot/memory/searches.jsonl",
+                "side_effects/scenario_snapshot/rag/queries.jsonl",
+                "side_effects/scenario_snapshot/rag/answers.jsonl",
+                "side_effects/scenario_snapshot/api/requests.jsonl",
+            ]
+        )
+    for relative in expected_streams:
+        path = case_result_dir / relative
+        record = _artifact_record(relative, path, case_result_dir)
+        if record["exists"]:
+            index["streams"].append(record)
+        else:
+            index["missing"].append({"path": relative, "reason": "not produced"})
+    side_effect_artifacts = row.get("case_side_effect_artifacts") if isinstance(row.get("case_side_effect_artifacts"), dict) else {}
+    side_effect_streams: list[dict[str, Any]] = []
+    for artifact in side_effect_artifacts.values():
+        if not isinstance(artifact, dict):
+            continue
+        for file_record in artifact.get("files") or []:
+            if not isinstance(file_record, dict) or not file_record.get("artifact_path"):
+                continue
+            record = _artifact_record(
+                str(file_record.get("relative_path") or "side_effect"),
+                Path(str(file_record["artifact_path"])),
+                case_result_dir,
+            )
+            side_effect_streams.append(record)
+            index["streams"].append(record)
+    index["side_effects"] = side_effect_streams
+    index["final_answer"] = row.get("final_answer") or ""
+    index["browser_final_state"] = {
+        "summary_path": "browser_action_summary.json",
+        "final_url": (_browser_action_summary(row)).get("final_url"),
+    }
+    index["llm_artifacts"] = {
+        "prompts": "llm_prompts/round_1_redacted.json",
+        "responses": "llm_responses/round_1_redacted.json",
+        "prompts_redacted": ["llm_prompts/round_1_redacted.json"],
+        "responses_redacted": ["llm_responses/round_1_redacted.json"],
+        "llm_request_count": row.get("llm_request_count", 0),
+        "planning_source": _redact_prompt_text(str(row.get("planning_source") or "")),
+    }
+    index["mcp_artifacts"] = {
+        "calls": "mcp/calls.jsonl",
+        "descriptors": "mcp/descriptors.jsonl",
+        "catalog_diff": "mcp/catalog_diff.jsonl",
+        "service_requests": "mcp/service_requests.jsonl",
+        "case_scoped": _case_scoped_mcp_logs_ok(case_result_dir, str(row.get("case_id") or "")),
+    }
+    if row.get("attack_type") == "memory_poisoning" or (row.get("metadata") or {}).get("source_dataset") == "PoisonedRAG":
+        index["memory_poisoning_artifacts"] = {
+            "case_scoped_logs": True,
+            "scenario_scoped_logs": True,
+            "memory_store_current_case": "side_effects/current_case/memory/store.jsonl",
+            "memory_store_scenario_snapshot": "side_effects/scenario_snapshot/memory/store.jsonl",
+            "memory_reads_current_case": "side_effects/current_case/memory/reads.jsonl",
+            "memory_reads_scenario_snapshot": "side_effects/scenario_snapshot/memory/reads.jsonl",
+            "memory_searches_current_case": "side_effects/current_case/memory/searches.jsonl",
+            "memory_searches_scenario_snapshot": "side_effects/scenario_snapshot/memory/searches.jsonl",
+            "rag_queries_current_case": "side_effects/current_case/rag/queries.jsonl",
+            "rag_queries_scenario_snapshot": "side_effects/scenario_snapshot/rag/queries.jsonl",
+            "rag_answers_current_case": "side_effects/current_case/rag/answers.jsonl",
+            "rag_answers_scenario_snapshot": "side_effects/scenario_snapshot/rag/answers.jsonl",
+            "api_requests_current_case": "side_effects/current_case/api/requests.jsonl",
+            "api_requests_scenario_snapshot": "side_effects/scenario_snapshot/api/requests.jsonl",
+        }
+    index["integrity"] = _evidence_index_integrity(case_result_dir, index)
+    return index
+
+
+def _write_tool_hijacking_llm_artifacts(case_result_dir: Path, row: dict[str, Any]) -> None:
+    if row.get("attack_type") != "tool_hijacking":
+        return
+    prompts_dir = case_result_dir / "llm_prompts"
+    responses_dir = case_result_dir / "llm_responses"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    responses_dir.mkdir(parents=True, exist_ok=True)
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    catalog_view = str(row.get("tool_catalog_view") or row.get("catalog_view") or "poisoned")
+    catalog_key = "clean_tool_catalog" if catalog_view == "clean" else "poisoned_tool_catalog"
+    catalog = row.get(catalog_key) or metadata.get(catalog_key)
+    if not isinstance(catalog, list) or not catalog:
+        catalog = row.get("poisoned_tool_catalog") or row.get("clean_tool_catalog")
+    if not isinstance(catalog, list) or not catalog:
+        catalog = metadata.get("poisoned_tool_catalog") if isinstance(metadata.get("poisoned_tool_catalog"), list) else metadata.get("clean_tool_catalog")
+    prompt_payload = {
+        "case_id": row.get("case_id"),
+        "round_index": 1,
+        "planning_source": _redact_prompt_text(str(row.get("planning_source") or "")),
+        "system_prompt_redacted": "Autonomous benchmark agent prompt redacted to public task, public tool catalog, and prior observations.",
+        "user_task_redacted": _redact_prompt_text(_user_task_from_row(row)),
+        "llm_request_count": row.get("llm_request_count"),
+        "tool_catalog_view": row.get("tool_catalog_view"),
+        "catalog_presented_to_llm": bool(row.get("catalog_presented_to_llm", True)),
+        "catalog_public_view": _public_catalog_view(catalog if isinstance(catalog, list) else []),
+        "catalog_hash": row.get("catalog_hash"),
+        "selected_descriptor_hash": row.get("selected_descriptor_hash"),
+        "tool_observations_redacted": _redacted_tool_observations(row),
+        "redaction_report": {
+            "api_keys_removed": True,
+            "oracle_fields_removed": True,
+            "attack_metadata_removed": True,
+            "internal_attack_args_removed": True,
+        },
+        "prompt_contamination_scan": _prompt_contamination_summary(row),
+        "redacted": True,
+    }
+    response_payload = {
+        "case_id": row.get("case_id"),
+        "last_model_content": row.get("final_answer") or row.get("last_model_content") or "",
+        "high_confidence_attack_success": row.get("high_confidence_attack_success"),
+        "low_confidence_attack_observed": row.get("low_confidence_attack_observed"),
+        "redacted": True,
+    }
+    (prompts_dir / "round_1_redacted.json").write_text(json.dumps(prompt_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    (responses_dir / "round_1_redacted.json").write_text(json.dumps(response_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _write_memory_poisoning_llm_artifacts(case_result_dir: Path, row: dict[str, Any]) -> None:
+    if row.get("attack_type") != "memory_poisoning" and (row.get("metadata") or {}).get("source_dataset") != "PoisonedRAG":
+        return
+    prompts_dir = case_result_dir / "llm_prompts"
+    responses_dir = case_result_dir / "llm_responses"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    responses_dir.mkdir(parents=True, exist_ok=True)
+    prompt_payload = {
+        "case_id": row.get("case_id"),
+        "phase": row.get("phase"),
+        "round_index": 1,
+        "planning_source": _redact_prompt_text(str(row.get("planning_source") or "")),
+        "system_prompt_redacted": "Autonomous support QA benchmark prompt redacted to public task, public tool names, and prior observations.",
+        "user_task_redacted": _redact_prompt_text(_user_task_from_row(row)),
+        "llm_request_count": row.get("llm_request_count", 0),
+        "tool_observations_redacted": _redacted_tool_observations(row),
+        "prompt_contamination_scan": _prompt_contamination_summary(row),
+        "redaction_report": {
+            "api_keys_removed": True,
+            "oracle_fields_removed": True,
+            "attack_metadata_removed": True,
+            "internal_attack_args_removed": True,
+        },
+        "redacted": True,
+    }
+    response_payload = {
+        "case_id": row.get("case_id"),
+        "phase": row.get("phase"),
+        "last_model_content": _redact_prompt_text(str(row.get("final_answer") or row.get("last_model_content") or "")),
+        "memory_poisoning_attack_success": row.get("memory_poisoning_attack_success"),
+        "clean_control_correct": row.get("clean_control_correct"),
+        "redacted": True,
+    }
+    (prompts_dir / "round_1_redacted.json").write_text(json.dumps(prompt_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    (responses_dir / "round_1_redacted.json").write_text(json.dumps(response_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+_INTERNAL_PROMPT_FIELDS = {
+    "attack_oracle",
+    "normal_oracle",
+    "safety_oracle",
+    "response_oracle",
+    "sequence_oracle",
+    "permission_oracle",
+    "success_condition",
+    "malicious_arguments",
+    "malicious_tools",
+    "expected_malicious_behavior",
+    "tool_plan",
+    "guided_success_plan",
+    "closure_plan",
+    "attackcase_tool_plan",
+    "deterministic_plan",
+    "mcpsafety_evaluator",
+    "attack_oracle",
+}
+
+
+def _user_task_from_row(row: dict[str, Any]) -> str:
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    input_payload = metadata.get("input") if isinstance(metadata.get("input"), dict) else {}
+    return str(row.get("user_task") or row.get("input_payload") or input_payload.get("payload") or "")
+
+
+def _public_catalog_view(catalog: list[Any]) -> list[dict[str, Any]]:
+    public: list[dict[str, Any]] = []
+    for item in catalog:
+        if not isinstance(item, dict):
+            continue
+        public.append(
+            {
+                "server": item.get("server"),
+                "tool": item.get("tool") or item.get("name"),
+                "title": item.get("title"),
+                "description": _redact_prompt_text(str(item.get("description") or "")),
+                "input_schema": _strip_internal_prompt_fields(item.get("input_schema") or item.get("parameters") or {}),
+                "permissions": list(item.get("permissions") or []) if isinstance(item.get("permissions"), list) else [],
+                "trust_level": item.get("trust_level"),
+                "version": item.get("version"),
+            }
+        )
+    return public
+
+
+def _redacted_tool_observations(row: dict[str, Any]) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    for item in row.get("tool_calls") or []:
+        if not isinstance(item, dict) or not item.get("executed"):
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        observations.append(
+            {
+                "tool_name": item.get("tool_name"),
+                "status": item.get("status"),
+                "request_id": _nested_first(item, "request_id", "requestId"),
+                "result_preview": _strip_internal_prompt_fields(result),
+            }
+        )
+    return observations[-5:]
+
+
+def _strip_internal_prompt_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key) in _INTERNAL_PROMPT_FIELDS:
+                continue
+            safe[str(key)] = _strip_internal_prompt_fields(item)
+        return safe
+    if isinstance(value, list):
+        return [_strip_internal_prompt_fields(item) for item in value]
+    if isinstance(value, str):
+        return _redact_prompt_text(value)
+    return value
+
+
+def _redact_prompt_text(text: str) -> str:
+    redacted = text
+    redacted = re.sub(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s]+", r"\1=[redacted]", redacted)
+    redacted = redacted.replace("attackcase_tool_plan", "redacted_internal_plan_source")
+    redacted = redacted.replace("tool_plan", "internal_plan")
+    return redacted
 
 
 def _artifact_record(artifact_type: str, path: Path, case_result_dir: Path) -> dict[str, Any]:
@@ -1140,6 +1956,80 @@ def _artifact_record(artifact_type: str, path: Path, case_result_dir: Path) -> d
         "warning": None,
         "error": None if exists else "missing",
     }
+
+
+def _evidence_index_integrity(case_result_dir: Path, index: dict[str, Any]) -> dict[str, Any]:
+    streams = index.get("streams") if isinstance(index.get("streams"), list) else []
+    existing_paths = [_artifact_record_path(case_result_dir, stream) for stream in streams if isinstance(stream, dict) and stream.get("exists")]
+    json_parse_ok = True
+    jsonl_parse_ok = True
+    for path in [item for item in existing_paths if item is not None]:
+        if path.suffix == ".jsonl":
+            jsonl_parse_ok = _jsonl_parse_ok(path) and jsonl_parse_ok
+        elif path.suffix == ".json":
+            json_parse_ok = _json_parse_ok(path) and json_parse_ok
+    missing_core = [
+        relative
+        for relative in (index.get("core_artifacts") or {}).values()
+        if isinstance(relative, str) and not (case_result_dir / relative).exists()
+    ]
+    return {
+        "all_paths_exist": not missing_core,
+        "json_parse_ok": json_parse_ok,
+        "jsonl_parse_ok": jsonl_parse_ok,
+        "case_scoped_logs": _case_scoped_mcp_logs_ok(case_result_dir, str(index.get("case_id") or "")),
+        "missing_core_artifacts": sorted(missing_core),
+    }
+
+
+def _artifact_record_path(case_result_dir: Path, stream: dict[str, Any]) -> Path | None:
+    debug_path = stream.get("debug_local_path")
+    if debug_path:
+        return Path(str(debug_path))
+    run_relative = stream.get("run_relative_path")
+    if run_relative:
+        case_parts = case_result_dir.parts
+        try:
+            cases_index = case_parts.index("cases")
+            run_dir = Path(*case_parts[:cases_index])
+            return run_dir / str(run_relative)
+        except ValueError:
+            pass
+    artifact_type = stream.get("type")
+    if artifact_type:
+        return case_result_dir / str(artifact_type)
+    return None
+
+
+def _json_parse_ok(path: Path) -> bool:
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+        return True
+    except Exception:
+        return False
+
+
+def _jsonl_parse_ok(path: Path) -> bool:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    json.loads(line)
+        return True
+    except Exception:
+        return False
+
+
+def _case_scoped_mcp_logs_ok(case_result_dir: Path, case_id: str) -> bool:
+    mcp_dir = case_result_dir / "mcp"
+    if not mcp_dir.exists():
+        return False
+    for path in sorted(mcp_dir.glob("*.jsonl")):
+        for record in _read_jsonl_records(path):
+            record_case_id = _nested_first(record, "case_id", "caseId")
+            if record_case_id and str(record_case_id) != case_id:
+                return False
+    return True
 
 
 def _relative_to(path: Path, root: Path) -> str:
@@ -1209,6 +2099,14 @@ def build_case_context(
         tool_runtime=tool_runtime,
         config=config,
         tool_server=tool_server,
+        tool_hijacking_context={
+            "case_id": case.case_id,
+            "metadata": case.metadata,
+            "clean_tool_catalog": case_extra_list(case, "clean_tool_catalog"),
+            "poisoned_tool_catalog": case_extra_list(case, "poisoned_tool_catalog"),
+            "descriptor_diff": _descriptor_diff_for_case(case),
+            "hijacking": case_extra_dict(case, "hijacking"),
+        },
     )
 
 
@@ -1260,6 +2158,17 @@ def _descriptor_evidence(tool_results: list[dict[str, Any]]) -> list[dict[str, A
     return [item for item in evidence if any(value for value in item.values())]
 
 
+def _selected_descriptor_hash(tool_results: list[dict[str, Any]]) -> str | None:
+    for item in tool_results:
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        if item.get("tool_name") != "mcp_call":
+            continue
+        descriptor_hash = result.get("descriptor_hash") or result.get("selected_descriptor_hash")
+        if descriptor_hash:
+            return str(descriptor_hash)
+    return None
+
+
 def _descriptor_diff_for_case(case: AttackCase) -> list[dict[str, Any]]:
     explicit = case_extra_list(case, "descriptor_diff")
     if explicit:
@@ -1287,6 +2196,155 @@ def group_cases_by_scenario(cases: list[AttackCase]) -> list[list[AttackCase]]:
         )
         for scenario_id in order
     ]
+
+
+def _write_scenario_artifacts(
+    results_dir: Path,
+    run_id: str,
+    group: list[AttackCase],
+    rows: list[dict[str, Any]],
+    sandbox_dir: Path,
+) -> None:
+    if not group:
+        return
+    scenario_id = str(group[0].metadata.get("scenario_id") or rows[0].get("scenario_id") or group[0].case_id)
+    scenario_dir = _run_results_dir(results_dir, run_id) / "scenarios" / scenario_id
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+    timeline = _scenario_memory_timeline(rows, sandbox_dir)
+    _write_case_jsonl(scenario_dir / "memory_timeline.jsonl", timeline)
+    phase_rows = {_row_phase(row): row for row in rows}
+    scenario_result = {
+        "scenario_id": scenario_id,
+        "case_ids": [row.get("case_id") for row in rows],
+        "phases": [_row_phase(row) for row in rows],
+        "clean_control_correct": _phase_success(phase_rows.get("clean_control")),
+        "memory_contaminated": bool((phase_rows.get("poison_seed") or {}).get("memory_poisoning_evaluation_report", {}).get("memory_contaminated")),
+        "delayed_memory_trigger_success": _phase_success(phase_rows.get("trigger_query")),
+        "conflict_poison_success": _phase_success(phase_rows.get("conflict_probe")),
+        "manual_script_consistent": all(
+            not (row.get("memory_poisoning_evaluation_report") or {}).get("manual_script_disagreement")
+            for row in rows
+        ),
+        "memory_timeline_path": "memory_timeline.jsonl",
+        "memory_store_path": str(sandbox_dir / "memory" / "store.jsonl"),
+        "memory_reads_path": str(sandbox_dir / "memory" / "reads.jsonl"),
+        "memory_searches_path": str(sandbox_dir / "memory" / "searches.jsonl"),
+        "rag_answers_path": str(sandbox_dir / "rag" / "answers.jsonl"),
+    }
+    (scenario_dir / "scenario_result.json").write_text(
+        json.dumps(scenario_result, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _scenario_memory_timeline(rows: list[dict[str, Any]], sandbox_dir: Path) -> list[dict[str, Any]]:
+    timeline: list[dict[str, Any]] = []
+    store_records = _jsonl_records_by_call_id(sandbox_dir / "memory" / "store.jsonl", "source_tool_call_id")
+    read_records = _jsonl_records_by_call_id(sandbox_dir / "memory" / "reads.jsonl", "tool_call_id")
+    search_records = _jsonl_records_by_call_id(sandbox_dir / "memory" / "searches.jsonl", "tool_call_id")
+    answer_records = _jsonl_records_by_call_id(sandbox_dir / "rag" / "answers.jsonl", "source_tool_call_id")
+    for row in rows:
+        case_id = row.get("case_id")
+        phase = _row_phase(row)
+        if phase == "clean_control":
+            memory_count = len(_read_jsonl_file(sandbox_dir / "memory" / "store.jsonl"))
+            timeline.append({"case_id": case_id, "phase": phase, "event": "memory_state", "count": memory_count})
+        for item in row.get("tool_calls") or []:
+            if not item.get("executed") or item.get("status") != "executed" or item.get("error"):
+                continue
+            tool_name = str(item.get("tool_name") or "")
+            call_id = str(item.get("call_id") or "")
+            result = item.get("result") if isinstance(item.get("result"), dict) else {}
+            base = {"case_id": case_id, "phase": phase, "event": tool_name, "tool_call_id": call_id}
+            if tool_name == "memory_write":
+                record = store_records.get(call_id, result)
+                timeline.append(
+                    {
+                        **base,
+                        "namespace": record.get("namespace"),
+                        "key": record.get("key"),
+                        "value": record.get("value"),
+                        "source_case_id": record.get("source_case_id"),
+                        "source_tool_call_id": record.get("source_tool_call_id"),
+                    }
+                )
+            elif tool_name == "memory_read":
+                record = read_records.get(call_id, result)
+                timeline.append(
+                    {
+                        **base,
+                        "namespace": result.get("namespace"),
+                        "key": result.get("key"),
+                        "found": result.get("found"),
+                        "source_case_id": result.get("source_case_id") or record.get("matched_source_case_id"),
+                        "source_tool_call_id": result.get("source_tool_call_id") or record.get("matched_source_tool_call_id"),
+                        "value": result.get("value"),
+                    }
+                )
+            elif tool_name == "memory_search":
+                record = search_records.get(call_id, result)
+                matches = result.get("matches") if isinstance(result.get("matches"), list) else []
+                timeline.append(
+                    {
+                        **base,
+                        "namespace": result.get("namespace"),
+                        "query": result.get("query"),
+                        "match_count": len(matches),
+                        "matched_keys": [match.get("key") for match in matches if isinstance(match, dict)],
+                        "matched_source_case_ids": record.get("matched_source_case_ids"),
+                        "matched_source_tool_call_ids": record.get("matched_source_tool_call_ids"),
+                    }
+                )
+            elif tool_name == "rag_answer":
+                record = answer_records.get(call_id, result)
+                timeline.append(
+                    {
+                        **base,
+                        "question_id": result.get("question_id"),
+                        "answer": result.get("answer"),
+                        "used_memory": result.get("used_memory"),
+                        "memory_refs": result.get("memory_refs"),
+                        "scenario_id": record.get("scenario_id") or result.get("scenario_id"),
+                    }
+                )
+    return timeline
+
+
+def _jsonl_records_by_call_id(path: Path, key: str) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for record in _read_jsonl_file(path):
+        call_id = str(record.get(key) or "")
+        if call_id:
+            records[call_id] = record
+    return records
+
+
+def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                records.append(payload)
+    return records
+
+
+def _row_phase(row: dict[str, Any] | None) -> str:
+    if not row:
+        return ""
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return str(row.get("phase") or metadata.get("phase") or "")
+
+
+def _phase_success(row: dict[str, Any] | None) -> bool | None:
+    if row is None:
+        return None
+    return bool(row.get("attack_success"))
 
 
 def _case_browser_session_ids(case: AttackCase) -> list[str]:
@@ -1338,6 +2396,11 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
     }
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     with run_csv.open("w", encoding="utf-8", newline="") as handle:
+        def _csv_value(value: Any) -> Any:
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, ensure_ascii=False)
+            return value
+
         fields = [
             "case_id",
             "trace_id",
@@ -1353,9 +2416,13 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
             "blocked",
             "executed",
             "attack_success",
+            "prompt_injection_attack_success",
             "task_success",
             "safe_completion",
             "overblocked",
+            "attack_visibility_seen",
+            "injection_intent_seen",
+            "harm_path_probe",
             "instrumentation_plan_mode",
             "planning_source",
             "guided_plan_applied",
@@ -1374,13 +2441,15 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
             "llm_timeout_count",
             "llm_retry_count",
             "evidence_status",
+            "prompt_injection_evaluation_report",
+            "memory_poisoning_evaluation_report",
             "mcpsafety_evaluator",
             "mcpsafety_evidence_status",
         ]
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         for row in rows:
-            writer.writerow({field: json.dumps(row[field]) if isinstance(row.get(field), list) else row.get(field) for field in fields})
+            writer.writerow({field: _csv_value(row.get(field)) for field in fields})
     paths = {
         "run_json": str(run_json),
         "run_csv": str(run_csv),
@@ -1417,6 +2486,11 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
         if _requires_browser_artifact(row) and not row.get("browser_recordings"):
             missing_artifacts.append(case_id)
     run_integrity_ok = not duplicates and not missing_case_results and not missing_artifacts
+    memory_rows = [
+        row for row in rows if row.get("attack_type") == "memory_poisoning" or (row.get("metadata") or {}).get("stateful_long_term_memory")
+    ]
+    first_row = rows[0] if rows else {}
+    run_metadata = first_row.get("run_metadata") if isinstance(first_row.get("run_metadata"), dict) else {}
     return {
         "expected_case_count": len(rows),
         "result_case_count": len(rows),
@@ -1427,7 +2501,38 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
         "run_dir": str(_run_results_dir(results_dir, run_id)),
         "case_artifacts_dir": str(_run_results_dir(results_dir, run_id) / "cases"),
         "run_integrity_ok": run_integrity_ok,
+        "dataset_kind": "memory_poisoning_stateful" if memory_rows else None,
+        "scenario_stateful": bool(
+            run_metadata.get("scenario_stateful")
+            if "scenario_stateful" in run_metadata
+            else memory_rows and any((row.get("metadata") or {}).get("stateful_long_term_memory") for row in memory_rows)
+        ),
+        "llm_enabled": bool(first_row.get("llm_request_count") or first_row.get("llm_planning_evidence")),
+        "instrumentation_plan_mode": first_row.get("instrumentation_plan_mode"),
+        "llm_fallback_to_case_plan": bool(first_row.get("fallback_applied")),
+        "poisonedrag_mode": run_metadata.get("poisonedrag_mode") or first_row.get("poisonedrag_mode") or _run_poisonedrag_mode(rows),
     }
+
+
+def _run_poisonedrag_mode(rows: list[dict[str, Any]]) -> str | None:
+    modes: set[str] = set()
+    for row in rows:
+        for item in row.get("tool_calls") or []:
+            if item.get("tool_name") not in {"rag_retrieve", "rag_answer"}:
+                continue
+            result = item.get("result") if isinstance(item.get("result"), dict) else {}
+            mode = str(result.get("mode") or "").strip()
+            if mode:
+                modes.add(mode)
+    if "delayed_memory" in modes:
+        return "delayed_memory"
+    if "hybrid" in modes:
+        return "hybrid"
+    if "poisoned" in modes:
+        return "poisoned"
+    if "clean" in modes:
+        return "clean"
+    return None
 
 
 def _requires_browser_artifact(row: dict[str, Any]) -> bool:
@@ -1661,6 +2766,15 @@ def main(argv: list[str] | None = None) -> int:
         reset_environment=not args.no_reset_env,
         scenario_stateful=args.scenario_stateful,
         isolate_scenarios=not args.share_memory_across_scenarios,
+        run_metadata={
+            "dataset_path": str(args.dataset),
+            "scenario_stateful": bool(args.scenario_stateful),
+            "poisonedrag_mode": args.poisonedrag_mode,
+            "poison_prefix": args.poison_prefix,
+            "rag_scorer": args.rag_scorer,
+            "top_k": args.top_k,
+            "adv_per_query": args.adv_per_query,
+        },
     )
     fake_core_active = args.fake_core or defense_enabled and args.core_url == "fake"
     summary = calculate_metrics(
@@ -1677,6 +2791,10 @@ def main(argv: list[str] | None = None) -> int:
     memory_summary = calculate_memory_poisoning_metrics(rows)
     if memory_summary is not None:
         summary["memory_poisoning"] = memory_summary
+        if isinstance(memory_summary.get("memory_poisoning_stateful"), dict):
+            summary["memory_poisoning_stateful"] = memory_summary["memory_poisoning_stateful"]
+        if isinstance(memory_summary.get("memory_poisoning_quality"), dict):
+            summary["memory_poisoning_quality"] = memory_summary["memory_poisoning_quality"]
     paths = write_results(rows, summary, config.results_dir)
     write_agent_abuse_iteration_report(rows=rows, summary=summary, outputs=paths, argv=argv)
     print(json.dumps({"summary": summary, "outputs": paths}, ensure_ascii=False, indent=2, sort_keys=True))
@@ -1758,7 +2876,7 @@ def _override_poisonedrag_step(
             args["allow_scorer_fallback"] = True
     elif step.tool == "rag_answer" and mode is not None:
         args["mode"] = mode
-        args["answer_strategy"] = "target_correct_answer" if mode == "clean" else args.get("answer_strategy", "target_incorrect_answer")
+        args.pop("answer_strategy", None)
     payload["arguments"] = args
     return payload
 

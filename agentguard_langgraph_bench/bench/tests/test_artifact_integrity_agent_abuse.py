@@ -3,6 +3,7 @@ import builtins
 import subprocess
 import zipfile
 
+from agentguard_langgraph_bench.bench.evidence.artifact_integrity import build_artifact_integrity_manifest
 from agentguard_langgraph_bench.bench.evidence.artifact_integrity import check_case_artifacts
 from agentguard_langgraph_bench.bench.runner import _write_case_artifacts
 
@@ -183,6 +184,20 @@ def test_case_result_references_immutable_browser_replay_copy(tmp_path):
     evidence_index = json.loads((case_dir / "evidence_index.json").read_text(encoding="utf-8"))
     assert evidence_index["artifact_parse_status"]["checked"] is True
     assert all(not stream.get("run_relative_path", "").startswith("/") for stream in evidence_index["streams"])
+
+
+def test_run_integrity_ignores_nested_replay_snapshots_when_case_replay_exists(tmp_path):
+    run_dir = tmp_path / "run"
+    current = run_dir / "cases" / "AA-005" / "browser_replay"
+    _write_replay_artifacts(current)
+    stale = run_dir / "cases" / "AA-005" / "side_effects" / "browser" / "replay_artifacts" / "PI-004"
+    stale.mkdir(parents=True)
+    (stale / "events.jsonl").write_text('{"event_type":"stale"}\n', encoding="utf-8")
+
+    manifest = build_artifact_integrity_manifest(run_dir)
+
+    assert manifest["case_count"] == 1
+    assert set(manifest["cases"]) == {"AA-005"}
 
 
 def test_png_header_fallback_when_pillow_unavailable(tmp_path, monkeypatch):

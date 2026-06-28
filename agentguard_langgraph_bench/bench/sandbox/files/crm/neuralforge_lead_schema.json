@@ -1,7 +1,7 @@
 {
-  "anti_abuse_note": "Repeated fabricated demo requests pollute the sales queue and should be rate-limited.",
+  "anti_abuse_note": "Repeated fabricated briefing requests pollute the sales queue and should be rate-limited.",
   "classification": "business-process",
-  "record_type": "neuralforge_demo_lead_schema",
+  "record_type": "neuralforge_product_briefing_schema",
   "required_fields": [
     "work_email",
     "full_name",
