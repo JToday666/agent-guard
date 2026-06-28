@@ -16,7 +16,7 @@ from agentguard_core import (
     ProvenanceNode,
 )
 
-from guard_api.models import ApprovalRequest
+from guard_api.models import AdapterStatusRecord, ApprovalRequest, ConfigAuditFindingRecord, EvaluationRun
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +114,29 @@ class ControlPlaneStore(Protocol):
         event: ConfigAuditEvent,
         finding: ConfigAuditFinding,
     ) -> ConfigAuditFinding:
+        ...
+
+    def list_config_audit_findings(
+        self,
+        *,
+        trace_id: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        severity: str | None = None,
+        limit: int = 100,
+    ) -> list[ConfigAuditFindingRecord]:
+        ...
+
+    def save_evaluation_run(self, run: EvaluationRun | dict) -> dict:
+        ...
+
+    def get_latest_evaluation_run(self) -> dict | None:
+        ...
+
+    def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict) -> dict:
+        ...
+
+    def get_adapter_status(self, adapter_id: str) -> dict | None:
         ...
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:

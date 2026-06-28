@@ -209,6 +209,65 @@ def test_openclaw_verify_delegates_to_existing_pnpm_script() -> None:
     assert commands == [["pnpm", "openclaw:plugin:verify"]]
 
 
+def test_openclaw_verify_record_passes_record_flag_to_dev_script() -> None:
+    commands: list[list[str]] = []
+
+    def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    exit_code, output, error = _run_cli(["openclaw", "verify", "--record"], run_command=run_command)
+
+    assert exit_code == 0
+    assert output == ""
+    assert error == ""
+    assert commands == [["pnpm", "openclaw:plugin:verify", "--", "--record"]]
+
+
+def test_eval_import_posts_evaluation_run() -> None:
+    seen: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            {
+                "method": request.method,
+                "url": str(request.url),
+                "authorization": request.headers.get("authorization"),
+                "body": json.loads(request.content.decode("utf-8")),
+            }
+        )
+        return httpx.Response(200, json={"run_id": "eval_cli"})
+
+    payload = {
+        "run_id": "eval_cli",
+        "run_at": "2026-06-28T00:00:00+00:00",
+        "asr_before": 0.7,
+        "asr_after": 0.1,
+        "per_attack": {},
+        "cases": [],
+    }
+    output_path = Path("/tmp/agentguard-cli-eval-import.json")
+    output_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code, output, error = _run_cli(
+        ["eval", "import", str(output_path)],
+        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert exit_code == 0
+    assert output == "Imported evaluation run eval_cli\n"
+    assert error == ""
+    assert seen == [
+        {
+            "method": "POST",
+            "url": "http://guard.local/v1/evaluations",
+            "authorization": "Bearer control-secret",
+            "body": payload,
+        }
+    ]
+
+
 def test_eval_run_delegates_to_attackbench_runner() -> None:
     seen_args: list[list[str] | None] = []
 

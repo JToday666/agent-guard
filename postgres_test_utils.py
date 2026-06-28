@@ -14,6 +14,8 @@ from guard_api.storage.postgres import PostgresControlPlaneStore
 
 ROOT = Path(__file__).resolve().parent
 CONTROL_PLANE_TABLES = [
+    "adapter_statuses",
+    "evaluation_runs",
     "action_critic_reviews",
     "memory_guard_changes",
     "config_audit_findings",

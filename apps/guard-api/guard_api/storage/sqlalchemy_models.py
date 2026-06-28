@@ -103,6 +103,25 @@ action_critic_reviews = Table(
     Index("ix_action_critic_reviews_verdict", "verdict"),
 )
 
+evaluation_runs = Table(
+    "evaluation_runs",
+    metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("run_at", Text, nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Index("ix_evaluation_runs_run_at", "run_at"),
+)
+
+adapter_statuses = Table(
+    "adapter_statuses",
+    metadata,
+    Column("adapter_id", Text, primary_key=True),
+    Column("payload_json", JSONB, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Index("ix_adapter_statuses_updated_at", "updated_at"),
+)
+
 approval_requests = Table(
     "approval_requests",
     metadata,

@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from agentguard_core import GuardDecision, new_id, utc_now_iso
+from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_iso
 from agentguard_core.models import ApprovalResolution
 
 
@@ -58,3 +58,52 @@ class EvaluationApproval(BaseModel):
 class GuardEvaluationResponse(BaseModel):
     decision: GuardDecision
     approval: EvaluationApproval | None = None
+
+
+class EvaluationAttackSummary(BaseModel):
+    asr_before: float | None = Field(default=None, ge=0, le=1)
+    asr_after: float | None = Field(default=None, ge=0, le=1)
+
+
+class EvaluationCase(BaseModel):
+    case_id: str
+    attack_type: str
+    runtime: str
+    expected_decision: Literal["allow", "deny", "ask"]
+    actual_decision: Literal["allow", "deny", "ask"]
+    blocked: bool
+    attack_success: bool
+    trace_id: str
+
+
+class EvaluationRun(BaseModel):
+    run_id: str
+    run_at: str
+    asr_before: float | None = Field(default=None, ge=0, le=1)
+    asr_after: float | None = Field(default=None, ge=0, le=1)
+    per_attack: dict[str, EvaluationAttackSummary] = Field(default_factory=dict)
+    cases: list[EvaluationCase] = Field(default_factory=list)
+
+
+class ConfigAuditFindingRecord(BaseModel):
+    runtime: str
+    target_type: str
+    target_id: str
+    trace_id: str
+    event_id: str
+    timestamp: str
+    finding: ConfigAuditFinding
+
+
+AdapterStatus = Literal["loaded", "not_loaded", "error", "unknown"]
+AdapterStatusSource = Literal["agentguardctl", "openclaw-plugin-dev"]
+
+
+class AdapterStatusRecord(BaseModel):
+    status: AdapterStatus = "unknown"
+    loaded: bool = False
+    hook_count: int | None = None
+    expected_hook_count: int = 16
+    last_verified_at: str | None = None
+    error: str | None = None
+    source: AdapterStatusSource | None = None
