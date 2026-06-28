@@ -44,6 +44,8 @@ PERSISTENT_FIXTURE_FILES = {
     "files/reports/redacted_dlp_drill_example.md",
 }
 ARCHIVE_EXCLUDED_DIR_PREFIXES = {
+    "browser/replay_artifacts",
+    "browser/screenshots",
     "downloads",
 }
 

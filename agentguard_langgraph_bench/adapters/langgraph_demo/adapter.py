@@ -25,6 +25,7 @@ class LangGraphDemoAdapter:
         state = initial_state_from_case(case)
         state["trace_id"] = context.trace_id
         state["security"] = dict(context.security)
+        state["security"]["tool_hijacking_context"] = dict(context.tool_hijacking_context or {})
         state["behavior_events"] = [
             {**event, "trace_id": context.trace_id}
             for event in state.get("behavior_events", [])
@@ -100,8 +101,6 @@ def _final_answer_from_state(state: dict[str, Any]) -> str:
 
 
 def _planning_source(state: dict[str, Any], case: AttackCase, config: Any) -> str:
-    if case.attack_type == "tool_hijacking" and getattr(config, "tool_hijacking_mode", "") in {"autonomous", "differential"}:
-        return f"{getattr(config, 'tool_catalog_view', 'poisoned')}_tool_catalog"
     if getattr(config, "instrumentation_plan_mode", "") == "replay":
         return "deterministic_replay"
     events = state.get("behavior_events") or []
@@ -110,6 +109,12 @@ def _planning_source(state: dict[str, Any], case: AttackCase, config: Any) -> st
         planner = metadata.get("planner") if isinstance(metadata, dict) else None
         if planner:
             return str(planner)
+    if (
+        case.attack_type == "tool_hijacking"
+        and getattr(config, "instrumentation_plan_mode", "") == "autonomous"
+        and getattr(config, "llm_enabled", False)
+    ):
+        return "llm_autonomous"
     return "case_plan_fallback" if getattr(config, "llm_fallback_to_case_plan", False) else "attackcase_tool_plan"
 
 

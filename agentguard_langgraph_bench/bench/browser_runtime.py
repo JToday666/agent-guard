@@ -9,6 +9,7 @@ import subprocess
 import hashlib
 import time
 import uuid
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -19,6 +20,7 @@ from threading import Thread
 from typing import Any
 from urllib.parse import quote, unquote, urljoin, urlparse
 
+from .browser_selectors import logical_selector_aliases
 from .config import BENCH_ROOT, PROJECT_ROOT, REPO_ROOT, WORKSPACE_ROOT
 
 
@@ -178,6 +180,19 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _artifact_error(path: Path, stage: str, exc: Exception | str) -> None:
+    error = str(exc)
+    _append_jsonl(
+        path,
+        {
+            "event_type": "artifact_capture_error",
+            "stage": stage,
+            "timestamp": _utc_now_iso(),
+            "error": error,
+        },
+    )
 
 
 def _safe_artifact_name(value: str) -> str:
@@ -947,37 +962,87 @@ class RealBrowserRuntime:
         video_source = "continuous_frame_sampler"
         ok = True
 
-        try:
-            self._flush_dom_events(session_id, session, "finalize_pre_observe")
-            self._observe_before_finalize(session)
-            self._flush_dom_events(session_id, session, "finalize_post_observe")
-            self._capture_continuous_frame(session, "final")
-            self._write_final_dom(session.page, final_dom_path)
-            self._copy_final_dom_references(final_dom_path, session.source_path, artifact_dir)
-            self._write_accessibility_tree(session, accessibility_path)
-            self._safe_screenshot(session.page, final_path)
-            self._safe_screenshot(session.page, final_full_path, full_page=True)
+        events_path = artifact_dir / "events.jsonl"
+        finalize_event = {
+            "event_type": "browser_finalize_started",
+            "timestamp": _utc_now_iso(),
+            "session_id": session_id,
+            "url": session.current_url,
+        }
+        _append_jsonl(events_path, finalize_event)
+        _append_jsonl(artifact_dir / "action_metadata.jsonl", finalize_event)
+        frames_result: dict[str, Any] = {"frame_count": 0, "error": "recorder_missing"}
+
+        for stage, operation in (
+            ("flush_dom_events_pre_observe", lambda: self._flush_dom_events(session_id, session, "finalize_pre_observe")),
+            ("observe_before_finalize", lambda: self._observe_before_finalize(session)),
+            ("flush_dom_events_post_observe", lambda: self._flush_dom_events(session_id, session, "finalize_post_observe")),
+            ("capture_final_frame", lambda: self._capture_continuous_frame(session, "final")),
+            ("write_final_dom", lambda: self._write_final_dom(session.page, final_dom_path)),
+            ("copy_final_dom_references", lambda: self._copy_final_dom_references(final_dom_path, session.source_path, artifact_dir)),
+            ("write_accessibility_tree", lambda: self._write_accessibility_tree(session, accessibility_path)),
+            ("capture_final_screenshot", lambda: self._safe_screenshot(session.page, final_path)),
+            ("capture_final_full_page_screenshot", lambda: self._safe_screenshot(session.page, final_full_path, full_page=True)),
+        ):
             try:
-                session.context.tracing.stop(path=str(trace_path))
+                operation()
             except Exception as exc:
                 ok = False
-                _append_jsonl(artifact_dir / "events.jsonl", {"event_type": "trace_error", "error": str(exc)})
-            frames_result = session.recorder.write_manifest() if session.recorder else {"frame_count": 0, "error": "recorder_missing"}
-            encode_result = session.recorder.encode_webm(video_path) if session.recorder else {"ok": False, "error": "recorder_missing"}
-            if not encode_result.get("ok"):
-                ok = False
-                video_error = str(encode_result.get("error") or "continuous_video_encode_failed")
-            session.context.close()
-            session.browser.close()
+                _artifact_error(events_path, stage, exc)
+
+        try:
+            session.context.tracing.stop(path=str(trace_path))
         except Exception as exc:
             ok = False
-            video_error = str(exc)
+            _append_jsonl(events_path, {"event_type": "trace_error", "timestamp": _utc_now_iso(), "error": str(exc)})
+
+        try:
             frames_result = session.recorder.write_manifest() if session.recorder else {"frame_count": 0, "error": "recorder_missing"}
-        finally:
+        except Exception as exc:
+            ok = False
+            frames_result = {"frame_count": 0, "error": str(exc)}
+            _artifact_error(events_path, "write_continuous_frames_manifest", exc)
+
+        try:
+            encode_result = session.recorder.encode_webm(video_path) if session.recorder else {"ok": False, "error": "recorder_missing"}
+        except Exception as exc:
+            encode_result = {"ok": False, "error": str(exc)}
+            _artifact_error(events_path, "encode_continuous_video", exc)
+        if not encode_result.get("ok"):
+            ok = False
+            video_error = str(encode_result.get("error") or "continuous_video_encode_failed")
+
+        for stage, closer in (
+            ("close_browser_context", session.context.close),
+            ("close_browser", session.browser.close),
+            ("stop_playwright", session.playwright.stop),
+        ):
             try:
-                session.playwright.stop()
-            except Exception:
-                pass
+                closer()
+            except Exception as exc:
+                ok = False
+                _artifact_error(events_path, stage, exc)
+        if not final_dom_path.exists():
+            ok = False
+            self._write_diagnostic_final_dom(final_dom_path, session=session, reason="final_dom_missing_after_finalize")
+            _artifact_error(events_path, "write_diagnostic_final_dom", "final_dom_missing_after_finalize")
+        if not accessibility_path.exists():
+            ok = False
+            self._write_json(
+                accessibility_path,
+                {
+                    "ok": False,
+                    "status": "diagnostic_placeholder",
+                    "does_not_invalidate_browser_recording": True,
+                    "error": "final_accessibility_tree_missing_after_finalize",
+                },
+            )
+            _artifact_error(events_path, "write_diagnostic_accessibility_tree", "final_accessibility_tree_missing_after_finalize")
+        for screenshot_path, label in ((final_path, "final"), (final_full_path, "final_full_page")):
+            if not screenshot_path.exists():
+                ok = False
+                self._write_diagnostic_png(screenshot_path)
+                _artifact_error(events_path, f"write_diagnostic_{label}_screenshot", f"{label}_screenshot_missing_after_finalize")
         session.finalized_at = _utc_now_iso()
         raw_video_path = artifact_dir / "raw_replay.webm"
         if raw_video_path.exists():
@@ -1125,50 +1190,7 @@ class RealBrowserRuntime:
         return session.page.locator(selector)
 
     def _testid_alias_selectors(self, value: str) -> list[str]:
-        aliases = {
-            "attack-input-0": [
-                "#identityVerify",
-                "#privateForm input:not([type='hidden'])",
-                ".oai-attacker-inline-wrap input:not([type='hidden'])",
-            ],
-            "attack-submit": [
-                "#eia-attacker-submit-btn",
-                "#oai-attacker-submit-btn",
-                ".zw-inline-submit-btn",
-                ".oai-attacker-submit-btn",
-                ".eia-malicious-submit-btn",
-                "#privateForm button",
-                "button:has-text('Submit')",
-            ],
-            "legitimate-step-1": [
-                "#pickupLocation",
-                "[data-test='rw-poi-finder__pickupLocation-input']",
-            ],
-            "legitimate-step-2": [
-                "#dropoffLocation",
-                "[data-test='rw-poi-finder__dropoffLocation-input']",
-            ],
-            "legitimate-final-action": [
-                "[name='searchButton']",
-                "[data-eia-normal-complete='1']",
-                "[data-test='rw-form__search-btn']",
-                ".gb-c-search-form__submit-button",
-            ],
-            "popup-submit": [
-                "#ad-form button[type='submit']",
-                "#ad-form button:has-text('Submit')",
-                "#ad-form button:has-text('Upload')",
-            ],
-            "local-file-option-0": [
-                "#file-picker-list button:nth-of-type(1)",
-                ".modal-list button:nth-of-type(1)",
-                ".file-option:nth-of-type(1)",
-            ],
-            "success-action": [
-                "#success-action",
-            ],
-        }
-        return aliases.get(value, [])
+        return logical_selector_aliases(value)
 
     def _css_attr(self, value: str) -> str:
         return value.replace("\\", "\\\\").replace('"', '\\"')
@@ -1204,6 +1226,7 @@ class RealBrowserRuntime:
                         '#eia-b3-normal-fix-overlay',
                         '#zw-task-complete-overlay',
                         '#eia-center-modal-overlay',
+                        '.ag-modal-backdrop',
                         '[id*="reminder-overlay"]',
                         '[id*="warning-overlay"]'
                     ];
@@ -1557,6 +1580,26 @@ class RealBrowserRuntime:
         except Exception as exc:
             html = f"<!-- final DOM capture failed: {escape(str(exc))} -->"
         path.write_text(html, encoding="utf-8", errors="replace")
+
+    def _write_diagnostic_final_dom(self, path: Path, *, session: RealBrowserSession, reason: str) -> None:
+        html = (
+            '<!doctype html><html><head><meta charset="utf-8"><title>Browser capture diagnostic</title></head>'
+            "<body>"
+            "<h1>Browser capture diagnostic</h1>"
+            f"<p>Final DOM capture did not complete: {escape(reason)}</p>"
+            f"<p>Session URL: {escape(str(session.current_url or ''))}</p>"
+            "</body></html>"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding="utf-8", errors="replace")
+
+    def _write_diagnostic_png(self, path: Path) -> None:
+        # A minimal transparent PNG. The paired event marks it as diagnostic, not proof of page state.
+        payload = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
 
     def _copy_final_dom_references(self, final_dom: Path, source_path: Path | None, artifact_dir: Path) -> None:
         if source_path is None:

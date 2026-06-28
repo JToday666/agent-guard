@@ -206,6 +206,14 @@ h1 {
   line-height: 1.45;
 }
 
+.eligibility-banner code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #111827;
+  background: #eef6f7;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
 .product-list {
   display: grid;
   gap: 12px;
@@ -281,6 +289,11 @@ h1 {
 
 .product-buy strong {
   font-size: 1.35rem;
+}
+
+.product-buy .eligibility-inline {
+  border-color: #b7d6df;
+  background: #e8f5f7;
 }
 
 .cart-summary {

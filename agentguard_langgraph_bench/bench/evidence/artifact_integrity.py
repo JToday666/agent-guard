@@ -11,6 +11,7 @@ import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 CONTINUOUS_VIDEO_MIN_BYTES = 8000
 
@@ -18,18 +19,105 @@ CONTINUOUS_VIDEO_MIN_BYTES = 8000
 def build_artifact_integrity_manifest(run_or_artifact_dir: Path, *, output_path: Path | None = None) -> dict[str, Any]:
     root = run_or_artifact_dir.expanduser().resolve()
     replay_dirs = _find_replay_dirs(root)
-    cases = {_case_key_for_replay_dir(case_dir): check_case_artifacts(case_dir, root=root) for case_dir in replay_dirs}
+    if replay_dirs:
+        cases = {_case_key_for_replay_dir(case_dir): check_case_artifacts(case_dir, root=root) for case_dir in replay_dirs}
+    else:
+        cases = {_case_key_for_generic_case_dir(case_dir): check_generic_case_artifacts(case_dir, root=root) for case_dir in _find_generic_case_dirs(root)}
     manifest = {
         "schema_version": "1.0",
         "root": str(root),
         "case_count": len(cases),
         "cases": cases,
-        "ok": all(item.get("ok") for item in cases.values()),
+        "ok": bool(cases) and all(item.get("ok") for item in cases.values()),
     }
+    if not cases:
+        manifest["error"] = "no cases indexed"
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return manifest
+
+
+def check_generic_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[str, Any]:
+    case_dir = case_dir.expanduser().resolve()
+    root = root.expanduser().resolve() if root is not None else case_dir
+    required = [
+        "case_result.json",
+        "tool_results.jsonl",
+        "tool_call_events.jsonl",
+        "audit_events.jsonl",
+        "policy_decisions.jsonl",
+        "evidence_index.json",
+        "sandbox_diff.json",
+        "agent_visible_prompt_contamination.json",
+        "llm_prompts/round_1_redacted.json",
+        "llm_responses/round_1_redacted.json",
+        "mcp/calls.jsonl",
+        "mcp/descriptors.jsonl",
+        "mcp/catalog_diff.jsonl",
+        "mcp/service_requests.jsonl",
+    ]
+    optional = [
+        "mcp/collections.jsonl",
+        "mcp/finance_queries.jsonl",
+        "mcp/finance_news_queries.jsonl",
+        "mcp/github_audits.jsonl",
+        "mcp/github_repository_events.jsonl",
+        "mcp/github_file_reads.jsonl",
+        "mcp/fetched_pages.jsonl",
+        "mcp/maps_place_queries.jsonl",
+        "mcp/playwright_navigation.jsonl",
+        "mcp/search_queries.jsonl",
+        "rag/answers.jsonl",
+        "browser/events.jsonl",
+        "browser/final_state.json",
+    ]
+    if _generic_case_is_memory_poisoning(case_dir):
+        required.extend(
+            [
+                "memory_poisoning_evaluation_report.json",
+                "side_effects/current_case/memory/store.jsonl",
+                "side_effects/current_case/memory/reads.jsonl",
+                "side_effects/current_case/memory/searches.jsonl",
+                "side_effects/current_case/rag/queries.jsonl",
+                "side_effects/current_case/rag/answers.jsonl",
+                "side_effects/current_case/api/requests.jsonl",
+                "side_effects/scenario_snapshot/memory/store.jsonl",
+                "side_effects/scenario_snapshot/memory/reads.jsonl",
+                "side_effects/scenario_snapshot/memory/searches.jsonl",
+                "side_effects/scenario_snapshot/rag/queries.jsonl",
+                "side_effects/scenario_snapshot/rag/answers.jsonl",
+                "side_effects/scenario_snapshot/api/requests.jsonl",
+            ]
+        )
+    artifacts: list[dict[str, Any]] = []
+    for relative in required:
+        artifacts.append(_check_case_relative(case_dir, relative, root=root))
+    for relative in optional:
+        path = case_dir / relative
+        if path.exists():
+            artifacts.append(_check_case_relative(case_dir, relative, root=root))
+    case_id = _case_key_for_generic_case_dir(case_dir)
+    case_scoped = _generic_case_mcp_logs_case_scoped(case_dir, case_id)
+    required_missing = [item for item in artifacts if item["type"] in required and not item.get("exists")]
+    parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False]
+    critical_errors = [f"missing:{item['type']}" for item in required_missing]
+    critical_errors.extend(f"parse:{item['type']}:{item.get('error')}" for item in parse_failures)
+    if not case_scoped:
+        critical_errors.append("mcp_case_scope_violation")
+    return {
+        "case_id": case_id,
+        "artifact_dir": _relative(case_dir, root),
+        "diagnostic_artifact": False,
+        "ok": not critical_errors,
+        "critical_ok": not critical_errors,
+        "artifacts": artifacts,
+        "case_scoped_mcp_logs": case_scoped,
+        "cross_checks": {"critical_errors": [] if case_scoped else ["mcp_case_scope_violation"], "warnings": [], "errors": []},
+        "warnings": [],
+        "errors": sorted({item.get("error") for item in artifacts if item.get("error")}),
+        "critical_errors": sorted(set(critical_errors)),
+    }
 
 
 def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[str, Any]:
@@ -92,7 +180,18 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
         parse_failures = [
             item
             for item in parse_failures
-            if item.get("type") not in {"replay.webm", "trace.zip", "video_timeline.json", "continuous_frames_manifest.json"}
+            if item.get("type")
+            not in {
+                "final_dom.html",
+                "report.html",
+                "final.png",
+                "final_full_page.png",
+                "step_png",
+                "replay.webm",
+                "trace.zip",
+                "video_timeline.json",
+                "continuous_frames_manifest.json",
+            }
         ]
     critical_errors = _critical_artifact_errors(errors, diagnostic_artifact=diagnostic_artifact) + cross_checks["critical_errors"]
     warning_messages = [warning for item in artifacts for warning in item.get("warnings", [])] + cross_checks["warnings"]
@@ -118,6 +217,9 @@ def _case_key_for_replay_dir(case_dir: Path) -> str:
 
 
 def _find_replay_dirs(root: Path) -> list[Path]:
+    case_replay_dirs = sorted(path for path in (root / "cases").glob("*/browser_replay") if path.is_dir())
+    if case_replay_dirs or (root / "cases").is_dir():
+        return case_replay_dirs
     candidates = [path for path in root.rglob("replay_artifacts") if path.is_dir()]
     candidates.extend(path for path in root.rglob("browser_replay") if path.is_dir())
     replay_dirs: list[Path] = []
@@ -129,6 +231,81 @@ def _find_replay_dirs(root: Path) -> list[Path]:
     if not replay_dirs and (root / "events.jsonl").exists():
         replay_dirs.append(root)
     return replay_dirs
+
+
+def _find_generic_case_dirs(root: Path) -> list[Path]:
+    cases_root = root / "cases"
+    if cases_root.is_dir():
+        return sorted(path for path in cases_root.iterdir() if path.is_dir() and (path / "case_result.json").exists())
+    if (root / "case_result.json").exists():
+        return [root]
+    return []
+
+
+def _case_key_for_generic_case_dir(case_dir: Path) -> str:
+    return case_dir.name
+
+
+def _generic_case_is_memory_poisoning(case_dir: Path) -> bool:
+    case_result = case_dir / "case_result.json"
+    if not case_result.exists():
+        return False
+    try:
+        payload = json.loads(case_result.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    metadata = payload.get("metadata") if isinstance(payload, dict) and isinstance(payload.get("metadata"), dict) else {}
+    return bool(
+        isinstance(payload, dict)
+        and (payload.get("attack_type") == "memory_poisoning" or metadata.get("source_dataset") == "PoisonedRAG")
+    )
+
+
+def _check_case_relative(case_dir: Path, relative: str, *, root: Path) -> dict[str, Any]:
+    path = case_dir / relative
+    if relative.endswith(".jsonl"):
+        return _check_jsonl(path, root=root, artifact_type=relative)
+    if relative.endswith(".json"):
+        return _check_json(path, root=root, artifact_type=relative)
+    return _check_text(path, root=root, artifact_type=relative)
+
+
+def _generic_case_mcp_logs_case_scoped(case_dir: Path, case_id: str) -> bool:
+    mcp_dir = case_dir / "mcp"
+    if not mcp_dir.exists():
+        return False
+    for path in sorted(mcp_dir.glob("*.jsonl")):
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    payload = json.loads(line)
+                    if not isinstance(payload, dict):
+                        return False
+                    record_case_id = _nested_case_id(payload)
+                    if record_case_id and record_case_id != case_id:
+                        return False
+        except Exception:
+            return False
+    return True
+
+
+def _nested_case_id(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("case_id", "caseId"):
+            if value.get(key):
+                return str(value[key])
+        for item in value.values():
+            found = _nested_case_id(item)
+            if found:
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = _nested_case_id(item)
+            if found:
+                return found
+    return ""
 
 
 def _is_diagnostic_artifact(case_dir: Path) -> bool:
@@ -354,9 +531,9 @@ def _check_html(path: Path, *, root: Path, artifact_type: str) -> dict[str, Any]
     parser.feed(path.read_text(encoding="utf-8", errors="replace"))
     missing: list[str] = []
     for ref in parser.refs:
-        if ref.startswith(("http://", "https://", "data:", "#")):
+        if _is_external_or_non_file_ref(ref):
             continue
-        if not (path.parent / ref).exists():
+        if not _html_ref_exists(path, root, ref):
             missing.append(ref)
     item["referenced_files"] = parser.refs
     item["missing_references"] = sorted(set(missing))
@@ -551,9 +728,49 @@ class _LinkParser(HTMLParser):
         self.refs: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {key.lower(): value for key, value in attrs if key and value}
         for key, value in attrs:
-            if key in {"href", "src"} and value:
+            if key == "src" and value:
                 self.refs.append(value)
+            elif tag == "link" and key == "href" and value:
+                rel = str(attr_map.get("rel") or "").lower()
+                if not rel or any(token in rel for token in ("stylesheet", "preload", "modulepreload", "icon")):
+                    self.refs.append(value)
+
+
+def _is_external_or_non_file_ref(ref: str) -> bool:
+    lowered = ref.strip().lower()
+    if not lowered or lowered.startswith("#"):
+        return True
+    return lowered.startswith(
+        (
+            "http://",
+            "https://",
+            "data:",
+            "blob:",
+            "javascript:",
+            "mailto:",
+            "tel:",
+            "link://",
+            "about:",
+        )
+    )
+
+
+def _html_ref_exists(path: Path, root: Path, ref: str) -> bool:
+    clean_ref = unquote(urlsplit(ref).path)
+    if not clean_ref:
+        return True
+    if clean_ref.startswith("/"):
+        relative = clean_ref.lstrip("/")
+        candidates = [
+            root / relative,
+            path.parent.parent / relative,
+            path.parent.parent.parent / relative,
+        ]
+    else:
+        candidates = [path.parent / clean_ref]
+    return any(candidate.exists() for candidate in candidates)
 
 
 def _sha256(path: Path) -> str:

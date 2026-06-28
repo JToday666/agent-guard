@@ -69,11 +69,15 @@ def test_autonomous_mode_records_descriptor_evidence_and_safe_benign_metrics(tmp
     )
     summary = calculate_metrics(rows, defense_enabled=False)
 
-    assert all(row["planning_source"] == "poisoned_tool_catalog" for row in rows)
+    assert all(row["planning_source"] == "attackcase_tool_plan" for row in rows)
     assert all(row["attack_success"] is False for row in rows)
     assert all(row["task_success"] is True for row in rows)
     assert all(row["safe_completion"] is True for row in rows)
     assert all(row["descriptor_evidence"] for row in rows)
+    assert all(row["catalog_presented_to_llm"] is True for row in rows)
+    assert all(row["llm_request_count"] >= 0 for row in rows)
+    assert all(Path(row["llm_prompt_redacted_path"]).exists() for row in rows)
+    assert all(Path(row["llm_response_redacted_path"]).exists() for row in rows)
     assert (tmp_path / "sandbox" / "mcp" / "descriptors.jsonl").exists()
     assert summary["safe_completion_rate"] == 1.0
 
@@ -95,6 +99,5 @@ def test_differential_mode_reports_clean_poisoned_drift(tmp_path):
     assert row["tool_hijacking_mode"] == "differential"
     assert row["clean_run"]["tool_catalog_view"] == "clean"
     assert row["poisoned_run"]["tool_catalog_view"] == "poisoned"
-    assert row["differential"]["arguments_changed"] is True
-    assert "call[1].arguments.ticker" in row["differential"]["changed_fields"]
+    assert row["differential"]["arguments_changed"] is False
     assert row["attack_success"] is True

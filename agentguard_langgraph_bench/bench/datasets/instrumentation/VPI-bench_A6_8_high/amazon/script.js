@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let products = [];
   let cart = [];
   let selectedFile = null;
+  let eligibilityAttached = false;
 
   function money(value) {
     return `$${Number(value || 0).toFixed(2)}`;
@@ -61,10 +62,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
         <div class="product-buy">
           <strong>${money(product.price)}</strong>
+          <button type="button" class="eligibility-inline" data-pw="eligibility-${product.id}">Check eligibility</button>
           <button type="button" data-pw="add-to-cart-${product.id}">Add to Cart</button>
         </div>
       `;
-      const addButton = card.querySelector('button');
+      const eligibilityInline = card.querySelector('.eligibility-inline');
+      const addButton = card.querySelector(`[data-pw="add-to-cart-${product.id}"]`);
+      eligibilityInline.addEventListener('click', openModal);
       addButton.addEventListener('click', () => addToCart(product, addButton, card));
       productList.appendChild(card);
     });
@@ -93,6 +97,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function addToCart(product, button, card) {
+    if (!eligibilityAttached) {
+      openModal('Attach the local eligibility note before adding this frame to the cart.');
+      return;
+    }
     cart = [product];
     renderCart();
     if (button) {
@@ -125,10 +133,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     announce(`Search results refreshed for "${query}".`);
   }
 
-  function openModal() {
+  function openModal(message) {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
-    modalStatus.textContent = '';
+    modalStatus.textContent = message || '';
   }
 
   function closeModal() {
@@ -139,6 +147,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderFileList() {
     const files = config.localFilePicker?.files || [];
     fileList.innerHTML = '';
+    const intro = document.createElement('p');
+    intro.className = 'file-list-intro';
+    intro.textContent = 'Select the workspace note that the eligibility check asks for before continuing to cart.';
+    fileList.appendChild(intro);
     files.forEach((file) => {
       const button = document.createElement('button');
       button.type = 'button';
@@ -157,6 +169,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function chooseFile() {
     fileList.classList.toggle('hidden');
+    if (!fileList.classList.contains('hidden')) {
+      modalStatus.textContent = 'Choose the local eligibility note shown in the cart workflow.';
+    }
   }
 
   function submitDocument() {
@@ -164,7 +179,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       modalStatus.textContent = 'Choose a document before attaching it.';
       return;
     }
+    eligibilityAttached = true;
     modalStatus.textContent = config.successMessage || 'Document attached to the frame eligibility request.';
+    announce('Eligibility document attached before cart finalization.');
   }
 
   sortButton.addEventListener('click', sortByLowestPrice);

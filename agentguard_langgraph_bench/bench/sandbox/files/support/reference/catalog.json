@@ -1,0 +1,195 @@
+{
+  "cases": [
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-001/agent_view.json",
+        "case": "support/reference/PR-001/case.json",
+        "page": "support/reference/PR-001/page.html",
+        "reference_evidence": "support/reference/PR-001/contexts.json"
+      },
+      "case_id": "PR-001",
+      "dataset": "nq",
+      "files": {
+        "agent_view": "support/reference/PR-001/agent_view.json",
+        "case": "support/reference/PR-001/case.json",
+        "page": "support/reference/PR-001/page.html",
+        "reference_evidence": "support/reference/PR-001/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/nq/test1/page",
+      "question_id": "test1",
+      "service_url": "http://127.0.0.1:18082/support/nq/test1"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-002/agent_view.json",
+        "case": "support/reference/PR-002/case.json",
+        "page": "support/reference/PR-002/page.html",
+        "reference_evidence": "support/reference/PR-002/contexts.json"
+      },
+      "case_id": "PR-002",
+      "dataset": "nq",
+      "files": {
+        "agent_view": "support/reference/PR-002/agent_view.json",
+        "case": "support/reference/PR-002/case.json",
+        "page": "support/reference/PR-002/page.html",
+        "reference_evidence": "support/reference/PR-002/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/nq/test11/page",
+      "question_id": "test11",
+      "service_url": "http://127.0.0.1:18082/support/nq/test11"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-003/agent_view.json",
+        "case": "support/reference/PR-003/case.json",
+        "page": "support/reference/PR-003/page.html",
+        "reference_evidence": "support/reference/PR-003/contexts.json"
+      },
+      "case_id": "PR-003",
+      "dataset": "nq",
+      "files": {
+        "agent_view": "support/reference/PR-003/agent_view.json",
+        "case": "support/reference/PR-003/case.json",
+        "page": "support/reference/PR-003/page.html",
+        "reference_evidence": "support/reference/PR-003/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/nq/test16/page",
+      "question_id": "test16",
+      "service_url": "http://127.0.0.1:18082/support/nq/test16"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-004/agent_view.json",
+        "case": "support/reference/PR-004/case.json",
+        "page": "support/reference/PR-004/page.html",
+        "reference_evidence": "support/reference/PR-004/contexts.json"
+      },
+      "case_id": "PR-004",
+      "dataset": "nq",
+      "files": {
+        "agent_view": "support/reference/PR-004/agent_view.json",
+        "case": "support/reference/PR-004/case.json",
+        "page": "support/reference/PR-004/page.html",
+        "reference_evidence": "support/reference/PR-004/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/nq/test19/page",
+      "question_id": "test19",
+      "service_url": "http://127.0.0.1:18082/support/nq/test19"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-005/agent_view.json",
+        "case": "support/reference/PR-005/case.json",
+        "page": "support/reference/PR-005/page.html",
+        "reference_evidence": "support/reference/PR-005/contexts.json"
+      },
+      "case_id": "PR-005",
+      "dataset": "msmarco",
+      "files": {
+        "agent_view": "support/reference/PR-005/agent_view.json",
+        "case": "support/reference/PR-005/case.json",
+        "page": "support/reference/PR-005/page.html",
+        "reference_evidence": "support/reference/PR-005/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/msmarco/1163399/page",
+      "question_id": "1163399",
+      "service_url": "http://127.0.0.1:18082/support/msmarco/1163399"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-006/agent_view.json",
+        "case": "support/reference/PR-006/case.json",
+        "page": "support/reference/PR-006/page.html",
+        "reference_evidence": "support/reference/PR-006/contexts.json"
+      },
+      "case_id": "PR-006",
+      "dataset": "msmarco",
+      "files": {
+        "agent_view": "support/reference/PR-006/agent_view.json",
+        "case": "support/reference/PR-006/case.json",
+        "page": "support/reference/PR-006/page.html",
+        "reference_evidence": "support/reference/PR-006/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/msmarco/192017/page",
+      "question_id": "192017",
+      "service_url": "http://127.0.0.1:18082/support/msmarco/192017"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-007/agent_view.json",
+        "case": "support/reference/PR-007/case.json",
+        "page": "support/reference/PR-007/page.html",
+        "reference_evidence": "support/reference/PR-007/contexts.json"
+      },
+      "case_id": "PR-007",
+      "dataset": "msmarco",
+      "files": {
+        "agent_view": "support/reference/PR-007/agent_view.json",
+        "case": "support/reference/PR-007/case.json",
+        "page": "support/reference/PR-007/page.html",
+        "reference_evidence": "support/reference/PR-007/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/msmarco/1164044/page",
+      "question_id": "1164044",
+      "service_url": "http://127.0.0.1:18082/support/msmarco/1164044"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-008/agent_view.json",
+        "case": "support/reference/PR-008/case.json",
+        "page": "support/reference/PR-008/page.html",
+        "reference_evidence": "support/reference/PR-008/contexts.json"
+      },
+      "case_id": "PR-008",
+      "dataset": "hotpotqa",
+      "files": {
+        "agent_view": "support/reference/PR-008/agent_view.json",
+        "case": "support/reference/PR-008/case.json",
+        "page": "support/reference/PR-008/page.html",
+        "reference_evidence": "support/reference/PR-008/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/hotpotqa/5adbf0a255429947ff17385a/page",
+      "question_id": "5adbf0a255429947ff17385a",
+      "service_url": "http://127.0.0.1:18082/support/hotpotqa/5adbf0a255429947ff17385a"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-009/agent_view.json",
+        "case": "support/reference/PR-009/case.json",
+        "page": "support/reference/PR-009/page.html",
+        "reference_evidence": "support/reference/PR-009/contexts.json"
+      },
+      "case_id": "PR-009",
+      "dataset": "hotpotqa",
+      "files": {
+        "agent_view": "support/reference/PR-009/agent_view.json",
+        "case": "support/reference/PR-009/case.json",
+        "page": "support/reference/PR-009/page.html",
+        "reference_evidence": "support/reference/PR-009/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/hotpotqa/5a8cb288554299585d9e3726/page",
+      "question_id": "5a8cb288554299585d9e3726",
+      "service_url": "http://127.0.0.1:18082/support/hotpotqa/5a8cb288554299585d9e3726"
+    },
+    {
+      "agent_files": {
+        "agent_view": "support/reference/PR-010/agent_view.json",
+        "case": "support/reference/PR-010/case.json",
+        "page": "support/reference/PR-010/page.html",
+        "reference_evidence": "support/reference/PR-010/contexts.json"
+      },
+      "case_id": "PR-010",
+      "dataset": "hotpotqa",
+      "files": {
+        "agent_view": "support/reference/PR-010/agent_view.json",
+        "case": "support/reference/PR-010/case.json",
+        "page": "support/reference/PR-010/page.html",
+        "reference_evidence": "support/reference/PR-010/contexts.json"
+      },
+      "page_url": "http://127.0.0.1:18082/support/hotpotqa/5ab56e32554299637185c594/page",
+      "question_id": "5ab56e32554299637185c594",
+      "service_url": "http://127.0.0.1:18082/support/hotpotqa/5ab56e32554299637185c594"
+    }
+  ],
+  "service": "local-support-knowledge-service"
+}

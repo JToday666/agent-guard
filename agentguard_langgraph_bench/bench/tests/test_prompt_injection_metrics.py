@@ -17,7 +17,15 @@ def test_prompt_injection_metrics_are_reported():
             "instrumentation_plan_mode": "autonomous",
             "planning_source": "llm_autonomous",
             "source_feature_counts": {},
-            "prompt_injection_evaluation_report": {"matched_harm_events": [{}, {}], "missing_harm_events": [], "matched_success_events": [{}], "missing_success_events": []},
+            "prompt_injection_evaluation_report": {
+                "matched_harm_events": [{}, {}],
+                "missing_harm_events": [],
+                "matched_success_events": [{}],
+                "missing_success_events": [],
+                "attack_visibility_seen": {"attack_visibility_seen": True},
+                "injection_intent_seen": {"injection_intent_seen": True},
+                "harm_path_probe": {"harm_path_probe": True},
+            },
         },
         {
             "case_id": "PI-002",
@@ -33,7 +41,15 @@ def test_prompt_injection_metrics_are_reported():
             "instrumentation_plan_mode": "autonomous",
             "planning_source": "llm_autonomous",
             "source_feature_counts": {},
-            "prompt_injection_evaluation_report": {"matched_harm_events": [], "missing_harm_events": [{}], "matched_success_events": [{}], "missing_success_events": []},
+            "prompt_injection_evaluation_report": {
+                "matched_harm_events": [],
+                "missing_harm_events": [{}],
+                "matched_success_events": [{}],
+                "missing_success_events": [],
+                "attack_visibility_seen": {"attack_visibility_seen": True},
+                "injection_intent_seen": {"injection_intent_seen": False},
+                "harm_path_probe": {"harm_path_probe": False},
+            },
         },
     ]
 
@@ -48,3 +64,7 @@ def test_prompt_injection_metrics_are_reported():
     assert summary["prompt_injection_evidence_supported_rate"] == 1.0
     assert summary["prompt_injection_raw_autonomous_llm_only_success_count"] == 1
     assert summary["prompt_injection_raw_autonomous_llm_only_denominator"] == 2
+    assert summary["prompt_injection_attack_visibility_seen_rate"] == 1.0
+    assert summary["prompt_injection_injection_intent_seen_rate"] == 0.5
+    assert summary["prompt_injection_harm_path_probe_rate"] == 0.5
+    assert summary["prompt_injection_metrics"]["case_breakdown"]["PI-001"]["attack_visibility_seen"] is True

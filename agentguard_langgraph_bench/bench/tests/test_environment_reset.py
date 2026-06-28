@@ -78,7 +78,7 @@ def test_archive_sandbox_effects_copies_changes_before_reset(tmp_path):
     assert not (sandbox / "api" / "requests.jsonl").exists()
 
 
-def test_archive_sandbox_effects_skips_duplicate_root_downloads(tmp_path):
+def test_archive_sandbox_effects_skips_volatile_downloads_and_browser_replay(tmp_path):
     sandbox = tmp_path / "sandbox"
     results = tmp_path / "results"
     ensure_sandbox(sandbox)
@@ -96,12 +96,12 @@ def test_archive_sandbox_effects_skips_duplicate_root_downloads(tmp_path):
 
     artifact_dir = Path(archive.artifact_dir)
     assert not (artifact_dir / "sandbox" / "downloads" / "AA-001" / "report.html").exists()
-    assert (artifact_dir / "sandbox" / "browser" / "replay_artifacts" / "AA-001" / "report.html").exists()
+    assert not (artifact_dir / "sandbox" / "browser" / "replay_artifacts" / "AA-001" / "report.html").exists()
     assert (artifact_dir / "sandbox" / "api" / "downloads" / "license_txt.exe").exists()
     manifest = json.loads(Path(archive.manifest_path).read_text(encoding="utf-8"))
     copied_paths = {item["path"] for item in manifest["copied_files"]}
     assert "downloads/AA-001/report.html" not in copied_paths
-    assert "browser/replay_artifacts/AA-001/report.html" in copied_paths
+    assert "browser/replay_artifacts/AA-001/report.html" not in copied_paths
     assert "api/downloads/license_txt.exe" in copied_paths
 
 
