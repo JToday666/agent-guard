@@ -1,16 +1,35 @@
-import type { AuditEvent, ConfigAuditEvent, ConfigAuditFinding, GuardEvent, JsonObject } from "./types.js";
+import type {
+  AuditEvent,
+  ConfigAuditEvent,
+  ConfigAuditFinding,
+  DerivedResource,
+  GuardEvent,
+  JsonObject,
+} from "./types.js";
 
-type BeforeToolCallEventInput = {
+type RuntimeSecurityFields = {
+  userTask?: string;
+  sourceTrust?: string;
+  sourceType?: string;
+  derivedResources?: readonly DerivedResourceInput[];
+  derivedPaths?: readonly string[];
+};
+
+type DerivedResourceInput = Partial<DerivedResource> & {
+  resourceType?: unknown;
+  dataClassification?: unknown;
+};
+
+type BeforeToolCallEventInput = RuntimeSecurityFields & {
   toolName: string;
   params?: JsonObject;
   toolKind?: string;
   toolInputKind?: string;
   runId?: string;
   toolCallId?: string;
-  derivedPaths?: readonly string[];
 };
 
-type ToolHookContextInput = {
+type ToolHookContextInput = RuntimeSecurityFields & {
   agentId?: string;
   sessionKey?: string;
   sessionId?: string;
@@ -22,7 +41,7 @@ type ToolHookContextInput = {
   toolCallId?: string;
 };
 
-type MessageSendingEventInput = {
+type MessageSendingEventInput = RuntimeSecurityFields & {
   to: string;
   content: string;
   replyToId?: string | number;
@@ -30,7 +49,7 @@ type MessageSendingEventInput = {
   metadata?: JsonObject;
 };
 
-type MessageHookContextInput = {
+type MessageHookContextInput = RuntimeSecurityFields & {
   channelId?: string;
   accountId?: string;
   conversationId?: string;
@@ -40,7 +59,7 @@ type MessageHookContextInput = {
   senderId?: string;
 };
 
-type ToolResultPersistEventInput = {
+type ToolResultPersistEventInput = RuntimeSecurityFields & {
   toolName?: string;
   toolKind?: string;
   toolInputKind?: string;
@@ -50,7 +69,6 @@ type ToolResultPersistEventInput = {
   message?: unknown;
   willEnterContext?: boolean;
   willPersist?: boolean;
-  derivedPaths?: readonly string[];
 };
 
 type BeforeInstallEventInput = {
@@ -84,7 +102,9 @@ export function buildToolCallGuardEvent(
 ): GuardEvent {
   const runId = event.runId ?? context.runId ?? null;
   const callId = event.toolCallId ?? context.toolCallId ?? createLocalId("call");
-  const derivedPaths = uniqueStrings(event.derivedPaths ?? []);
+  const security = runtimeSecurityFields(event, context);
+  const derivedResources = derivedResourcesForTool(event, context);
+  const derivedPaths = derivedPathTargets(event, context, derivedResources);
 
   return {
     schema_version: "0.3",
@@ -98,9 +118,9 @@ export function buildToolCallGuardEvent(
     timestamp: new Date().toISOString(),
     pre_execution: true,
     security_context: {
-      user_task: "",
-      source_type: "openclaw",
-      source_trust: "trusted",
+      user_task: security.userTask,
+      source_type: security.sourceType,
+      source_trust: security.sourceTrust,
       channel: context.channelId ?? null,
       sender_id: null,
       session_id: context.sessionId ?? null,
@@ -125,13 +145,7 @@ export function buildToolCallGuardEvent(
         call_id: callId,
       },
       arguments: event.params ?? {},
-      derived_resources: derivedPaths.map((target) => ({
-        resource_type: "file",
-        operation: "unknown",
-        target,
-        data_classification: null,
-        direction: "local",
-      })),
+      derived_resources: derivedResources,
     },
     metadata: {
       openclaw_hook: "before_tool_call",
@@ -145,6 +159,8 @@ export function buildMessageSendGuardEvent(
   context: MessageHookContextInput = {},
 ): GuardEvent {
   const traceId = firstNonEmpty(context.runId, context.sessionKey, context.messageId, String(event.threadId ?? ""));
+  const security = runtimeSecurityFields(event, context);
+  const derivedResources = derivedResourcesForMessage(event, context);
 
   return {
     schema_version: "0.3",
@@ -158,9 +174,9 @@ export function buildMessageSendGuardEvent(
     timestamp: new Date().toISOString(),
     pre_execution: true,
     security_context: {
-      user_task: "",
-      source_type: "openclaw",
-      source_trust: "trusted",
+      user_task: security.userTask,
+      source_type: security.sourceType,
+      source_trust: security.sourceTrust,
       channel: context.channelId ?? "unknown",
       sender_id: context.senderId ?? null,
       session_id: null,
@@ -169,7 +185,7 @@ export function buildMessageSendGuardEvent(
       current_step: "message_sending",
       model_intent: null,
       context_sources: [],
-      derived_paths: [],
+      derived_paths: derivedPathTargets(event, context, derivedResources),
       metadata: {
         account_id: context.accountId ?? null,
         conversation_id: context.conversationId ?? null,
@@ -185,7 +201,7 @@ export function buildMessageSendGuardEvent(
       content_preview: truncate(event.content, PREVIEW_LIMIT),
       contains_sensitive_data: false,
       sanitized: false,
-      derived_resources: [],
+      derived_resources: derivedResources,
     },
     metadata: {
       openclaw_hook: "message_sending",
@@ -203,7 +219,9 @@ export function buildToolResultGuardEvent(
   const toolName = event.toolName ?? context.toolName ?? "unknown";
   const rawResultPreview = resultContentPreview(event.result ?? event.message);
   const resultPreview = truncate(rawResultPreview, PREVIEW_LIMIT);
-  const derivedPaths = uniqueStrings(event.derivedPaths ?? []);
+  const security = runtimeSecurityFields(event, context);
+  const derivedResources = derivedResourcesForToolResult(event, context, toolName);
+  const derivedPaths = derivedPathTargets(event, context, derivedResources);
 
   return {
     schema_version: "0.3",
@@ -217,9 +235,9 @@ export function buildToolResultGuardEvent(
     timestamp: new Date().toISOString(),
     pre_execution: false,
     security_context: {
-      user_task: "",
-      source_type: "openclaw",
-      source_trust: "trusted",
+      user_task: security.userTask,
+      source_type: security.sourceType,
+      source_trust: security.sourceTrust,
       channel: context.channelId ?? null,
       sender_id: null,
       session_id: context.sessionId ?? null,
@@ -251,13 +269,7 @@ export function buildToolResultGuardEvent(
       sanitized: false,
       contains_sensitive_data: false,
       contains_instruction_like_text: containsInstructionLikeText(resultPreview),
-      derived_resources: derivedPaths.map((target) => ({
-        resource_type: "file",
-        operation: "unknown",
-        target,
-        data_classification: null,
-        direction: "local",
-      })),
+      derived_resources: derivedResources,
     },
     metadata: {
       openclaw_hook: "tool_result_persist",
@@ -284,6 +296,7 @@ export function buildBeforeInstallConfigAuditEvent(event: BeforeInstallEventInpu
     findings,
     metadata: {
       manifest_id: stringValue(manifest.id, targetId),
+      trace_id: targetId,
     },
   };
 }
@@ -345,6 +358,181 @@ function createLocalId(prefix: string): string {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
+
+function runtimeSecurityFields(
+  event: RuntimeSecurityFields,
+  context: RuntimeSecurityFields,
+): { userTask: string; sourceTrust: string; sourceType: string } {
+  return {
+    userTask: stringMaybe(event.userTask) ?? stringMaybe(context.userTask) ?? "",
+    sourceTrust: stringMaybe(event.sourceTrust) ?? stringMaybe(context.sourceTrust) ?? "trusted",
+    sourceType: stringMaybe(event.sourceType) ?? stringMaybe(context.sourceType) ?? "openclaw",
+  };
+}
+
+function derivedResourcesForTool(event: BeforeToolCallEventInput, context: ToolHookContextInput): DerivedResource[] {
+  const explicit = normalizeDerivedResources(event.derivedResources ?? context.derivedResources);
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  return uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []).map((target) =>
+    inferDerivedResource({
+      toolName: event.toolName,
+      toolKind: event.toolKind ?? context.toolKind,
+      toolInputKind: event.toolInputKind ?? context.toolInputKind,
+      params: event.params ?? {},
+      target,
+    }),
+  );
+}
+
+function derivedResourcesForToolResult(
+  event: ToolResultPersistEventInput,
+  context: ToolHookContextInput,
+  toolName: string,
+): DerivedResource[] {
+  const explicit = normalizeDerivedResources(event.derivedResources ?? context.derivedResources);
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  return uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []).map((target) =>
+    inferDerivedResource({
+      toolName,
+      toolKind: event.toolKind ?? context.toolKind,
+      toolInputKind: event.toolInputKind ?? context.toolInputKind,
+      params: {},
+      target,
+    }),
+  );
+}
+
+function derivedResourcesForMessage(event: MessageSendingEventInput, context: MessageHookContextInput): DerivedResource[] {
+  const explicit = normalizeDerivedResources(event.derivedResources ?? context.derivedResources);
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  const derivedTargets = uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []);
+  if (derivedTargets.length > 0) {
+    return derivedTargets.map((target) => ({
+      resource_type: "message",
+      operation: "send",
+      target,
+      data_classification: null,
+      direction: "outbound",
+    }));
+  }
+  return [
+    {
+      resource_type: "message",
+      operation: "send",
+      target: event.to,
+      data_classification: null,
+      direction: "outbound",
+    },
+  ];
+}
+
+function derivedPathTargets(
+  event: RuntimeSecurityFields,
+  context: RuntimeSecurityFields,
+  resources: readonly DerivedResource[],
+): string[] {
+  const explicitPaths = uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []);
+  if (explicitPaths.length > 0) {
+    return explicitPaths;
+  }
+  return uniqueStrings(resources.map((resource) => resource.target));
+}
+
+function normalizeDerivedResources(values: readonly DerivedResourceInput[] | undefined): DerivedResource[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const resources: DerivedResource[] = [];
+  for (const value of values) {
+    const record = asRecord(value);
+    const target = stringMaybe(record.target);
+    if (!target) {
+      continue;
+    }
+    resources.push({
+      resource_type: stringValue(record.resource_type ?? record.resourceType, "resource"),
+      operation: stringValue(record.operation, "unknown"),
+      target,
+      data_classification: stringMaybe(record.data_classification ?? record.dataClassification) ?? null,
+      direction: stringValue(record.direction, "local"),
+    });
+  }
+  return resources;
+}
+
+function inferDerivedResource(input: {
+  toolName: string;
+  toolKind?: string;
+  toolInputKind?: string;
+  params: JsonObject;
+  target: string;
+}): DerivedResource {
+  const toolName = input.toolName.toLowerCase();
+  const toolIdentity = `${input.toolName} ${input.toolKind ?? ""} ${input.toolInputKind ?? ""}`.toLowerCase();
+  const method = stringMaybe(input.params.method)?.toUpperCase();
+  if (toolName === "call_api" || toolIdentity.includes("api") || toolIdentity.includes("http") || /^https?:\/\//i.test(input.target)) {
+    return {
+      resource_type: "api",
+      operation: method ?? "request",
+      target: input.target,
+      data_classification: null,
+      direction: "outbound",
+    };
+  }
+  if (toolIdentity.includes("memory") || input.target.startsWith("memory://")) {
+    return {
+      resource_type: "memory",
+      operation: operationFromToolIdentity(toolIdentity, "write", "read", "search"),
+      target: input.target,
+      data_classification: null,
+      direction: "local",
+    };
+  }
+  if (toolIdentity.includes("message") || toolIdentity.includes("send") || toolIdentity.includes("email")) {
+    return {
+      resource_type: "message",
+      operation: "send",
+      target: input.target,
+      data_classification: null,
+      direction: "outbound",
+    };
+  }
+  if (toolIdentity.includes("exec") || toolIdentity.includes("shell") || toolIdentity.includes("command") || toolIdentity.includes("code")) {
+    return {
+      resource_type: "process",
+      operation: "execute",
+      target: input.target,
+      data_classification: null,
+      direction: "local",
+    };
+  }
+  return {
+    resource_type: "file",
+    operation: operationFromToolIdentity(toolIdentity, "write", "read"),
+    target: input.target,
+    data_classification: null,
+    direction: "local",
+  };
+}
+
+function operationFromToolIdentity(identity: string, writeOperation: string, readOperation: string, searchOperation?: string): string {
+  if (identity.includes("write") || identity.includes("create") || identity.includes("update")) {
+    return writeOperation;
+  }
+  if (searchOperation && identity.includes("search")) {
+    return searchOperation;
+  }
+  if (identity.includes("read") || identity.includes("fetch") || identity.includes("get")) {
+    return readOperation;
+  }
+  return "unknown";
 }
 
 function truncate(value: string, limit: number): string {

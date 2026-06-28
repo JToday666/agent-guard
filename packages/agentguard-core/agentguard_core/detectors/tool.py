@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..decisions import DetectionResult, RuleHit
 from ..events import GuardEvent, ToolCallPayload, derive_resources
 from ..policies import PolicyBundle
@@ -64,6 +66,51 @@ class ToolHijackDetector(Detector):
         return [result] if result is not None else []
 
 
+class UnprofiledToolResourceDetector(Detector):
+    rule_id = "P007_unprofiled_tool_resource_review"
+
+    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+        if is_rule_disabled(self.rule_id, policies):
+            return []
+        if not isinstance(event.payload, ToolCallPayload):
+            return []
+        if event.payload.tool.name in policies.tool_profiles:
+            return []
+
+        risky_resources = [
+            resource
+            for resource in derive_resources(event)
+            if resource_is_high_risk_for_unprofiled_tool(resource.direction, resource.operation)
+        ]
+        if not risky_resources:
+            return []
+
+        resource = risky_resources[0]
+        result = apply_rule_override(
+            DetectionResult(
+                decision="ask",
+                risk_score=58,
+                category="unprofiled_tool_resource_review",
+                rule_hit=RuleHit(
+                    rule_id=self.rule_id,
+                    rule_name="Unprofiled Tool Resource Review",
+                    severity="medium",
+                    evidence=[
+                        f"tool={event.payload.tool.name}",
+                        f"resource_direction={resource.direction}",
+                        f"resource_operation={resource.operation}",
+                        f"resource_target={resource.target}",
+                    ],
+                ),
+                reason="An unprofiled tool targets a high-risk resource and requires approval.",
+                approval_resource=resource.target,
+                severity="medium",
+            ),
+            policies,
+        )
+        return [result] if result is not None else []
+
+
 class TaskMismatchDetector(Detector):
     rule_id = "P004_task_mismatch"
 
@@ -75,10 +122,9 @@ class TaskMismatchDetector(Detector):
         source_trust = event.security_context.source_trust.lower()
         if source_trust != "untrusted":
             return []
-        user_task = event.security_context.user_task.lower()
         tool_name = event.payload.tool.name
         if tool_name in {"send_email", "call_api", "read_file", "write_file", "memory_write", "code_exec"}:
-            if not any(alias in user_task for alias in action_aliases(tool_name, policies)):
+            if not task_allows_tool_action(event.security_context.user_task, tool_name, policies):
                 result = apply_rule_override(
                     DetectionResult(
                         decision="ask",
@@ -103,6 +149,51 @@ def action_aliases(tool_name: str, policies: PolicyBundle) -> set[str]:
     aliases = {tool_name.lower(), verb_for_tool(tool_name).lower()}
     aliases.update(alias.lower() for alias in policies.tool_action_aliases.get(tool_name, []))
     return aliases
+
+
+def task_allows_tool_action(user_task: str, tool_name: str, policies: PolicyBundle) -> bool:
+    aliases = action_aliases(tool_name, policies)
+    if task_negates_action(user_task, aliases):
+        return False
+    normalized = normalize_task_text(user_task)
+    return any(alias in normalized for alias in aliases)
+
+
+def task_negates_action(user_task: str, aliases: set[str]) -> bool:
+    normalized = normalize_task_text(user_task)
+    for alias in aliases:
+        escaped = re.escape(alias)
+        patterns = [
+            rf"\bdo not {escaped}\b",
+            rf"\bdon't {escaped}\b",
+            rf"\bnever {escaped}\b",
+            rf"\bnot {escaped}\b",
+            rf"不要{escaped}",
+            rf"不要 {escaped}",
+            rf"禁止{escaped}",
+            rf"禁止 {escaped}",
+        ]
+        if any(re.search(pattern, normalized) for pattern in patterns):
+            return True
+    return False
+
+
+def normalize_task_text(value: str) -> str:
+    lowered = value.lower()
+    lowered = re.sub(r"[\t\r\n]+", " ", lowered)
+    return re.sub(r"\s+", " ", lowered).strip()
+
+
+def resource_is_high_risk_for_unprofiled_tool(direction: str, operation: str) -> bool:
+    return direction.lower() in {"outbound", "persistent"} or operation.lower() in {
+        "delete",
+        "execute",
+        "patch",
+        "post",
+        "put",
+        "send",
+        "write",
+    }
 
 
 def verb_for_tool(tool_name: str) -> str:

@@ -45,6 +45,27 @@ def test_openclaw_tool_call_mapping_matches_guard_event_contract() -> None:
     assert parsed.payload.tool.call_id == "call_contract"
 
 
+def test_openclaw_runtime_sample_mapping_matches_guard_event_contract() -> None:
+    event = _node_json(
+        f"""
+        import {{ readFileSync }} from 'node:fs';
+        import {{ buildToolCallGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+        const samples = JSON.parse(readFileSync('./{PLUGIN_ROOT}/test/fixtures/runtime-mapping-samples.json', 'utf8'));
+        const sample = samples.tool_call_event_fields_win;
+        console.log(JSON.stringify(buildToolCallGuardEvent(sample.event, sample.context)));
+        """
+    )
+
+    parsed = GuardEvent.model_validate(event)
+
+    assert parsed.security_context.user_task == "Audit private token access from retrieved instructions"
+    assert parsed.security_context.source_trust == "untrusted"
+    assert parsed.security_context.source_type == "retrieved_context"
+    assert parsed.security_context.derived_paths == ["/private/token.txt"]
+    assert parsed.payload.derived_resources[0].operation == "read"
+    assert parsed.payload.derived_resources[0].target == "/private/token.txt"
+
+
 def test_openclaw_message_send_mapping_matches_guard_event_contract() -> None:
     event = _node_json(
         f"""

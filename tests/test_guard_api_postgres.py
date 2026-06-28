@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
 
@@ -17,6 +16,7 @@ from guard_api.models import ApprovalRequest
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, EvalMetricFilters
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from postgres_test_utils import get_test_database_url, reset_control_plane_schema
 
 
 def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
@@ -29,16 +29,14 @@ def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
 
 
 def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_{run_id}"
     approval_id = f"app_pg_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -81,9 +79,7 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
 
 
 def test_postgres_store_persists_auth_state_across_instances() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     approval_id = f"app_pg_auth_{run_id}"
@@ -92,7 +88,7 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
     session_id: str | None = None
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         settings = GuardApiSettings(control_token="control-secret")
         first_auth = CapabilityAuthService(settings=settings, store=store)
@@ -134,9 +130,7 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
 
 
 def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_payload() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     approval_id = f"app_pg_legacy_subject_{run_id}"
@@ -146,7 +140,7 @@ def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_p
     subject_id = f"call_pg_legacy_subject_{run_id}"
     engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         legacy_payload = {
             "approval_id": approval_id,
             "trace_id": trace_id,
@@ -272,20 +266,18 @@ def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_p
         assert approval.action_name == "send_email"
         assert approval.tool_call_id == subject_id
     finally:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
 
 
 def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_metric_{run_id}"
     other_trace_id = f"trace_pg_other_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -340,13 +332,11 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
 
 
 def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         first_record = store.save_policy_snapshot(
             PolicyBundle(
@@ -383,13 +373,11 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
 
 
 def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     worker_count = 16
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         PostgresControlPlaneStore(database_url).initialize()
 
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -414,13 +402,11 @@ def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() 
 
 
 def test_postgres_migration_creates_policy_snapshots_table() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
@@ -449,16 +435,14 @@ def test_postgres_migration_creates_policy_snapshots_table() -> None:
 
 
 def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_route_{run_id}"
     approval_id = f"app_pg_route_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -522,29 +506,6 @@ def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None
             )
     except Exception:
         return None
-
-
-def _reset_control_plane_schema(database_url: str) -> None:
-    engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
-    with engine.begin() as conn:
-        for table in [
-            "action_critic_reviews",
-            "memory_guard_changes",
-            "config_audit_findings",
-            "provenance_edges",
-            "provenance_nodes",
-            "audit_integrity_heads",
-            "policy_snapshot_history",
-            "policy_snapshots",
-            "approval_nonces",
-            "browser_sessions",
-            "launch_codes",
-            "approval_requests",
-            "approvals",
-            "audit_events",
-            "alembic_version",
-        ]:
-            conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
 
 
 def _cleanup_auth_rows(

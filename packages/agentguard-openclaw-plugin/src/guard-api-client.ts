@@ -28,6 +28,8 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   requestTimeoutMs: 5000,
   approvalPollIntervalMs: 1000,
   approvalTimeoutMs: 120000,
+  approvalWaitBudgetMs: 8000,
+  diagnosticLogging: false,
 };
 
 export class GuardApiError extends Error {
@@ -82,9 +84,10 @@ export class GuardApiClient {
     return (await response.json()) as { ok: boolean; audit_id: string };
   }
 
-  async waitForApproval(approvalId: string): Promise<ApprovalWaitResponse> {
+  async waitForApproval(approvalId: string, timeoutBudgetMs = this.config.approvalTimeoutMs): Promise<ApprovalWaitResponse> {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < this.config.approvalTimeoutMs) {
+    const timeoutMs = Math.min(this.config.approvalTimeoutMs, timeoutBudgetMs);
+    do {
       const response = await this.request(`/v1/approvals/${encodeURIComponent(approvalId)}/wait`, {
         method: "GET",
       });
@@ -93,7 +96,7 @@ export class GuardApiClient {
         return parsed;
       }
       await delay(this.config.approvalPollIntervalMs);
-    }
+    } while (Date.now() - startedAt < timeoutMs);
     return { status: "timeout", decision: "deny" };
   }
 
@@ -112,6 +115,10 @@ export class GuardApiClient {
         },
       });
       if (!response.ok) {
+        logDiagnostic(this.config, "Guard API request returned an error response", {
+          path,
+          status: response.status,
+        });
         throw new GuardApiError(`Guard API request failed with status ${response.status}`);
       }
       return response;
@@ -119,6 +126,10 @@ export class GuardApiClient {
       if (error instanceof GuardApiError) {
         throw error;
       }
+      logDiagnostic(this.config, "Guard API request failed", {
+        path,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw new GuardApiError("Guard API request failed");
     } finally {
       clearTimeout(timeout);
@@ -139,6 +150,8 @@ export function buildPluginConfig(
       DEFAULT_CONFIG.approvalPollIntervalMs,
     ),
     approvalTimeoutMs: positiveInteger(input?.approvalTimeoutMs, DEFAULT_CONFIG.approvalTimeoutMs),
+    approvalWaitBudgetMs: positiveInteger(input?.approvalWaitBudgetMs, DEFAULT_CONFIG.approvalWaitBudgetMs),
+    diagnosticLogging: input?.diagnosticLogging === true,
   };
 }
 
@@ -153,12 +166,12 @@ export async function decisionToToolResult(
     return { block: true, blockReason: safeDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
-    return { block: true, blockReason: safeDecisionMessage(response) };
+    return { block: true, blockReason: safeDecisionMessage(response, response.approval?.approval_id) };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
   return approval.status === "resolved" && approval.decision === "allow_once"
     ? undefined
-    : { block: true, blockReason: safeDecisionMessage(response) };
+    : { block: true, blockReason: safeDecisionMessage(response, response.approval.approval_id) };
 }
 
 export async function decisionToMessageResult(
@@ -172,12 +185,12 @@ export async function decisionToMessageResult(
     return { cancel: true, cancelReason: safeDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
-    return { cancel: true, cancelReason: safeDecisionMessage(response) };
+    return { cancel: true, cancelReason: safeDecisionMessage(response, response.approval?.approval_id) };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
   return approval.status === "resolved" && approval.decision === "allow_once"
     ? undefined
-    : { cancel: true, cancelReason: safeDecisionMessage(response) };
+    : { cancel: true, cancelReason: safeDecisionMessage(response, response.approval.approval_id) };
 }
 
 export function failClosedToolResult(): ToolHookResult {
@@ -188,8 +201,9 @@ export function failClosedMessageResult(): MessageHookResult {
   return { cancel: true, cancelReason: "AgentGuard is unavailable; cancelled by fail-closed policy." };
 }
 
-function safeDecisionMessage(response: GuardEvaluationResponse): string {
-  return response.decision.safe_message || response.decision.reason || "Blocked by AgentGuard policy.";
+function safeDecisionMessage(response: GuardEvaluationResponse, approvalId?: string): string {
+  const message = response.decision.safe_message || response.decision.reason || "Blocked by AgentGuard policy.";
+  return approvalId ? `${message} (approval_id=${approvalId})` : message;
 }
 
 function nonEmptyString(value: unknown, fallback: string): string {
@@ -206,4 +220,35 @@ function trimTrailingSlash(value: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function logDiagnostic(
+  config: AgentGuardPluginConfig,
+  message: string,
+  details: Record<string, unknown> = {},
+): void {
+  if (!config.diagnosticLogging) {
+    return;
+  }
+  console.warn("[AgentGuard OpenClaw]", message, JSON.stringify(sanitizeDiagnostic(details, config.adapterToken)));
+}
+
+function sanitizeDiagnostic(value: unknown, adapterToken: string): unknown {
+  if (typeof value === "string") {
+    return adapterToken ? value.replaceAll(adapterToken, "[redacted]") : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDiagnostic(item, adapterToken));
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nestedValue]) => [
+      key,
+      /token|secret|authorization|credential/i.test(key)
+        ? "[redacted]"
+        : sanitizeDiagnostic(nestedValue, adapterToken),
+    ]),
+  );
 }

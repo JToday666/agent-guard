@@ -23,6 +23,21 @@ test("buildPluginConfig uses safe defaults and env token fallback", () => {
   assert.equal(config.requestTimeoutMs, 5000);
   assert.equal(config.approvalPollIntervalMs, 1000);
   assert.equal(config.approvalTimeoutMs, 120000);
+  assert.equal(config.approvalWaitBudgetMs, 8000);
+  assert.equal(config.diagnosticLogging, false);
+});
+
+test("buildPluginConfig accepts approval budget and diagnostic logging", () => {
+  const config = buildPluginConfig(
+    {
+      approvalWaitBudgetMs: 2500,
+      diagnosticLogging: true,
+    },
+    { AGENTGUARD_ADAPTER_TOKEN: "env-token" },
+  );
+
+  assert.equal(config.approvalWaitBudgetMs, 2500);
+  assert.equal(config.diagnosticLogging, true);
 });
 
 test("GuardApiClient sends bearer token without exposing it in errors", async () => {
@@ -96,13 +111,71 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
     await decisionToMessageResult(askDecision, {
       waitForApproval: async () => ({ status: "resolved", decision: "deny" }),
     }),
-    { cancel: true, cancelReason: "needs review" },
+    { cancel: true, cancelReason: "needs review (approval_id=app_001)" },
   );
 
   assert.deepEqual(
     await decisionToToolResult(askDecision, {
       waitForApproval: async () => ({ status: "pending", decision: null }),
     }),
-    { block: true, blockReason: "needs review" },
+    { block: true, blockReason: "needs review (approval_id=app_001)" },
   );
+});
+
+test("GuardApiClient caps approval polling by per-hook budget", async () => {
+  let waitCalls = 0;
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 50,
+      approvalTimeoutMs: 120000,
+      approvalWaitBudgetMs: 5,
+      diagnosticLogging: false,
+    },
+    fetchImpl: async () => {
+      waitCalls += 1;
+      return new Response(JSON.stringify({ status: "pending", decision: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  const approval = await client.waitForApproval("app_budget", 5);
+
+  assert.equal(approval.status, "timeout");
+  assert.equal(approval.decision, "deny");
+  assert.equal(waitCalls, 1);
+});
+
+test("GuardApiClient diagnostic logging redacts adapter token", async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.map(String).join(" "));
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 10,
+      approvalTimeoutMs: 10,
+      approvalWaitBudgetMs: 10,
+      diagnosticLogging: true,
+    },
+    fetchImpl: async () => {
+      throw new Error("secret-token leaked by transport");
+    },
+  });
+
+  try {
+    await assert.rejects(() => client.evaluate({ event_id: "evt_001" }));
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnings.length > 0, true);
+  assert.equal(warnings.join("\n").includes("secret-token"), false);
+  assert.equal(warnings.join("\n").includes("[redacted]"), true);
 });

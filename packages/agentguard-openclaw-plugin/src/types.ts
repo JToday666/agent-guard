@@ -6,6 +6,8 @@ export type AgentGuardPluginConfig = {
   requestTimeoutMs: number;
   approvalPollIntervalMs: number;
   approvalTimeoutMs: number;
+  approvalWaitBudgetMs: number;
+  diagnosticLogging: boolean;
 };
 
 export type OpenClawPluginConfigInput = Partial<AgentGuardPluginConfig> | undefined;
