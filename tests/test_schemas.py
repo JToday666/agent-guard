@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import get_args
 
 import agentguard_core
 import pytest
@@ -25,7 +26,7 @@ from agentguard_core import (
     ToolResult,
     ToolResultPayload,
 )
-from agentguard_core.models import guard_event_raw_payload_contracts
+from agentguard_core.models import Decision, GuardEventType, guard_event_raw_payload_contracts
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,6 +131,29 @@ def test_core_models_reject_wrong_schema_version() -> None:
             blocked=False,
             reason="Bad version should be rejected.",
         )
+
+
+def test_core_protocol_keeps_terminal_event_lifecycle_and_decision_enum_compatible() -> None:
+    event_types = set(get_args(GuardEventType))
+    decisions = set(get_args(Decision))
+    event_schema = _load_schema("guard_event.schema.json")
+    decision_schema = _load_schema("guard_decision.schema.json")
+
+    assert event_types == {
+        "tool_call_proposed",
+        "context_assembled",
+        "model_input_prepared",
+        "model_output_produced",
+        "tool_result_produced",
+        "memory_write_proposed",
+        "message_send_proposed",
+    }
+    assert event_schema["properties"]["schema_version"]["const"] == "0.3"
+    assert set(event_schema["properties"]["event_type"]["enum"]) == event_types
+    assert decisions == {"allow", "deny", "ask"}
+    assert set(decision_schema["properties"]["decision"]["enum"]) == decisions
+    assert "shadow_deny" not in decision_schema["properties"]["decision"]["enum"]
+    assert "shadow_deny" in decision_schema["properties"]["enforcement"]["anyOf"][0]["properties"]["mode"]["enum"]
 
 
 def test_audit_event_allows_forward_compatible_extensions() -> None:
