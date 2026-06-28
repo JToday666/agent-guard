@@ -1,4 +1,4 @@
-import type { AuditEventRow } from "../types/dashboard";
+import type { AuditEventRow, TraceSummary } from "../types/dashboard";
 import type { InvestigationQueryState } from "../utils/investigation-query";
 
 export interface InvestigationIndex {
@@ -17,6 +17,29 @@ export type InvestigationEventResolution =
   | { status: "idle" }
   | { event: AuditEventRow; status: "found" }
   | { status: "not-found" };
+
+type TraceSummaryEvent = Pick<
+  AuditEventRow,
+  "approvalId" | "caseId" | "decision" | "occurredAt" | "reason"
+>;
+
+export function buildTraceSummary(
+  id: string,
+  events: TraceSummaryEvent[],
+): TraceSummary | undefined {
+  if (!events.length) return undefined;
+  const last = events.at(-1)!;
+  const isDenied = events.some((e) => e.decision === "deny");
+  const isPaused = !isDenied && events.some((e) => e.decision === "ask");
+  return {
+    id,
+    lastEventAt: last.occurredAt,
+    caseId: last.caseId ?? "未提供",
+    title: last.reason,
+    status: isDenied ? "blocked" : isPaused ? "paused" : "allowed",
+    approvalId: last.approvalId,
+  };
+}
 
 export function buildInvestigationIndex(
   events: AuditEventRow[],

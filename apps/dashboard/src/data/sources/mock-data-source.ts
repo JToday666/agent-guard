@@ -1,7 +1,3 @@
-import {
-  approvals as fixtureApprovals,
-  auditEvents as fixtureEvents,
-} from "../mocks/dashboard-data.ts";
 import type {
   ApprovalRequest,
   AuditIntegrity,
@@ -11,14 +7,18 @@ import type {
   PolicySummary,
   ProvenanceGraph,
   TraceDetail,
-} from "../types/dashboard";
+} from "../../types/dashboard";
 import type {
   DashboardDataSource,
   EventFilters,
 } from "./dashboard-data-source";
-import { deriveMetrics } from "./dashboard-metrics.ts";
-import { maskSensitiveText } from "../utils/data-redaction.ts";
-import { formatRuleListForDisplay } from "../utils/rule-display.ts";
+import {
+  approvals as fixtureApprovals,
+  auditEvents as fixtureEvents,
+} from "./mock-data";
+import { deriveMetrics } from "../dashboard-metrics";
+import { maskSensitiveText } from "../../utils/data-redaction";
+import { formatRuleListForDisplay } from "../../utils/rule-display";
 
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -192,11 +192,12 @@ export class MockDashboardDataSource implements DashboardDataSource {
     const ruleSummary = firstEvent.ruleHits.length
       ? formatRuleListForDisplay(firstEvent.ruleHits)
       : "未命中阻断规则";
-    const outcomeLabel = firstEvent.decision === "ask"
-      ? "等待人工审批"
-      : firstEvent.blocked
-        ? "已阻断"
-        : "允许执行";
+    const outcomeLabel =
+      firstEvent.decision === "ask"
+        ? "等待人工审批"
+        : firstEvent.blocked
+          ? "已阻断"
+          : "允许执行";
 
     const nodes = [
       {
@@ -218,12 +219,18 @@ export class MockDashboardDataSource implements DashboardDataSource {
         traceId,
         kind: "config_audit",
         refId: `context:${firstEvent.id}`,
-        label: firstEvent.attackType === "benign" ? "任务上下文校验" : "外部上下文进入任务",
+        label:
+          firstEvent.attackType === "benign"
+            ? "任务上下文校验"
+            : "外部上下文进入任务",
         timestamp: firstEvent.occurredAt,
         metadata: {
           lane: "上下文",
           source: "mock",
-          summary: firstEvent.attackType === "benign" ? "未发现异常指令" : "发现跨任务或外部输入风险",
+          summary:
+            firstEvent.attackType === "benign"
+              ? "未发现异常指令"
+              : "发现跨任务或外部输入风险",
           type: "context_check",
         },
       },
@@ -299,20 +306,22 @@ export class MockDashboardDataSource implements DashboardDataSource {
         },
       },
       ...(approval
-        ? [{
-            nodeId: `${traceId}:approval`,
-            traceId,
-            kind: "action_critic",
-            refId: `approval:${approval.id}`,
-            label: approval.status === "pending" ? "等待审批" : "审批已处理",
-            timestamp: approval.createdAt,
-            metadata: {
-              lane: "人工审批",
-              source: "mock",
-              status: approval.status,
-              summary: approval.consequence,
+        ? [
+            {
+              nodeId: `${traceId}:approval`,
+              traceId,
+              kind: "action_critic",
+              refId: `approval:${approval.id}`,
+              label: approval.status === "pending" ? "等待审批" : "审批已处理",
+              timestamp: approval.createdAt,
+              metadata: {
+                lane: "人工审批",
+                source: "mock",
+                status: approval.status,
+                summary: approval.consequence,
+              },
             },
-          }]
+          ]
         : []),
       {
         nodeId: `${traceId}:outcome`,
@@ -334,9 +343,10 @@ export class MockDashboardDataSource implements DashboardDataSource {
     const eventEdges = events.map((event, index) => ({
       edgeId: `${traceId}:edge:event:${event.id}`,
       traceId,
-      sourceNodeId: index === 0
-        ? `${traceId}:resource`
-        : `${traceId}:event:${events[index - 1]!.id}`,
+      sourceNodeId:
+        index === 0
+          ? `${traceId}:resource`
+          : `${traceId}:event:${events[index - 1]!.id}`,
       targetNodeId: `${traceId}:event:${event.id}`,
       relation: index === 0 ? "生成审计" : "下一事件",
       timestamp: event.occurredAt,
@@ -394,33 +404,37 @@ export class MockDashboardDataSource implements DashboardDataSource {
           metadata: { source: "mock" },
         },
         ...(approval
-          ? [{
-              edgeId: `${traceId}:edge:critic-approval`,
-              traceId,
-              sourceNodeId: `${traceId}:critic`,
-              targetNodeId: `${traceId}:approval`,
-              relation: "请求审批",
-              timestamp: approval.createdAt,
-              metadata: { source: "mock" },
-            },
-            {
-              edgeId: `${traceId}:edge:approval-outcome`,
-              traceId,
-              sourceNodeId: `${traceId}:approval`,
-              targetNodeId: `${traceId}:outcome`,
-              relation: "形成结果",
-              timestamp: approval.resolvedAt ?? approval.createdAt,
-              metadata: { source: "mock" },
-            }]
-          : [{
-              edgeId: `${traceId}:edge:critic-outcome`,
-              traceId,
-              sourceNodeId: `${traceId}:critic`,
-              targetNodeId: `${traceId}:outcome`,
-              relation: "形成结果",
-              timestamp: firstEvent.occurredAt,
-              metadata: { source: "mock" },
-            }]),
+          ? [
+              {
+                edgeId: `${traceId}:edge:critic-approval`,
+                traceId,
+                sourceNodeId: `${traceId}:critic`,
+                targetNodeId: `${traceId}:approval`,
+                relation: "请求审批",
+                timestamp: approval.createdAt,
+                metadata: { source: "mock" },
+              },
+              {
+                edgeId: `${traceId}:edge:approval-outcome`,
+                traceId,
+                sourceNodeId: `${traceId}:approval`,
+                targetNodeId: `${traceId}:outcome`,
+                relation: "形成结果",
+                timestamp: approval.resolvedAt ?? approval.createdAt,
+                metadata: { source: "mock" },
+              },
+            ]
+          : [
+              {
+                edgeId: `${traceId}:edge:critic-outcome`,
+                traceId,
+                sourceNodeId: `${traceId}:critic`,
+                targetNodeId: `${traceId}:outcome`,
+                relation: "形成结果",
+                timestamp: firstEvent.occurredAt,
+                metadata: { source: "mock" },
+              },
+            ]),
       ],
     };
   }

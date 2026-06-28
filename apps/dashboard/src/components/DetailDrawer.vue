@@ -167,11 +167,12 @@ watch(
 }
 
 .detail-drawer__body {
+  align-content: start;
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   overflow: auto;
   overscroll-behavior: contain;
-  padding: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-7);
 }
 
 @media (max-width: 900px) {

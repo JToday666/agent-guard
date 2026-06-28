@@ -1,4 +1,4 @@
-import type { ApprovalRequest, AuditEventRow } from "../types/dashboard";
+import type { ApprovalRequest, AuditEventRow } from "../../types/dashboard";
 
 export const auditEvents: AuditEventRow[] = [
   {

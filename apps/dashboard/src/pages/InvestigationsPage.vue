@@ -61,8 +61,7 @@
           <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
           <div><button type="button" :disabled="currentPage === 1" @click="handlePage(currentPage - 1)">上一页</button><button type="button" :disabled="currentPage === totalPages" @click="handlePage(currentPage + 1)">下一页</button></div>
         </footer>
-      </template>
-      <EmptyState v-else title="没有匹配事件" message="当前条件下没有审计事件，清除筛选后可查看完整记录。"><button type="button" @click="handleClearFilters">清除筛选</button></EmptyState>
+      </template><EmptyState v-else title="没有匹配事件" message="当前条件下没有审计事件，清除筛选后可查看完整记录。"><button type="button" @click="handleClearFilters">清除筛选</button></EmptyState>
     </main>
 
     <DetailDrawer :is-open="Boolean(query.eventId)" eyebrow="事件证据" :title="selectedEvent?.tool ?? '事件未找到'" @close="handleCloseEvent">
@@ -123,14 +122,12 @@ const hasFilters = computed(() => Boolean(
 const decisionOptions = [{ label: "全部", value: "" }, { label: "拒绝", value: "deny" }, { label: "审批", value: "ask" }, { label: "放行", value: "allow" }];
 const runtimeOptions = [{ label: "全部", value: "" }, { label: "LangGraph", value: "langgraph" }, { label: "OpenClaw", value: "openclaw" }];
 const severityOptions = [{ label: "全部", value: "" }, { label: "严重", value: "critical" }, { label: "高", value: "high" }, { label: "中", value: "medium" }, { label: "低", value: "low" }];
-const eventTypeOptions = computed(() => {
-  const types = new Set(index.value.latestEvents.map((e) => e.eventType).filter(Boolean));
-  return [{ label: "全部", value: "" }, ...([...types].map((v) => ({ label: v, value: v })))];
-});
-const attackTypeOptions = computed(() => {
-  const types = new Set(index.value.latestEvents.map((e) => e.attackType).filter((v): v is string => Boolean(v)));
-  return [{ label: "全部", value: "" }, ...([...types].map((v) => ({ label: v, value: v })))];
-});
+function buildDynamicOptions(events: typeof index.value.latestEvents, key: "eventType" | "attackType") {
+  const types = new Set(events.map((e) => e[key]).filter((v): v is string => Boolean(v)));
+  return [{ label: "全部", value: "" }, ...[...types].map((v) => ({ label: v, value: v }))];
+}
+const eventTypeOptions = computed(() => buildDynamicOptions(index.value.latestEvents, "eventType"));
+const attackTypeOptions = computed(() => buildDynamicOptions(index.value.latestEvents, "attackType"));
 
 function queryModel(key: "decision" | "runtime" | "severity" | "eventType" | "attackType") {
   return computed({ get: () => query.value[key], set: (value: string) => updateQuery({ [key]: value, page: 1 }) });
@@ -168,23 +165,26 @@ function handleExport() {
   const rows = filteredEvents.value.map((e) => [
     e.occurredAt, e.decision, e.severity, e.riskScore, e.runtime, e.stage,
     e.eventType, e.tool, e.resource, e.reason, e.traceId, e.caseId ?? "",
-    formatRuleListForDisplay(e.ruleHits),
-  ]);
+    formatRuleListForDisplay(e.ruleHits),]);
   const csv = [headers, ...rows].map((row) =>
     row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
   ).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click(); URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 </script>
 
 <style scoped lang="scss">
 .investigations-page { display: grid; grid-template-columns: minmax(0, 1fr); }
-.investigations-page--detail { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); }
-.investigations-page__main { min-width: 0; }
+.investigations-page--detail { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); height: calc(100vh - var(--top-bar-height)); overflow: hidden; }
+.investigations-page__main { min-width: 0; overflow-y: auto; min-height: 0; }
 .investigation-tools { align-items: end; border-block: 1px solid var(--color-border); display: grid; gap: var(--space-3); grid-template-columns: minmax(16rem, 1fr) repeat(5, minmax(7rem, .4fr)) auto; padding: var(--space-4) 0; }
 @media (max-width: 1280px) { .investigation-tools { grid-template-columns: 1fr repeat(3, minmax(7rem, .4fr)) auto; } .investigation-tools > :nth-child(5), .investigation-tools > :nth-child(6) { grid-column: auto; } }
 @media (max-width: 1180px) { .investigation-tools { grid-template-columns: repeat(3, 1fr); } .investigation-search { grid-column: 1 / -1; } }
@@ -222,7 +222,6 @@ function handleExport() {
 .trace-preview > header { align-items: start; display: flex; justify-content: space-between; }
 .trace-preview h3 { margin: 0; }
 .trace-preview header span { color: var(--color-text-subtle); font-size: var(--font-size-12); }
-@media (max-width: 1180px) { .investigation-tools { grid-template-columns: repeat(3, 1fr); } .investigation-search { grid-column: 1 / -1; } }
 @media (max-width: 900px) { .investigations-page, .investigations-page--detail { grid-template-columns: 1fr; } }
 @media (max-width: 640px) {
   .investigation-tools { grid-template-columns: 1fr; }

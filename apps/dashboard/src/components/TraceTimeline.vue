@@ -46,7 +46,7 @@ function eventLink(eventId: string) {
 .trace-timeline__marker { align-items: center; background: var(--color-surface); border: 2px solid var(--color-active); border-radius: 50%; display: flex; font-size: var(--font-size-11); font-weight: var(--font-weight-bold); height: 2rem; justify-content: center; position: relative; width: 2rem; z-index: 1; }
 .trace-timeline__item--deny .trace-timeline__marker { border-color: var(--color-danger); color: var(--color-danger); }
 .trace-timeline__item--ask .trace-timeline__marker { border-color: var(--color-warning); color: var(--color-warning); }
-.trace-timeline article { border-bottom: 1px solid var(--color-border); display: grid; gap: var(--space-2); margin-bottom: var(--space-4); padding: 0 0 var(--space-4); }
+.trace-timeline article { border-bottom: 1px solid var(--color-border); display: grid; gap: var(--space-2); margin-bottom: var(--space-2); padding: 0 0 var(--space-3); }
 .trace-timeline__item--selected article { background: var(--color-active-soft); box-shadow: inset 2px 0 var(--color-active); margin-inline: calc(-1 * var(--space-3)); padding: var(--space-3); }
 .trace-timeline article header, .trace-timeline article footer { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .trace-timeline article header { justify-content: space-between; }
