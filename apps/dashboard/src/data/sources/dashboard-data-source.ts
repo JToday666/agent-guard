@@ -10,7 +10,7 @@ import type {
   PolicySummary,
   ProvenanceGraph,
   TraceDetail,
-} from "../types/dashboard";
+} from "../../types/dashboard";
 
 export interface EventFilters {
   traceId?: string;

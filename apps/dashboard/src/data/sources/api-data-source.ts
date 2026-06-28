@@ -8,8 +8,8 @@ import type {
   GuardPolicyHistoryDto,
   GuardProvenanceDto,
   GuardTraceDetailDto,
-} from "../api/guard-api-types";
-import { requestHealth, requestJson } from "../api/guard-http-client";
+} from "../../api/guard-api-types";
+import { requestHealth, requestJson } from "../../api/guard-http-client";
 import {
   mapApproval,
   mapAuditEvent,
@@ -19,8 +19,8 @@ import {
   mapPolicySummary,
   mapProvenance,
   mapTraceDetail,
-} from "../api/guard-api-mappers";
-import { mergeApprovalsWithAuditEvidence } from "./approval-evidence";
+} from "../../api/guard-api-mappers";
+import { mergeApprovalsWithAuditEvidence } from "../approval-evidence";
 import type {
   ApprovalRequest,
   ApprovalResolution,
@@ -28,7 +28,7 @@ import type {
   EvalMetrics,
   EvaluationSummary,
   ProvenanceGraph,
-} from "../types/dashboard";
+} from "../../types/dashboard";
 import type {
   DashboardDataSource,
   EventFilters,

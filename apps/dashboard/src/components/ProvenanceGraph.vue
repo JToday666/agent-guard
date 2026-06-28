@@ -103,9 +103,9 @@ function nodeMetaBadge(metadata: Record<string, unknown>): string {
   return "";
 }
 
-const NODE_W = 188;
-const NODE_H = 84;
-const ENHANCED_STEP_X = 214;
+const NODE_W = 204;
+const NODE_H = 96;
+const ENHANCED_STEP_X = 232;
 const ENHANCED_TOP_Y = 72;
 const ENHANCED_BOTTOM_Y = 220;
 
@@ -151,7 +151,7 @@ const flowNodes = computed<Node[]>(() => {
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 44, ranksep: 104, marginx: 28, marginy: 58 });
+  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 128, marginx: 28, marginy: 58 });
   for (const n of props.graph.nodes) g.setNode(n.nodeId, { width: NODE_W, height: NODE_H });
   for (const e of props.graph.edges) g.setEdge(e.sourceNodeId, e.targetNodeId);
   dagre.layout(g);
@@ -195,7 +195,7 @@ function handleNodeClick(event: { node: { id: string } }) {
 .provenance-wrap {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
-  height: 32rem;
+  height: 36rem;
   overflow: hidden;
   position: relative;
 }
@@ -252,9 +252,9 @@ function handleNodeClick(event: { node: { id: string } }) {
   cursor: pointer;
   display: grid;
   gap: 0.22rem;
-  min-height: 4.75rem;
-  min-width: 10.75rem;
-  max-width: 11.75rem;
+  min-height: 5.25rem;
+  min-width: 11.5rem;
+  max-width: 12.75rem;
   padding: 0.55rem 0.7rem 0.65rem;
   transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 
@@ -274,13 +274,15 @@ function handleNodeClick(event: { node: { id: string } }) {
 }
 
 .prov-node__label {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--color-text);
+  display: -webkit-box;
   font-size: var(--font-size-13);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-ui);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .prov-node__summary {

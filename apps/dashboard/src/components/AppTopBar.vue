@@ -111,7 +111,6 @@ function handleSearch(): void {
   text-decoration: none;
 }
 
-.top-bar__chip,
 .top-bar__pending {
   align-items: center;
   background: var(--color-surface-muted);

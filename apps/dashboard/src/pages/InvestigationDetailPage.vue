@@ -74,9 +74,9 @@ import StatusBadge from "../components/StatusBadge.vue";
 import ErrorState from "../components/States/ErrorState.vue";
 import LoadingState from "../components/States/LoadingState.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
-import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigation-index";
+import { buildInvestigationIndex, buildTraceSummary, resolveInvestigationEvent } from "../data/investigation-index";
 import { useDashboardStore } from "../stores/dashboardStore";
-import type { ProvenanceNode, TraceSummary } from "../types/dashboard";
+import type { ProvenanceNode } from "../types/dashboard";
 import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
 
@@ -121,35 +121,27 @@ watch(traceId, (value) => {
   if (value) { void store.loadTraceDetail(value); void store.loadTraceProvenance(value); }
 }, { immediate: true });
 function handleTimelineSelectEvent(eventId: string) {
-  // 时间线事件点击后，通过 ref_id 前缀 "event:" 匹配并高亮溯源图节点。
   const matchNode = provenance.value?.nodes.find(
     (n) => n.refId === `event:${eventId}` || n.refId === eventId
   );
-  if (matchNode) {
-    void router.replace({
-      path: `/evidence/${traceId.value}`,
-      query: mergeInvestigationQuery(route.query, { prov_node: matchNode.nodeId, event_id: eventId }),
-    });
-  }
+  void router.replace({
+    path: `/evidence/${traceId.value}`,
+    query: mergeInvestigationQuery(route.query, {
+      prov_node: matchNode?.nodeId,
+      event_id: eventId,
+    }),
+  });
 }
 function handleCloseEvidence() {
   void router.replace({ path: `/evidence/${traceId.value}`, query: mergeInvestigationQuery(route.query, { event_id: undefined }) });
 }
 function handleTraceRetry() { void store.loadTraceDetail(traceId.value); }
-function buildTraceSummary(id: string, events: TraceSummaryEvent[]): TraceSummary | undefined {
-  if (!events.length) return undefined;
-  const last = events.at(-1)!;
-  const isDenied = events.some((e) => e.decision === "deny");
-  const isPaused = !isDenied && events.some((e) => e.decision === "ask");
-  return { id, lastEventAt: last.occurredAt, caseId: last.caseId ?? "未提供", title: last.reason, status: isDenied ? "blocked" : isPaused ? "paused" : "allowed", approvalId: last.approvalId };
-}
-type TraceSummaryEvent = { approvalId?: string; caseId: string | null; decision: "allow" | "deny" | "ask"; occurredAt: string; reason: string; };
 </script>
 
 <style scoped lang="scss">
 .investigation-detail { display: grid; grid-template-columns: minmax(0, 1fr); }
-.investigation-detail--evidence { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); }
-.investigation-detail__main { min-width: 0; }
+.investigation-detail--evidence { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); height: calc(100vh - var(--top-bar-height)); overflow: hidden; }
+.investigation-detail__main { min-width: 0; overflow-y: auto; min-height: 0; }
 .trace-body { display: grid; gap: var(--space-7); }
 .trace-provenance { display: grid; gap: var(--space-4); }
 .trace-provenance > header { align-items: start; display: flex; gap: var(--space-4); justify-content: space-between; flex-wrap: wrap; }
@@ -162,7 +154,7 @@ type TraceSummaryEvent = { approvalId?: string; caseId: string | null; decision:
 .trace-events > header { align-items: start; display: flex; justify-content: space-between; }
 .trace-events h2, .trace-events p { margin: 0; }
 .trace-events p, .trace-events > header > span { color: var(--color-text-subtle); font-size: var(--font-size-12); }
-.trace-context { align-self: start; border-left: 1px solid var(--color-border); display: grid; gap: var(--space-4); padding-left: var(--space-5); position: sticky; top: calc(var(--top-bar-height) + var(--space-5)); }
+.trace-context { align-self: start; border-left: 1px solid var(--color-border); display: grid; gap: var(--space-4); max-height: calc(100vh - var(--top-bar-height) - 6rem); overflow-y: auto; overscroll-behavior: contain; padding-left: var(--space-5); position: sticky; top: calc(var(--top-bar-height) + var(--space-5)); }
 .trace-context h2 { font-size: var(--font-size-16); margin: 0; }
 .trace-context dl { display: grid; gap: var(--space-3); margin: 0; }
 .trace-context dl > div { display: grid; gap: var(--space-1); }

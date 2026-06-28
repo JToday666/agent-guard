@@ -23,7 +23,7 @@
             <strong>无法建立监督端会话</strong>
             <p>{{ authStore.error ?? "会话无效或启动链接已过期。" }}</p>
           </div>
-          <button type="button" @click="handleRetryAuthentication">重新检查</button>
+          <button type="button" @click="handleInitializeDashboard">重新检查</button>
         </section>
         <template v-else>
           <section
@@ -85,9 +85,6 @@ function handleToggleSidebar(): void {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
 }
 
-async function handleRetryAuthentication(): Promise<void> {
-  await handleInitializeDashboard();
-}
 
 function handleRefreshDashboard(): void {
   void dashboardStore.refresh();
