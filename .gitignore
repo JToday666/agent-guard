@@ -18,6 +18,8 @@ __pycache__/
 
 # Project agent instructions
 AGENTS.md
+.agents/skills/frontend-design/
+question-record/
 
 # Dashboard caches
 apps/dashboard/.vite/
