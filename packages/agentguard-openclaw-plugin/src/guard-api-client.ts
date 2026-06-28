@@ -1,5 +1,6 @@
 import type {
   AgentGuardPluginConfig,
+  AdapterHeartbeatInput,
   AuditEvent,
   ApprovalWaitResponse,
   ConfigAuditEvent,
@@ -30,6 +31,29 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   approvalTimeoutMs: 120000,
   approvalWaitBudgetMs: 8000,
   diagnosticLogging: false,
+  runtimeId: "openclaw",
+  agentId: "main",
+  enabledHooks: [
+    "before_tool_call",
+    "message_sending",
+    "before_install",
+    "tool_result_persist",
+    "gateway_start",
+    "gateway_stop",
+    "session_start",
+    "session_end",
+    "before_compaction",
+    "after_compaction",
+    "subagent_spawned",
+    "subagent_ended",
+    "model_call_started",
+    "model_call_ended",
+    "cron_changed",
+    "resolve_exec_env",
+  ],
+  failClosedStages: ["before_tool_call", "message_sending", "before_install"],
+  redaction: { enabled: true, previewLimit: 2000 },
+  heartbeatIntervalMs: 60000,
 };
 
 export class GuardApiError extends Error {
@@ -82,6 +106,32 @@ export class GuardApiClient {
       body: JSON.stringify(event),
     });
     return (await response.json()) as { ok: boolean; audit_id: string };
+  }
+
+  async submitHeartbeat(input: AdapterHeartbeatInput): Promise<Record<string, unknown>> {
+    if (!this.config.adapterToken) {
+      throw new GuardApiError("AgentGuard adapter token is not configured");
+    }
+
+    const response = await this.request("/v1/adapters/openclaw/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({
+        status: "loaded",
+        loaded: true,
+        runtime: "openclaw",
+        runtime_id: this.config.runtimeId,
+        agent_id: this.config.agentId,
+        plugin_version: input.pluginVersion,
+        runtime_version: input.runtimeVersion ?? null,
+        source: "openclaw-plugin",
+        capabilities: input.capabilities,
+        hooks: input.hooks.length > 0 ? input.hooks : this.config.enabledHooks,
+        hook_count: input.hooks.length,
+        expected_hook_count: this.config.enabledHooks.length,
+        fail_closed_stages: this.config.failClosedStages,
+      }),
+    });
+    return (await response.json()) as Record<string, unknown>;
   }
 
   async waitForApproval(approvalId: string, timeoutBudgetMs = this.config.approvalTimeoutMs): Promise<ApprovalWaitResponse> {
@@ -152,6 +202,12 @@ export function buildPluginConfig(
     approvalTimeoutMs: positiveInteger(input?.approvalTimeoutMs, DEFAULT_CONFIG.approvalTimeoutMs),
     approvalWaitBudgetMs: positiveInteger(input?.approvalWaitBudgetMs, DEFAULT_CONFIG.approvalWaitBudgetMs),
     diagnosticLogging: input?.diagnosticLogging === true,
+    runtimeId: nonEmptyString(input?.runtimeId, DEFAULT_CONFIG.runtimeId),
+    agentId: nonEmptyString(input?.agentId, DEFAULT_CONFIG.agentId),
+    enabledHooks: stringArray(input?.enabledHooks, DEFAULT_CONFIG.enabledHooks),
+    failClosedStages: stringArray(input?.failClosedStages, DEFAULT_CONFIG.failClosedStages),
+    redaction: redactionConfig(input?.redaction, DEFAULT_CONFIG.redaction),
+    heartbeatIntervalMs: positiveInteger(input?.heartbeatIntervalMs, DEFAULT_CONFIG.heartbeatIntervalMs),
   };
 }
 
@@ -212,6 +268,25 @@ function nonEmptyString(value: unknown, fallback: string): string {
 
 function positiveInteger(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function stringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  const items = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  return items.length > 0 ? [...items] : [...fallback];
+}
+
+function redactionConfig(value: unknown, fallback: AgentGuardPluginConfig["redaction"]): AgentGuardPluginConfig["redaction"] {
+  if (typeof value !== "object" || value === null) {
+    return { ...fallback };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    enabled: record.enabled !== false,
+    previewLimit: positiveInteger(record.previewLimit, fallback.previewLimit),
+  };
 }
 
 function trimTrailingSlash(value: string): string {

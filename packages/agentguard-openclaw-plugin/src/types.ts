@@ -8,14 +8,34 @@ export type AgentGuardPluginConfig = {
   approvalTimeoutMs: number;
   approvalWaitBudgetMs: number;
   diagnosticLogging: boolean;
+  runtimeId: string;
+  agentId: string;
+  enabledHooks: string[];
+  failClosedStages: string[];
+  redaction: RedactionConfig;
+  heartbeatIntervalMs: number;
 };
 
 export type OpenClawPluginConfigInput = Partial<AgentGuardPluginConfig> | undefined;
 
+export type RedactionConfig = {
+  enabled: boolean;
+  previewLimit: number;
+};
+
+export type GuardEventType =
+  | "tool_call_proposed"
+  | "context_assembled"
+  | "model_input_prepared"
+  | "model_output_produced"
+  | "tool_result_produced"
+  | "memory_write_proposed"
+  | "message_send_proposed";
+
 export type GuardEvent = {
   schema_version: "0.3";
   event_id: string;
-  event_type: "tool_call_proposed" | "message_send_proposed" | "tool_result_produced";
+  event_type: GuardEventType;
   runtime: "openclaw";
   trace_id: string;
   case_id?: string | null;
@@ -24,9 +44,17 @@ export type GuardEvent = {
   timestamp: string;
   pre_execution: boolean;
   security_context: SecurityContext;
-  payload: ToolCallPayload | MessageSendPayload | ToolResultPayload;
+  payload: GuardPayload;
   metadata: JsonObject;
 };
+
+export type GuardPayload =
+  | ToolCallPayload
+  | ContextBuildPayload
+  | ModelCallPayload
+  | ToolResultPayload
+  | MemoryEventPayload
+  | MessageSendPayload;
 
 export type SecurityContext = {
   user_task: string;
@@ -54,6 +82,30 @@ export type ToolCallPayload = {
   };
   arguments: JsonObject;
   derived_resources: DerivedResource[];
+};
+
+export type ContextBuildPayload = {
+  sources: Array<{
+    source_id: string;
+    source_type: string;
+    source_trust: string;
+    summary: string;
+    contains_instruction_like_text: boolean;
+    contains_sensitive_data: boolean;
+  }>;
+  will_enter_context: boolean;
+  sanitized: boolean;
+};
+
+export type ModelCallPayload = {
+  phase: "input" | "output";
+  content_preview: string;
+  provider?: string | null;
+  model?: string | null;
+  contains_instruction_like_text: boolean;
+  contains_sensitive_data: boolean;
+  sanitized: boolean;
+  tool_plan: JsonObject[];
 };
 
 export type MessageSendPayload = {
@@ -86,6 +138,18 @@ export type ToolResultPayload = {
   derived_resources: DerivedResource[];
 };
 
+export type MemoryEventPayload = {
+  memory: {
+    namespace: string;
+    key: string;
+    value_preview: string;
+    source_trust: string;
+    operation: string;
+  };
+  will_persist: boolean;
+  requires_approval: boolean;
+};
+
 export type DerivedResource = {
   resource_type: string;
   operation: string;
@@ -100,9 +164,23 @@ export type GuardEvaluationResponse = {
 };
 
 export type GuardDecision = {
+  decision_id?: string;
   decision: "allow" | "deny" | "ask";
+  risk_score?: number;
+  severity?: string;
+  categories?: string[];
+  rule_hits?: Array<{
+    rule_id: string;
+    rule_name?: string | null;
+    severity?: string | null;
+    evidence?: string[];
+  }>;
   reason: string;
   safe_message?: string | null;
+  approval_intent?: JsonObject | null;
+  latency_ms?: number | null;
+  enforcement?: JsonObject | null;
+  effects?: JsonObject[];
 };
 
 export type EvaluationApproval = {
@@ -178,4 +256,11 @@ export type MessageHookResult = {
   cancel?: boolean;
   cancelReason?: string;
   metadata?: JsonObject;
+};
+
+export type AdapterHeartbeatInput = {
+  pluginVersion: string;
+  runtimeVersion?: string | null;
+  hooks: string[];
+  capabilities: JsonObject;
 };

@@ -18,7 +18,13 @@ from agentguard_core import (
     utc_now_iso,
 )
 
-from guard_api.models import AdapterStatusRecord, ApprovalRequest, ConfigAuditFindingRecord, EvaluationRun
+from guard_api.models import (
+    AdapterStatusRecord,
+    ApprovalRequest,
+    ConfigAuditFindingRecord,
+    CredentialRecord,
+    EvaluationRun,
+)
 from guard_api.storage.base import (
     AuditEventFilters,
     AuditIntegrityStatus,
@@ -40,6 +46,7 @@ class MemoryControlPlaneStore:
     config_audit_findings: list[dict[str, Any]] = field(default_factory=list)
     evaluation_runs: dict[str, dict[str, Any]] = field(default_factory=dict)
     adapter_statuses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    credentials: dict[str, CredentialRecord] = field(default_factory=dict)
     action_critic_reviews: dict[str, ActionCriticReview] = field(default_factory=dict)
     memory_changes: dict[str, MemoryGuardChange] = field(default_factory=dict)
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
@@ -139,6 +146,24 @@ class MemoryControlPlaneStore:
             return None
         return max(self.evaluation_runs.values(), key=lambda run: (str(run["run_at"]), str(run["run_id"])))
 
+    def get_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
+        return self.evaluation_runs.get(run_id)
+
+    def list_evaluation_runs(
+        self,
+        *,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows = list(self.evaluation_runs.values())
+        if dataset_id is not None:
+            rows = [run for run in rows if run.get("dataset_id") == dataset_id]
+        if dataset_version is not None:
+            rows = [run for run in rows if run.get("dataset_version") == dataset_version]
+        rows.sort(key=lambda run: (str(run["run_at"]), str(run["run_id"])), reverse=True)
+        return rows[: _bounded_limit(limit)]
+
     def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
         self.adapter_statuses[adapter_id] = payload
@@ -146,6 +171,26 @@ class MemoryControlPlaneStore:
 
     def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
         return self.adapter_statuses.get(adapter_id)
+
+    def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
+        record = CredentialRecord.model_validate(credential)
+        self.credentials[record.credential_id] = record
+        return record
+
+    def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
+        for credential in self.credentials.values():
+            if credential.token_hash == token_hash and credential.revoked_at is None:
+                return credential
+        return None
+
+    def list_credentials(self) -> list[CredentialRecord]:
+        return sorted(self.credentials.values(), key=lambda credential: credential.created_at)
+
+    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
+        credential = self.credentials[credential_id]
+        revoked = credential.model_copy(update={"revoked_at": revoked_at})
+        self.credentials[credential_id] = revoked
+        return revoked
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
         self.action_critic_reviews[review.review_id] = review

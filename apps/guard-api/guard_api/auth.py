@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from agentguard_core import new_id
 
+from guard_api.models import CredentialCreateRequest, CredentialRecord
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
@@ -76,14 +77,50 @@ class CapabilityAuthService:
                     "config-audit:read",
                     "adapter:read",
                     "adapter:status:write",
+                    "credential:read",
+                    "credential:write",
+                    "credential:revoke",
                 ],
                 auth_method="bearer",
             )
         else:
-            raise ApiAuthError("TOKEN_INVALID")
+            credential = self.store.get_credential_by_token_hash(_token_hash(token))
+            if credential is None:
+                raise ApiAuthError("TOKEN_INVALID")
+            if credential.expires_at is not None and _parse_datetime(credential.expires_at) < _now():
+                raise ApiAuthError("TOKEN_INVALID")
+            context = AuthContext(
+                principal_type=credential.principal_type,
+                principal_id=credential.principal_id,
+                role=credential.role,
+                scopes=credential.scopes,
+                auth_method="bearer",
+                runtime=credential.runtime,
+                agent_id=credential.agent_id,
+            )
         if required_scope not in context.scopes:
             raise ApiAuthError("SCOPE_DENIED", status_code=403)
         return context
+
+    def create_credential(self, request: CredentialCreateRequest) -> tuple[str, CredentialRecord]:
+        token = f"agt_{new_id('tok')}"
+        credential = CredentialRecord(
+            token_hash=_token_hash(token),
+            principal_type=request.principal_type,
+            principal_id=request.principal_id,
+            role=request.role,
+            scopes=request.scopes,
+            runtime=request.runtime,
+            agent_id=request.agent_id,
+            expires_at=request.expires_at,
+        )
+        return token, self.store.create_credential(credential)
+
+    def list_credentials(self) -> list[CredentialRecord]:
+        return self.store.list_credentials()
+
+    def revoke_credential(self, credential_id: str) -> CredentialRecord:
+        return self.store.revoke_credential(credential_id, _now().isoformat())
 
     def create_launch_code(self) -> str:
         code = new_id("lc")

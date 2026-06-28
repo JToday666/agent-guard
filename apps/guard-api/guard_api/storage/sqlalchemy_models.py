@@ -122,6 +122,26 @@ adapter_statuses = Table(
     Index("ix_adapter_statuses_updated_at", "updated_at"),
 )
 
+credentials = Table(
+    "credentials",
+    metadata,
+    Column("credential_id", Text, primary_key=True),
+    Column("token_hash", Text, nullable=False),
+    Column("principal_type", Text, nullable=False),
+    Column("principal_id", Text, nullable=False),
+    Column("role", Text, nullable=False),
+    Column("runtime", Text, nullable=True),
+    Column("agent_id", Text, nullable=True),
+    Column("payload_json", JSONB, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Column("expires_at", Text, nullable=True),
+    Column("revoked_at", Text, nullable=True),
+    Index("ix_credentials_token_hash", "token_hash"),
+    Index("ix_credentials_principal", "principal_type", "principal_id"),
+    Index("ix_credentials_runtime_agent", "runtime", "agent_id"),
+    Index("ix_credentials_revoked_at", "revoked_at"),
+)
+
 approval_requests = Table(
     "approval_requests",
     metadata,

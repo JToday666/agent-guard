@@ -1039,6 +1039,186 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
     assert sensitive_text_response.json()["decision"]["decision"] == "deny"
 
 
+def test_generic_adapter_status_and_heartbeat_keep_openclaw_alias_compatible() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    client = TestClient(app)
+
+    heartbeat_response = client.post(
+        "/v1/adapters/openclaw/heartbeat",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "status": "loaded",
+            "loaded": True,
+            "hook_count": 16,
+            "expected_hook_count": 16,
+            "runtime": "openclaw",
+            "agent_id": "main",
+            "plugin_version": "0.1.0",
+            "runtime_version": "2026.6.6",
+            "source": "openclaw-plugin",
+            "capabilities": {"event_types": ["tool_call_proposed", "message_send_proposed"]},
+            "hooks": ["before_tool_call", "message_sending"],
+        },
+    )
+    generic_response = client.get(
+        "/v1/adapters/openclaw/status",
+        headers={"Authorization": "Bearer control-secret"},
+    )
+    alias_response = client.get(
+        "/v1/adapters/openclaw/status",
+        headers={"Authorization": "Bearer control-secret"},
+    )
+
+    assert heartbeat_response.status_code == 200
+    heartbeat = heartbeat_response.json()
+    assert heartbeat["runtime"] == "openclaw"
+    assert heartbeat["agent_id"] == "main"
+    assert heartbeat["plugin_version"] == "0.1.0"
+    assert heartbeat["last_heartbeat_at"] is not None
+    assert generic_response.status_code == 200
+    assert generic_response.json()["capabilities"]["event_types"] == [
+        "tool_call_proposed",
+        "message_send_proposed",
+    ]
+    assert alias_response.status_code == 200
+    assert alias_response.json()["hooks"] == ["before_tool_call", "message_sending"]
+
+
+def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(
+        store=MemoryControlPlaneStore(),
+        settings=settings,
+        policy_bundle=PolicyBundle(bundle_id="default-policy", allowed_email_domains=["agentguard.local"]),
+    )
+    client = TestClient(app)
+    _login_dashboard(client, control_token="control-secret")
+    csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    first_policy = PolicyBundle(bundle_id="first-policy", allowed_email_domains=["first.example"])
+    second_policy = PolicyBundle(bundle_id="second-policy", allowed_email_domains=["second.example"])
+
+    validate_response = client.post("/v1/policies/validate", json=first_policy.model_dump(mode="json"))
+    diff_response = client.post("/v1/policies/diff", json=first_policy.model_dump(mode="json"))
+    first_update = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token},
+        json=first_policy.model_dump(mode="json"),
+    )
+    second_update = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token},
+        json=second_policy.model_dump(mode="json"),
+    )
+    rollback_response = client.post(
+        "/v1/policies/rollback/1",
+        headers={"X-AgentGuard-CSRF": csrf_token},
+    )
+    current_response = client.get("/v1/policies/current")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json() == {"valid": True, "bundle_id": "first-policy", "version": "p0"}
+    assert diff_response.status_code == 200
+    diff = diff_response.json()
+    assert diff["current"]["bundle_id"] == "default-policy"
+    assert diff["candidate"]["bundle_id"] == "first-policy"
+    assert "bundle_id" in diff["changed_fields"]
+    assert "allowed_email_domains" in diff["changed_fields"]
+    assert first_update.status_code == 200
+    assert second_update.status_code == 200
+    assert rollback_response.status_code == 200
+    assert rollback_response.json()["bundle_id"] == "first-policy"
+    assert current_response.status_code == 200
+    assert current_response.json()["allowed_email_domains"] == ["first.example"]
+
+
+def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer control-secret"}
+
+    first = {
+        "run_id": "eval_attackbench_v1",
+        "run_at": "2026-06-28T00:00:00+00:00",
+        "dataset_id": "attackbench",
+        "dataset_version": "v1",
+        "asr_before": 0.8,
+        "asr_after": 0.1,
+        "per_family": {"prompt_injection": {"case_count": 10, "blocked_count": 9}},
+        "per_rule": {"P101_prompt_injection": {"hit_count": 9}},
+        "cases": [],
+    }
+    second = {
+        "run_id": "eval_other_v1",
+        "run_at": "2026-06-28T00:01:00+00:00",
+        "dataset_id": "other",
+        "dataset_version": "v1",
+        "cases": [],
+    }
+
+    assert client.post("/v1/evaluations", headers=headers, json=first).status_code == 200
+    assert client.post("/v1/evaluations", headers=headers, json=second).status_code == 200
+
+    list_response = client.get("/v1/evaluations?dataset_id=attackbench&dataset_version=v1", headers=headers)
+    get_response = client.get("/v1/evaluations/eval_attackbench_v1", headers=headers)
+
+    assert list_response.status_code == 200
+    runs = list_response.json()
+    assert [run["run_id"] for run in runs] == ["eval_attackbench_v1"]
+    assert runs[0]["per_family"]["prompt_injection"]["blocked_count"] == 9
+    assert get_response.status_code == 200
+    assert get_response.json()["dataset_id"] == "attackbench"
+
+
+def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    client = TestClient(app)
+    control_headers = {"Authorization": "Bearer control-secret"}
+
+    create_response = client.post(
+        "/v1/credentials",
+        headers=control_headers,
+        json={
+            "principal_type": "component",
+            "principal_id": "openclaw-main",
+            "role": "adapter",
+            "scopes": ["adapter:status:write"],
+            "runtime": "openclaw",
+            "agent_id": "main",
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    token = created["token"]
+    credential_id = created["credential"]["credential_id"]
+    assert created["credential"]["token_hash"] == "[redacted]"
+    assert token.startswith("agt_")
+
+    heartbeat_response = client.post(
+        "/v1/adapters/openclaw/heartbeat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "loaded", "loaded": True, "runtime": "openclaw", "agent_id": "main"},
+    )
+    list_response = client.get("/v1/credentials", headers=control_headers)
+    revoke_response = client.post(f"/v1/credentials/{credential_id}/revoke", headers=control_headers)
+    rejected_response = client.post(
+        "/v1/adapters/openclaw/heartbeat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "loaded", "loaded": True, "runtime": "openclaw", "agent_id": "main"},
+    )
+
+    assert heartbeat_response.status_code == 200
+    assert list_response.status_code == 200
+    assert [item["credential_id"] for item in list_response.json()] == [credential_id]
+    assert revoke_response.status_code == 200
+    assert revoke_response.json()["revoked_at"] is not None
+    assert rejected_response.status_code == 401
+    assert rejected_response.json()["error"]["code"] == "TOKEN_INVALID"
+
+
 def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
     settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
     app = create_app(store=MemoryControlPlaneStore(), settings=settings)
