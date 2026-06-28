@@ -129,6 +129,91 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
         _cleanup_auth_rows(database_url, approval_id, launch_code, session_id)
 
 
+def test_postgres_store_roundtrips_dashboard_todo_state() -> None:
+    database_url = get_test_database_url()
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        evaluation = store.save_evaluation_run(
+            {
+                "run_id": "eval_pg_latest",
+                "run_at": "2026-06-28T00:00:00+00:00",
+                "asr_before": 0.75,
+                "asr_after": 0.05,
+                "per_attack": {"prompt_injection": {"asr_before": 0.8, "asr_after": 0.1}},
+                "cases": [
+                    {
+                        "case_id": "PI-PG",
+                        "attack_type": "prompt_injection",
+                        "runtime": "openclaw",
+                        "expected_decision": "deny",
+                        "actual_decision": "deny",
+                        "blocked": True,
+                        "attack_success": False,
+                        "trace_id": "trace_pg_eval",
+                    }
+                ],
+            }
+        )
+        store.save_adapter_status(
+            "openclaw",
+            {
+                "status": "loaded",
+                "loaded": True,
+                "hook_count": 16,
+                "expected_hook_count": 16,
+                "last_verified_at": "2026-06-28T00:01:00+00:00",
+                "error": None,
+                "source": "agentguardctl",
+            },
+        )
+
+        from agentguard_core import ConfigAuditEvent, ConfigAuditFinding
+
+        event = ConfigAuditEvent(
+            event_id="cfg_pg_findings",
+            runtime="openclaw",
+            target_type="plugin_config",
+            target_id="agentguard-security",
+            action="before_install",
+            metadata={"trace_id": "trace_pg_findings"},
+            timestamp="2026-06-28T00:02:00+00:00",
+        )
+        finding = ConfigAuditFinding(
+            finding_id="finding_pg_high",
+            severity="high",
+            category="openclaw.plugin",
+            title="Raw conversation access enabled",
+            subject="hooks.allowConversationAccess",
+            description="Plugin can read raw conversation content.",
+        )
+        store.add_config_audit_finding(event, finding)
+
+        restarted = PostgresControlPlaneStore(database_url)
+        latest = restarted.get_latest_evaluation_run()
+        status = restarted.get_adapter_status("openclaw")
+        findings = restarted.list_config_audit_findings(
+            trace_id="trace_pg_findings",
+            target_id="agentguard-security",
+            severity="high",
+            limit=10,
+        )
+
+        assert evaluation["run_id"] == "eval_pg_latest"
+        assert latest is not None
+        assert latest["run_id"] == "eval_pg_latest"
+        assert latest["cases"][0]["trace_id"] == "trace_pg_eval"
+        assert status is not None
+        assert status["status"] == "loaded"
+        assert status["hook_count"] == 16
+        assert len(findings) == 1
+        assert findings[0].trace_id == "trace_pg_findings"
+        assert findings[0].finding.finding_id == "finding_pg_high"
+    finally:
+        reset_control_plane_schema(database_url)
+
+
 def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_payload() -> None:
     database_url = get_test_database_url()
 

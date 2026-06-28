@@ -115,10 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
     openclaw = subcommands.add_parser("openclaw", help="OpenClaw helper commands")
     openclaw_subcommands = openclaw.add_subparsers(dest="openclaw_command", required=True)
     openclaw_verify = openclaw_subcommands.add_parser("verify", help="Verify installed OpenClaw plugin")
+    openclaw_verify.add_argument("--record", action="store_true", help="Record verify status in Guard API")
     openclaw_verify.set_defaults(handler=_cmd_openclaw_verify)
 
     eval_parser = subcommands.add_parser("eval", help="AttackBench helper commands")
     eval_subcommands = eval_parser.add_subparsers(dest="eval_command", required=True)
+    eval_import = eval_subcommands.add_parser("import", help="Import evaluation results into Guard API")
+    eval_import.add_argument("path", help="Evaluation result JSON file")
+    eval_import.set_defaults(handler=_cmd_eval_import)
     eval_run = eval_subcommands.add_parser("run", help="Run AttackBench", add_help=False)
     eval_run.set_defaults(bench_args=[])
     eval_run.set_defaults(handler=_cmd_eval_run)
@@ -205,14 +209,38 @@ def _cmd_trace_get(args: argparse.Namespace, *, env: Env, stdout: TextIO, transp
 
 
 def _cmd_openclaw_verify(
-    _: argparse.Namespace,
+    args: argparse.Namespace,
     *,
     run_command: RunCommand | None,
     **__: Any,
 ) -> int:
     runner = run_command or _default_run_command
-    completed = runner(["pnpm", "openclaw:plugin:verify"])
+    command = ["pnpm", "openclaw:plugin:verify"]
+    if args.record:
+        command.extend(["--", "--record"])
+    completed = runner(command)
     return completed.returncode
+
+
+def _cmd_eval_import(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    input_path = Path(args.path)
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CliError(f"Failed to read evaluation file: {exc}") from exc
+    except ValueError as exc:
+        raise CliError("Evaluation file was not valid JSON") from exc
+    response = _request_json("POST", "/v1/evaluations", env=env, transport=transport, json_body=payload)
+    run_id = response.get("run_id") if isinstance(response, dict) else None
+    stdout.write(f"Imported evaluation run {run_id or '<unknown>'}\n")
+    return 0
 
 
 def _cmd_eval_run(args: argparse.Namespace, *, bench_main: BenchMain | None, **_: Any) -> int:
@@ -227,6 +255,7 @@ def _request_json(
     env: Env,
     transport: httpx.BaseTransport | None,
     params: dict[str, Any] | None = None,
+    json_body: Any | None = None,
     token_required: bool = True,
 ) -> Any:
     headers = {}
@@ -237,7 +266,13 @@ def _request_json(
         headers["Authorization"] = f"Bearer {token}"
     try:
         with httpx.Client(timeout=10.0, transport=transport) as client:
-            response = client.request(method, _join_url(_api_base_url(env), path), params=params, headers=headers)
+            response = client.request(
+                method,
+                _join_url(_api_base_url(env), path),
+                params=params,
+                headers=headers,
+                json=json_body,
+            )
     except httpx.HTTPError as exc:
         raise CliError(f"Guard API request failed: {exc}") from exc
     if response.status_code >= 400:

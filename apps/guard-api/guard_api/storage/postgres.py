@@ -24,7 +24,7 @@ from agentguard_core import (
     ProvenanceNode,
     utc_now_iso,
 )
-from guard_api.models import ApprovalRequest
+from guard_api.models import AdapterStatusRecord, ApprovalRequest, ConfigAuditFindingRecord, EvaluationRun
 from guard_api.storage.base import (
     AuditEventFilters,
     AuditIntegrityStatus,
@@ -38,12 +38,14 @@ from guard_api.storage.base import (
 from guard_api.storage.integrity import attach_audit_integrity, read_audit_integrity, verify_audit_chain
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
+    adapter_statuses,
     approval_nonces,
     approval_requests,
     audit_integrity_heads,
     audit_events,
     browser_sessions,
     config_audit_findings,
+    evaluation_runs,
     launch_codes,
     memory_guard_changes,
     policy_snapshot_history,
@@ -305,6 +307,98 @@ class PostgresControlPlaneStore:
             session.execute(stmt)
             session.commit()
         return finding
+
+    def list_config_audit_findings(
+        self,
+        *,
+        trace_id: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        severity: str | None = None,
+        limit: int = 100,
+    ) -> list[ConfigAuditFindingRecord]:
+        stmt = select(config_audit_findings.c.payload_json).order_by(
+            desc(config_audit_findings.c.created_at),
+            desc(config_audit_findings.c.finding_id),
+        )
+        if target_id is not None:
+            stmt = stmt.where(config_audit_findings.c.target_id == target_id)
+        if target_type is not None:
+            stmt = stmt.where(config_audit_findings.c.target_type == target_type)
+        if severity is not None:
+            stmt = stmt.where(config_audit_findings.c.severity == severity)
+        if trace_id is not None:
+            stmt = stmt.where(
+                text(
+                    "(config_audit_findings.payload_json #>> '{event,metadata,trace_id}') = :trace_id "
+                    "OR (config_audit_findings.payload_json #>> '{event,event_id}') = :trace_id"
+                )
+            ).params(trace_id=trace_id)
+        stmt = stmt.limit(_bounded_limit(limit))
+        with self._session_factory() as session:
+            rows = session.execute(stmt).scalars().all()
+        records = [_config_finding_record(row) for row in rows]
+        return records[: _bounded_limit(limit)]
+
+    def save_evaluation_run(self, run: EvaluationRun | dict[str, Any]) -> dict[str, Any]:
+        payload = EvaluationRun.model_validate(run).model_dump(mode="json")
+        stmt = pg_insert(evaluation_runs).values(
+            run_id=payload["run_id"],
+            run_at=payload["run_at"],
+            payload_json=payload,
+            created_at=utc_now_iso(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[evaluation_runs.c.run_id],
+            set_={
+                "run_at": stmt.excluded.run_at,
+                "payload_json": stmt.excluded.payload_json,
+                "created_at": stmt.excluded.created_at,
+            },
+        )
+        with self._session_factory() as session:
+            session.execute(stmt)
+            session.commit()
+        return payload
+
+    def get_latest_evaluation_run(self) -> dict[str, Any] | None:
+        stmt = (
+            select(evaluation_runs.c.payload_json)
+            .order_by(desc(evaluation_runs.c.run_at), desc(evaluation_runs.c.run_id))
+            .limit(1)
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return EvaluationRun.model_validate(row).model_dump(mode="json")
+
+    def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]) -> dict[str, Any]:
+        payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
+        stmt = pg_insert(adapter_statuses).values(
+            adapter_id=adapter_id,
+            payload_json=payload,
+            updated_at=payload.get("last_verified_at") or utc_now_iso(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[adapter_statuses.c.adapter_id],
+            set_={
+                "payload_json": stmt.excluded.payload_json,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        with self._session_factory() as session:
+            session.execute(stmt)
+            session.commit()
+        return payload
+
+    def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
+        stmt = select(adapter_statuses.c.payload_json).where(adapter_statuses.c.adapter_id == adapter_id)
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return AdapterStatusRecord.model_validate(row).model_dump(mode="json")
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
         payload = review.model_dump(mode="json")
@@ -773,6 +867,20 @@ def _json_text(key: str) -> Any:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
+    event = ConfigAuditEvent.model_validate(row["event"])
+    finding = ConfigAuditFinding.model_validate(row["finding"])
+    return ConfigAuditFindingRecord(
+        runtime=event.runtime,
+        target_type=event.target_type,
+        target_id=event.target_id,
+        trace_id=str(event.metadata.get("trace_id") or event.event_id),
+        event_id=event.event_id,
+        timestamp=event.timestamp,
+        finding=finding,
+    )
 
 
 def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:

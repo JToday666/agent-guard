@@ -16,6 +16,7 @@ from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent, MemoryGuar
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.errors import error_response, http_error_code, validation_error_details
+from guard_api.models import AdapterStatusRecord, EvaluationRun
 from guard_api.services import (
     ApprovalService,
     AuditService,
@@ -280,6 +281,30 @@ def create_app(
         filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
         return metric_service.eval_metrics(filters)
 
+    @app.post("/v1/evaluations")
+    def save_evaluation_run(
+        payload: EvaluationRun,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "evaluation:write")
+        return store.save_evaluation_run(payload)
+
+    @app.get("/v1/evaluations/latest")
+    def latest_evaluation_run(
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="evaluation:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        run = store.get_latest_evaluation_run()
+        if run is None:
+            raise ApiAuthError("EVALUATION_NOT_FOUND", status_code=404)
+        return run
+
     @app.get("/v1/traces/{trace_id}")
     def trace_detail(
         trace_id: str,
@@ -308,6 +333,33 @@ def create_app(
         )
         return trace_service.get_provenance(trace_id)
 
+    @app.get("/v1/config-audit/findings")
+    def config_audit_findings(
+        trace_id: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        severity: str | None = None,
+        limit: int = 100,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="config-audit:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        return [
+            row.model_dump(mode="json")
+            for row in store.list_config_audit_findings(
+                trace_id=trace_id,
+                target_id=target_id,
+                target_type=target_type,
+                severity=severity,
+                limit=_bounded_limit(limit),
+            )
+        ]
+
     @app.post("/v1/config-audit/evaluate")
     def evaluate_config_audit_event(
         payload: ConfigAuditEvent,
@@ -315,6 +367,30 @@ def create_app(
     ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:evaluate")
         return config_audit_service.evaluate(payload).model_dump(mode="json")
+
+    @app.put("/v1/adapters/openclaw/status")
+    def save_openclaw_adapter_status(
+        payload: AdapterStatusRecord,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        auth.verify_bearer(authorization, "adapter:status:write")
+        return store.save_adapter_status("openclaw", payload)
+
+    @app.get("/v1/adapters/openclaw/status")
+    def openclaw_adapter_status(
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="adapter:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        status = store.get_adapter_status("openclaw")
+        if status is None:
+            return AdapterStatusRecord().model_dump(mode="json")
+        return status
 
     @app.post("/v1/memory/changes/propose")
     def propose_memory_change(

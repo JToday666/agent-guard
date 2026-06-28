@@ -1,15 +1,31 @@
 # 后端待处理项（前端预留能力）
 
+## 状态
+
+本文件原三项前端预留后端能力已完成后端侧实现：
+
+- 安全评测 ASR 数据：已提供导入与 latest 查询接口。
+- 配置审计 findings：已提供只读查询接口。
+- OpenClaw 插件验证状态：已提供最近一次 verify 状态写入与读取接口。
+
+Dashboard 仍未接入这些新增接口。本轮按约束不修改 `apps/dashboard/**`；如需在页面展示 ASR、finding 明细或 OpenClaw verify 状态，需要另行确认前端改动范围。
+
 ## 安全评测 ASR 数据接口
 
-**背景**：前端评测页已预留 `asrBefore / asrAfter` 字段显示，但当前 Guard API `/v1/metrics/eval` 不返回 ASR 数据。
+后端采用“导入并保存”方案，评测结果由 CLI/API 写入 Guard API，再由 Dashboard 或 CLI 读取最新一次 run。
 
-**建议方案**：新增只读接口 `GET /v1/evaluations/latest`，返回：
+### 写入
+
+`POST /v1/evaluations`
+
+- 鉴权：control token。
+- 用途：导入 AttackBench/Core matrix 等评测结果。
+- ASR 字段允许 `null`；非 `null` 时必须在 `[0, 1]`。
 
 ```json
 {
-  "run_id": "string",
-  "run_at": "ISO8601",
+  "run_id": "eval_20260628",
+  "run_at": "2026-06-28T00:00:00+00:00",
   "asr_before": 0.732,
   "asr_after": 0.048,
   "per_attack": {
@@ -19,9 +35,9 @@
     {
       "case_id": "PI-001",
       "attack_type": "prompt_injection",
-      "runtime": "langgraph",
+      "runtime": "openclaw",
       "expected_decision": "deny",
-      "actual_decision": "deny",
+      "actual_decision": "ask",
       "blocked": true,
       "attack_success": false,
       "trace_id": "trace_001"
@@ -30,30 +46,61 @@
 }
 ```
 
-**前端已就绪**：`EvaluationSummary.asrBefore / asrAfter` 类型已定义，显示逻辑已实现，空状态文案已更新为"请运行 AttackBench 评测并导入结果"。
+### 读取
 
-**优先级**：P1（竞赛展示时如有真实评测数据，建议接入）
+`GET /v1/evaluations/latest`
 
----
+- 鉴权：browser session 或 control token。
+- 无数据：`404 EVALUATION_NOT_FOUND`。
+
+### CLI
+
+```bash
+uv run agentguardctl eval import /path/to/evaluation-run.json
+```
 
 ## 配置审计 findings 只读接口
 
-**背景**：配置审计结果落成 `event_type=config_audit` 的 AuditEvent，metadata 含 `finding_count`，但无法查询完整 finding 列表（title / evidence / recommendation）。
+`GET /v1/config-audit/findings?trace_id=&target_id=&target_type=&severity=&limit=`
 
-**建议方案**：`GET /v1/config-audit/findings?trace_id=&target_id=`
-
-**前端现状**：系统状态页配置审计区块显示 finding_count，不展示 finding 详情（因为接口不存在）。
-
-**优先级**：P2
-
----
+- 鉴权：browser session 或 control token。
+- 数据来源：`/v1/config-audit/evaluate` 写入的 `config_audit_findings`。
+- 返回 finding 原文，并附带 `runtime`、`target_type`、`target_id`、`trace_id`、`event_id`、`timestamp`。
 
 ## OpenClaw 插件验证状态接口
 
-**背景**：CLI `agentguardctl openclaw verify` 能验证插件安装状态，但前端无法调用 CLI，也没有对应 REST 接口。
+OpenClaw 状态不是每次 Dashboard 刷新实时 shell 探测，而是最近一次 verify 上报结果。
 
-**建议方案**：`GET /v1/adapters/openclaw/status`，返回插件是否 loaded、hookCount、最近 verify 时间。
+### 写入
 
-**前端现状**：系统状态页显示"未接入验证结果"，只基于审计事件统计 OpenClaw 活动。
+`PUT /v1/adapters/openclaw/status`
 
-**优先级**：P2
+- 鉴权：control token。
+- 写入方：`agentguardctl openclaw verify --record` 或 `scripts/openclaw-plugin-dev.mjs verify --record`。
+
+```json
+{
+  "status": "loaded",
+  "loaded": true,
+  "hook_count": 16,
+  "expected_hook_count": 16,
+  "last_verified_at": "2026-06-28T00:00:00+00:00",
+  "error": null,
+  "source": "agentguardctl"
+}
+```
+
+### 读取
+
+`GET /v1/adapters/openclaw/status`
+
+- 鉴权：browser session 或 control token。
+- 无记录：返回 `status="unknown"`。
+
+## 前端接入待确认
+
+以下属于 Dashboard 改动，需单独确认后再做：
+
+- `EvaluationPage` 读取 `/v1/evaluations/latest` 并展示 `asrBefore/asrAfter`。
+- `SystemPage` 展示 OpenClaw verify 状态。
+- `SystemPage` 展示配置审计 finding 明细。
