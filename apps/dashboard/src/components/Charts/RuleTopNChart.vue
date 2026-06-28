@@ -2,7 +2,7 @@
   <div v-if="items.length" class="rule-topn" aria-label="规则命中 TopN" role="img">
     <div v-for="item in items" :key="item.label" class="rule-topn__row">
       <div class="rule-topn__meta">
-        <code class="rule-topn__id" :title="item.label">{{ shortRuleId(item.label) }}</code>
+        <span class="rule-topn__id" :title="ruleLabel(item.label)">{{ ruleLabel(item.label) }}</span>
         <strong>{{ item.value }}</strong>
       </div>
       <span class="rule-topn__track"><i :style="{ width: `${(item.value / maxValue) * 100}%` }"></i></span>
@@ -13,13 +13,10 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { ruleLabel } from "../../utils/rule-display";
 defineOptions({ name: "RuleTopNChart" });
 const props = defineProps<{ items: Array<{ label: string; value: number }> }>();
 const maxValue = computed(() => Math.max(1, ...props.items.map((i) => i.value)));
-function shortRuleId(id: string): string {
-  // "P001_sensitive_file_access" → "P001"
-  return id.split("_")[0] ?? id;
-}
 </script>
 
 <style scoped lang="scss">

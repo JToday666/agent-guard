@@ -1,5 +1,5 @@
 <template>
-  <ol class="trace-timeline" aria-label="Trace 审计事件">
+  <ol class="trace-timeline" aria-label="证据链审计事件">
     <li
       v-for="(event, index) in events"
       :key="event.id"
@@ -16,7 +16,7 @@
         <footer>
           <StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" />
           <span>风险 {{ event.riskScore }}</span>
-          <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">联动溯源图</button>
+          <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">定位溯源节点</button>
           <RouterLink class="page-action" :to="eventLink(event.id)">查看证据</RouterLink>
         </footer>
       </article>
@@ -34,7 +34,7 @@ const props = defineProps<{ events: AuditEventRow[]; selectedEventId?: string; t
 const emit = defineEmits<{ "select-event": [eventId: string] }>();
 function eventLink(eventId: string) {
   return props.traceId
-    ? { path: `/investigations/${props.traceId}`, query: { event_id: eventId } }
+    ? { path: `/evidence/${props.traceId}`, query: { event_id: eventId } }
     : { path: "/investigations", query: { event_id: eventId } };
 }
 </script>
@@ -58,5 +58,4 @@ function eventLink(eventId: string) {
 .timeline-select-btn { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text-subtle); cursor: pointer; font-size: var(--font-size-11); min-height: 1.75rem; padding: 0 var(--space-2); transition: border-color var(--transition-fast), color var(--transition-fast); }
 .timeline-select-btn:hover { border-color: var(--color-active); color: var(--color-active); }
 </style>
-
 

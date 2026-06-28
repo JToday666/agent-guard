@@ -39,10 +39,22 @@
   }
 
   h1 {
+    align-items: center;
+    color: var(--color-link);
+    display: inline-flex;
     font-size: var(--font-size-28);
     font-weight: var(--font-weight-bold);
+    gap: var(--space-3);
     line-height: var(--line-height-tight);
     overflow-wrap: anywhere;
+
+    &::before {
+      background: linear-gradient(180deg, var(--color-active), var(--color-link));
+      border-radius: var(--radius-pill);
+      content: "";
+      flex: 0 0 .3rem;
+      height: 1.35em;
+    }
   }
 }
 

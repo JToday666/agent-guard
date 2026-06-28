@@ -1,6 +1,6 @@
 <template>
   <section class="system-page workspace-panel" aria-labelledby="system-title">
-    <header class="page-header"><div><p>运行状态</p><h1 id="system-title">系统状态</h1></div><button class="page-action" type="button" :aria-busy="store.isRefreshing" :disabled="store.isRefreshing" @click="handleRefresh">{{ store.isRefreshing ? "检查中" : "立即检查" }}</button></header>
+    <header class="page-header"><div><h1 id="system-title">系统状态</h1></div><button class="page-action" type="button" :aria-busy="store.isRefreshing" :disabled="store.isRefreshing" @click="handleRefresh">{{ store.isRefreshing ? "检查中" : "立即检查" }}</button></header>
     <section class="status-ledger" aria-labelledby="status-ledger-title">
       <header><div><h2 id="status-ledger-title">服务与会话</h2><p>当前监督端依赖及数据同步状态</p></div><DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" /></header>
       <div class="status-ledger__rows">
@@ -14,7 +14,7 @@
     </section>
     <section v-if="store.status === 'error' && store.error" class="system-alert" role="alert"><strong>最近一次检查失败</strong><p>{{ store.error }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
     <section class="policy-ledger" aria-labelledby="policy-ledger-title">
-      <header><div><h2 id="policy-ledger-title">策略快照</h2><p>当前只读策略与最近变更记录</p></div></header>
+      <header><div><h2 id="policy-ledger-title">策略状态</h2><p>查看当前生效的风险判断配置</p></div></header>
       <section v-if="store.policyError" class="system-alert" role="alert"><strong>策略数据加载失败</strong><p>{{ store.policyError }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
       <template v-else-if="store.policySummary">
         <dl class="policy-summary">
@@ -22,8 +22,8 @@
           <div><dt>版本</dt><dd>{{ store.policySummary.version }}</dd></div>
           <div><dt>修订号</dt><dd>{{ store.policySummary.revision ?? "未提供" }}</dd></div>
           <div><dt>更新时间</dt><dd>{{ formatTime(store.policySummary.updatedAt) }}</dd></div>
-          <div><dt>禁用规则</dt><dd>{{ store.policySummary.disabledRuleCount }}</dd></div>
-          <div><dt>规则覆盖</dt><dd>{{ store.policySummary.ruleOverrideCount }}</dd></div>
+          <div><dt>停用判断</dt><dd>{{ store.policySummary.disabledRuleCount }}</dd></div>
+          <div><dt>自定义判断</dt><dd>{{ store.policySummary.ruleOverrideCount }}</dd></div>
           <div><dt>工具画像</dt><dd>{{ store.policySummary.toolProfileCount }}</dd></div>
         </dl>
         <div v-if="store.policyHistory.length" class="policy-history" role="list" aria-label="策略历史">
@@ -32,7 +32,7 @@
           </article>
         </div>
       </template>
-      <EmptyState v-else title="暂无策略快照" message="当前没有可展示的策略数据。" />
+      <EmptyState v-else title="暂无策略状态" message="当前没有可展示的策略数据。" />
     </section>
 
     <section id="audit-integrity" class="system-ledger" aria-labelledby="integrity-title">
@@ -52,7 +52,7 @@
     </section>
 
     <section class="system-ledger" aria-labelledby="adapters-title">
-      <header><div><h2 id="adapters-title">运行时适配器</h2><p>审计活动来源，基于已记录审计事件派生</p></div></header>
+      <header><div><h2 id="adapters-title">运行时适配器</h2><p>查看哪些运行时正在写入审计事件</p></div></header>
       <div class="adapter-grid">
         <article class="adapter-card">
           <h3>LangGraph</h3>
@@ -77,7 +77,7 @@
 
     <!-- 配置审计摘要 -->
     <section class="system-ledger" aria-labelledby="config-audit-title">
-      <header><div><h2 id="config-audit-title">配置审计</h2><p>基于 event_type=config_audit 的审计事件派生</p></div><RouterLink class="page-action" to="/investigations?event_type=config_audit">查看全部</RouterLink></header>
+      <header><div><h2 id="config-audit-title">配置审计</h2><p>查看配置检查发现的风险项</p></div><RouterLink class="page-action" to="/investigations?event_type=config_audit">查看全部</RouterLink></header>
       <template v-if="configAuditEvents.length">
         <div class="event-table-wrap">
           <table class="event-table">
@@ -189,7 +189,7 @@ function handleRefresh() { void store.refresh(); }
 .integrity-detail dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .integrity-detail dd { margin: 0; }
 .hash-short { font-size: var(--font-size-12); }
-.adapter-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.adapter-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); }
 .adapter-card { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: var(--space-3); padding: var(--space-4); }
 .adapter-card h3 { font-size: var(--font-size-14); margin: 0; }
 .adapter-card dl { display: grid; gap: var(--space-2); grid-template-columns: 1fr 1fr 1fr; margin: 0; }

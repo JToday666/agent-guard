@@ -1,32 +1,31 @@
 <template>
   <section class="evaluation-page workspace-panel" aria-labelledby="evaluation-title">
-    <header class="page-header"><div><p>防御效果</p><h1 id="evaluation-title">安全评测</h1></div><DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" /></header>
+    <header class="page-header"><div><h1 id="evaluation-title">安全评测</h1></div><DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" /></header>
     <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
     <LoadingState v-else-if="store.status === 'loading' && !store.events.length" />
     <template v-else>
       <AsrComparisonChart v-if="hasAsrData" :before="store.evaluation.asrBefore" :after="store.evaluation.asrAfter" />
       <section v-else class="evaluation-empty-asr" aria-labelledby="asr-empty-title"><h2 id="asr-empty-title">暂无评测结果</h2><p>请运行 AttackBench 评测并将结果写入审计后，数据将自动展示。</p></section>
       <MetricStrip :items="metricItems" />
-      <section class="eval-runtime section-divider" aria-labelledby="runtime-perf-title">
-        <header><div><h2 id="runtime-perf-title">运行时延迟对比</h2><p>基于当前审计事件 latency_ms 字段派生</p></div></header>
-        <div v-if="runtimeLatency.some(r => r.avg !== null)" class="runtime-bars">
+      <section v-if="hasRuntimeComparison" class="eval-runtime section-divider" aria-labelledby="runtime-perf-title">
+        <header><div><h2 id="runtime-perf-title">运行时延迟对比</h2><p>比较多个运行时的平均判定耗时</p></div></header>
+        <div class="runtime-bars">
           <div v-for="row in runtimeLatency" :key="row.runtime" class="runtime-bar-row">
             <span class="runtime-bar-label">{{ row.runtime }}</span>
             <span class="runtime-bar-track"><i :style="{ width: `${row.pct}%` }"></i></span>
             <span class="runtime-bar-val">{{ row.avg === null ? '—' : `${row.avg.toFixed(1)} ms` }}</span>
           </div>
         </div>
-        <p v-else class="eval-matrix__empty">暂无延迟数据（需要 latency_ms 字段）</p>
       </section>
       <section class="eval-matrix section-divider" aria-labelledby="matrix-title">
-        <header><div><h2 id="matrix-title">混淆矩阵</h2><p>基于审计事件 is_malicious 与 blocked 派生</p></div></header>
+        <header><div><h2 id="matrix-title">混淆矩阵</h2><p>查看恶意样本和正常样本的放行、阻断结果</p></div></header>
         <ConfusionMatrix v-if="hasMatrixData" :tp="matrix.tp" :fp="matrix.fp" :tn="matrix.tn" :fn="matrix.fn" />
         <p v-else class="eval-matrix__empty">暂无足够标注数据（需要 is_malicious 字段）</p>
       </section>
       <section class="evaluation-evidence section-divider" aria-labelledby="sample-title">
-      <header><div><h2 id="sample-title">样本证据</h2><p>评测结论可追溯到对应的 Trace 与审计事件</p></div><span>{{ store.traces.length }} 个样本</span></header>
+      <header><div><h2 id="sample-title">样本证据</h2><p>评测结论可追溯到对应的证据链与审计事件</p></div><span>{{ store.traces.length }} 个样本</span></header>
       <div v-if="store.traces.length" class="sample-list">
-        <RouterLink v-for="trace in store.traces" :id="`case-${trace.caseId}`" :key="trace.id" :class="{ 'sample-list__selected': selectedCaseId === trace.caseId }" :to="`/investigations/${trace.id}`">
+        <RouterLink v-for="trace in store.traces" :id="`case-${trace.caseId}`" :key="trace.id" :class="{ 'sample-list__selected': selectedCaseId === trace.caseId }" :to="`/evidence/${trace.id}`">
           <code>{{ trace.caseId }}</code><span>{{ trace.title }}</span><StatusBadge :label="getTraceStatusLabel(trace.status)" :tone="getTraceStatusTone(trace.status)" /><time>{{ formatDashboardDateTime(trace.lastEventAt) }}</time><strong>查看证据</strong>
         </RouterLink>
       </div>
@@ -86,6 +85,7 @@ const runtimeLatency = computed(() => {
   const max = Math.max(1, ...rows.map((r) => r.avg ?? 0));
   return rows.map((r) => ({ ...r, pct: r.avg ? (r.avg / max) * 100 : 0 }));
 });
+const hasRuntimeComparison = computed(() => runtimeLatency.value.filter((row) => row.avg !== null).length > 1);
 watch([selectedCaseId, () => store.traces.length], async ([caseId]) => { if (!caseId) return; await nextTick(); document.getElementById(`case-${caseId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }, { immediate: true });
 </script>
 

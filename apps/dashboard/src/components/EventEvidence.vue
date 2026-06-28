@@ -32,7 +32,7 @@
     <section class="event-evidence__section">
       <h3>命中规则</h3>
       <div class="rule-list">
-        <span v-for="rule in event.ruleHits" :key="rule">{{ rule }}</span>
+        <span v-for="rule in event.ruleHits" :key="rule">{{ ruleLabel(rule) }}</span>
         <span v-if="!event.ruleHits.length">未命中阻断规则</span>
       </div>
     </section>
@@ -40,8 +40,8 @@
     <section class="event-evidence__section">
       <h3>关联证据</h3>
       <div class="evidence-links">
-        <RouterLink :to="`/investigations/${event.traceId}`">完整 Trace</RouterLink>
-        <button type="button" @click="copy(event.traceId, 'Trace ID')">复制 Trace ID</button>
+        <RouterLink :to="`/evidence/${event.traceId}`">完整证据链</RouterLink>
+        <button type="button" @click="copy(event.traceId, '证据链 ID')">复制证据链 ID</button>
         <RouterLink v-if="event.caseId" :to="{ path: '/evaluation', query: { case_id: event.caseId } }">评测样本</RouterLink>
         <RouterLink v-if="event.approvalId" :to="`/approvals/${event.approvalId}`">关联审批</RouterLink>
       </div>
@@ -65,11 +65,12 @@ import {
 } from "../utils/dashboard-formatters";
 import StatusBadge from "./StatusBadge.vue";
 import StructuredDataView from "./StructuredDataView.vue";
+import { prepareEvidenceDataForDisplay, ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EventEvidence" });
 const props = defineProps<{ event: AuditEventRow }>();
 const copyStatus = ref("");
-const safeRawEvent = computed(() => redactSensitiveData(props.event.raw ?? props.event));
+const safeRawEvent = computed(() => prepareEvidenceDataForDisplay(redactSensitiveData(props.event.raw ?? props.event)));
 
 async function copy(value: string, label: string): Promise<void> {
   try {
@@ -91,13 +92,13 @@ async function copy(value: string, label: string): Promise<void> {
 .risk-score--medium { border-color: var(--color-warning); color: var(--color-warning); }
 .event-evidence__risk dl { display: grid; gap: var(--space-2); margin: 0; }
 .event-evidence__risk dl > div { align-items: center; display: flex; gap: var(--space-3); justify-content: space-between; }
-.event-evidence dt { color: var(--color-text-subtle); }
-.event-evidence dd { margin: 0; overflow-wrap: anywhere; }
+	.event-evidence dt { color: var(--color-text-muted); font-size: var(--font-size-12); font-weight: var(--font-weight-semibold); }
+	.event-evidence dd { margin: 0; overflow-wrap: anywhere; }
 .event-evidence__section { border-top: 1px solid var(--color-border); display: grid; gap: var(--space-3); padding-top: var(--space-4); }
 .event-evidence h3 { font-size: var(--font-size-14); margin: 0; }
 .evidence-copy { display: grid; gap: var(--space-3); margin: 0; }
 .evidence-copy > div { display: grid; gap: var(--space-1); }
-.evidence-copy dd { color: var(--color-text-muted); }
+	.evidence-copy dd { color: var(--color-text); line-height: 1.55; }
 .rule-list, .evidence-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .resource-list { display: grid; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
 .resource-list li { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); padding: var(--space-2); }

@@ -113,6 +113,7 @@ watch(
   grid-template-rows: auto 1fr;
   min-height: calc(100vh - var(--top-bar-height));
   min-width: 0;
+  overscroll-behavior: contain;
 }
 
 .detail-drawer__header {
@@ -169,6 +170,7 @@ watch(
   display: grid;
   gap: var(--space-4);
   overflow: auto;
+  overscroll-behavior: contain;
   padding: var(--space-4);
 }
 

@@ -10,20 +10,20 @@ test("approval exposes separate trace and event evidence destinations", async ({
 }) => {
   await page.goto("/approvals");
 
-  const fullTraceLink = page.getByRole("link", { name: "查看完整 Trace" });
+  const fullTraceLink = page.getByRole("link", { name: "查看完整证据链" });
   await expect(fullTraceLink).toBeVisible();
   await expect(fullTraceLink).toHaveAttribute(
     "href",
-    "/investigations/trace_002",
+    "/evidence/trace_002",
   );
   await fullTraceLink.click();
 
-  await expect(page).toHaveURL(/\/investigations\/trace_002$/);
-  const investigationNavigation = page.locator(
-    '.sidebar__link[href="/investigations"]',
+  await expect(page).toHaveURL(/\/evidence\/trace_002$/);
+  const evidenceNavigation = page.locator(
+    '.sidebar__link[href="/evidence"]',
   );
-  await expect(investigationNavigation).toHaveClass(/sidebar__link--active/);
-  await expect(investigationNavigation).toHaveAttribute("aria-current", "page");
+  await expect(evidenceNavigation).toHaveClass(/sidebar__link--active/);
+  await expect(evidenceNavigation).toHaveAttribute("aria-current", "page");
   const evidenceLink = page
     .locator('[data-event-id="evt_20260607_002"]')
     .getByRole("link", { name: "查看证据" });
@@ -38,14 +38,82 @@ test("approval exposes separate trace and event evidence destinations", async ({
   await locateEventLink.click();
 
   await expect(page).toHaveURL(
-    /\/investigations\/trace_002\?event_id=evt_20260607_002$/,
+    /\/evidence\/trace_002\?event_id=evt_20260607_002$/,
   );
-  await expect(investigationNavigation).toHaveClass(/sidebar__link--active/);
-  await expect(investigationNavigation).toHaveAttribute("aria-current", "page");
+  await expect(evidenceNavigation).toHaveClass(/sidebar__link--active/);
+  await expect(evidenceNavigation).toHaveAttribute("aria-current", "page");
   await expect(
     page.locator('[data-event-id="evt_20260607_002"]'),
   ).toHaveAttribute("aria-current", "true");
   await expect(page.getByRole("dialog")).toContainText("风险分数");
+});
+
+test("decision trend keeps decision words in the legend only", async ({
+  page,
+}) => {
+  await page.goto("/overview");
+
+  await expect(page.locator(".trend-legend")).toContainText("放行");
+  await expect(page.locator(".trend-legend")).toContainText("审批");
+  await expect(page.locator(".trend-legend")).toContainText("拒绝");
+
+  const svgLabels = await page.locator(".trend-chart svg text").allTextContents();
+  expect(svgLabels.join(" ")).not.toMatch(/放行|审批|拒绝/);
+});
+
+test("top page headers use the emphasized title without category subtitles", async ({
+  page,
+}) => {
+  const removedSubtitles = [
+    "安全态势",
+    "监控与取证",
+    "证据追踪",
+    "人工控制",
+    "防御效果",
+    "运行状态",
+  ];
+  for (const path of [
+    "/overview",
+    "/investigations",
+    "/evidence",
+    "/evidence/trace_002",
+    "/approvals",
+    "/evaluation",
+    "/system",
+  ]) {
+    await page.goto(path);
+    const title = page.locator(".page-header h1").first();
+    await expect(title).toBeVisible();
+    await expect(title).toHaveCSS("color", "rgb(23, 78, 166)");
+    for (const subtitle of removedSubtitles) {
+      await expect(page.getByText(subtitle)).toHaveCount(0);
+    }
+  }
+});
+
+test("approval desktop layout keeps queue and detail in separate scroll regions", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop");
+  await page.goto("/approvals");
+
+  const layout = page.locator(".approvals-layout");
+  await expect(layout).toBeVisible();
+  const state = await layout.evaluate((element) => {
+    const queue = element.querySelector<HTMLElement>(".approval-queue");
+    const detail = element.querySelector<HTMLElement>(".approval-detail");
+    return {
+      detailOverflow: detail ? getComputedStyle(detail).overflowY : "",
+      gridColumns: getComputedStyle(element).gridTemplateColumns,
+      layoutWidth: element.clientWidth,
+      queueOverflow: queue ? getComputedStyle(queue).overflowY : "",
+    };
+  });
+
+  expect(state.gridColumns.split(" ").length).toBeGreaterThanOrEqual(2);
+  expect(state.layoutWidth).toBeGreaterThan(0);
+  expect(state.queueOverflow).toBe("auto");
+  expect(state.detailOverflow).toBe("auto");
 });
 
 test("overview investigation links use the shared action style", async ({
@@ -53,8 +121,12 @@ test("overview investigation links use the shared action style", async ({
 }) => {
   await page.goto("/overview");
 
-  for (const name of ["进入调查", "查看全部"]) {
-    const link = page.getByRole("link", { name });
+  const links = page.locator(".overview-page .page-action");
+  await expect(links.first()).toBeVisible();
+  const count = await links.count();
+  expect(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const link = links.nth(index);
     await expect(link).toHaveClass(/page-action/);
     await expect(link).toHaveCSS("border-top-style", "solid");
     await expect(link).toHaveCSS("background-color", "rgb(241, 245, 249)");
@@ -98,7 +170,7 @@ test("a missing event keeps the query and shows explicit feedback", async ({
 test("trace context evidence destinations use button styling", async ({
   page,
 }) => {
-  await page.goto("/investigations/trace_002");
+  await page.goto("/evidence/trace_002");
 
   for (const name of ["查看关联审批", "查看评测样本"]) {
     const link = page.getByRole("link", { name });
@@ -189,7 +261,7 @@ test("investigation select supports mouse selection and outside dismissal", asyn
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "false");
 
   await runtimeSelect.click();
-  await page.locator(".result-summary").click();
+  await page.locator(".page-header h1").click();
   await expect(runtimeSelect).toHaveAttribute("aria-expanded", "false");
 });
 
@@ -250,7 +322,7 @@ test("investigation select closes when its KeepAlive page is deactivated", async
   await page.getByRole("link", { name: "总览" }).click();
   await expect(page).toHaveURL(/\/overview$/);
   await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "调查", exact: true }).click();
+  await page.getByRole("link", { name: "事件调查", exact: true }).click();
   await expect(page).toHaveURL(/\/investigations$/);
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "false");
 });
@@ -267,6 +339,8 @@ test("primary dashboard routes do not overflow the viewport", async ({
   for (const path of [
     "/overview",
     "/investigations",
+    "/evidence",
+    "/evidence/trace_002",
     "/approvals",
     "/evaluation",
     "/system",

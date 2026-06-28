@@ -101,38 +101,6 @@ export interface GuardPolicyHistoryDto {
   version: string;
 }
 
-export interface GuardAuditIntegrityDto {
-  valid: boolean;
-  event_count: number;
-  head_hash: string;
-  first_broken_audit_id: string | null;
-}
-
-export interface GuardProvenanceNodeDto {
-  node_id: string;
-  trace_id: string;
-  kind: string;
-  ref_id: string;
-  label: string;
-  timestamp: string;
-  metadata: Record<string, unknown>;
-}
-
-export interface GuardProvenanceEdgeDto {
-  edge_id: string;
-  trace_id: string;
-  source_node_id: string;
-  target_node_id: string;
-  relation: string;
-  timestamp: string;
-  metadata: Record<string, unknown>;
-}
-
-export interface GuardProvenanceDto {
-  trace_id: string;
-  nodes: GuardProvenanceNodeDto[];
-  edges: GuardProvenanceEdgeDto[];
-}
 
 export interface GuardAuditIntegrityDto {
   valid: boolean;
