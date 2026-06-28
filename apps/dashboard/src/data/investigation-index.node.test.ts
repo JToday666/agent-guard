@@ -5,6 +5,7 @@ import type { AuditEventRow } from "../types/dashboard.ts";
 import {
   buildInvestigationIndex,
   filterInvestigationEvents,
+  getRuleFilterOptions,
   resolveInvestigationEvent,
 } from "./investigation-index.ts";
 
@@ -19,11 +20,13 @@ function event(overrides: Partial<AuditEventRow>): AuditEventRow {
     raw: {},
     reason: "正常访问",
     resource: "/workspace/readme.md",
+    resourceTargets: ["/workspace/readme.md"],
     riskScore: 10,
     ruleHits: [],
     runtime: "langgraph",
     severity: "low",
     stage: "pre_tool",
+    eventType: "tool_call_proposed",
     time: "10:00:00",
     tool: "read_file",
     traceId: "trace-1",
@@ -54,6 +57,41 @@ test("builds reusable latest-first event and trace indexes", () => {
   );
 });
 
+test("builds dynamic rule filter options from real audit data", () => {
+  const index = buildInvestigationIndex([
+    event({
+      id: "prompt",
+      ruleHits: ["P101_prompt_injection", "P105_environment_poisoning"],
+    }),
+    event({
+      id: "second-prompt",
+      ruleHits: ["P101_prompt_injection"],
+    }),
+    event({
+      id: "sensitive",
+      ruleHits: ["P001_sensitive_file_access"],
+    }),
+  ]);
+
+  assert.deepEqual(getRuleFilterOptions(index.latestEvents), [
+    {
+      count: 2,
+      label: "P101_prompt_injection",
+      value: "P101_prompt_injection",
+    },
+    {
+      count: 1,
+      label: "P001_sensitive_file_access",
+      value: "P001_sensitive_file_access",
+    },
+    {
+      count: 1,
+      label: "P105_environment_poisoning",
+      value: "P105_environment_poisoning",
+    },
+  ]);
+});
+
 test("filters indexed events by combined URL-backed criteria", () => {
   const index = buildInvestigationIndex([
     event({ id: "allow", reason: "普通读取" }),
@@ -77,6 +115,9 @@ test("filters indexed events by combined URL-backed criteria", () => {
     runtime: "",
     search: "ssh",
     severity: "high",
+    eventType: "",
+    stage: "",
+    attackType: "",
   });
 
   assert.deepEqual(

@@ -2,4 +2,9 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  '@google/genai': true
   "@parcel/watcher": true
+  openclaw: true
+  protobufjs: true
+  tree-sitter-bash: true
+  vue-demi: true

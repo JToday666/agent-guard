@@ -65,7 +65,7 @@ class CapabilityAuthService:
                 principal_type="cli",
                 principal_id="cred_control",
                 role="control",
-                scopes=["auth:launch"],
+                scopes=["auth:launch", "audit:read", "metrics:read", "trace:read", "policy:read"],
                 auth_method="bearer",
             )
         else:

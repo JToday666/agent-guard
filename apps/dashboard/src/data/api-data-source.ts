@@ -2,19 +2,32 @@ import type {
   GuardApprovalDto,
   GuardApprovalResolutionDto,
   GuardAuditEventDto,
+  GuardAuditIntegrityDto,
   GuardEvalMetricsDto,
+  GuardPolicyBundleDto,
+  GuardPolicyHistoryDto,
+  GuardProvenanceDto,
+  GuardTraceDetailDto,
 } from "../api/guard-api-types";
 import { requestHealth, requestJson } from "../api/guard-http-client";
 import {
   mapApproval,
   mapAuditEvent,
+  mapAuditIntegrity,
   mapMetrics,
+  mapPolicyHistory,
+  mapPolicySummary,
+  mapProvenance,
+  mapTraceDetail,
 } from "../api/guard-api-mappers";
+import { mergeApprovalsWithAuditEvidence } from "./approval-evidence";
 import type {
   ApprovalRequest,
   ApprovalResolution,
+  AuditIntegrity,
   EvalMetrics,
   EvaluationSummary,
+  ProvenanceGraph,
 } from "../types/dashboard";
 import type {
   DashboardDataSource,
@@ -104,7 +117,60 @@ export class ApiDashboardDataSource implements DashboardDataSource {
       asrAfter: null,
       blockRate: metrics.blockRate,
       fpr: metrics.fpr,
+      fnr: metrics.fnr,
       averageLatencyMs: metrics.averageLatencyMs,
     };
+  }
+
+  async getTraceDetail(traceId: string, signal?: AbortSignal) {
+    const detail = mapTraceDetail(
+      await requestJson<GuardTraceDetailDto>(
+        `/traces/${encodeURIComponent(traceId)}`,
+        {},
+        signal,
+      ),
+    );
+    return {
+      ...detail,
+      approvals: mergeApprovalsWithAuditEvidence(
+        detail.approvals,
+        detail.events,
+      ),
+    };
+  }
+
+  async getCurrentPolicy(signal?: AbortSignal) {
+    return mapPolicySummary(
+      await requestJson<GuardPolicyBundleDto>("/policies/current", {}, signal),
+    );
+  }
+
+  async getPolicyHistory(signal?: AbortSignal) {
+    return mapPolicyHistory(
+      await requestJson<GuardPolicyHistoryDto[]>(
+        "/policies/history?limit=10",
+        {},
+        signal,
+      ),
+    );
+  }
+
+  async getAuditIntegrity(signal?: AbortSignal): Promise<AuditIntegrity> {
+    return mapAuditIntegrity(
+      await requestJson<GuardAuditIntegrityDto>("/audit/integrity", {}, signal),
+    );
+  }
+
+  async getTraceProvenance(
+    traceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProvenanceGraph> {
+    return mapProvenance(
+      await requestJson<GuardProvenanceDto>(
+        `/traces/${encodeURIComponent(traceId)}/provenance`,
+        {},
+        signal,
+      ),
+    );
   }
 }

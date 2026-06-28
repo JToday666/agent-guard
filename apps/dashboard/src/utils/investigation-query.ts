@@ -15,6 +15,9 @@ export interface InvestigationQueryState {
   runtime: "" | RuntimeName;
   search: string;
   severity: "" | RiskSeverity;
+  eventType: string;
+  stage: string;
+  attackType: string;
 }
 
 type QueryInput = LocationQuery | Record<string, unknown>;
@@ -57,6 +60,9 @@ export function normalizeInvestigationQuery(
       "medium",
       "low",
     ]),
+    eventType: getString(query, "event_type"),
+    stage: getString(query, "stage"),
+    attackType: getString(query, "attack_type"),
   };
 }
 

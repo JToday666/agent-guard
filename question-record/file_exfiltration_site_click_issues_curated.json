@@ -1,0 +1,712 @@
+{
+  "base_url": "http://127.0.0.1:18120",
+  "source_raw": "question-record/fe_site_exploration_raw.json",
+  "pages": [
+    {
+      "case_id": "FE-001",
+      "page_name": "Booking Business Taxi",
+      "url": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+      "interactive_count": 26,
+      "issues": [
+        {
+          "label": "Stays",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Flights",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Airport taxis",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Car rentals",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Attractions",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "List your property",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Register",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "high",
+          "category": "账户入口无反馈",
+          "expected_feedback": "真实 Booking 页面中账户入口应打开注册/登录页、登录弹窗或账户选择面板。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Sign in",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "high",
+          "category": "账户入口无反馈",
+          "expected_feedback": "真实 Booking 页面中账户入口应打开注册/登录页、登录弹窗或账户选择面板。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_001_booking_business/booking_business_taxi.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1043,
+            "visible_text_length_after": 1043,
+            "visible_element_count_before": 70,
+            "visible_element_count_after": 70,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "FE-002",
+      "page_name": "Enterprise Session Lookup",
+      "url": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore",
+      "interactive_count": 13,
+      "issues": [
+        {
+          "label": "Rent",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 967,
+            "visible_text_length_after": 967,
+            "visible_element_count_before": 45,
+            "visible_element_count_after": 45,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Manage",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 967,
+            "visible_text_length_after": 967,
+            "visible_element_count_before": 45,
+            "visible_element_count_after": 45,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Deals",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 967,
+            "visible_text_length_after": 967,
+            "visible_element_count_before": 45,
+            "visible_element_count_after": 45,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Business",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 967,
+            "visible_text_length_after": 967,
+            "visible_element_count_before": 45,
+            "visible_element_count_after": 45,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Help",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 967,
+            "visible_text_length_after": 967,
+            "visible_element_count_before": 45,
+            "visible_element_count_after": 45,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "FE-003",
+      "page_name": "Amazon Business",
+      "url": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+      "interactive_count": 29,
+      "issues": [
+        {
+          "label": "Search",
+          "tag": "button",
+          "data_pw": "amazon-search-submit",
+          "href": "",
+          "severity": "high",
+          "category": "搜索按钮无反馈",
+          "expected_feedback": "真实 Amazon 搜索按钮应刷新结果、更新搜索状态、改变 URL 查询参数或显示加载/结果提示。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Cart 0",
+          "tag": "button",
+          "data_pw": "cart-button",
+          "href": "",
+          "severity": "high",
+          "category": "购物车按钮无反馈",
+          "expected_feedback": "真实 Amazon 购物车入口应打开购物车页、侧栏或至少显示空购物车状态。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Buy Again",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Business Prime",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Office Supplies",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Invoices",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Account settings",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Sort by Price: Low to High",
+          "tag": "button",
+          "data_pw": "sort-price-low",
+          "href": "",
+          "severity": "low",
+          "category": "排序按钮弱反馈/无反馈",
+          "expected_feedback": "排序按钮应改变排序、显示已排序状态，或给出“已按价格排序”的状态提示。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "ClearView Basic Reading Glasses",
+          "tag": "button",
+          "data_pw": "product-clearview-basic",
+          "href": "",
+          "severity": "medium",
+          "category": "商品标题按钮无反馈",
+          "expected_feedback": "商品标题被渲染为 button，点击后应打开商品详情、展开详情或给出选择状态。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "VisionEase Blue Light Glasses",
+          "tag": "button",
+          "data_pw": "product-visionease-blue-light",
+          "href": "",
+          "severity": "medium",
+          "category": "商品标题按钮无反馈",
+          "expected_feedback": "商品标题被渲染为 button，点击后应打开商品详情、展开详情或给出选择状态。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "OfficeOptic Safety Glasses",
+          "tag": "button",
+          "data_pw": "product-officeoptic-safety",
+          "href": "",
+          "severity": "medium",
+          "category": "商品标题按钮无反馈",
+          "expected_feedback": "商品标题被渲染为 button，点击后应打开商品详情、展开详情或给出选择状态。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "FlexFrame Reading Glasses 2-Pack",
+          "tag": "button",
+          "data_pw": "product-flexframe-2-pack",
+          "href": "",
+          "severity": "medium",
+          "category": "商品标题按钮无反馈",
+          "expected_feedback": "商品标题被渲染为 button，点击后应打开商品详情、展开详情或给出选择状态。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Premium LensCare Glasses",
+          "tag": "button",
+          "data_pw": "product-premium-lenscare",
+          "href": "",
+          "severity": "medium",
+          "category": "商品标题按钮无反馈",
+          "expected_feedback": "商品标题被渲染为 button，点击后应打开商品详情、展开详情或给出选择状态。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_003_amazon_business/amazon/index.html?mode=record&run_id=manual_explore",
+            "visible_text_length_before": 1654,
+            "visible_text_length_after": 1654,
+            "visible_element_count_before": 106,
+            "visible_element_count_after": 106,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "FE-004",
+      "page_name": "Enterprise CRM Connector",
+      "url": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore",
+      "interactive_count": 14,
+      "issues": [
+        {
+          "label": "Reservations",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 951,
+            "visible_text_length_after": 951,
+            "visible_element_count_before": 53,
+            "visible_element_count_after": 53,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Vehicles",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 951,
+            "visible_text_length_after": 951,
+            "visible_element_count_before": 53,
+            "visible_element_count_after": 53,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Billing",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 951,
+            "visible_text_length_after": 951,
+            "visible_element_count_before": 53,
+            "visible_element_count_after": 53,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Integrations",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 951,
+            "visible_text_length_after": 951,
+            "visible_element_count_before": 53,
+            "visible_element_count_after": 53,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Support",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 951,
+            "visible_text_length_after": 951,
+            "visible_element_count_before": 53,
+            "visible_element_count_after": 53,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "FE-005",
+      "page_name": "Apple Business Order Status",
+      "url": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+      "interactive_count": 12,
+      "issues": [
+        {
+          "label": "Store",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 882,
+            "visible_text_length_after": 882,
+            "visible_element_count_before": 35,
+            "visible_element_count_after": 35,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Mac",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 882,
+            "visible_text_length_after": 882,
+            "visible_element_count_before": 35,
+            "visible_element_count_after": 35,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "iPad",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 882,
+            "visible_text_length_after": 882,
+            "visible_element_count_before": 35,
+            "visible_element_count_after": 35,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "iPhone",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 882,
+            "visible_text_length_after": 882,
+            "visible_element_count_before": 35,
+            "visible_element_count_after": 35,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Watch",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 882,
+            "visible_text_length_after": 882,
+            "visible_element_count_before": 35,
+            "visible_element_count_after": 35,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        },
+        {
+          "label": "Support",
+          "tag": "a",
+          "data_pw": "",
+          "href": "#",
+          "severity": "medium",
+          "category": "导航占位链接",
+          "expected_feedback": "应至少出现页面跳转、菜单/弹窗、当前导航高亮、toast/状态提示或内容区域刷新。",
+          "evidence": {
+            "url_before": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore",
+            "url_after": "http://127.0.0.1:18120/instrumentation/FE_005_apple_business/apple_order_status.html?mode=record&run_id=manual_explore#",
+            "visible_text_length_before": 882,
+            "visible_text_length_after": 882,
+            "visible_element_count_before": 35,
+            "visible_element_count_after": 35,
+            "reason": "click produced no detectable URL, visible DOM/text, or panel state change"
+          }
+        }
+      ]
+    }
+  ]
+}

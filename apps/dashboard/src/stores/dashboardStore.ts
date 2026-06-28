@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { dashboardEnv } from "../config/dashboard-env";
+import { mergeApprovalsWithAuditEvidence } from "../data/approval-evidence";
 import { dashboardDataSource } from "../data/dashboard-data-source-instance";
 import { deriveMetrics, groupDecisionTrend } from "../data/dashboard-metrics";
 import { buildInvestigationIndex } from "../data/investigation-index";
@@ -17,11 +18,16 @@ import {
 } from "../data/dashboard-snapshot";
 import type {
   ApprovalRequest,
+  AuditIntegrity,
   AuditEventRow,
   DataStatus,
   EvalMetrics,
   EvaluationSummary,
   HealthStatus,
+  PolicyHistoryEntry,
+  PolicySummary,
+  ProvenanceGraph,
+  TraceDetail,
   TraceSummary,
 } from "../types/dashboard";
 import {
@@ -44,6 +50,20 @@ const emptyMetrics: EvalMetrics = {
 
 const POLL_INTERVAL_MS = 10_000;
 
+function applyLatestPolicyHistory(
+  summary: PolicySummary,
+  history: PolicyHistoryEntry[],
+): PolicySummary {
+  const latest = history[0];
+  if (!latest) return summary;
+  return {
+    ...summary,
+    revision: latest.revision,
+    updatedAt: latest.updatedAt,
+    updatedBy: latest.updatedBy,
+  };
+}
+
 export const useDashboardStore = defineStore("dashboard", () => {
   const events = ref<AuditEventRow[]>([]);
   const approvals = ref<ApprovalRequest[]>([]);
@@ -53,8 +73,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
     asrAfter: null,
     blockRate: null,
     fpr: null,
+    fnr: null,
     averageLatencyMs: null,
   });
+  const traceDetails = ref<Record<string, TraceDetail>>({});
+  const traceDetailErrors = ref<Record<string, string>>({});
+  const traceDetailLoadingId = ref<string | null>(null);
+  const policySummary = ref<PolicySummary | null>(null);
+  const policyHistory = ref<PolicyHistoryEntry[]>([]);
+  const policyError = ref<string | null>(null);
+  const auditIntegrity = ref<AuditIntegrity | null>(null);
+  const provenanceByTrace = ref<Record<string, ProvenanceGraph>>({});
+  const provenanceErrors = ref<Record<string, string>>({});
   const health = ref<HealthStatus>({
     api: "unknown",
     database: "unknown",
@@ -98,6 +128,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
       .map(([label, value]) => ({ label, value }))
       .sort((left, right) => right.value - left.value);
   });
+  const ruleDistribution = computed(() => {
+    const counts = new Map<string, number>();
+    for (const event of investigationIndex.value.latestEvents) {
+      for (const rule of event.ruleHits) {
+        counts.set(rule, (counts.get(rule) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  });
   const traces = computed<TraceSummary[]>(() => {
     return [...investigationIndex.value.byTrace.entries()]
       .map(([id, rows]): TraceSummary => {
@@ -130,16 +172,26 @@ export const useDashboardStore = defineStore("dashboard", () => {
       dashboardDataSource.getMetrics({}, controller.signal),
       dashboardDataSource.getPendingApprovals(controller.signal),
       dashboardDataSource.getHealth(controller.signal),
+      dashboardDataSource.getCurrentPolicy(controller.signal),
+      dashboardDataSource.getPolicyHistory(controller.signal),
     ] as const);
 
-    const [eventsResult, metricsResult, approvalsResult, healthResult] =
-      results;
+    const [
+      eventsResult,
+      metricsResult,
+      approvalsResult,
+      healthResult,
+      policyResult,
+      policyHistoryResult,
+    ] = results;
+    let visibleEvents = events.value;
     if (
       eventsResult.status === "fulfilled" &&
       !hasSameEventWindow(events.value, eventsResult.value)
     ) {
       events.value = eventsResult.value;
     }
+    if (eventsResult.status === "fulfilled") visibleEvents = eventsResult.value;
     if (metricsResult.status === "fulfilled") {
       if (!hasSameMetrics(metrics.value, metricsResult.value)) {
         metrics.value = metricsResult.value;
@@ -156,14 +208,53 @@ export const useDashboardStore = defineStore("dashboard", () => {
       }
     }
     if (approvalsResult.status === "fulfilled") {
-      approvals.value = reconcileApprovals(
-        approvals.value,
+      const enrichedApprovals = mergeApprovalsWithAuditEvidence(
         approvalsResult.value,
+        visibleEvents,
       );
+      approvals.value = reconcileApprovals(approvals.value, enrichedApprovals);
     }
     if (healthResult.status === "fulfilled") health.value = healthResult.value;
+    if (policyHistoryResult.status === "fulfilled") {
+      policyHistory.value = policyHistoryResult.value;
+    }
+    if (policyResult.status === "fulfilled") {
+      const history =
+        policyHistoryResult.status === "fulfilled"
+          ? policyHistoryResult.value
+          : policyHistory.value;
+      policySummary.value = applyLatestPolicyHistory(
+        policyResult.value,
+        history,
+      );
+      policyError.value = null;
+    } else if (policyHistoryResult.status === "rejected") {
+      policyError.value =
+        policyHistoryResult.reason instanceof Error
+          ? policyHistoryResult.reason.message
+          : "策略数据加载失败";
+    } else if (policyResult.status === "rejected") {
+      policyError.value =
+        policyResult.reason instanceof Error
+          ? policyResult.reason.message
+          : "策略数据加载失败";
+    }
 
-    const failures = results.filter(
+    // 审计完整性（non-critical，失败不影响主状态）
+    try {
+      auditIntegrity.value = await dashboardDataSource.getAuditIntegrity(
+        controller.signal,
+      );
+    } catch {
+      // 忽略，不影响主刷新状态
+    }
+
+    const failures = [
+      eventsResult,
+      metricsResult,
+      approvalsResult,
+      healthResult,
+    ].filter(
       (result) => result.status === "rejected",
     ) as PromiseRejectedResult[];
     if (failures.length) {
@@ -249,6 +340,29 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
+  async function loadTraceDetail(traceId: string): Promise<void> {
+    if (!traceId || traceDetailLoadingId.value === traceId) return;
+    traceDetailLoadingId.value = traceId;
+    traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
+    try {
+      const detail = await dashboardDataSource.getTraceDetail(traceId);
+      traceDetails.value = { ...traceDetails.value, [traceId]: detail };
+    } catch (reason) {
+      if (isSessionAuthError(reason)) {
+        useAuthStore().invalidateSession(getAuthErrorMessage(reason));
+        stopPolling();
+      }
+      traceDetailErrors.value = {
+        ...traceDetailErrors.value,
+        [traceId]:
+          reason instanceof Error ? reason.message : "Trace 数据加载失败",
+      };
+    } finally {
+      if (traceDetailLoadingId.value === traceId)
+        traceDetailLoadingId.value = null;
+    }
+  }
+
   function startPolling(): void {
     if (pollingActive) return;
     pollingActive = true;
@@ -269,11 +383,36 @@ export const useDashboardStore = defineStore("dashboard", () => {
     activeController?.abort();
   }
 
+  async function loadTraceProvenance(traceId: string): Promise<void> {
+    if (!traceId || provenanceByTrace.value[traceId]) return;
+    try {
+      const graph = await dashboardDataSource.getTraceProvenance(traceId);
+      provenanceByTrace.value = {
+        ...provenanceByTrace.value,
+        [traceId]: graph,
+      };
+    } catch (reason) {
+      provenanceErrors.value = {
+        ...provenanceErrors.value,
+        [traceId]: reason instanceof Error ? reason.message : "溯源图加载失败",
+      };
+    }
+  }
+
   return {
     events,
     approvals,
     metrics,
     evaluation,
+    traceDetails,
+    traceDetailErrors,
+    traceDetailLoadingId,
+    policySummary,
+    policyHistory,
+    policyError,
+    auditIntegrity,
+    provenanceByTrace,
+    provenanceErrors,
     health,
     status,
     error,
@@ -285,8 +424,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
     investigationIndex,
     attackDistribution,
     traces,
+    ruleDistribution,
     dataSourceMode: dashboardEnv.dataSource,
     refresh,
+    loadTraceDetail,
+    loadTraceProvenance,
     resolveApproval,
     startPolling,
     stopPolling,

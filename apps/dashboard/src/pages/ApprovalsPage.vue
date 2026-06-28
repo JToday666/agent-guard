@@ -1,7 +1,7 @@
 <template>
   <section class="approvals-page workspace-panel" aria-labelledby="approvals-title">
     <header class="page-header">
-      <div><p>人工控制</p><h1 id="approvals-title">审批中心</h1></div>
+      <div><p>人工控制</p><h1 id="approvals-title">人工审批</h1></div>
       <div class="approval-header-status">
         <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
         <StatusBadge :label="`${store.pendingCount} 待处理`" :tone="store.pendingCount ? 'warning' : 'success'" />
@@ -43,6 +43,8 @@
 
         <dl class="evidence-grid">
           <div><dt>目标资源</dt><dd><code>{{ selectedApproval.resource }}</code></dd></div>
+          <div><dt>审批对象</dt><dd><code>{{ approvalSubjectLabel }}</code></dd></div>
+          <div><dt>动作</dt><dd>{{ selectedApproval.actionName ?? selectedApproval.tool }}</dd></div>
           <div><dt>风险等级</dt><dd>{{ getRiskSeverityLabel(selectedApproval.severity) }}</dd></div>
           <div><dt>请求时间</dt><dd>{{ formatDashboardDateTime(selectedApproval.createdAt) }}</dd></div>
           <div><dt>到期时间</dt><dd>{{ selectedApproval.expiresAt ? formatDashboardDateTime(selectedApproval.expiresAt) : "未提供" }}</dd></div>
@@ -118,6 +120,10 @@ const selectedApproval = computed(() => requestedId.value
 const selectedApprovalRoutes = computed(() => selectedApproval.value
   ? getApprovalEvidenceRoutes(selectedApproval.value)
   : null);
+const approvalSubjectLabel = computed(() => {
+  if (!selectedApproval.value?.subjectId) return "未提供";
+  return `${selectedApproval.value.subjectType ?? "subject"} / ${selectedApproval.value.subjectId}`;
+});
 const isSubmitting = computed(() => store.submittingApprovalId === selectedApproval.value?.id);
 const isExpired = computed(() => {
   const expiresAt = selectedApproval.value?.expiresAt;

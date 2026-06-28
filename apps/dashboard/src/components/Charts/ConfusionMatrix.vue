@@ -1,0 +1,31 @@
+<template>
+  <div class="conf-matrix" aria-label="混淆矩阵">
+    <div class="conf-matrix__grid">
+      <span></span><span class="axis-label">预测：放行</span><span class="axis-label">预测：阻断</span>
+      <span class="axis-label">实际：恶意</span>
+      <div class="conf-cell conf-cell--fn"><strong>{{ fn }}</strong><small>漏报 FN</small></div>
+      <div class="conf-cell conf-cell--tp"><strong>{{ tp }}</strong><small>正确阻断 TP</small></div>
+      <span class="axis-label">实际：正常</span>
+      <div class="conf-cell conf-cell--tn"><strong>{{ tn }}</strong><small>正确放行 TN</small></div>
+      <div class="conf-cell conf-cell--fp"><strong>{{ fp }}</strong><small>误报 FP</small></div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+defineOptions({ name: "ConfusionMatrix" });
+defineProps<{ tp: number; fp: number; tn: number; fn: number }>();
+</script>
+
+<style scoped lang="scss">
+.conf-matrix { min-width: 0; overflow: auto; }
+.conf-matrix__grid { display: grid; gap: 2px; grid-template-columns: minmax(4rem, 6rem) 1fr 1fr; min-width: 18rem; }
+.axis-label { align-items: center; color: var(--color-text-subtle); display: flex; font-size: var(--font-size-12); font-weight: var(--font-weight-semibold); justify-content: center; padding: var(--space-2); text-align: center; }
+.conf-cell { display: grid; gap: var(--space-1); min-height: 4.5rem; padding: var(--space-3); place-items: center; text-align: center; border-radius: var(--radius-2); }
+.conf-cell strong { font-size: var(--font-size-24); font-weight: var(--font-weight-bold); line-height: 1; }
+.conf-cell small { color: var(--color-text-subtle); font-size: var(--font-size-11); }
+.conf-cell--tp { background: var(--color-success-soft); border: 1px solid var(--color-success-border); strong { color: var(--color-success); } }
+.conf-cell--tn { background: var(--color-success-soft); border: 1px solid var(--color-success-border); strong { color: var(--color-success); } }
+.conf-cell--fp { background: var(--color-warning-soft); border: 1px solid var(--color-warning-border); strong { color: var(--color-warning); } }
+.conf-cell--fn { background: var(--color-danger-soft); border: 1px solid var(--color-danger-border); strong { color: var(--color-danger); } }
+</style>

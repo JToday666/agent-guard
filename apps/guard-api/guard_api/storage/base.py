@@ -5,7 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentguard_core import AuditEvent, PolicyBundle
+from agentguard_core import (
+    AuditEvent,
+    ActionCriticReview,
+    ConfigAuditEvent,
+    ConfigAuditFinding,
+    MemoryGuardChange,
+    PolicyBundle,
+    ProvenanceEdge,
+    ProvenanceNode,
+)
 
 from guard_api.models import ApprovalRequest
 
@@ -64,6 +73,14 @@ class PolicySnapshotRecord:
 EvalMetrics = dict[str, int | float | None]
 
 
+@dataclass(frozen=True, slots=True)
+class AuditIntegrityStatus:
+    valid: bool
+    event_count: int
+    head_hash: str | None
+    first_broken_audit_id: str | None = None
+
+
 class ControlPlaneStore(Protocol):
     def initialize(self) -> None:
         ...
@@ -77,7 +94,41 @@ class ControlPlaneStore(Protocol):
     def list_audit_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
         ...
 
+    def verify_audit_integrity(self) -> AuditIntegrityStatus:
+        ...
+
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
+        ...
+
+    def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
+        ...
+
+    def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge:
+        ...
+
+    def list_provenance(self, trace_id: str) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
+        ...
+
+    def add_config_audit_finding(
+        self,
+        event: ConfigAuditEvent,
+        finding: ConfigAuditFinding,
+    ) -> ConfigAuditFinding:
+        ...
+
+    def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
+        ...
+
+    def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]:
+        ...
+
+    def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        ...
+
+    def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
+        ...
+
+    def update_memory_change_status(self, change_id: str, status: str) -> MemoryGuardChange:
         ...
 
     def get_policy_snapshot(self) -> PolicyBundle | None:

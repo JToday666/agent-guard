@@ -1,6 +1,6 @@
 # AgentGuard Dashboard
 
-AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取审计事件、审批项和评测指标，再从审计事件聚合 trace；不直接访问 LangGraph、OpenClaw、沙箱工具或 AttackBench runner 的内部状态。
+AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取审计事件、审批项、Trace 详情、评测指标、健康状态和只读策略快照；不直接访问 LangGraph、OpenClaw、沙箱工具或 AttackBench runner 的内部状态。
 
 ## 技术栈
 
@@ -78,25 +78,35 @@ pnpm guard-api:dev
 pnpm dashboard:dev
 ```
 
-在第三个终端创建一次性 launch code：
+在第三个终端加载根 `.env` 并创建一次性 launch code：
 
 ```bash
-pnpm guard-api:launch
+set -a
+. ./.env
+set +a
+uv run agentguardctl launch
 ```
 
-命令只输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的完整地址，不输出 control token。将该地址直接粘贴到目标浏览器后，前端通过 Vite 代理交换 browser session，并从地址栏移除 launch code。launch code 只能使用一次；VS Code 内置浏览器、外部浏览器和不同浏览器配置文件需要分别运行一次 `pnpm guard-api:launch`。始终使用 `localhost`，不要与 `127.0.0.1` 混用。
+命令只输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的完整地址，不输出 control token。将该地址直接粘贴到目标浏览器后，前端通过 Vite 代理交换 browser session，并从地址栏移除 launch code。launch code 只能使用一次；VS Code 内置浏览器、外部浏览器和不同浏览器配置文件需要分别运行一次 `uv run agentguardctl launch`。始终使用 `localhost`，不要与 `127.0.0.1` 混用。
+
+`uv run agentguardctl launch` 只创建登录地址，不启动 Vite 页面服务。如果浏览器显示 `ERR_CONNECTION_REFUSED localhost:5173`，说明 `pnpm dashboard:dev` 没有运行或端口不是 `5173`。`pnpm guard-api:launch` 仍保留为兼容脚本。
 
 如果直接访问 `http://localhost:5173/`，浏览器尚无 session，`GET /v1/auth/browser/me` 返回 `401` 属于预期行为。API 请求失败时不会自动切换到 Mock 数据。
 
-Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批和健康状态；上一轮完成后才会安排下一轮。页面隐藏时暂停轮询，恢复可见后立即刷新。Skeleton 仅在首次加载显示，后台刷新和短暂连接异常会保留当前页面与用户选择。
+Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批、健康状态和只读策略状态；上一轮完成后才会安排下一轮。页面隐藏时暂停轮询，恢复可见后立即刷新。调查详情页会按需读取 `GET /v1/traces/{trace_id}`，失败时回退到已加载审计事件窗口。Skeleton 仅在首次加载显示，后台刷新和短暂连接异常会保留当前页面与用户选择。
 
 ## 比赛演示路径
 
-1. 总览确认 Guard API、指标和数据更新时间。
-2. 调查页查看阻断原因、命中规则、资源与 Trace ID。
-3. 审批中心处理 `ask`，仅支持 `allow_once` 和 `deny`。
-4. 调查详情按真实 AuditEvent 的 `trace_id` 展示证据序列。
-5. 评测页展示 ASR、Block Rate、FPR 和判定延迟；API 未提供的指标显示 `--`。
+1. 安全总览：确认 Guard API 在线、指标正常、审计链有效、规则命中分布和高风险事件。
+2. 事件调查：筛选阻断事件，查看原因、命中规则、资源与 Trace ID，导出 CSV。
+3. 证据链：进入 Trace 详情，查看审计事件时间线、溯源图与节点证据，点击节点联动时间线。
+4. 人工审批：处理 `ask` 决策，仅支持 `allow_once` 和 `deny`。
+5. 安全评测：查看 Block Rate、FPR、FNR、判定延迟、混淆矩阵和 runtime 延迟对比；ASR 仅在 API 提供 before / after 数据时展示。
+6. 系统状态：查看 Guard API 健康、browser session、轮询状态、审计链完整性、运行时适配器活动、配置审计摘要和只读策略快照。
+
+## 测试文件边界
+
+`src/**/*.node.test.ts` 覆盖 mapper、状态快照、审批证据关联、调查筛选、格式化和鉴权错误等长期逻辑，`e2e/*.spec.ts` 覆盖 mock 模式下的页面导航和视口行为。这些测试文件属于长期维护资产。`apps/dashboard/test-results/` 是 Playwright 运行产物，已被 `.gitignore` 忽略，可随时清理并由测试重新生成。
 
 ## 目录
 
@@ -117,6 +127,7 @@ apps/dashboard/
 - [前端文档索引](docs/README.md)
 - [前端 UI 设计规范](docs/04-规范/前端UI设计规范.md)
 - [文档维护约定](docs/04-规范/文档维护约定.md)
+- [根部署、安装与使用说明](../../docs/06_delivery/deployment_install_usage.md)
 
 ## 边界
 

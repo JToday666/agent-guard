@@ -1,11 +1,17 @@
 """Stateless AgentGuard Core package."""
 
+from .action_critic import ActionCritic, ActionCriticReview
+from .audit_integrity import AuditIntegrityMetadata
+from .config_audit import ConfigAuditEvent, ConfigAuditFinding, ConfigAuditResult, evaluate_config_audit
 from .engine import GuardEngine, evaluate
+from .memory_guard import MemoryGuardChange
 from .models import (
     ApprovalIntent,
     AuditEvent,
     ContextBuildPayload,
     ContextSource,
+    DecisionEffect,
+    DecisionEnforcement,
     DerivedResource,
     GuardDecision,
     GuardEvent,
@@ -28,21 +34,33 @@ from .models import (
     new_id,
     utc_now_iso,
 )
+from .provenance import ProvenanceEdge, ProvenanceNode
 
 __all__ = [
+    "ActionCritic",
+    "ActionCriticReview",
     "ApprovalIntent",
     "AuditEvent",
+    "AuditIntegrityMetadata",
+    "ConfigAuditEvent",
+    "ConfigAuditFinding",
+    "ConfigAuditResult",
     "ContextBuildPayload",
     "ContextSource",
+    "DecisionEffect",
+    "DecisionEnforcement",
     "DerivedResource",
     "GuardDecision",
     "GuardEngine",
     "GuardEvent",
     "MemoryEventPayload",
+    "MemoryGuardChange",
     "MemoryRecord",
     "MessageSendPayload",
     "ModelCallPayload",
     "PolicyBundle",
+    "ProvenanceEdge",
+    "ProvenanceNode",
     "RawPayloadContract",
     "RuleOverride",
     "RuleHit",
@@ -54,6 +72,7 @@ __all__ = [
     "ToolResultPayload",
     "default_tool_profiles",
     "evaluate",
+    "evaluate_config_audit",
     "guard_event_raw_payload_contracts",
     "new_id",
     "utc_now_iso",

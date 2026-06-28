@@ -82,12 +82,12 @@ const navigationGroups = computed(() => [
   {
     label: "监控",
     items: [
-      { icon: LayoutDashboard, label: "总览", to: "/overview" },
-      { icon: ScanSearch, label: "调查", to: "/investigations" },
+      { icon: LayoutDashboard, label: "安全总览", to: "/overview" },
+      { icon: ScanSearch, label: "事件调查", to: "/investigations" },
       {
         count: props.pendingCount,
         icon: CircleCheckBig,
-        label: "审批",
+        label: "人工审批",
         meta: `${props.pendingCount} 待处理`,
         to: "/approvals",
       },
@@ -95,12 +95,12 @@ const navigationGroups = computed(() => [
   },
   {
     label: "评测",
-    items: [{ icon: ChartNoAxesColumn, label: "评测", to: "/evaluation" }],
+    items: [{ icon: ChartNoAxesColumn, label: "安全评测", to: "/evaluation" }],
   },
   {
     label: "运维",
     items: [
-      { icon: Server, label: "系统", to: "/system" },
+      { icon: Server, label: "系统状态", to: "/system" },
     ],
   },
 ]);
@@ -237,8 +237,8 @@ function isNavigationItemActive(path: string): boolean {
 
 .sidebar__link.router-link-active,
 .sidebar__link--active {
-  background: var(--color-active-soft);
-  box-shadow: inset 2px 0 var(--color-active);
+  background: linear-gradient(90deg, var(--color-active-soft), transparent 88%);
+  box-shadow: inset 3px 0 var(--color-active);
   color: var(--color-active);
   font-weight: var(--font-weight-bold);
 

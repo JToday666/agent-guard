@@ -13,20 +13,22 @@ docs/
 ├── 03_adapters/          # LangGraph、OpenClaw 接入
 ├── 04_apps/              # Dashboard 与审批
 ├── 05_redteam/           # AttackBench、攻击样本与评测
-└── 06_delivery/          # 实施路线、演示脚本
+├── 06_delivery/          # 部署使用、实施路线、演示脚本
+└── 07_auth/              # Capability Auth、前端与适配器鉴权
 ```
 
 ## 2. 开发阅读路径
 
 ### P0 最小闭环
 
-1. [总体架构](01_overview/architecture.md)
-2. [接口契约与事件模型](02_core/interface_contract.md)
-3. [`agentguard-core` 设计](02_core/core_design.md)
-4. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
-5. [AttackBench 攻击样本与评测](05_redteam/attackbench.md)
-6. [Dashboard 与审批流](04_apps/dashboard_design.md)
-7. [实施路线与验收标准](06_delivery/implementation_plan.md)
+1. [部署、安装与使用说明](06_delivery/deployment_install_usage.md)
+2. [总体架构](01_overview/architecture.md)
+3. [接口契约与事件模型](02_core/interface_contract.md)
+4. [`agentguard-core` 设计](02_core/core_design.md)
+5. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
+6. [AttackBench 攻击样本与评测](05_redteam/attackbench.md)
+7. [Dashboard 与审批流](04_apps/dashboard_design.md)
+8. [实施路线与验收标准](06_delivery/implementation_plan.md)
 
 ### Core 开发
 
@@ -40,13 +42,15 @@ docs/
 1. [接口契约与事件模型](02_core/interface_contract.md)
 2. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
 3. [OpenClaw Security Plugin](03_adapters/openclaw_plugin.md)
-4. [OpenClaw 与 LangChain/LangGraph Hook 清单](03_adapters/runtime_hooks_inventory.md)
+4. [OpenClaw 插件部署、安装与配置](03_adapters/openclaw_plugin_deployment.md)
+5. [OpenClaw 与 LangChain/LangGraph Hook 清单](03_adapters/runtime_hooks_inventory.md)
 
 ### Dashboard 开发
 
-1. [接口契约与事件模型](02_core/interface_contract.md)
-2. [Dashboard 与审批流](04_apps/dashboard_design.md)
-3. [实施路线与验收标准](06_delivery/implementation_plan.md)
+1. [部署、安装与使用说明](06_delivery/deployment_install_usage.md)
+2. [接口契约与事件模型](02_core/interface_contract.md)
+3. [Dashboard 与审批流](04_apps/dashboard_design.md)
+4. [实施路线与验收标准](06_delivery/implementation_plan.md)
 
 ### Redteam 开发
 
@@ -75,11 +79,16 @@ docs/
 | [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标            |
 | [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路 |
 | [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计      |
+| [openclaw_plugin_deployment.md](03_adapters/openclaw_plugin_deployment.md)               | OpenClaw 插件部署、安装、配置、验证和卸载   |
 | [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计 |
 | [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示    |
 | [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标    |
+| [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                    | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |
 | [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准       |
 | [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                  |
+| [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                                | Capability Auth、control token、adapter token、browser session 与接口鉴权 |
+| [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                            | Adapter / Plugin token 使用边界和 scope      |
+| [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                                | Dashboard browser session、CSRF 和 launch code 边界 |
 
 ## 4. 维护规则
 

@@ -12,6 +12,8 @@ from ..ids import new_id, utc_now_iso
 Decision = Literal["allow", "deny", "ask"]
 ApprovalResolution = Literal["allow_once", "deny"]
 RuleOverrideDecision = Literal["ask", "deny"]
+EnforcementMode = Literal["enforce", "audit_only", "shadow_deny", "modify"]
+DecisionEffectType = Literal["would_block", "patch", "audit", "quarantine"]
 
 
 class RuleHit(BaseModel):
@@ -26,6 +28,24 @@ class ApprovalIntent(BaseModel):
     resource: str
 
 
+class DecisionEffect(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    effect_type: DecisionEffectType
+    target: str
+    description: str
+    patch: dict[str, Any] | None = None
+
+
+class DecisionEnforcement(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    mode: EnforcementMode = "enforce"
+    actual_decision: Decision
+    policy_decision: Decision
+    reason: str | None = None
+
+
 class GuardDecision(BaseModel):
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
@@ -37,6 +57,8 @@ class GuardDecision(BaseModel):
     safe_message: str | None = None
     approval_intent: ApprovalIntent | None = None
     latency_ms: int | None = None
+    enforcement: DecisionEnforcement | None = None
+    effects: list[DecisionEffect] = Field(default_factory=list)
 
     @property
     def blocked(self) -> bool:

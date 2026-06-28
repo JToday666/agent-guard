@@ -22,6 +22,13 @@
       </dl>
     </section>
 
+    <section v-if="event.resourceTargets.length > 1" class="event-evidence__section">
+      <h3>资源目标</h3>
+      <ul class="resource-list">
+        <li v-for="target in event.resourceTargets" :key="target"><code>{{ target }}</code></li>
+      </ul>
+    </section>
+
     <section class="event-evidence__section">
       <h3>命中规则</h3>
       <div class="rule-list">
@@ -92,6 +99,9 @@ async function copy(value: string, label: string): Promise<void> {
 .evidence-copy > div { display: grid; gap: var(--space-1); }
 .evidence-copy dd { color: var(--color-text-muted); }
 .rule-list, .evidence-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.resource-list { display: grid; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
+.resource-list li { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); padding: var(--space-2); }
+.resource-list code { overflow-wrap: anywhere; }
 .rule-list span { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-pill); font-size: var(--font-size-11); padding: var(--space-1) var(--space-2); }
 .evidence-links a, .evidence-links button { background: transparent; border: 0; color: var(--color-link); cursor: pointer; font-size: var(--font-size-12); padding: 0; text-decoration: none; }
 .copy-status { color: var(--color-success); font-size: var(--font-size-12); }

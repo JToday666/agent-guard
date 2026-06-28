@@ -465,6 +465,68 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert metrics_response.json()["ask_count"] == 1
 
 
+def test_control_token_can_read_cli_endpoints_without_browser_session() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    app = create_app(
+        store=MemoryControlPlaneStore(),
+        settings=settings,
+        policy_bundle=PolicyBundle(bundle_id="cli-default"),
+    )
+    client = TestClient(app)
+
+    decision_response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(),
+    )
+    assert decision_response.status_code == 200
+
+    headers = {"Authorization": "Bearer control-secret"}
+    events_response = client.get("/v1/audit/events", headers=headers)
+    integrity_response = client.get("/v1/audit/integrity", headers=headers)
+    metrics_response = client.get("/v1/metrics/eval", headers=headers)
+    trace_response = client.get("/v1/traces/trace_api", headers=headers)
+    provenance_response = client.get("/v1/traces/trace_api/provenance", headers=headers)
+    policy_response = client.get("/v1/policies/current", headers=headers)
+    history_response = client.get("/v1/policies/history", headers=headers)
+
+    assert events_response.status_code == 200
+    assert events_response.json()[0]["trace_id"] == "trace_api"
+    assert integrity_response.status_code == 200
+    assert integrity_response.json()["valid"] is True
+    assert metrics_response.status_code == 200
+    assert metrics_response.json()["event_count"] == 1
+    assert trace_response.status_code == 200
+    assert trace_response.json()["trace_id"] == "trace_api"
+    assert provenance_response.status_code == 200
+    assert provenance_response.json()["trace_id"] == "trace_api"
+    assert policy_response.status_code == 200
+    assert policy_response.json()["bundle_id"] == "cli-default"
+    assert history_response.status_code == 200
+    assert history_response.json() == []
+
+
+def test_adapter_token_cannot_read_cli_endpoints() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+
+    events_response = client.get("/v1/audit/events", headers=headers)
+    metrics_response = client.get("/v1/metrics/eval", headers=headers)
+    trace_response = client.get("/v1/traces/trace_api", headers=headers)
+    policy_response = client.get("/v1/policies/current", headers=headers)
+
+    assert events_response.status_code == 403
+    assert events_response.json()["error"]["code"] == "SCOPE_DENIED"
+    assert metrics_response.status_code == 403
+    assert metrics_response.json()["error"]["code"] == "SCOPE_DENIED"
+    assert trace_response.status_code == 403
+    assert trace_response.json()["error"]["code"] == "SCOPE_DENIED"
+    assert policy_response.status_code == 403
+    assert policy_response.json()["error"]["code"] == "SCOPE_DENIED"
+
+
 def test_guard_evaluate_records_canonical_resource_when_explicit_resources_are_wrong() -> None:
     settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
     app = create_app(store=MemoryControlPlaneStore(), settings=settings)
@@ -882,11 +944,15 @@ def test_policy_service_prefers_store_snapshot_over_static_bundle() -> None:
     assert store.get_policy_snapshot().allowed_email_domains == ["stored.example"]
 
 
-def test_policy_current_requires_browser_session() -> None:
+def test_policy_current_requires_authentication_and_rejects_adapter_read() -> None:
     app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
     client = TestClient(app)
 
     get_response = client.get("/v1/policies/current")
+    adapter_get_response = client.get(
+        "/v1/policies/current",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
     put_response = client.put(
         "/v1/policies/current",
         headers={"Authorization": "Bearer adapter-secret"},
@@ -894,6 +960,8 @@ def test_policy_current_requires_browser_session() -> None:
     )
 
     assert get_response.status_code == 401
+    assert adapter_get_response.status_code == 403
+    assert adapter_get_response.json()["error"]["code"] == "SCOPE_DENIED"
     assert put_response.status_code == 401
 
 
@@ -992,7 +1060,8 @@ def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
 
     assert denied_history_response.status_code == 401
     assert adapter_write_response.status_code == 401
-    assert adapter_history_response.status_code == 401
+    assert adapter_history_response.status_code == 403
+    assert adapter_history_response.json()["error"]["code"] == "SCOPE_DENIED"
     assert first_response.status_code == 200
     assert first_response.json()["bundle_id"] == "runtime-1"
     assert "revision" not in first_response.json()

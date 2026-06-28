@@ -18,8 +18,10 @@ export interface AuditEventRow {
   blocked: boolean;
   runtime: RuntimeName;
   stage: string;
+  eventType: string;
   tool: string;
   resource: string;
+  resourceTargets: string[];
   reason: string;
   traceId: string;
   caseId: string | null;
@@ -28,6 +30,7 @@ export interface AuditEventRow {
   userTask: string | null;
   agentAction: string | null;
   attackType?: string | null;
+  isMalicious?: boolean | null;
   latencyMs?: number | null;
   raw?: unknown;
 }
@@ -43,6 +46,10 @@ export interface ApprovalRequest {
   reason: string;
   eventId: string;
   traceId: string;
+  subjectId?: string;
+  subjectType?: string;
+  actionId?: string;
+  actionName?: string;
   userTask: string;
   agentAction: string;
   consequence: string;
@@ -97,5 +104,66 @@ export interface EvaluationSummary {
   asrAfter: number | null;
   blockRate: number | null;
   fpr: number | null;
+  fnr: number | null;
   averageLatencyMs: number | null;
+}
+
+export interface TraceDetail {
+  id: string;
+  events: AuditEventRow[];
+  approvals: ApprovalRequest[];
+  metrics: EvalMetrics;
+  loadedAt: string;
+}
+
+export interface PolicyHistoryEntry {
+  revision: number;
+  updatedAt: string;
+  updatedBy: string;
+  bundleId: string;
+  version: string;
+}
+
+export interface PolicySummary {
+  bundleId: string;
+  version: string;
+  revision: number | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  disabledRuleCount: number;
+  ruleOverrideCount: number;
+  toolProfileCount: number;
+}
+
+export interface AuditIntegrity {
+  valid: boolean;
+  eventCount: number;
+  headHash: string;
+  firstBrokenAuditId: string | null;
+}
+
+export interface ProvenanceNode {
+  nodeId: string;
+  traceId: string;
+  kind: string;
+  refId: string;
+  label: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ProvenanceEdge {
+  edgeId: string;
+  traceId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  relation: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ProvenanceGraph {
+  traceId: string;
+  nodes: ProvenanceNode[];
+  edges: ProvenanceEdge[];
 }

@@ -8,6 +8,9 @@ __pycache__/
 # Node dependencies
 **/node_modules/
 
+# OpenClaw local development staging and backups
+.openclaw-dev/
+
 # Local environment files
 **/.env*
 !**/.env.example

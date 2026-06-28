@@ -25,8 +25,10 @@ function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
     blocked: true,
     runtime: "langgraph",
     stage: "before_tool_call",
+    eventType: "tool_call_proposed",
     tool: "read_file",
     resource: "/private/token.txt",
+    resourceTargets: ["/private/token.txt"],
     reason: "Sensitive resource",
     traceId: "trace_1",
     caseId: "PI-001",
@@ -70,6 +72,10 @@ function makeApproval(
     agentAction: "Send email",
     consequence: "The action will continue once.",
     ruleHits: ["P005_external_send"],
+    subjectId: "call_1",
+    subjectType: "tool_call",
+    actionId: "call_1",
+    actionName: "send_email",
     approvalNonce: "nonce_1",
     expiresAt: "2026-06-22T06:45:00Z",
     resolvedAt: null,
@@ -102,11 +108,16 @@ test("compares evaluation summaries by value", () => {
     asrAfter: null,
     blockRate: 1,
     fpr: null,
+    fnr: 0.2,
     averageLatencyMs: 3,
   };
   assert.equal(hasSameEvaluation(evaluation, { ...evaluation }), true);
   assert.equal(
     hasSameEvaluation(evaluation, { ...evaluation, blockRate: 0.5 }),
+    false,
+  );
+  assert.equal(
+    hasSameEvaluation(evaluation, { ...evaluation, fnr: null }),
     false,
   );
 });

@@ -16,6 +16,7 @@
         <footer>
           <StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" />
           <span>风险 {{ event.riskScore }}</span>
+          <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">联动溯源图</button>
           <RouterLink class="page-action" :to="eventLink(event.id)">查看证据</RouterLink>
         </footer>
       </article>
@@ -30,6 +31,7 @@ import StatusBadge from "./StatusBadge.vue";
 
 defineOptions({ name: "TraceTimeline" });
 const props = defineProps<{ events: AuditEventRow[]; selectedEventId?: string; traceId?: string }>();
+const emit = defineEmits<{ "select-event": [eventId: string] }>();
 function eventLink(eventId: string) {
   return props.traceId
     ? { path: `/investigations/${props.traceId}`, query: { event_id: eventId } }
@@ -53,4 +55,8 @@ function eventLink(eventId: string) {
 .trace-timeline p, .trace-timeline time { color: var(--color-text-muted); }
 .trace-timeline code { color: var(--color-text-subtle); overflow-wrap: anywhere; }
 .trace-timeline footer .page-action { margin-left: auto; }
+.timeline-select-btn { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text-subtle); cursor: pointer; font-size: var(--font-size-11); min-height: 1.75rem; padding: 0 var(--space-2); transition: border-color var(--transition-fast), color var(--transition-fast); }
+.timeline-select-btn:hover { border-color: var(--color-active); color: var(--color-active); }
 </style>
+
+
