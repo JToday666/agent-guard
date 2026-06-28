@@ -56,7 +56,7 @@ class CapabilityAuthService:
                 principal_type="component",
                 principal_id="cred_adapter_main",
                 role="adapter",
-                scopes=["event:evaluate", "event:audit:write", "approval:wait", "adapter:status:write"],
+                scopes=["event:evaluate", "event:audit:write", "approval:wait"],
                 auth_method="bearer",
                 runtime="langgraph",
                 agent_id="main",

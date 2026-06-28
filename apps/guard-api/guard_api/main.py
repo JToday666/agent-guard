@@ -78,6 +78,27 @@ def _verify_browser_or_bearer_read(
     auth.verify_browser_session(agentguard_session)
 
 
+def _verify_adapter_heartbeat_write(auth: CapabilityAuthService, authorization: str | None) -> None:
+    try:
+        auth.verify_bearer(authorization, "adapter:status:write")
+    except ApiAuthError as error:
+        if error.code != "SCOPE_DENIED":
+            raise
+        auth.verify_bearer(authorization, "event:evaluate")
+
+
+def _legacy_unknown_adapter_status() -> dict[str, Any]:
+    return {
+        "status": "unknown",
+        "loaded": False,
+        "hook_count": None,
+        "expected_hook_count": 16,
+        "last_verified_at": None,
+        "error": None,
+        "source": None,
+    }
+
+
 def create_app(
     *,
     store: ControlPlaneStore | None = None,
@@ -476,7 +497,7 @@ def create_app(
         payload: AdapterStatusRecord,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "adapter:status:write")
+        _verify_adapter_heartbeat_write(auth, authorization)
         heartbeat = payload.model_copy(
             update={
                 "last_heartbeat_at": payload.last_heartbeat_at or utc_now_iso(),
@@ -498,7 +519,7 @@ def create_app(
         )
         status = store.get_adapter_status(adapter_id)
         if status is None:
-            return AdapterStatusRecord().model_dump(mode="json")
+            return _legacy_unknown_adapter_status()
         return status
 
     @app.post("/v1/credentials")
