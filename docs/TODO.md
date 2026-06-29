@@ -1,14 +1,14 @@
-# 后端待处理项（前端预留能力）
+# 已完成后端能力与剩余接入项
 
 ## 状态
 
-本文件原三项前端预留后端能力已完成后端侧实现：
+本文件记录原前端预留能力的后端落地状态。三项后端能力均已完成：
 
 - 安全评测 ASR 数据：已提供导入与 latest 查询接口。
 - 配置审计 findings：已提供只读查询接口。
 - OpenClaw 插件验证状态：已提供最近一次 verify 状态写入与读取接口。
 
-Dashboard 仍未接入这些新增接口。本轮按约束不修改 `apps/dashboard/**`；如需在页面展示 ASR、finding 明细或 OpenClaw verify 状态，需要另行确认前端改动范围。
+剩余工作主要是 Dashboard 展示接入。按当前协作约束，默认不修改 `apps/dashboard/**`；如需在页面展示 ASR、finding 明细或 OpenClaw verify 状态，需要另行确认前端改动范围。
 
 ## 安全评测 ASR 数据接口
 
