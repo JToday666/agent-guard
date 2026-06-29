@@ -123,6 +123,6 @@ function handleRefresh() { void store.refresh(); }
 .asr-summary > div { background: var(--color-surface-muted); display: grid; gap: var(--space-1); padding: var(--space-3); }
 .asr-summary dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .asr-summary dd { font-size: var(--font-size-18); font-weight: var(--font-weight-bold); margin: 0; }
-	@media (max-width: 640px) { .risk-feed__rows > a { align-items: start; grid-template-columns: auto 1fr auto; padding: var(--space-3) 0; } .risk-feed__rows code, .risk-feed__rows span:not(.risk-rail) { grid-column: 1 / -1; } .risk-rail { grid-column: 1 / 3; width: 100%; } }
-	@media (max-width: 980px) { .analysis-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .risk-feed__rows > a { align-items: start; grid-template-columns: auto 1fr auto; padding: var(--space-3) 0; } .risk-feed__rows code, .risk-feed__rows span:not(.risk-rail) { grid-column: 1 / -1; } .risk-rail { grid-column: 1 / 3; width: 100%; } }
+@media (max-width: 980px) { .analysis-grid { grid-template-columns: 1fr; } }
 </style>

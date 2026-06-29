@@ -113,10 +113,10 @@ function handleSearch(): void {
 
 .top-bar__pending {
   align-items: center;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-pill);
-  color: var(--color-text-muted);
+  color: var(--color-warning);
   display: inline-flex;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
@@ -125,6 +125,10 @@ function handleSearch(): void {
   padding: 0 var(--space-3);
   text-decoration: none;
   white-space: nowrap;
+
+  strong {
+    color: var(--color-text);
+  }
 
   &:hover {
     background: var(--color-active-soft);
@@ -152,16 +156,6 @@ function handleSearch(): void {
     &:hover {
       border-color: var(--color-border-strong);
     }
-  }
-}
-
-.top-bar__pending {
-  background: var(--color-warning-soft);
-  border-color: var(--color-warning-border);
-  color: var(--color-warning);
-
-  strong {
-    color: var(--color-text);
   }
 }
 

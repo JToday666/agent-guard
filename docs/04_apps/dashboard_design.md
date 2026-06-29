@@ -31,11 +31,14 @@ Dashboard 不做用户登录，不保存长期 token，不生成 launch code，�
 GET  /v1/audit/events
 GET  /v1/audit/integrity
 GET  /v1/metrics/eval
+GET  /v1/evaluations/latest
 GET  /v1/approvals/pending
 GET  /v1/traces/{trace_id}
 GET  /v1/traces/{trace_id}/provenance
 GET  /v1/policies/current
 GET  /v1/policies/history
+GET  /v1/config-audit/findings
+GET  /v1/adapters/openclaw/status
 GET  /health?check_db=true
 POST /v1/approvals/{id}/resolve
 ```
@@ -71,9 +74,9 @@ P0、P1 关键路径和部分 P2 功能均已交付：
 
 - P0：事件调查列表、阻断记录、基础总览、Dashboard 审批、审计完整性
 - P1：证据链时间线、溯源图、指标评测、混淆矩阵
-- P2（已完成）：OpenClaw 配置审计摘要、审计完整性完整展示、运行时适配器活动、规则命中 TopN、runtime 延迟对比
+- P2（已完成）：OpenClaw verify/heartbeat 状态展示、配置审计 findings 明细、审计完整性完整展示、运行时适配器活动、规则命中 TopN、runtime 延迟对比
 
-P2 待办：OpenClaw verify 报告导入、永久审批策略配置、多渠道审批。
+P2 待办：永久审批策略配置、多渠道审批。
 
 ## 8. 验收证据
 
@@ -81,7 +84,7 @@ P2 待办：OpenClaw verify 报告导入、永久审批策略配置、多渠道�
 2. 阻断记录显示 `reason`、`rule_hits`、`resource_targets`。
 3. `ask` 事件能进入审批中心，并可由 Dashboard resolve 为 `allow_once` 或 `deny`。
 4. 调查详情能读取 Trace detail，并在接口失败时显示局部回退状态。
-5. 指标页能展示 AttackBench 已提供的 Block Rate、FPR、FNR、Latency 和可用 ASR。
-6. 系统页能展示只读策略快照和最近历史。
+5. 指标页能展示 latest evaluation run 的 ASR、per-attack、cases，以及当前审计窗口派生的 Block Rate、FPR、FNR、Latency。
+6. 系统页能展示只读策略快照、最近历史、OpenClaw verify/heartbeat 状态和配置审计 findings 明细。
 7. Dashboard 不直接访问 runtime 内部数据。
 8. Dashboard 不保存长期 token，审批 resolve 使用 browser session、CSRF token 和 approval nonce，Adapter 能通过 wait 接口收到审批结果。

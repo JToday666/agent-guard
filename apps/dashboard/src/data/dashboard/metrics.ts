@@ -2,7 +2,7 @@ import type {
   DecisionStatus,
   DecisionTrendPoint,
   EvalMetrics,
-} from "../../types/dashboard.ts";
+} from "../../types/dashboard";
 
 interface MetricEvent {
   decision: DecisionStatus;

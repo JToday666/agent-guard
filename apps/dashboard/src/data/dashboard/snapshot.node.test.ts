@@ -104,8 +104,33 @@ test("compares evaluation metrics by value", () => {
 
 test("compares evaluation summaries by value", () => {
   const evaluation: EvaluationSummary = {
+    runId: "eval_1",
+    runAt: "2026-06-28T00:00:00+00:00",
+    datasetId: "attackbench",
+    datasetVersion: "v1",
+    datasetLabel: "attackbench / v1",
     asrBefore: null,
     asrAfter: null,
+    perAttack: [
+      {
+        attackType: "prompt_injection",
+        asrBefore: 0.8,
+        asrAfter: 0.1,
+        reduction: 0.7000000000000001,
+      },
+    ],
+    cases: [
+      {
+        caseId: "PI-001",
+        attackType: "prompt_injection",
+        runtime: "openclaw",
+        expectedDecision: "deny",
+        actualDecision: "ask",
+        blocked: true,
+        attackSuccess: false,
+        traceId: "trace_1",
+      },
+    ],
     blockRate: 1,
     fpr: null,
     fnr: 0.2,
@@ -118,6 +143,20 @@ test("compares evaluation summaries by value", () => {
   );
   assert.equal(
     hasSameEvaluation(evaluation, { ...evaluation, fnr: null }),
+    false,
+  );
+  assert.equal(
+    hasSameEvaluation(evaluation, {
+      ...evaluation,
+      perAttack: [{ ...evaluation.perAttack[0]!, asrAfter: 0.2 }],
+    }),
+    false,
+  );
+  assert.equal(
+    hasSameEvaluation(evaluation, {
+      ...evaluation,
+      cases: [{ ...evaluation.cases[0]!, actualDecision: "allow" }],
+    }),
     false,
   );
 });
