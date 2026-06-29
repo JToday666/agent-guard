@@ -22,7 +22,7 @@
           <dl>
             <div><dt>运行 ID</dt><dd><code>{{ store.evaluation.runId }}</code></dd></div>
             <div><dt>运行时间</dt><dd>{{ formatMaybeTime(store.evaluation.runAt) }}</dd></div>
-            <div><dt>样本</dt><dd>{{ store.evaluation.cases.length }}</dd></div>
+            <div><dt>展示样本</dt><dd>{{ store.evaluation.cases.length }}</dd></div>
           </dl>
         </header>
 
@@ -43,7 +43,7 @@
 
         <AsrComparisonChart :before="store.evaluation.asrBefore" :after="store.evaluation.asrAfter" />
       </section>
-      <EmptyState v-else title="暂无评测结果" message="评测 run 写入 Guard API 后将在这里展示 latest ASR、攻击类型和样本结果。" />
+      <EmptyState v-else title="暂无评测结果" message="评测结果写入后将在这里展示最新攻击成功率、防护效果和样本结果。" />
 
       <MetricStrip :items="metricItems" />
 
@@ -84,21 +84,25 @@
       </section>
 
       <section class="eval-matrix section-divider" aria-labelledby="matrix-title">
-        <header><div><h2 id="matrix-title">混淆矩阵</h2><p>由当前审计窗口的 is_malicious 与 blocked 字段派生</p></div></header>
+        <header><div><h2 id="matrix-title">混淆矩阵</h2><p>由当前审计窗口的恶意标注与阻断结果派生</p></div></header>
         <ConfusionMatrix v-if="hasMatrixData" :tp="matrix.tp" :fp="matrix.fp" :tn="matrix.tn" :fn="matrix.fn" />
-        <p v-else class="eval-matrix__empty">暂无足够标注数据（需要 is_malicious 字段）</p>
+        <p v-else class="eval-matrix__empty">暂无足够标注数据（需要样本恶意标注）</p>
       </section>
 
       <section class="evaluation-cases section-divider" aria-labelledby="case-title">
         <header>
-          <div><h2 id="case-title">评测样本</h2><p>Latest run 中的样本可追溯到对应证据链</p></div>
-          <span>{{ store.evaluation.cases.length }} 个样本</span>
+          <div><h2 id="case-title">展示样本</h2><p>最新评测中的展示样本可追溯到对应证据链</p></div>
+          <span>{{ store.evaluation.cases.length }} 个展示样本</span>
         </header>
+        <div v-if="selectedCaseId" class="case-locator" :class="{ 'case-locator--missing': !selectedCaseExists }">
+          <span>{{ selectedCaseExists ? `当前定位样本：${selectedCaseId}` : `未找到定位样本：${selectedCaseId}` }}</span>
+          <button type="button" @click="handleClearCaseLocator">清除定位</button>
+        </div>
         <div v-if="store.evaluation.cases.length" class="case-table-wrap">
           <table class="case-table">
-            <caption>评测样本结果</caption>
+            <caption>展示样本结果</caption>
             <thead>
-              <tr><th>Case</th><th>攻击类型</th><th>运行时</th><th>期望</th><th>实际</th><th>结果</th><th>证据链</th></tr>
+              <tr><th>样本</th><th>攻击类型</th><th>运行时</th><th>期望</th><th>实际</th><th>结果</th><th>证据链</th></tr>
             </thead>
             <tbody>
               <tr v-for="row in store.evaluation.cases" :key="row.caseId" :class="{ 'case-table__selected': selectedCaseId === row.caseId }" :data-case-id="row.caseId">
@@ -113,7 +117,7 @@
             </tbody>
           </table>
         </div>
-        <EmptyState v-else title="暂无评测样本" message="评测 run 包含 cases 后将在此展示。" />
+        <EmptyState v-else title="暂无展示样本" message="最新评测包含样本明细后将在此展示。" />
       </section>
     </template>
   </section>
@@ -121,7 +125,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import AsrComparisonChart from "../components/charts/AsrComparisonChart.vue";
 import ConfusionMatrix from "../components/charts/ConfusionMatrix.vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
@@ -141,8 +145,15 @@ defineOptions({ name: "EvaluationPage" });
 
 const store = useDashboardStore();
 const route = useRoute();
+const router = useRouter();
 const selectedCaseId = computed(() =>
   typeof route.query.case_id === "string" ? route.query.case_id : "",
+);
+const selectedCaseExists = computed(() =>
+  Boolean(
+    selectedCaseId.value &&
+      store.evaluation.cases.some((row) => row.caseId === selectedCaseId.value),
+  ),
 );
 const hasRunData = computed(() => store.evaluation.runId !== null);
 const matrix = computed(() => {
@@ -168,7 +179,7 @@ const metricItems = computed(() => [
   { detail: "当前审计窗口", label: "误报率 FPR", route: "/investigations", value: percent(store.evaluation.fpr) },
   { detail: "当前审计窗口", label: "漏报率 FNR", route: "/investigations?decision=allow", value: percent(store.evaluation.fnr) },
   { detail: "当前审计窗口", label: "平均判定延迟", route: "/system", value: store.evaluation.averageLatencyMs === null ? "--" : `${store.evaluation.averageLatencyMs.toFixed(1)} ms` },
-  { detail: "Latest run", label: "样本数", route: "/evaluation", value: String(store.evaluation.cases.length) },
+  { detail: "最新评测", label: "展示样本数", route: "/evaluation", value: String(store.evaluation.cases.length) },
 ]);
 const runtimeLatency = computed(() => {
   const runtimes = ["langgraph", "openclaw"] as const;
@@ -203,6 +214,10 @@ function barWidth(value: number | null): string {
 
 function formatMaybeTime(value: string | null): string {
   return value ? formatDashboardDateTime(value) : "未提供";
+}
+
+function handleClearCaseLocator() {
+  void router.replace({ path: "/evaluation" });
 }
 
 watch(
@@ -260,6 +275,11 @@ watch(
 .runtime-bar-track i { background: linear-gradient(90deg, var(--color-active), #7aa7ff); border-radius: inherit; display: block; height: 100%; min-width: 3px; }
 .runtime-bar-val { color: var(--color-text-muted); font-size: var(--font-size-13); font-variant-numeric: tabular-nums; text-align: right; }
 .eval-matrix__empty { color: var(--color-text-subtle); font-size: var(--font-size-13); margin: 0; }
+.case-locator { align-items: center; background: var(--color-active-soft); border: 1px solid var(--color-active-border); border-radius: var(--radius-2); display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: space-between; padding: var(--space-3); }
+.case-locator span { color: var(--color-active); font-size: var(--font-size-13); font-weight: var(--font-weight-semibold); overflow-wrap: anywhere; }
+.case-locator button { background: var(--color-surface); border: 1px solid var(--color-active-border); border-radius: var(--radius-2); color: var(--color-link); cursor: pointer; min-height: 2rem; padding: 0 var(--space-3); }
+.case-locator--missing { background: var(--color-warning-soft); border-color: var(--color-warning-border); }
+.case-locator--missing span { color: var(--color-warning); }
 .case-table-wrap { overflow: auto; }
 .case-table { border-collapse: collapse; min-width: 48rem; width: 100%; }
 .case-table caption { clip: rect(0,0,0,0); height: 1px; overflow: hidden; position: absolute; width: 1px; }

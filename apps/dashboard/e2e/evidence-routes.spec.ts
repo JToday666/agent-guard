@@ -38,6 +38,23 @@ test("approval exposes separate trace and event evidence destinations", async ({
   await expect(page.getByRole("dialog")).toContainText("风险分数");
 });
 
+test("approval detail exposes explicit control-flow evidence fields", async ({
+  page,
+}) => {
+  await page.goto("/approvals");
+
+  const detail = page.locator(".approval-detail");
+  await expect(detail).toContainText("关联事件");
+  await expect(detail).toContainText("evt_20260607_002");
+  await expect(detail).toContainText("证据链");
+  await expect(detail).toContainText("trace_002");
+  await expect(detail).toContainText("审批主体");
+  await expect(detail).toContainText("tool_call / call_send_email_001");
+  await expect(detail).toContainText("动作");
+  await expect(detail).toContainText("send_email / action_send_email_001");
+  await expect(detail).not.toContainText("approvalNonce");
+});
+
 test("evidence detail keeps related approval and evaluation destinations", async ({
   page,
 }) => {
@@ -53,4 +70,20 @@ test("evidence detail keeps related approval and evaluation destinations", async
     "href",
     /\/evaluation\?case_id=PI-002$/,
   );
+});
+
+test("evidence detail surfaces the final security conclusion", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_002");
+
+  const conclusion = page.locator(".trace-conclusion");
+  await expect(conclusion).toBeVisible();
+  await expect(conclusion).toContainText("等待人工审批");
+  await expect(conclusion).toContainText(
+    "发送目标不在当前任务允许范围内，需要人工确认",
+  );
+  await expect(conclusion).toContainText("外部发送需确认");
+  await expect(conclusion).toContainText("任务与行为不一致");
+  await expect(conclusion).not.toContainText(/P\d{3}/);
 });

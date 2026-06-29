@@ -29,9 +29,32 @@ test("mock source exposes rich evaluation data for populated pages", async () =>
   assert.equal(evaluation.asrBefore, 0.732);
   assert.equal(evaluation.asrAfter, 0.048);
   assert.ok(evaluation.perAttack.length >= 3);
-  assert.ok(evaluation.cases.some((row) => row.runtime === "openclaw"));
-  assert.ok(evaluation.cases.some((row) => row.attackSuccess));
-  assert.ok(evaluation.cases.some((row) => !row.attackSuccess));
+  assert.ok(evaluation.cases.some((row) => row.attackType === "benign"));
+  assert.ok(evaluation.cases.some((row) => row.blocked));
+  assert.ok(evaluation.cases.some((row) => !row.blocked));
+});
+
+test("mock evaluation cases stay consistent with linked audit events", async () => {
+  const source = new MockDashboardDataSource(0);
+  const events = await source.getEvents();
+  const metrics = await source.getMetrics();
+  const evaluation = await source.getEvaluation(metrics);
+
+  for (const row of evaluation.cases) {
+    const event = events.find(
+      (candidate) =>
+        candidate.traceId === row.traceId && candidate.caseId === row.caseId,
+    );
+    assert.ok(event, `${row.caseId} should link to a matching audit event`);
+    assert.equal(event.runtime, row.runtime, `${row.caseId} runtime`);
+    assert.equal(event.attackType, row.attackType, `${row.caseId} attack type`);
+    assert.equal(
+      event.decision,
+      row.actualDecision,
+      `${row.caseId} actual decision`,
+    );
+    assert.equal(event.blocked, row.blocked, `${row.caseId} blocked`);
+  }
 });
 
 test("mock source exposes config findings and OpenClaw status", async () => {

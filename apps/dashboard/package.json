@@ -9,6 +9,7 @@
     "typecheck": "vue-tsc --build --force",
     "test:unit": "node --test",
     "test:e2e": "playwright test",
+    "test:e2e:api": "playwright test --config=playwright.api.config.ts",
     "build": "vue-tsc --build --force && vite build",
     "preview": "vite preview"
   },

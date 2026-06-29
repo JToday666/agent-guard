@@ -18,8 +18,10 @@
 
     <dl class="evidence-grid">
       <div><dt>目标资源</dt><dd><code>{{ approval.resource }}</code></dd></div>
-      <div><dt>审批对象</dt><dd><code>{{ subjectLabel }}</code></dd></div>
-      <div><dt>动作</dt><dd>{{ approval.actionName ?? approval.tool }}</dd></div>
+      <div><dt>关联事件</dt><dd><code>{{ evidenceFields.eventId }}</code></dd></div>
+      <div><dt>证据链</dt><dd><code>{{ evidenceFields.traceId }}</code></dd></div>
+      <div><dt>审批主体</dt><dd><code>{{ evidenceFields.subject }}</code></dd></div>
+      <div><dt>动作</dt><dd><code>{{ evidenceFields.action }}</code></dd></div>
       <div><dt>风险等级</dt><dd>{{ getRiskSeverityLabel(approval.severity) }}</dd></div>
       <div><dt>请求时间</dt><dd>{{ formatDashboardDateTime(approval.createdAt) }}</dd></div>
       <div><dt>到期时间</dt><dd>{{ approval.expiresAt ? formatDashboardDateTime(approval.expiresAt) : '未提供' }}</dd></div>
@@ -63,6 +65,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { RouteLocationRaw } from "vue-router";
+import { formatApprovalEvidenceFields } from "../../data/approvals/evidence";
 import type { ApprovalRequest } from "../../types/dashboard";
 import { formatDashboardDateTime, getRiskSeverityLabel } from "../../utils/dashboard-formatters";
 
@@ -81,10 +84,9 @@ const confirmAllow = ref(false);
 
 watch(() => props.approval.id, () => { confirmAllow.value = false; });
 
-const subjectLabel = computed(() => {
-  if (!props.approval.subjectId) return "未提供";
-  return `${props.approval.subjectType ?? "subject"} / ${props.approval.subjectId}`;
-});
+const evidenceFields = computed(() =>
+  formatApprovalEvidenceFields(props.approval),
+);
 </script>
 
 <style scoped lang="scss">

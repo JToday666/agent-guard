@@ -12,6 +12,37 @@ export class ApiError extends Error {
   }
 }
 
+async function readErrorBody(
+  response: Response,
+): Promise<{ code: string; message: string }> {
+  const fallback = {
+    code: "REQUEST_FAILED",
+    message: `请求失败 (${response.status})`,
+  };
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const payload = await response.json().catch(() => null);
+    const error = payload?.error;
+    return {
+      code:
+        typeof error?.code === "string" && error.code
+          ? error.code
+          : fallback.code,
+      message:
+        typeof error?.message === "string" && error.message
+          ? error.message
+          : fallback.message,
+    };
+  }
+
+  const text = (await response.text().catch(() => "")).trim();
+  return {
+    code: fallback.code,
+    message: text ? `${text} (${response.status})` : fallback.message,
+  };
+}
+
 export async function requestJson<T>(
   path: string,
   init: RequestInit = {},
@@ -28,9 +59,8 @@ export async function requestJson<T>(
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    const code = payload?.error?.code ?? "REQUEST_FAILED";
-    throw new ApiError(response.status, code, `请求失败 (${response.status})`);
+    const error = await readErrorBody(response);
+    throw new ApiError(response.status, error.code, error.message);
   }
 
   return response.json() as Promise<T>;

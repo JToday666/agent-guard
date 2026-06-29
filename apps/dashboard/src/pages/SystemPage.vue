@@ -50,7 +50,7 @@
 
     <section class="system-ledger" aria-labelledby="openclaw-verify-title">
       <header>
-        <div><h2 id="openclaw-verify-title">OpenClaw 插件验证</h2><p>最近一次 verify 或 heartbeat 上报状态</p></div>
+        <div><h2 id="openclaw-verify-title">OpenClaw 插件验证</h2><p>最近一次验证或心跳上报状态</p></div>
         <StatusBadge :label="adapterStatusLabel" :tone="adapterStatusTone" />
       </header>
       <section v-if="store.openclawStatusError" class="system-alert" role="alert"><strong>OpenClaw 状态加载失败</strong><p>{{ store.openclawStatusError }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
@@ -65,11 +65,11 @@
         </div>
         <dl class="adapter-verify__facts">
           <div><dt>Hook 覆盖</dt><dd>{{ hookCoverageText }}</dd></div>
-          <div><dt>最近 verify</dt><dd>{{ formatTime(store.openclawStatus.lastVerifiedAt) }}</dd></div>
-          <div><dt>最近 heartbeat</dt><dd>{{ formatTime(store.openclawStatus.lastHeartbeatAt) }}</dd></div>
+          <div><dt>最近验证</dt><dd>{{ formatTime(store.openclawStatus.lastVerifiedAt) }}</dd></div>
+          <div><dt>最近心跳</dt><dd>{{ formatTime(store.openclawStatus.lastHeartbeatAt) }}</dd></div>
           <div><dt>来源</dt><dd>{{ store.openclawStatus.source ?? "未提供" }}</dd></div>
           <div><dt>插件版本</dt><dd>{{ store.openclawStatus.pluginVersion ?? "未提供" }}</dd></div>
-          <div><dt>Fail-closed</dt><dd>{{ store.openclawStatus.failClosedStages.length }} 阶段</dd></div>
+          <div><dt>失败关闭阶段</dt><dd>{{ store.openclawStatus.failClosedStages.length }} 阶段</dd></div>
         </dl>
         <p v-if="store.openclawStatus.error" class="adapter-verify__error">{{ store.openclawStatus.error }}</p>
         <div v-if="store.openclawStatus.hooks.length" class="hook-list" aria-label="OpenClaw hooks">
@@ -79,7 +79,7 @@
     </section>
 
     <section class="system-ledger" aria-labelledby="adapters-title">
-      <header><div><h2 id="adapters-title">运行时审计活动</h2><p>按已加载审计事件统计 runtime 写入情况</p></div></header>
+      <header><div><h2 id="adapters-title">运行时审计活动</h2><p>按已加载审计事件统计运行时写入情况</p></div></header>
       <div class="adapter-grid">
         <article class="adapter-card">
           <h3>LangGraph</h3>
@@ -104,12 +104,12 @@
 
     <section class="system-ledger" aria-labelledby="config-audit-title">
       <header>
-        <div><h2 id="config-audit-title">配置审计 Findings</h2><p>后端保存的配置检查发现项</p></div>
-        <div class="finding-summary" aria-label="finding severity summary">
+        <div><h2 id="config-audit-title">配置审计发现项</h2><p>后端保存的配置检查发现项</p></div>
+        <div class="finding-summary" aria-label="发现项严重性摘要">
           <span v-for="item in findingSummary" :key="item.label">{{ item.label }} {{ item.value }}</span>
         </div>
       </header>
-      <section v-if="store.configAuditError" class="system-alert" role="alert"><strong>Findings 加载失败</strong><p>{{ store.configAuditError }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
+      <section v-if="store.configAuditError" class="system-alert" role="alert"><strong>发现项加载失败</strong><p>{{ store.configAuditError }}</p><button type="button" @click="handleRefresh">重新检查</button></section>
       <div v-if="store.configAuditFindings.length" class="finding-list">
         <article v-for="row in store.configAuditFindings" :key="row.finding.findingId">
           <header>
@@ -118,8 +118,8 @@
           </header>
           <dl>
             <div><dt>目标</dt><dd>{{ row.targetType }} / {{ row.targetId }}</dd></div>
-            <div><dt>Subject</dt><dd>{{ row.finding.subject }}</dd></div>
-            <div><dt>Runtime</dt><dd>{{ row.runtime }}</dd></div>
+            <div><dt>主体</dt><dd>{{ row.finding.subject }}</dd></div>
+            <div><dt>运行时</dt><dd>{{ row.runtime }}</dd></div>
             <div><dt>时间</dt><dd>{{ formatTime(row.timestamp) }}</dd></div>
           </dl>
           <p>{{ row.finding.description }}</p>
@@ -136,7 +136,7 @@
           </div>
         </article>
       </div>
-      <EmptyState v-else title="暂无配置审计 findings" message="配置审计结果写入后将在这里展示 finding 明细。" />
+      <EmptyState v-else title="暂无配置审计发现项" message="配置审计结果写入后将在这里展示发现项明细。" />
     </section>
   </section>
 </template>

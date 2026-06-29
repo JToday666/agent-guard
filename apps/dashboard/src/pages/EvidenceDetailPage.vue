@@ -15,6 +15,23 @@
       <LoadingState v-else-if="(store.status === 'loading' && !store.events.length) || (isTraceLoading && !traceEvents.length)" />
       <template v-else-if="trace">
         <MetricStrip :items="summaryItems" />
+        <section v-if="traceConclusion" class="trace-conclusion" aria-labelledby="trace-conclusion-title">
+          <header>
+            <span>最终结论</span>
+            <h2 id="trace-conclusion-title">{{ traceConclusion.title }}</h2>
+          </header>
+          <dl>
+            <div><dt>原因</dt><dd>{{ traceConclusion.reason }}</dd></div>
+            <div>
+              <dt>命中规则</dt>
+              <dd>
+                <template v-if="!traceConclusion.ruleHits.length"><span>未命中阻断规则</span></template>
+                <template v-else><code v-for="rule in traceConclusion.ruleHits" :key="rule">{{ ruleLabel(rule) }}</code></template>
+              </dd>
+            </div>
+            <div><dt>结果</dt><dd>{{ traceConclusion.result }}</dd></div>
+          </dl>
+        </section>
         <div class="trace-body section-divider">
           <section class="trace-provenance" aria-labelledby="provenance-title">
             <header>
@@ -42,7 +59,7 @@
                   <h3>节点详情</h3>
                   <dl class="prov-node-detail__dl">
                     <div><dt>类型</dt><dd>{{ selectedProvenanceNode.kind }}</dd></div>
-                    <div><dt>标签</dt><dd>{{ selectedProvenanceNode.label }}</dd></div>
+                    <div><dt>标签</dt><dd>{{ formatRuleIdsInTextForDisplay(selectedProvenanceNode.label) }}</dd></div>
                     <div><dt>时间</dt><dd>{{ formatDashboardDateTime(selectedProvenanceNode.timestamp) }}</dd></div>
                   </dl>
                 </div>
@@ -74,11 +91,12 @@ import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import TraceTimeline from "../components/evidence/TraceTimeline.vue";
-import { buildInvestigationIndex, buildTraceSummary, resolveInvestigationEvent } from "../data/investigations";
+import { buildInvestigationIndex, buildTraceConclusion, buildTraceSummary, resolveInvestigationEvent } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ProvenanceNode } from "../types/dashboard";
 import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
+import { formatRuleIdsInTextForDisplay, ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EvidenceDetailPage" });
 const route = useRoute();
@@ -91,6 +109,7 @@ const isTraceLoading = computed(() => store.traceDetailLoadingId === traceId.val
 const traceEvents = computed(() => traceDetail.value?.events.length ? traceDetail.value.events : store.investigationIndex.byTrace.get(traceId.value) ?? []);
 const detailIndex = computed(() => buildInvestigationIndex(traceEvents.value));
 const trace = computed(() => buildTraceSummary(traceId.value, traceEvents.value) ?? store.traces.find((t) => t.id === traceId.value));
+const traceConclusion = computed(() => buildTraceConclusion(traceEvents.value));
 const selectedEventId = computed(() => typeof route.query.event_id === "string" ? route.query.event_id : "");
 const eventResolution = computed(() => resolveInvestigationEvent(detailIndex.value, selectedEventId.value, traceId.value));
 const selectedEvent = computed(() => eventResolution.value.status === "found" ? eventResolution.value.event : undefined);
@@ -142,6 +161,15 @@ function handleTraceRetry() { void store.loadTraceDetail(traceId.value); }
 .evidence-detail { display: grid; grid-template-columns: minmax(0, 1fr); }
 .evidence-detail--evidence { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); height: calc(100vh - var(--top-bar-height)); overflow: hidden; }
 .evidence-detail__main { min-width: 0; overflow-y: auto; min-height: 0; }
+.trace-conclusion { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-left: 3px solid var(--color-active); border-radius: var(--radius-2); display: grid; gap: var(--space-4); padding: var(--space-4); }
+.trace-conclusion header { display: grid; gap: var(--space-1); }
+.trace-conclusion header span { color: var(--color-text-subtle); font-size: var(--font-size-12); font-weight: var(--font-weight-semibold); }
+.trace-conclusion h2 { font-size: var(--font-size-20); margin: 0; }
+.trace-conclusion dl { display: grid; gap: var(--space-3); margin: 0; }
+.trace-conclusion dl > div { display: grid; gap: var(--space-1); }
+.trace-conclusion dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
+.trace-conclusion dd { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; overflow-wrap: anywhere; }
+.trace-conclusion code { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-1); color: var(--color-text); padding: 0 var(--space-2); }
 .trace-body { display: grid; gap: var(--space-7); }
 .trace-provenance { display: grid; gap: var(--space-4); }
 .trace-provenance > header { align-items: start; display: flex; gap: var(--space-4); justify-content: space-between; flex-wrap: wrap; }

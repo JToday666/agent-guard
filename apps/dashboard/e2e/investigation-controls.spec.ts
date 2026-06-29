@@ -15,6 +15,26 @@ test("clicking a non-time event cell opens its evidence", async ({ page }) => {
   await expect(page.getByRole("dialog")).toContainText("风险分数");
 });
 
+test("CSV export uses rule names without raw policy numbers", async ({
+  page,
+}) => {
+  await page.goto("/investigations");
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "导出 CSV" }).click(),
+  ]);
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error("CSV 下载流不可用");
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const csv = Buffer.concat(chunks).toString("utf8");
+
+  expect(csv).toContain("外部发送需确认");
+  expect(csv).not.toMatch(/P\d{3}/);
+});
+
 test("keyboard opens event evidence and Escape restores row focus", async ({
   page,
 }) => {

@@ -28,7 +28,7 @@ import type {
   ProvenanceNode,
   TraceDetail,
 } from "../types/dashboard";
-import { maskSensitiveText } from "../utils/data-redaction";
+import { maskSensitiveText } from "../utils/data-redaction.ts";
 
 function formatEventTime(timestamp: string): string {
   const value = new Date(timestamp);
@@ -45,8 +45,50 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
-function fallbackResourceTargets(dto: GuardAuditEventDto): string[] {
-  const metadata = dto.metadata;
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function readNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function readNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readDecision(value: unknown): AuditEventRow["decision"] {
+  return value === "allow" || value === "ask" || value === "deny"
+    ? value
+    : "allow";
+}
+
+function readSeverity(value: unknown): AuditEventRow["severity"] {
+  return value === "critical" ||
+    value === "high" ||
+    value === "medium" ||
+    value === "low"
+    ? value
+    : "low";
+}
+
+function fallbackResourceTargets(metadata: Record<string, unknown>): string[] {
   const recipient = readString(metadata.recipient);
   if (recipient) {
     const channel = readString(metadata.channel);
@@ -66,10 +108,14 @@ function fallbackResourceTargets(dto: GuardAuditEventDto): string[] {
   return [];
 }
 
-function mapResourceTargets(dto: GuardAuditEventDto): string[] {
-  const targets = dto.resource_targets.length
-    ? dto.resource_targets
-    : fallbackResourceTargets(dto);
+function mapResourceTargets(
+  dto: GuardAuditEventDto,
+  metadata: Record<string, unknown>,
+): string[] {
+  const explicitTargets = readStringArray(dto.resource_targets);
+  const targets = explicitTargets.length
+    ? explicitTargets
+    : fallbackResourceTargets(metadata);
   return targets.map((target) => maskSensitiveText(target));
 }
 
@@ -79,60 +125,71 @@ function summarizeTargets(targets: string[]): string {
   return `${targets[0]} 等 ${targets.length} 项`;
 }
 
-function actionName(dto: GuardAuditEventDto): string {
+function actionName(
+  dto: GuardAuditEventDto,
+  metadata: Record<string, unknown>,
+): string {
   return (
-    readString(dto.metadata.action_name) ??
-    readString(dto.metadata.tool) ??
-    readString(dto.metadata.source_tool) ??
-    dto.event_type
+    readString(metadata.action_name) ??
+    readString(metadata.tool) ??
+    readString(metadata.source_tool) ??
+    readString(dto.event_type) ??
+    "未提供"
   );
 }
 
 function stageName(dto: GuardAuditEventDto): string {
+  const stage = readString(dto.stage) ?? "未提供";
+  const eventType = readString(dto.event_type) ?? stage;
   if (
-    dto.stage === "before_tool_call" &&
-    dto.event_type !== "tool_call_proposed"
+    stage === "before_tool_call" &&
+    eventType !== "tool_call_proposed"
   ) {
-    return dto.event_type;
+    return eventType;
   }
-  return dto.stage;
+  return stage;
 }
 
 export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
-  const resourceTargets = mapResourceTargets(dto);
-  const action = actionName(dto);
+  const metadata = readRecord(dto.metadata);
+  const links = readRecord(dto.links);
+  const resourceTargets = mapResourceTargets(dto, metadata);
+  const action = actionName(dto, metadata);
+  const timestamp = readString(dto.timestamp) ?? "";
+  const summary = readString(dto.summary);
   return {
-    id: dto.audit_id,
-    occurredAt: dto.timestamp,
-    time: formatEventTime(dto.timestamp),
-    decision: dto.decision,
-    riskScore: dto.risk_score,
-    severity: dto.severity,
-    blocked: dto.blocked,
-    runtime: dto.runtime,
+    id: readString(dto.audit_id) ?? "未提供",
+    occurredAt: timestamp,
+    time: formatEventTime(timestamp),
+    decision: readDecision(dto.decision),
+    riskScore: readNumber(dto.risk_score),
+    severity: readSeverity(dto.severity),
+    blocked: readBoolean(dto.blocked),
+    runtime: dto.runtime ?? "langgraph",
     stage: stageName(dto),
-    eventType: dto.event_type,
+    eventType: readString(dto.event_type) ?? "未提供",
     tool: action,
     resource: summarizeTargets(resourceTargets),
     resourceTargets,
-    reason: dto.reason,
-    traceId: dto.trace_id,
-    caseId: dto.case_id,
-    approvalId: dto.links.approval_id,
-    ruleHits: dto.rule_hits,
-    userTask:
-      typeof dto.metadata.user_task === "string"
-        ? dto.metadata.user_task
-        : null,
-    agentAction: dto.summary ? maskSensitiveText(dto.summary) : action,
-    attackType: dto.attack_type,
-    isMalicious: dto.is_malicious,
-    latencyMs: dto.latency_ms,
+    reason: readString(dto.reason) ?? "未提供",
+    traceId: readString(dto.trace_id) ?? "",
+    caseId: readString(dto.case_id),
+    approvalId: readString(links.approval_id) ?? undefined,
+    ruleHits: readStringArray(dto.rule_hits),
+    userTask: readString(metadata.user_task),
+    agentAction: summary ? maskSensitiveText(summary) : action,
+    attackType: readString(dto.attack_type),
+    isMalicious:
+      typeof dto.is_malicious === "boolean" ? dto.is_malicious : null,
+    latencyMs: readNullableNumber(dto.latency_ms),
     raw: dto,
   };
 }
 
 export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
+  const tool = readString(dto.tool) ?? "未提供";
+  const resource = readString(dto.resource) ?? "未提供";
+  const toolCallId = readString(dto.tool_call_id) ?? "未提供";
   const status: ApprovalRequest["status"] =
     dto.status === "expired"
       ? "expired"
@@ -143,27 +200,27 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
           : "denied";
 
   return {
-    id: dto.approval_id,
-    createdAt: dto.created_at,
+    id: readString(dto.approval_id) ?? "未提供",
+    createdAt: readString(dto.created_at) ?? "",
     status,
-    tool: dto.tool,
-    resource: maskSensitiveText(dto.resource),
-    riskScore: dto.risk_score,
-    severity: dto.severity,
-    reason: dto.reason,
+    tool,
+    resource: maskSensitiveText(resource),
+    riskScore: readNumber(dto.risk_score),
+    severity: readSeverity(dto.severity),
+    reason: readString(dto.reason) ?? "未提供",
     eventId: "",
-    traceId: dto.trace_id,
-    subjectId: dto.subject_id ?? dto.tool_call_id,
-    subjectType: dto.subject_type ?? "tool_call",
-    actionId: dto.action_id ?? dto.tool_call_id,
-    actionName: dto.action_name ?? dto.tool,
+    traceId: readString(dto.trace_id) ?? "",
+    subjectId: readString(dto.subject_id) ?? toolCallId,
+    subjectType: readString(dto.subject_type) ?? "tool_call",
+    actionId: readString(dto.action_id) ?? toolCallId,
+    actionName: readString(dto.action_name) ?? tool,
     userTask: "未提供",
-    agentAction: `${dto.tool}(${maskSensitiveText(dto.resource)})`,
+    agentAction: `${tool}(${maskSensitiveText(resource)})`,
     consequence: approvalConsequence(status),
     ruleHits: [],
-    approvalNonce: dto.approval_nonce,
-    expiresAt: dto.expires_at,
-    resolvedAt: dto.resolved_at,
+    approvalNonce: readString(dto.approval_nonce) ?? undefined,
+    expiresAt: readString(dto.expires_at),
+    resolvedAt: readString(dto.resolved_at),
   };
 }
 
@@ -175,16 +232,17 @@ function approvalConsequence(status: ApprovalRequest["status"]): string {
 }
 
 export function mapMetrics(dto: GuardEvalMetricsDto): EvalMetrics {
+  const metrics = readRecord(dto);
   return {
-    eventCount: dto.event_count,
-    allowCount: dto.allow_count,
-    denyCount: dto.deny_count,
-    askCount: dto.ask_count,
-    blockedCount: dto.blocked_count,
-    blockRate: dto.block_rate,
-    fpr: dto.fpr,
-    fnr: dto.fnr,
-    averageLatencyMs: dto.average_latency_ms,
+    eventCount: readNumber(metrics.event_count),
+    allowCount: readNumber(metrics.allow_count),
+    denyCount: readNumber(metrics.deny_count),
+    askCount: readNumber(metrics.ask_count),
+    blockedCount: readNumber(metrics.blocked_count),
+    blockRate: readNullableNumber(metrics.block_rate),
+    fpr: readNullableNumber(metrics.fpr),
+    fnr: readNullableNumber(metrics.fnr),
+    averageLatencyMs: readNullableNumber(metrics.average_latency_ms),
   };
 }
 
@@ -232,17 +290,22 @@ export function mapEvaluationRun(
   dto: GuardEvaluationRunDto,
   metrics: EvalMetrics,
 ): EvaluationSummary {
-  const datasetId = dto.dataset_id ?? null;
-  const datasetVersion = dto.dataset_version ?? null;
+  const datasetId = readString(dto.dataset_id);
+  const datasetVersion = readString(dto.dataset_version);
   const perAttack: EvaluationAttackMetric[] = Object.entries(
-    dto.per_attack ?? {},
+    readRecord(dto.per_attack),
   )
-    .map(([attackType, summary]) => ({
-      attackType,
-      asrBefore: summary.asr_before ?? null,
-      asrAfter: summary.asr_after ?? null,
-      reduction: metricReduction(summary.asr_before, summary.asr_after),
-    }))
+    .map(([attackType, summary]) => {
+      const values = readRecord(summary);
+      const asrBefore = readNullableNumber(values.asr_before);
+      const asrAfter = readNullableNumber(values.asr_after);
+      return {
+        attackType,
+        asrBefore,
+        asrAfter,
+        reduction: metricReduction(asrBefore, asrAfter),
+      };
+    })
     .sort((left, right) => {
       const leftValue = left.asrBefore ?? -1;
       const rightValue = right.asrBefore ?? -1;
@@ -251,24 +314,27 @@ export function mapEvaluationRun(
         left.attackType.localeCompare(right.attackType)
       );
     });
-  const cases: EvaluationCase[] = (dto.cases ?? []).map((row) => ({
-    caseId: row.case_id,
-    attackType: row.attack_type,
-    runtime: row.runtime,
-    expectedDecision: row.expected_decision,
-    actualDecision: row.actual_decision,
-    blocked: row.blocked,
-    attackSuccess: row.attack_success,
-    traceId: row.trace_id,
-  }));
+  const cases: EvaluationCase[] = readArray(dto.cases).map((item) => {
+    const row = readRecord(item);
+    return {
+      caseId: readString(row.case_id) ?? "未提供",
+      attackType: readString(row.attack_type) ?? "未提供",
+      runtime: readString(row.runtime) ?? "未提供",
+      expectedDecision: readDecision(row.expected_decision),
+      actualDecision: readDecision(row.actual_decision),
+      blocked: readBoolean(row.blocked),
+      attackSuccess: readBoolean(row.attack_success),
+      traceId: readString(row.trace_id) ?? "",
+    };
+  });
   return {
-    runId: dto.run_id,
-    runAt: dto.run_at,
+    runId: readString(dto.run_id) ?? "未提供",
+    runAt: readString(dto.run_at) ?? null,
     datasetId,
     datasetVersion,
     datasetLabel: evaluationDatasetLabel(datasetId, datasetVersion),
-    asrBefore: dto.asr_before ?? null,
-    asrAfter: dto.asr_after ?? null,
+    asrBefore: readNullableNumber(dto.asr_before),
+    asrAfter: readNullableNumber(dto.asr_after),
     perAttack,
     cases,
     blockRate: metrics.blockRate,
@@ -279,16 +345,18 @@ export function mapEvaluationRun(
 }
 
 export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
-  const events = dto.audit_events
-    .map(mapAuditEvent)
+  const events = readArray(dto.audit_events)
+    .map((row) => mapAuditEvent(row as GuardAuditEventDto))
     .sort(
       (left, right) =>
         Date.parse(left.occurredAt) - Date.parse(right.occurredAt),
     );
   return {
-    id: dto.trace_id,
+    id: readString(dto.trace_id) ?? "",
     events,
-    approvals: dto.approvals.map(mapApproval),
+    approvals: readArray(dto.approvals).map((row) =>
+      mapApproval(row as GuardApprovalDto),
+    ),
     metrics: mapMetrics(dto.metrics),
     loadedAt: new Date().toISOString(),
   };
@@ -297,13 +365,16 @@ export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
 export function mapPolicyHistory(
   rows: GuardPolicyHistoryDto[],
 ): PolicyHistoryEntry[] {
-  return rows.map((row) => ({
-    revision: row.revision,
-    updatedAt: row.updated_at,
-    updatedBy: row.updated_by,
-    bundleId: row.bundle_id,
-    version: row.version,
-  }));
+  return readArray(rows).map((item) => {
+    const row = readRecord(item);
+    return {
+      revision: readNumber(row.revision),
+      updatedAt: readString(row.updated_at) ?? "",
+      updatedBy: readString(row.updated_by) ?? "未提供",
+      bundleId: readString(row.bundle_id) ?? "未提供",
+      version: readString(row.version) ?? "未提供",
+    };
+  });
 }
 
 export function mapPolicySummary(
@@ -332,88 +403,98 @@ export function mapPolicySummary(
 }
 
 export function mapAuditIntegrity(dto: GuardAuditIntegrityDto): AuditIntegrity {
+  const integrity = readRecord(dto);
   return {
-    valid: dto.valid,
-    eventCount: dto.event_count,
-    headHash: dto.head_hash,
-    firstBrokenAuditId: dto.first_broken_audit_id,
+    valid: readBoolean(integrity.valid),
+    eventCount: readNumber(integrity.event_count),
+    headHash: readString(integrity.head_hash),
+    firstBrokenAuditId: readString(integrity.first_broken_audit_id),
   };
 }
 
 export function mapConfigAuditFindingRecord(
   dto: GuardConfigAuditFindingRecordDto,
 ): ConfigAuditFindingRecord {
+  const finding = readRecord(dto.finding);
   return {
-    runtime: dto.runtime,
-    targetType: dto.target_type,
-    targetId: dto.target_id,
-    traceId: dto.trace_id,
-    eventId: dto.event_id,
-    timestamp: dto.timestamp,
+    runtime: readString(dto.runtime) ?? "未提供",
+    targetType: readString(dto.target_type) ?? "未提供",
+    targetId: readString(dto.target_id) ?? "未提供",
+    traceId: readString(dto.trace_id) ?? "",
+    eventId: readString(dto.event_id) ?? "",
+    timestamp: readString(dto.timestamp) ?? "",
     finding: {
-      findingId: dto.finding.finding_id,
-      severity: dto.finding.severity,
-      category: dto.finding.category,
-      title: dto.finding.title,
-      subject: dto.finding.subject,
-      description: dto.finding.description,
-      evidence: dto.finding.evidence,
-      recommendation: dto.finding.recommendation ?? null,
+      findingId: readString(finding.finding_id) ?? "未提供",
+      severity: readSeverity(finding.severity),
+      category: readString(finding.category) ?? "未分类",
+      title: readString(finding.title) ?? "未命名发现项",
+      subject: readString(finding.subject) ?? "未提供",
+      description: readString(finding.description) ?? "未提供",
+      evidence: readStringArray(finding.evidence),
+      recommendation: readString(finding.recommendation),
     },
   };
 }
 
 export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
-  const expectedHookCount = dto.expected_hook_count;
-  const hookCount = dto.hook_count;
+  const expectedHookCount = readNumber(dto.expected_hook_count, 16);
+  const hookCount = readNullableNumber(dto.hook_count);
   return {
-    status: dto.status,
-    loaded: dto.loaded,
+    status:
+      dto.status === "loaded" ||
+      dto.status === "not_loaded" ||
+      dto.status === "error" ||
+      dto.status === "unknown"
+        ? dto.status
+        : "unknown",
+    loaded: readBoolean(dto.loaded),
     hookCount,
     expectedHookCount,
     hookCoverage:
       hookCount === null || expectedHookCount <= 0
         ? null
         : hookCount / expectedHookCount,
-    lastVerifiedAt: dto.last_verified_at,
-    lastHeartbeatAt: dto.last_heartbeat_at ?? null,
-    error: dto.error,
-    source: dto.source,
-    runtime: dto.runtime ?? null,
-    runtimeId: dto.runtime_id ?? null,
-    agentId: dto.agent_id ?? null,
-    pluginVersion: dto.plugin_version ?? null,
-    runtimeVersion: dto.runtime_version ?? null,
-    capabilities: dto.capabilities ?? {},
-    hooks: dto.hooks ?? [],
-    failClosedStages: dto.fail_closed_stages ?? [],
+    lastVerifiedAt: readString(dto.last_verified_at),
+    lastHeartbeatAt: readString(dto.last_heartbeat_at),
+    error: readString(dto.error),
+    source: readString(dto.source),
+    runtime: readString(dto.runtime),
+    runtimeId: readString(dto.runtime_id),
+    agentId: readString(dto.agent_id),
+    pluginVersion: readString(dto.plugin_version),
+    runtimeVersion: readString(dto.runtime_version),
+    capabilities: readRecord(dto.capabilities),
+    hooks: readStringArray(dto.hooks),
+    failClosedStages: readStringArray(dto.fail_closed_stages),
   };
 }
 
 export function mapProvenance(dto: GuardProvenanceDto): ProvenanceGraph {
   return {
-    traceId: dto.trace_id,
-    nodes: dto.nodes.map(
-      (n): ProvenanceNode => ({
-        nodeId: n.node_id,
-        traceId: n.trace_id,
-        kind: n.kind,
-        refId: n.ref_id,
-        label: n.label,
-        timestamp: n.timestamp,
-        metadata: n.metadata,
-      }),
-    ),
-    edges: dto.edges.map(
-      (e): ProvenanceEdge => ({
-        edgeId: e.edge_id,
-        traceId: e.trace_id,
-        sourceNodeId: e.source_node_id,
-        targetNodeId: e.target_node_id,
-        relation: e.relation,
-        timestamp: e.timestamp,
-        metadata: e.metadata,
-      }),
-    ),
+    traceId: readString(dto.trace_id) ?? "",
+    nodes: readArray(dto.nodes).map((item): ProvenanceNode => {
+      const n = readRecord(item);
+      return {
+        nodeId: readString(n.node_id) ?? "node",
+        traceId: readString(n.trace_id) ?? readString(dto.trace_id) ?? "",
+        kind: readString(n.kind) ?? "event",
+        refId: readString(n.ref_id) ?? "",
+        label: readString(n.label) ?? "未提供",
+        timestamp: readString(n.timestamp) ?? "",
+        metadata: readRecord(n.metadata),
+      };
+    }),
+    edges: readArray(dto.edges).map((item): ProvenanceEdge => {
+      const e = readRecord(item);
+      return {
+        edgeId: readString(e.edge_id) ?? "edge",
+        traceId: readString(e.trace_id) ?? readString(dto.trace_id) ?? "",
+        sourceNodeId: readString(e.source_node_id) ?? "",
+        targetNodeId: readString(e.target_node_id) ?? "",
+        relation: readString(e.relation) ?? "",
+        timestamp: readString(e.timestamp) ?? "",
+        metadata: readRecord(e.metadata),
+      };
+    }),
   };
 }
