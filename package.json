@@ -18,6 +18,7 @@
     "openclaw:plugin:install": "node scripts/openclaw-plugin-dev.mjs install",
     "openclaw:plugin:verify": "node scripts/openclaw-plugin-dev.mjs verify",
     "openclaw:plugin:e2e": "pnpm --filter @agentguard/openclaw-plugin build && node scripts/openclaw-e2e-runner.mjs",
+    "openclaw:plugin:reliability": "pnpm --filter @agentguard/openclaw-plugin build && node scripts/openclaw-e2e-runner.mjs reliability --iterations 50",
     "openclaw:plugin:uninstall": "node scripts/openclaw-plugin-dev.mjs uninstall"
   }
 }

@@ -181,6 +181,38 @@ pnpm openclaw:plugin:e2e
 - audit integrity `valid=true`
 - provenance 至少包含 `event`、`decision` 和 `audit` 节点
 
+全 Hook 可靠性验收使用独立测试库，要求 `.env` 中存在
+`AGENTGUARD_TEST_DATABASE_URL`，且数据库名为 `agent_guard_test` 或以
+`_test` 结尾：
+
+```bash
+pnpm openclaw:plugin:reliability
+```
+
+该命令会构建插件、重置测试库控制平面表、启动指向测试库的 Guard
+API、复核 OpenClaw runtime 插件加载状态，并触发 16 个 hook 各 50 次，
+共 800 条预期审计事件。若 `127.0.0.1:8088` 已有 Guard API 监听，runner
+会直接停止，避免误写开发库。
+
+输出文件：
+
+```text
+/tmp/agentguard-openclaw-reliability-report.json
+/tmp/agentguard-openclaw-reliability-acceptance-report.md
+```
+
+验收重点：
+
+- `ok=true`
+- `missing_traces=[]`、`duplicate_trace_ids=[]`、`non_openclaw_count=0`
+- 审计事件计数符合 `tool_call_proposed=50`、`message_send_proposed=50`、
+  `config_audit=50`、`tool_result_produced=50`、`runtime_observation=600`
+- adapter status 显示 `loaded=true`、`hook_count=16`、
+  `expected_hook_count=16`
+- audit integrity `valid=true`
+- 阻断型 hook：`before_tool_call` 返回 `block=true`，
+  `message_sending` 返回 `cancel=true`，`before_install` 返回 `block=true`
+
 ## 8. 卸载与回滚
 
 卸载开发安装：

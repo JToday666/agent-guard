@@ -68,3 +68,18 @@ curl -s "http://127.0.0.1:8088/v1/audit/events?runtime=openclaw"
 curl -s "http://127.0.0.1:8088/v1/audit/integrity"
 curl -s "http://127.0.0.1:8088/v1/traces/<trace_id>/provenance"
 ```
+
+Full hook reliability acceptance uses the isolated PostgreSQL test database
+from `AGENTGUARD_TEST_DATABASE_URL`:
+
+```bash
+pnpm openclaw:plugin:reliability
+```
+
+The reliability runner triggers all 16 registered hooks 50 times each, starts a
+temporary Guard API pointed at the `_test` database, and writes:
+
+```text
+/tmp/agentguard-openclaw-reliability-report.json
+/tmp/agentguard-openclaw-reliability-acceptance-report.md
+```
