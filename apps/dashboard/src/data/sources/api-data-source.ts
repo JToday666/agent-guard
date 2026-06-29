@@ -1,19 +1,30 @@
 import type {
+  GuardAdapterStatusDto,
   GuardApprovalDto,
   GuardApprovalResolutionDto,
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
+  GuardConfigAuditFindingRecordDto,
   GuardEvalMetricsDto,
+  GuardEvaluationRunDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
   GuardProvenanceDto,
   GuardTraceDetailDto,
 } from "../../api/guard-api-types";
-import { requestHealth, requestJson } from "../../api/guard-http-client";
 import {
+  ApiError,
+  requestHealth,
+  requestJson,
+} from "../../api/guard-http-client";
+import {
+  emptyEvaluationSummary,
+  mapAdapterStatus,
   mapApproval,
   mapAuditEvent,
   mapAuditIntegrity,
+  mapConfigAuditFindingRecord,
+  mapEvaluationRun,
   mapMetrics,
   mapPolicyHistory,
   mapPolicySummary,
@@ -25,11 +36,13 @@ import type {
   ApprovalRequest,
   ApprovalResolution,
   AuditIntegrity,
+  ConfigAuditFindingRecord,
   EvalMetrics,
   EvaluationSummary,
   ProvenanceGraph,
 } from "../../types/dashboard";
 import type {
+  ConfigAuditFindingFilters,
   DashboardDataSource,
   EventFilters,
 } from "./dashboard-data-source";
@@ -46,6 +59,18 @@ function buildQueryString(
   if (filters.decision) params.set("decision", filters.decision);
   const query = params.toString();
   return query ? `?${query}` : "";
+}
+
+function buildConfigFindingQueryString(
+  filters: ConfigAuditFindingFilters = {},
+): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 20));
+  if (filters.traceId) params.set("trace_id", filters.traceId);
+  if (filters.targetId) params.set("target_id", filters.targetId);
+  if (filters.targetType) params.set("target_type", filters.targetType);
+  if (filters.severity) params.set("severity", filters.severity);
+  return `?${params.toString()}`;
 }
 
 export class ApiDashboardDataSource implements DashboardDataSource {
@@ -111,15 +136,50 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getEvaluation(metrics: EvalMetrics): Promise<EvaluationSummary> {
-    return {
-      asrBefore: null,
-      asrAfter: null,
-      blockRate: metrics.blockRate,
-      fpr: metrics.fpr,
-      fnr: metrics.fnr,
-      averageLatencyMs: metrics.averageLatencyMs,
-    };
+  async getEvaluation(
+    metrics: EvalMetrics,
+    signal?: AbortSignal,
+  ): Promise<EvaluationSummary> {
+    try {
+      return mapEvaluationRun(
+        await requestJson<GuardEvaluationRunDto>(
+          "/evaluations/latest",
+          {},
+          signal,
+        ),
+        metrics,
+      );
+    } catch (reason) {
+      if (
+        reason instanceof ApiError &&
+        reason.code === "EVALUATION_NOT_FOUND"
+      ) {
+        return emptyEvaluationSummary(metrics);
+      }
+      throw reason;
+    }
+  }
+
+  async getConfigAuditFindings(
+    filters: ConfigAuditFindingFilters = {},
+    signal?: AbortSignal,
+  ): Promise<ConfigAuditFindingRecord[]> {
+    const rows = await requestJson<GuardConfigAuditFindingRecordDto[]>(
+      `/config-audit/findings${buildConfigFindingQueryString(filters)}`,
+      {},
+      signal,
+    );
+    return rows.map(mapConfigAuditFindingRecord);
+  }
+
+  async getAdapterStatus(adapterId: string, signal?: AbortSignal) {
+    return mapAdapterStatus(
+      await requestJson<GuardAdapterStatusDto>(
+        `/adapters/${encodeURIComponent(adapterId)}/status`,
+        {},
+        signal,
+      ),
+    );
   }
 
   async getTraceDetail(traceId: string, signal?: AbortSignal) {

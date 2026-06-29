@@ -1,8 +1,10 @@
 import type {
+  AdapterStatus,
   ApprovalRequest,
   ApprovalResolution,
   AuditEventRow,
   AuditIntegrity,
+  ConfigAuditFindingRecord,
   EvalMetrics,
   EvaluationSummary,
   HealthStatus,
@@ -17,6 +19,14 @@ export interface EventFilters {
   caseId?: string;
   runtime?: string;
   decision?: string;
+}
+
+export interface ConfigAuditFindingFilters {
+  traceId?: string;
+  targetId?: string;
+  targetType?: string;
+  severity?: string;
+  limit?: number;
 }
 
 export interface DashboardDataSource {
@@ -35,7 +45,18 @@ export interface DashboardDataSource {
     csrfToken: string,
   ): Promise<ApprovalResolution>;
   getHealth(signal?: AbortSignal): Promise<HealthStatus>;
-  getEvaluation(metrics: EvalMetrics): Promise<EvaluationSummary>;
+  getEvaluation(
+    metrics: EvalMetrics,
+    signal?: AbortSignal,
+  ): Promise<EvaluationSummary>;
+  getConfigAuditFindings(
+    filters?: ConfigAuditFindingFilters,
+    signal?: AbortSignal,
+  ): Promise<ConfigAuditFindingRecord[]>;
+  getAdapterStatus(
+    adapterId: string,
+    signal?: AbortSignal,
+  ): Promise<AdapterStatus>;
   getTraceDetail(traceId: string, signal?: AbortSignal): Promise<TraceDetail>;
   getCurrentPolicy(signal?: AbortSignal): Promise<PolicySummary>;
   getPolicyHistory(signal?: AbortSignal): Promise<PolicyHistoryEntry[]>;

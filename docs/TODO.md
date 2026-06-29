@@ -8,7 +8,7 @@
 - 配置审计 findings：已提供只读查询接口。
 - OpenClaw 插件验证状态：已提供最近一次 verify 状态写入与读取接口。
 
-剩余工作主要是 Dashboard 展示接入。按当前协作约束，默认不修改 `apps/dashboard/**`；如需在页面展示 ASR、finding 明细或 OpenClaw verify 状态，需要另行确认前端改动范围。
+Dashboard 已完成展示接入：安全评测页读取 latest evaluation，系统状态页读取配置审计 findings 与 OpenClaw verify/status。mock 数据源已补齐有数据状态，便于本地查看真实数据形态下的页面效果。
 
 ## 安全评测 ASR 数据接口
 
@@ -97,10 +97,10 @@ OpenClaw 状态不是每次 Dashboard 刷新实时 shell 探测，而是最近�
 - 鉴权：browser session 或 control token。
 - 无记录：返回 `status="unknown"`。
 
-## 前端接入待确认
+## 前端接入状态
 
-以下属于 Dashboard 改动，需单独确认后再做：
+以下 Dashboard 展示已接入：
 
-- `EvaluationPage` 读取 `/v1/evaluations/latest` 并展示 `asrBefore/asrAfter`。
-- `SystemPage` 展示 OpenClaw verify 状态。
-- `SystemPage` 展示配置审计 finding 明细。
+- `EvaluationPage` 读取 `/v1/evaluations/latest`，展示 latest run、ASR before/after、per-attack ASR 和 cases 样本追踪。
+- `SystemPage` 读取 `/v1/adapters/openclaw/status`，展示 OpenClaw verify/heartbeat、hook 覆盖、版本、来源和错误状态。
+- `SystemPage` 读取 `/v1/config-audit/findings`，展示配置审计 finding 明细、严重性分布、目标、建议和证据链入口。

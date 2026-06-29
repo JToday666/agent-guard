@@ -100,12 +100,37 @@ export interface ApprovalResolution {
 }
 
 export interface EvaluationSummary {
+  runId: string | null;
+  runAt: string | null;
+  datasetId: string | null;
+  datasetVersion: string | null;
+  datasetLabel: string;
   asrBefore: number | null;
   asrAfter: number | null;
+  perAttack: EvaluationAttackMetric[];
+  cases: EvaluationCase[];
   blockRate: number | null;
   fpr: number | null;
   fnr: number | null;
   averageLatencyMs: number | null;
+}
+
+export interface EvaluationAttackMetric {
+  attackType: string;
+  asrBefore: number | null;
+  asrAfter: number | null;
+  reduction: number | null;
+}
+
+export interface EvaluationCase {
+  caseId: string;
+  attackType: string;
+  runtime: string;
+  expectedDecision: DecisionStatus;
+  actualDecision: DecisionStatus;
+  blocked: boolean;
+  attackSuccess: boolean;
+  traceId: string;
 }
 
 export interface TraceDetail {
@@ -140,6 +165,47 @@ export interface AuditIntegrity {
   eventCount: number;
   headHash: string | null;
   firstBrokenAuditId: string | null;
+}
+
+export interface ConfigAuditFinding {
+  findingId: string;
+  severity: RiskSeverity;
+  category: string;
+  title: string;
+  subject: string;
+  description: string;
+  evidence: string[];
+  recommendation: string | null;
+}
+
+export interface ConfigAuditFindingRecord {
+  runtime: string;
+  targetType: string;
+  targetId: string;
+  traceId: string;
+  eventId: string;
+  timestamp: string;
+  finding: ConfigAuditFinding;
+}
+
+export interface AdapterStatus {
+  status: "loaded" | "not_loaded" | "error" | "unknown";
+  loaded: boolean;
+  hookCount: number | null;
+  expectedHookCount: number;
+  hookCoverage: number | null;
+  lastVerifiedAt: string | null;
+  lastHeartbeatAt: string | null;
+  error: string | null;
+  source: string | null;
+  runtime: string | null;
+  runtimeId: string | null;
+  agentId: string | null;
+  pluginVersion: string | null;
+  runtimeVersion: string | null;
+  capabilities: Record<string, unknown>;
+  hooks: string[];
+  failClosedStages: string[];
 }
 
 export interface ProvenanceNode {

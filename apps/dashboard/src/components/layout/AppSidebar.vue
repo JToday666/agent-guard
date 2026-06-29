@@ -83,10 +83,10 @@ const navigationGroups = computed(() => [
   {
     label: "监控",
     items: [
-	      { icon: LayoutDashboard, label: "安全总览", to: "/overview" },
-	      { icon: ScanSearch, label: "事件调查", to: "/investigations" },
-	      { icon: GitBranch, label: "证据链", to: "/evidence" },
-	      {
+      { icon: LayoutDashboard, label: "安全总览", to: "/overview" },
+      { icon: ScanSearch, label: "事件调查", to: "/investigations" },
+      { icon: GitBranch, label: "证据链", to: "/evidence" },
+      {
         count: props.pendingCount,
         icon: CircleCheckBig,
         label: "人工审批",

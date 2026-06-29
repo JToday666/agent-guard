@@ -20,9 +20,11 @@ import {
   reconcileApprovals,
 } from "../data/dashboard/snapshot";
 import type {
+  AdapterStatus,
   ApprovalRequest,
   AuditIntegrity,
   AuditEventRow,
+  ConfigAuditFindingRecord,
   DataStatus,
   EvalMetrics,
   EvaluationSummary,
@@ -51,6 +53,42 @@ const emptyMetrics: EvalMetrics = {
   averageLatencyMs: null,
 };
 
+const emptyEvaluation: EvaluationSummary = {
+  runId: null,
+  runAt: null,
+  datasetId: null,
+  datasetVersion: null,
+  datasetLabel: "未提供",
+  asrBefore: null,
+  asrAfter: null,
+  perAttack: [],
+  cases: [],
+  blockRate: null,
+  fpr: null,
+  fnr: null,
+  averageLatencyMs: null,
+};
+
+const unknownOpenClawStatus: AdapterStatus = {
+  status: "unknown",
+  loaded: false,
+  hookCount: null,
+  expectedHookCount: 16,
+  hookCoverage: null,
+  lastVerifiedAt: null,
+  lastHeartbeatAt: null,
+  error: null,
+  source: null,
+  runtime: null,
+  runtimeId: null,
+  agentId: null,
+  pluginVersion: null,
+  runtimeVersion: null,
+  capabilities: {},
+  hooks: [],
+  failClosedStages: [],
+};
+
 const POLL_INTERVAL_MS = 10_000;
 
 function applyLatestPolicyHistory(
@@ -71,14 +109,12 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const events = ref<AuditEventRow[]>([]);
   const approvals = ref<ApprovalRequest[]>([]);
   const metrics = ref<EvalMetrics>({ ...emptyMetrics });
-  const evaluation = ref<EvaluationSummary>({
-    asrBefore: null,
-    asrAfter: null,
-    blockRate: null,
-    fpr: null,
-    fnr: null,
-    averageLatencyMs: null,
-  });
+  const evaluation = ref<EvaluationSummary>({ ...emptyEvaluation });
+  const evaluationError = ref<string | null>(null);
+  const configAuditFindings = ref<ConfigAuditFindingRecord[]>([]);
+  const configAuditError = ref<string | null>(null);
+  const openclawStatus = ref<AdapterStatus>({ ...unknownOpenClawStatus });
+  const openclawStatusError = ref<string | null>(null);
   const traceDetails = ref<Record<string, TraceDetail>>({});
   const traceDetailErrors = ref<Record<string, string>>({});
   const traceDetailLoadingId = ref<string | null>(null);
@@ -216,13 +252,67 @@ export const useDashboardStore = defineStore("dashboard", () => {
           : "策略数据加载失败";
     }
 
-    // 审计完整性（non-critical，失败不影响主状态）
-    try {
-      auditIntegrity.value = await dashboardDataSource.getAuditIntegrity(
+    const secondaryResults = await Promise.allSettled([
+      dashboardDataSource.getAuditIntegrity(controller.signal),
+      dashboardDataSource.getEvaluation(metrics.value, controller.signal),
+      dashboardDataSource.getConfigAuditFindings(
+        { limit: 20 },
         controller.signal,
+      ),
+      dashboardDataSource.getAdapterStatus("openclaw", controller.signal),
+    ] as const);
+
+    const [
+      auditIntegrityResult,
+      evaluationResult,
+      configFindingsResult,
+      openclawStatusResult,
+    ] = secondaryResults;
+
+    if (auditIntegrityResult.status === "fulfilled") {
+      auditIntegrity.value = auditIntegrityResult.value;
+    }
+    if (evaluationResult.status === "fulfilled") {
+      if (!hasSameEvaluation(evaluation.value, evaluationResult.value)) {
+        evaluation.value = evaluationResult.value;
+      }
+      evaluationError.value = null;
+    } else {
+      evaluationError.value =
+        evaluationResult.reason instanceof Error
+          ? evaluationResult.reason.message
+          : "评测结果加载失败";
+    }
+    if (configFindingsResult.status === "fulfilled") {
+      configAuditFindings.value = configFindingsResult.value;
+      configAuditError.value = null;
+    } else {
+      configAuditError.value =
+        configFindingsResult.reason instanceof Error
+          ? configFindingsResult.reason.message
+          : "配置审计 findings 加载失败";
+    }
+    if (openclawStatusResult.status === "fulfilled") {
+      openclawStatus.value = openclawStatusResult.value;
+      openclawStatusError.value = null;
+    } else {
+      openclawStatusError.value =
+        openclawStatusResult.reason instanceof Error
+          ? openclawStatusResult.reason.message
+          : "OpenClaw 状态加载失败";
+    }
+
+    const secondaryFailures = secondaryResults.filter(
+      (result) => result.status === "rejected",
+    ) as PromiseRejectedResult[];
+    const secondarySessionFailure = secondaryFailures.find((failure) =>
+      isSessionAuthError(failure.reason),
+    );
+    if (secondarySessionFailure) {
+      useAuthStore().invalidateSession(
+        getAuthErrorMessage(secondarySessionFailure.reason),
       );
-    } catch {
-      // 忽略，不影响主刷新状态
+      stopPolling();
     }
 
     const failures = [
@@ -254,16 +344,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       error.value = null;
       lastUpdatedAt.value = new Date().toISOString();
     }
-    try {
-      const nextEvaluation = await dashboardDataSource.getEvaluation(
-        metrics.value,
-      );
-      if (!hasSameEvaluation(evaluation.value, nextEvaluation)) {
-        evaluation.value = nextEvaluation;
-      }
-    } finally {
-      if (activeController === controller) activeController = null;
-    }
+    if (activeController === controller) activeController = null;
   }
 
   function clearPollTimer(): void {
@@ -388,6 +469,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
     approvals,
     metrics,
     evaluation,
+    evaluationError,
+    configAuditFindings,
+    configAuditError,
+    openclawStatus,
+    openclawStatusError,
     traceDetails,
     traceDetailErrors,
     traceDetailLoadingId,

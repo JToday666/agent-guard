@@ -1,26 +1,34 @@
 import type {
+  GuardAdapterStatusDto,
   GuardApprovalDto,
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
+  GuardConfigAuditFindingRecordDto,
   GuardEvalMetricsDto,
+  GuardEvaluationRunDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
   GuardProvenanceDto,
   GuardTraceDetailDto,
-} from "./guard-api-types.ts";
+} from "./guard-api-types";
 import type {
+  AdapterStatus,
   ApprovalRequest,
   AuditEventRow,
   AuditIntegrity,
+  ConfigAuditFindingRecord,
   EvalMetrics,
+  EvaluationAttackMetric,
+  EvaluationCase,
+  EvaluationSummary,
   PolicyHistoryEntry,
   PolicySummary,
   ProvenanceEdge,
   ProvenanceGraph,
   ProvenanceNode,
   TraceDetail,
-} from "../types/dashboard.ts";
-import { maskSensitiveText } from "../utils/data-redaction.ts";
+} from "../types/dashboard";
+import { maskSensitiveText } from "../utils/data-redaction";
 
 function formatEventTime(timestamp: string): string {
   const value = new Date(timestamp);
@@ -180,6 +188,96 @@ export function mapMetrics(dto: GuardEvalMetricsDto): EvalMetrics {
   };
 }
 
+function evaluationDatasetLabel(
+  datasetId: string | null,
+  datasetVersion: string | null,
+): string {
+  if (datasetId && datasetVersion) return `${datasetId} / ${datasetVersion}`;
+  return datasetId ?? datasetVersion ?? "未提供";
+}
+
+function metricReduction(
+  before: number | null | undefined,
+  after: number | null | undefined,
+): number | null {
+  return before === null ||
+    before === undefined ||
+    after === null ||
+    after === undefined
+    ? null
+    : before - after;
+}
+
+export function emptyEvaluationSummary(
+  metrics: EvalMetrics,
+): EvaluationSummary {
+  return {
+    runId: null,
+    runAt: null,
+    datasetId: null,
+    datasetVersion: null,
+    datasetLabel: "未提供",
+    asrBefore: null,
+    asrAfter: null,
+    perAttack: [],
+    cases: [],
+    blockRate: metrics.blockRate,
+    fpr: metrics.fpr,
+    fnr: metrics.fnr,
+    averageLatencyMs: metrics.averageLatencyMs,
+  };
+}
+
+export function mapEvaluationRun(
+  dto: GuardEvaluationRunDto,
+  metrics: EvalMetrics,
+): EvaluationSummary {
+  const datasetId = dto.dataset_id ?? null;
+  const datasetVersion = dto.dataset_version ?? null;
+  const perAttack: EvaluationAttackMetric[] = Object.entries(
+    dto.per_attack ?? {},
+  )
+    .map(([attackType, summary]) => ({
+      attackType,
+      asrBefore: summary.asr_before ?? null,
+      asrAfter: summary.asr_after ?? null,
+      reduction: metricReduction(summary.asr_before, summary.asr_after),
+    }))
+    .sort((left, right) => {
+      const leftValue = left.asrBefore ?? -1;
+      const rightValue = right.asrBefore ?? -1;
+      return (
+        rightValue - leftValue ||
+        left.attackType.localeCompare(right.attackType)
+      );
+    });
+  const cases: EvaluationCase[] = (dto.cases ?? []).map((row) => ({
+    caseId: row.case_id,
+    attackType: row.attack_type,
+    runtime: row.runtime,
+    expectedDecision: row.expected_decision,
+    actualDecision: row.actual_decision,
+    blocked: row.blocked,
+    attackSuccess: row.attack_success,
+    traceId: row.trace_id,
+  }));
+  return {
+    runId: dto.run_id,
+    runAt: dto.run_at,
+    datasetId,
+    datasetVersion,
+    datasetLabel: evaluationDatasetLabel(datasetId, datasetVersion),
+    asrBefore: dto.asr_before ?? null,
+    asrAfter: dto.asr_after ?? null,
+    perAttack,
+    cases,
+    blockRate: metrics.blockRate,
+    fpr: metrics.fpr,
+    fnr: metrics.fnr,
+    averageLatencyMs: metrics.averageLatencyMs,
+  };
+}
+
 export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
   const events = dto.audit_events
     .map(mapAuditEvent)
@@ -239,6 +337,56 @@ export function mapAuditIntegrity(dto: GuardAuditIntegrityDto): AuditIntegrity {
     eventCount: dto.event_count,
     headHash: dto.head_hash,
     firstBrokenAuditId: dto.first_broken_audit_id,
+  };
+}
+
+export function mapConfigAuditFindingRecord(
+  dto: GuardConfigAuditFindingRecordDto,
+): ConfigAuditFindingRecord {
+  return {
+    runtime: dto.runtime,
+    targetType: dto.target_type,
+    targetId: dto.target_id,
+    traceId: dto.trace_id,
+    eventId: dto.event_id,
+    timestamp: dto.timestamp,
+    finding: {
+      findingId: dto.finding.finding_id,
+      severity: dto.finding.severity,
+      category: dto.finding.category,
+      title: dto.finding.title,
+      subject: dto.finding.subject,
+      description: dto.finding.description,
+      evidence: dto.finding.evidence,
+      recommendation: dto.finding.recommendation ?? null,
+    },
+  };
+}
+
+export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
+  const expectedHookCount = dto.expected_hook_count;
+  const hookCount = dto.hook_count;
+  return {
+    status: dto.status,
+    loaded: dto.loaded,
+    hookCount,
+    expectedHookCount,
+    hookCoverage:
+      hookCount === null || expectedHookCount <= 0
+        ? null
+        : hookCount / expectedHookCount,
+    lastVerifiedAt: dto.last_verified_at,
+    lastHeartbeatAt: dto.last_heartbeat_at ?? null,
+    error: dto.error,
+    source: dto.source,
+    runtime: dto.runtime ?? null,
+    runtimeId: dto.runtime_id ?? null,
+    agentId: dto.agent_id ?? null,
+    pluginVersion: dto.plugin_version ?? null,
+    runtimeVersion: dto.runtime_version ?? null,
+    capabilities: dto.capabilities ?? {},
+    hooks: dto.hooks ?? [],
+    failClosedStages: dto.fail_closed_stages ?? [],
   };
 }
 

@@ -28,11 +28,14 @@ API 模式当前读取的监督端接口包括：
 - `GET /v1/audit/events`
 - `GET /v1/audit/integrity`
 - `GET /v1/metrics/eval`
+- `GET /v1/evaluations/latest`
 - `GET /v1/approvals/pending`
 - `GET /v1/traces/{trace_id}`
 - `GET /v1/traces/{trace_id}/provenance`
 - `GET /v1/policies/current`
 - `GET /v1/policies/history`
+- `GET /v1/config-audit/findings`
+- `GET /v1/adapters/openclaw/status`
 - `GET /health?check_db=true`
 - `POST /v1/approvals/{approval_id}/resolve`
 
@@ -51,7 +54,7 @@ Dashboard 不生成 launch code，不保存长期 token，也不将鉴权状态�
 
 ## 4. 刷新与失败恢复
 
-`dashboardStore` 在上一轮完成后等待 10 秒，再串行请求事件、指标、审批、健康状态和只读策略状态。页面不可见时暂停轮询，恢复可见后立即刷新；审批提交后立即刷新。证据链详情只在打开 `/evidence/:trace_id` 时按需请求。Skeleton 只在首次请求时显示，合法空数据不重复进入 loading。后台刷新和短暂失败保留现有页面、筛选、选择和详情状态；相同事件、指标、评测和审批数据保留现有响应式引用。
+`dashboardStore` 在上一轮完成后等待 10 秒，再请求事件、指标、审批、健康状态、只读策略状态、审计完整性、latest evaluation、配置审计 findings 和 OpenClaw status。页面不可见时暂停轮询，恢复可见后立即刷新；审批提交后立即刷新。证据链详情只在打开 `/evidence/:trace_id` 时按需请求。Skeleton 只在首次请求时显示，合法空数据不重复进入 loading。后台刷新和短暂失败保留现有页面、筛选、选择和详情状态；相同事件、指标、评测和审批数据保留现有响应式引用。
 
 Store 状态包括：
 
@@ -64,7 +67,7 @@ Browser session 无效或过期时不属于普通 stale：Dashboard 停止轮询
 
 事件接口成功而指标接口失败时，只使用同一批真实审计事件派生基础计数；FPR、FNR 等依赖标注的数据保持不可用。
 
-证据链详情请求失败时，详情页回退到已加载审计事件窗口中同一 `trace_id` 的局部证据，并显示局部失败状态。策略接口失败只影响系统页策略区块，不触发全局鉴权错误态，除非 Guard API 返回 session 失效。
+证据链详情请求失败时，详情页回退到已加载审计事件窗口中同一 `trace_id` 的局部证据，并显示局部失败状态。策略、latest evaluation、配置审计 findings、OpenClaw status 接口失败只影响对应区块，不触发全局错误态，除非 Guard API 返回 session 失效。
 
 ## 5. 页面消费
 
@@ -72,5 +75,5 @@ Browser session 无效或过期时不属于普通 stale：Dashboard 停止轮询
 - 事件调查：审计列表、搜索、多维筛选（decision/runtime/severity/event_type/attack_type/rule）、脱敏详情、CSV 导出，规则选项只来自真实 `rule_hits`。
 - 人工审批：pending 队列、`allow_once` / `deny`，并用已加载审计事件按 `approval_id` 补齐关联事件、规则命中和 Agent 行为。
 - 证据链：优先读取证据链详情接口，按真实事件时间排序展示；展示溯源图与节点证据抽屉，时间线与溯源图联动；接口失败时回退到当前审计事件窗口，并按 `event_id` 定位证据。
-- 安全评测：展示接口或场景数据已提供的 Block Rate、FPR、FNR 和平均判定延迟；混淆矩阵由 `is_malicious + blocked` 派生；runtime 延迟对比由 `latency_ms` 字段派生；ASR 仅在 before / after 数据同时存在时展示。
-- 系统状态：展示会话、健康检查、轮询、数据新鲜度、只读策略快照 / 历史、审计链完整性、运行时适配器活动（LangGraph/OpenClaw）、配置审计摘要。
+- 安全评测：展示 latest evaluation run 的 ASR before / after、per-attack ASR、cases 样本追踪；Block Rate、FPR、FNR、平均判定延迟、混淆矩阵和 runtime 延迟仍由当前审计窗口派生。
+- 系统状态：展示会话、健康检查、轮询、数据新鲜度、只读策略快照 / 历史、审计链完整性、OpenClaw verify/heartbeat 状态、运行时审计活动（LangGraph/OpenClaw）和配置审计 finding 明细。

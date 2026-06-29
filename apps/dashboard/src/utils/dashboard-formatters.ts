@@ -2,7 +2,7 @@ import type {
   DecisionStatus,
   RiskSeverity,
   TraceSummary,
-} from "../types/dashboard.ts";
+} from "../types/dashboard";
 
 export type StatusBadgeTone = "neutral" | "success" | "warning" | "danger";
 

@@ -3,7 +3,7 @@ import type {
   AuditEventRow,
   EvalMetrics,
   EvaluationSummary,
-} from "../../types/dashboard.ts";
+} from "../../types/dashboard";
 
 function hasSameStringList(left: readonly string[], right: readonly string[]) {
   return (
@@ -67,8 +67,39 @@ export function hasSameEvaluation(
   right: EvaluationSummary,
 ): boolean {
   return (
+    left.runId === right.runId &&
+    left.runAt === right.runAt &&
+    left.datasetId === right.datasetId &&
+    left.datasetVersion === right.datasetVersion &&
+    left.datasetLabel === right.datasetLabel &&
     left.asrBefore === right.asrBefore &&
     left.asrAfter === right.asrAfter &&
+    left.perAttack.length === right.perAttack.length &&
+    left.perAttack.every((row, index) => {
+      const other = right.perAttack[index];
+      return (
+        other !== undefined &&
+        row.attackType === other.attackType &&
+        row.asrBefore === other.asrBefore &&
+        row.asrAfter === other.asrAfter &&
+        row.reduction === other.reduction
+      );
+    }) &&
+    left.cases.length === right.cases.length &&
+    left.cases.every((row, index) => {
+      const other = right.cases[index];
+      return (
+        other !== undefined &&
+        row.caseId === other.caseId &&
+        row.attackType === other.attackType &&
+        row.runtime === other.runtime &&
+        row.expectedDecision === other.expectedDecision &&
+        row.actualDecision === other.actualDecision &&
+        row.blocked === other.blocked &&
+        row.attackSuccess === other.attackSuccess &&
+        row.traceId === other.traceId
+      );
+    }) &&
     left.blockRate === right.blockRate &&
     left.fpr === right.fpr &&
     left.fnr === right.fnr &&

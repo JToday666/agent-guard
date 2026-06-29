@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+async function openResponsiveNavigationIfNeeded(
+  page: import("@playwright/test").Page,
+) {
+  const menuButton = page.getByRole("button", { name: "菜单" });
+  if (await menuButton.isVisible()) await menuButton.click();
+}
+
 test("evidence context does not trap desktop wheel scrolling", async ({
   page,
 }, testInfo) => {
@@ -53,6 +60,7 @@ test("dashboard routes use the shell transition layer", async ({ page }) => {
   );
   expect(hasRouteTransitionRules).toBe(true);
 
+  await openResponsiveNavigationIfNeeded(page);
   await page.getByRole("link", { name: /^事件调查/ }).click();
   await expect(page).toHaveURL(/\/investigations$/);
   await expect(page.locator(".dashboard-route-view")).toHaveCount(1);
