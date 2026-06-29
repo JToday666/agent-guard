@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环和 P1 核心路径均已有可运行实现；P2 部分功能已完成，余下开发项保持不变。
+本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环和 P1 核心路径均已有可运行实现；P2 部分后端与插件能力已完成，余下开发项以本文为准。
 
 关联入口：
 
@@ -68,40 +68,47 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
    - 展示 pending approval，并支持 `allow_once` / `deny`。
    - 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
 
-## 4. P1 已完成项
+## 4. P1 已完成 / 部分完成项
 
 - `GET /v1/traces/{trace_id}` 已接入，证据链页展示 Trace 时间线与详情。
 - `GET /v1/traces/{trace_id}/provenance` 已接入，证据链页展示溯源图，时间线与节点联动。
 - `GET /v1/audit/integrity` 已接入，系统状态页与安全总览展示审计链完整性。
+- `ContextBuildEvent`、`ToolResultEvent`、`MemoryEvent`、`MessageSendEvent` 已进入 `GuardEvent` 契约、schema 校验和 Core/API 测试路径。
+- `message_send_proposed` 已支持消息外发 DLP、`ask` 审批与 OpenClaw `message_sending` 映射。
+- `memory_write_proposed` 已有契约、Core 检测和基础后端变更记录；真实 runtime memory/store 接入仍需后续补齐。
 - FPR、FNR、Block Rate、Latency 已在安全评测页展示；混淆矩阵由 `is_malicious + blocked` 派生。
+- 评测结果导入与读取后端接口已实现：`POST /v1/evaluations`、`GET /v1/evaluations`、`GET /v1/evaluations/latest`、`GET /v1/evaluations/{run_id}`。
 - Dashboard 运行时延迟对比（LangGraph / OpenClaw）由 `latency_ms` 字段前端派生。
 
 ## 5. P1 待完成项
 
-- `ContextBuildEvent`、`ToolResultEvent`、`MemoryEvent`。
-- `pre_model_hook`、`post_model_hook`。
-- 消息外发和记忆写入审计。
-- `POST /v1/eval/runs` 评测任务接口。
-- `GET /v1/metrics/runtime` 运行时监控指标。
+- Adapter 侧模型输入/输出 hook 接入，例如 `pre_model_hook`、`post_model_hook` 或对应 runtime 的等价 hook。
+- 长期记忆真实 runtime/store 写入前拦截与回滚链路。
+- `GET /v1/metrics/runtime` 运行时监控指标；当前已实现的是 `GET /v1/metrics/eval`。
+- 更完整的上下文隔离执行策略，包括 sanitize、降权、工具最小权限和下游审计联动。
 
-## 6. P2 已完成项
+## 6. P2 已完成 / 部分完成项
 
 - Provenance Graph（前端接入）。
 - Tamper-Evident Audit / 审计完整性（前端接入）。
-- OpenClaw Config Audit 摘要（前端展示，基于 `event_type=config_audit` 派生）。
+- OpenClaw Config Audit 后端评估与 findings 查询接口已实现；前端摘要可基于 `event_type=config_audit` 派生。
 - 运行时适配器活动（LangGraph / OpenClaw 审计统计）。
 - Dashboard 规则命中 TopN。
+- Memory Guard 已有后端基础变更流：propose、commit、rollback。
+- Action Critic 已有确定性 review 与可选 provider 扩展点。
+- OpenClaw verify 最近状态写入与读取接口已实现：`PUT /v1/adapters/openclaw/status`、`GET /v1/adapters/openclaw/status`。
+- 安全评测 ASR before/after 后端导入与 latest 查询已实现，统一走 `/v1/evaluations` 系列接口。
 
 ## 7. P2 待完成项
 
-- Memory Guard。
-- Action Critic。
+- Memory Guard 策略深化、真实 runtime memory 接入和审批/回滚语义完善。
+- Action Critic 从确定性 review 扩展到可评测、可消融的 LLM-as-Judge / rule hybrid 方案。
 - 多渠道审批。
 - 消融实验。
-- OpenClaw verify 报告导入或后端状态接口（见 `docs/TODO.md`）。
-- 安全评测 ASR before/after 后端接口（见 `docs/TODO.md`）。
+- OpenClaw verify / E2E 报告纳入稳定发布门禁。
+- Dashboard 展示新增后端能力属于前端改动，需要单独确认范围，见 `docs/TODO.md`。
 
-## 6. 分工建议
+## 8. 分工建议
 
 | 成员 | 负责                                                      |
 | ---- | --------------------------------------------------------- |
@@ -109,7 +116,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 | B    | LangGraph、沙箱工具、AttackBench runner                   |
 | C    | Dashboard、OpenClaw Plugin、文档、Demo                    |
 
-## 7. P0 验收标准
+## 9. P0 验收标准
 
 P0 完成必须同时满足：
 
