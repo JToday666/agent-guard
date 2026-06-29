@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ApprovalRequest, AuditEventRow } from "../types/dashboard.ts";
-import { mergeApprovalsWithAuditEvidence } from "./approval-evidence.ts";
+import type { ApprovalRequest, AuditEventRow } from "../../types/dashboard.ts";
+import { mergeApprovalsWithAuditEvidence } from "./evidence.ts";
 
 function event(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {

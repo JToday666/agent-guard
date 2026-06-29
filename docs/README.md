@@ -67,28 +67,28 @@ docs/
 
 ## 3. 文档职责
 
-| 文档                                                                                     | 职责                                                        |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| [命题.pdf](00_requirements/命题.pdf)                                                     | 原始题目材料                                                |
-| [命题一\_题目解读总结.md](00_requirements/命题一_题目解读总结.md)                        | 命题一解读、攻击场景和成果形态建议                          |
-| [requirement_traceability_matrix.md](00_requirements/requirement_traceability_matrix.md) | 命题要求、模块设计和验收证据的追踪矩阵                      |
-| [architecture.md](01_overview/architecture.md)                                           | 系统总体架构、核心链路和模块关系                            |
-| [repo_structure.md](01_overview/repo_structure.md)                                       | 仓库目录职责和边界规则                                      |
-| [interface_contract.md](02_core/interface_contract.md)                                   | Guard API / Control Plane API、事件模型、决策模型和冻结规则 |
-| [core_design.md](02_core/core_design.md)                                                 | 无状态 Core 职责、检测器、策略和风险判定设计 |
-| [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标            |
-| [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路 |
-| [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计      |
-| [openclaw_plugin_deployment.md](03_adapters/openclaw_plugin_deployment.md)               | OpenClaw 插件部署、安装、配置、验证和卸载   |
-| [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计 |
-| [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示    |
-| [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标    |
-| [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                    | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |
-| [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准       |
-| [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                  |
-| [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                                | Capability Auth、control token、adapter token、browser session 与接口鉴权 |
-| [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                            | Adapter / Plugin token 使用边界和 scope      |
-| [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                                | Dashboard browser session、CSRF 和 launch code 边界 |
+| 文档                                                                                     | 职责                                                                           |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [命题.pdf](00_requirements/命题.pdf)                                                     | 原始题目材料                                                                   |
+| [命题一\_题目解读总结.md](00_requirements/命题一_题目解读总结.md)                        | 命题一解读、攻击场景和成果形态建议                                             |
+| [requirement_traceability_matrix.md](00_requirements/requirement_traceability_matrix.md) | 命题要求、模块设计和验收证据的追踪矩阵                                         |
+| [architecture.md](01_overview/architecture.md)                                           | 系统总体架构、核心链路和模块关系                                               |
+| [repo_structure.md](01_overview/repo_structure.md)                                       | 仓库目录职责和边界规则                                                         |
+| [interface_contract.md](02_core/interface_contract.md)                                   | Guard API / Control Plane API、事件模型、决策模型和冻结规则                    |
+| [core_design.md](02_core/core_design.md)                                                 | 无状态 Core 职责、检测器、策略和风险判定设计                                   |
+| [threat_model.md](02_core/threat_model.md)                                               | 保护目标、攻击面、攻击链和非目标                                               |
+| [langgraph_adapter.md](03_adapters/langgraph_adapter.md)                                 | LangGraph 接入点、Mock Tools 和 P0 靶场链路                                    |
+| [openclaw_plugin.md](03_adapters/openclaw_plugin.md)                                     | OpenClaw 插件接入、Hook 映射和配置审计                                         |
+| [openclaw_plugin_deployment.md](03_adapters/openclaw_plugin_deployment.md)               | OpenClaw 插件部署、安装、配置、验证和卸载                                      |
+| [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计             |
+| [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示                                       |
+| [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标                                       |
+| [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                   | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |
+| [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准                                          |
+| [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                                                     |
+| [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                               | Capability Auth、control token、adapter token、browser session 与接口鉴权      |
+| [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                           | Adapter / Plugin token 使用边界和 scope                                        |
+| [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                               | Dashboard browser session、CSRF 和 launch code 边界                            |
 
 ## 4. 维护规则
 

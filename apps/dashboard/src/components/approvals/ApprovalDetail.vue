@@ -63,8 +63,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { RouteLocationRaw } from "vue-router";
-import type { ApprovalRequest } from "../types/dashboard";
-import { formatDashboardDateTime, getRiskSeverityLabel } from "../utils/dashboard-formatters";
+import type { ApprovalRequest } from "../../types/dashboard";
+import { formatDashboardDateTime, getRiskSeverityLabel } from "../../utils/dashboard-formatters";
 
 const props = defineProps<{
   approval: ApprovalRequest;

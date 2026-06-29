@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   getRefreshFailureStatus,
   shouldEnterInitialLoading,
-} from "./dashboard-refresh-state.ts";
+} from "./refresh-state.ts";
 
 test("only enters blocking loading from the idle state", () => {
   assert.equal(shouldEnterInitialLoading("idle"), true);

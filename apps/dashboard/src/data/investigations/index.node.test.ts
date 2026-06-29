@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { AuditEventRow } from "../types/dashboard.ts";
+import type { AuditEventRow } from "../../types/dashboard.ts";
 import {
   buildInvestigationIndex,
   filterInvestigationEvents,
   getRuleFilterOptions,
   resolveInvestigationEvent,
-} from "./investigation-index.ts";
+} from "./index.ts";
 
 function event(overrides: Partial<AuditEventRow>): AuditEventRow {
   return {

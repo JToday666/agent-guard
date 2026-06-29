@@ -1,5 +1,5 @@
-import type { AuditEventRow, TraceSummary } from "../types/dashboard";
-import type { InvestigationQueryState } from "../utils/investigation-query";
+import type { AuditEventRow, TraceSummary } from "../../types/dashboard";
+import type { InvestigationQueryState } from "../../utils/investigation-query";
 
 export interface InvestigationIndex {
   byId: Map<string, AuditEventRow>;

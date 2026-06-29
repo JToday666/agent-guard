@@ -10,10 +10,7 @@ const RULE_LABELS: Record<string, string> = {
 const RULE_ID_PATTERN = /^P\d+_?/;
 
 function titleCaseWords(value: string): string {
-  const words = value
-    .replace(RULE_ID_PATTERN, "")
-    .split("_")
-    .filter(Boolean);
+  const words = value.replace(RULE_ID_PATTERN, "").split("_").filter(Boolean);
   if (!words.length) return "安全规则";
   return words
     .map((word, index) =>
@@ -63,13 +60,11 @@ export function prepareEvidenceDataForDisplay(
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-        const displayKey = shouldMapRuleObjectKeys(fieldName) && isRuleId(key)
-          ? ruleLabel(key)
-          : key;
-        return [
-          displayKey,
-          prepareEvidenceDataForDisplay(item, key),
-        ];
+        const displayKey =
+          shouldMapRuleObjectKeys(fieldName) && isRuleId(key)
+            ? ruleLabel(key)
+            : key;
+        return [displayKey, prepareEvidenceDataForDisplay(item, key)];
       }),
     );
   }

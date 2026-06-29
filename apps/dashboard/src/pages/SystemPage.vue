@@ -36,7 +36,7 @@
           <StatusBadge :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'" :tone="store.auditIntegrity.valid ? 'success' : 'danger'" />
           <span class="integrity-count">{{ store.auditIntegrity.eventCount }} 条审计事件</span></div>
         <dl class="integrity-detail">
-          <div><dt>链头哈希</dt><dd><code class="hash-short">{{ store.auditIntegrity.headHash.slice(0, 12) }}…</code></dd></div>
+          <div><dt>链头哈希</dt><dd><code class="hash-short">{{ formatAuditHeadHash(store.auditIntegrity.headHash) }}</code></dd></div>
           <div v-if="store.auditIntegrity.firstBrokenAuditId"><dt>首个异常审计</dt><dd><RouterLink :to="`/investigations?search=${store.auditIntegrity.firstBrokenAuditId}`">{{ store.auditIntegrity.firstBrokenAuditId }}</RouterLink></dd></div></dl>
       </template>
       <EmptyState v-else title="暂无完整性数据" message="审计完整性信息加载中或不可用。" />
@@ -92,13 +92,13 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import DataFreshness from "../components/DataFreshness.vue";
-import EmptyState from "../components/EmptyState.vue";
-import StatusBadge from "../components/StatusBadge.vue";
+import DataFreshness from "../components/common/DataFreshness.vue";
+import EmptyState from "../components/common/EmptyState.vue";
+import StatusBadge from "../components/common/StatusBadge.vue";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { AuditEventRow } from "../types/dashboard";
-import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
+import { formatAuditHeadHash, getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 defineOptions({ name: "SystemPage" });
 const store = useDashboardStore();
 const auth = useAuthStore();

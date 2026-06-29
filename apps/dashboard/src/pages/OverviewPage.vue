@@ -66,15 +66,15 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import AttackDistributionChart from "../components/Charts/AttackDistributionChart.vue";
-import RuleTopNChart from "../components/Charts/RuleTopNChart.vue";
-import DecisionTrendChart from "../components/Charts/DecisionTrendChart.vue";
-import DataFreshness from "../components/DataFreshness.vue";
-import EmptyState from "../components/EmptyState.vue";
-import MetricStrip from "../components/MetricStrip.vue";
-import StatusBadge from "../components/StatusBadge.vue";
-import ErrorState from "../components/States/ErrorState.vue";
-import LoadingState from "../components/States/LoadingState.vue";
+import AttackDistributionChart from "../components/charts/AttackDistributionChart.vue";
+import RuleTopNChart from "../components/charts/RuleTopNChart.vue";
+import DecisionTrendChart from "../components/charts/DecisionTrendChart.vue";
+import DataFreshness from "../components/common/DataFreshness.vue";
+import EmptyState from "../components/common/EmptyState.vue";
+import MetricStrip from "../components/common/MetricStrip.vue";
+import StatusBadge from "../components/common/StatusBadge.vue";
+import ErrorState from "../components/states/ErrorState.vue";
+import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
 import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 

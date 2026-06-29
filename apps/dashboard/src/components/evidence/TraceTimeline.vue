@@ -25,9 +25,9 @@
 </template>
 
 <script setup lang="ts">
-import type { AuditEventRow } from "../types/dashboard";
-import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
-import StatusBadge from "./StatusBadge.vue";
+import type { AuditEventRow } from "../../types/dashboard";
+import { getDecisionLabel, getDecisionTone } from "../../utils/dashboard-formatters";
+import StatusBadge from "../common/StatusBadge.vue";
 
 defineOptions({ name: "TraceTimeline" });
 const props = defineProps<{ events: AuditEventRow[]; selectedEventId?: string; traceId?: string }>();
@@ -58,4 +58,3 @@ function eventLink(eventId: string) {
 .timeline-select-btn { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-2); color: var(--color-text-subtle); cursor: pointer; font-size: var(--font-size-11); min-height: 1.75rem; padding: 0 var(--space-2); transition: border-color var(--transition-fast), color var(--transition-fast); }
 .timeline-select-btn:hover { border-color: var(--color-active); color: var(--color-active); }
 </style>
-

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveMetrics, groupDecisionTrend } from "./dashboard-metrics.ts";
+import { deriveMetrics, groupDecisionTrend } from "./metrics.ts";
 
 const events = [
   {

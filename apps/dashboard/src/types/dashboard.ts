@@ -138,7 +138,7 @@ export interface PolicySummary {
 export interface AuditIntegrity {
   valid: boolean;
   eventCount: number;
-  headHash: string;
+  headHash: string | null;
   firstBrokenAuditId: string | null;
 }
 

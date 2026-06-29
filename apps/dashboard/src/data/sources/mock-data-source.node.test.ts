@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MockDashboardDataSource } from "./sources/mock-data-source";
+import { MockDashboardDataSource } from "./mock-data-source.ts";
 
 test("mock provenance graph contains evidence nodes and event references", async () => {
   const source = new MockDashboardDataSource(0);

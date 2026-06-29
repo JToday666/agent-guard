@@ -20,7 +20,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import { serializeStructuredData } from "../utils/structured-data";
+import { serializeStructuredData } from "../../utils/structured-data";
 
 defineOptions({ name: "StructuredDataView" });
 const props = defineProps<{ value: unknown }>();

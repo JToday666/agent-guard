@@ -11,7 +11,13 @@ import {
 test("formats known rule ids as user-facing labels without exposing ids", () => {
   assert.equal(ruleLabel("P004_task_mismatch"), "任务与行为不一致");
   assert.equal(ruleOptionLabel("P005_external_send", 3), "外部发送需确认 3");
-  assert.equal(formatRuleListForDisplay(["P001_sensitive_file_access", "P004_task_mismatch"]), "敏感文件访问、任务与行为不一致");
+  assert.equal(
+    formatRuleListForDisplay([
+      "P001_sensitive_file_access",
+      "P004_task_mismatch",
+    ]),
+    "敏感文件访问、任务与行为不一致",
+  );
 });
 
 test("falls back to a readable rule name without the numeric prefix", () => {

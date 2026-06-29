@@ -6,13 +6,13 @@ import type {
   AuditEventRow,
   EvalMetrics,
   EvaluationSummary,
-} from "../types/dashboard.ts";
+} from "../../types/dashboard.ts";
 import {
   hasSameEventWindow,
   hasSameEvaluation,
   hasSameMetrics,
   reconcileApprovals,
-} from "./dashboard-snapshot.ts";
+} from "./snapshot.ts";
 
 function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {

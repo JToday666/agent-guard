@@ -1,6 +1,6 @@
 # AgentGuard Dashboard 完整设计方案
 
-> 本文保留 Dashboard 的 P1/P2 目标设计。当前已落地的路由是 `/overview`、`/approvals/:approval_id?`、`/investigations`、`/investigations/:trace_id`、`/evaluation` 和 `/system`；独立 Events、Traces 和 Advanced 页仍是未来规划。调查详情优先读取 `GET /v1/traces/{trace_id}`，接口失败时回退到已加载 AuditEvent 窗口中的同 `trace_id` 事件。
+> 本文保留 Dashboard 的 P1/P2 目标设计。当前已落地的路由是 `/overview`、`/approvals/:approval_id?`、`/investigations`、`/evidence`、`/evidence/:trace_id`、`/evaluation` 和 `/system`；独立 Advanced 页仍是未来规划。证据链详情优先读取 `GET /v1/traces/{trace_id}`，接口失败时回退到已加载 AuditEvent 窗口中的同 `trace_id` 事件。
 
 ## 1. 产品定位
 
@@ -347,7 +347,7 @@ Events 是默认首页和核心工作台。它承担三个任务：
 
 P0 最重要的信息都要放在 Events 首屏：`time`、`decision`、`risk_score`、`severity`、`blocked`、`runtime`、`tool`、`resource_targets`、`reason`。
 
-P0 默认表格只承诺展示 AuditEvent 字段。`trace_id`、`case_id` 可以展示和复制，当前可进入 `/investigations/:trace_id` 查看调查详情；详情页优先读取 Trace detail，失败时回退到已加载 AuditEvent 窗口。P1 扩展 stage 包括 `memory_write`、`message_sending`、`tool_result`、`context_build` 和 `model_call`。
+P0 默认表格只承诺展示 AuditEvent 字段。`trace_id`、`case_id` 可以展示和复制，当前可进入 `/evidence/:trace_id` 查看证据链详情；详情页优先读取证据链详情接口，失败时回退到已加载 AuditEvent 窗口。P1 扩展 stage 包括 `memory_write`、`message_sending`、`tool_result`、`context_build` 和 `model_call`。
 
 Dashboard 文档要求实时事件页展示 AuditEvent 列表、决策、风险分数和阻断原因，并要求阻断记录显示工具名、参数、资源目标、命中规则和用户任务。仓库接口契约也把 AuditEvent 定义为 Dashboard、指标和答辩证据的共同输入。
 
@@ -650,7 +650,7 @@ Traces 负责解释“为什么这条事件发生”。它把单条事件扩展�
 → AuditEvent 写入
 ```
 
-独立 Traces 列表和 Provenance 图是 P1 能力。当前已提供 `/investigations/:trace_id` 调查详情，优先读取 Trace detail 接口生成同一 `trace_id` 的时间线；接口失败时回退到已加载 AuditEvent 窗口。
+独立证据链列表和 Provenance 图是 P1 能力。当前已提供 `/evidence/:trace_id` 证据链详情，优先读取证据链详情接口生成同一 `trace_id` 的时间线；接口失败时回退到已加载 AuditEvent 窗口。
 
 ## 8.2 布局
 

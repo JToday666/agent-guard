@@ -4,14 +4,14 @@
 
 本文是 AgentGuard 当前 MVP 的统一运行手册，覆盖本地开发、演示验收、无头机器使用和生产化边界。当前系统按以下职责拆分：
 
-| 组件 | 部署形态 | 职责 |
-| ---- | -------- | ---- |
-| `agentguard-core` | Python 库 | 无状态安全判定内核，负责事件规范化、检测器、策略匹配、风险评分和 `GuardDecision` 输出。 |
-| Guard API / Control Plane | FastAPI 服务 | 对外 HTTP 入口，负责鉴权、调用 core、审计入库、审批、指标、Trace、策略快照和 Dashboard 查询。 |
-| `agentguardctl` CLI | Python console script | 无图形界面机器上的工程控制台，通过 Guard API 做健康检查、登录链接、审计导出、指标、Trace、插件验证和评测委托。 |
-| Dashboard | Vue/Vite 前端 | 图形化监督端，只通过 Guard API 读取审计、审批、Trace、指标和策略状态。 |
-| OpenClaw 插件 | OpenClaw runtime plugin | Runtime Adapter，通过 adapter token 把 OpenClaw hook 事件送入 Guard API，不保存 Dashboard 会话。 |
-| AttackBench runner | Python 评测入口 | 运行攻击样本和正常样本，生成阻断率、误报、漏报和延迟指标。 |
+| 组件                      | 部署形态                | 职责                                                                                                           |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `agentguard-core`         | Python 库               | 无状态安全判定内核，负责事件规范化、检测器、策略匹配、风险评分和 `GuardDecision` 输出。                        |
+| Guard API / Control Plane | FastAPI 服务            | 对外 HTTP 入口，负责鉴权、调用 core、审计入库、审批、指标、Trace、策略快照和 Dashboard 查询。                  |
+| `agentguardctl` CLI       | Python console script   | 无图形界面机器上的工程控制台，通过 Guard API 做健康检查、登录链接、审计导出、指标、Trace、插件验证和评测委托。 |
+| Dashboard                 | Vue/Vite 前端           | 图形化监督端，只通过 Guard API 读取审计、审批、Trace、指标和策略状态。                                         |
+| OpenClaw 插件             | OpenClaw runtime plugin | Runtime Adapter，通过 adapter token 把 OpenClaw hook 事件送入 Guard API，不保存 Dashboard 会话。               |
+| AttackBench runner        | Python 评测入口         | 运行攻击样本和正常样本，生成阻断率、误报、漏报和延迟指标。                                                     |
 
 依赖方向固定为：Runtime Adapter 调用 Guard API，Guard API 调用 `agentguard-core`，Dashboard 和 CLI 都只调用 Guard API。Core 不启动服务、不访问数据库、不读取 token。
 
@@ -24,7 +24,7 @@ uv sync
 pnpm install
 ```
 
-当前根 `package.json` 声明 Node `24.15.0` 和 pnpm `11.5.2`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `agentguard-core`、Guard API 和 `agentguard-cli`。
+当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.5.2`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `agentguard-core`、Guard API 和 `agentguard-cli`。
 
 准备本地配置：
 
