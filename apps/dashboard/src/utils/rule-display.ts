@@ -7,10 +7,11 @@ const RULE_LABELS: Record<string, string> = {
   P104_memory_poisoning: "长期记忆写入风险",
 };
 
-const RULE_ID_PATTERN = /^P\d+_?/;
+const RULE_ID_PATTERN = /^P\d{3}(?:_|$)/;
+const RULE_ID_TOKEN_PATTERN = /\bP\d{3}(?:_[A-Za-z0-9]+)*\b/g;
 
 function titleCaseWords(value: string): string {
-  const words = value.replace(RULE_ID_PATTERN, "").split("_").filter(Boolean);
+  const words = value.replace(/^P\d{3}_?/, "").split("_").filter(Boolean);
   if (!words.length) return "安全规则";
   return words
     .map((word, index) =>
@@ -34,6 +35,10 @@ export function ruleOptionLabel(ruleId: string, count: number): string {
 export function formatRuleListForDisplay(ruleIds: readonly string[]): string {
   if (!ruleIds.length) return "未命中阻断规则";
   return ruleIds.map(ruleLabel).join("、");
+}
+
+export function formatRuleIdsInTextForDisplay(value: string): string {
+  return value.replace(RULE_ID_TOKEN_PATTERN, (ruleId) => ruleLabel(ruleId));
 }
 
 function shouldMapRuleArray(fieldName: string): boolean {
@@ -69,8 +74,10 @@ export function prepareEvidenceDataForDisplay(
     );
   }
 
-  if (typeof value === "string" && shouldMapRuleArray(fieldName)) {
-    return ruleLabel(value);
+  if (typeof value === "string") {
+    return shouldMapRuleArray(fieldName)
+      ? ruleLabel(value)
+      : formatRuleIdsInTextForDisplay(value);
   }
 
   return value;

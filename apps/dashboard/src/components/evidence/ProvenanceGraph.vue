@@ -13,7 +13,7 @@
         :nodes-connectable="false"
         :nodes-draggable="false"
         :elements-selectable="true"
-        :fit-view-options="{ padding: 0.12 }"
+        :fit-view-options="{ padding: 0.18 }"
         :zoom-on-scroll="true"
         class="provenance-flow"
         @node-click="handleNodeClick"
@@ -24,10 +24,10 @@
           <div
             class="prov-node"
             :class="[`prov-node--${data.kind}`, { 'prov-node--selected': data.nodeId === selectedNodeId }]"
-            :title="data.label"
+            :title="displayText(data.label)"
           >
             <span class="prov-node__kind">{{ nodeLane(data.metadata, data.kind) }}</span>
-            <span class="prov-node__label">{{ data.label }}</span>
+            <span class="prov-node__label">{{ displayText(data.label) }}</span>
             <span v-if="nodeSummary(data.metadata)" class="prov-node__summary">{{ nodeSummary(data.metadata) }}</span>
             <span v-if="nodeMetaBadge(data.metadata)" class="prov-node__badge">{{ nodeMetaBadge(data.metadata) }}</span>
           </div>
@@ -45,6 +45,7 @@ import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import dagre from "@dagrejs/dagre";
 import type { ProvenanceGraph } from "../../types/dashboard";
+import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 
 defineOptions({ name: "ProvenanceGraph" });
 
@@ -82,13 +83,17 @@ function metadataValue(metadata: Record<string, unknown>, key: string): string {
     : "";
 }
 
+function displayText(value: string): string {
+  return formatRuleIdsInTextForDisplay(value);
+}
+
 function nodeLane(metadata: Record<string, unknown>, kind: string): string {
   return metadataValue(metadata, "lane") || kindLabel(kind);
 }
 
 function nodeSummary(metadata: Record<string, unknown>): string {
-  const summary = metadataValue(metadata, "summary");
-  return summary.length > 44 ? `${summary.slice(0, 44)}...` : summary;
+  const summary = displayText(metadataValue(metadata, "summary"));
+  return summary.length > 54 ? `${summary.slice(0, 54)}...` : summary;
 }
 
 function nodeMetaBadge(metadata: Record<string, unknown>): string {
@@ -103,11 +108,11 @@ function nodeMetaBadge(metadata: Record<string, unknown>): string {
   return "";
 }
 
-const NODE_W = 204;
-const NODE_H = 96;
-const ENHANCED_STEP_X = 232;
-const ENHANCED_TOP_Y = 72;
-const ENHANCED_BOTTOM_Y = 220;
+const NODE_W = 260;
+const NODE_H = 120;
+const ENHANCED_STEP_X = 328;
+const ENHANCED_TOP_Y = 96;
+const ENHANCED_BOTTOM_Y = 296;
 
 function enhancedMockPosition(nodeId: string, index: number): { x: number; y: number } {
   const suffix = nodeId.split(":").at(-1) ?? "";
@@ -125,11 +130,11 @@ function enhancedMockPosition(nodeId: string, index: number): { x: number; y: nu
   if (known) {
     return {
       x: 28 + known.column * ENHANCED_STEP_X,
-      y: known.row === "top" ? ENHANCED_TOP_Y : known.row === "bottom" ? ENHANCED_BOTTOM_Y : 146,
+      y: known.row === "top" ? ENHANCED_TOP_Y : known.row === "bottom" ? ENHANCED_BOTTOM_Y : 196,
     };
   }
   if (nodeId.includes(":event:")) {
-    return { x: 28 + 3 * ENHANCED_STEP_X, y: ENHANCED_BOTTOM_Y + Math.max(0, index - 4) * 24 };
+    return { x: 28 + 3 * ENHANCED_STEP_X, y: ENHANCED_BOTTOM_Y + Math.max(0, index - 4) * 72 };
   }
   return { x: 28 + index * ENHANCED_STEP_X, y: ENHANCED_BOTTOM_Y };
 }
@@ -151,7 +156,7 @@ const flowNodes = computed<Node[]>(() => {
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 128, marginx: 28, marginy: 58 });
+  g.setGraph({ rankdir: "LR", nodesep: 90, ranksep: 180, marginx: 36, marginy: 72 });
   for (const n of props.graph.nodes) g.setNode(n.nodeId, { width: NODE_W, height: NODE_H });
   for (const e of props.graph.edges) g.setEdge(e.sourceNodeId, e.targetNodeId);
   dagre.layout(g);
@@ -166,17 +171,27 @@ const flowNodes = computed<Node[]>(() => {
   });
 });
 
+function edgeLabel(relation: string): string {
+  return ({
+    "生成审计": "审计",
+    "规则判断": "判断",
+    "风险复核": "复核",
+    "请求审批": "审批",
+    "形成结果": "结果",
+  } as Record<string, string>)[relation] ?? "";
+}
+
 const flowEdges = computed<Edge[]>(() =>
   props.graph.edges.map((e) => ({
     id: e.edgeId,
     source: e.sourceNodeId,
     target: e.targetNodeId,
-    label: e.relation,
+    label: edgeLabel(e.relation),
     style: { stroke: "var(--color-border-strong)", strokeWidth: 1.5 },
     labelBgBorderRadius: 4,
-    labelBgPadding: [3, 5],
-    labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.92 },
-    labelStyle: { fontSize: "11px", fill: "var(--color-text-muted)", fontWeight: 640 },
+    labelBgPadding: [2, 4],
+    labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.96 },
+    labelStyle: { fontSize: "10px", fill: "var(--color-text-muted)", fontWeight: 640 },
   })),
 );
 
@@ -195,7 +210,7 @@ function handleNodeClick(event: { node: { id: string } }) {
 .provenance-wrap {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
-  height: 36rem;
+  height: 40rem;
   overflow: hidden;
   position: relative;
 }
@@ -249,13 +264,13 @@ function handleNodeClick(event: { node: { id: string } }) {
   background: var(--color-surface);
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-2);
+  box-sizing: border-box;
   cursor: pointer;
   display: grid;
   gap: 0.22rem;
-  min-height: 5.25rem;
-  min-width: 11.5rem;
-  max-width: 12.75rem;
-  padding: 0.55rem 0.7rem 0.65rem;
+  height: 7.5rem;
+  width: 16.25rem;
+  padding: 0.65rem 0.78rem 0.72rem;
   transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 
   &:hover { border-color: var(--color-active); box-shadow: 0 0 0 2px var(--color-active-soft); }
@@ -283,16 +298,23 @@ function handleNodeClick(event: { node: { id: string } }) {
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-ui);
   overflow: hidden;
+  overflow-wrap: anywhere;
   white-space: normal;
+  word-break: break-word;
 }
 
 .prov-node__summary {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   color: var(--color-text-muted);
+  display: -webkit-box;
   font-size: var(--font-size-11);
   line-height: var(--line-height-ui);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .prov-node__badge {
@@ -318,7 +340,7 @@ function handleNodeClick(event: { node: { id: string } }) {
 }
 
 @media (max-width: 640px) {
-  .provenance-wrap { height: 26rem; }
+  .provenance-wrap { height: 30rem; }
   .provenance-legend {
     left: var(--space-2);
     max-width: calc(100% - 4rem);

@@ -30,6 +30,7 @@ apps/dashboard/dist/
 apps/dashboard/dist-ssr/
 apps/dashboard/playwright-report/
 apps/dashboard/test-results/
+apps/dashboard/test-results-api/
 
 # Logs
 *.log

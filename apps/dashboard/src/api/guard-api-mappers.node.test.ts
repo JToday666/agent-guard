@@ -10,6 +10,7 @@ import {
   mapEvaluationRun,
   mapPolicyHistory,
   mapPolicySummary,
+  mapProvenance,
   mapTraceDetail,
 } from "./guard-api-mappers.ts";
 import type { GuardAuditIntegrityDto } from "./guard-api-types.ts";
@@ -45,6 +46,35 @@ test("maps Guard API audit evidence without inventing missing fields", () => {
   assert.equal(event.userTask, null);
   assert.equal(event.approvalId, "app_1");
   assert.deepEqual(event.resourceTargets, ["/private/token.txt"]);
+});
+
+test("maps sparse audit DTOs without throwing on missing arrays or records", () => {
+  const event = mapAuditEvent({
+    audit_id: "audit_sparse",
+    schema_version: "0.3",
+    trace_id: "trace_sparse",
+    case_id: null,
+    runtime: "langgraph",
+    timestamp: "2026-06-22T06:30:00Z",
+    stage: "before_tool_call",
+    event_type: "tool_call_proposed",
+    attack_type: null,
+    is_malicious: null,
+    decision: "allow",
+    risk_score: 0,
+    severity: "low",
+    blocked: false,
+    reason: "Allowed",
+    latency_ms: null,
+  } as unknown as Parameters<typeof mapAuditEvent>[0]);
+
+  assert.equal(event.id, "audit_sparse");
+  assert.equal(event.resource, "未提供");
+  assert.equal(event.approvalId, undefined);
+  assert.deepEqual(event.resourceTargets, []);
+  assert.deepEqual(event.ruleHits, []);
+  assert.equal(event.userTask, null);
+  assert.equal(event.agentAction, "tool_call_proposed");
 });
 
 test("maps P1 audit metadata into readable action and resource fields", () => {
@@ -252,6 +282,27 @@ test("maps trace detail response through existing event and approval mappers", (
   assert.equal(detail.metrics.fnr, 0.25);
 });
 
+test("maps sparse trace detail responses with empty collections and metrics", () => {
+  const detail = mapTraceDetail({
+    trace_id: "trace_sparse",
+  } as unknown as Parameters<typeof mapTraceDetail>[0]);
+
+  assert.equal(detail.id, "trace_sparse");
+  assert.deepEqual(detail.events, []);
+  assert.deepEqual(detail.approvals, []);
+  assert.deepEqual(detail.metrics, {
+    eventCount: 0,
+    allowCount: 0,
+    denyCount: 0,
+    askCount: 0,
+    blockedCount: 0,
+    blockRate: null,
+    fpr: null,
+    fnr: null,
+    averageLatencyMs: null,
+  });
+});
+
 test("maps current policy with latest history metadata", () => {
   const history = mapPolicyHistory([
     {
@@ -381,6 +432,28 @@ test("maps config audit finding records with display-ready fields", () => {
   assert.deepEqual(record.finding.evidence, ["allowConversationAccess=true"]);
 });
 
+test("maps sparse config findings with safe display fallbacks", () => {
+  const record = mapConfigAuditFindingRecord({
+    runtime: "openclaw",
+    target_type: "plugin_config",
+    target_id: "agentguard-security",
+    trace_id: "trace_cfg_sparse",
+    event_id: "cfg_sparse",
+    timestamp: "2026-06-28T00:00:00+00:00",
+    finding: {
+      finding_id: "finding_sparse",
+      severity: "medium",
+      title: "Hook coverage changed",
+    },
+  } as unknown as Parameters<typeof mapConfigAuditFindingRecord>[0]);
+
+  assert.equal(record.finding.category, "未分类");
+  assert.equal(record.finding.subject, "未提供");
+  assert.equal(record.finding.description, "未提供");
+  assert.deepEqual(record.finding.evidence, []);
+  assert.equal(record.finding.recommendation, null);
+});
+
 test("maps OpenClaw adapter status with hook coverage", () => {
   const status = mapAdapterStatus({
     status: "loaded",
@@ -402,4 +475,29 @@ test("maps OpenClaw adapter status with hook coverage", () => {
   assert.equal(status.hookCoverage, 1);
   assert.equal(status.pluginVersion, "0.1.0");
   assert.deepEqual(status.failClosedStages, ["before_install"]);
+});
+
+test("maps sparse adapter and provenance responses with safe defaults", () => {
+  const status = mapAdapterStatus({
+    status: "unknown",
+    loaded: false,
+    hook_count: null,
+    last_verified_at: null,
+    error: null,
+    source: null,
+  } as unknown as Parameters<typeof mapAdapterStatus>[0]);
+
+  assert.equal(status.expectedHookCount, 16);
+  assert.equal(status.hookCoverage, null);
+  assert.deepEqual(status.capabilities, {});
+  assert.deepEqual(status.hooks, []);
+  assert.deepEqual(status.failClosedStages, []);
+
+  const provenance = mapProvenance({
+    trace_id: "trace_sparse",
+  } as unknown as Parameters<typeof mapProvenance>[0]);
+
+  assert.equal(provenance.traceId, "trace_sparse");
+  assert.deepEqual(provenance.nodes, []);
+  assert.deepEqual(provenance.edges, []);
 });

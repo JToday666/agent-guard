@@ -18,10 +18,10 @@ import type {
 import {
   approvals as fixtureApprovals,
   auditEvents as fixtureEvents,
-} from "./mock-data";
-import { deriveMetrics } from "../dashboard/metrics";
-import { maskSensitiveText } from "../../utils/data-redaction";
-import { formatRuleListForDisplay } from "../../utils/rule-display";
+} from "./mock-data.ts";
+import { deriveMetrics } from "../dashboard/metrics.ts";
+import { maskSensitiveText } from "../../utils/data-redaction.ts";
+import { formatRuleListForDisplay } from "../../utils/rule-display.ts";
 
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -239,22 +239,10 @@ export class MockDashboardDataSource implements DashboardDataSource {
       asrAfter: 0.048,
       perAttack: [
         {
-          attackType: "prompt_injection",
+          attackType: "indirect_prompt_injection",
           asrBefore: 0.85,
           asrAfter: 0.05,
           reduction: 0.8,
-        },
-        {
-          attackType: "file_exfiltration",
-          asrBefore: 0.78,
-          asrAfter: 0.06,
-          reduction: 0.72,
-        },
-        {
-          attackType: "memory_poisoning",
-          asrBefore: 0.58,
-          asrAfter: 0.04,
-          reduction: 0.54,
         },
         {
           attackType: "tool_hijacking",
@@ -262,12 +250,18 @@ export class MockDashboardDataSource implements DashboardDataSource {
           asrAfter: 0.08,
           reduction: 0.33999999999999997,
         },
+        {
+          attackType: "memory_poisoning",
+          asrBefore: 0.58,
+          asrAfter: 0.04,
+          reduction: 0.54,
+        },
       ],
       cases: [
         {
           caseId: "PI-002",
-          attackType: "prompt_injection",
-          runtime: "openclaw",
+          attackType: "tool_hijacking",
+          runtime: "langgraph",
           expectedDecision: "deny",
           actualDecision: "ask",
           blocked: true,
@@ -275,8 +269,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
           traceId: "trace_002",
         },
         {
-          caseId: "FE-001",
-          attackType: "file_exfiltration",
+          caseId: "PI-001",
+          attackType: "indirect_prompt_injection",
           runtime: "langgraph",
           expectedDecision: "deny",
           actualDecision: "deny",
@@ -285,24 +279,24 @@ export class MockDashboardDataSource implements DashboardDataSource {
           traceId: "trace_001",
         },
         {
-          caseId: "MP-004",
+          caseId: "PI-003",
           attackType: "memory_poisoning",
-          runtime: "openclaw",
+          runtime: "langgraph",
           expectedDecision: "deny",
-          actualDecision: "allow",
-          blocked: false,
-          attackSuccess: true,
-          traceId: "trace_006",
+          actualDecision: "ask",
+          blocked: true,
+          attackSuccess: false,
+          traceId: "trace_004",
         },
         {
           caseId: "BENIGN-003",
           attackType: "benign",
           runtime: "langgraph",
           expectedDecision: "allow",
-          actualDecision: "deny",
-          blocked: true,
+          actualDecision: "allow",
+          blocked: false,
           attackSuccess: false,
-          traceId: "trace_003",
+          traceId: "trace_008",
         },
       ],
       blockRate: metrics.blockRate,

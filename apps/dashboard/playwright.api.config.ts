@@ -1,19 +1,17 @@
 import { defineConfig } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:4173";
+const baseURL = "http://127.0.0.1:4174";
 
 export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: false,
-  outputDir: "test-results",
+  outputDir: "test-results-api",
   projects: [
-    { name: "desktop", use: { viewport: { height: 768, width: 1366 } } },
-    { name: "tablet", use: { viewport: { height: 1024, width: 768 } } },
-    { name: "mobile", use: { viewport: { height: 844, width: 390 } } },
+    { name: "api-desktop", use: { viewport: { height: 768, width: 1366 } } },
   ],
   reporter: "list",
   testDir: "e2e",
-  testIgnore: /api-mode\.spec\.ts/,
+  testMatch: /api-mode\.spec\.ts/,
   use: {
     baseURL,
     screenshot: "only-on-failure",
@@ -21,7 +19,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm dev:mock --host 127.0.0.1 --port 4173",
+    command: "pnpm dev --host 127.0.0.1 --port 4174",
     reuseExistingServer: false,
     timeout: 30_000,
     url: baseURL,

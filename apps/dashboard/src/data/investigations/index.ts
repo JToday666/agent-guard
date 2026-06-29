@@ -18,9 +18,21 @@ export type InvestigationEventResolution =
   | { event: AuditEventRow; status: "found" }
   | { status: "not-found" };
 
+export interface TraceConclusion {
+  title: string;
+  reason: string;
+  result: string;
+  ruleHits: string[];
+}
+
 type TraceSummaryEvent = Pick<
   AuditEventRow,
   "approvalId" | "caseId" | "decision" | "occurredAt" | "reason"
+>;
+
+type TraceConclusionEvent = Pick<
+  AuditEventRow,
+  "blocked" | "decision" | "reason" | "riskScore" | "ruleHits"
 >;
 
 export function buildTraceSummary(
@@ -38,6 +50,28 @@ export function buildTraceSummary(
     title: last.reason,
     status: isDenied ? "blocked" : isPaused ? "paused" : "allowed",
     approvalId: last.approvalId,
+  };
+}
+
+export function buildTraceConclusion(
+  events: TraceConclusionEvent[],
+): TraceConclusion | undefined {
+  if (!events.length) return undefined;
+  const highestRisk = [...events].sort(
+    (left, right) => right.riskScore - left.riskScore,
+  )[0]!;
+  const hasDeny = events.some((event) => event.decision === "deny");
+  const hasAsk = !hasDeny && events.some((event) => event.decision === "ask");
+
+  return {
+    title: hasDeny ? "已阻断高风险工具调用" : hasAsk ? "等待人工审批" : "已放行",
+    reason: highestRisk.reason,
+    result: hasDeny
+      ? "风险动作已被阻断，目标资源未继续执行"
+      : hasAsk
+        ? "动作暂停，等待人工审批后继续或拒绝"
+        : "动作已放行，未触发阻断或审批",
+    ruleHits: highestRisk.ruleHits,
   };
 }
 

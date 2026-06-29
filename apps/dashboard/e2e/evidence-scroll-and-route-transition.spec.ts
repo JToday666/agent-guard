@@ -66,3 +66,77 @@ test("dashboard routes use the shell transition layer", async ({ page }) => {
   await expect(page.locator(".dashboard-route-view")).toHaveCount(1);
   await expect(page.locator(".dashboard-route-view").first()).toBeVisible();
 });
+
+test("provenance graph keeps node text readable without label overlap", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_002");
+
+  const graph = page.locator(".provenance-wrap");
+  await expect(graph).toBeVisible();
+  await expect(graph.locator(".prov-node").first()).toBeVisible();
+
+  const layout = await graph.evaluate((root) => {
+    const boxes = (selector: string) =>
+      Array.from(root.querySelectorAll(selector)).map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text: element.textContent ?? "",
+        };
+      });
+
+    const nodes = boxes(".vue-flow__node");
+    const edgeLabels = boxes(".vue-flow__edge-text");
+    const overflowingText = Array.from(
+      root.querySelectorAll(".prov-node__label, .prov-node__summary"),
+    ).filter((element) => {
+      const html = element as HTMLElement;
+      return html.scrollWidth > html.clientWidth + 1;
+    }).length;
+
+    function intersects(
+      left: { x: number; y: number; width: number; height: number },
+      right: { x: number; y: number; width: number; height: number },
+      padding = 0,
+    ) {
+      return !(
+        left.x + left.width + padding <= right.x ||
+        right.x + right.width + padding <= left.x ||
+        left.y + left.height + padding <= right.y ||
+        right.y + right.height + padding <= left.y
+      );
+    }
+
+    let nodeOverlaps = 0;
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        if (intersects(nodes[i]!, nodes[j]!, 8)) nodeOverlaps += 1;
+      }
+    }
+
+    let edgeLabelOverlaps = 0;
+    for (const label of edgeLabels) {
+      if (nodes.some((node) => intersects(label, node, 4))) {
+        edgeLabelOverlaps += 1;
+      }
+    }
+
+    return {
+      edgeLabelCount: edgeLabels.length,
+      nodeCount: nodes.length,
+      edgeLabelOverlaps,
+      nodeOverlaps,
+      overflowingText,
+    };
+  });
+
+  expect(layout.nodeCount).toBeGreaterThan(4);
+  expect(layout.edgeLabelCount).toBeGreaterThan(0);
+  expect(layout.nodeOverlaps).toBe(0);
+  expect(layout.edgeLabelOverlaps).toBe(0);
+  expect(layout.overflowingText).toBe(0);
+});

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ApprovalRequest, AuditEventRow } from "../../types/dashboard.ts";
-import { mergeApprovalsWithAuditEvidence } from "./evidence.ts";
+import {
+  formatApprovalEvidenceFields,
+  mergeApprovalsWithAuditEvidence,
+} from "./evidence.ts";
 
 function event(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {
@@ -74,4 +77,13 @@ test("keeps approval fields when no matching audit event is loaded", () => {
   const [result] = mergeApprovalsWithAuditEvidence([original], [event()]);
 
   assert.equal(result, original);
+});
+
+test("formats explicit approval evidence fields without exposing the nonce", () => {
+  assert.deepEqual(formatApprovalEvidenceFields(approval({ eventId: "audit_1" })), {
+    action: "send_email / call_1",
+    eventId: "audit_1",
+    subject: "tool_call / call_1",
+    traceId: "trace_1",
+  });
 });

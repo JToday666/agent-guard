@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AuditEventRow } from "../../types/dashboard.ts";
 import {
   buildInvestigationIndex,
+  buildTraceConclusion,
   filterInvestigationEvents,
   getRuleFilterOptions,
   resolveInvestigationEvent,
@@ -146,5 +147,32 @@ test("rejects an event that does not belong to the requested trace", () => {
   assert.deepEqual(resolveInvestigationEvent(index, "event-1", "trace-1"), {
     event: index.byId.get("event-1"),
     status: "found",
+  });
+});
+
+test("builds a concise conclusion from the highest-risk trace event", () => {
+  const conclusion = buildTraceConclusion([
+    event({
+      blocked: true,
+      decision: "ask",
+      id: "approval",
+      reason: "发送目标不在当前任务允许范围内，需要人工确认",
+      riskScore: 64,
+      ruleHits: ["P005_external_send", "P004_task_mismatch"],
+    }),
+    event({
+      decision: "allow",
+      id: "context",
+      reason: "上下文进入任务",
+      riskScore: 28,
+      ruleHits: [],
+    }),
+  ]);
+
+  assert.deepEqual(conclusion, {
+    reason: "发送目标不在当前任务允许范围内，需要人工确认",
+    result: "动作暂停，等待人工审批后继续或拒绝",
+    ruleHits: ["P005_external_send", "P004_task_mismatch"],
+    title: "等待人工审批",
   });
 });

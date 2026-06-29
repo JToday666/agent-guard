@@ -290,7 +290,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       configAuditError.value =
         configFindingsResult.reason instanceof Error
           ? configFindingsResult.reason.message
-          : "配置审计 findings 加载失败";
+          : "配置审计发现项加载失败";
     }
     if (openclawStatusResult.status === "fulfilled") {
       openclawStatus.value = openclawStatusResult.value;
