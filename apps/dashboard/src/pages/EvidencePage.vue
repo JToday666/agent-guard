@@ -24,11 +24,11 @@
 </template>
 
 <script setup lang="ts">
-import DataFreshness from "../components/DataFreshness.vue";
-import EmptyState from "../components/EmptyState.vue";
-import StatusBadge from "../components/StatusBadge.vue";
-import ErrorState from "../components/States/ErrorState.vue";
-import LoadingState from "../components/States/LoadingState.vue";
+import DataFreshness from "../components/common/DataFreshness.vue";
+import EmptyState from "../components/common/EmptyState.vue";
+import StatusBadge from "../components/common/StatusBadge.vue";
+import ErrorState from "../components/states/ErrorState.vue";
+import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
 import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
 

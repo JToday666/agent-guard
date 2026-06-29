@@ -1,6 +1,6 @@
 <template>
-  <div class="investigation-detail" :class="{ 'investigation-detail--evidence': Boolean(selectedEvent) }">
-    <main class="workspace-panel investigation-detail__main" aria-labelledby="trace-title">
+  <div class="evidence-detail" :class="{ 'evidence-detail--evidence': Boolean(selectedEvent) }">
+    <main class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
       <header class="page-header">
         <div>
           <h1 id="trace-title">证据链</h1>
@@ -65,22 +65,22 @@
 <script setup lang="ts">
 import { computed, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import DetailDrawer from "../components/DetailDrawer.vue";
-import EmptyState from "../components/EmptyState.vue";
-import EventEvidence from "../components/EventEvidence.vue";
-import MetricStrip from "../components/MetricStrip.vue";
-import ProvenanceGraph from "../components/ProvenanceGraph.vue";
-import StatusBadge from "../components/StatusBadge.vue";
-import ErrorState from "../components/States/ErrorState.vue";
-import LoadingState from "../components/States/LoadingState.vue";
-import TraceTimeline from "../components/TraceTimeline.vue";
-import { buildInvestigationIndex, buildTraceSummary, resolveInvestigationEvent } from "../data/investigation-index";
+import DetailDrawer from "../components/common/DetailDrawer.vue";
+import EmptyState from "../components/common/EmptyState.vue";
+import EventEvidence from "../components/evidence/EventEvidence.vue";
+import MetricStrip from "../components/common/MetricStrip.vue";
+import ProvenanceGraph from "../components/evidence/ProvenanceGraph.vue";
+import StatusBadge from "../components/common/StatusBadge.vue";
+import ErrorState from "../components/states/ErrorState.vue";
+import LoadingState from "../components/states/LoadingState.vue";
+import TraceTimeline from "../components/evidence/TraceTimeline.vue";
+import { buildInvestigationIndex, buildTraceSummary, resolveInvestigationEvent } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ProvenanceNode } from "../types/dashboard";
 import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
 
-defineOptions({ name: "InvestigationDetailPage" });
+defineOptions({ name: "EvidenceDetailPage" });
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
@@ -139,9 +139,9 @@ function handleTraceRetry() { void store.loadTraceDetail(traceId.value); }
 </script>
 
 <style scoped lang="scss">
-.investigation-detail { display: grid; grid-template-columns: minmax(0, 1fr); }
-.investigation-detail--evidence { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); height: calc(100vh - var(--top-bar-height)); overflow: hidden; }
-.investigation-detail__main { min-width: 0; overflow-y: auto; min-height: 0; }
+.evidence-detail { display: grid; grid-template-columns: minmax(0, 1fr); }
+.evidence-detail--evidence { grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem); height: calc(100vh - var(--top-bar-height)); overflow: hidden; }
+.evidence-detail__main { min-width: 0; overflow-y: auto; min-height: 0; }
 .trace-body { display: grid; gap: var(--space-7); }
 .trace-provenance { display: grid; gap: var(--space-4); }
 .trace-provenance > header { align-items: start; display: flex; gap: var(--space-4); justify-content: space-between; flex-wrap: wrap; }
@@ -154,7 +154,7 @@ function handleTraceRetry() { void store.loadTraceDetail(traceId.value); }
 .trace-events > header { align-items: start; display: flex; justify-content: space-between; }
 .trace-events h2, .trace-events p { margin: 0; }
 .trace-events p, .trace-events > header > span { color: var(--color-text-subtle); font-size: var(--font-size-12); }
-.trace-context { align-self: start; border-left: 1px solid var(--color-border); display: grid; gap: var(--space-4); max-height: calc(100vh - var(--top-bar-height) - 6rem); overflow-y: auto; overscroll-behavior: contain; padding-left: var(--space-5); position: sticky; top: calc(var(--top-bar-height) + var(--space-5)); }
+.trace-context { align-self: start; border-left: 1px solid var(--color-border); display: grid; gap: var(--space-4); max-height: calc(100vh - var(--top-bar-height) - 6rem); overflow-y: auto; padding-left: var(--space-5); position: sticky; top: calc(var(--top-bar-height) + var(--space-5)); }
 .trace-context h2 { font-size: var(--font-size-16); margin: 0; }
 .trace-context dl { display: grid; gap: var(--space-3); margin: 0; }
 .trace-context dl > div { display: grid; gap: var(--space-1); }
@@ -169,5 +169,5 @@ function handleTraceRetry() { void store.loadTraceDetail(traceId.value); }
 .prov-node-detail__dl dd { font-size: var(--font-size-13); margin: 0; overflow-wrap: anywhere; }
 .trace-detail-alert { background: var(--color-warning-soft); border-left: 3px solid var(--color-warning); display: grid; gap: var(--space-1); margin-bottom: var(--space-4); padding: var(--space-3); }
 .trace-detail-alert p { color: var(--color-text-muted); margin: 0; }
-@media (max-width: 1100px) { .investigation-detail, .investigation-detail--evidence { grid-template-columns: 1fr; } .trace-layout { grid-template-columns: 1fr; } .trace-context { border-left: 0; border-top: 1px solid var(--color-border); padding: var(--space-5) 0 0; position: static; } }
+@media (max-width: 1100px) { .evidence-detail, .evidence-detail--evidence { grid-template-columns: 1fr; } .trace-layout { grid-template-columns: 1fr; } .trace-context { border-left: 0; border-top: 1px solid var(--color-border); padding: var(--space-5) 0 0; position: static; } }
 </style>

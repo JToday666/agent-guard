@@ -44,7 +44,7 @@ import { VueFlow, type Node, type Edge } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import dagre from "@dagrejs/dagre";
-import type { ProvenanceGraph } from "../types/dashboard";
+import type { ProvenanceGraph } from "../../types/dashboard";
 
 defineOptions({ name: "ProvenanceGraph" });
 
@@ -276,6 +276,7 @@ function handleNodeClick(event: { node: { id: string } }) {
 .prov-node__label {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   color: var(--color-text);
   display: -webkit-box;
   font-size: var(--font-size-13);

@@ -58,3 +58,7 @@ export function formatDashboardDateTime(value: string): string {
   if (Number.isNaN(date.getTime())) return value;
   return dashboardDateTimeFormatter.format(date);
 }
+
+export function formatAuditHeadHash(value: string | null): string {
+  return value ? `${value.slice(0, 12)}…` : "暂无链头";
+}

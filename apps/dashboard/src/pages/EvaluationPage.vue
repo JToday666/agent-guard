@@ -38,14 +38,14 @@
 <script setup lang="ts">
 import { computed, nextTick, watch } from "vue";
 import { useRoute } from "vue-router";
-import AsrComparisonChart from "../components/Charts/AsrComparisonChart.vue";
-import ConfusionMatrix from "../components/ConfusionMatrix.vue";
-import DataFreshness from "../components/DataFreshness.vue";
-import EmptyState from "../components/EmptyState.vue";
-import MetricStrip from "../components/MetricStrip.vue";
-import StatusBadge from "../components/StatusBadge.vue";
-import ErrorState from "../components/States/ErrorState.vue";
-import LoadingState from "../components/States/LoadingState.vue";
+import AsrComparisonChart from "../components/charts/AsrComparisonChart.vue";
+import ConfusionMatrix from "../components/charts/ConfusionMatrix.vue";
+import DataFreshness from "../components/common/DataFreshness.vue";
+import EmptyState from "../components/common/EmptyState.vue";
+import MetricStrip from "../components/common/MetricStrip.vue";
+import StatusBadge from "../components/common/StatusBadge.vue";
+import ErrorState from "../components/states/ErrorState.vue";
+import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
 import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
 

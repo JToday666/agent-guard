@@ -20,7 +20,7 @@ import {
   mapProvenance,
   mapTraceDetail,
 } from "../../api/guard-api-mappers";
-import { mergeApprovalsWithAuditEvidence } from "../approval-evidence";
+import { mergeApprovalsWithAuditEvidence } from "../approvals/evidence";
 import type {
   ApprovalRequest,
   ApprovalResolution,

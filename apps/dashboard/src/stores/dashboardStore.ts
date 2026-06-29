@@ -2,23 +2,23 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { dashboardEnv } from "../config/dashboard-env";
-import { mergeApprovalsWithAuditEvidence } from "../data/approval-evidence";
+import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
 import { dashboardDataSource } from "../data/sources/index";
-import { deriveMetrics, groupDecisionTrend } from "../data/dashboard-metrics";
+import { deriveMetrics, groupDecisionTrend } from "../data/dashboard/metrics";
 import {
   buildInvestigationIndex,
   buildTraceSummary,
-} from "../data/investigation-index";
+} from "../data/investigations";
 import {
   getRefreshFailureStatus,
   shouldEnterInitialLoading,
-} from "../data/dashboard-refresh-state";
+} from "../data/dashboard/refresh-state";
 import {
   hasSameEventWindow,
   hasSameEvaluation,
   hasSameMetrics,
   reconcileApprovals,
-} from "../data/dashboard-snapshot";
+} from "../data/dashboard/snapshot";
 import type {
   ApprovalRequest,
   AuditIntegrity,

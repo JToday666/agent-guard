@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   mapApproval,
   mapAuditEvent,
+  mapAuditIntegrity,
   mapPolicyHistory,
   mapPolicySummary,
   mapTraceDetail,
 } from "./guard-api-mappers.ts";
+import type { GuardAuditIntegrityDto } from "./guard-api-types.ts";
 
 test("maps Guard API audit evidence without inventing missing fields", () => {
   const event = mapAuditEvent({
@@ -281,4 +283,20 @@ test("maps current policy with latest history metadata", () => {
   assert.equal(summary.disabledRuleCount, 1);
   assert.equal(summary.ruleOverrideCount, 1);
   assert.equal(summary.toolProfileCount, 1);
+});
+
+test("maps an empty audit integrity chain with a null head hash", () => {
+  const dto: GuardAuditIntegrityDto = {
+    valid: true,
+    event_count: 0,
+    head_hash: null,
+    first_broken_audit_id: null,
+  };
+
+  assert.deepEqual(mapAuditIntegrity(dto), {
+    valid: true,
+    eventCount: 0,
+    headHash: null,
+    firstBrokenAuditId: null,
+  });
 });

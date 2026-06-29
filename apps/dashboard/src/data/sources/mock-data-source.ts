@@ -15,10 +15,10 @@ import type {
 import {
   approvals as fixtureApprovals,
   auditEvents as fixtureEvents,
-} from "./mock-data";
-import { deriveMetrics } from "../dashboard-metrics";
-import { maskSensitiveText } from "../../utils/data-redaction";
-import { formatRuleListForDisplay } from "../../utils/rule-display";
+} from "./mock-data.ts";
+import { deriveMetrics } from "../dashboard/metrics.ts";
+import { maskSensitiveText } from "../../utils/data-redaction.ts";
+import { formatRuleListForDisplay } from "../../utils/rule-display.ts";
 
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));

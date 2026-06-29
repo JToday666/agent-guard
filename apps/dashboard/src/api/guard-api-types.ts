@@ -101,11 +101,10 @@ export interface GuardPolicyHistoryDto {
   version: string;
 }
 
-
 export interface GuardAuditIntegrityDto {
   valid: boolean;
   event_count: number;
-  head_hash: string;
+  head_hash: string | null;
   first_broken_audit_id: string | null;
 }
 

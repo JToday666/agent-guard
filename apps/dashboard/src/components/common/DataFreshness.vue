@@ -8,7 +8,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { DataStatus } from "../types/dashboard";
+import type { DataStatus } from "../../types/dashboard";
 
 const props = defineProps<{ status: DataStatus; updatedAt?: string | null }>();
 

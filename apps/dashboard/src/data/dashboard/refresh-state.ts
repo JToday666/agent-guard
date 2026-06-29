@@ -1,4 +1,4 @@
-import type { DataStatus } from "../types/dashboard.ts";
+import type { DataStatus } from "../../types/dashboard.ts";
 
 export function shouldEnterInitialLoading(status: DataStatus): boolean {
   return status === "idle";

@@ -1,4 +1,4 @@
-import type { ApprovalRequest, AuditEventRow } from "../types/dashboard.ts";
+import type { ApprovalRequest, AuditEventRow } from "../../types/dashboard.ts";
 
 export function mergeApprovalsWithAuditEvidence(
   approvals: ApprovalRequest[],

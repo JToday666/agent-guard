@@ -34,9 +34,9 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 
-import type { DataStatus, HealthStatus } from "../types/dashboard";
-import DataFreshness from "./DataFreshness.vue";
-import StatusBadge from "./StatusBadge.vue";
+import type { DataStatus, HealthStatus } from "../../types/dashboard";
+import DataFreshness from "../common/DataFreshness.vue";
+import StatusBadge from "../common/StatusBadge.vue";
 
 defineOptions({
   name: "AppTopBar",

@@ -3,7 +3,7 @@ import type {
   AuditEventRow,
   EvalMetrics,
   EvaluationSummary,
-} from "../types/dashboard.ts";
+} from "../../types/dashboard.ts";
 
 function hasSameStringList(left: readonly string[], right: readonly string[]) {
   return (

@@ -53,16 +53,16 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import type { AuditEventRow } from "../types/dashboard";
-import { redactSensitiveData } from "../utils/data-redaction";
+import type { AuditEventRow } from "../../types/dashboard";
+import { redactSensitiveData } from "../../utils/data-redaction";
 import {
   getDecisionLabel,
   getDecisionTone,
   getRiskSeverityLabel,
-} from "../utils/dashboard-formatters";
-import StatusBadge from "./StatusBadge.vue";
-import StructuredDataView from "./StructuredDataView.vue";
-import { prepareEvidenceDataForDisplay, ruleLabel } from "../utils/rule-display";
+} from "../../utils/dashboard-formatters";
+import StatusBadge from "../common/StatusBadge.vue";
+import StructuredDataView from "../common/StructuredDataView.vue";
+import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
 
 defineOptions({ name: "EventEvidence" });
 const props = defineProps<{ event: AuditEventRow }>();
