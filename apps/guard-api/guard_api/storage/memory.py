@@ -172,6 +172,9 @@ class MemoryControlPlaneStore:
     def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
         return self.adapter_statuses.get(adapter_id)
 
+    def list_adapter_statuses(self) -> dict[str, dict[str, Any]]:
+        return dict(self.adapter_statuses)
+
     def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
         record = CredentialRecord.model_validate(credential)
         self.credentials[record.credential_id] = record

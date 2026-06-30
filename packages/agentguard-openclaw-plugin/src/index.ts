@@ -12,7 +12,9 @@ import {
 } from "./guard-api-client.js";
 import {
   buildBeforeInstallConfigAuditEvent,
+  buildContextGuardEvent,
   buildMessageSendGuardEvent,
+  buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
   buildToolCallGuardEvent,
   buildToolResultGuardEvent,
@@ -36,8 +38,14 @@ const OBSERVATION_HOOKS = [
   "resolve_exec_env",
 ] as const;
 
+const PROMPT_MODEL_HOOKS = ["before_prompt_build", "llm_input", "llm_output"] as const;
 const BLOCKING_HOOKS = ["before_tool_call", "message_sending", "before_install"] as const;
-const ALL_REGISTERED_HOOKS = [...BLOCKING_HOOKS, "tool_result_persist", ...OBSERVATION_HOOKS] as const;
+const ALL_REGISTERED_HOOKS = [
+  ...BLOCKING_HOOKS,
+  ...PROMPT_MODEL_HOOKS,
+  "tool_result_persist",
+  ...OBSERVATION_HOOKS,
+] as const;
 
 const plugin: OpenClawPluginDefinition = definePluginEntry({
   id: "agentguard-security",
@@ -106,6 +114,54 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
         }
       },
       { priority: 100, timeoutMs: 10_000 },
+    );
+
+    api.on(
+      "before_prompt_build",
+      async (event, context) => {
+        const client = makeClient();
+        try {
+          await client.evaluate(buildContextGuardEvent("before_prompt_build", event, context));
+        } catch (error) {
+          logDiagnostic(config, "before_prompt_build observation failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return undefined;
+      },
+      { priority: 0, timeoutMs: 2000 },
+    );
+
+    api.on(
+      "llm_input",
+      async (event, context) => {
+        const client = makeClient();
+        try {
+          await client.evaluate(buildModelGuardEvent("llm_input", event, context));
+        } catch (error) {
+          logDiagnostic(config, "llm_input observation failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return undefined;
+      },
+      { priority: 0, timeoutMs: 2000 },
+    );
+
+    api.on(
+      "llm_output",
+      async (event, context) => {
+        const client = makeClient();
+        try {
+          await client.evaluate(buildModelGuardEvent("llm_output", event, context));
+        } catch (error) {
+          logDiagnostic(config, "llm_output observation failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return undefined;
+      },
+      { priority: 0, timeoutMs: 2000 },
     );
 
     api.on(

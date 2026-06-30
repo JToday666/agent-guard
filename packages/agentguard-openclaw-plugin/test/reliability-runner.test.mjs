@@ -13,10 +13,13 @@ test("reliability runner plans every registered hook for each iteration", async 
 
   const plan = buildReliabilityPlan({ runId: "unit", iterations: 2 });
 
-  assert.equal(RELIABILITY_HOOKS.length, 16);
-  assert.equal(plan.cases.length, 32);
+  assert.equal(RELIABILITY_HOOKS.length, 19);
+  assert.equal(plan.cases.length, 38);
   assert.deepEqual(plan.expectedEventCounts, {
     tool_call_proposed: 2,
+    context_assembled: 2,
+    model_input_prepared: 2,
+    model_output_produced: 2,
     message_send_proposed: 2,
     config_audit: 2,
     tool_result_produced: 2,
@@ -24,6 +27,9 @@ test("reliability runner plans every registered hook for each iteration", async 
   });
   assert.deepEqual(expectedReliabilityEventCounts(50), {
     tool_call_proposed: 50,
+    context_assembled: 50,
+    model_input_prepared: 50,
+    model_output_produced: 50,
     message_send_proposed: 50,
     config_audit: 50,
     tool_result_produced: 50,
@@ -63,10 +69,57 @@ test("reliability runner summarizes missing duplicate and wrong-runtime events",
 
   const summary = summarizeReliabilityEvents(plan, events);
 
-  assert.equal(summary.expected_total, 16);
-  assert.equal(summary.observed_total, 17);
+  assert.equal(summary.expected_total, 19);
+  assert.equal(summary.observed_total, 20);
   assert.deepEqual(summary.missing_traces, [plan.cases.at(-1).traceId]);
   assert.deepEqual(summary.duplicate_trace_ids, [events[0].trace_id]);
   assert.equal(summary.non_openclaw_count, 1);
   assert.equal(summary.ok, false);
+});
+
+test("release gate summary is safe to persist in adapter status", async () => {
+  const { buildReleaseGateSummary } = await import("../../../scripts/openclaw-e2e-runner.mjs");
+
+  const summary = buildReleaseGateSummary("reliability", {
+    ok: true,
+    generated_at: "2026-06-30T00:00:00.000Z",
+    plugin: {
+      registered_hook_count: 19,
+      registered_hooks: ["before_tool_call", "llm_input"],
+    },
+    audit: {
+      expected_total: 950,
+      observed_total: 950,
+      missing_traces: [],
+      duplicate_trace_ids: [],
+      non_openclaw_count: 0,
+      event_types: ["tool_call_proposed"],
+    },
+    integrity: { valid: true },
+    failures: [],
+    timings: {
+      p95_hook_return_ms: 12,
+      p95_report_lag_ms: 34,
+    },
+  });
+
+  assert.deepEqual(summary, {
+    kind: "reliability",
+    ok: true,
+    generated_at: "2026-06-30T00:00:00.000Z",
+    registered_hook_count: 19,
+    registered_hooks: ["before_tool_call", "llm_input"],
+    audit: {
+      expected_total: 950,
+      observed_total: 950,
+      event_types: ["tool_call_proposed"],
+      missing_count: 0,
+      duplicate_count: 0,
+      non_openclaw_count: 0,
+    },
+    integrity_valid: true,
+    p95_hook_return_ms: 12,
+    p95_report_lag_ms: 34,
+    failures: [],
+  });
 });

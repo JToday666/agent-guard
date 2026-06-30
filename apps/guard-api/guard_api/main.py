@@ -55,6 +55,70 @@ def _policy_snapshot_record_payload(record: PolicySnapshotRecord) -> dict[str, A
     }
 
 
+def _evaluation_dataset_registry(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    datasets: dict[str, dict[str, Any]] = {}
+    version_maps: dict[str, dict[str, dict[str, Any]]] = {}
+    for run in runs:
+        dataset_id = run.get("dataset_id")
+        dataset_version = run.get("dataset_version")
+        if not isinstance(dataset_id, str) or not dataset_id:
+            continue
+        if not isinstance(dataset_version, str) or not dataset_version:
+            continue
+        dataset = datasets.setdefault(
+            dataset_id,
+            {
+                "dataset_id": dataset_id,
+                "run_count": 0,
+                "latest_run_id": None,
+                "latest_run_at": None,
+                "versions": [],
+            },
+        )
+        dataset["run_count"] += 1
+        _refresh_latest_run(dataset, run)
+
+        versions = version_maps.setdefault(dataset_id, {})
+        version = versions.setdefault(
+            dataset_version,
+            {
+                "dataset_version": dataset_version,
+                "dataset_digest": run.get("dataset_digest"),
+                "locked": bool(run.get("dataset_locked")),
+                "run_count": 0,
+                "case_count": 0,
+                "case_provenance_count": 0,
+                "latest_run_id": None,
+                "latest_run_at": None,
+                "regression_gate": None,
+            },
+        )
+        version["run_count"] += 1
+        version["case_count"] += len(run.get("cases") or [])
+        version["case_provenance_count"] += sum(1 for case in run.get("cases") or [] if case.get("provenance"))
+        version["locked"] = bool(version["locked"] or run.get("dataset_locked"))
+        version["dataset_digest"] = run.get("dataset_digest") or version["dataset_digest"]
+        if run.get("regression_gate") is not None:
+            version["regression_gate"] = run["regression_gate"]
+        _refresh_latest_run(version, run)
+
+    for dataset_id, dataset in datasets.items():
+        dataset["versions"] = sorted(
+            version_maps[dataset_id].values(),
+            key=lambda item: str(item["dataset_version"]),
+            reverse=True,
+        )
+    return sorted(datasets.values(), key=lambda item: str(item["dataset_id"]))
+
+
+def _refresh_latest_run(target: dict[str, Any], run: dict[str, Any]) -> None:
+    run_at = str(run.get("run_at") or "")
+    latest_at = str(target.get("latest_run_at") or "")
+    if run_at >= latest_at:
+        target["latest_run_id"] = run.get("run_id")
+        target["latest_run_at"] = run.get("run_at")
+
+
 def _changed_policy_fields(current: PolicyBundle, candidate: PolicyBundle) -> list[str]:
     current_payload = current.model_dump(mode="json")
     candidate_payload = candidate.model_dump(mode="json")
@@ -92,7 +156,7 @@ def _legacy_unknown_adapter_status() -> dict[str, Any]:
         "status": "unknown",
         "loaded": False,
         "hook_count": None,
-        "expected_hook_count": 16,
+        "expected_hook_count": 19,
         "last_verified_at": None,
         "error": None,
         "source": None,
@@ -124,6 +188,7 @@ def create_app(
         policy_service=policy_service,
         audit_service=audit_service,
         approval_service=approval_service,
+        memory_guard_service=memory_guard_service,
     )
 
     @asynccontextmanager
@@ -358,6 +423,21 @@ def create_app(
         filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
         return metric_service.eval_metrics(filters)
 
+    @app.get("/v1/metrics/runtime")
+    def runtime_metrics(
+        runtime: str | None = None,
+        limit: int = 1000,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, object]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="metrics:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        return metric_service.runtime_metrics(runtime=runtime, limit=_bounded_limit(limit))
+
     @app.post("/v1/evaluations")
     def save_evaluation_run(
         payload: EvaluationRun,
@@ -385,6 +465,21 @@ def create_app(
             dataset_version=dataset_version,
             limit=_bounded_limit(limit),
         )
+
+    @app.get("/v1/evaluations/datasets")
+    def list_evaluation_datasets(
+        dataset_id: str | None = None,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
+        _verify_browser_or_bearer_read(
+            auth,
+            required_scope="evaluation:read",
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        runs = store.list_evaluation_runs(dataset_id=dataset_id, limit=1000)
+        return _evaluation_dataset_registry(runs)
 
     @app.get("/v1/evaluations/latest")
     def latest_evaluation_run(

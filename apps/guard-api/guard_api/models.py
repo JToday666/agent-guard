@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -69,11 +69,23 @@ class EvaluationCase(BaseModel):
     case_id: str
     attack_type: str
     runtime: str
+    dataset_id: str | None = None
+    dataset_version: str | None = None
+    case_digest: str | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
     expected_decision: Literal["allow", "deny", "ask"]
     actual_decision: Literal["allow", "deny", "ask"]
     blocked: bool
     attack_success: bool
     trace_id: str
+
+
+class EvaluationRegressionGate(BaseModel):
+    status: Literal["passed", "failed", "skipped"]
+    baseline_run_id: str | None = None
+    max_allowed_regression: float | None = Field(default=None, ge=0)
+    asr_delta: float | None = None
+    failed_case_ids: list[str] = Field(default_factory=list)
 
 
 class EvaluationRun(BaseModel):
@@ -83,12 +95,28 @@ class EvaluationRun(BaseModel):
     run_at: str
     dataset_id: str | None = None
     dataset_version: str | None = None
+    dataset_digest: str | None = None
+    dataset_locked: bool = False
+    regression_gate: EvaluationRegressionGate | None = None
     asr_before: float | None = Field(default=None, ge=0, le=1)
     asr_after: float | None = Field(default=None, ge=0, le=1)
     per_attack: dict[str, EvaluationAttackSummary] = Field(default_factory=dict)
     per_family: dict[str, Any] = Field(default_factory=dict)
     per_rule: dict[str, Any] = Field(default_factory=dict)
     cases: list[EvaluationCase] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def fill_case_dataset_metadata(self) -> Self:
+        filled_cases: list[EvaluationCase] = []
+        for case in self.cases:
+            updates: dict[str, Any] = {}
+            if case.dataset_id is None and self.dataset_id is not None:
+                updates["dataset_id"] = self.dataset_id
+            if case.dataset_version is None and self.dataset_version is not None:
+                updates["dataset_version"] = self.dataset_version
+            filled_cases.append(case.model_copy(update=updates) if updates else case)
+        self.cases = filled_cases
+        return self
 
 
 class ConfigAuditFindingRecord(BaseModel):
@@ -111,7 +139,7 @@ class AdapterStatusRecord(BaseModel):
     status: AdapterStatus = "unknown"
     loaded: bool = False
     hook_count: int | None = None
-    expected_hook_count: int = 16
+    expected_hook_count: int = 19
     last_verified_at: str | None = None
     last_heartbeat_at: str | None = None
     error: str | None = None

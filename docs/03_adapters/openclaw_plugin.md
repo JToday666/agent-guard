@@ -8,7 +8,7 @@
 packages/agentguard-openclaw-plugin/
 ```
 
-它不是 `agentguard_langgraph_bench/adapters/openclaw/` 的 AttackBench 外部 adapter。当前范围是 OpenClaw runtime 插件：P1 注册 `before_tool_call` 和 `message_sending` 执行前阻断面，把事件映射成 `GuardEvent(schema_version="0.3", runtime="openclaw")`，调用 Guard API，并按 `GuardDecision` 放行、阻断或等待审批；P2 增加 `before_install` 配置审计、`tool_result_persist` 工具结果事件，以及 session/gateway/model/subagent/cron/exec-env 观察型审计。
+它不是 `agentguard_langgraph_bench/adapters/openclaw/` 的 AttackBench 外部 adapter。当前范围是 OpenClaw runtime 插件：P1 注册 `before_tool_call` 和 `message_sending` 执行前阻断面，把事件映射成 `GuardEvent(schema_version="0.3", runtime="openclaw")`，调用 Guard API，并按 `GuardDecision` 放行、阻断或等待审批；同时接入 `before_prompt_build`、`llm_input`、`llm_output` 作为 prompt/model 评估型观测面。P2 增加 `before_install` 配置审计、`tool_result_persist` 工具结果事件，以及 session/gateway/model/subagent/cron/exec-env 观察型审计。
 
 关联入口：
 
@@ -60,6 +60,8 @@ packages/agentguard-openclaw-plugin/
 | --- | --- | --- |
 | `before_tool_call` | 已实现并通过本机 OpenClaw runtime 验证 | 映射为 `tool_call_proposed`；`allow` 放行，`deny` block，`ask` 等待 Guard approval |
 | `message_sending` | 已实现并通过本机 OpenClaw runtime 验证 | 映射为 `message_send_proposed`；`allow` 放行，`deny`/拒绝/超时 cancel |
+| `before_prompt_build` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `context_assembled`；调用 Guard API 写审计/provenance；不改写 prompt |
+| `llm_input` / `llm_output` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `model_input_prepared` / `model_output_produced`；调用 Guard API 写审计/provenance；不阻断模型调用 |
 | `before_install` | 已实现，需运行本机 OpenClaw install 验证 | 调用 Guard API config audit；high/critical 阻断安装；Guard API 失败 fail-closed |
 | `tool_result_persist` | 已实现，需运行本机 OpenClaw hook 验证 | 映射为 `tool_result_produced`，调用 Guard evaluate 写审计/provenance；失败 fail-open |
 | `gateway_start` / `gateway_stop` | 已实现，需运行本机 OpenClaw runtime 验证 | observation-only，写 `AuditEvent(event_type=runtime_observation, runtime=openclaw)`；失败 fail-open |
@@ -69,7 +71,6 @@ packages/agentguard-openclaw-plugin/
 | `model_call_started` / `model_call_ended` | 已实现，需运行本机 OpenClaw runtime 验证 | observation-only，记录模型调用遥测 |
 | `cron_changed` | 已实现，需运行本机 OpenClaw runtime 验证 | observation-only，记录自动化任务变更 |
 | `resolve_exec_env` | 已实现，需运行本机 OpenClaw runtime 验证 | 仅审计 exec env 风险；不注入敏感环境变量；Guard API 失败时不新增 env 变更 |
-| `before_prompt_build` / `llm_input` / `llm_output` | 未纳入本轮 | 需要 conversation access 配置和内容脱敏策略后再验证 |
 
 ## 5. 事件映射
 
@@ -78,6 +79,8 @@ packages/agentguard-openclaw-plugin/
 `message_sending` 使用 `to`、`content`、`channelId`、`sessionKey`、`messageId` 构造 `message_send_proposed`。该 hook 不强依赖 `runId`，优先用 `sessionKey` 关联 trace。
 
 `tool_result_persist` 使用工具名、调用 id、结果内容预览、content type、是否进入上下文和是否持久化构造 `tool_result_produced`。该 hook 不作为阻断面；Guard API 失败时不影响 OpenClaw 持久化路径。
+
+`before_prompt_build` 使用 prompt、session messages 和 source trust 构造 `context_assembled`。`llm_input` / `llm_output` 使用 prompt/output preview、provider、model 和 tool plan 构造模型输入/输出事件。三者当前只写入 Guard API 审计与 provenance，不做 prompt 改写、模型输出重写或原生 `requireApproval` 接管。非 bundled 插件要启用 `llm_input` / `llm_output`，OpenClaw config 必须为 `agentguard-security` 设置 `hooks.allowConversationAccess=true`。
 
 `before_install` 构造 `ConfigAuditEvent(runtime="openclaw")`，当前会识别 `allowConversationAccess`、`allowPromptInjection` 和 exec-like 权限等高风险配置。`high`/`critical` findings 会返回 block。
 
@@ -139,12 +142,15 @@ pnpm openclaw:plugin:verify
 
 ```json
 {
-  "plugin": { "id": "agentguard-security", "status": "loaded", "hookCount": 16 },
+  "plugin": { "id": "agentguard-security", "status": "loaded", "hookCount": 19 },
   "shape": "hook-only",
   "typedHooks": [
     { "name": "before_tool_call", "priority": 100 },
     { "name": "message_sending", "priority": 100 },
     { "name": "before_install", "priority": 100 },
+    { "name": "before_prompt_build", "priority": 0 },
+    { "name": "llm_input", "priority": 0 },
+    { "name": "llm_output", "priority": 0 },
     { "name": "tool_result_persist", "priority": 0 },
     { "name": "gateway_start", "priority": 0 },
     { "name": "gateway_stop", "priority": 0 },
@@ -177,7 +183,7 @@ OpenClaw 2026.6.6 的 `openclaw plugins validate --root ... --entry ...` 面向 
 ## 9. 当前限制
 
 - 本仓库 pnpm workspace 包目录内可能有 `node_modules` symlink。直接 `openclaw plugins install -l packages/agentguard-openclaw-plugin` 会被 OpenClaw install safety scan 拦截。正式开发安装使用不含 `node_modules` 的 `.openclaw-dev/agentguard-security` staging 目录，流程见 [部署文档](openclaw_plugin_deployment.md)。
-- 当前仍不实现消息改写、参数改写、prompt/model content hooks、OpenClaw 原生 `requireApproval` 审批 UI 接管。
+- 当前仍不实现消息改写、参数改写、prompt/model 内容改写、OpenClaw 原生 `requireApproval` 审批 UI 接管。
 - 本机 OpenClaw 持久配置通过 `pnpm openclaw:plugin:install` 启用 `agentguard-security` 并指向 `.openclaw-dev/agentguard-security`；正式联调时需在 `.env` 中提供真实 `AGENTGUARD_ADAPTER_TOKEN`。
 
 ## 10. E2E 验收报告
@@ -188,4 +194,4 @@ OpenClaw 2026.6.6 的 `openclaw plugins validate --root ... --entry ...` 面向 
 /tmp/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
-该验收使用 OpenClaw 2026.6.6、Guard API、独立 PostgreSQL 测试库和确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。
+该验收使用 OpenClaw 2026.6.6、Guard API、独立 PostgreSQL 测试库和确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_prompt_build`、`llm_input`、`llm_output`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。

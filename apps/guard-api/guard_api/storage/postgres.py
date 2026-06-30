@@ -435,6 +435,15 @@ class PostgresControlPlaneStore:
             return None
         return AdapterStatusRecord.model_validate(row).model_dump(mode="json")
 
+    def list_adapter_statuses(self) -> dict[str, dict[str, Any]]:
+        stmt = select(adapter_statuses.c.adapter_id, adapter_statuses.c.payload_json)
+        with self._session_factory() as session:
+            rows = session.execute(stmt).mappings().all()
+        return {
+            str(row["adapter_id"]): AdapterStatusRecord.model_validate(row["payload_json"]).model_dump(mode="json")
+            for row in rows
+        }
+
     def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
         record = CredentialRecord.model_validate(credential)
         payload = record.model_dump(mode="json")

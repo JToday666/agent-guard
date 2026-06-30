@@ -75,16 +75,17 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - `GET /v1/audit/integrity` 已接入，系统状态页与安全总览展示审计链完整性。
 - `ContextBuildEvent`、`ToolResultEvent`、`MemoryEvent`、`MessageSendEvent` 已进入 `GuardEvent` 契约、schema 校验和 Core/API 测试路径。
 - `message_send_proposed` 已支持消息外发 DLP、`ask` 审批与 OpenClaw `message_sending` 映射。
-- `memory_write_proposed` 已有契约、Core 检测和基础后端变更记录；真实 runtime memory/store 接入仍需后续补齐。
+- `memory_write_proposed` 已有契约、Core 检测、Guard API 评估联动和基础后端变更记录；真实 runtime memory/store wrapper 仍需后续补齐。
 - FPR、FNR、Block Rate、Latency 已在安全评测页展示；混淆矩阵由 `is_malicious + blocked` 派生。
-- 评测结果导入与读取后端接口已实现：`POST /v1/evaluations`、`GET /v1/evaluations`、`GET /v1/evaluations/latest`、`GET /v1/evaluations/{run_id}`。
+- 评测结果导入与读取后端接口已实现：`POST /v1/evaluations`、`GET /v1/evaluations`、`GET /v1/evaluations/datasets`、`GET /v1/evaluations/latest`、`GET /v1/evaluations/{run_id}`；run 支持 dataset digest、版本锁定、per-case provenance 和 regression gate 摘要。
+- `GET /v1/metrics/runtime` 已提供最小运行时监控聚合：审计事件计数、阻断率、hook 活跃度和 adapter status。
+- OpenClaw `before_prompt_build`、`llm_input`、`llm_output` 已接入 Guard API 评估型观测路径，不改写 prompt/model 内容。
 - Dashboard 运行时延迟对比（LangGraph / OpenClaw）由 `latency_ms` 字段前端派生。
 
 ## 5. P1 待完成项
 
-- Adapter 侧模型输入/输出 hook 接入，例如 `pre_model_hook`、`post_model_hook` 或对应 runtime 的等价 hook。
-- 长期记忆真实 runtime/store 写入前拦截与回滚链路。
-- `GET /v1/metrics/runtime` 运行时监控指标；当前已实现的是 `GET /v1/metrics/eval`。
+- LangGraph 等非 OpenClaw Adapter 侧模型输入/输出 hook 接入，例如 `pre_model_hook`、`post_model_hook` 或对应 runtime 的等价 hook。
+- 长期记忆真实 runtime/store wrapper 写入前拦截与回滚链路。
 - 更完整的上下文隔离执行策略，包括 sanitize、降权、工具最小权限和下游审计联动。
 
 ## 6. P2 已完成 / 部分完成项
@@ -96,8 +97,8 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - Dashboard 规则命中 TopN。
 - Memory Guard 已有后端基础变更流：propose、commit、rollback。
 - Action Critic 已有确定性 review 与可选 provider 扩展点。
-- OpenClaw verify 最近状态写入与读取接口已实现：`PUT /v1/adapters/openclaw/status`、`GET /v1/adapters/openclaw/status`。
-- 安全评测 ASR before/after 后端导入与 latest 查询已实现，统一走 `/v1/evaluations` 系列接口。
+- OpenClaw verify / E2E / reliability 最近状态摘要写入与读取接口已实现：`PUT /v1/adapters/openclaw/status`、`GET /v1/adapters/openclaw/status`。
+- 安全评测 ASR before/after 后端导入、latest 查询和 dataset registry 汇总已实现，统一走 `/v1/evaluations` 系列接口；独立 dataset 资源表、样本版本锁文件和跨 run regression gate 发布门禁仍需后续补齐。
 
 ## 7. P2 待完成项
 
@@ -105,7 +106,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - Action Critic 从确定性 review 扩展到可评测、可消融的 LLM-as-Judge / rule hybrid 方案。
 - 多渠道审批。
 - 消融实验。
-- OpenClaw verify / E2E 报告纳入稳定发布门禁。
+- OpenClaw verify / E2E / reliability 报告已能写入 adapter status；后续需接入 CI 或发布脚本作为强制门禁。
 - Dashboard 展示新增后端能力属于前端改动，需要单独确认范围，见 `docs/TODO.md`。
 
 ## 8. 分工建议
