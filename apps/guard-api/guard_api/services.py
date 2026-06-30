@@ -14,6 +14,7 @@ from agentguard_core import (
     ConfigAuditResult,
     GuardDecision,
     GuardEvent,
+    MemoryEventPayload,
     MemoryGuardChange,
     PolicyBundle,
     ProvenanceEdge,
@@ -101,12 +102,14 @@ class AuditService:
         *,
         approval_id: str | None = None,
         critic_review: ActionCriticReview | None = None,
+        memory_change_id: str | None = None,
     ) -> AuditEvent:
         audit_event = build_audit_event(
             event,
             decision,
             approval_id=approval_id,
             critic_review_id=critic_review.review_id if critic_review is not None else None,
+            memory_change_id=memory_change_id,
         )
         self.store.add_audit_event(audit_event)
         if critic_review is not None:
@@ -346,6 +349,65 @@ class MetricService:
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         return self.store.eval_metrics(filters)
 
+    def runtime_metrics(self, *, runtime: str | None = None, limit: int = 1000) -> dict[str, object]:
+        events = self.store.list_audit_events(AuditEventFilters(runtime=runtime, limit=limit))
+        by_runtime: dict[str, dict[str, object]] = {}
+        hook_activity: dict[str, int] = {}
+        for event in events:
+            bucket = by_runtime.setdefault(
+                event.runtime,
+                {
+                    "event_count": 0,
+                    "allow_count": 0,
+                    "deny_count": 0,
+                    "ask_count": 0,
+                    "blocked_count": 0,
+                    "average_latency_ms": None,
+                    "_latency_values": [],
+                    "last_event_at": event.timestamp,
+                },
+            )
+            bucket["event_count"] = int(bucket["event_count"]) + 1
+            bucket[f"{event.decision}_count"] = int(bucket[f"{event.decision}_count"]) + 1
+            if event.blocked or event.decision in {"deny", "ask"}:
+                bucket["blocked_count"] = int(bucket["blocked_count"]) + 1
+            if event.latency_ms is not None:
+                bucket["_latency_values"].append(event.latency_ms)  # type: ignore[union-attr]
+            if event.timestamp > str(bucket["last_event_at"]):
+                bucket["last_event_at"] = event.timestamp
+            hook_name = _event_hook_name(event)
+            if hook_name is not None:
+                hook_activity[hook_name] = hook_activity.get(hook_name, 0) + 1
+
+        for bucket in by_runtime.values():
+            latency_values = bucket.pop("_latency_values")
+            bucket["average_latency_ms"] = (
+                sum(latency_values) / len(latency_values) if latency_values else None
+            )
+
+        statuses = {
+            adapter_id: status
+            for adapter_id, status in self.store.list_adapter_statuses().items()
+            if runtime is None or status.get("runtime") == runtime or adapter_id == runtime
+        }
+        event_count = len(events)
+        blocked_count = sum(1 for event in events if event.blocked or event.decision in {"deny", "ask"})
+        latency_values = [event.latency_ms for event in events if event.latency_ms is not None]
+        return {
+            "runtime": runtime,
+            "event_count": event_count,
+            "allow_count": sum(1 for event in events if event.decision == "allow"),
+            "deny_count": sum(1 for event in events if event.decision == "deny"),
+            "ask_count": sum(1 for event in events if event.decision == "ask"),
+            "blocked_count": blocked_count,
+            "block_rate": (blocked_count / event_count) if event_count else None,
+            "average_latency_ms": (sum(latency_values) / len(latency_values)) if latency_values else None,
+            "by_runtime": by_runtime,
+            "hook_activity": dict(sorted(hook_activity.items())),
+            "adapters": statuses,
+            "active_adapter_count": sum(1 for status in statuses.values() if status.get("loaded") is True),
+        }
+
 
 class TraceService:
     def __init__(self, *, store: ControlPlaneStore) -> None:
@@ -380,11 +442,13 @@ class EvaluationService:
         policy_service: PolicyService,
         audit_service: AuditService,
         approval_service: ApprovalService,
+        memory_guard_service: MemoryGuardService | None = None,
         action_critic: ActionCritic | None = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
         self.approval_service = approval_service
+        self.memory_guard_service = memory_guard_service
         self.action_critic = action_critic or ActionCritic()
 
     def evaluate(self, event: GuardEvent, *, requesting_principal_id: str) -> GuardEvaluationResponse:
@@ -395,11 +459,13 @@ class EvaluationService:
             decision,
             requesting_principal_id=requesting_principal_id,
         )
+        memory_change = self._record_memory_change(event, decision)
         self.audit_service.record_evaluation(
             event,
             decision,
             approval_id=approval.approval_id if approval is not None else None,
             critic_review=critic_review,
+            memory_change_id=memory_change.change_id if memory_change is not None else None,
         )
         return GuardEvaluationResponse(
             decision=decision,
@@ -414,6 +480,29 @@ class EvaluationService:
             ),
         )
 
+    def _record_memory_change(self, event: GuardEvent, decision: GuardDecision) -> MemoryGuardChange | None:
+        if self.memory_guard_service is None or not isinstance(event.payload, MemoryEventPayload):
+            return None
+        memory = event.payload.memory
+        if memory.operation.lower() != "write" or not event.payload.will_persist:
+            return None
+        return self.memory_guard_service.propose(
+            MemoryGuardChange(
+                trace_id=event.trace_id,
+                namespace=memory.namespace,
+                key=memory.key,
+                value_preview=memory.value_preview,
+                operation=memory.operation,
+                source_trust=memory.source_trust,
+                metadata={
+                    "event_id": event.event_id,
+                    "decision_id": decision.decision_id,
+                    "decision": decision.decision,
+                    "requires_approval": event.payload.requires_approval,
+                },
+            )
+        )
+
 
 def build_audit_event(
     event: GuardEvent,
@@ -421,6 +510,7 @@ def build_audit_event(
     *,
     approval_id: str | None = None,
     critic_review_id: str | None = None,
+    memory_change_id: str | None = None,
 ) -> AuditEvent:
     description = describe_guard_event(event)
     links = {"event_id": event.event_id, "decision_id": decision.decision_id}
@@ -428,6 +518,8 @@ def build_audit_event(
         links["approval_id"] = approval_id
     if critic_review_id is not None:
         links["critic_review_id"] = critic_review_id
+    if memory_change_id is not None:
+        links["memory_change_id"] = memory_change_id
     return AuditEvent(
         trace_id=event.trace_id,
         case_id=event.case_id,
@@ -445,7 +537,7 @@ def build_audit_event(
         reason=decision.reason,
         links=links,
         latency_ms=decision.latency_ms,
-        metadata=description.metadata,
+        metadata={**event.metadata, **description.metadata},
     )
 
 
@@ -489,6 +581,15 @@ def _should_quarantine_memory_change(change: MemoryGuardChange) -> bool:
     if change.source_trust != "trusted":
         return True
     return any(marker in preview for marker in ("secret", "token", "password", "always send"))
+
+
+def _event_hook_name(event: AuditEvent) -> str | None:
+    hook_name = event.metadata.get("openclaw_hook") or event.metadata.get("hook_name")
+    if isinstance(hook_name, str) and hook_name:
+        return hook_name
+    if event.event_type == "runtime_observation" and event.stage:
+        return event.stage
+    return None
 
 
 def describe_guard_event(event: GuardEvent) -> EventDescription:

@@ -157,6 +157,9 @@ class ControlPlaneStore(Protocol):
     def get_adapter_status(self, adapter_id: str) -> dict | None:
         ...
 
+    def list_adapter_statuses(self) -> dict[str, dict]:
+        ...
+
     def create_credential(self, credential: CredentialRecord | dict) -> CredentialRecord:
         ...
 

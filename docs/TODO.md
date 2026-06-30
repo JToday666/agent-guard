@@ -4,9 +4,10 @@
 
 本文件记录原前端预留能力的后端落地状态。三项后端能力均已完成：
 
-- 安全评测 ASR 数据：已提供导入与 latest 查询接口。
+- 安全评测 ASR 数据：已提供导入、latest 查询和 dataset registry 汇总接口。
 - 配置审计 findings：已提供只读查询接口。
-- OpenClaw 插件验证状态：已提供最近一次 verify 状态写入与读取接口。
+- OpenClaw 插件验证状态：已提供最近一次 verify、E2E 和 reliability 状态摘要写入与读取接口。
+- 运行时监控指标：已提供 `/v1/metrics/runtime`，可按 runtime 聚合审计事件、hook 活跃度和 adapter 状态。
 
 Dashboard 已完成展示接入：安全评测页读取 latest evaluation，系统状态页读取配置审计 findings 与 OpenClaw verify/status。mock 数据源已补齐有数据状态，便于本地查看真实数据形态下的页面效果。
 
@@ -26,6 +27,17 @@ Dashboard 已完成展示接入：安全评测页读取 latest evaluation，系�
 {
   "run_id": "eval_20260628",
   "run_at": "2026-06-28T00:00:00+00:00",
+  "dataset_id": "attackbench",
+  "dataset_version": "v1",
+  "dataset_digest": "sha256:...",
+  "dataset_locked": true,
+  "regression_gate": {
+    "status": "passed",
+    "baseline_run_id": "eval_baseline",
+    "max_allowed_regression": 0.02,
+    "asr_delta": -0.684,
+    "failed_case_ids": []
+  },
   "asr_before": 0.732,
   "asr_after": 0.048,
   "per_attack": {
@@ -36,6 +48,12 @@ Dashboard 已完成展示接入：安全评测页读取 latest evaluation，系�
       "case_id": "PI-001",
       "attack_type": "prompt_injection",
       "runtime": "openclaw",
+      "case_digest": "sha256:...",
+      "provenance": {
+        "source": "attackbench",
+        "source_path": "bench/datasets/attack_cases/prompt_injection.jsonl",
+        "line": 1
+      },
       "expected_decision": "deny",
       "actual_decision": "ask",
       "blocked": true,
@@ -52,6 +70,11 @@ Dashboard 已完成展示接入：安全评测页读取 latest evaluation，系�
 
 - 鉴权：browser session 或 control token。
 - 无数据：`404 EVALUATION_NOT_FOUND`。
+
+`GET /v1/evaluations/datasets`
+
+- 鉴权：browser session 或 control token。
+- 用途：从已保存 evaluation run 汇总 dataset 版本、锁定状态、case provenance 覆盖、latest run 和 regression gate 摘要。
 
 ### CLI
 
@@ -82,13 +105,15 @@ OpenClaw 状态不是每次 Dashboard 刷新实时 shell 探测，而是最近�
 {
   "status": "loaded",
   "loaded": true,
-  "hook_count": 16,
-  "expected_hook_count": 16,
+  "hook_count": 19,
+  "expected_hook_count": 19,
   "last_verified_at": "2026-06-28T00:00:00+00:00",
   "error": null,
   "source": "agentguardctl"
 }
 ```
+
+E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`，用于后续发布前复查。
 
 ### 读取
 

@@ -16,10 +16,13 @@ const REQUIRED_HOOKS = [
   "after_compaction",
   "before_compaction",
   "before_install",
+  "before_prompt_build",
   "before_tool_call",
   "cron_changed",
   "gateway_start",
   "gateway_stop",
+  "llm_input",
+  "llm_output",
   "message_sending",
   "model_call_ended",
   "model_call_started",
@@ -76,7 +79,7 @@ function install() {
       entries: {
         [PLUGIN_ID]: {
           enabled: true,
-          hooks: { timeoutMs: 10000 },
+          hooks: { timeoutMs: 10000, allowConversationAccess: true },
           config: {
             guardApiBaseUrl,
             adapterToken,
@@ -102,21 +105,28 @@ async function verify({ record }) {
     const parsed = parseJsonObject(inspect.stdout);
     const plugin = parsed.plugin ?? {};
     const typedHooks = Array.isArray(parsed.typedHooks) ? parsed.typedHooks : [];
+    const diagnostics = Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [];
     const hookNames = new Set(typedHooks.map((hook) => hook?.name).filter(Boolean));
     const missingHooks = REQUIRED_HOOKS.filter((hookName) => !hookNames.has(hookName));
+    const conversationAccessDiagnostics = diagnostics
+      .map((item) => String(item?.message ?? ""))
+      .filter((message) => /allowConversationAccess=true/.test(message));
 
     const failures = [];
     if (plugin.status !== "loaded") {
       failures.push(`expected plugin status=loaded, got ${String(plugin.status)}`);
     }
-    if (plugin.hookCount !== 16) {
-      failures.push(`expected hookCount=16, got ${String(plugin.hookCount)}`);
+    if (plugin.hookCount !== REQUIRED_HOOKS.length) {
+      failures.push(`expected hookCount=${REQUIRED_HOOKS.length}, got ${String(plugin.hookCount)}`);
     }
     if (!pluginUsesStaging(plugin)) {
       failures.push(`expected plugin source/rootDir to use ${relativePath(STAGING_DIR)}, got ${plugin.source ?? plugin.rootDir}`);
     }
     if (missingHooks.length > 0) {
       failures.push(`missing hooks: ${missingHooks.join(", ")}`);
+    }
+    if (conversationAccessDiagnostics.length > 0) {
+      failures.push(conversationAccessDiagnostics.join("; "));
     }
     if (failures.length > 0) {
       throw new Error(`OpenClaw plugin verification failed:\n- ${failures.join("\n- ")}`);
@@ -135,7 +145,7 @@ async function verify({ record }) {
     if (record) {
       await recordOpenClawStatus(status);
     }
-    console.log(`Verified ${PLUGIN_ID}: status=loaded, hookCount=16.`);
+    console.log(`Verified ${PLUGIN_ID}: status=loaded, hookCount=${REQUIRED_HOOKS.length}.`);
   } catch (error) {
     if (record) {
       try {

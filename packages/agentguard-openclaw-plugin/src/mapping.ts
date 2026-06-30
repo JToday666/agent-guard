@@ -71,6 +71,28 @@ type ToolResultPersistEventInput = RuntimeSecurityFields & {
   willPersist?: boolean;
 };
 
+type PromptBuildEventInput = RuntimeSecurityFields & {
+  prompt?: unknown;
+  messages?: unknown;
+  context?: unknown;
+  sanitized?: boolean;
+  willEnterContext?: boolean;
+};
+
+type ModelHookEventInput = RuntimeSecurityFields & {
+  prompt?: unknown;
+  input?: unknown;
+  output?: unknown;
+  response?: unknown;
+  content?: unknown;
+  messages?: unknown;
+  provider?: string;
+  model?: string;
+  sanitized?: boolean;
+  toolPlan?: unknown;
+  toolCalls?: unknown;
+};
+
 type BeforeInstallEventInput = {
   request?: JsonObject & {
     targetType?: string;
@@ -273,6 +295,118 @@ export function buildToolResultGuardEvent(
     },
     metadata: {
       openclaw_hook: "tool_result_persist",
+      session_key: context.sessionKey ?? null,
+    },
+  };
+}
+
+export function buildContextGuardEvent(
+  hookName: string,
+  event: PromptBuildEventInput,
+  context: ToolHookContextInput = {},
+): GuardEvent {
+  const runId = context.runId ?? null;
+  const security = runtimeSecurityFields(event, context);
+  const sourceSummaries = contextSourceSummaries(event);
+  const sources = sourceSummaries.length > 0 ? sourceSummaries : [stringPreview(event.prompt ?? event.context)];
+
+  return {
+    schema_version: "0.3",
+    event_id: createLocalId("evt"),
+    event_type: "context_assembled",
+    runtime: "openclaw",
+    trace_id: firstNonEmpty(runId, context.sessionKey, context.sessionId),
+    case_id: null,
+    attack_type: null,
+    is_malicious: null,
+    timestamp: new Date().toISOString(),
+    pre_execution: true,
+    security_context: {
+      user_task: security.userTask,
+      source_type: security.sourceType,
+      source_trust: security.sourceTrust,
+      channel: context.channelId ?? null,
+      sender_id: null,
+      session_id: context.sessionId ?? null,
+      run_id: runId,
+      agent_id: context.agentId ?? "main",
+      current_step: hookName,
+      model_intent: null,
+      context_sources: [],
+      derived_paths: uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []),
+      metadata: {
+        session_key: context.sessionKey ?? null,
+      },
+    },
+    payload: {
+      sources: sources.map((summary, index) => ({
+        source_id: `openclaw:${hookName}:${index + 1}`,
+        source_type: security.sourceType,
+        source_trust: security.sourceTrust,
+        summary: truncate(summary, PREVIEW_LIMIT),
+        contains_instruction_like_text: containsInstructionLikeText(summary),
+        contains_sensitive_data: containsSensitiveText(summary),
+      })),
+      will_enter_context: event.willEnterContext ?? true,
+      sanitized: event.sanitized === true,
+    },
+    metadata: {
+      openclaw_hook: hookName,
+      session_key: context.sessionKey ?? null,
+    },
+  };
+}
+
+export function buildModelGuardEvent(
+  hookName: "llm_input" | "llm_output",
+  event: ModelHookEventInput,
+  context: ToolHookContextInput = {},
+): GuardEvent {
+  const runId = context.runId ?? null;
+  const security = runtimeSecurityFields(event, context);
+  const phase = hookName === "llm_input" ? "input" : "output";
+  const content = modelContentPreview(hookName, event);
+
+  return {
+    schema_version: "0.3",
+    event_id: createLocalId("evt"),
+    event_type: phase === "input" ? "model_input_prepared" : "model_output_produced",
+    runtime: "openclaw",
+    trace_id: firstNonEmpty(runId, context.sessionKey, context.sessionId),
+    case_id: null,
+    attack_type: null,
+    is_malicious: null,
+    timestamp: new Date().toISOString(),
+    pre_execution: phase === "input",
+    security_context: {
+      user_task: security.userTask,
+      source_type: security.sourceType,
+      source_trust: security.sourceTrust,
+      channel: context.channelId ?? null,
+      sender_id: null,
+      session_id: context.sessionId ?? null,
+      run_id: runId,
+      agent_id: context.agentId ?? "main",
+      current_step: hookName,
+      model_intent: null,
+      context_sources: [],
+      derived_paths: uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []),
+      metadata: {
+        session_key: context.sessionKey ?? null,
+      },
+    },
+    payload: {
+      phase,
+      content_preview: truncate(content, PREVIEW_LIMIT),
+      provider: event.provider ?? null,
+      model: event.model ?? null,
+      contains_instruction_like_text: containsInstructionLikeText(content),
+      contains_sensitive_data: containsSensitiveText(content),
+      sanitized: event.sanitized === true,
+      tool_plan: modelToolPlan(event),
+    },
+    metadata: {
+      openclaw_hook: hookName,
       session_key: context.sessionKey ?? null,
     },
   };
@@ -587,7 +721,42 @@ function containsInstructionLikeText(value: string): boolean {
   );
 }
 
+function containsSensitiveText(value: string): boolean {
+  return /token\s*=|api[_-]?key|password|secret|authorization/i.test(value);
+}
+
+function contextSourceSummaries(event: PromptBuildEventInput): string[] {
+  if (!Array.isArray(event.messages)) {
+    return [];
+  }
+  return event.messages
+    .map((item) => {
+      const record = asRecord(item);
+      return stringPreview(record.content ?? record.text ?? item);
+    })
+    .filter((item) => item.length > 0);
+}
+
+function modelContentPreview(hookName: "llm_input" | "llm_output", event: ModelHookEventInput): string {
+  if (hookName === "llm_input") {
+    return stringPreview(event.prompt ?? event.input ?? event.content ?? event.messages);
+  }
+  return stringPreview(event.output ?? event.response ?? event.content ?? event.messages);
+}
+
+function modelToolPlan(event: ModelHookEventInput): JsonObject[] {
+  const toolPlan = event.toolPlan ?? event.toolCalls;
+  if (!Array.isArray(toolPlan)) {
+    return [];
+  }
+  return toolPlan.map((item) => asRecord(item));
+}
+
 function resultContentPreview(value: unknown): string {
+  return stringPreview(value);
+}
+
+function stringPreview(value: unknown): string {
   const record = asRecord(value);
   const content = record.content ?? record.text ?? record.output ?? value;
   if (typeof content === "string") {

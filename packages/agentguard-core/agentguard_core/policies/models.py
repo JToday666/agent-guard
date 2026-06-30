@@ -82,7 +82,16 @@ class PolicyBundle(BaseModel):
         ]
     )
     sensitive_text_markers: list[str] = Field(
-        default_factory=lambda: ["token=", "secret", "credential", "api key", "password", "private key"]
+        default_factory=lambda: [
+            "token=",
+            "secret",
+            "credential",
+            "api key",
+            "password",
+            "private key",
+            "authorization:",
+            "bearer ",
+        ]
     )
     prompt_injection_markers: list[str] = Field(
         default_factory=lambda: [
@@ -116,6 +125,8 @@ class PolicyBundle(BaseModel):
             "secret",
             "credential",
             "api key",
+            "authorization:",
+            "bearer ",
         ]
     )
     dangerous_command_markers: list[str] = Field(
@@ -134,6 +145,10 @@ class PolicyBundle(BaseModel):
             "chmod +x",
             "ssh ",
             "scp ",
+            "powershell",
+            "invoke-webrequest",
+            "python -c",
+            "base64 -d",
         ]
     )
     memory_poisoning_markers: list[str] = Field(

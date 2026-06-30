@@ -49,11 +49,15 @@ Expected runtime hooks after install:
 
 - P1 enforcement: `before_tool_call`, `message_sending`
 - P2 config gate: `before_install`
-- P2 evaluation/observation: `tool_result_persist`, `gateway_start`,
-  `gateway_stop`, `session_start`, `session_end`, `before_compaction`,
-  `after_compaction`, `subagent_spawned`, `subagent_ended`,
-  `model_call_started`, `model_call_ended`, `cron_changed`,
-  `resolve_exec_env`
+- P2 evaluation/observation: `before_prompt_build`, `llm_input`,
+  `llm_output`, `tool_result_persist`, `gateway_start`, `gateway_stop`,
+  `session_start`, `session_end`, `before_compaction`, `after_compaction`,
+  `subagent_spawned`, `subagent_ended`, `model_call_started`,
+  `model_call_ended`, `cron_changed`, `resolve_exec_env`
+
+`llm_input` and `llm_output` require
+`plugins.entries.agentguard-security.hooks.allowConversationAccess=true` in the
+OpenClaw config. The repository-level development installer writes this setting.
 
 To remove the development install from the local OpenClaw profile:
 
@@ -76,7 +80,7 @@ from `AGENTGUARD_TEST_DATABASE_URL`:
 pnpm openclaw:plugin:reliability
 ```
 
-The reliability runner triggers all 16 registered hooks 50 times each, starts a
+The reliability runner triggers all 19 registered hooks 50 times each, starts a
 temporary Guard API pointed at the `_test` database, and writes:
 
 ```text
