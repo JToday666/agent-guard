@@ -20,6 +20,8 @@ class GuardedToolGateway:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        raw_arguments: dict[str, Any] | None = None,
+        compatibility: dict[str, Any] | None = None,
         security: dict[str, Any],
         trace_id: str,
         call_id: str | None = None,
@@ -33,14 +35,27 @@ class GuardedToolGateway:
             case_context=case_context,
             call_id=call_id,
         )
+        security_for_event = dict(security)
+        if raw_arguments is not None or compatibility is not None:
+            metadata = dict(security_for_event.get("metadata") or {})
+            metadata["compatibility"] = {
+                "raw_arguments": dict(raw_arguments or {}),
+                "normalized_arguments": dict(arguments),
+                **dict(compatibility or {}),
+            }
+            security_for_event["metadata"] = metadata
         event, decision = self.guard_adapter.evaluate_before_tool(
             tool_name=tool_name,
             arguments=arguments,
-            security=security,
+            security=security_for_event,
             trace_id=trace_id,
             call_id=call_id,
         )
+        if compatibility is not None:
+            event.metadata["compatibility"] = dict(compatibility)
         audit_event = self.guard_adapter.build_audit_event(event, decision)
+        if compatibility is not None:
+            audit_event.metadata["compatibility"] = dict(compatibility)
         self.guard_adapter.submit_audit_event(audit_event)
 
         if decision.decision in {"deny", "ask"}:

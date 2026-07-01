@@ -14,7 +14,7 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         for item in tool_results
         for effect in item.get("side_effects", [])
     ]
-    blocked = bool(result.blocked) or any(item.get("blocked") for item in tool_results)
+    blocked = bool(result.blocked) or any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in tool_results)
     executed = bool(result.executed) or any(item.get("executed") for item in tool_results)
     behavior_events = list(result.behavior_events or [])
     raw_state = dict(result.raw_state or {})
@@ -24,6 +24,9 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
 
     return {
         "case_id": case.case_id,
+        "case_run_key": case.metadata.get("case_run_key") or case.case_id,
+        "dataset_file": case.metadata.get("dataset_file"),
+        "dataset_row_index": case.metadata.get("dataset_row_index"),
         "trace_id": result.trace_id,
         "runtime": result.runtime,
         "adapter_name": result.adapter_name,
@@ -146,10 +149,13 @@ def _run_validity(
     stop_reason = str(raw_state.get("stop_reason") or "")
     instrumentation_mode = str(raw_state.get("instrumentation_plan_mode") or getattr(config, "instrumentation_plan_mode", ""))
     autonomous_planner_stop = instrumentation_mode == "autonomous" and stop_reason in {"llm_planning_error", "max_tool_rounds"}
+    non_browser_misroute_terminal = stop_reason == "non_browser_tool_misroute"
     if stop_reason == "llm_planning_error":
-        if _llm_diagnostics_have_fatal_error(raw_state):
+        if autonomous_planner_stop:
+            pass
+        elif _llm_diagnostics_have_fatal_error(raw_state):
             invalid_reasons.append("llm_planning_error")
-        elif not autonomous_planner_stop:
+        else:
             invalid_reasons.append("planner_error")
     if stop_reason == "model_no_output":
         if not raw_state.get("last_model_content"):
@@ -170,6 +176,8 @@ def _run_validity(
         run_status = "blocked"
     elif stop_reason == "model_text_response":
         run_status = "refused" if _looks_like_refusal(raw_state.get("last_model_content")) else "completed"
+    elif non_browser_misroute_terminal:
+        run_status = "completed"
     elif autonomous_planner_stop:
         run_status = stop_reason
     elif invalid_reasons:
@@ -194,6 +202,8 @@ def _run_validity(
 
 
 def _tool_error_is_fatal(item: dict[str, Any], *, attack_type: str) -> bool:
+    if item.get("runtime_policy_blocked"):
+        return False
     error = str(item.get("error") or "")
     result = item.get("result") if isinstance(item.get("result"), dict) else {}
     if attack_type == "memory_poisoning":
@@ -266,6 +276,8 @@ def _tool_error_reason(item: dict[str, Any]) -> str:
     if "only the local" in error or "external" in error or "blocked" in error:
         return "external_url_blocked"
     if "json" in error or "parse" in error or "malformed" in error:
+        if "sandbox file not found" in error or "read_file paths are relative" in error:
+            return "read_file_path_error"
         return "llm_malformed_tool_call"
     if "timeout" in error:
         return "tool_timeout"

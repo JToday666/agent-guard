@@ -7,7 +7,7 @@ import pytest
 
 from agentguard_langgraph_bench.bench.config import BenchConfig
 from agentguard_langgraph_bench.bench.dataset_loader import load_attack_cases
-from agentguard_langgraph_bench.bench.runner import run_cases, success_for_case
+from agentguard_langgraph_bench.bench.runner import _write_case_scoped_mcp_logs, run_cases, success_for_case
 from agentguard_langgraph_bench.bench.runtime.agent_protocol import CaseRunResult
 from agentguard_langgraph_bench.bench.runtime.row_normalizer import normalize_case_result
 
@@ -187,6 +187,74 @@ def test_tool_hijacking_case_scoped_mcp_logs_are_filtered_by_request_id(tmp_path
         for line in path.read_text(encoding="utf-8").splitlines():
             record = json.loads(line)
             assert record["case_id"] == case_id
+
+
+def test_tool_hijacking_case_scoped_mcp_logs_synthesize_missing_descriptor(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    (sandbox / "mcp").mkdir(parents=True)
+    (sandbox / "mcp" / "calls.jsonl").write_text(
+        json.dumps({"case_id": "MCP-B006", "server": "playwright", "tool": "browser_start"}) + "\n",
+        encoding="utf-8",
+    )
+    for name in ("descriptors.jsonl", "catalog_diff.jsonl", "service_requests.jsonl"):
+        (sandbox / "mcp" / name).write_text("", encoding="utf-8")
+    row = {
+        "case_id": "MCP-B006",
+        "benchmark_run_id": "run-test",
+        "sandbox_diff": {
+            "root": str(sandbox),
+            "added": [{"relative_path": "mcp/calls.jsonl", "absolute_path": str(sandbox / "mcp" / "calls.jsonl")}],
+            "modified": [],
+        },
+        "tool_calls": [
+            {
+                "tool_name": "mcp_call",
+                "call_id": "call_1",
+                "event": {
+                    "arguments": {
+                        "server": "playwright",
+                        "tool": "browser_start",
+                        "catalog_view": "poisoned",
+                        "descriptor": {"description": "Navigate", "input_schema": {"type": "object"}},
+                    }
+                },
+                "result": {
+                    "server": "playwright",
+                    "tool": "browser_start",
+                    "arguments": {"url": ""},
+                    "descriptor_hash": "hash-current",
+                    "clean_descriptor_hash": "hash-clean",
+                    "poisoned_descriptor_hash": "hash-current",
+                    "descriptor_diff": [],
+                    "descriptor_view": "poisoned",
+                    "permissions": ["browser:navigate"],
+                    "trust_level": "user_installed",
+                    "response": {
+                        "service": {
+                            "url": "http://127.0.0.1:18085/mcp/playwright/browser_start",
+                            "status_code": 200,
+                            "real_local_service": True,
+                        }
+                    },
+                },
+            }
+        ],
+    }
+
+    result = _write_case_scoped_mcp_logs(tmp_path / "case", row, sandbox)
+
+    descriptor_path = tmp_path / "case" / "mcp" / "descriptors.jsonl"
+    service_path = tmp_path / "case" / "mcp" / "service_requests.jsonl"
+    descriptor_records = [json.loads(line) for line in descriptor_path.read_text(encoding="utf-8").splitlines()]
+    service_records = [json.loads(line) for line in service_path.read_text(encoding="utf-8").splitlines()]
+    manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+
+    assert descriptor_records[0]["case_id"] == "MCP-B006"
+    assert descriptor_records[0]["descriptor_hash"] == "hash-current"
+    assert service_records[0]["case_id"] == "MCP-B006"
+    assert service_records[0]["status_code"] == 200
+    assert any(item["relative_path"] == "mcp/descriptors.jsonl" and item["state"] == "case_scoped_synthesized" for item in manifest["files"])
+    assert any(item["relative_path"] == "mcp/calls.jsonl" and item["state"] == "case_scoped" for item in manifest["files"])
 
 
 def test_redacted_tool_hijacking_prompt_is_auditable_without_oracles(tmp_path):

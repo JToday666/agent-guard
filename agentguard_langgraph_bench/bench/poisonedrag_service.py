@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import errno
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,7 +58,12 @@ def ensure_poisonedrag_service_started() -> None:
     if _SERVER is not None:
         return
     port = int(os.getenv("AGENTGUARD_POISONEDRAG_SERVICE_PORT", str(DEFAULT_POISONEDRAG_SERVICE_PORT)))
-    _SERVER = ThreadingHTTPServer(("127.0.0.1", port), _PoisonedRagServiceHandler)
+    try:
+        _SERVER = ThreadingHTTPServer(("127.0.0.1", port), _PoisonedRagServiceHandler)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            return
+        raise
     _THREAD = Thread(target=_SERVER.serve_forever, daemon=True)
     _THREAD.start()
 

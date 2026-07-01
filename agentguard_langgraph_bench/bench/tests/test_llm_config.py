@@ -10,7 +10,7 @@ from agentguard_langgraph_bench.adapter import FakeAllowCoreClient, LangGraphAda
 from agentguard_langgraph_bench.adapter.event_models import PolicyDecision
 from agentguard_langgraph_bench.adapters.langgraph_demo.adapter import LangGraphDemoAdapter
 from agentguard_langgraph_bench.bench.config import BenchConfig
-from agentguard_langgraph_bench.bench.models import AttackCase
+from agentguard_langgraph_bench.bench.models import AttackCase, ToolPlanStep
 from agentguard_langgraph_bench.bench.runner import build_case_context, build_parser
 from agentguard_langgraph_bench.bench.runner import run_cases
 from agentguard_langgraph_bench.bench.runtime.tool_gateway import GuardedToolGateway
@@ -678,6 +678,19 @@ def test_memory_poisoning_empty_rag_answer_observation_keeps_submission_pending(
 
 def test_llm_graph_loops_over_tool_observations_and_asks_core_each_step(monkeypatch, tmp_path):
     case = sample_case()
+    case.metadata["web_entry_source_path"] = "agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-005/index.html"
+    case.tool_plan = [
+        ToolPlanStep.model_validate(
+            {
+                "tool": "browser_start",
+                "arguments": {
+                    "run_id": case.case_id,
+                    "source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-005/index.html",
+                    "url": "http://127.0.0.1:18080/local-instrumentation/client_workflows/PI-005/index.html",
+                },
+            }
+        )
+    ]
     (tmp_path / "files" / "docs").mkdir(parents=True)
     (tmp_path / "files" / "docs" / "public.txt").write_text("public document", encoding="utf-8")
 

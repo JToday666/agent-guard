@@ -26,7 +26,7 @@ from .evidence.artifact_integrity import check_case_artifacts
 from .metrics import calculate_metrics
 from .memory_poisoning_metrics import calculate_memory_poisoning_metrics
 from .models import AttackCase, ToolPlanStep, supports_runtime
-from .mcpsafety import build_descriptor_diff, evaluate_differential_run
+from .mcpsafety import build_descriptor_diff, descriptor_hash, evaluate_differential_run
 from .mcpsafety_evaluator import build_mcpsafety_evaluation_report, should_evaluate_mcpsafety
 from .poisonedrag_metrics import calculate_poisonedrag_metrics
 from .runtime.adapter_loader import load_agent_adapter
@@ -60,6 +60,7 @@ def run_cases(
     run_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     benchmark_run_id = benchmark_run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    _assign_case_run_keys(cases)
     if config.tool_hijacking_mode == "differential" and all(case.attack_type == "tool_hijacking" for case in cases):
         return _run_differential_cases(
             cases,
@@ -200,8 +201,10 @@ def _run_differential_cases(
             "overblocked": bool(clean_row.get("overblocked") or poisoned_row.get("overblocked")),
             "benchmark_run_id": benchmark_run_id,
         }
-        combined_case_dir = _case_result_dir(config.results_dir, benchmark_run_id, case.case_id)
+        case_run_key = _case_run_key(case)
+        combined_case_dir = _case_result_dir(config.results_dir, benchmark_run_id, case_run_key)
         combined_case_dir.mkdir(parents=True, exist_ok=True)
+        combined["case_run_key"] = case_run_key
         combined["case_artifact_dir"] = str(combined_case_dir)
         _write_case_artifacts(combined_case_dir, combined, None)
         rows.append(combined)
@@ -287,6 +290,33 @@ def _core_mode(*, fake_core: bool, fake_core_decision: str, defense_enabled: boo
     return "real_core"
 
 
+def _assign_case_run_keys(cases: list[AttackCase]) -> None:
+    case_id_counts: dict[str, int] = {}
+    for case in cases:
+        case_id_counts[case.case_id] = case_id_counts.get(case.case_id, 0) + 1
+    ordinals: dict[str, int] = {}
+    for index, case in enumerate(cases, start=1):
+        metadata = dict(case.metadata or {})
+        if case_id_counts.get(case.case_id, 0) <= 1:
+            key = case.case_id
+        else:
+            ordinals[case.case_id] = ordinals.get(case.case_id, 0) + 1
+            dataset_stem = str(metadata.get("dataset_file_stem") or metadata.get("dataset_file") or "dataset").removesuffix(".jsonl")
+            row_index = metadata.get("dataset_row_index") or index
+            key = f"{case.case_id}__{_safe_case_key_component(dataset_stem)}__{row_index}"
+        metadata["case_run_key"] = key
+        case.metadata = metadata
+
+
+def _safe_case_key_component(value: Any) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip())
+    return cleaned[:80] or "dataset"
+
+
+def _case_run_key(case: AttackCase) -> str:
+    return str(case.metadata.get("case_run_key") or case.case_id)
+
+
 def _run_single_case(
     case: AttackCase,
     agent_adapter: AgentAdapterProtocol,
@@ -299,7 +329,8 @@ def _run_single_case(
     fake_core_decision: str | None = None,
 ) -> dict[str, Any]:
     run_id = benchmark_run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    case_result_dir = _case_result_dir(config.results_dir, run_id, case.case_id)
+    case_run_key = _case_run_key(case)
+    case_result_dir = _case_result_dir(config.results_dir, run_id, case_run_key)
     case_result_dir.mkdir(parents=True, exist_ok=True)
     sandbox_before = snapshot_sandbox(config.sandbox_dir)
     row: dict[str, Any]
@@ -311,12 +342,17 @@ def _run_single_case(
             context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
             context.security["benchmark_run_id"] = run_id
             context.security["attempt_id"] = "1"
+            if tool_server is not None and hasattr(tool_server, "set_case_context"):
+                tool_server.set_case_context(case, context)
             result = agent_adapter.run_case(case, context)
             row = normalize_case_result(case, result, config, tools)
         except Exception as exc:
             row = _invalid_case_row(case, config, str(exc), benchmark_run_id=run_id)
     row["benchmark_run_id"] = run_id
     row["attempt_id"] = "1"
+    row["case_run_key"] = case_run_key
+    row["dataset_file"] = case.metadata.get("dataset_file")
+    row["dataset_row_index"] = case.metadata.get("dataset_row_index")
     row["case_artifact_dir"] = str(case_result_dir)
     row["core_mode"] = core_mode
     row["fake_core_decision"] = fake_core_decision
@@ -356,8 +392,10 @@ def _run_single_case(
         row["descriptor_diff"] = _descriptor_diff_for_case(case)
         row["catalog_presented_to_llm"] = True
         row["catalog_view"] = row.get("tool_catalog_view") or config.tool_catalog_view
-        row["selected_descriptor_hash"] = _selected_descriptor_hash(row.get("tool_calls") or [])
+        row["selected_descriptor_hash"] = _selected_descriptor_hash(row.get("tool_calls") or []) or _selected_descriptor_hash_for_case(case)
         row["catalog_hash"] = row["selected_descriptor_hash"]
+        if _case_has_executed_mcp_calls(row):
+            _ensure_runtime_mcp_log_files(config.sandbox_dir)
         row["mcp_calls_path"] = str(config.sandbox_dir / "mcp" / "calls.jsonl")
         row["mcp_descriptors_path"] = str(config.sandbox_dir / "mcp" / "descriptors.jsonl")
         row["mcp_catalog_diff_path"] = str(config.sandbox_dir / "mcp" / "catalog_diff.jsonl")
@@ -600,6 +638,9 @@ def _closure_browser_replay_paths(row: dict[str, Any]) -> list[dict[str, Any]]:
 def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benchmark_run_id: str | None) -> dict[str, Any]:
     return {
         "case_id": case.case_id,
+        "case_run_key": _case_run_key(case),
+        "dataset_file": case.metadata.get("dataset_file"),
+        "dataset_row_index": case.metadata.get("dataset_row_index"),
         "trace_id": new_id("trace"),
         "runtime": config.runtime,
         "adapter_name": config.agent_adapter,
@@ -1004,23 +1045,230 @@ def _write_case_scoped_mcp_logs(case_result_dir: Path, row: dict[str, Any], sand
                 "record_count": len(filtered),
             }
         )
+    synthesized: list[dict[str, Any]] = []
+    if _case_has_mcp_calls(row):
+        missing_mcp_logs = {name for name in required_empty if not _read_jsonl_records(mcp_dest / name)}
+        if missing_mcp_logs:
+            synthesized = _synthesize_case_scoped_mcp_logs_from_tool_results(
+                mcp_dest,
+                row,
+                target_files=missing_mcp_logs,
+                include_empty_records=not copied,
+            )
     if not copied:
+        if synthesized:
+            manifest = _write_case_scoped_mcp_manifest(mcp_dest, row, sandbox_root, synthesized)
+            return {"root": str(mcp_dest), "manifest": str(manifest), "files": synthesized, "case_scoped": True}
         manifest = _write_empty_case_scoped_mcp_manifest(mcp_dest, row, sandbox_root)
         return {"root": str(mcp_dest), "manifest": str(manifest), "files": _mcp_required_empty_file_records(mcp_dest, row), "case_scoped": True}
+    if synthesized:
+        synthesized_by_relative = {str(item.get("relative_path")) for item in synthesized}
+        copied = [item for item in copied if str(item.get("relative_path")) not in synthesized_by_relative]
+        copied.extend(synthesized)
     copied_by_relative = {str(item.get("relative_path")) for item in copied}
     copied.extend(item for item in _mcp_required_empty_file_records(mcp_dest, row) if item["relative_path"] not in copied_by_relative)
+    manifest = _write_case_scoped_mcp_manifest(mcp_dest, row, sandbox_root, copied)
+    return {"root": str(mcp_dest), "manifest": str(manifest), "files": copied, "case_scoped": True}
+
+
+def _write_case_scoped_mcp_manifest(mcp_dest: Path, row: dict[str, Any], sandbox_root: Path, files: list[dict[str, Any]]) -> Path:
     manifest = {
-        "case_id": case_id,
-        "run_id": run_id,
+        "case_id": row.get("case_id"),
+        "run_id": row.get("benchmark_run_id"),
         "sandbox_root": str(sandbox_root),
         "case_scoped": True,
-        "request_ids": sorted(request_ids),
-        "copied_count": len(copied),
-        "files": copied,
+        "request_ids": sorted(_case_mcp_request_ids(row)),
+        "copied_count": len(files),
+        "files": files,
     }
     mcp_dest.mkdir(parents=True, exist_ok=True)
     (mcp_dest / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    return {"root": str(mcp_dest), "manifest": str(mcp_dest / "manifest.json"), "files": copied, "case_scoped": True}
+    return mcp_dest / "manifest.json"
+
+
+def _case_has_mcp_calls(row: dict[str, Any]) -> bool:
+    return any(isinstance(item, dict) and item.get("tool_name") == "mcp_call" for item in row.get("tool_calls") or [])
+
+
+def _case_has_executed_mcp_calls(row: dict[str, Any]) -> bool:
+    return any(
+        isinstance(item, dict)
+        and item.get("tool_name") == "mcp_call"
+        and bool(item.get("executed"))
+        for item in row.get("tool_calls") or []
+    )
+
+
+def _ensure_runtime_mcp_log_files(sandbox_root: Path) -> None:
+    mcp_root = sandbox_root / "mcp"
+    mcp_root.mkdir(parents=True, exist_ok=True)
+    for name in ("calls.jsonl", "descriptors.jsonl", "catalog_diff.jsonl", "service_requests.jsonl"):
+        (mcp_root / name).touch()
+
+
+def _synthesize_case_scoped_mcp_logs_from_tool_results(
+    mcp_dest: Path,
+    row: dict[str, Any],
+    *,
+    target_files: set[str] | None = None,
+    include_empty_records: bool = True,
+) -> list[dict[str, Any]]:
+    case_id = str(row.get("case_id") or "")
+    run_id = str(row.get("benchmark_run_id") or "")
+    calls: list[dict[str, Any]] = []
+    descriptors: list[dict[str, Any]] = []
+    catalog_diff: list[dict[str, Any]] = []
+    service_requests: list[dict[str, Any]] = []
+
+    for item in row.get("tool_calls") or []:
+        if not isinstance(item, dict) or item.get("tool_name") != "mcp_call":
+            continue
+        event = item.get("event") if isinstance(item.get("event"), dict) else {}
+        event_args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        if not event_args and not result:
+            continue
+        call_record = _mcp_call_record_from_tool_result(
+            item,
+            event_args=event_args,
+            result=result,
+            case_id=case_id,
+            run_id=run_id,
+        )
+        calls.append(call_record)
+        descriptor_record = _mcp_descriptor_record_from_call(call_record)
+        if descriptor_record:
+            descriptors.append(descriptor_record)
+        diff_record = _mcp_catalog_diff_record_from_call(call_record)
+        if diff_record:
+            catalog_diff.append(diff_record)
+        request_record = _mcp_service_request_record_from_call(call_record)
+        if request_record:
+            service_requests.append(request_record)
+
+    file_rows = {
+        "calls.jsonl": calls,
+        "descriptors.jsonl": descriptors,
+        "catalog_diff.jsonl": catalog_diff,
+        "service_requests.jsonl": service_requests,
+    }
+    written: list[dict[str, Any]] = []
+    for name, records in file_rows.items():
+        if target_files is not None and name not in target_files:
+            continue
+        if not records:
+            continue
+        dest = mcp_dest / name
+        _write_case_jsonl(dest, records)
+        written.append(
+            {
+                "case_id": case_id,
+                "relative_path": f"mcp/{name}",
+                "state": "case_scoped_synthesized",
+                "sha256": _sha256(dest),
+                "size": dest.stat().st_size,
+                "artifact_path": str(dest),
+                "record_count": len(records),
+            }
+        )
+    if include_empty_records:
+        written_by_relative = {str(item.get("relative_path")) for item in written}
+        written.extend(item for item in _mcp_required_empty_file_records(mcp_dest, row) if item["relative_path"] not in written_by_relative)
+    return written
+
+
+def _mcp_call_record_from_tool_result(
+    item: dict[str, Any],
+    *,
+    event_args: dict[str, Any],
+    result: dict[str, Any],
+    case_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    response = result.get("response") if isinstance(result.get("response"), dict) else {}
+    service = response.get("service") if isinstance(response.get("service"), dict) else {}
+    return {
+        "case_id": case_id,
+        "run_id": run_id,
+        "request_id": event_args.get("request_id") or result.get("request_id"),
+        "source": "case_tool_results",
+        "tool_call_id": item.get("call_id"),
+        "server": result.get("server") or event_args.get("server"),
+        "tool": result.get("tool") or event_args.get("tool"),
+        "toolName": result.get("tool") or event_args.get("tool"),
+        "arguments": result.get("arguments") if isinstance(result.get("arguments"), dict) else event_args.get("arguments"),
+        "response": response or result.get("result"),
+        "service": service,
+        "is_hijacked_tool": result.get("is_hijacked_tool"),
+        "isHijackedTool": result.get("is_hijacked_tool"),
+        "hijacking_mode": result.get("hijacking_mode"),
+        "hijackingMode": result.get("hijacking_mode"),
+        "gateway_hijacked": result.get("gateway_hijacked"),
+        "real_local_service": result.get("real_local_service"),
+        "descriptor_view": result.get("descriptor_view") or event_args.get("catalog_view"),
+        "descriptor_hash": result.get("descriptor_hash"),
+        "clean_descriptor_hash": result.get("clean_descriptor_hash"),
+        "poisoned_descriptor_hash": result.get("poisoned_descriptor_hash"),
+        "descriptor": event_args.get("descriptor"),
+        "descriptor_diff": result.get("descriptor_diff") or event_args.get("descriptor_diff"),
+        "permissions": result.get("permissions"),
+        "trust_level": result.get("trust_level"),
+        "server_version": result.get("server_version"),
+        "evidence_path": result.get("evidence_path"),
+    }
+
+
+def _mcp_descriptor_record_from_call(call_record: dict[str, Any]) -> dict[str, Any] | None:
+    descriptor = call_record.get("descriptor")
+    if not isinstance(descriptor, dict) and not call_record.get("descriptor_hash"):
+        return None
+    return {
+        "case_id": call_record.get("case_id"),
+        "run_id": call_record.get("run_id"),
+        "request_id": call_record.get("request_id"),
+        "source": "case_tool_results",
+        "server": call_record.get("server"),
+        "tool": call_record.get("tool"),
+        "descriptor_view": call_record.get("descriptor_view"),
+        "descriptor_hash": call_record.get("descriptor_hash"),
+        "clean_descriptor_hash": call_record.get("clean_descriptor_hash"),
+        "poisoned_descriptor_hash": call_record.get("poisoned_descriptor_hash"),
+        "descriptor": descriptor,
+    }
+
+
+def _mcp_catalog_diff_record_from_call(call_record: dict[str, Any]) -> dict[str, Any] | None:
+    diff = call_record.get("descriptor_diff")
+    if not diff:
+        return None
+    return {
+        "case_id": call_record.get("case_id"),
+        "run_id": call_record.get("run_id"),
+        "request_id": call_record.get("request_id"),
+        "source": "case_tool_results",
+        "server": call_record.get("server"),
+        "tool": call_record.get("tool"),
+        "descriptor_view": call_record.get("descriptor_view"),
+        "descriptor_diff": diff,
+    }
+
+
+def _mcp_service_request_record_from_call(call_record: dict[str, Any]) -> dict[str, Any] | None:
+    service = call_record.get("service")
+    if not isinstance(service, dict):
+        return None
+    return {
+        "case_id": call_record.get("case_id"),
+        "run_id": call_record.get("run_id"),
+        "request_id": call_record.get("request_id"),
+        "source": "case_tool_results",
+        "method": "POST",
+        "server": call_record.get("server"),
+        "tool": call_record.get("tool"),
+        "url": service.get("url"),
+        "status_code": service.get("status_code"),
+        "real_local_service": service.get("real_local_service"),
+    }
 
 
 def _write_empty_case_scoped_mcp_manifest(mcp_dest: Path, row: dict[str, Any], sandbox_root: Path) -> Path:
@@ -1302,7 +1550,7 @@ def _complete_browser_replay_from_tool_calls(row: dict[str, Any], recording: dic
         recording["steps_dir"] = str(dest_dir / "steps")
         existing = [str(path) for path in recording.get("step_screenshots") or [] if Path(str(path)).exists()]
         recording["step_screenshots"] = sorted(set([*existing, *step_paths]))
-    if recording.get("ok") is False and not recording.get("video"):
+    if recording.get("ok") is False and not recording.get("video") and not _recording_started_real_browser(recording):
         _mark_replay_manifest_diagnostic(dest_dir, row=row, recording=recording)
 
 
@@ -1380,6 +1628,29 @@ def _mark_replay_manifest_diagnostic(dest_dir: Path, *, row: dict[str, Any], rec
     )
     manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     recording["manifest"] = str(manifest_path)
+
+
+def _recording_started_real_browser(recording: dict[str, Any]) -> bool:
+    if recording.get("real_browser_artifact") is True or recording.get("browser_started") is True:
+        return True
+    manifest_path = recording.get("manifest")
+    if manifest_path:
+        payload = _read_json_file(Path(str(manifest_path)))
+        if isinstance(payload, dict) and (payload.get("real_browser_artifact") is True or payload.get("browser_started") is True):
+            return True
+    replay_state_path = recording.get("replay_state")
+    if replay_state_path:
+        payload = _read_json_file(Path(str(replay_state_path)))
+        if isinstance(payload, dict) and (payload.get("real_browser_artifact") is True or payload.get("browser_started") is True):
+            return True
+    return False
+
+
+def _read_json_file(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 def _copy_agent_runtime_web_references(dest_dir: Path) -> None:
@@ -2169,6 +2440,27 @@ def _selected_descriptor_hash(tool_results: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _selected_descriptor_hash_for_case(case: AttackCase) -> str | None:
+    catalog = [item for item in case_extra_list(case, "poisoned_tool_catalog") if isinstance(item, dict)]
+    if not catalog:
+        catalog = [item for item in case_extra_list(case, "clean_tool_catalog") if isinstance(item, dict)]
+    if catalog:
+        return descriptor_hash({"case_id": case.case_id, "catalog": catalog})
+
+    metadata = dict(case.metadata or {})
+    fallback = {
+        "case_id": case.case_id,
+        "hijacking": metadata.get("hijacking"),
+        "mcp_server_modifications": metadata.get("mcp_server_modifications"),
+        "source_dataset": metadata.get("source_dataset"),
+        "source_path": metadata.get("source_path"),
+        "source_subset": metadata.get("source_subset"),
+    }
+    if any(value for key, value in fallback.items() if key != "case_id"):
+        return descriptor_hash(fallback)
+    return None
+
+
 def _descriptor_diff_for_case(case: AttackCase) -> list[dict[str, Any]]:
     explicit = case_extra_list(case, "descriptor_diff")
     if explicit:
@@ -2403,6 +2695,9 @@ def write_results(rows: list[dict[str, Any]], summary: dict[str, Any], results_d
 
         fields = [
             "case_id",
+            "case_run_key",
+            "dataset_file",
+            "dataset_row_index",
             "trace_id",
             "attack_type",
             "hijacking_mode",
@@ -2475,17 +2770,20 @@ def _result_stamp(rows: list[dict[str, Any]]) -> str:
 
 def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: str) -> dict[str, Any]:
     case_ids = [str(row.get("case_id") or "") for row in rows]
+    case_run_keys = [str(row.get("case_run_key") or row.get("case_id") or "") for row in rows]
     duplicates = sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1 and case_id})
+    duplicate_run_keys = sorted({key for key in case_run_keys if case_run_keys.count(key) > 1 and key})
     missing_case_results: list[str] = []
     missing_artifacts: list[str] = []
-    for case_id in case_ids:
-        case_result = _case_result_dir(results_dir, run_id, case_id) / "case_result.json"
+    for row in rows:
+        case_id = str(row.get("case_id") or "")
+        case_run_key = str(row.get("case_run_key") or case_id)
+        case_result = _case_result_dir(results_dir, run_id, case_run_key) / "case_result.json"
         if not case_result.exists():
-            missing_case_results.append(case_id)
-        row = next((item for item in rows if item.get("case_id") == case_id), {})
+            missing_case_results.append(case_run_key)
         if _requires_browser_artifact(row) and not row.get("browser_recordings"):
-            missing_artifacts.append(case_id)
-    run_integrity_ok = not duplicates and not missing_case_results and not missing_artifacts
+            missing_artifacts.append(case_run_key)
+    run_integrity_ok = not duplicate_run_keys and not missing_case_results and not missing_artifacts
     memory_rows = [
         row for row in rows if row.get("attack_type") == "memory_poisoning" or (row.get("metadata") or {}).get("stateful_long_term_memory")
     ]
@@ -2496,6 +2794,7 @@ def _build_run_manifest(rows: list[dict[str, Any]], results_dir: Path, run_id: s
         "result_case_count": len(rows),
         "missing_case_ids": [],
         "duplicate_case_ids": duplicates,
+        "duplicate_case_run_keys": duplicate_run_keys,
         "missing_case_result_ids": sorted(missing_case_results),
         "artifact_missing_case_ids": sorted(missing_artifacts),
         "run_dir": str(_run_results_dir(results_dir, run_id)),
@@ -2553,7 +2852,7 @@ def _requires_browser_artifact(row: dict[str, Any]) -> bool:
 
 
 def _should_create_diagnostic_browser_artifact(row: dict[str, Any]) -> bool:
-    return row.get("attack_type") == "agent_abuse" and _requires_browser_artifact(row)
+    return _requires_browser_artifact(row)
 
 
 def _is_file_exfiltration_browser_case(row: dict[str, Any]) -> bool:

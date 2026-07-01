@@ -26,6 +26,11 @@ def load_attack_cases(dataset_path: str | Path) -> list[AttackCase]:
     files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
     cases: list[AttackCase] = []
     for file_path in files:
-        for payload in iter_jsonl(file_path):
+        for row_index, payload in enumerate(iter_jsonl(file_path), start=1):
+            metadata = dict(payload.get("metadata") or {})
+            metadata.setdefault("dataset_file", file_path.name)
+            metadata.setdefault("dataset_file_stem", file_path.stem)
+            metadata.setdefault("dataset_row_index", row_index)
+            payload["metadata"] = metadata
             cases.append(AttackCase.model_validate(payload))
     return cases

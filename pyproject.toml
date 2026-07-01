@@ -7,6 +7,7 @@ dependencies = [
   "agentguard-cli",
   "agentguard-core",
   "agentguard-guard-api",
+  "agentguard-langgraph-adapter",
   "httpx>=0.28",
 ]
 
@@ -24,6 +25,7 @@ package = false
 agentguard-cli = { path = "apps/cli", editable = true }
 agentguard-core = { path = "packages/agentguard-core", editable = true }
 agentguard-guard-api = { path = "apps/guard-api", editable = true }
+agentguard-langgraph-adapter = { path = "packages/agentguard-langgraph-adapter", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

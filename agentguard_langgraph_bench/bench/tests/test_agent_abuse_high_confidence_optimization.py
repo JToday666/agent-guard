@@ -223,6 +223,24 @@ def test_autonomous_planner_stops_are_valid_non_success_outcomes():
 
     max_rounds = _run_validity([], {"stop_reason": "max_tool_rounds"}, False, case, config)
     planning_error = _run_validity([], {"stop_reason": "llm_planning_error"}, False, case, config)
+    planning_timeout = _run_validity(
+        [],
+        {
+            "instrumentation_plan_mode": "autonomous",
+            "stop_reason": "llm_planning_error",
+            "llm_planning_evidence": [
+                {
+                    "diagnostics": {
+                        "outcome": "timeout",
+                        "error": "LLM request failed: timed out",
+                    }
+                }
+            ],
+        },
+        False,
+        case,
+        config,
+    )
 
     assert max_rounds["run_valid"] is True
     assert max_rounds["run_status"] == "max_tool_rounds"
@@ -230,6 +248,9 @@ def test_autonomous_planner_stops_are_valid_non_success_outcomes():
     assert planning_error["run_valid"] is True
     assert planning_error["run_status"] == "llm_planning_error"
     assert planning_error["invalid_reasons"] == []
+    assert planning_timeout["run_valid"] is True
+    assert planning_timeout["run_status"] == "llm_planning_error"
+    assert planning_timeout["invalid_reasons"] == []
 
 
 def test_autonomous_llm_timeout_without_browser_evidence_is_stalled_not_unknown(tmp_path):

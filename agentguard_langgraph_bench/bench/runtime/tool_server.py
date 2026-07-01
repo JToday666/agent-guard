@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock, Thread
 from typing import Any
 from urllib.parse import urlparse
 
 from .tool_gateway import GuardedToolGateway
+from .tool_compat import BROWSER_TOOLS, ToolCompatibilityLayer, blocked_runtime_policy_result, tool_result_with_compatibility
 
 
 class BenchmarkToolServer:
@@ -18,8 +19,10 @@ class BenchmarkToolServer:
         self.port = port
         self._events: list[dict[str, Any]] = []
         self._lock = Lock()
-        self._server: ThreadingHTTPServer | None = None
+        self._server: HTTPServer | None = None
         self._thread: Thread | None = None
+        self._active_case_context: dict[str, Any] | None = None
+        self._compatibility_layer = ToolCompatibilityLayer(getattr(gateway.tool_runtime, "sandbox_dir", None))
 
     @property
     def base_url(self) -> str:
@@ -40,9 +43,22 @@ class BenchmarkToolServer:
                     return
                 if path == "/tools":
                     tools = list(outer.gateway.tool_runtime.list_tools().values())
-                    for item in tools:
+                    case_context = outer.case_context()
+                    case = case_context.get("case") if case_context else None
+                    visible_tools = outer._compatibility_layer.visible_tools(
+                        tools,
+                        case=case,
+                        security=dict((case_context or {}).get("security") or {}),
+                        config=(case_context or {}).get("config"),
+                    )
+                    for item in visible_tools:
                         item.setdefault("endpoint", f"{outer.base_url}/tools/{item.get('name')}")
-                    self._send_json({"tools": tools})
+                    runtime_policy = outer._compatibility_layer.case_tool_policy(
+                        case=case,
+                        security=dict((case_context or {}).get("security") or {}),
+                        config=(case_context or {}).get("config"),
+                    )
+                    self._send_json({"tools": visible_tools, "runtime_policy": runtime_policy})
                     return
                 if path == "/events":
                     with outer._lock:
@@ -61,14 +77,79 @@ class BenchmarkToolServer:
                 if path.startswith("/tools/"):
                     tool_name = path.removeprefix("/tools/").strip("/")
                     payload = self._read_json()
+                    raw_arguments = dict(payload.get("arguments") or {})
+                    case_context = outer.case_context()
+                    case = case_context.get("case") if case_context else None
+                    security = dict(payload.get("security") or (case_context or {}).get("security") or {})
+                    trace_id = str(payload.get("trace_id") or security.get("trace_id") or "")
+                    call_id = str(payload.get("call_id") or "")
+                    compatibility = outer._compatibility_layer.normalize_arguments(
+                        tool_name,
+                        raw_arguments,
+                        case=case,
+                        security=security,
+                        trace_id=trace_id,
+                        call_id=call_id,
+                        config=(case_context or {}).get("config"),
+                    )
+                    if tool_name in BROWSER_TOOLS and not compatibility.case_tool_policy.get("browser_available"):
+                        result_payload = blocked_runtime_policy_result(
+                            tool_name=tool_name,
+                            call_id=call_id or f"runtime_policy_{len(outer.events()) + 1}",
+                            trace_id=trace_id,
+                            case_id=compatibility.case_tool_policy.get("case_id"),
+                            compatibility=compatibility,
+                        )
+                        with outer._lock:
+                            outer._events.append(result_payload)
+                        self._send_json(result_payload)
+                        return
                     result = outer.gateway.invoke_tool(
                         tool_name=tool_name,
-                        arguments=dict(payload.get("arguments") or {}),
-                        security=dict(payload.get("security") or {}),
-                        trace_id=str(payload.get("trace_id") or (payload.get("security") or {}).get("trace_id") or ""),
+                        arguments=compatibility.normalized_arguments,
+                        raw_arguments=raw_arguments,
+                        compatibility=compatibility.model_dump(),
+                        security=security,
+                        trace_id=trace_id,
                         call_id=payload.get("call_id"),
+                        case_context=case_context,
                     )
                     dumped = result.model_dump()
+                    dumped = tool_result_with_compatibility(dumped, compatibility)
+                    if dumped.get("status") == "error":
+                        recovered = outer._compatibility_layer.recover_after_error(
+                            tool_name,
+                            raw_arguments,
+                            str(dumped.get("error") or ""),
+                            case=case,
+                            security=security,
+                            trace_id=trace_id,
+                            call_id=str(dumped.get("call_id") or call_id or ""),
+                            config=(case_context or {}).get("config"),
+                        )
+                        if recovered is not None:
+                            retry_result = outer.gateway.invoke_tool(
+                                tool_name=tool_name,
+                                arguments=recovered.normalized_arguments,
+                                raw_arguments=raw_arguments,
+                                compatibility=recovered.model_dump(),
+                                security=security,
+                                trace_id=trace_id,
+                                call_id=payload.get("call_id"),
+                                case_context=case_context,
+                            ).model_dump()
+                            dumped = tool_result_with_compatibility(
+                                retry_result,
+                                recovered,
+                                retry={
+                                    "compatibility_retry": True,
+                                    "retry_reason": "recoverable_schema_error",
+                                    "previous_error": dumped.get("error"),
+                                    "retry_index": 1,
+                                    "raw_arguments": raw_arguments,
+                                    "normalized_arguments": recovered.normalized_arguments,
+                                },
+                            )
                     with outer._lock:
                         outer._events.append(dumped)
                     self._send_json(dumped)
@@ -92,14 +173,41 @@ class BenchmarkToolServer:
                 self.end_headers()
                 self.wfile.write(body)
 
-        self._server = ThreadingHTTPServer((self.host, self.port), Handler)
+        self._server = HTTPServer((self.host, self.port), Handler)
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
 
-    def reset_case(self) -> None:
+    def set_case_context(self, case: Any, context: Any) -> None:
+        self._compatibility_layer.set_sandbox_dir(getattr(self.gateway.tool_runtime, "sandbox_dir", None))
+        security = dict(getattr(context, "security", {}) or {})
+        hijacking_context = dict(getattr(context, "tool_hijacking_context", {}) or {})
+        self._active_case_context = {
+            **hijacking_context,
+            "case": case,
+            "case_id": getattr(case, "case_id", security.get("case_id", "")),
+            "attack_type": getattr(case, "attack_type", security.get("attack_type", "")),
+            "is_malicious": getattr(case, "is_malicious", security.get("is_malicious", None)),
+            "metadata": dict(getattr(case, "metadata", {}) or security.get("metadata") or {}),
+            "tool_plan_summary": [
+                {"tool": step.tool, "arguments": dict(step.arguments or {})}
+                for step in getattr(case, "tool_plan", [])
+            ],
+            "security": security,
+            "config": getattr(context, "config", None),
+        }
+
+    def clear_case_context(self) -> None:
+        self._active_case_context = None
+
+    def case_context(self) -> dict[str, Any]:
+        return dict(self._active_case_context or {})
+
+    def reset_case(self, *, clear_context: bool = False) -> None:
         with self._lock:
             self._events.clear()
+        if clear_context:
+            self.clear_case_context()
 
     def events(self) -> list[dict[str, Any]]:
         with self._lock:
