@@ -211,6 +211,45 @@ def test_artifact_integrity_indexes_generic_tool_hijacking_case(tmp_path):
     assert manifest["cases"]["MCP-020"]["case_scoped_mcp_logs"] is True
 
 
+def test_artifact_integrity_allows_unproduced_llm_artifacts_for_external_adapter(tmp_path):
+    run_dir = tmp_path / "run"
+    case_dir = run_dir / "cases" / "BN-001"
+    evidence_index = {
+        "case_id": "BN-001",
+        "missing": [
+            {"path": "llm_prompts/round_1_redacted.json", "reason": "not produced"},
+            {"path": "llm_responses/round_1_redacted.json", "reason": "not produced"},
+        ],
+    }
+    for relative, content in (
+        ("case_result.json", {"case_id": "BN-001", "adapter_name": "openclaw"}),
+        ("evidence_index.json", evidence_index),
+        ("sandbox_diff.json", {"schema_version": "1.0", "added": [], "modified": [], "deleted": []}),
+        ("agent_visible_prompt_contamination.json", {"checked": True, "found": False}),
+    ):
+        path = case_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content), encoding="utf-8")
+    for relative in (
+        "tool_results.jsonl",
+        "tool_call_events.jsonl",
+        "audit_events.jsonl",
+        "policy_decisions.jsonl",
+        "mcp/calls.jsonl",
+        "mcp/descriptors.jsonl",
+        "mcp/catalog_diff.jsonl",
+        "mcp/service_requests.jsonl",
+    ):
+        path = case_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"case_id":"BN-001","request_id":"BN-001"}\n', encoding="utf-8")
+
+    manifest = build_artifact_integrity_manifest(run_dir)
+
+    assert manifest["case_count"] == 1
+    assert manifest["ok"] is True
+    assert manifest["cases"]["BN-001"]["critical_errors"] == []
+
 
 def test_write_results_includes_prompt_injection_auxiliary_columns(tmp_path):
     rows = [

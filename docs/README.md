@@ -56,7 +56,8 @@ docs/
 
 1. [命题要求追踪矩阵](00_requirements/requirement_traceability_matrix.md)
 2. [AttackBench 攻击样本与评测](05_redteam/attackbench.md)
-3. [演示脚本](06_delivery/demo_script.md)
+3. [OpenClaw AttackBench 轮转验证与检测启用](05_redteam/openclaw_attackbench.md)
+4. [演示脚本](06_delivery/demo_script.md)
 
 ### 答辩准备
 
@@ -83,6 +84,7 @@ docs/
 | [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计             |
 | [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示                                       |
 | [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标                                       |
+| [openclaw_attackbench.md](05_redteam/openclaw_attackbench.md)                            | OpenClaw 自动轮转 AttackBench、bench shim、bench tools、检测启用和验证流程     |
 | [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                   | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |
 | [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准                                          |
 | [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                                                     |
