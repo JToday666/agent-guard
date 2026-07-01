@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from ..decisions import DetectionResult, RuleHit
-from ..events import GuardEvent, ToolCallPayload, derive_resources
+from ..events import GuardEvent, ToolCallPayload, derive_resources, is_exec_like_tool
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
 
@@ -123,7 +123,9 @@ class TaskMismatchDetector(Detector):
         if source_trust != "untrusted":
             return []
         tool_name = event.payload.tool.name
-        if tool_name in {"send_email", "call_api", "read_file", "write_file", "memory_write", "code_exec"}:
+        if tool_name in {"send_email", "call_api", "read_file", "write_file", "memory_write", "code_exec"} or is_exec_like_tool(
+            event.payload.tool
+        ):
             if not task_allows_tool_action(event.security_context.user_task, tool_name, policies):
                 result = apply_rule_override(
                     DetectionResult(
@@ -197,11 +199,12 @@ def resource_is_high_risk_for_unprofiled_tool(direction: str, operation: str) ->
 
 
 def verb_for_tool(tool_name: str) -> str:
+    if tool_name in {"code_exec", "exec", "shell", "command", "bash", "sh", "powershell", "terminal"}:
+        return "execute"
     return {
         "read_file": "read",
         "write_file": "write",
         "send_email": "email",
         "call_api": "api",
         "memory_write": "memory",
-        "code_exec": "execute",
     }.get(tool_name, tool_name)

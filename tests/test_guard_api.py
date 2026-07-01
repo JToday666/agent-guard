@@ -472,6 +472,11 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert event["links"]["event_id"] == "evt_test"
     assert "approval_id" in event["links"]
     assert event["latency_ms"] is not None
+    assert event["metadata"]["user_task"] == "Complete the visible web form only"
+    assert event["metadata"]["source_type"] == "webpage"
+    assert event["metadata"]["source_trust"] == "untrusted"
+    assert event["metadata"]["agent_id"] == "main"
+    assert event["metadata"]["current_step"] == "before_tool"
     assert metrics_response.status_code == 200
     assert metrics_response.json()["event_count"] == 1
     assert metrics_response.json()["ask_count"] == 1
@@ -1097,8 +1102,8 @@ def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
         json={
             "status": "loaded",
             "loaded": True,
-            "hook_count": 19,
-            "expected_hook_count": 19,
+            "hook_count": 22,
+            "expected_hook_count": 22,
             "runtime": "openclaw",
             "agent_id": "main",
             "plugin_version": "0.1.0",
@@ -1161,7 +1166,7 @@ def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
     assert metrics["by_runtime"]["openclaw"]["event_count"] == 2
     assert metrics["hook_activity"] == {"before_tool_call": 1, "llm_input": 1}
     assert metrics["adapters"]["openclaw"]["loaded"] is True
-    assert metrics["adapters"]["openclaw"]["hook_count"] == 19
+    assert metrics["adapters"]["openclaw"]["hook_count"] == 22
 
 
 def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:

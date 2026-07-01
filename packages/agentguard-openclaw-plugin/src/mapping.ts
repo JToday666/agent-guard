@@ -6,6 +6,11 @@ import type {
   GuardEvent,
   JsonObject,
 } from "./types.js";
+import {
+  containsSensitiveCredentialText,
+  isExecLikeToolIdentity,
+  redactSensitiveCredentials,
+} from "./security.js";
 
 type RuntimeSecurityFields = {
   userTask?: string;
@@ -39,6 +44,7 @@ type ToolHookContextInput = RuntimeSecurityFields & {
   toolKind?: string;
   toolInputKind?: string;
   toolCallId?: string;
+  toolParams?: JsonObject;
 };
 
 type MessageSendingEventInput = RuntimeSecurityFields & {
@@ -86,6 +92,8 @@ type ModelHookEventInput = RuntimeSecurityFields & {
   response?: unknown;
   content?: unknown;
   messages?: unknown;
+  assistantTexts?: unknown;
+  lastAssistant?: unknown;
   provider?: string;
   model?: string;
   sanitized?: boolean;
@@ -286,10 +294,10 @@ export function buildToolResultGuardEvent(
         content_type: resultContentType(event.result ?? event.message),
         size_bytes: byteLength(rawResultPreview),
       },
-      will_enter_context: event.willEnterContext ?? false,
-      will_persist: event.willPersist ?? false,
+      will_enter_context: event.willEnterContext ?? true,
+      will_persist: event.willPersist ?? true,
       sanitized: false,
-      contains_sensitive_data: false,
+      contains_sensitive_data: containsSensitiveText(resultPreview),
       contains_instruction_like_text: containsInstructionLikeText(resultPreview),
       derived_resources: derivedResources,
     },
@@ -510,15 +518,38 @@ function derivedResourcesForTool(event: BeforeToolCallEventInput, context: ToolH
   if (explicit.length > 0) {
     return explicit;
   }
-  return uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []).map((target) =>
-    inferDerivedResource({
+  const derivedTargets = uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []);
+  if (derivedTargets.length > 0) {
+    return derivedTargets.map((target) =>
+      inferDerivedResource({
+        toolName: event.toolName,
+        toolKind: event.toolKind ?? context.toolKind,
+        toolInputKind: event.toolInputKind ?? context.toolInputKind,
+        params: event.params ?? {},
+        target,
+      }),
+    );
+  }
+  const command = toolCommandText(event.params ?? {});
+  if (
+    command &&
+    isExecLikeToolIdentity({
       toolName: event.toolName,
       toolKind: event.toolKind ?? context.toolKind,
       toolInputKind: event.toolInputKind ?? context.toolInputKind,
-      params: event.params ?? {},
-      target,
-    }),
-  );
+    })
+  ) {
+    return [
+      {
+        resource_type: "process",
+        operation: "execute",
+        target: redactSensitiveCredentials(command),
+        data_classification: null,
+        direction: "local",
+      },
+    ];
+  }
+  return [];
 }
 
 function derivedResourcesForToolResult(
@@ -530,12 +561,16 @@ function derivedResourcesForToolResult(
   if (explicit.length > 0) {
     return explicit;
   }
-  return uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []).map((target) =>
+  const derivedTargets = uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []);
+  if (derivedTargets.length === 0) {
+    return [];
+  }
+  return derivedTargets.map((target) =>
     inferDerivedResource({
       toolName,
       toolKind: event.toolKind ?? context.toolKind,
       toolInputKind: event.toolInputKind ?? context.toolInputKind,
-      params: {},
+      params: context.toolParams ?? {},
       target,
     }),
   );
@@ -638,11 +673,21 @@ function inferDerivedResource(input: {
       direction: "outbound",
     };
   }
-  if (toolIdentity.includes("exec") || toolIdentity.includes("shell") || toolIdentity.includes("command") || toolIdentity.includes("code")) {
+  if (
+    isExecLikeToolIdentity({
+      toolName: input.toolName,
+      toolKind: input.toolKind,
+      toolInputKind: input.toolInputKind,
+    }) ||
+    toolIdentity.includes("exec") ||
+    toolIdentity.includes("shell") ||
+    toolIdentity.includes("command") ||
+    toolIdentity.includes("code")
+  ) {
     return {
       resource_type: "process",
       operation: "execute",
-      target: input.target,
+      target: redactSensitiveCredentials(input.target),
       data_classification: null,
       direction: "local",
     };
@@ -722,7 +767,10 @@ function containsInstructionLikeText(value: string): boolean {
 }
 
 function containsSensitiveText(value: string): boolean {
-  return /token\s*=|api[_-]?key|password|secret|authorization/i.test(value);
+  return (
+    /token\s*=|api[_-]?key|password|secret|authorization/i.test(value) ||
+    containsSensitiveCredentialText(value)
+  );
 }
 
 function contextSourceSummaries(event: PromptBuildEventInput): string[] {
@@ -741,7 +789,7 @@ function modelContentPreview(hookName: "llm_input" | "llm_output", event: ModelH
   if (hookName === "llm_input") {
     return stringPreview(event.prompt ?? event.input ?? event.content ?? event.messages);
   }
-  return stringPreview(event.output ?? event.response ?? event.content ?? event.messages);
+  return stringPreview(event.output ?? event.response ?? event.content ?? event.assistantTexts ?? event.lastAssistant ?? event.messages);
 }
 
 function modelToolPlan(event: ModelHookEventInput): JsonObject[] {
@@ -775,6 +823,10 @@ function stringPreview(value: unknown): string {
 function resultContentType(value: unknown): string {
   const record = asRecord(value);
   return stringMaybe(record.contentType ?? record.mimeType ?? record.type) ?? "text/plain";
+}
+
+function toolCommandText(params: JsonObject): string {
+  return stringMaybe(params.command ?? params.cmd ?? params.code) ?? "";
 }
 
 function asRecord(value: unknown): JsonObject {

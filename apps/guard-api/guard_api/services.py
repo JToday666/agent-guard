@@ -45,7 +45,7 @@ class EventDescription:
     action_name: str
     resource_targets: list[str]
     summary: str
-    metadata: dict[str, str]
+    metadata: dict[str, object]
 
 
 class PolicyService:
@@ -537,7 +537,7 @@ def build_audit_event(
         reason=decision.reason,
         links=links,
         latency_ms=decision.latency_ms,
-        metadata={**event.metadata, **description.metadata},
+        metadata={**_security_context_metadata(event), **event.metadata, **description.metadata},
     )
 
 
@@ -592,6 +592,31 @@ def _event_hook_name(event: AuditEvent) -> str | None:
     return None
 
 
+def _security_context_metadata(event: GuardEvent) -> dict[str, object]:
+    context = event.security_context
+    metadata: dict[str, object] = {}
+    scalar_fields = (
+        "user_task",
+        "source_type",
+        "source_trust",
+        "channel",
+        "sender_id",
+        "run_id",
+        "agent_id",
+        "current_step",
+        "model_intent",
+    )
+    for field_name in scalar_fields:
+        value = getattr(context, field_name)
+        if value not in (None, ""):
+            metadata[field_name] = value
+    if context.derived_paths:
+        metadata["derived_paths"] = list(context.derived_paths)
+    if context.context_sources:
+        metadata["context_sources"] = list(context.context_sources)
+    return metadata
+
+
 def describe_guard_event(event: GuardEvent) -> EventDescription:
     resources = derive_resources(event)
     resource_targets = [resource.target for resource in resources if resource.target]
@@ -636,6 +661,9 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
     payload_model = getattr(payload, "model", None)
     if payload_model is not None:
         metadata["model"] = payload_model
+    payload_provider = getattr(payload, "provider", None)
+    if payload_provider is not None:
+        metadata["provider"] = payload_provider
     payload_channel = getattr(payload, "channel", None)
     if payload_channel is not None:
         metadata["channel"] = payload_channel

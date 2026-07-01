@@ -133,6 +133,9 @@ test("plugin entry registers P2 hooks and handles before_install fail-closed", a
       "llm_output",
       "before_install",
       "tool_result_persist",
+      "message_received",
+      "before_message_write",
+      "before_agent_finalize",
       "gateway_start",
       "gateway_stop",
       "session_start",
@@ -161,6 +164,137 @@ test("plugin entry registers P2 hooks and handles before_install fail-closed", a
     });
 
     assert.deepEqual(result, { block: true, blockReason: "Blocked by AgentGuard config audit." });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry carries session user task into tool call evaluations", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const requests = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return new Response(
+        JSON.stringify({
+          decision: { decision: "allow", reason: "ok" },
+          approval: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const sessionKey = "agent:main:cached-task";
+    await registered.find((entry) => entry.name === "message_received").handler(
+      { content: "Check shell readiness only" },
+      { sessionKey, runId: "run_cached_task" },
+    );
+    await registered.find((entry) => entry.name === "before_tool_call").handler(
+      {
+        toolName: "exec",
+        params: { command: "echo hello" },
+        toolCallId: "call_cached_task",
+      },
+      { sessionKey, runId: "run_cached_task" },
+    );
+
+    const toolCall = requests.find((body) => body.event_type === "tool_call_proposed");
+    assert.equal(toolCall.security_context.user_task, "Check shell readiness only");
+    assert.equal(toolCall.payload.derived_resources[0].resource_type, "process");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry redacts sensitive tool results synchronously before persistence", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "deny", reason: "credential exposure" },
+          approval: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
+      {
+        toolName: "exec",
+        toolCallId: "call_secret",
+        message: {
+          role: "tool",
+          content: "DASHSCOPE_API_KEY=sk-ws-live-secret-value",
+        },
+      },
+      { sessionKey: "agent:main:redact", toolName: "exec", toolCallId: "call_secret" },
+    );
+
+    assert.equal(result.message.content.includes("sk-ws-live-secret-value"), false);
+    assert.equal(result.message.content.includes("[redacted]"), true);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry asks the harness to revise final answers that expose credentials", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "allow", reason: "ok" },
+          approval: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const result = await registered.find((entry) => entry.name === "before_agent_finalize").handler(
+      {
+        runId: "run_finalize",
+        sessionId: "sess_finalize",
+        sessionKey: "agent:main:finalize",
+        provider: "dashscope",
+        model: "qwen3.5-plus",
+        stopHookActive: false,
+        lastAssistantMessage: "完整 Key: sk-ws-live-secret-value",
+      },
+      { sessionKey: "agent:main:finalize", runId: "run_finalize" },
+    );
+
+    assert.equal(result.action, "revise");
+    assert.match(result.retry.instruction, /credential|secret|API Key/i);
+    assert.equal(result.retry.maxAttempts, 1);
   } finally {
     globalThis.fetch = previousFetch;
   }

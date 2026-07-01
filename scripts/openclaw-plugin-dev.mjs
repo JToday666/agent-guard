@@ -14,8 +14,10 @@ const STAGING_DIR = path.join(DEV_ROOT, PLUGIN_ID);
 const BACKUP_DIR = path.join(DEV_ROOT, "backups");
 const REQUIRED_HOOKS = [
   "after_compaction",
+  "before_agent_finalize",
   "before_compaction",
   "before_install",
+  "before_message_write",
   "before_prompt_build",
   "before_tool_call",
   "cron_changed",
@@ -23,6 +25,7 @@ const REQUIRED_HOOKS = [
   "gateway_stop",
   "llm_input",
   "llm_output",
+  "message_received",
   "message_sending",
   "model_call_ended",
   "model_call_started",

@@ -34,6 +34,8 @@ const REQUIRED_RUNTIME_HOOKS = [
   "after_compaction",
   "before_compaction",
   "before_install",
+  "before_agent_finalize",
+  "before_message_write",
   "before_prompt_build",
   "before_tool_call",
   "cron_changed",
@@ -41,6 +43,7 @@ const REQUIRED_RUNTIME_HOOKS = [
   "gateway_stop",
   "llm_input",
   "llm_output",
+  "message_received",
   "message_sending",
   "model_call_ended",
   "model_call_started",
@@ -60,6 +63,7 @@ const RELIABILITY_EVENT_TYPE_BY_HOOK = {
   before_prompt_build: "context_assembled",
   llm_input: "model_input_prepared",
   llm_output: "model_output_produced",
+  before_agent_finalize: "model_output_produced",
   message_sending: "message_send_proposed",
   before_install: "config_audit",
   tool_result_persist: "tool_result_produced",
@@ -74,16 +78,20 @@ const failures = [];
 export function expectedReliabilityEventCounts(iterations) {
   const count = positiveInteger(iterations, DEFAULT_RELIABILITY_ITERATIONS);
   const observationHookCount = RELIABILITY_HOOKS.length - Object.keys(RELIABILITY_EVENT_TYPE_BY_HOOK).length;
-  return {
-    tool_call_proposed: count,
-    context_assembled: count,
-    model_input_prepared: count,
-    model_output_produced: count,
-    message_send_proposed: count,
-    config_audit: count,
-    tool_result_produced: count,
+  const counts = {
+    tool_call_proposed: 0,
+    context_assembled: 0,
+    model_input_prepared: 0,
+    model_output_produced: 0,
+    message_send_proposed: 0,
+    config_audit: 0,
+    tool_result_produced: 0,
     runtime_observation: observationHookCount * count,
   };
+  for (const eventType of Object.values(RELIABILITY_EVENT_TYPE_BY_HOOK)) {
+    counts[eventType] += count;
+  }
+  return counts;
 }
 
 export function buildReleaseGateSummary(kind, report) {
@@ -682,6 +690,28 @@ async function triggerReliabilityHook(runner, item) {
         },
         reliabilityAgentContext(traceId),
       );
+    case "before_message_write":
+      return runner.runBeforeMessageWrite(
+        {
+          message: { role: "assistant", content: "Reliability status is ready." },
+          sessionKey: traceId,
+          agentId: "main",
+        },
+        reliabilityAgentContext(traceId),
+      );
+    case "before_agent_finalize":
+      return runner.runBeforeAgentFinalize(
+        {
+          runId: traceId,
+          sessionId: `sess_${traceId}`,
+          sessionKey: traceId,
+          provider: "openai",
+          model: "reliability-model",
+          stopHookActive: false,
+          lastAssistantMessage: "Reliability status is ready.",
+        },
+        reliabilityAgentContext(traceId),
+      );
     case "llm_input":
       return runner.runLlmInput(
         {
@@ -699,6 +729,15 @@ async function triggerReliabilityHook(runner, item) {
           output: "token=abc123",
           provider: "openai",
           model: "reliability-model",
+        },
+        reliabilityAgentContext(traceId),
+      );
+    case "message_received":
+      return runner.runMessageReceived(
+        {
+          content: "Check reliability status only",
+          sessionKey: traceId,
+          runId: traceId,
         },
         reliabilityAgentContext(traceId),
       );

@@ -8,6 +8,7 @@ from .base import (
     is_rule_disabled as _is_rule_disabled,
 )
 from .code import CodeExecDetector
+from .credential import CredentialExposureDetector
 from .environment import EnvironmentPoisoningDetector
 from .memory import MemoryPoisoningDetector
 from .model import JailbreakDetector
@@ -40,6 +41,7 @@ from .tool import (
 
 __all__ = [
     "CodeExecDetector",
+    "CredentialExposureDetector",
     "Detector",
     "EnvironmentPoisoningDetector",
     "JailbreakDetector",

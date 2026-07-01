@@ -99,6 +99,22 @@ test("infers resource operation from real runtime tool shape when derivedResourc
   ]);
 });
 
+test("infers local process resource for exec tools without derivedPaths", () => {
+  const event = buildToolCallGuardEvent(
+    {
+      toolName: "exec",
+      params: { command: 'echo "DASHSCOPE_API_KEY=$DASHSCOPE_API_KEY"' },
+      toolCallId: "call_exec",
+    },
+    { runId: "run_exec", sessionKey: "session-key" },
+  );
+
+  assert.equal(event.payload.derived_resources[0].resource_type, "process");
+  assert.equal(event.payload.derived_resources[0].operation, "execute");
+  assert.equal(event.payload.derived_resources[0].direction, "local");
+  assert.equal(event.payload.derived_resources[0].target.includes("$DASHSCOPE_API_KEY"), false);
+});
+
 test("maps message_sending into an OpenClaw GuardEvent without relying on runId", () => {
   const event = buildMessageSendGuardEvent(
     {

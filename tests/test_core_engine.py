@@ -19,6 +19,7 @@ from agentguard_core import (
     ToolResultPayload,
     evaluate,
 )
+from agentguard_core.resources import derive_resources
 
 
 def _event(
@@ -485,6 +486,115 @@ def test_code_exec_powershell_download_is_denied_by_default_policy() -> None:
 
     assert decision.decision == "deny"
     assert [hit.rule_id for hit in decision.rule_hits] == ["P103_code_execution_abuse"]
+
+
+def test_exec_secret_environment_read_is_denied_without_approval() -> None:
+    event = _event(
+        tool_name="exec",
+        arguments={"command": 'echo "DASHSCOPE_API_KEY=$DASHSCOPE_API_KEY"'},
+        user_task="Check whether the shell is configured",
+    )
+
+    decision = evaluate(event)
+
+    assert decision.decision == "deny"
+    assert "credential_exposure" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == ["P106_credential_exposure"]
+    assert decision.approval_intent is None
+
+
+def test_exec_secret_environment_read_variants_are_denied() -> None:
+    commands = [
+        "printenv DASHSCOPE_API_KEY",
+        "env | grep API_KEY",
+        "cat /proc/self/environ",
+        "printf '%s' ${OPENAI_API_KEY}",
+    ]
+
+    for command in commands:
+        decision = evaluate(
+            _event(
+                tool_name="exec",
+                arguments={"command": command},
+                user_task="Check whether the shell is configured",
+            )
+        )
+
+        assert decision.decision == "deny", command
+        assert [hit.rule_id for hit in decision.rule_hits] == ["P106_credential_exposure"]
+
+
+def test_exec_benign_command_is_allowed() -> None:
+    decision = evaluate(
+        _event(
+            tool_name="exec",
+            arguments={"command": "echo hello"},
+            user_task="Print a hello marker",
+        )
+    )
+
+    assert decision.decision == "allow"
+    assert decision.rule_hits == []
+
+
+def test_exec_resource_derivation_uses_redacted_process_target() -> None:
+    event = _event(
+        tool_name="exec",
+        arguments={"command": 'echo "DASHSCOPE_API_KEY=$DASHSCOPE_API_KEY"'},
+        user_task="Check whether the shell is configured",
+    )
+
+    resources = derive_resources(event)
+
+    assert resources[0].resource_type == "process"
+    assert resources[0].operation == "execute"
+    assert "DASHSCOPE_API_KEY" in resources[0].target
+    assert "$DASHSCOPE_API_KEY" not in resources[0].target
+
+
+def test_tool_result_credential_leakage_is_denied() -> None:
+    event = _p1_event(
+        event_type="tool_result_produced",
+        payload=ToolResultPayload(
+            tool=ToolDescriptor(name="exec", category="code", kind="shell", call_id="call_result"),
+            result=ToolResult(
+                content_preview="DASHSCOPE_API_KEY=sk-ws-redacted-example",
+                content_type="text/plain",
+                size_bytes=128,
+            ),
+            will_enter_context=True,
+            will_persist=True,
+            sanitized=False,
+            contains_sensitive_data=False,
+            contains_instruction_like_text=False,
+        ),
+    )
+
+    decision = evaluate(event)
+
+    assert decision.decision == "deny"
+    assert "credential_exposure" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == ["P106_credential_exposure"]
+    assert decision.approval_intent is None
+
+
+def test_model_output_provider_key_value_is_denied() -> None:
+    event = _p1_event(
+        event_type="model_output_produced",
+        payload=ModelCallPayload(
+            phase="output",
+            content_preview="完整 key 是 sk-ws-live-value-123456",
+            contains_instruction_like_text=False,
+            contains_sensitive_data=False,
+            sanitized=False,
+        ),
+    )
+
+    decision = evaluate(event)
+
+    assert decision.decision == "deny"
+    assert "credential_exposure" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == ["P106_credential_exposure"]
 
 
 def test_untrusted_memory_write_requires_approval() -> None:
