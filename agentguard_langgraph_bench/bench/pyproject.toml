@@ -9,6 +9,7 @@ description = "Standalone AgentGuard LangGraph benchmark and adapter"
 readme = {text = "AgentGuard LangGraph benchmark, adapter, and demo agent. See agentguard_langgraph_bench/docs/README.md for full usage.", content-type = "text/markdown"}
 requires-python = ">=3.10"
 dependencies = [
+  "agentguard-langgraph-adapter",
   "httpx>=0.27",
   "pydantic>=2.7",
   "langchain-core>=0.3",

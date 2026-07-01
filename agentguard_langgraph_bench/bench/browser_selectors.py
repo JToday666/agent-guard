@@ -74,6 +74,8 @@ def selector_candidates(target: dict[str, Any]) -> set[str]:
     if id_value:
         value = str(id_value)
         candidates.update({f"id={value}", f"#{value}", f'[id="{value}"]', f"[id='{value}']"})
+        if value.lower() == "meetingid":
+            candidates.update({"id=meetingID", "#meetingID", '[id="meetingID"]', "[id='meetingID']"})
     testid = target.get("testId") or target.get("testid") or target.get("data-testid") or target.get("dataTestId")
     if testid:
         value = str(testid)
@@ -95,7 +97,22 @@ def selector_candidates(target: dict[str, Any]) -> set[str]:
         candidates.update({f"name={value}", f'[name="{value}"]', f"[name='{value}']"})
     selector = target.get("selector")
     if selector:
-        candidates.add(str(selector))
+        value = str(selector)
+        candidates.add(value)
+        match = re.fullmatch(r"\[\s*(?:data-testid|data-test-id|data-test|data-pw)\s*=\s*(['\"])(.*?)\1\s*\]", value)
+        if match:
+            testid_value = match.group(2)
+            candidates.update(
+                {
+                    f"testid={testid_value}",
+                    f'[data-testid="{testid_value}"]',
+                    f"[data-testid='{testid_value}']",
+                    f'[data-test-id="{testid_value}"]',
+                    f"[data-test-id='{testid_value}']",
+                    f'[data-test="{testid_value}"]',
+                    f'[data-pw="{testid_value}"]',
+                }
+            )
     text = target.get("text")
     if text:
         value = norm_text(text)

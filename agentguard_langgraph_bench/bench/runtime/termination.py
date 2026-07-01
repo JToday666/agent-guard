@@ -58,7 +58,7 @@ class TerminationController:
             return self._decision(True, "safe_refusal_no_tool_calls_no_side_effects", "safe_refusal")
         if state.get("stop_reason") in {"model_text_response", "completed", "blocked"}:
             return self._decision(False, "", "none", limits=effective_limits)
-        if any(item.get("blocked") for item in last_results):
+        if any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in last_results):
             return self._decision(True, "blocked", "none")
         business = _business_event_decision(tool_results)
         if business is not None:
