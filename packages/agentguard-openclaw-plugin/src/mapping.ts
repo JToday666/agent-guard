@@ -120,6 +120,13 @@ type RuntimeObservationContextInput = {
   sessionId?: string;
   agentId?: string;
   channelId?: string;
+  userTask?: string;
+  sourceTrust?: string;
+  sourceType?: string;
+  model?: string;
+  provider?: string;
+  derivedResources?: readonly DerivedResourceInput[];
+  derivedPaths?: readonly string[];
   [key: string]: unknown;
 };
 
@@ -449,6 +456,9 @@ export function buildRuntimeObservationAuditEvent(
   context: RuntimeObservationContextInput = {},
 ): AuditEvent {
   const eventRecord = asRecord(event);
+  const contextRecord = asRecord(context);
+  const security = runtimeSecurityFields(eventRecord, contextRecord);
+  const resourceTargets = runtimeObservationResourceTargets(hookName, eventRecord, contextRecord);
   const traceId = firstNonEmpty(
     stringMaybe(context.runId),
     stringMaybe(eventRecord.runId),
@@ -471,15 +481,56 @@ export function buildRuntimeObservationAuditEvent(
     severity: "low",
     blocked: false,
     reason: "Observation only.",
-    resource_targets: [],
+    resource_targets: resourceTargets,
     rule_hits: [],
     links: {},
     metadata: {
       openclaw_hook: hookName,
+      ...definedMetadata({
+        user_task: security.userTask,
+        source_trust: security.sourceTrust,
+        source_type: security.sourceType,
+        run_id: stringMaybe(eventRecord.runId) ?? stringMaybe(contextRecord.runId),
+        agent_id: stringMaybe(eventRecord.agentId) ?? stringMaybe(contextRecord.agentId),
+        current_step: hookName,
+        model: stringMaybe(eventRecord.model) ?? stringMaybe(contextRecord.model),
+        provider: stringMaybe(eventRecord.provider) ?? stringMaybe(contextRecord.provider),
+      }),
+      ...(resourceTargets.length > 0 ? { derived_paths: resourceTargets } : {}),
       event: sanitizeJson(event),
       context: sanitizeJson(context),
     },
   };
+}
+
+function runtimeObservationResourceTargets(
+  hookName: string,
+  event: RuntimeSecurityFields & JsonObject,
+  context: RuntimeSecurityFields & JsonObject,
+): string[] {
+  const explicitResources = normalizeDerivedResources(event.derivedResources ?? context.derivedResources);
+  if (explicitResources.length > 0) {
+    return uniqueStrings(explicitResources.map((resource) => resource.target));
+  }
+  const paths = uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []);
+  if (paths.length > 0) {
+    return paths;
+  }
+  const model = stringMaybe(event.model) ?? stringMaybe(context.model);
+  if (model && hookName.startsWith("model_call_")) {
+    return [model];
+  }
+  return [];
+}
+
+function definedMetadata(values: Record<string, unknown>): JsonObject {
+  const metadata: JsonObject = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== null && value !== "") {
+      metadata[key] = value;
+    }
+  }
+  return metadata;
 }
 
 function firstNonEmpty(...values: Array<string | null | undefined>): string {

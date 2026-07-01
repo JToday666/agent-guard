@@ -88,6 +88,38 @@ test("maps OpenClaw tool_result_persist into GuardEvent tool_result_produced", (
   assert.equal(event.payload.contains_instruction_like_text, true);
 });
 
+test("maps runtime observations with dashboard-visible task and resource evidence", () => {
+  const event = buildRuntimeObservationAuditEvent(
+    "model_call_ended",
+    {
+      runId: "run_model_observation",
+      userTask: "Check shell readiness only",
+      derivedResources: [
+        {
+          resource_type: "model",
+          operation: "call",
+          target: "qwen3.5-plus",
+          direction: "outbound",
+        },
+      ],
+    },
+    {
+      sessionKey: "agent:main:model",
+      agentId: "main",
+      model: "qwen3.5-plus",
+      provider: "dashscope",
+    },
+  );
+
+  assert.equal(event.event_type, "runtime_observation");
+  assert.equal(event.trace_id, "run_model_observation");
+  assert.deepEqual(event.resource_targets, ["qwen3.5-plus"]);
+  assert.equal(event.metadata.user_task, "Check shell readiness only");
+  assert.equal(event.metadata.agent_id, "main");
+  assert.equal(event.metadata.model, "qwen3.5-plus");
+  assert.equal(event.metadata.provider, "dashscope");
+});
+
 test("maps before_install into config audit event", () => {
   const audit = buildBeforeInstallConfigAuditEvent({
     request: {
@@ -211,6 +243,61 @@ test("plugin entry carries session user task into tool call evaluations", async 
     const toolCall = requests.find((body) => body.event_type === "tool_call_proposed");
     assert.equal(toolCall.security_context.user_task, "Check shell readiness only");
     assert.equal(toolCall.payload.derived_resources[0].resource_type, "process");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry carries cached task evidence into runtime observations", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const requests = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ ok: true, audit_id: "audit_obs" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const sessionKey = "agent:main:cached-observation";
+    registered.find((entry) => entry.name === "message_received").handler(
+      { content: "Check shell readiness only" },
+      { sessionKey, runId: "run_cached_observation", agentId: "main" },
+    );
+    registered.find((entry) => entry.name === "model_call_ended").handler(
+      {
+        runId: "run_cached_observation",
+        model: "qwen3.5-plus",
+        provider: "dashscope",
+        derivedResources: [
+          {
+            resource_type: "model",
+            operation: "call",
+            target: "qwen3.5-plus",
+            direction: "outbound",
+          },
+        ],
+      },
+      { sessionKey, runId: "run_cached_observation", agentId: "main" },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const observation = requests.find(
+      (body) => body.event_type === "runtime_observation" && body.stage === "model_call_ended",
+    );
+    assert.equal(observation.metadata.user_task, "Check shell readiness only");
+    assert.deepEqual(observation.resource_targets, ["qwen3.5-plus"]);
   } finally {
     globalThis.fetch = previousFetch;
   }

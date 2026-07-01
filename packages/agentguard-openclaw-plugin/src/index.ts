@@ -162,8 +162,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context);
+          const cached = withCachedRuntimeFields(sessionState, event, context);
           void client
-            .submitRuntimeObservation(buildRuntimeObservationAuditEvent("message_received", event, context))
+            .submitRuntimeObservation(buildRuntimeObservationAuditEvent("message_received", cached.event, cached.context))
             .catch((error) => {
               logDiagnostic(config, "message_received observation failed", {
                 error: error instanceof Error ? error.message : String(error),
@@ -265,8 +266,10 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       (event, context) => {
         const client = makeClient();
         try {
+          rememberSessionState(sessionState, event, context);
+          const cached = withCachedRuntimeFields(sessionState, event, context);
           void client
-            .submitRuntimeObservation(buildRuntimeObservationAuditEvent("before_message_write", event, context))
+            .submitRuntimeObservation(buildRuntimeObservationAuditEvent("before_message_write", cached.event, cached.context))
             .catch((error) => {
               logDiagnostic(config, "before_message_write observation failed", {
                 error: error instanceof Error ? error.message : String(error),
@@ -352,8 +355,12 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
         (event: unknown, context: Record<string, unknown>) => {
           const client = makeClient();
           try {
+            const eventRecord = asRecord(event);
+            const contextRecord = asRecord(context);
+            rememberSessionState(sessionState, eventRecord, contextRecord);
+            const cached = withCachedRuntimeFields(sessionState, eventRecord, contextRecord);
             void client
-              .submitRuntimeObservation(buildRuntimeObservationAuditEvent(hookName, event, context))
+              .submitRuntimeObservation(buildRuntimeObservationAuditEvent(hookName, cached.event, cached.context))
               .catch((error) => {
                 logDiagnostic(config, "runtime observation submit failed", {
                   hookName,
