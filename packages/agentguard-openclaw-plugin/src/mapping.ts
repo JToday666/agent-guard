@@ -18,6 +18,12 @@ type RuntimeSecurityFields = {
   sourceType?: string;
   derivedResources?: readonly DerivedResourceInput[];
   derivedPaths?: readonly string[];
+  [key: string]: unknown;
+};
+
+type RuntimeSecurityOptions = {
+  promptFallback?: boolean;
+  contentFallback?: boolean;
 };
 
 type DerivedResourceInput = Partial<DerivedResource> & {
@@ -40,6 +46,8 @@ type ToolHookContextInput = RuntimeSecurityFields & {
   sessionId?: string;
   runId?: string;
   channelId?: string;
+  provider?: string;
+  model?: string;
   toolName?: string;
   toolKind?: string;
   toolInputKind?: string;
@@ -101,7 +109,7 @@ type ModelHookEventInput = RuntimeSecurityFields & {
   toolCalls?: unknown;
 };
 
-type BeforeInstallEventInput = {
+type BeforeInstallEventInput = RuntimeSecurityFields & {
   request?: JsonObject & {
     targetType?: string;
     targetId?: string;
@@ -110,6 +118,8 @@ type BeforeInstallEventInput = {
   };
   targetType?: string;
   targetId?: string;
+  runId?: string;
+  agentId?: string;
   manifest?: unknown;
   config?: unknown;
 };
@@ -321,7 +331,7 @@ export function buildContextGuardEvent(
   context: ToolHookContextInput = {},
 ): GuardEvent {
   const runId = context.runId ?? null;
-  const security = runtimeSecurityFields(event, context);
+  const security = runtimeSecurityFields(event, context, { promptFallback: true });
   const sourceSummaries = contextSourceSummaries(event);
   const sources = sourceSummaries.length > 0 ? sourceSummaries : [stringPreview(event.prompt ?? event.context)];
 
@@ -378,9 +388,11 @@ export function buildModelGuardEvent(
   context: ToolHookContextInput = {},
 ): GuardEvent {
   const runId = context.runId ?? null;
-  const security = runtimeSecurityFields(event, context);
+  const security = runtimeSecurityFields(event, context, { promptFallback: hookName === "llm_input" });
   const phase = hookName === "llm_input" ? "input" : "output";
   const content = modelContentPreview(hookName, event);
+  const provider = event.provider ?? context.provider ?? null;
+  const model = event.model ?? context.model ?? null;
 
   return {
     schema_version: "0.3",
@@ -413,8 +425,8 @@ export function buildModelGuardEvent(
     payload: {
       phase,
       content_preview: truncate(content, PREVIEW_LIMIT),
-      provider: event.provider ?? null,
-      model: event.model ?? null,
+      provider,
+      model,
       contains_instruction_like_text: containsInstructionLikeText(content),
       contains_sensitive_data: containsSensitiveText(content),
       sanitized: event.sanitized === true,
@@ -427,7 +439,12 @@ export function buildModelGuardEvent(
   };
 }
 
-export function buildBeforeInstallConfigAuditEvent(event: BeforeInstallEventInput): ConfigAuditEvent {
+export function buildBeforeInstallConfigAuditEvent(
+  event: BeforeInstallEventInput,
+  context: RuntimeObservationContextInput = {},
+): ConfigAuditEvent {
+  const eventRecord = asRecord(event);
+  const contextRecord = asRecord(context);
   const request = asRecord(event.request);
   const targetType = stringValue(request.targetType ?? event.targetType, "plugin");
   const targetId = stringValue(request.targetId ?? event.targetId, "unknown");
@@ -436,6 +453,13 @@ export function buildBeforeInstallConfigAuditEvent(event: BeforeInstallEventInpu
   const hooks = asRecord(config.hooks ?? manifest.hooks);
   const permissions = asRecord(config.permissions ?? manifest.permissions);
   const findings = buildInstallFindings({ targetId, hooks, permissions });
+  const security = runtimeSecurityFields(eventRecord, contextRecord);
+  const runId = firstNonEmpty(
+    stringMaybe(contextRecord.runId),
+    stringMaybe(eventRecord.runId),
+    stringMaybe(request.runId),
+    targetId,
+  );
 
   return {
     runtime: "openclaw",
@@ -445,7 +469,15 @@ export function buildBeforeInstallConfigAuditEvent(event: BeforeInstallEventInpu
     findings,
     metadata: {
       manifest_id: stringValue(manifest.id, targetId),
-      trace_id: targetId,
+      trace_id: runId,
+      ...definedMetadata({
+        user_task: security.userTask,
+        source_type: security.sourceType,
+        source_trust: security.sourceTrust,
+        run_id: runId,
+        agent_id: stringMaybe(eventRecord.agentId) ?? stringMaybe(contextRecord.agentId),
+        current_step: "before_install",
+      }),
     },
   };
 }
@@ -556,12 +588,76 @@ function uniqueStrings(values: readonly string[]): string[] {
 function runtimeSecurityFields(
   event: RuntimeSecurityFields,
   context: RuntimeSecurityFields,
+  options: RuntimeSecurityOptions = {},
 ): { userTask: string; sourceTrust: string; sourceType: string } {
+  const eventRecord = asRecord(event);
+  const contextRecord = asRecord(context);
   return {
-    userTask: stringMaybe(event.userTask) ?? stringMaybe(context.userTask) ?? "",
-    sourceTrust: stringMaybe(event.sourceTrust) ?? stringMaybe(context.sourceTrust) ?? "trusted",
-    sourceType: stringMaybe(event.sourceType) ?? stringMaybe(context.sourceType) ?? "openclaw",
+    userTask: extractRuntimeUserTask([eventRecord, contextRecord], options) ?? "",
+    sourceTrust: stringMaybe(eventRecord.sourceTrust) ?? stringMaybe(contextRecord.sourceTrust) ?? "trusted",
+    sourceType: stringMaybe(eventRecord.sourceType) ?? stringMaybe(contextRecord.sourceType) ?? "openclaw",
   };
+}
+
+function extractRuntimeUserTask(
+  values: readonly JsonObject[],
+  options: RuntimeSecurityOptions,
+): string | undefined {
+  for (const value of values) {
+    const explicit = stringMaybe(value.userTask);
+    if (explicit) {
+      return sanitizeUserTask(explicit);
+    }
+  }
+  for (const value of values) {
+    const fromMessages = userTaskFromMessages(value.messages) ?? userTaskFromMessages(asRecord(value.prompt).messages);
+    if (fromMessages) {
+      return sanitizeUserTask(fromMessages);
+    }
+  }
+  if (options.promptFallback) {
+    for (const value of values) {
+      const prompt = stringMaybe(value.prompt) ?? stringMaybe(value.input);
+      if (prompt) {
+        return sanitizeUserTask(prompt);
+      }
+    }
+  }
+  if (options.contentFallback) {
+    for (const value of values) {
+      const content = stringMaybe(value.content)
+        ?? stringMaybe(value.text)
+        ?? stringMaybe(value.body)
+        ?? stringMaybe(value.message);
+      if (content) {
+        return sanitizeUserTask(content);
+      }
+    }
+  }
+  return undefined;
+}
+
+function userTaskFromMessages(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  for (const item of [...value].reverse()) {
+    const record = asRecord(item);
+    const role = stringMaybe(record.role)?.toLowerCase();
+    if (role && role !== "user") {
+      continue;
+    }
+    const content = stringMaybe(record.content) ?? stringMaybe(record.text);
+    if (content) {
+      return content;
+    }
+  }
+  return undefined;
+}
+
+function sanitizeUserTask(value: string): string {
+  const redacted = redactSensitiveCredentials(value);
+  return redacted.length > 1000 ? `${redacted.slice(0, 1000)}...` : redacted;
 }
 
 function derivedResourcesForTool(event: BeforeToolCallEventInput, context: ToolHookContextInput): DerivedResource[] {

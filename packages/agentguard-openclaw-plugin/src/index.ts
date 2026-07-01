@@ -65,6 +65,11 @@ type SessionState = {
   sessionId?: string;
 };
 
+type TaskExtractionOptions = {
+  promptFallback?: boolean;
+  contentFallback?: boolean;
+};
+
 type ToolCallState = {
   userTask?: string;
   sourceTrust?: string;
@@ -139,10 +144,10 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
 
     api.on(
       "before_install",
-      async (event) => {
+      async (event, context) => {
         const client = makeClient();
         try {
-          const result = await client.evaluateConfigAudit(buildBeforeInstallConfigAuditEvent(event));
+          const result = await client.evaluateConfigAudit(buildBeforeInstallConfigAuditEvent(event, context));
           return result.decision === "block"
             ? { block: true, blockReason: "Blocked by AgentGuard config audit." }
             : undefined;
@@ -161,7 +166,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       (event, context) => {
         const client = makeClient();
         try {
-          rememberSessionState(sessionState, event, context);
+          rememberSessionState(sessionState, event, context, { contentFallback: true });
           const cached = withCachedRuntimeFields(sessionState, event, context);
           void client
             .submitRuntimeObservation(buildRuntimeObservationAuditEvent("message_received", cached.event, cached.context))
@@ -185,7 +190,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       async (event, context) => {
         const client = makeClient();
         try {
-          rememberSessionState(sessionState, event, context);
+          rememberSessionState(sessionState, event, context, { promptFallback: true });
           const cached = withCachedRuntimeFields(sessionState, event, context);
           await client.evaluate(buildContextGuardEvent("before_prompt_build", cached.event, cached.context));
         } catch (error) {
@@ -203,7 +208,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       async (event, context) => {
         const client = makeClient();
         try {
-          rememberSessionState(sessionState, event, context);
+          rememberSessionState(sessionState, event, context, { promptFallback: true });
           const cached = withCachedRuntimeFields(sessionState, event, context);
           await client.evaluate(buildModelGuardEvent("llm_input", cached.event, cached.context));
         } catch (error) {
@@ -240,13 +245,13 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
         const client = makeClient();
         try {
           const cached = withCachedToolContext(sessionState, toolCallState, event, context);
+          const message = asRecord(event).message;
+          const redacted = redactUnknownCredentials(message);
           void client.evaluate(buildToolResultGuardEvent(cached.event, cached.context)).catch((error) => {
             logDiagnostic(config, "tool_result_persist observation failed", {
               error: error instanceof Error ? error.message : String(error),
             });
           });
-          const message = asRecord(event).message;
-          const redacted = redactUnknownCredentials(message);
           if (redacted.changed) {
             return { message: redacted.value as never };
           }
@@ -386,17 +391,20 @@ function rememberSessionState(
   cache: Map<string, SessionState>,
   event: unknown,
   context: unknown,
+  options: TaskExtractionOptions = {},
 ): void {
-  const key = cacheKey(event, context);
-  if (!key) {
+  const keys = cacheKeys(event, context);
+  if (keys.length === 0) {
     return;
   }
   const eventRecord = asRecord(event);
   const contextRecord = asRecord(context);
-  const existing = cache.get(key) ?? {};
+  const existing = cacheState(cache, event, context) ?? {};
+  const explicitUserTask = extractExplicitUserTask(event, context);
+  const fallbackUserTask = extractUserTask(event, context, options);
   const next: SessionState = {
     ...existing,
-    userTask: extractUserTask(event, context) ?? existing.userTask,
+    userTask: explicitUserTask ?? existing.userTask ?? fallbackUserTask,
     sourceTrust: stringMaybe(eventRecord.sourceTrust) ?? stringMaybe(contextRecord.sourceTrust) ?? existing.sourceTrust,
     sourceType: stringMaybe(eventRecord.sourceType) ?? stringMaybe(contextRecord.sourceType) ?? existing.sourceType,
     provider: stringMaybe(eventRecord.provider) ?? stringMaybe(contextRecord.provider) ?? existing.provider,
@@ -404,7 +412,9 @@ function rememberSessionState(
     runId: stringMaybe(eventRecord.runId) ?? stringMaybe(contextRecord.runId) ?? existing.runId,
     sessionId: stringMaybe(eventRecord.sessionId) ?? stringMaybe(contextRecord.sessionId) ?? existing.sessionId,
   };
-  setLimited(cache, key, next);
+  for (const key of keys) {
+    setLimited(cache, key, next);
+  }
 }
 
 function withCachedRuntimeFields<T extends object, C extends object>(
@@ -502,14 +512,19 @@ function mergeRuntimeFields(value: object, state: SessionState): JsonObject {
 }
 
 function cacheState(cache: Map<string, SessionState>, event: unknown, context: unknown): SessionState | undefined {
-  const key = cacheKey(event, context);
-  return key ? cache.get(key) : undefined;
+  const states = cacheKeys(event, context)
+    .map((key) => cache.get(key))
+    .filter((state): state is SessionState => state !== undefined);
+  if (states.length === 0) {
+    return undefined;
+  }
+  return Object.assign({}, ...states);
 }
 
-function cacheKey(event: unknown, context: unknown): string | undefined {
+function cacheKeys(event: unknown, context: unknown): string[] {
   const eventRecord = asRecord(event);
   const contextRecord = asRecord(context);
-  return firstNonEmptyString(
+  return uniqueStrings([
     stringMaybe(eventRecord.sessionKey),
     stringMaybe(contextRecord.sessionKey),
     stringMaybe(eventRecord.runId),
@@ -518,32 +533,55 @@ function cacheKey(event: unknown, context: unknown): string | undefined {
     stringMaybe(contextRecord.sessionId),
     stringMaybe(eventRecord.traceId),
     stringMaybe(contextRecord.traceId),
-  );
+  ]);
 }
 
-function extractUserTask(...values: unknown[]): string | undefined {
+function extractExplicitUserTask(...values: unknown[]): string | undefined {
   for (const value of values) {
     const explicit = stringMaybe(asRecord(value).userTask);
     if (explicit) {
       return sanitizeTask(explicit);
     }
   }
+  return undefined;
+}
+
+function extractUserTask(
+  event: unknown,
+  context: unknown,
+  options: TaskExtractionOptions = {},
+): string | undefined {
+  const values = [event, context];
+  const explicit = extractExplicitUserTask(...values);
+  if (explicit) {
+    return explicit;
+  }
   for (const value of values) {
-    const fromMessages = userTaskFromMessages(asRecord(value).messages);
+    const record = asRecord(value);
+    const fromMessages = userTaskFromMessages(record.messages) ?? userTaskFromMessages(asRecord(record.prompt).messages);
     if (fromMessages) {
       return sanitizeTask(fromMessages);
     }
   }
-  for (const value of values) {
-    const record = asRecord(value);
-    const task = stringMaybe(record.content)
-      ?? stringMaybe(record.text)
-      ?? stringMaybe(record.body)
-      ?? stringMaybe(record.prompt)
-      ?? stringMaybe(record.input)
-      ?? stringMaybe(record.message);
-    if (task) {
-      return sanitizeTask(task);
+  if (options.promptFallback) {
+    for (const value of values) {
+      const record = asRecord(value);
+      const task = stringMaybe(record.prompt) ?? stringMaybe(record.input);
+      if (task) {
+        return sanitizeTask(task);
+      }
+    }
+  }
+  if (options.contentFallback) {
+    for (const value of values) {
+      const record = asRecord(value);
+      const task = stringMaybe(record.content)
+        ?? stringMaybe(record.text)
+        ?? stringMaybe(record.body)
+        ?? stringMaybe(record.message);
+      if (task) {
+        return sanitizeTask(task);
+      }
     }
   }
   return undefined;
@@ -581,6 +619,10 @@ function setLimited<T>(cache: Map<string, T>, key: string, value: T, limit = 200
     }
   }
   cache.set(key, value);
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
 }
 
 function asRecord(value: unknown): JsonObject {

@@ -537,7 +537,11 @@ def build_audit_event(
         reason=decision.reason,
         links=links,
         latency_ms=decision.latency_ms,
-        metadata={**_security_context_metadata(event), **event.metadata, **description.metadata},
+        metadata=_merge_metadata(
+            _security_context_metadata(event),
+            event.metadata,
+            description.metadata,
+        ),
     )
 
 
@@ -558,11 +562,14 @@ def _config_audit_event(event: ConfigAuditEvent, result: ConfigAuditResult) -> A
         rule_hits=[finding.category for finding in result.findings],
         reason=result.reason,
         links={"config_audit_event_id": event.event_id},
-        metadata={
-            "target_type": event.target_type,
-            "target_id": event.target_id,
-            "finding_count": len(result.findings),
-        },
+        metadata=_merge_metadata(
+            event.metadata,
+            {
+                "target_type": event.target_type,
+                "target_id": event.target_id,
+                "finding_count": len(result.findings),
+            },
+        ),
     )
 
 
@@ -614,6 +621,16 @@ def _security_context_metadata(event: GuardEvent) -> dict[str, object]:
         metadata["derived_paths"] = list(context.derived_paths)
     if context.context_sources:
         metadata["context_sources"] = list(context.context_sources)
+    return metadata
+
+
+def _merge_metadata(*items: dict[str, object]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    for item in items:
+        for key, value in item.items():
+            if value in (None, ""):
+                continue
+            metadata[key] = value
     return metadata
 
 

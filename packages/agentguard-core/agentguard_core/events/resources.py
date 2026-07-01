@@ -49,6 +49,8 @@ def derive_resources(event: GuardEvent) -> list[DerivedResource]:
     resources = _canonical_resources(event)
     derived_resources = getattr(event.payload, "derived_resources", [])
     if derived_resources:
+        if isinstance(event.payload, ToolResultPayload):
+            return _dedupe_resources([*derived_resources, *resources])
         resources.extend(derived_resources)
     return _dedupe_resources(resources)
 
@@ -85,6 +87,17 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
             )
         ]
     if isinstance(event.payload, ContextBuildPayload):
+        if event.security_context.derived_paths:
+            return [
+                DerivedResource(
+                    resource_type="context_source",
+                    operation="assemble",
+                    target=target,
+                    data_classification=None,
+                    direction="inbound",
+                )
+                for target in event.security_context.derived_paths
+            ]
         return [
             DerivedResource(
                 resource_type="context_source",
