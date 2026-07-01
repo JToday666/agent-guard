@@ -192,6 +192,31 @@ export function summarizeReliabilityEvents(plan, events) {
   return summary;
 }
 
+export async function collectReliabilityEventsByTrace(plan, seedEvents, fetchEventsByTraceId) {
+  const expectedTraceIds = new Set(plan.cases.map((item) => item.traceId));
+  const eventsByTraceId = new Map();
+  const addEvent = (event) => {
+    if (!event || typeof event.trace_id !== "string" || !expectedTraceIds.has(event.trace_id)) {
+      return;
+    }
+    eventsByTraceId.set(event.trace_id, event);
+  };
+  for (const event of seedEvents) {
+    addEvent(event);
+  }
+
+  const missingTraceIds = summarizeReliabilityEvents(plan, [...eventsByTraceId.values()]).missing_traces;
+  for (const traceId of missingTraceIds) {
+    const fetchedEvents = await fetchEventsByTraceId(traceId);
+    if (Array.isArray(fetchedEvents)) {
+      for (const event of fetchedEvents) {
+        addEvent(event);
+      }
+    }
+  }
+  return [...eventsByTraceId.values()];
+}
+
 function reliabilityTraceId(runId, hookName, iteration) {
   return `openclaw_rel_${runId}_${hookName}_${String(iteration).padStart(3, "0")}`;
 }
@@ -1502,7 +1527,10 @@ async function waitForReliabilityEvents(plan, hookResults, timeoutMs) {
   let latestEvents = [];
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    latestEvents = await controlGet("/v1/audit/events?limit=1000");
+    const latestPage = await controlGet("/v1/audit/events?limit=1000");
+    latestEvents = await collectReliabilityEventsByTrace(plan, latestPage, (traceId) =>
+      controlGet(`/v1/audit/events?trace_id=${encodeURIComponent(traceId)}&limit=10`),
+    );
     const now = Date.now();
     for (const event of latestEvents) {
       if (expectedTraceIds.has(event.trace_id) && observedAtByTraceId[event.trace_id] === undefined) {

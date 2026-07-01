@@ -77,6 +77,40 @@ test("reliability runner summarizes missing duplicate and wrong-runtime events",
   assert.equal(summary.ok, false);
 });
 
+test("reliability runner fetches missing traces beyond audit list cap", async () => {
+  process.env.AGENTGUARD_ADAPTER_TOKEN = process.env.AGENTGUARD_ADAPTER_TOKEN || "test-adapter-token";
+  process.env.AGENTGUARD_CONTROL_TOKEN = process.env.AGENTGUARD_CONTROL_TOKEN || "test-control-token";
+
+  const {
+    buildReliabilityPlan,
+    collectReliabilityEventsByTrace,
+    summarizeReliabilityEvents,
+  } = await import("../../../scripts/openclaw-e2e-runner.mjs");
+
+  const plan = buildReliabilityPlan({ runId: "paged", iterations: 50 });
+  const toEvent = (item) => ({
+    trace_id: item.traceId,
+    event_type: item.expectedEventType,
+    runtime: "openclaw",
+    stage: item.hookName,
+  });
+  const latestPage = plan.cases.slice(100).map(toEvent);
+  const fetchedTraceIds = [];
+
+  const events = await collectReliabilityEventsByTrace(plan, latestPage, async (traceId) => {
+    fetchedTraceIds.push(traceId);
+    const item = plan.cases.find((candidate) => candidate.traceId === traceId);
+    return item ? [toEvent(item)] : [];
+  });
+  const summary = summarizeReliabilityEvents(plan, events);
+
+  assert.equal(latestPage.length, 1000);
+  assert.equal(fetchedTraceIds.length, 100);
+  assert.equal(events.length, 1100);
+  assert.deepEqual(summary.missing_traces, []);
+  assert.equal(summary.ok, true);
+});
+
 test("release gate summary is safe to persist in adapter status", async () => {
   const { buildReleaseGateSummary } = await import("../../../scripts/openclaw-e2e-runner.mjs");
 

@@ -101,6 +101,31 @@ test("infers resource operation from real runtime tool shape when derivedResourc
   ]);
 });
 
+test("infers file resource from OpenClaw tool arguments", () => {
+  const event = buildToolCallGuardEvent(
+    {
+      toolName: "read",
+      arguments: { path: "/home/today/.openclaw/workspace/README.md" },
+      toolCallId: "call_read",
+      runId: "run_read",
+      userTask: "Summarize public README only",
+    },
+    { sessionKey: "agent:main:read", agentId: "main" },
+  );
+
+  assert.deepEqual(event.payload.arguments, { path: "/home/today/.openclaw/workspace/README.md" });
+  assert.deepEqual(event.security_context.derived_paths, ["/home/today/.openclaw/workspace/README.md"]);
+  assert.deepEqual(event.payload.derived_resources, [
+    {
+      resource_type: "file",
+      operation: "read",
+      target: "/home/today/.openclaw/workspace/README.md",
+      data_classification: null,
+      direction: "local",
+    },
+  ]);
+});
+
 test("infers local process resource for exec tools without derivedPaths", () => {
   const event = buildToolCallGuardEvent(
     {
@@ -255,4 +280,57 @@ test("maps runtime observation model calls to dashboard-visible task and model r
   assert.equal(event.metadata.user_task, "Summarize external page safely");
   assert.equal(event.metadata.current_step, "model_call_ended");
   assert.deepEqual(event.resource_targets, ["gpt-test"]);
+});
+
+test("maps lifecycle runtime observations to dashboard-visible fallback evidence", () => {
+  const cases = [
+    {
+      hookName: "gateway_start",
+      event: { runId: "run_gateway" },
+      context: { gatewayId: "openclaw-main" },
+      userTask: "OpenClaw gateway lifecycle",
+      resourceTargets: ["openclaw-main"],
+    },
+    {
+      hookName: "session_start",
+      event: { runId: "run_session" },
+      context: { sessionKey: "agent:main:session" },
+      userTask: "OpenClaw session lifecycle",
+      resourceTargets: ["agent:main:session"],
+    },
+    {
+      hookName: "before_compaction",
+      event: { runId: "run_compaction", sessionFile: "/tmp/session.jsonl" },
+      context: {},
+      userTask: "OpenClaw context compaction",
+      resourceTargets: ["/tmp/session.jsonl"],
+    },
+    {
+      hookName: "subagent_ended",
+      event: { runId: "run_subagent", subagentId: "subagent_001" },
+      context: {},
+      userTask: "OpenClaw subagent lifecycle",
+      resourceTargets: ["subagent_001"],
+    },
+    {
+      hookName: "cron_changed",
+      event: { runId: "run_cron", cronId: "cron_daily" },
+      context: {},
+      userTask: "OpenClaw cron configuration update",
+      resourceTargets: ["cron_daily"],
+    },
+    {
+      hookName: "resolve_exec_env",
+      event: { runId: "run_exec_env", command: "python -m pytest" },
+      context: {},
+      userTask: "OpenClaw execution environment resolution",
+      resourceTargets: ["python -m pytest"],
+    },
+  ];
+
+  for (const item of cases) {
+    const event = buildRuntimeObservationAuditEvent(item.hookName, item.event, item.context);
+    assert.equal(event.metadata.user_task, item.userTask, item.hookName);
+    assert.deepEqual(event.resource_targets, item.resourceTargets, item.hookName);
+  }
 });

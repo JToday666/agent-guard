@@ -34,6 +34,9 @@ type DerivedResourceInput = Partial<DerivedResource> & {
 type BeforeToolCallEventInput = RuntimeSecurityFields & {
   toolName: string;
   params?: JsonObject;
+  arguments?: JsonObject;
+  input?: JsonObject;
+  toolInput?: JsonObject;
   toolKind?: string;
   toolInputKind?: string;
   runId?: string;
@@ -150,7 +153,8 @@ export function buildToolCallGuardEvent(
   const runId = event.runId ?? context.runId ?? null;
   const callId = event.toolCallId ?? context.toolCallId ?? createLocalId("call");
   const security = runtimeSecurityFields(event, context);
-  const derivedResources = derivedResourcesForTool(event, context);
+  const toolArgs = toolArguments(event, context);
+  const derivedResources = derivedResourcesForTool(event, context, toolArgs);
   const derivedPaths = derivedPathTargets(event, context, derivedResources);
 
   return {
@@ -191,7 +195,7 @@ export function buildToolCallGuardEvent(
         input_kind: event.toolInputKind ?? context.toolInputKind ?? null,
         call_id: callId,
       },
-      arguments: event.params ?? {},
+      arguments: toolArgs,
       derived_resources: derivedResources,
     },
     metadata: {
@@ -490,6 +494,7 @@ export function buildRuntimeObservationAuditEvent(
   const eventRecord = asRecord(event);
   const contextRecord = asRecord(context);
   const security = runtimeSecurityFields(eventRecord, contextRecord);
+  const userTask = runtimeObservationUserTask(hookName, security.userTask);
   const resourceTargets = runtimeObservationResourceTargets(hookName, eventRecord, contextRecord);
   const traceId = firstNonEmpty(
     stringMaybe(context.runId),
@@ -519,7 +524,7 @@ export function buildRuntimeObservationAuditEvent(
     metadata: {
       openclaw_hook: hookName,
       ...definedMetadata({
-        user_task: security.userTask,
+        user_task: userTask,
         source_trust: security.sourceTrust,
         source_type: security.sourceType,
         run_id: stringMaybe(eventRecord.runId) ?? stringMaybe(contextRecord.runId),
@@ -552,7 +557,91 @@ function runtimeObservationResourceTargets(
   if (model && hookName.startsWith("model_call_")) {
     return [model];
   }
+  switch (hookName) {
+    case "gateway_start":
+    case "gateway_stop":
+      return runtimeResourceTargets(event.gatewayId, context.gatewayId, "openclaw-gateway");
+    case "session_start":
+    case "session_end":
+    case "message_received":
+    case "before_message_write":
+      return runtimeResourceTargets(
+        event.messageId,
+        context.messageId,
+        event.sessionKey,
+        context.sessionKey,
+        event.sessionId,
+        context.sessionId,
+      );
+    case "before_compaction":
+    case "after_compaction":
+      return runtimeResourceTargets(
+        event.sessionFile,
+        context.sessionFile,
+        event.sessionKey,
+        context.sessionKey,
+        event.sessionId,
+        context.sessionId,
+        "context-compaction",
+      );
+    case "subagent_spawned":
+    case "subagent_ended":
+      return runtimeResourceTargets(event.subagentId, context.subagentId, event.sessionKey, context.sessionKey);
+    case "cron_changed":
+      return runtimeResourceTargets(event.cronId, context.cronId, "openclaw-cron");
+    case "resolve_exec_env":
+      return runtimeResourceTargets(event.command, context.command, event.cwd, context.cwd, "exec-env");
+    default:
+      return runtimeResourceTargets(event.targetId, context.targetId, event.runId, context.runId, `openclaw:${hookName}`);
+  }
+}
+
+function runtimeObservationUserTask(hookName: string, explicit: string): string {
+  if (explicit) {
+    return explicit;
+  }
+  switch (hookName) {
+    case "gateway_start":
+    case "gateway_stop":
+      return "OpenClaw gateway lifecycle";
+    case "session_start":
+    case "session_end":
+      return "OpenClaw session lifecycle";
+    case "before_compaction":
+    case "after_compaction":
+      return "OpenClaw context compaction";
+    case "subagent_spawned":
+    case "subagent_ended":
+      return "OpenClaw subagent lifecycle";
+    case "cron_changed":
+      return "OpenClaw cron configuration update";
+    case "resolve_exec_env":
+      return "OpenClaw execution environment resolution";
+    case "message_received":
+      return "OpenClaw inbound message handling";
+    case "before_message_write":
+      return "OpenClaw transcript persistence";
+    default:
+      return "OpenClaw runtime observation";
+  }
+}
+
+function runtimeResourceTargets(...values: unknown[]): string[] {
+  for (const value of values) {
+    const target = runtimeResourceTarget(value);
+    if (target) {
+      return [target];
+    }
+  }
   return [];
+}
+
+function runtimeResourceTarget(value: unknown): string | undefined {
+  const preview = redactSensitiveCredentials(stringPreview(value)).trim();
+  if (!preview) {
+    return undefined;
+  }
+  return preview.length > 240 ? `${preview.slice(0, 240)}...` : preview;
 }
 
 function definedMetadata(values: Record<string, unknown>): JsonObject {
@@ -660,7 +749,11 @@ function sanitizeUserTask(value: string): string {
   return redacted.length > 1000 ? `${redacted.slice(0, 1000)}...` : redacted;
 }
 
-function derivedResourcesForTool(event: BeforeToolCallEventInput, context: ToolHookContextInput): DerivedResource[] {
+function derivedResourcesForTool(
+  event: BeforeToolCallEventInput,
+  context: ToolHookContextInput,
+  toolArgs: JsonObject,
+): DerivedResource[] {
   const explicit = normalizeDerivedResources(event.derivedResources ?? context.derivedResources);
   if (explicit.length > 0) {
     return explicit;
@@ -672,12 +765,12 @@ function derivedResourcesForTool(event: BeforeToolCallEventInput, context: ToolH
         toolName: event.toolName,
         toolKind: event.toolKind ?? context.toolKind,
         toolInputKind: event.toolInputKind ?? context.toolInputKind,
-        params: event.params ?? {},
+        params: toolArgs,
         target,
       }),
     );
   }
-  const command = toolCommandText(event.params ?? {});
+  const command = toolCommandText(toolArgs);
   if (
     command &&
     isExecLikeToolIdentity({
@@ -694,6 +787,18 @@ function derivedResourcesForTool(event: BeforeToolCallEventInput, context: ToolH
         data_classification: null,
         direction: "local",
       },
+    ];
+  }
+  const argumentTarget = toolTargetText(toolArgs);
+  if (argumentTarget) {
+    return [
+      inferDerivedResource({
+        toolName: event.toolName,
+        toolKind: event.toolKind ?? context.toolKind,
+        toolInputKind: event.toolInputKind ?? context.toolInputKind,
+        params: toolArgs,
+        target: argumentTarget,
+      }),
     ];
   }
   return [];
@@ -974,6 +1079,33 @@ function resultContentType(value: unknown): string {
 
 function toolCommandText(params: JsonObject): string {
   return stringMaybe(params.command ?? params.cmd ?? params.code) ?? "";
+}
+
+function toolArguments(event: BeforeToolCallEventInput, context: ToolHookContextInput): JsonObject {
+  for (const value of [event.params, event.arguments, event.input, event.toolInput, context.toolParams]) {
+    const record = asRecord(value);
+    if (Object.keys(record).length > 0) {
+      return record;
+    }
+  }
+  return {};
+}
+
+function toolTargetText(params: JsonObject): string {
+  return (
+    stringMaybe(
+      params.path
+        ?? params.file
+        ?? params.filePath
+        ?? params.filename
+        ?? params.url
+        ?? params.uri
+        ?? params.endpoint
+        ?? params.target
+        ?? params.key
+        ?? params.name,
+    ) ?? ""
+  );
 }
 
 function asRecord(value: unknown): JsonObject {
