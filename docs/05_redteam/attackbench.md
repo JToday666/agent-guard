@@ -8,6 +8,7 @@ AttackBench 实现位于 `agentguard_langgraph_bench/`，负责攻击样本、�
 
 - [命题要求追踪矩阵](../00_requirements/requirement_traceability_matrix.md)
 - [LangGraph 评测靶场](../03_adapters/langgraph_adapter.md)
+- [OpenClaw AttackBench 轮转验证与检测启用](openclaw_attackbench.md)
 - [演示脚本](../06_delivery/demo_script.md)
 
 ## 2. 模块职责
