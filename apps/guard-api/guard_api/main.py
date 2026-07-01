@@ -156,7 +156,7 @@ def _legacy_unknown_adapter_status() -> dict[str, Any]:
         "status": "unknown",
         "loaded": False,
         "hook_count": None,
-        "expected_hook_count": 19,
+        "expected_hook_count": 22,
         "last_verified_at": None,
         "error": None,
         "source": None,

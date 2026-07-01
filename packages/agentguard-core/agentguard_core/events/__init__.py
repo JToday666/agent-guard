@@ -17,7 +17,7 @@ from .payloads import (
     ToolResult,
     ToolResultPayload,
 )
-from .resources import derive_resources, tool_argument_text
+from .resources import derive_resources, is_exec_like_tool, tool_argument_text
 
 __all__ = [
     "ContextBuildPayload",
@@ -38,5 +38,6 @@ __all__ = [
     "ToolResultPayload",
     "derive_resources",
     "guard_event_raw_payload_contracts",
+    "is_exec_like_tool",
     "tool_argument_text",
 ]
