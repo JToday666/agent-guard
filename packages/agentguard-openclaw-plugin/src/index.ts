@@ -231,9 +231,12 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
             return decisionToBlockResult(decision) as never;
           }
         } catch (error) {
-          logDiagnostic(config, "before_prompt_build observation failed", {
+          logDiagnostic(config, "before_prompt_build enforcement failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+          if (shouldFailClosedRuntimeStage(config, "before_prompt_build")) {
+            return failClosedBlockResult() as never;
+          }
         }
         return undefined;
       },
@@ -255,9 +258,12 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
             return decisionToBlockResult(decision) as never;
           }
         } catch (error) {
-          logDiagnostic(config, "llm_input observation failed", {
+          logDiagnostic(config, "llm_input enforcement failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+          if (shouldFailClosedRuntimeStage(config, "llm_input")) {
+            return failClosedBlockResult() as never;
+          }
         }
         return undefined;
       },
@@ -287,32 +293,35 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
 
     api.on(
       "tool_result_persist",
-      (event, context) => {
+      (async (event: object, context: object) => {
         if (isDisabled(config)) {
           return undefined;
         }
         const client = makeClient();
+        let message: unknown;
         try {
           const cached = withCachedToolContext(sessionState, toolCallState, event, context);
-          const message = asRecord(event).message;
+          message = asRecord(event).message;
           const redacted = redactUnknownCredentials(message);
           const sanitized = sanitizePersistentInstructionPoisoning(redacted.value);
-          void client.evaluate(buildToolResultGuardEvent({ ...cached.event, message: redacted.value }, cached.context)).catch((error) => {
-            logDiagnostic(config, "tool_result_persist evaluation failed", {
-              error: error instanceof Error ? error.message : String(error),
-            });
-          });
+          const decision = await client.evaluate(buildToolResultGuardEvent({ ...cached.event, message: redacted.value }, cached.context));
+          if (shouldRuntimeBlock(config, decision)) {
+            return { message: quarantinedToolResultMessage(message, safeDecisionMessage(decision)) as never };
+          }
           if (isEnforcing(config) && (redacted.changed || sanitized.changed)) {
             return { message: sanitized.value as never };
           }
         } catch (error) {
-          logDiagnostic(config, "tool_result_persist mapping failed", {
+          logDiagnostic(config, "tool_result_persist enforcement failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+          if (shouldFailClosedRuntimeStage(config, "tool_result_persist")) {
+            return { message: quarantinedToolResultMessage(message, "AgentGuard is unavailable; quarantined by fail-closed policy.") as never };
+          }
           return undefined;
         }
         return undefined;
-      },
+      }) as never,
       { priority: 0, timeoutMs: 2000 },
     );
 
@@ -369,9 +378,15 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
             cached.context,
           );
           let shouldRevise = containsSensitiveCredentialText(content);
+          let revisionReason = shouldRevise
+            ? "AgentGuard detected credential exposure in the final assistant message."
+            : "";
           try {
             const decision = await client.evaluate(guardEvent);
-            shouldRevise ||= isEnforcing(config) && decision.decision.decision === "deny";
+            if (shouldRuntimeBlock(config, decision)) {
+              shouldRevise = true;
+              revisionReason = safeDecisionMessage(decision);
+            }
           } catch (error) {
             logDiagnostic(config, "before_agent_finalize evaluation failed", {
               error: error instanceof Error ? error.message : String(error),
@@ -392,7 +407,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           finalizeRevisionKeys.add(revisionKey);
           return {
             action: "revise",
-            reason: "AgentGuard detected credential exposure in the final assistant message.",
+            reason: revisionReason || "AgentGuard detected unsafe content in the final assistant message.",
             retry: {
               instruction:
                 "Remove all credential, secret, token, and API Key values from the final answer. Replace any credential value with [redacted] and do not reveal environment variable contents.",
@@ -832,11 +847,50 @@ function shouldRuntimeBlock(config: ReturnType<typeof buildPluginConfig>, respon
   return isEnforcing(config) && response.decision.decision !== "allow";
 }
 
+function shouldFailClosedRuntimeStage(config: ReturnType<typeof buildPluginConfig>, stage: string): boolean {
+  return isEnforcing(config) && config.failClosedStages.includes(stage);
+}
+
 function decisionToBlockResult(response: GuardEvaluationResponse): { block: true; blockReason: string } {
   return {
     block: true,
-    blockReason: response.decision.safe_message || response.decision.reason || "Blocked by AgentGuard policy.",
+    blockReason: safeDecisionMessage(response),
   };
+}
+
+function failClosedBlockResult(): { block: true; blockReason: string } {
+  return {
+    block: true,
+    blockReason: "AgentGuard is unavailable; blocked by fail-closed policy.",
+  };
+}
+
+function safeDecisionMessage(response: GuardEvaluationResponse): string {
+  return response.decision.safe_message || response.decision.reason || "Blocked by AgentGuard policy.";
+}
+
+function quarantinedToolResultMessage(original: unknown, reason: string): unknown {
+  const safeContent = `[AgentGuard quarantined this tool result before persistence. ${reason}]`;
+  if (typeof original === "string") {
+    return safeContent;
+  }
+  if (Array.isArray(original)) {
+    return safeContent;
+  }
+  const record = asRecord(original);
+  if (Object.keys(record).length === 0) {
+    return safeContent;
+  }
+  if ("content" in record) {
+    return { ...record, content: safeContent };
+  }
+  if ("text" in record) {
+    return { ...record, text: safeContent };
+  }
+  if ("message" in record) {
+    return { ...record, message: safeContent };
+  }
+  return safeContent;
 }
 
 function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeClient: () => GuardApiClient): void {
@@ -859,7 +913,7 @@ function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeCli
             "memory_write_proposed",
             "message_send_proposed",
           ],
-          blocking_hooks: [...BLOCKING_HOOKS, "before_agent_finalize"],
+          blocking_hooks: [...BLOCKING_HOOKS, "before_prompt_build", "llm_input", "before_agent_finalize"],
           observation_hooks: [...OBSERVATION_HOOKS, "message_received"],
           redaction_hooks: ["tool_result_persist", "before_message_write", "before_agent_finalize"],
           fail_closed_stages: config.failClosedStages,

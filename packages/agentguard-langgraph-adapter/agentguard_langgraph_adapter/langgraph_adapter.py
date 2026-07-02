@@ -124,6 +124,8 @@ class LangGraphAdapter:
             return _allow_decision("Defense is disabled for this benchmark run.")
         try:
             assert self.core_client is not None
+            if not hasattr(self.core_client, "evaluate_guard_event"):
+                return _allow_decision("Core client does not implement runtime guard events; allowed for compatibility.")
             raw_decision = self.core_client.evaluate_guard_event(_event_dump(event))
             return PolicyDecision.model_validate(raw_decision)
         except Exception as exc:
@@ -277,7 +279,7 @@ class LangGraphAdapter:
             security,
             current_step="context_assembled",
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
         )
         return RuntimeGuardEvent(
             event_type="context_assembled",
@@ -314,7 +316,7 @@ class LangGraphAdapter:
             security,
             current_step=current_step,
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
         )
         preview = _preview(content)
         return RuntimeGuardEvent(
@@ -356,7 +358,7 @@ class LangGraphAdapter:
             security,
             current_step="tool_result_produced",
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
             resources=derive_resources(tool_name, arguments),
         )
         preview = _preview(result)
@@ -406,7 +408,7 @@ class LangGraphAdapter:
             {**security, "source_trust": source_trust},
             current_step="memory_write_proposed",
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
         )
         return RuntimeGuardEvent(
             event_type="memory_write_proposed",
@@ -532,6 +534,10 @@ def _event_dump(event: RuntimeGuardEvent | ToolCallEvent | dict[str, Any]) -> di
     if isinstance(event, dict):
         return event
     return event.model_dump()
+
+
+def _config_agent_id(config: Any) -> str:
+    return str(getattr(config, "agent_id", None) or "langgraph_demo")
 
 
 def _security_context(

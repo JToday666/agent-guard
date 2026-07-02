@@ -82,6 +82,15 @@ class _LangGraphRuntimeAdapter:
     def evaluate_before_tool(self, **kwargs: Any) -> Any:
         return self.guard_adapter.evaluate_before_tool(**kwargs)
 
+    def evaluate_context(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.evaluate_context(**kwargs)
+
+    def evaluate_model_input(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.evaluate_model_input(**kwargs)
+
+    def evaluate_model_output(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.evaluate_model_output(**kwargs)
+
     def build_tool_call_event(self, **kwargs: Any) -> Any:
         return self.guard_adapter.build_tool_call_event(**kwargs)
 
@@ -90,6 +99,9 @@ class _LangGraphRuntimeAdapter:
 
     def submit_audit_event(self, *args: Any, **kwargs: Any) -> Any:
         return self.guard_adapter.submit_audit_event(*args, **kwargs)
+
+    def wait_for_approval(self, *args: Any, **kwargs: Any) -> Any:
+        return self.guard_adapter.wait_for_approval(*args, **kwargs)
 
 
 def _final_answer_from_state(state: dict[str, Any]) -> str:

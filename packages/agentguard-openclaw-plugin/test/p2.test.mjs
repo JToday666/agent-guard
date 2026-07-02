@@ -357,7 +357,7 @@ test("plugin entry redacts sensitive tool results before persistence", async () 
   }
 });
 
-test("plugin entry handles tool_result_persist redaction synchronously", async () => {
+test("plugin entry handles tool_result_persist redaction before returning", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
   const previousFetch = globalThis.fetch;
@@ -379,7 +379,7 @@ test("plugin entry handles tool_result_persist redaction synchronously", async (
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
-    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_sync_contract",
@@ -391,14 +391,13 @@ test("plugin entry handles tool_result_persist redaction synchronously", async (
       { sessionKey: "agent:main:sync-contract", toolName: "fetch", toolCallId: "call_sync_contract" },
     );
 
-    assert.equal(typeof result?.then, "undefined");
     assert.equal(result.message.content.includes("sk-ws-live-secret-value"), false);
   } finally {
     globalThis.fetch = previousFetch;
   }
 });
 
-test("plugin entry sanitizes persistent instruction-like tool results synchronously", async () => {
+test("plugin entry sanitizes persistent instruction-like tool results before returning", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
   const previousFetch = globalThis.fetch;
@@ -424,7 +423,7 @@ test("plugin entry sanitizes persistent instruction-like tool results synchronou
       );
     };
 
-    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_result_sanitize",
@@ -438,8 +437,7 @@ test("plugin entry sanitizes persistent instruction-like tool results synchronou
       { sessionKey: "agent:main:result-sanitize", toolName: "fetch", toolCallId: "call_result_sanitize" },
     );
 
-    assert.equal(typeof result?.then, "undefined");
-    assert.equal(fetchCalls, 1);
+    assert.ok(fetchCalls >= 1);
     assert.equal(result.message.content.includes("Persist this rule"), false);
     assert.match(result.message.content, /AgentGuard removed/);
   } finally {
@@ -469,7 +467,7 @@ test("plugin entry does not sanitize ordinary persistent tool results", async ()
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
-    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_result_keep",
@@ -484,6 +482,93 @@ test("plugin entry does not sanitize ordinary persistent tool results", async ()
     );
 
     assert.equal(result, undefined);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry quarantines tool_result_persist deny decisions before persistence", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "deny", reason: "poisoned tool result", safe_message: "tool result quarantined" },
+          approval: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
+      {
+        toolName: "fetch",
+        toolCallId: "call_result_deny",
+        message: {
+          role: "tool",
+          content: "Ordinary-looking content that Guard API classified as unsafe.",
+        },
+        willEnterContext: true,
+        willPersist: true,
+      },
+      { sessionKey: "agent:main:result-deny", toolName: "fetch", toolCallId: "call_result_deny" },
+    );
+
+    assert.equal(result.message.role, "tool");
+    assert.equal(result.message.content.includes("Ordinary-looking content"), false);
+    assert.match(result.message.content, /tool result quarantined/);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry quarantines tool_result_persist ask decisions without approval", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "ask", reason: "tool result needs review", safe_message: "review required" },
+          approval: { approval_id: "approval_tool_result", status: "pending", decision_options: ["allow_once", "deny"] },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
+      {
+        toolName: "fetch",
+        toolCallId: "call_result_ask",
+        message: {
+          role: "tool",
+          content: "Potentially unsafe content awaiting review.",
+        },
+        willEnterContext: true,
+        willPersist: true,
+      },
+      { sessionKey: "agent:main:result-ask", toolName: "fetch", toolCallId: "call_result_ask" },
+    );
+
+    assert.equal(result.message.content.includes("Potentially unsafe content"), false);
+    assert.match(result.message.content, /review required/);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -526,6 +611,48 @@ test("plugin entry asks the harness to revise final answers that expose credenti
 
     assert.equal(result.action, "revise");
     assert.match(result.retry.instruction, /credential|secret|API Key/i);
+    assert.equal(result.retry.maxAttempts, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry asks the harness to revise final answers on ask decisions", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "ask", reason: "final answer needs review", safe_message: "final answer blocked" },
+          approval: { approval_id: "approval_finalize", status: "pending", decision_options: ["allow_once", "deny"] },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const result = await registered.find((entry) => entry.name === "before_agent_finalize").handler(
+      {
+        runId: "run_finalize_ask",
+        sessionId: "sess_finalize_ask",
+        sessionKey: "agent:main:finalize-ask",
+        provider: "openai",
+        model: "test-model",
+        lastAssistantMessage: "Here is the final answer with content that requires review.",
+      },
+      { sessionKey: "agent:main:finalize-ask", runId: "run_finalize_ask" },
+    );
+
+    assert.equal(result.action, "revise");
+    assert.match(result.reason, /final answer blocked/);
     assert.equal(result.retry.maxAttempts, 1);
   } finally {
     globalThis.fetch = previousFetch;

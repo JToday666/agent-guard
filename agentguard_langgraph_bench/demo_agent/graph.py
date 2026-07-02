@@ -810,6 +810,11 @@ def _message_json_tool_call(message: Any, tools: MockToolRegistry, allowed_tool_
 
 
 def _build_llm(config: BenchConfig) -> Any:
+    if not config.llm_api_key:
+        raise RuntimeError(
+            "AGENTGUARD_LLM_API_KEY is required when LLM planning is enabled; "
+            "DEEPSEEK_API_KEY is also accepted for provider=deepseek"
+        )
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as exc:  # pragma: no cover - depends on optional install
@@ -817,11 +822,6 @@ def _build_llm(config: BenchConfig) -> Any:
 
     if not config.llm_model:
         raise RuntimeError("AGENTGUARD_LLM_MODEL is required when LLM planning is enabled")
-    if not config.llm_api_key:
-        raise RuntimeError(
-            "AGENTGUARD_LLM_API_KEY is required when LLM planning is enabled; "
-            "DEEPSEEK_API_KEY is also accepted for provider=deepseek"
-        )
 
     kwargs: dict[str, Any] = {
         "model": config.llm_model,
@@ -1679,8 +1679,12 @@ def build_tool_plan_with_llm(
     round_index: int = 1,
 ) -> PlannerOutput:
     llm = _build_llm(config)
-    lc_tools = _llm_visible_langchain_tools(case, tools)
-    if not lc_tools:
+    use_json_planner = config.instrumentation_plan_mode == "autonomous" and (
+        _is_agent_abuse_browser_case(case) or _is_prompt_injection_browser_case(case)
+        or case.attack_type == "memory_poisoning"
+    )
+    lc_tools = [] if use_json_planner else _llm_visible_langchain_tools(case, tools)
+    if not use_json_planner and not lc_tools:
         raise RuntimeError("No LangChain tools are available for LLM binding")
     messages = _llm_messages_for_case(
         case,
@@ -1689,10 +1693,6 @@ def build_tool_plan_with_llm(
         round_index=round_index,
     )
     contamination = check_agent_visible_prompt(messages) if config.prompt_contamination_check else {"found": False, "findings": []}
-    use_json_planner = config.instrumentation_plan_mode == "autonomous" and (
-        _is_agent_abuse_browser_case(case) or _is_prompt_injection_browser_case(case)
-        or case.attack_type == "memory_poisoning"
-    )
     llm_for_request = llm if use_json_planner else llm.bind_tools(lc_tools)
     message, diagnostics = _invoke_llm_with_diagnostics(
         llm_for_request,
@@ -2406,9 +2406,12 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_ga
         from langgraph.graph import END, StateGraph
     except Exception:
         def direct_runner(state: DemoState) -> dict[str, Any]:
-            state = _pre_model_capture(state)
+            state = _pre_model_capture(state, adapter)
+            if state.get("stop_reason"):
+                state = _post_tool_capture(state, adapter.config)
+                return _finalize_capture(state)
             while state.get("attack_case"):
-                state = _plan_tool_capture(state, adapter.config, tools)
+                state = _plan_tool_capture(state, adapter.config, tools, adapter)
                 if not state.get("tool_calls"):
                     break
                 state = guarded_tool_node(state)
@@ -2421,10 +2424,10 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_ga
         return direct_runner
 
     def pre_model(state: DemoState) -> DemoState:
-        return _pre_model_capture(state)
+        return _pre_model_capture(state, adapter)
 
     def plan_tool(state: DemoState) -> DemoState:
-        return _plan_tool_capture(state, adapter.config, tools)
+        return _plan_tool_capture(state, adapter.config, tools, adapter)
 
     def post_tool(state: DemoState) -> DemoState:
         return _post_tool_capture(state, adapter.config)
@@ -2439,7 +2442,7 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_ga
     graph.add_node("post_tool", post_tool)
     graph.add_node("finalize", finalize)
     graph.set_entry_point("pre_model")
-    graph.add_edge("pre_model", "plan_tool")
+    graph.add_conditional_edges("pre_model", _route_after_pre_model, {"plan_tool": "plan_tool", "post_tool": "post_tool"})
     graph.add_conditional_edges("plan_tool", _route_after_planning, {"tools": "guarded_tools", "post_tool": "post_tool"})
     graph.add_conditional_edges(
         "guarded_tools",
@@ -2453,6 +2456,10 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_ga
 
 def _route_after_planning(state: DemoState) -> str:
     return "tools" if state.get("tool_calls") else "post_tool"
+
+
+def _route_after_pre_model(state: DemoState) -> str:
+    return "post_tool" if state.get("stop_reason") else "plan_tool"
 
 
 def _route_after_tools(state: DemoState, config: BenchConfig) -> str:
@@ -2560,7 +2567,72 @@ def _case_from_state(state: DemoState) -> AttackCase | None:
         return None
 
 
-def _pre_model_capture(state: DemoState) -> DemoState:
+def _evaluate_runtime_guard(
+    state: DemoState,
+    adapter: LangGraphAdapter,
+    evaluator: Any,
+    *,
+    stage: str,
+) -> DemoState:
+    event, decision = evaluator()
+    audit_event = adapter.build_audit_event(event, decision)
+    adapter.submit_audit_event(audit_event)
+    if not _runtime_decision_blocks(adapter, decision):
+        return state
+    event_type = _event_type(event)
+    blocked = {
+        **state,
+        "tool_calls": [],
+        "last_tool_results": [],
+        "stop_reason": "blocked",
+        "task_terminal": True,
+        "task_terminal_reason": "blocked",
+        "completed_round_index": state.get("round_index"),
+    }
+    return _append_lifecycle(
+        blocked,
+        "policy_decided",
+        stage,
+        "AgentGuard runtime guard blocked execution.",
+        {
+            "guard_event_type": event_type,
+            "decision": getattr(decision, "decision", None),
+            "reason": getattr(decision, "reason", ""),
+            "safe_message": getattr(decision, "safe_message", None),
+            "rule_ids": [getattr(hit, "rule_id", "") for hit in getattr(decision, "rule_hits", [])],
+        },
+    )
+
+
+def _runtime_decision_blocks(adapter: LangGraphAdapter, decision: Any) -> bool:
+    if getattr(decision, "decision", None) == "deny":
+        return True
+    if getattr(decision, "decision", None) != "ask":
+        return False
+    approval_id = _runtime_approval_id(getattr(decision, "approval", None))
+    if not approval_id or not hasattr(adapter, "wait_for_approval"):
+        return True
+    resolution = adapter.wait_for_approval(approval_id)
+    if not isinstance(resolution, dict) or resolution.get("status") != "resolved":
+        return True
+    return str(resolution.get("decision") or "").lower() not in {"allow", "allow_once", "allow_session"}
+
+
+def _runtime_approval_id(approval: Any) -> str | None:
+    if isinstance(approval, dict):
+        value = approval.get("approval_id") or approval.get("id")
+        return str(value) if value else None
+    value = getattr(approval, "approval_id", None) or getattr(approval, "id", None)
+    return str(value) if value else None
+
+
+def _event_type(event: Any) -> str:
+    if isinstance(event, dict):
+        return str(event.get("event_type") or "")
+    return str(getattr(event, "event_type", "") or "")
+
+
+def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState:
     security = state.get("security") or {}
     messages = state.get("messages") or []
     state = _append_lifecycle(
@@ -2575,7 +2647,21 @@ def _pre_model_capture(state: DemoState) -> DemoState:
             "contains_untrusted_context": security.get("source_trust") == "untrusted",
         },
     )
-    return _append_lifecycle(
+    state = _evaluate_runtime_guard(
+        state,
+        adapter,
+        lambda: adapter.evaluate_context(
+            sources=messages,
+            security=security,
+            trace_id=state.get("trace_id") or security.get("trace_id") or new_id("trace"),
+            will_enter_context=True,
+            sanitized=False,
+        ),
+        stage="pre_model_hook",
+    )
+    if state.get("stop_reason"):
+        return state
+    state = _append_lifecycle(
         state,
         "model_input_prepared",
         "pre_model_hook",
@@ -2585,9 +2671,27 @@ def _pre_model_capture(state: DemoState) -> DemoState:
             "security_keys": sorted(security.keys()),
         },
     )
+    return _evaluate_runtime_guard(
+        state,
+        adapter,
+        lambda: adapter.evaluate_model_input(
+            content=messages,
+            security=security,
+            trace_id=state.get("trace_id") or security.get("trace_id") or new_id("trace"),
+            provider=getattr(adapter.config, "llm_provider", None),
+            model=getattr(adapter.config, "llm_model", None),
+            sanitized=False,
+        ),
+        stage="pre_model_hook",
+    )
 
 
-def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolRegistry) -> DemoState:
+def _plan_tool_capture(
+    state: DemoState,
+    config: BenchConfig,
+    tools: MockToolRegistry,
+    adapter: LangGraphAdapter | None = None,
+) -> DemoState:
     round_index = int(state.get("round_index") or 0) + 1
     planning_error = ""
     planning_diagnostics: dict[str, Any] = {}
@@ -2674,7 +2778,7 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
         state["stop_reason"] = stop_reason
     if evidence:
         state["llm_planning_evidence"] = evidence
-    return _append_lifecycle(
+    state = _append_lifecycle(
         state,
         "model_output_produced",
         "post_model_hook",
@@ -2692,6 +2796,21 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
             "planning_error": planning_error,
             "llm_diagnostics": planning_diagnostics,
         },
+    )
+    if adapter is None:
+        return state
+    return _evaluate_runtime_guard(
+        state,
+        adapter,
+        lambda: adapter.evaluate_model_output(
+            content=planner_content or {"tool_calls": calls},
+            security=state.get("security") or {},
+            trace_id=state.get("trace_id") or (state.get("security") or {}).get("trace_id") or new_id("trace"),
+            provider=getattr(adapter.config, "llm_provider", None),
+            model=getattr(adapter.config, "llm_model", None),
+            sanitized=False,
+        ),
+        stage="post_model_hook",
     )
 
 
