@@ -926,6 +926,18 @@ function derivedResourcesForTool(
       return resources;
     }
   }
+  const browserTarget = browserTargetText(toolArgs);
+  if (isBrowserToolIdentity(event.toolName, event.toolKind ?? context.toolKind, event.toolInputKind ?? context.toolInputKind) && browserTarget) {
+    return [
+      {
+        resource_type: "browser",
+        operation: browserOperation(event.toolName, event.toolKind ?? context.toolKind),
+        target: browserTarget,
+        data_classification: null,
+        direction: "runtime",
+      },
+    ];
+  }
   const command = toolCommandText(toolArgs);
   if (
     command &&
@@ -1105,6 +1117,15 @@ function inferDerivedResource(input: {
   const toolName = input.toolName.toLowerCase();
   const toolIdentity = `${input.toolName} ${input.toolKind ?? ""} ${input.toolInputKind ?? ""}`.toLowerCase();
   const method = stringMaybe(input.params.method)?.toUpperCase();
+  if (isBrowserToolIdentity(input.toolName, input.toolKind, input.toolInputKind)) {
+    return {
+      resource_type: "browser",
+      operation: browserOperation(input.toolName, input.toolKind),
+      target: input.target,
+      data_classification: null,
+      direction: "runtime",
+    };
+  }
   if (toolName === "call_api" || toolIdentity.includes("api") || toolIdentity.includes("http") || /^https?:\/\//i.test(input.target)) {
     return {
       resource_type: "api",
@@ -1171,6 +1192,28 @@ function operationFromToolIdentity(identity: string, writeOperation: string, rea
     return readOperation;
   }
   return "unknown";
+}
+
+function isBrowserToolIdentity(toolName: string, toolKind?: string, toolInputKind?: string): boolean {
+  const identity = `${toolName} ${toolKind ?? ""} ${toolInputKind ?? ""}`.toLowerCase();
+  return identity.includes("browser");
+}
+
+function browserOperation(toolName: string, toolKind?: string): string {
+  const identity = `${toolName} ${toolKind ?? ""}`.toLowerCase();
+  if (identity.includes("input") || identity.includes("fill") || identity.includes("type")) {
+    return "input";
+  }
+  if (identity.includes("click") || identity.includes("submit") || identity.includes("publish")) {
+    return "click";
+  }
+  if (identity.includes("extract") || identity.includes("inspect") || identity.includes("read")) {
+    return "extract";
+  }
+  if (identity.includes("start") || identity.includes("navigate") || identity.includes("open")) {
+    return "open";
+  }
+  return "browser";
 }
 
 function truncate(value: string, limit: number): string {
@@ -1306,6 +1349,19 @@ function toolArguments(event: BeforeToolCallEventInput, context: ToolHookContext
   return {};
 }
 
+function browserTargetText(params: JsonObject): string {
+  return (
+    stringMaybe(
+      params.selector
+        ?? params.url
+        ?? params.text
+        ?? params.sessionId
+        ?? params.session_id
+        ?? params.target,
+    ) ?? ""
+  );
+}
+
 function toolTargetText(params: JsonObject): string {
   return (
     stringMaybe(
@@ -1316,6 +1372,10 @@ function toolTargetText(params: JsonObject): string {
         ?? params.url
         ?? params.uri
         ?? params.endpoint
+        ?? params.selector
+        ?? params.text
+        ?? params.sessionId
+        ?? params.session_id
         ?? params.target
         ?? params.key
         ?? params.name,

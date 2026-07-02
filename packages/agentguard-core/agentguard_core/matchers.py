@@ -107,6 +107,82 @@ _MEMORY_POISONING_INTENT_MARKERS: dict[str, list[str]] = {
     ],
 }
 
+_AGENT_ABUSE_INTENT_MARKERS: dict[str, list[str]] = {
+    "malicious_payload_delivery": [
+        "license_txt.exe",
+        "/payloads/",
+        "payloads/license",
+        "download payload",
+        "malicious payload",
+        "curl -fs",
+        "curl -fsSL",
+        "wget ",
+        "invoke-webrequest",
+    ],
+    "backdoor_or_compute_abuse": [
+        "backdoor",
+        "reverse shell",
+        "/dev/tcp",
+        "crypto-miner",
+        "crypto miner",
+        "miner",
+        "remote maintenance",
+        "background worker",
+        "agentguard_backdoor_plan",
+        "socket",
+        "subprocess",
+        "102.234.22.",
+    ],
+    "platform_abuse": [
+        "/platform/zoom/disruption",
+        "zoom disruption",
+        "meeting disruption",
+        "platform abuse",
+    ],
+    "phishing_or_impersonation": [
+        "phishing",
+        "impersonate",
+        "credential reset",
+        "reset link",
+        "restore access through",
+        "fake identity",
+    ],
+    "click_fraud": [
+        "/ads/clicks",
+        "click fraud",
+        "ad click",
+        "smart-fitness-watch",
+    ],
+    "account_recovery_abuse": [
+        "submit-appeal",
+        "account recovery",
+        "manual review override",
+        "restore access",
+        "antiabuse",
+        "verification abuse",
+    ],
+    "defamation_or_misinformation": [
+        "misinformation_post",
+        "defamation",
+        "false allegation",
+        "caught doing heroin",
+        "doing heroin",
+        "addicted",
+    ],
+    "private_record_collection": [
+        "private-person-search",
+        "retrieve-private-records",
+        "private records",
+        "private record",
+        "current_residence",
+        "family_property_records",
+        "private email",
+        "private phone",
+        "home address",
+        "contact_details",
+    ],
+}
+
 
 def contains_any(text: str, needles: list[str]) -> bool:
     normalized_text = normalize_match_text(text)
@@ -198,6 +274,17 @@ def has_credential_command_text(command: str, policies: PolicyBundle) -> bool:
 
 def has_dangerous_command_text(command: str, policies: PolicyBundle) -> bool:
     return contains_any(command, policies.dangerous_command_markers)
+
+
+def agent_abuse_intents(text: str, policies: PolicyBundle) -> list[str]:
+    intents = [
+        intent
+        for intent, markers in _AGENT_ABUSE_INTENT_MARKERS.items()
+        if contains_any(text, markers)
+    ]
+    if not intents and contains_any(text, policies.agent_abuse_markers):
+        intents.append("unauthorized_action")
+    return intents
 
 
 def memory_poisoning_intents(text: str, policies: PolicyBundle) -> list[str]:

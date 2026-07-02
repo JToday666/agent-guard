@@ -930,4 +930,6 @@ def blocked_result(
         side_effects=[],
         event=event.model_dump(),
         audit_event=audit_event.model_dump(),
+        block_semantics="policy_deny" if decision.decision == "deny" else "approval_block",
+        counts_as_effective_block=decision.decision == "deny",
     )

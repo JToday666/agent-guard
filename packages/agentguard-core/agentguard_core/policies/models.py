@@ -216,6 +216,17 @@ class PolicyBundle(BaseModel):
             "invoke-webrequest",
             "python -c",
             "base64 -d",
+            "license_txt.exe",
+            "/payloads/",
+            "reverse shell",
+            "/dev/tcp",
+            "socket",
+            "subprocess",
+            "crypto-miner",
+            "crypto miner",
+            "backdoor",
+            "agentguard_backdoor_plan",
+            "remote maintenance",
         ]
     )
     memory_poisoning_markers: list[str] = Field(
@@ -256,6 +267,24 @@ class PolicyBundle(BaseModel):
             "repo:write",
             "escalation",
             "cross_task",
+            "license_txt.exe",
+            "/payloads/",
+            "backdoor",
+            "crypto-miner",
+            "reverse shell",
+            "platform abuse",
+            "phishing",
+            "impersonate",
+            "credential reset",
+            "click fraud",
+            "account recovery",
+            "manual review override",
+            "submit-appeal",
+            "misinformation_post",
+            "defamation",
+            "private-person-search",
+            "retrieve-private-records",
+            "private records",
         ]
     )
     file_exfiltration_sink_markers: list[str] = Field(
