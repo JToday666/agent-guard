@@ -7,7 +7,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const BENCH_PLUGIN_ID = "agentguard-bench-tools";
-export const BENCH_AGENT_ID = "agentguard-bench";
+export const BENCH_AGENT_ID = "local-task-runner";
+const LEGACY_BENCH_AGENT_IDS = new Set(["agentguard-bench", BENCH_AGENT_ID]);
 export const BENCH_TOOL_NAMES = [
   "read_file",
   "write_file",
@@ -26,12 +27,16 @@ export const BENCH_TOOL_NAMES = [
   "mcp_call",
   "rag_retrieve",
   "rag_answer",
-  "agentguard_bench_tool",
+  "local_tool_call",
 ];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGE = "@agentguard/openclaw-bench-tools";
-const PLUGIN_ROOT = path.join(ROOT, "packages", "agentguard-openclaw-bench-tools");
+const PLUGIN_ROOT = path.join(
+  ROOT,
+  "packages",
+  "agentguard-openclaw-bench-tools",
+);
 const DEV_ROOT = path.join(ROOT, ".openclaw-dev");
 const STAGING_DIR = path.join(DEV_ROOT, BENCH_PLUGIN_ID);
 const RUNTIME_CONFIG_PATH = path.join(DEV_ROOT, "bench-tools-runtime.json");
@@ -78,26 +83,45 @@ function install() {
   refreshPluginRegistry();
   restartGateway();
   waitForGateway();
-  console.log(`Installed ${BENCH_PLUGIN_ID} from ${relativePath(STAGING_DIR)}.`);
+  console.log(
+    `Installed ${BENCH_PLUGIN_ID} from ${relativePath(STAGING_DIR)}.`,
+  );
 }
 
 function uninstall() {
   backupOpenClawConfig("uninstall-bench-tools");
   const current = readOpenClawConfig();
   const next = structuredCloneSafe(current);
-  const currentPaths = Array.isArray(next.plugins?.load?.paths) ? next.plugins.load.paths : [];
+  const currentPaths = Array.isArray(next.plugins?.load?.paths)
+    ? next.plugins.load.paths
+    : [];
   next.plugins = next.plugins || {};
   next.plugins.load = next.plugins.load || {};
   next.plugins.entries = next.plugins.entries || {};
-  next.plugins.load.paths = currentPaths.filter((item) => typeof item === "string" && !isBenchLoadPath(item));
+  next.plugins.load.paths = currentPaths.filter(
+    (item) => typeof item === "string" && !isBenchLoadPath(item),
+  );
   delete next.plugins.entries[BENCH_PLUGIN_ID];
   if (next.agents && Array.isArray(next.agents.list)) {
-    next.agents.list = next.agents.list.filter((agent) => agent?.id !== BENCH_AGENT_ID);
+    next.agents.list = next.agents.list.filter(
+      (agent) => !LEGACY_BENCH_AGENT_IDS.has(String(agent?.id || "")),
+    );
   }
   patchOpenClawConfig(next);
-  const removed = run("openclaw", ["plugins", "uninstall", BENCH_PLUGIN_ID, "--force"], { allowFailure: true, capture: true });
-  if (removed.status !== 0 && !/not found|no plugin|unknown plugin|does not exist|missing/i.test(combinedOutput(removed))) {
-    throw new Error(`Failed to uninstall ${BENCH_PLUGIN_ID}:\n${combinedOutput(removed)}`);
+  const removed = run(
+    "openclaw",
+    ["plugins", "uninstall", BENCH_PLUGIN_ID, "--force"],
+    { allowFailure: true, capture: true },
+  );
+  if (
+    removed.status !== 0 &&
+    !/not found|no plugin|unknown plugin|does not exist|missing/i.test(
+      combinedOutput(removed),
+    )
+  ) {
+    throw new Error(
+      `Failed to uninstall ${BENCH_PLUGIN_ID}:\n${combinedOutput(removed)}`,
+    );
   }
   refreshPluginRegistry();
   restartGateway();
@@ -106,11 +130,17 @@ function uninstall() {
 }
 
 function verify() {
-  const inspect = run("openclaw", ["plugins", "inspect", BENCH_PLUGIN_ID, "--runtime", "--json"], { capture: true });
+  const inspect = run(
+    "openclaw",
+    ["plugins", "inspect", BENCH_PLUGIN_ID, "--runtime", "--json"],
+    { capture: true },
+  );
   const parsed = parseJsonObject(inspect.stdout);
   const plugin = parsed.plugin ?? {};
   if (plugin.status !== "loaded") {
-    throw new Error(`Expected ${BENCH_PLUGIN_ID} status=loaded, got ${String(plugin.status)}`);
+    throw new Error(
+      `Expected ${BENCH_PLUGIN_ID} status=loaded, got ${String(plugin.status)}`,
+    );
   }
   console.log(`Verified ${BENCH_PLUGIN_ID}: status=loaded.`);
 }
@@ -121,9 +151,13 @@ export function buildPatchedOpenClawConfig(config, options) {
   next.plugins = next.plugins || {};
   next.plugins.load = next.plugins.load || {};
   next.plugins.entries = next.plugins.entries || {};
-  const currentPaths = Array.isArray(next.plugins.load.paths) ? next.plugins.load.paths : [];
+  const currentPaths = Array.isArray(next.plugins.load.paths)
+    ? next.plugins.load.paths
+    : [];
   next.plugins.load.paths = [
-    ...currentPaths.filter((item) => typeof item === "string" && !isBenchLoadPath(item)),
+    ...currentPaths.filter(
+      (item) => typeof item === "string" && !isBenchLoadPath(item),
+    ),
     options.stagingDir,
   ];
   next.plugins.entries[BENCH_PLUGIN_ID] = {
@@ -137,9 +171,10 @@ export function buildPatchedOpenClawConfig(config, options) {
   const benchAgent = {
     id: BENCH_AGENT_ID,
     skills: [],
+    contextInjection: "never",
     identity: {
-      name: "AgentGuard AttackBench",
-      theme: "Local AttackBench verification agent",
+      name: "Local Task Runner",
+      theme: "Local task automation",
     },
     sandbox: {
       mode: "off",
@@ -150,7 +185,9 @@ export function buildPatchedOpenClawConfig(config, options) {
     },
   };
   next.agents.list = [
-    ...next.agents.list.filter((agent) => agent?.id !== BENCH_AGENT_ID),
+    ...next.agents.list.filter(
+      (agent) => !LEGACY_BENCH_AGENT_IDS.has(String(agent?.id || "")),
+    ),
     benchAgent,
   ];
   return next;
@@ -160,8 +197,15 @@ function rebuildStaging() {
   fs.rmSync(STAGING_DIR, { recursive: true, force: true });
   fs.mkdirSync(STAGING_DIR, { recursive: true });
   copyRecursive(path.join(PLUGIN_ROOT, "dist"), path.join(STAGING_DIR, "dist"));
-  for (const fileName of ["openclaw.plugin.json", "package.json", "README.md"]) {
-    fs.copyFileSync(path.join(PLUGIN_ROOT, fileName), path.join(STAGING_DIR, fileName));
+  for (const fileName of [
+    "openclaw.plugin.json",
+    "package.json",
+    "README.md",
+  ]) {
+    fs.copyFileSync(
+      path.join(PLUGIN_ROOT, fileName),
+      path.join(STAGING_DIR, fileName),
+    );
   }
 }
 
@@ -171,7 +215,10 @@ function backupOpenClawConfig(reason) {
   if (!fs.existsSync(configPath)) {
     return null;
   }
-  const backupPath = path.join(BACKUP_DIR, `${timestamp()}-${reason}-openclaw.json`);
+  const backupPath = path.join(
+    BACKUP_DIR,
+    `${timestamp()}-${reason}-openclaw.json`,
+  );
   fs.copyFileSync(configPath, backupPath);
   fs.chmodSync(backupPath, 0o600);
   console.log(`Backed up OpenClaw config to ${relativePath(backupPath)}.`);
@@ -180,13 +227,29 @@ function backupOpenClawConfig(reason) {
 
 function patchOpenClawConfig(patch) {
   fs.mkdirSync(DEV_ROOT, { recursive: true });
-  const patchFile = path.join(DEV_ROOT, `.openclaw-bench-tools-config-patch-${process.pid}.json`);
-  fs.writeFileSync(patchFile, `${JSON.stringify(patch, null, 2)}\n`, { mode: 0o600 });
+  const patchFile = path.join(
+    DEV_ROOT,
+    `.openclaw-bench-tools-config-patch-${process.pid}.json`,
+  );
+  fs.writeFileSync(patchFile, `${JSON.stringify(patch, null, 2)}\n`, {
+    mode: 0o600,
+  });
   try {
-    run("openclaw", ["config", "patch", "--file", patchFile]);
+    run("openclaw", openClawConfigPatchArgs(patchFile));
   } finally {
     fs.rmSync(patchFile, { force: true });
   }
+}
+
+export function openClawConfigPatchArgs(patchFile) {
+  return [
+    "config",
+    "patch",
+    "--file",
+    patchFile,
+    "--replace-path",
+    "agents.list",
+  ];
 }
 
 function readOpenClawConfig() {
@@ -198,9 +261,16 @@ function readOpenClawConfig() {
 }
 
 function resolveOpenClawConfigPath() {
-  const result = run("openclaw", ["config", "file"], { allowFailure: true, capture: true });
+  const result = run("openclaw", ["config", "file"], {
+    allowFailure: true,
+    capture: true,
+  });
   if (result.status === 0) {
-    const line = result.stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean).at(-1);
+    const line = result.stdout
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .at(-1);
     if (line) {
       return expandHome(line);
     }
@@ -209,26 +279,44 @@ function resolveOpenClawConfigPath() {
 }
 
 function uninstallExistingPlugin() {
-  run("openclaw", ["plugins", "uninstall", BENCH_PLUGIN_ID, "--force"], { allowFailure: true, capture: true });
+  run("openclaw", ["plugins", "uninstall", BENCH_PLUGIN_ID, "--force"], {
+    allowFailure: true,
+    capture: true,
+  });
 }
 
 function refreshPluginRegistry() {
-  const result = run("openclaw", ["plugins", "registry", "--refresh"], { allowFailure: true, capture: true });
+  const result = run("openclaw", ["plugins", "registry", "--refresh"], {
+    allowFailure: true,
+    capture: true,
+  });
   if (result.status !== 0) {
-    throw new Error(`Failed to refresh OpenClaw plugin registry:\n${combinedOutput(result)}`);
+    throw new Error(
+      `Failed to refresh OpenClaw plugin registry:\n${combinedOutput(result)}`,
+    );
   }
 }
 
 function restartGateway() {
-  run("openclaw", ["gateway", "restart", "--safe"], { allowFailure: true, capture: true });
+  run("openclaw", ["gateway", "restart", "--safe"], {
+    allowFailure: true,
+    capture: true,
+  });
 }
 
 function waitForGateway() {
   let lastOutput = "";
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const result = run("openclaw", ["gateway", "status"], { allowFailure: true, capture: true });
+    const result = run("openclaw", ["gateway", "status"], {
+      allowFailure: true,
+      capture: true,
+    });
     lastOutput = combinedOutput(result);
-    if (result.status === 0 && /Runtime:\s+running/.test(result.stdout) && /Connectivity probe:\s+ok/.test(result.stdout)) {
+    if (
+      result.status === 0 &&
+      /Runtime:\s+running/.test(result.stdout) &&
+      /Connectivity probe:\s+ok/.test(result.stdout)
+    ) {
       return;
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
@@ -238,7 +326,10 @@ function waitForGateway() {
 
 function isBenchLoadPath(value) {
   const resolved = path.resolve(expandHome(value));
-  return resolved === path.resolve(STAGING_DIR) || /agentguard-bench-tools/.test(value);
+  return (
+    resolved === path.resolve(STAGING_DIR) ||
+    /agentguard-bench-tools/.test(value)
+  );
 }
 
 function run(cmd, args, options = {}) {
@@ -251,7 +342,9 @@ function run(cmd, args, options = {}) {
     throw result.error;
   }
   if (!options.allowFailure && result.status !== 0) {
-    throw new Error(`Command failed: ${cmd} ${args.join(" ")}\n${combinedOutput(result)}`);
+    throw new Error(
+      `Command failed: ${cmd} ${args.join(" ")}\n${combinedOutput(result)}`,
+    );
   }
   return result;
 }
@@ -286,7 +379,9 @@ function structuredCloneSafe(value) {
 }
 
 function expandHome(value) {
-  return value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
+  return value.startsWith("~/")
+    ? path.join(os.homedir(), value.slice(2))
+    : value;
 }
 
 function timestamp() {

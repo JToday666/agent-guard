@@ -444,7 +444,7 @@ def test_weather_mcp_call_uses_local_fixture_service(monkeypatch, tmp_path):
         return {
             "status_code": 200,
             "real_local_service": True,
-            "service": "agentguard-local-weather",
+            "service": "local-weather-service",
             "body": {"forecast": {"city": arguments["city"], "summary": "Warm with light afternoon rain"}},
         }
 

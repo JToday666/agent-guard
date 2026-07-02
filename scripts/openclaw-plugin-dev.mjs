@@ -15,9 +15,17 @@ const BACKUP_DIR = path.join(DEV_ROOT, "backups");
 const CODE_ROOT = path.resolve(ROOT, "..");
 const LOCAL_OPENCLAW_HOME = path.join(CODE_ROOT, ".openclaw-home");
 const LOCAL_OPENCLAW_STATE_DIR = path.join(CODE_ROOT, ".openclaw");
-const LOCAL_OPENCLAW_CONFIG_PATH = path.join(LOCAL_OPENCLAW_STATE_DIR, "openclaw.json");
+const LOCAL_OPENCLAW_CONFIG_PATH = path.join(
+  LOCAL_OPENCLAW_STATE_DIR,
+  "openclaw.json",
+);
 const LOCAL_TOOLS_BIN = path.join(CODE_ROOT, ".tools", "bin");
-const LOCAL_NODE_BIN = path.join(CODE_ROOT, ".tools", "node-v24.15.0-linux-x64", "bin");
+const LOCAL_NODE_BIN = path.join(
+  CODE_ROOT,
+  ".tools",
+  "node-v24.15.0-linux-x64",
+  "bin",
+);
 const REQUIRED_HOOKS = [
   "after_compaction",
   "before_agent_finalize",
@@ -108,28 +116,46 @@ function install() {
 
 async function verify({ record }) {
   try {
-    const inspect = run("openclaw", ["plugins", "inspect", PLUGIN_ID, "--runtime", "--json"], {
-      capture: true,
-    });
+    const inspect = run(
+      "openclaw",
+      ["plugins", "inspect", PLUGIN_ID, "--runtime", "--json"],
+      {
+        capture: true,
+      },
+    );
     const parsed = parseJsonObject(inspect.stdout);
     const plugin = parsed.plugin ?? {};
-    const typedHooks = Array.isArray(parsed.typedHooks) ? parsed.typedHooks : [];
-    const diagnostics = Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [];
-    const hookNames = new Set(typedHooks.map((hook) => hook?.name).filter(Boolean));
-    const missingHooks = REQUIRED_HOOKS.filter((hookName) => !hookNames.has(hookName));
+    const typedHooks = Array.isArray(parsed.typedHooks)
+      ? parsed.typedHooks
+      : [];
+    const diagnostics = Array.isArray(parsed.diagnostics)
+      ? parsed.diagnostics
+      : [];
+    const hookNames = new Set(
+      typedHooks.map((hook) => hook?.name).filter(Boolean),
+    );
+    const missingHooks = REQUIRED_HOOKS.filter(
+      (hookName) => !hookNames.has(hookName),
+    );
     const conversationAccessDiagnostics = diagnostics
       .map((item) => String(item?.message ?? ""))
       .filter((message) => /allowConversationAccess=true/.test(message));
 
     const failures = [];
     if (plugin.status !== "loaded") {
-      failures.push(`expected plugin status=loaded, got ${String(plugin.status)}`);
+      failures.push(
+        `expected plugin status=loaded, got ${String(plugin.status)}`,
+      );
     }
     if (plugin.hookCount !== REQUIRED_HOOKS.length) {
-      failures.push(`expected hookCount=${REQUIRED_HOOKS.length}, got ${String(plugin.hookCount)}`);
+      failures.push(
+        `expected hookCount=${REQUIRED_HOOKS.length}, got ${String(plugin.hookCount)}`,
+      );
     }
     if (!pluginUsesStaging(plugin)) {
-      failures.push(`expected plugin source/rootDir to use ${relativePath(STAGING_DIR)}, got ${plugin.source ?? plugin.rootDir}`);
+      failures.push(
+        `expected plugin source/rootDir to use ${relativePath(STAGING_DIR)}, got ${plugin.source ?? plugin.rootDir}`,
+      );
     }
     if (missingHooks.length > 0) {
       failures.push(`missing hooks: ${missingHooks.join(", ")}`);
@@ -138,7 +164,9 @@ async function verify({ record }) {
       failures.push(conversationAccessDiagnostics.join("; "));
     }
     if (failures.length > 0) {
-      throw new Error(`OpenClaw plugin verification failed:\n- ${failures.join("\n- ")}`);
+      throw new Error(
+        `OpenClaw plugin verification failed:\n- ${failures.join("\n- ")}`,
+      );
     }
 
     waitForGateway();
@@ -154,7 +182,9 @@ async function verify({ record }) {
     if (record) {
       await recordOpenClawStatus(status);
     }
-    console.log(`Verified ${PLUGIN_ID}: status=loaded, hookCount=${REQUIRED_HOOKS.length}.`);
+    console.log(
+      `Verified ${PLUGIN_ID}: status=loaded, hookCount=${REQUIRED_HOOKS.length}.`,
+    );
   } catch (error) {
     if (record) {
       try {
@@ -168,7 +198,9 @@ async function verify({ record }) {
           source: "openclaw-plugin-dev",
         });
       } catch (recordError) {
-        console.warn(`Failed to record OpenClaw verification status: ${recordError instanceof Error ? recordError.message : String(recordError)}`);
+        console.warn(
+          `Failed to record OpenClaw verification status: ${recordError instanceof Error ? recordError.message : String(recordError)}`,
+        );
       }
     }
     throw error;
@@ -187,12 +219,18 @@ function uninstall({ cleanStaging }) {
       },
     },
   });
-  const removed = run("openclaw", ["plugins", "uninstall", PLUGIN_ID, "--force"], {
-    allowFailure: true,
-    capture: true,
-  });
+  const removed = run(
+    "openclaw",
+    ["plugins", "uninstall", PLUGIN_ID, "--force"],
+    {
+      allowFailure: true,
+      capture: true,
+    },
+  );
   if (removed.status !== 0 && !looksLikeMissingPlugin(removed)) {
-    throw new Error(`Failed to uninstall ${PLUGIN_ID}:\n${combinedOutput(removed)}`);
+    throw new Error(
+      `Failed to uninstall ${PLUGIN_ID}:\n${combinedOutput(removed)}`,
+    );
   }
   refreshPluginRegistry();
   restartGateway();
@@ -208,8 +246,15 @@ function rebuildStaging() {
   fs.rmSync(STAGING_DIR, { recursive: true, force: true });
   fs.mkdirSync(STAGING_DIR, { recursive: true });
   copyRecursive(path.join(PLUGIN_ROOT, "dist"), path.join(STAGING_DIR, "dist"));
-  for (const fileName of ["openclaw.plugin.json", "package.json", "README.md"]) {
-    fs.copyFileSync(path.join(PLUGIN_ROOT, fileName), path.join(STAGING_DIR, fileName));
+  for (const fileName of [
+    "openclaw.plugin.json",
+    "package.json",
+    "README.md",
+  ]) {
+    fs.copyFileSync(
+      path.join(PLUGIN_ROOT, fileName),
+      path.join(STAGING_DIR, fileName),
+    );
   }
   if (fs.existsSync(path.join(STAGING_DIR, "node_modules"))) {
     throw new Error("staging unexpectedly contains node_modules");
@@ -220,10 +265,15 @@ function backupOpenClawConfig(reason) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const configPath = resolveOpenClawConfigPath();
   if (!fs.existsSync(configPath)) {
-    console.warn(`OpenClaw config not found at ${configPath}; skipping backup.`);
+    console.warn(
+      `OpenClaw config not found at ${configPath}; skipping backup.`,
+    );
     return null;
   }
-  const backupPath = path.join(BACKUP_DIR, `${timestamp()}-${reason}-openclaw.json`);
+  const backupPath = path.join(
+    BACKUP_DIR,
+    `${timestamp()}-${reason}-openclaw.json`,
+  );
   fs.copyFileSync(configPath, backupPath);
   fs.chmodSync(backupPath, 0o600);
   console.log(`Backed up OpenClaw config to ${relativePath(backupPath)}.`);
@@ -231,11 +281,15 @@ function backupOpenClawConfig(reason) {
 }
 
 function resolveOpenClawConfigPath() {
-  const explicit = process.env.OPENCLAW_CONFIG_PATH?.trim() || LOCAL_OPENCLAW_CONFIG_PATH;
+  const explicit =
+    process.env.OPENCLAW_CONFIG_PATH?.trim() || LOCAL_OPENCLAW_CONFIG_PATH;
   if (explicit) {
     return expandHome(explicit);
   }
-  const result = run("openclaw", ["config", "file"], { allowFailure: true, capture: true });
+  const result = run("openclaw", ["config", "file"], {
+    allowFailure: true,
+    capture: true,
+  });
   if (result.status === 0) {
     const line = result.stdout
       .split(/\r?\n/)
@@ -251,8 +305,13 @@ function resolveOpenClawConfigPath() {
 
 function patchOpenClawConfig(patch) {
   fs.mkdirSync(DEV_ROOT, { recursive: true });
-  const patchFile = path.join(DEV_ROOT, `.openclaw-config-patch-${process.pid}.json`);
-  fs.writeFileSync(patchFile, `${JSON.stringify(patch, null, 2)}\n`, { mode: 0o600 });
+  const patchFile = path.join(
+    DEV_ROOT,
+    `.openclaw-config-patch-${process.pid}.json`,
+  );
+  fs.writeFileSync(patchFile, `${JSON.stringify(patch, null, 2)}\n`, {
+    mode: 0o600,
+  });
   try {
     run("openclaw", ["config", "patch", "--file", patchFile]);
   } finally {
@@ -266,15 +325,21 @@ function refreshPluginRegistry() {
     capture: true,
   });
   if (result.status !== 0) {
-    throw new Error(`Failed to refresh OpenClaw plugin registry:\n${combinedOutput(result)}`);
+    throw new Error(
+      `Failed to refresh OpenClaw plugin registry:\n${combinedOutput(result)}`,
+    );
   }
   console.log("Refreshed OpenClaw plugin registry.");
 }
 
 function agentGuardLoadPaths({ includeStaging }) {
   const config = readOpenClawConfig();
-  const currentPaths = Array.isArray(config.plugins?.load?.paths) ? config.plugins.load.paths : [];
-  const filtered = currentPaths.filter((item) => typeof item === "string" && !isAgentGuardLoadPath(item));
+  const currentPaths = Array.isArray(config.plugins?.load?.paths)
+    ? config.plugins.load.paths
+    : [];
+  const filtered = currentPaths.filter(
+    (item) => typeof item === "string" && !isAgentGuardLoadPath(item),
+  );
   return includeStaging ? [...filtered, STAGING_DIR] : filtered;
 }
 
@@ -292,13 +357,17 @@ function isAgentGuardLoadPath(value) {
   if (resolved === path.resolve(STAGING_DIR)) {
     return true;
   }
-  return /agentguard-openclaw-plugin-install-p2|agentguard-security/.test(value);
+  return /agentguard-openclaw-plugin-install-p2|agentguard-security/.test(
+    value,
+  );
 }
 
 function pluginUsesStaging(plugin) {
   const staging = path.resolve(STAGING_DIR);
-  const source = typeof plugin.source === "string" ? path.resolve(plugin.source) : "";
-  const rootDir = typeof plugin.rootDir === "string" ? path.resolve(plugin.rootDir) : "";
+  const source =
+    typeof plugin.source === "string" ? path.resolve(plugin.source) : "";
+  const rootDir =
+    typeof plugin.rootDir === "string" ? path.resolve(plugin.rootDir) : "";
   return rootDir === staging || source.startsWith(`${staging}${path.sep}`);
 }
 
@@ -308,7 +377,9 @@ function restartGateway() {
     capture: true,
   });
   if (result.status !== 0) {
-    console.warn("Gateway restart returned a non-zero status; checking gateway status before failing.");
+    console.warn(
+      "Gateway restart returned a non-zero status; checking gateway status before failing.",
+    );
     const output = combinedOutput(result).trim();
     if (output) {
       console.warn(output);
@@ -320,7 +391,10 @@ function waitForGateway() {
   const attempts = 12;
   let lastOutput = "";
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = run("openclaw", ["gateway", "status"], { allowFailure: true, capture: true });
+    const result = run("openclaw", ["gateway", "status"], {
+      allowFailure: true,
+      capture: true,
+    });
     lastOutput = combinedOutput(result);
     if (
       result.status === 0 &&
@@ -335,23 +409,37 @@ function waitForGateway() {
 }
 
 function uninstallExistingPlugin() {
-  const result = run("openclaw", ["plugins", "uninstall", PLUGIN_ID, "--force"], {
-    allowFailure: true,
-    capture: true,
-  });
-  if (result.status !== 0 && !looksLikeMissingPlugin(result) && combinedOutput(result).trim()) {
-    throw new Error(`Failed to remove existing ${PLUGIN_ID} install:\n${combinedOutput(result)}`);
+  const result = run(
+    "openclaw",
+    ["plugins", "uninstall", PLUGIN_ID, "--force"],
+    {
+      allowFailure: true,
+      capture: true,
+    },
+  );
+  if (
+    result.status !== 0 &&
+    !looksLikeMissingPlugin(result) &&
+    combinedOutput(result).trim()
+  ) {
+    throw new Error(
+      `Failed to remove existing ${PLUGIN_ID} install:\n${combinedOutput(result)}`,
+    );
   }
 }
 
 function looksLikeMissingPlugin(result) {
-  return /not found|no plugin|unknown plugin|does not exist|missing/i.test(combinedOutput(result));
+  return /not found|no plugin|unknown plugin|does not exist|missing/i.test(
+    combinedOutput(result),
+  );
 }
 
 function readDotEnv() {
   const envPath = path.join(ROOT, ".env");
   if (!fs.existsSync(envPath)) {
-    throw new Error("Missing .env. Copy .env.example to .env and set AGENTGUARD_ADAPTER_TOKEN.");
+    throw new Error(
+      "Missing .env. Copy .env.example to .env and set AGENTGUARD_ADAPTER_TOKEN.",
+    );
   }
   const parsed = { ...process.env };
   const content = fs.readFileSync(envPath, "utf8");
@@ -374,25 +462,31 @@ async function recordOpenClawStatus(status) {
   const controlToken = requireEnv(env, "AGENTGUARD_CONTROL_TOKEN");
   const host = env.AGENTGUARD_HOST || "127.0.0.1";
   const port = env.AGENTGUARD_PORT || "8088";
-  const apiBaseUrl = (env.AGENTGUARD_API_URL || `http://${host}:${port}`).replace(/\/+$/, "");
+  const apiBaseUrl = (
+    env.AGENTGUARD_API_URL || `http://${host}:${port}`
+  ).replace(/\/+$/, "");
   const response = await fetch(`${apiBaseUrl}/v1/adapters/openclaw/status`, {
     method: "PUT",
     headers: {
-      "Authorization": `Bearer ${controlToken}`,
+      Authorization: `Bearer ${controlToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(status),
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Guard API status record failed: HTTP ${response.status} ${body}`);
+    throw new Error(
+      `Guard API status record failed: HTTP ${response.status} ${body}`,
+    );
   }
 }
 
 function requireEnv(env, key) {
   const value = env[key];
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`.env is missing ${key}; refusing to write an empty OpenClaw adapter token.`);
+    throw new Error(
+      `.env is missing ${key}; refusing to write an empty OpenClaw adapter token.`,
+    );
   }
   return value.trim();
 }
@@ -420,7 +514,9 @@ function run(cmd, args, options = {}) {
     throw result.error;
   }
   if (!options.allowFailure && result.status !== 0) {
-    throw new Error(`Command failed: ${cmd} ${args.join(" ")}\n${combinedOutput(result)}`);
+    throw new Error(
+      `Command failed: ${cmd} ${args.join(" ")}\n${combinedOutput(result)}`,
+    );
   }
   return result;
 }
@@ -437,10 +533,14 @@ function localCommandEnv() {
     ...process.env,
     PATH: pathEntries.join(path.delimiter),
     OPENCLAW_HOME: process.env.OPENCLAW_HOME || LOCAL_OPENCLAW_HOME,
-    OPENCLAW_STATE_DIR: process.env.OPENCLAW_STATE_DIR || LOCAL_OPENCLAW_STATE_DIR,
-    OPENCLAW_CONFIG_PATH: process.env.OPENCLAW_CONFIG_PATH || LOCAL_OPENCLAW_CONFIG_PATH,
-    COREPACK_HOME: process.env.COREPACK_HOME || path.join(CODE_ROOT, ".cache", "corepack"),
-    npm_config_cache: process.env.npm_config_cache || path.join(CODE_ROOT, ".cache", "npm"),
+    OPENCLAW_STATE_DIR:
+      process.env.OPENCLAW_STATE_DIR || LOCAL_OPENCLAW_STATE_DIR,
+    OPENCLAW_CONFIG_PATH:
+      process.env.OPENCLAW_CONFIG_PATH || LOCAL_OPENCLAW_CONFIG_PATH,
+    COREPACK_HOME:
+      process.env.COREPACK_HOME || path.join(CODE_ROOT, ".cache", "corepack"),
+    npm_config_cache:
+      process.env.npm_config_cache || path.join(CODE_ROOT, ".cache", "npm"),
     PNPM_HOME: process.env.PNPM_HOME || LOCAL_TOOLS_BIN,
   };
 }
@@ -471,7 +571,9 @@ function copyRecursive(source, destination) {
 }
 
 function expandHome(value) {
-  return value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
+  return value.startsWith("~/")
+    ? path.join(os.homedir(), value.slice(2))
+    : value;
 }
 
 function timestamp() {

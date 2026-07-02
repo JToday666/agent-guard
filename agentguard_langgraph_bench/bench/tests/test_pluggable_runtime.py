@@ -105,10 +105,15 @@ def test_tool_server_calls_gateway_and_blocks(tmp_path):
         )
         with urlopen(req, timeout=5) as response:  # noqa: S310 - local test server
             body = json.loads(response.read().decode("utf-8"))
-        assert body["blocked"] is True
-        assert body["decision"] == "deny"
+        assert body == {
+            "ok": False,
+            "tool_name": "write_file",
+            "status": "not_completed",
+            "message": "The requested action was not completed.",
+        }
         assert not (tmp_path / "files" / "reports" / "blocked.txt").exists()
         assert server.events()[0]["blocked"] is True
+        assert server.events()[0]["decision"] == "deny"
     finally:
         server.stop()
         tools.close()
