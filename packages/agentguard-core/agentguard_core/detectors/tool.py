@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import re
+import shlex
+from typing import Any
+from urllib.parse import urlparse
 
 from ..decisions import DetectionResult, RuleHit
 from ..events import GuardEvent, ToolCallPayload, derive_resources, is_exec_like_tool
+from ..matchers import (
+    has_credential_command_text,
+    has_dangerous_command_text,
+    has_high_confidence_memory_poisoning_text,
+    has_instruction_like_text,
+    has_memory_poisoning_text,
+)
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
 
@@ -76,6 +88,10 @@ class UnprofiledToolResourceDetector(Detector):
             return []
         if event.payload.tool.name in policies.tool_profiles:
             return []
+        if scoped_runtime_manifest_allows_tool(event):
+            return []
+        if trusted_low_risk_memory_write(event, policies):
+            return []
 
         risky_resources = [
             resource
@@ -121,6 +137,10 @@ class TaskMismatchDetector(Detector):
             return []
         source_trust = event.security_context.source_trust.lower()
         if source_trust != "untrusted":
+            return []
+        if low_risk_observation_action_allowed(event, policies):
+            return []
+        if scoped_runtime_manifest_allows_low_risk_tool(event, policies):
             return []
         tool_name = event.payload.tool.name
         if tool_name in {"send_email", "call_api", "read_file", "write_file", "memory_write", "code_exec"} or is_exec_like_tool(
@@ -196,6 +216,357 @@ def resource_is_high_risk_for_unprofiled_tool(direction: str, operation: str) ->
         "send",
         "write",
     }
+
+
+def trusted_low_risk_memory_write(event: GuardEvent, policies: PolicyBundle) -> bool:
+    if not isinstance(event.payload, ToolCallPayload):
+        return False
+    if event.payload.tool.name != "memory_write":
+        return False
+    if event.security_context.source_trust.lower() not in {"trusted", "verified", "sanitized", "clean"}:
+        return False
+    argument_trust = str(event.payload.arguments.get("source_trust") or "").lower()
+    if argument_trust and argument_trust not in {"trusted", "verified", "sanitized", "clean"}:
+        return False
+    text = _memory_write_argument_text(event.payload.arguments)
+    return not (
+        has_high_confidence_memory_poisoning_text(text, policies)
+        or has_memory_poisoning_text(text, policies)
+        or has_instruction_like_text(text, policies)
+    )
+
+
+def _memory_write_argument_text(arguments: dict[str, Any]) -> str:
+    selected = {
+        key: value
+        for key, value in arguments.items()
+        if key in {"namespace", "key", "value", "value_preview", "content", "text", "source_trust"}
+    }
+    if not selected:
+        selected = arguments
+    try:
+        return json.dumps(selected, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return str(selected)
+
+
+def scoped_runtime_manifest_allows_tool(event: GuardEvent) -> bool:
+    if not isinstance(event.payload, ToolCallPayload):
+        return False
+    policy = runtime_policy_for_event(event)
+    if not policy:
+        return False
+    if not truthy(policy.get("tool_manifest_scoped")):
+        return False
+    declared_tools = normalized_string_set(policy.get("declared_tools"))
+    if not declared_tools:
+        return False
+    return event.payload.tool.name.lower() in declared_tools
+
+
+def scoped_runtime_manifest_allows_low_risk_tool(event: GuardEvent, policies: PolicyBundle) -> bool:
+    if not isinstance(event.payload, ToolCallPayload):
+        return False
+    if not scoped_runtime_manifest_allows_tool(event):
+        return False
+    if event.payload.tool.name != "read_file":
+        return False
+    resources = derive_resources(event)
+    if not resources:
+        return False
+    return all(resource_is_low_risk_local_read(resource, policies) for resource in resources)
+
+
+def low_risk_observation_action_allowed(event: GuardEvent, policies: PolicyBundle) -> bool:
+    if not isinstance(event.payload, ToolCallPayload):
+        return False
+    tool_name = event.payload.tool.name
+    if tool_name == "read_file":
+        resources = derive_resources(event)
+        return bool(resources) and all(resource_is_low_risk_local_read(resource, policies) for resource in resources)
+    if tool_name == "call_api":
+        return api_call_is_low_risk_local_get(event.payload.arguments, policies)
+    if is_exec_like_tool(event.payload.tool):
+        return exec_command_is_low_risk_observation(
+            event.payload.arguments,
+            policies,
+            user_task=event.security_context.user_task,
+        )
+    return False
+
+
+def resource_is_low_risk_local_read(resource: Any, policies: PolicyBundle) -> bool:
+    return (
+        str(resource.direction).lower() in {"local", "runtime"}
+        and str(resource.operation).lower() in {"read", "get", "extract", "extract_text"}
+        and str(resource.data_classification or "").lower() != "sensitive"
+        and not resource_target_has_marker(str(resource.target or ""), policies.sensitive_resource_markers)
+    )
+
+
+def api_call_is_low_risk_local_get(arguments: dict[str, Any], policies: PolicyBundle) -> bool:
+    method = str(arguments.get("method") or "GET").upper()
+    if method not in {"GET", "HEAD"}:
+        return False
+    target = str(arguments.get("url") or arguments.get("path") or "")
+    if not target:
+        return False
+    parsed = urlparse(target.lower())
+    if parsed.scheme or parsed.netloc:
+        if parsed.hostname not in {host.lower() for host in policies.allowed_api_hosts}:
+            return False
+    elif not target.startswith("/"):
+        return False
+    if resource_target_has_marker(target, policies.sensitive_resource_markers):
+        return False
+    if resource_target_has_marker(target, policies.collection_path_markers):
+        return False
+    return not any(arguments.get(key) for key in ("body", "data", "json", "payload"))
+
+
+def exec_command_is_low_risk_observation(
+    arguments: dict[str, Any],
+    policies: PolicyBundle,
+    *,
+    user_task: str = "",
+) -> bool:
+    command = str(arguments.get("command") or arguments.get("cmd") or arguments.get("code") or "")
+    if not command.strip():
+        return False
+    if has_credential_command_text(command, policies) or has_dangerous_command_text(command, policies):
+        return False
+    python_code = extract_python_inline_code(command) or extract_python_heredoc(command)
+    if python_code is not None:
+        return task_allows_computation(user_task) and python_code_is_side_effect_free(python_code)
+
+    normalized_command = strip_safe_shell_fallback(command) or command
+    if shell_command_has_control_operator(normalized_command):
+        return False
+    try:
+        parts = shlex.split(normalized_command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    program = parts[0].rsplit("/", 1)[-1].lower()
+    if program not in {"cat", "head", "tail", "wc", "ls"}:
+        if program != "mkdir":
+            return False
+        if "-p" not in parts[1:]:
+            return False
+        if not task_allows_tool_action(user_task, "write_file", policies):
+            return False
+    targets = [part for part in parts[1:] if part and not part.startswith("-")]
+    if not targets:
+        return False
+    return all(command_target_is_low_risk_observation(target, policies) for target in targets)
+
+
+def strip_safe_shell_fallback(command: str) -> str | None:
+    match = re.match(
+        r"^\s*(?P<primary>.+?)\s*(?:2>\s*/dev/null\s*)?\|\|\s*echo\s+(?P<message>.+?)\s*$",
+        command,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    primary = match.group("primary").strip()
+    message = match.group("message").strip()
+    if not primary or not message:
+        return None
+    if shell_command_has_control_operator(primary):
+        return None
+    if re.search(r"[;&|<>`$()\n\r]", message):
+        return None
+    try:
+        echo_parts = shlex.split(f"echo {message}")
+    except ValueError:
+        return None
+    if len(echo_parts) != 2 or echo_parts[0] != "echo":
+        return None
+    return primary
+
+
+def shell_command_has_control_operator(command: str) -> bool:
+    return bool(re.search(r"[;&|<>`$()\n\r]", command))
+
+
+def command_target_is_low_risk_observation(target: str, policies: PolicyBundle) -> bool:
+    if resource_target_has_marker(target, policies.sensitive_resource_markers):
+        return False
+    if resource_target_has_marker(target, policies.collection_path_markers):
+        return False
+    lowered = target.lower()
+    return not lowered.startswith(("/dev/", "/etc/", "/proc/", "/sys/", "/var/run/"))
+
+
+def extract_python_heredoc(command: str) -> str | None:
+    match = re.match(
+        r"^\s*(?:python|python3)\s+<<\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?\s*\n(?P<code>.*)\n\1\s*$",
+        command.strip(),
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    return match.group("code")
+
+
+def extract_python_inline_code(command: str) -> str | None:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+    if len(parts) != 3:
+        return None
+    program = parts[0].rsplit("/", 1)[-1].lower()
+    if program not in {"python", "python3"}:
+        return None
+    if parts[1] != "-c":
+        return None
+    return parts[2]
+
+
+def task_allows_computation(user_task: str) -> bool:
+    normalized = normalize_task_text(user_task)
+    return any(
+        marker in normalized
+        for marker in (
+            "calculate",
+            "compute",
+            "analyze",
+            "analyse",
+            "analysis",
+            "derive",
+            "estimate",
+            "signal",
+            "return",
+            "计算",
+            "分析",
+        )
+    )
+
+
+def python_code_is_side_effect_free(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    allowed_modules = {"datetime", "decimal", "fractions", "json", "math", "statistics"}
+    blocked_names = {
+        "__import__",
+        "compile",
+        "eval",
+        "exec",
+        "globals",
+        "input",
+        "locals",
+        "open",
+        "setattr",
+        "vars",
+    }
+    blocked_attrs = {
+        "connect",
+        "download",
+        "mkdir",
+        "open",
+        "popen",
+        "read_text",
+        "remove",
+        "rename",
+        "replace",
+        "request",
+        "rmdir",
+        "send",
+        "system",
+        "unlink",
+        "upload",
+        "urlopen",
+        "write",
+        "write_text",
+    }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.split(".", 1)[0] not in allowed_modules for alias in node.names):
+                return False
+            continue
+        if isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".", 1)[0] not in allowed_modules:
+                return False
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While, ast.Try)):
+            return False
+        if isinstance(node, ast.Name) and node.id in blocked_names:
+            return False
+        if isinstance(node, ast.Attribute) and node.attr in blocked_attrs:
+            return False
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in blocked_names:
+                return False
+            if isinstance(func, ast.Attribute) and func.attr in blocked_attrs:
+                return False
+    return True
+
+
+def resource_target_has_marker(target: str, markers: list[str]) -> bool:
+    lowered = target.lower()
+    return any(marker.lower() in lowered for marker in markers)
+
+
+def runtime_policy_for_event(event: GuardEvent) -> dict[str, Any]:
+    for value in (
+        event.metadata.get("runtime_policy"),
+        event.metadata.get("runtimePolicy"),
+        event.security_context.metadata.get("runtime_policy"),
+        event.security_context.metadata.get("runtimePolicy"),
+    ):
+        policy = normalized_runtime_policy(value)
+        if policy:
+            return policy
+    return {}
+
+
+def nested_mapping(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return None
+
+
+def normalized_runtime_policy(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    policy = dict(value)
+    declared_tools = normalized_string_set(policy.get("declared_tools"))
+    declared_tools.update(normalized_string_set(policy.get("tools")))
+    if declared_tools:
+        policy["declared_tools"] = sorted(declared_tools)
+
+    return policy
+
+
+def truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"1", "true", "yes"}
+    return False
+
+
+def normalized_string_set(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    normalized: set[str] = set()
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            normalized.add(item.strip().lower())
+        elif isinstance(item, dict):
+            name = item.get("name") or item.get("tool_name") or item.get("id")
+            if isinstance(name, str) and name.strip():
+                normalized.add(name.strip().lower())
+    return normalized
 
 
 def verb_for_tool(tool_name: str) -> str:

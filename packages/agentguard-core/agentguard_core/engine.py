@@ -5,12 +5,15 @@ from __future__ import annotations
 from time import perf_counter
 
 from .detectors import (
+    AgentAbuseDetector,
     CodeExecDetector,
     CredentialExposureDetector,
     Detector,
     EnvironmentPoisoningDetector,
+    FileExfiltrationDetector,
     JailbreakDetector,
     MemoryPoisoningDetector,
+    McpToolHijackingDetector,
     OutboundDetector,
     PromptInjectionDetector,
     SensitiveResourceDetector,
@@ -27,9 +30,12 @@ class GuardEngine:
     def __init__(self, *, detectors: list[Detector] | None = None) -> None:
         self.detectors = detectors or [
             SensitiveResourceDetector(),
+            McpToolHijackingDetector(),
+            FileExfiltrationDetector(),
             ToolHijackDetector(),
             UnprofiledToolResourceDetector(),
             OutboundDetector(),
+            AgentAbuseDetector(),
             TaskMismatchDetector(),
             PromptInjectionDetector(),
             JailbreakDetector(),

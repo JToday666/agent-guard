@@ -39,6 +39,12 @@ def has_instruction_like_text(text: str, policies: PolicyBundle) -> bool:
     return contains_any(text, policies.prompt_injection_markers)
 
 
+def has_high_confidence_prompt_injection_text(text: str, policies: PolicyBundle) -> bool:
+    return has_instruction_like_text(text, policies) and contains_any(
+        text, policies.high_confidence_prompt_injection_markers
+    )
+
+
 def has_jailbreak_text(text: str, policies: PolicyBundle) -> bool:
     return contains_any(text, policies.jailbreak_markers)
 
@@ -61,3 +67,7 @@ def has_dangerous_command_text(command: str, policies: PolicyBundle) -> bool:
 
 def has_memory_poisoning_text(text: str, policies: PolicyBundle) -> bool:
     return contains_any(text, policies.memory_poisoning_markers)
+
+
+def has_high_confidence_memory_poisoning_text(text: str, policies: PolicyBundle) -> bool:
+    return contains_any(text, policies.high_confidence_memory_poisoning_markers)

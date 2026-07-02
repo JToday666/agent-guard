@@ -7,10 +7,13 @@ from .base import (
     is_rule_disabled,
     is_rule_disabled as _is_rule_disabled,
 )
+from .agent_abuse import AgentAbuseDetector
 from .code import CodeExecDetector
 from .credential import CredentialExposureDetector
 from .environment import EnvironmentPoisoningDetector
+from .file_exfiltration import FileExfiltrationDetector
 from .memory import MemoryPoisoningDetector
+from .mcp_hijacking import McpToolHijackingDetector
 from .model import JailbreakDetector
 from .outbound import (
     OutboundDetector,
@@ -44,8 +47,11 @@ __all__ = [
     "CredentialExposureDetector",
     "Detector",
     "EnvironmentPoisoningDetector",
+    "AgentAbuseDetector",
+    "FileExfiltrationDetector",
     "JailbreakDetector",
     "MemoryPoisoningDetector",
+    "McpToolHijackingDetector",
     "OutboundDetector",
     "PromptInjectionDetector",
     "SensitiveResourceDetector",

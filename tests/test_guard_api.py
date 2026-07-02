@@ -486,6 +486,7 @@ def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
         "source_trust": "local_reference",
         "agent_id": "openclaw",
         "current_step": "before_tool_call",
+        "metadata": {"requires_rag_answer_review": True},
     }
 
     response = client.post(
@@ -820,7 +821,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                     "sanitized": False,
                 },
             ),
-            "ask",
+            "deny",
             "P101_prompt_injection",
             ["web_001"],
             "context_assembled",
@@ -942,7 +943,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                     "requires_approval": False,
                 },
             ),
-            "ask",
+            "deny",
             "P104_memory_poisoning",
             ["user_profile/summary"],
             "memory_write_proposed",
@@ -1418,7 +1419,7 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
     events_response = client.get("/v1/audit/events?trace_id=trace_memory_runtime_link")
 
     assert response.status_code == 200
-    assert response.json()["decision"]["decision"] == "ask"
+    assert response.json()["decision"]["decision"] == "deny"
     assert len(store.memory_changes) == 1
     memory_change = next(iter(store.memory_changes.values()))
     assert memory_change.namespace == "user_preferences"
