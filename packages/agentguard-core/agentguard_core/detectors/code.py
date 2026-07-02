@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ..decisions import DetectionResult, RuleHit
-from ..events import GuardEvent, ToolCallPayload, tool_argument_text
-from ..matchers import has_dangerous_command_text
+from ..events import GuardEvent, ToolCallPayload, is_exec_like_tool, tool_argument_text
+from ..matchers import has_credential_command_text, has_dangerous_command_text
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
 
@@ -17,9 +17,11 @@ class CodeExecDetector(Detector):
             return []
         if not isinstance(event.payload, ToolCallPayload):
             return []
-        if event.payload.tool.name != "code_exec":
+        if not is_exec_like_tool(event.payload.tool):
             return []
         command = tool_argument_text(event.payload.arguments, "command", "cmd", "code")
+        if has_credential_command_text(command, policies):
+            return []
         if not has_dangerous_command_text(command, policies):
             return []
         result = apply_rule_override(

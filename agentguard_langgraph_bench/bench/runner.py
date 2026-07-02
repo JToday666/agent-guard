@@ -26,7 +26,7 @@ from .evidence.artifact_integrity import check_case_artifacts
 from .metrics import calculate_metrics
 from .memory_poisoning_metrics import calculate_memory_poisoning_metrics
 from .models import AttackCase, ToolPlanStep, supports_runtime
-from .mcpsafety import build_descriptor_diff, evaluate_differential_run
+from .mcpsafety import build_descriptor_diff, descriptor_hash, evaluate_differential_run
 from .mcpsafety_evaluator import build_mcpsafety_evaluation_report, should_evaluate_mcpsafety
 from .poisonedrag_metrics import calculate_poisonedrag_metrics
 from .runtime.adapter_loader import load_agent_adapter
@@ -441,8 +441,10 @@ def _run_single_case(
         row["descriptor_diff"] = _descriptor_diff_for_case(case)
         row["catalog_presented_to_llm"] = True
         row["catalog_view"] = row.get("tool_catalog_view") or config.tool_catalog_view
-        row["selected_descriptor_hash"] = _selected_descriptor_hash(row.get("tool_calls") or [])
+        row["selected_descriptor_hash"] = _selected_descriptor_hash(row.get("tool_calls") or []) or _selected_descriptor_hash_for_case(case)
         row["catalog_hash"] = row["selected_descriptor_hash"]
+        if _case_has_executed_mcp_calls(row):
+            _ensure_runtime_mcp_log_files(config.sandbox_dir)
         row["mcp_calls_path"] = str(config.sandbox_dir / "mcp" / "calls.jsonl")
         row["mcp_descriptors_path"] = str(config.sandbox_dir / "mcp" / "descriptors.jsonl")
         row["mcp_catalog_diff_path"] = str(config.sandbox_dir / "mcp" / "catalog_diff.jsonl")
@@ -1188,6 +1190,22 @@ def _write_case_scoped_mcp_manifest(mcp_dest: Path, row: dict[str, Any], sandbox
 
 def _case_has_mcp_calls(row: dict[str, Any]) -> bool:
     return any(isinstance(item, dict) and item.get("tool_name") == "mcp_call" for item in row.get("tool_calls") or [])
+
+
+def _case_has_executed_mcp_calls(row: dict[str, Any]) -> bool:
+    return any(
+        isinstance(item, dict)
+        and item.get("tool_name") == "mcp_call"
+        and bool(item.get("executed"))
+        for item in row.get("tool_calls") or []
+    )
+
+
+def _ensure_runtime_mcp_log_files(sandbox_root: Path) -> None:
+    mcp_root = sandbox_root / "mcp"
+    mcp_root.mkdir(parents=True, exist_ok=True)
+    for name in ("calls.jsonl", "descriptors.jsonl", "catalog_diff.jsonl", "service_requests.jsonl"):
+        (mcp_root / name).touch()
 
 
 def _synthesize_case_scoped_mcp_logs_from_tool_results(
@@ -2521,6 +2539,27 @@ def _selected_descriptor_hash(tool_results: list[dict[str, Any]]) -> str | None:
         descriptor_hash = result.get("descriptor_hash") or result.get("selected_descriptor_hash")
         if descriptor_hash:
             return str(descriptor_hash)
+    return None
+
+
+def _selected_descriptor_hash_for_case(case: AttackCase) -> str | None:
+    catalog = [item for item in case_extra_list(case, "poisoned_tool_catalog") if isinstance(item, dict)]
+    if not catalog:
+        catalog = [item for item in case_extra_list(case, "clean_tool_catalog") if isinstance(item, dict)]
+    if catalog:
+        return descriptor_hash({"case_id": case.case_id, "catalog": catalog})
+
+    metadata = dict(case.metadata or {})
+    fallback = {
+        "case_id": case.case_id,
+        "hijacking": metadata.get("hijacking"),
+        "mcp_server_modifications": metadata.get("mcp_server_modifications"),
+        "source_dataset": metadata.get("source_dataset"),
+        "source_path": metadata.get("source_path"),
+        "source_subset": metadata.get("source_subset"),
+    }
+    if any(value for key, value in fallback.items() if key != "case_id"):
+        return descriptor_hash(fallback)
     return None
 
 

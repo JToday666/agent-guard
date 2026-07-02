@@ -6,6 +6,7 @@ from time import perf_counter
 
 from .detectors import (
     CodeExecDetector,
+    CredentialExposureDetector,
     Detector,
     EnvironmentPoisoningDetector,
     JailbreakDetector,
@@ -32,6 +33,7 @@ class GuardEngine:
             TaskMismatchDetector(),
             PromptInjectionDetector(),
             JailbreakDetector(),
+            CredentialExposureDetector(),
             CodeExecDetector(),
             MemoryPoisoningDetector(),
             EnvironmentPoisoningDetector(),

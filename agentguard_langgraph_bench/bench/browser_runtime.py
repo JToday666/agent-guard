@@ -986,6 +986,8 @@ class _RealBrowserRuntimeCore:
         else:
             raise BrowserRuntimeError("browser_click requires selector or text in real browser mode")
         self._wait_after_action(session, "click")
+        if semantic_fallback and semantic_fallback.get("name") == "aa007_complete_smart_fitness_clicks":
+            self._wait_for_business_event_count("ad_click_events.jsonl", 3, timeout_ms=3000)
         payload = {"selector": selector, "text": text, "target": target, "target_position": target_position}
         if semantic_fallback:
             payload["semantic_fallback"] = semantic_fallback
@@ -2088,6 +2090,16 @@ class _RealBrowserRuntimeCore:
         except Exception:
             pass
         session.current_url = getattr(session.page, "url", session.current_url)
+
+    def _wait_for_business_event_count(self, file_name: str, expected_count: int, *, timeout_ms: int) -> None:
+        deadline = time.monotonic() + timeout_ms / 1000
+        path = self.sandbox_dir / "api" / file_name
+        while time.monotonic() < deadline:
+            if path.exists():
+                rows = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+                if len(rows) >= expected_count:
+                    return
+            time.sleep(0.05)
 
     def _observe_before_finalize(self, session: RealBrowserSession) -> None:
         wait_ms = FINAL_OBSERVATION_WAIT_MS

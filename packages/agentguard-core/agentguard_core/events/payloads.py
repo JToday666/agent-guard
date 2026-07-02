@@ -108,6 +108,7 @@ class ToolResultPayload(BaseModel):
     sanitized: bool = False
     contains_sensitive_data: bool = False
     contains_instruction_like_text: bool = False
+    derived_resources: list[DerivedResource] = Field(default_factory=list)
 
 
 class MemoryRecord(BaseModel):

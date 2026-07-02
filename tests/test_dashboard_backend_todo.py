@@ -149,7 +149,7 @@ def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
         "status": "unknown",
         "loaded": False,
         "hook_count": None,
-        "expected_hook_count": 19,
+        "expected_hook_count": 22,
         "last_verified_at": None,
         "error": None,
         "source": None,
@@ -172,7 +172,7 @@ def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
 
     assert write_response.status_code == 200
     assert write_response.json()["status"] == "loaded"
-    assert write_response.json()["hook_count"] == 19
+    assert write_response.json()["hook_count"] == 22
     assert read_response.status_code == 200
     assert read_response.json() == write_response.json()
 
@@ -222,8 +222,8 @@ def _openclaw_status_payload() -> dict:
     return {
         "status": "loaded",
         "loaded": True,
-        "hook_count": 19,
-        "expected_hook_count": 19,
+        "hook_count": 22,
+        "expected_hook_count": 22,
         "last_verified_at": "2026-06-28T00:00:00+00:00",
         "error": None,
         "source": "agentguardctl",

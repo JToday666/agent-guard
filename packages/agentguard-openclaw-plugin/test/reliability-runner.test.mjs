@@ -13,27 +13,27 @@ test("reliability runner plans every registered hook for each iteration", async 
 
   const plan = buildReliabilityPlan({ runId: "unit", iterations: 2 });
 
-  assert.equal(RELIABILITY_HOOKS.length, 19);
-  assert.equal(plan.cases.length, 38);
+  assert.equal(RELIABILITY_HOOKS.length, 22);
+  assert.equal(plan.cases.length, 44);
   assert.deepEqual(plan.expectedEventCounts, {
     tool_call_proposed: 2,
     context_assembled: 2,
     model_input_prepared: 2,
-    model_output_produced: 2,
+    model_output_produced: 4,
     message_send_proposed: 2,
     config_audit: 2,
     tool_result_produced: 2,
-    runtime_observation: 24,
+    runtime_observation: 28,
   });
   assert.deepEqual(expectedReliabilityEventCounts(50), {
     tool_call_proposed: 50,
     context_assembled: 50,
     model_input_prepared: 50,
-    model_output_produced: 50,
+    model_output_produced: 100,
     message_send_proposed: 50,
     config_audit: 50,
     tool_result_produced: 50,
-    runtime_observation: 600,
+    runtime_observation: 700,
   });
 
   for (const hookName of RELIABILITY_HOOKS) {
@@ -69,12 +69,46 @@ test("reliability runner summarizes missing duplicate and wrong-runtime events",
 
   const summary = summarizeReliabilityEvents(plan, events);
 
-  assert.equal(summary.expected_total, 19);
-  assert.equal(summary.observed_total, 20);
+  assert.equal(summary.expected_total, 22);
+  assert.equal(summary.observed_total, 23);
   assert.deepEqual(summary.missing_traces, [plan.cases.at(-1).traceId]);
   assert.deepEqual(summary.duplicate_trace_ids, [events[0].trace_id]);
   assert.equal(summary.non_openclaw_count, 1);
   assert.equal(summary.ok, false);
+});
+
+test("reliability runner fetches missing traces beyond audit list cap", async () => {
+  process.env.AGENTGUARD_ADAPTER_TOKEN = process.env.AGENTGUARD_ADAPTER_TOKEN || "test-adapter-token";
+  process.env.AGENTGUARD_CONTROL_TOKEN = process.env.AGENTGUARD_CONTROL_TOKEN || "test-control-token";
+
+  const {
+    buildReliabilityPlan,
+    collectReliabilityEventsByTrace,
+    summarizeReliabilityEvents,
+  } = await import("../../../scripts/openclaw-e2e-runner.mjs");
+
+  const plan = buildReliabilityPlan({ runId: "paged", iterations: 50 });
+  const toEvent = (item) => ({
+    trace_id: item.traceId,
+    event_type: item.expectedEventType,
+    runtime: "openclaw",
+    stage: item.hookName,
+  });
+  const latestPage = plan.cases.slice(100).map(toEvent);
+  const fetchedTraceIds = [];
+
+  const events = await collectReliabilityEventsByTrace(plan, latestPage, async (traceId) => {
+    fetchedTraceIds.push(traceId);
+    const item = plan.cases.find((candidate) => candidate.traceId === traceId);
+    return item ? [toEvent(item)] : [];
+  });
+  const summary = summarizeReliabilityEvents(plan, events);
+
+  assert.equal(latestPage.length, 1000);
+  assert.equal(fetchedTraceIds.length, 100);
+  assert.equal(events.length, 1100);
+  assert.deepEqual(summary.missing_traces, []);
+  assert.equal(summary.ok, true);
 });
 
 test("release gate summary is safe to persist in adapter status", async () => {
@@ -84,7 +118,7 @@ test("release gate summary is safe to persist in adapter status", async () => {
     ok: true,
     generated_at: "2026-06-30T00:00:00.000Z",
     plugin: {
-      registered_hook_count: 19,
+      registered_hook_count: 22,
       registered_hooks: ["before_tool_call", "llm_input"],
     },
     audit: {
@@ -107,7 +141,7 @@ test("release gate summary is safe to persist in adapter status", async () => {
     kind: "reliability",
     ok: true,
     generated_at: "2026-06-30T00:00:00.000Z",
-    registered_hook_count: 19,
+    registered_hook_count: 22,
     registered_hooks: ["before_tool_call", "llm_input"],
     audit: {
       expected_total: 950,

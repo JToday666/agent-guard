@@ -14,6 +14,10 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 CONTINUOUS_VIDEO_MIN_BYTES = 8000
+OPTIONAL_UNPRODUCED_GENERIC_ARTIFACTS = {
+    "llm_prompts/round_1_redacted.json",
+    "llm_responses/round_1_redacted.json",
+}
 
 
 def build_artifact_integrity_manifest(run_or_artifact_dir: Path, *, output_path: Path | None = None) -> dict[str, Any]:
@@ -99,7 +103,12 @@ def check_generic_case_artifacts(case_dir: Path, *, root: Path | None = None) ->
             artifacts.append(_check_case_relative(case_dir, relative, root=root))
     case_id = _case_key_for_generic_case_dir(case_dir)
     case_scoped = _generic_case_mcp_logs_case_scoped(case_dir, case_id)
-    required_missing = [item for item in artifacts if item["type"] in required and not item.get("exists")]
+    optional_unproduced = _generic_case_optional_unproduced_artifacts(case_dir)
+    required_missing = [
+        item
+        for item in artifacts
+        if item["type"] in required and not item.get("exists") and item["type"] not in optional_unproduced
+    ]
     parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False]
     critical_errors = [f"missing:{item['type']}" for item in required_missing]
     critical_errors.extend(f"parse:{item['type']}:{item.get('error')}" for item in parse_failures)
@@ -259,6 +268,27 @@ def _generic_case_is_memory_poisoning(case_dir: Path) -> bool:
         isinstance(payload, dict)
         and (payload.get("attack_type") == "memory_poisoning" or metadata.get("source_dataset") == "PoisonedRAG")
     )
+
+
+def _generic_case_optional_unproduced_artifacts(case_dir: Path) -> set[str]:
+    evidence_index = case_dir / "evidence_index.json"
+    if not evidence_index.exists():
+        return set()
+    try:
+        payload = json.loads(evidence_index.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    if not isinstance(payload, dict) or not isinstance(payload.get("missing"), list):
+        return set()
+    optional: set[str] = set()
+    for item in payload["missing"]:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        reason = str(item.get("reason") or "")
+        if path in OPTIONAL_UNPRODUCED_GENERIC_ARTIFACTS and reason == "not produced":
+            optional.add(path)
+    return optional
 
 
 def _check_case_relative(case_dir: Path, relative: str, *, root: Path) -> dict[str, Any]:

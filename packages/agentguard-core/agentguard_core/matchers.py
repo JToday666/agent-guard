@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 
 from .events import ModelCallPayload
+from .credentials import has_credential_command_text as _has_credential_command_text
+from .credentials import has_credential_value_text
 from .policies import PolicyBundle
 
 
@@ -43,6 +45,14 @@ def has_jailbreak_text(text: str, policies: PolicyBundle) -> bool:
 
 def looks_like_sensitive_model_leak(payload: ModelCallPayload, policies: PolicyBundle) -> bool:
     return contains_any(payload.content_preview, policies.model_leak_markers)
+
+
+def has_credential_exposure_text(text: str, policies: PolicyBundle) -> bool:
+    return has_credential_value_text(text) or contains_any(text, policies.credential_exposure_markers)
+
+
+def has_credential_command_text(command: str, policies: PolicyBundle) -> bool:
+    return _has_credential_command_text(command) or contains_any(command, policies.credential_exposure_markers)
 
 
 def has_dangerous_command_text(command: str, policies: PolicyBundle) -> bool:

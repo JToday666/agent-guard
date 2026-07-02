@@ -25,6 +25,26 @@ class ToolProfile(BaseModel):
 
 
 def default_tool_profiles() -> dict[str, ToolProfile]:
+    def code_exec_profile() -> ToolProfile:
+        return ToolProfile(
+            categories=["tool", "code", "process", "shell", "terminal"],
+            kinds=[
+                "code_exec",
+                "exec",
+                "shell",
+                "shell_exec",
+                "command",
+                "command_exec",
+                "bash",
+                "sh",
+                "powershell",
+                "terminal",
+                "code_mode_exec",
+            ],
+            operations=["execute"],
+            directions=["local"],
+        )
+
     return {
         "read_file": ToolProfile(
             categories=["tool", "file"],
@@ -50,12 +70,14 @@ def default_tool_profiles() -> dict[str, ToolProfile]:
             operations=["get", "post", "put", "patch", "delete"],
             directions=["outbound"],
         ),
-        "code_exec": ToolProfile(
-            categories=["tool", "code", "process"],
-            kinds=["code_exec", "shell_exec", "command_exec"],
-            operations=["execute"],
-            directions=["local"],
-        ),
+        "code_exec": code_exec_profile(),
+        "exec": code_exec_profile(),
+        "shell": code_exec_profile(),
+        "command": code_exec_profile(),
+        "bash": code_exec_profile(),
+        "sh": code_exec_profile(),
+        "powershell": code_exec_profile(),
+        "terminal": code_exec_profile(),
     }
 
 
@@ -129,6 +151,17 @@ class PolicyBundle(BaseModel):
             "bearer ",
         ]
     )
+    credential_exposure_markers: list[str] = Field(
+        default_factory=lambda: [
+            "dashscope_api_key",
+            "openai_api_key",
+            "anthropic_api_key",
+            "api_key=",
+            "access_token=",
+            "secret_key=",
+            "/proc/self/environ",
+        ]
+    )
     dangerous_command_markers: list[str] = Field(
         default_factory=lambda: [
             "curl ",
@@ -176,6 +209,13 @@ class PolicyBundle(BaseModel):
             "call_api": ["api", "call"],
             "memory_write": ["memory", "write"],
             "code_exec": ["execute", "run"],
+            "exec": ["execute", "run", "shell"],
+            "shell": ["execute", "run", "shell"],
+            "command": ["execute", "run", "command"],
+            "bash": ["execute", "run", "shell"],
+            "sh": ["execute", "run", "shell"],
+            "powershell": ["execute", "run", "shell"],
+            "terminal": ["execute", "run", "shell"],
         }
     )
     metadata: dict[str, Any] = Field(default_factory=dict)

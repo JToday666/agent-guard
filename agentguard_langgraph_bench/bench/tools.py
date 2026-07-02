@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from html.parser import HTMLParser
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any, Callable
 from urllib.parse import quote, urlparse
 from urllib.error import URLError
@@ -58,6 +58,7 @@ _EXFILTRATION_COLLECTOR_SERVER: ThreadingHTTPServer | None = None
 _EXFILTRATION_COLLECTOR_THREAD: Thread | None = None
 _PROMPT_INJECTION_API_SERVER: ThreadingHTTPServer | None = None
 _PROMPT_INJECTION_API_THREAD: Thread | None = None
+_JSONL_WRITE_LOCK = Lock()
 
 
 if BaseModel is not None:
@@ -2065,8 +2066,15 @@ def _sandbox_artifact_file(sandbox_dir: Path, requested_path: str) -> str | None
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    with _JSONL_WRITE_LOCK:
+        if path.name == "ad_click_events.jsonl" and isinstance(payload.get("payload"), dict) and payload["payload"].get("sequence") is not None:
+            rows = _read_jsonl(path) if path.exists() else []
+            rows.append(payload)
+            rows.sort(key=lambda row: int((row.get("payload") or {}).get("sequence") or 0))
+            _write_jsonl(path, rows)
+            return
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:

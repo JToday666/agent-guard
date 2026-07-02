@@ -1,0 +1,40 @@
+{
+  "name": "@agentguard/openclaw-bench-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentGuard AttackBench tool bridge for OpenClaw",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "plugin:build": "pnpm run build && openclaw plugins build --entry ./dist/index.js",
+    "plugin:validate": "pnpm run build && openclaw plugins validate --entry ./dist/index.js",
+    "test": "pnpm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "openclaw": "2026.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.1",
+    "typescript": "6.0.3"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.6.6",
+      "minGatewayVersion": "2026.6.6"
+    },
+    "build": {
+      "openclawVersion": "2026.6.6",
+      "pluginSdkVersion": "2026.6.6"
+    }
+  }
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..credentials import redact_credential_text
 from .contracts import GuardEvent
 from .payloads import (
     ContextBuildPayload,
@@ -15,11 +16,41 @@ from .payloads import (
     ToolResultPayload,
 )
 
+EXEC_LIKE_TOOL_NAMES = frozenset(
+    {
+        "code_exec",
+        "exec",
+        "shell",
+        "command",
+        "bash",
+        "sh",
+        "powershell",
+        "terminal",
+    }
+)
+EXEC_LIKE_TOOL_KINDS = frozenset(
+    {
+        "code_exec",
+        "exec",
+        "shell",
+        "shell_exec",
+        "command",
+        "command_exec",
+        "bash",
+        "sh",
+        "powershell",
+        "terminal",
+        "code_mode_exec",
+    }
+)
+
 
 def derive_resources(event: GuardEvent) -> list[DerivedResource]:
     resources = _canonical_resources(event)
     derived_resources = getattr(event.payload, "derived_resources", [])
     if derived_resources:
+        if isinstance(event.payload, ToolResultPayload):
+            return _dedupe_resources([*derived_resources, *resources])
         resources.extend(derived_resources)
     return _dedupe_resources(resources)
 
@@ -56,6 +87,17 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
             )
         ]
     if isinstance(event.payload, ContextBuildPayload):
+        if event.security_context.derived_paths:
+            return [
+                DerivedResource(
+                    resource_type="context_source",
+                    operation="assemble",
+                    target=target,
+                    data_classification=None,
+                    direction="inbound",
+                )
+                for target in event.security_context.derived_paths
+            ]
         return [
             DerivedResource(
                 resource_type="context_source",
@@ -121,12 +163,12 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
                 direction="outbound",
             )
         ]
-    if tool == "code_exec":
+    if is_exec_like_tool(event.payload.tool):
         return [
             DerivedResource(
                 resource_type="process",
                 operation="execute",
-                target=tool_argument_text(args, "command", "cmd", "code"),
+                target=redact_credential_text(tool_argument_text(args, "command", "cmd", "code")),
                 data_classification=None,
                 direction="local",
             )
@@ -164,3 +206,13 @@ def tool_argument_text(arguments: dict[str, Any], *keys: str) -> str:
         if value is not None:
             return str(value)
     return ""
+
+
+def is_exec_like_tool(tool: Any) -> bool:
+    identifiers = [
+        getattr(tool, "name", None),
+        getattr(tool, "kind", None),
+        getattr(tool, "input_kind", None),
+    ]
+    normalized = {str(value).lower() for value in identifiers if value is not None}
+    return bool(normalized & EXEC_LIKE_TOOL_NAMES or normalized & EXEC_LIKE_TOOL_KINDS)

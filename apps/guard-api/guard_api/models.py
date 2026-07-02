@@ -139,7 +139,7 @@ class AdapterStatusRecord(BaseModel):
     status: AdapterStatus = "unknown"
     loaded: bool = False
     hook_count: int | None = None
-    expected_hook_count: int = 19
+    expected_hook_count: int = 22
     last_verified_at: str | None = None
     last_heartbeat_at: str | None = None
     error: str | None = None

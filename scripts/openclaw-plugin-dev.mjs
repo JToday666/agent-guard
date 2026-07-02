@@ -20,8 +20,10 @@ const LOCAL_TOOLS_BIN = path.join(CODE_ROOT, ".tools", "bin");
 const LOCAL_NODE_BIN = path.join(CODE_ROOT, ".tools", "node-v24.15.0-linux-x64", "bin");
 const REQUIRED_HOOKS = [
   "after_compaction",
+  "before_agent_finalize",
   "before_compaction",
   "before_install",
+  "before_message_write",
   "before_prompt_build",
   "before_tool_call",
   "cron_changed",
@@ -29,6 +31,7 @@ const REQUIRED_HOOKS = [
   "gateway_stop",
   "llm_input",
   "llm_output",
+  "message_received",
   "message_sending",
   "model_call_ended",
   "model_call_started",
