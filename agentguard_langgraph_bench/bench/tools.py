@@ -2430,6 +2430,7 @@ class MockToolRegistry:
         self._browser_form_state: dict[str, dict[str, Any]] = {}
         self._ad_click_sequences: dict[str, int] = {}
         self._real_browser: Any = None
+        self._real_browser_agent_abuse_api_fallback = False
         self._mcp_call_counts: dict[tuple[str, str], int] = {}
         self._poisonedrag_repository: PoisonedRagRepository | None = None
 
@@ -2804,7 +2805,7 @@ class MockToolRegistry:
         }
         if self.browser_mode == "real":
             if _is_agent_abuse_source(source_path):
-                _ensure_agent_abuse_api_server(self.sandbox_dir)
+                self._real_browser_agent_abuse_api_fallback = not _ensure_agent_abuse_api_server(self.sandbox_dir)
             real_result = self._real_browser_runtime().start(session_id=session_id, url=url, source_path=source_path)
             result.update(real_result)
         elif source_path:
@@ -2985,7 +2986,7 @@ class MockToolRegistry:
     def _synthetic_browser_business_events_enabled(self) -> bool:
         if self.browser_mode != "real":
             return True
-        return os.getenv("AGENTGUARD_ALLOW_REAL_BROWSER_SYNTHETIC_BUSINESS_EVENTS") == "1"
+        return self._real_browser_agent_abuse_api_fallback or os.getenv("AGENTGUARD_ALLOW_REAL_BROWSER_SYNTHETIC_BUSINESS_EVENTS") == "1"
 
     def _record_browser_intent_only(
         self,

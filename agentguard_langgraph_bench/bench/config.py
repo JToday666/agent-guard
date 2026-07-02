@@ -21,6 +21,7 @@ DEFAULT_LLM_MAX_RETRIES = 1
 DEFAULT_INSTRUMENTATION_PLAN_MODE = "autonomous"
 DEFAULT_AGENT_VISIBLE_PAYLOAD_MODE = "original"
 DEFAULT_LANGGRAPH_RECURSION_LIMIT = 100
+LLM_ENV_KEY_PREFIXES = ("AGENTGUARD_LLM_", "DEEPSEEK_", "OPENAI_")
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -47,6 +48,8 @@ def _load_env_file(path: Path) -> None:
         if parsed is None:
             continue
         key, value = parsed
+        if not key.startswith(LLM_ENV_KEY_PREFIXES):
+            continue
         os.environ.setdefault(key, value)
 
 

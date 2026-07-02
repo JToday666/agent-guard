@@ -163,21 +163,20 @@ def _source_map() -> dict[str, str]:
             if isinstance(value, list):
                 rows.extend(item for item in value if isinstance(item, dict))
     for row in rows:
-        local_value = row.get("local_web_entry_source_path") or row.get("local_source_path")
-        if not local_value:
-            continue
-        local_source = _first_existing_unchecked(str(local_value))
-        if local_source is None:
-            continue
-        keys = [
-            row.get("local_web_entry_source_path"),
-            row.get("local_source_path"),
-            row.get("original_web_entry_source_path"),
-            row.get("original_source_path"),
-        ]
-        for key in keys:
-            if key:
-                mapping[_source_map_key(str(key))] = str(local_source)
+        local_source = _first_existing_unchecked(str(row.get("local_source_path") or ""))
+        local_web_entry = _first_existing_unchecked(
+            str(row.get("local_web_entry_source_path") or row.get("local_source_path") or "")
+        )
+        source_keys = [row.get("local_source_path"), row.get("original_source_path")]
+        web_entry_keys = [row.get("local_web_entry_source_path"), row.get("original_web_entry_source_path")]
+        if local_source is not None:
+            for key in source_keys:
+                if key:
+                    mapping[_source_map_key(str(key))] = str(local_source)
+        if local_web_entry is not None:
+            for key in web_entry_keys:
+                if key:
+                    mapping[_source_map_key(str(key))] = str(local_web_entry)
     _SOURCE_MAP_CACHE = mapping
     return _SOURCE_MAP_CACHE
 
