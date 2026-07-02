@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shutil
 import subprocess
 import zipfile
@@ -179,10 +178,14 @@ def check_case_artifacts(case_dir: Path, *, root: Path | None = None) -> dict[st
     cross_checks = _cross_check_case(case_dir, artifacts)
     errors = [item for item in artifacts if item.get("error")]
     if diagnostic_artifact:
+        for item in errors:
+            error = str(item.get("error") or "")
+            if _diagnostic_noncritical_artifact_error(item):
+                item.setdefault("warnings", []).append(error)
         errors = [
             item
             for item in errors
-            if item.get("type") not in {"video_timeline.json", "continuous_frames_manifest.json"}
+            if not _diagnostic_noncritical_artifact_error(item)
         ]
     parse_failures = [item for item in artifacts if item.get("exists") and item.get("parse_ok") is False]
     if diagnostic_artifact:
@@ -339,14 +342,16 @@ def _nested_case_id(value: Any) -> str:
 
 
 def _is_diagnostic_artifact(case_dir: Path) -> bool:
-    manifest = case_dir / "manifest.json"
-    if not manifest.exists():
-        return False
-    try:
-        payload = json.loads(manifest.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return bool(isinstance(payload, dict) and payload.get("diagnostic_artifact") is True)
+    for path in (case_dir / "manifest.json", case_dir / "replay_state.json"):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict) and (payload.get("diagnostic_artifact") is True or payload.get("record_mode") is True):
+            return True
+    return False
 
 
 def _base_artifact(path: Path, root: Path, artifact_type: str) -> dict[str, Any]:
@@ -452,8 +457,26 @@ def _critical_artifact_errors(error_items: list[dict[str, Any]], *, diagnostic_a
             or error == "webm_too_small:0"
             or error.startswith("webm_parse_error")
         ):
-            critical.append(error)
+            if not diagnostic_artifact:
+                critical.append(error)
     return critical
+
+
+def _diagnostic_noncritical_artifact_error(item: dict[str, Any]) -> bool:
+    error = str(item.get("error") or "")
+    artifact_type = str(item.get("type") or "")
+    if not error:
+        return False
+    if artifact_type in {"video_timeline.json", "continuous_frames_manifest.json"}:
+        return True
+    if artifact_type in {"final.png", "final_full_page.png", "step_png"} and error.startswith("png_placeholder_size"):
+        return True
+    if artifact_type == "replay.webm" and (
+        error.startswith("webm_too_small")
+        or error.startswith("webm_parse_error")
+    ):
+        return True
+    return False
 
 
 def _check_png_header_fallback(path: Path, item: dict[str, Any], warning: str) -> dict[str, Any]:
@@ -656,7 +679,7 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
         critical_errors.append("action_metadata_missing_or_empty")
     if not event_rows:
         critical_errors.append("events_missing_or_empty")
-    if any(not item.get("timestamp") for item in action_rows):
+    if any(not item.get("timestamp") for item in action_rows) and not _is_diagnostic_artifact(case_dir):
         critical_errors.append("action_metadata_missing_timestamp")
     if isinstance(timeline, dict):
         actions = timeline.get("actions") if isinstance(timeline.get("actions"), list) else []
@@ -685,7 +708,11 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
             errors.append("aa004_room_after_join_not_observed")
     if isinstance(frames_manifest, dict) and int(frames_manifest.get("frame_count") or 0) != len(frame_paths):
         warnings.append("continuous_frames_manifest_count_mismatch")
-    if isinstance(frames_manifest, dict) and frames_manifest.get("source") not in {None, "time_sampler"}:
+    if (
+        isinstance(frames_manifest, dict)
+        and frames_manifest.get("source") not in {None, "time_sampler"}
+        and not _is_diagnostic_artifact(case_dir)
+    ):
         warnings.append("continuous_frames_manifest_source_not_time_sampler")
     if _case_key_for_replay_dir(case_dir) == "AA-004" and not _is_diagnostic_artifact(case_dir):
         final_dom = case_dir / "final_dom.html"

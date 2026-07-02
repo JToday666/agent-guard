@@ -109,9 +109,7 @@ _MEMORY_POISONING_INTENT_MARKERS: dict[str, list[str]] = {
 
 _AGENT_ABUSE_INTENT_MARKERS: dict[str, list[str]] = {
     "malicious_payload_delivery": [
-        "license_txt.exe",
         "/payloads/",
-        "payloads/license",
         "download payload",
         "malicious payload",
         "curl -fs",
@@ -128,10 +126,8 @@ _AGENT_ABUSE_INTENT_MARKERS: dict[str, list[str]] = {
         "miner",
         "remote maintenance",
         "background worker",
-        "agentguard_backdoor_plan",
         "socket",
         "subprocess",
-        "102.234.22.",
     ],
     "platform_abuse": [
         "/platform/zoom/disruption",
@@ -182,6 +178,53 @@ _AGENT_ABUSE_INTENT_MARKERS: dict[str, list[str]] = {
         "contact_details",
     ],
 }
+
+_EXECUTABLE_PAYLOAD_RE = re.compile(
+    r"\.(?:exe|dll|msi|bat|cmd|ps1|sh|bash|zsh|jar|py|pl|rb|bin|scr|so|dylib)(?:\b|[?#\"'\\])",
+    flags=re.IGNORECASE,
+)
+_ARCHIVE_PAYLOAD_RE = re.compile(
+    r"\.(?:zip|tar|tgz|tar\.gz|gz|7z|rar)(?:\b|[?#\"'\\])",
+    flags=re.IGNORECASE,
+)
+_URL_OR_PATH_PAYLOAD_RE = re.compile(
+    r"(?:https?://|/)(?:[^\s\"']*/)?(?:payloads?|downloads?|artifacts?|staging|bin|scripts?)/",
+    flags=re.IGNORECASE,
+)
+_PAYLOAD_DELIVERY_ACTION_MARKERS = [
+    "curl ",
+    "curl-",
+    "wget ",
+    "invoke-webrequest",
+    "download",
+    "fetch",
+    "retrieve",
+    "pull",
+    "stage",
+    "staging",
+    "execute",
+    "chmod+x",
+    "chmod +x",
+    "method\":\"get",
+    "method\":\"post",
+    "method\": \"get",
+    "method\": \"post",
+    "browser_input",
+    "write_file",
+    "call_api",
+    "dockerfile",
+    "run ",
+]
+_BACKDOOR_COMPUTE_ABUSE_RE = re.compile(
+    r"("
+    r"reverse\s+shell|/dev/tcp|netcat|nc\s+-e|"
+    r"socket\s*[,)]|socket\(|subprocess|popen|"
+    r"crypto[-\s]?miner|cryptominer|coinhive|xmrig|"
+    r"backdoor|remote\s+maintenance|unauthorized\s+remote|"
+    r"background\s+worker|persistence|payload\s+staging"
+    r")",
+    flags=re.IGNORECASE,
+)
 
 
 def contains_any(text: str, needles: list[str]) -> bool:
@@ -273,7 +316,11 @@ def has_credential_command_text(command: str, policies: PolicyBundle) -> bool:
 
 
 def has_dangerous_command_text(command: str, policies: PolicyBundle) -> bool:
-    return contains_any(command, policies.dangerous_command_markers)
+    return (
+        contains_any(command, policies.dangerous_command_markers)
+        or _looks_like_malicious_payload_delivery(command)
+        or _looks_like_backdoor_or_compute_abuse(command)
+    )
 
 
 def agent_abuse_intents(text: str, policies: PolicyBundle) -> list[str]:
@@ -282,9 +329,79 @@ def agent_abuse_intents(text: str, policies: PolicyBundle) -> list[str]:
         for intent, markers in _AGENT_ABUSE_INTENT_MARKERS.items()
         if contains_any(text, markers)
     ]
+    if _looks_like_malicious_payload_delivery(text):
+        intents.append("malicious_payload_delivery")
+    if _looks_like_backdoor_or_compute_abuse(text):
+        intents.append("backdoor_or_compute_abuse")
     if not intents and contains_any(text, policies.agent_abuse_markers):
         intents.append("unauthorized_action")
-    return intents
+    return list(dict.fromkeys(intents))
+
+
+def _looks_like_malicious_payload_delivery(text: str) -> bool:
+    normalized = normalize_match_text(text)
+    if not normalized:
+        return False
+    has_delivery_action = contains_any(normalized, _PAYLOAD_DELIVERY_ACTION_MARKERS)
+    if not has_delivery_action:
+        return False
+    has_payload_path = _URL_OR_PATH_PAYLOAD_RE.search(text) is not None
+    has_executable_payload = _EXECUTABLE_PAYLOAD_RE.search(text) is not None
+    has_archive_payload = _ARCHIVE_PAYLOAD_RE.search(text) is not None
+    has_network_or_staging_target = bool(
+        re.search(r"https?://|/(?:tmp|var/tmp|opt|usr/local/bin|payloads?|downloads?|artifacts?|staging|scripts?)/", text, flags=re.IGNORECASE)
+    )
+    if has_payload_path and (has_executable_payload or has_archive_payload or "payload" in normalized):
+        return True
+    return has_executable_payload and has_network_or_staging_target
+
+
+def _looks_like_backdoor_or_compute_abuse(text: str) -> bool:
+    normalized = normalize_match_text(text)
+    if not normalized:
+        return False
+    if not _BACKDOOR_COMPUTE_ABUSE_RE.search(text):
+        return False
+    if contains_any(
+        normalized,
+        [
+            "reverse shell",
+            "/dev/tcp",
+            "crypto-miner",
+            "crypto miner",
+            "cryptominer",
+            "xmrig",
+            "backdoor",
+            "remote maintenance",
+            "unauthorized remote",
+            "payload staging",
+        ],
+    ):
+        return True
+    return contains_any(
+        normalized,
+        [
+            "socket",
+            "subprocess",
+            "background worker",
+            "persistence",
+        ],
+    ) and contains_any(
+        normalized,
+        [
+            "remote",
+            "miner",
+            "mining",
+            "unauthorized",
+            "connect",
+            "execute",
+            "shell",
+            "popen",
+            "call_api",
+            "browser_input",
+            "write_file",
+        ],
+    )
 
 
 def memory_poisoning_intents(text: str, policies: PolicyBundle) -> list[str]:

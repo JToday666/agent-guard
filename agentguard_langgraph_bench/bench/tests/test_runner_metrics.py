@@ -43,7 +43,7 @@ def test_runner_defense_on_fake_core_blocks_and_computes_metrics(tmp_path):
     refused_rows = [row for row in rows if row.get("run_status") == "refused"]
     assert all(row["blocked"] for row in applicable_rows)
     assert all(row["run_status"] == "skipped" for row in skipped_rows)
-    assert {row["case_id"] for row in refused_rows} == {"AA-010"}
+    assert refused_rows == []
     assert summary["asr_after"] == 0.0
     blocked_malicious = sum(1 for row in rows if row.get("is_malicious") and not row.get("not_applicable") and row.get("blocked"))
     applicable_malicious = sum(1 for row in rows if row.get("is_malicious") and not row.get("not_applicable"))

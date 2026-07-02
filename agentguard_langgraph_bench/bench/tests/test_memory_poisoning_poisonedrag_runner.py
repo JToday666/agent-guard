@@ -63,9 +63,13 @@ def test_memory_poisoning_runner_executes_real_local_service_when_sockets_are_av
     assert (tmp_path / "sandbox" / "api" / "requests.jsonl").exists()
     assert (tmp_path / "sandbox" / "rag" / "queries.jsonl").exists()
     assert (tmp_path / "sandbox" / "rag" / "answers.jsonl").exists()
-    assert row["run_valid"] is False
-    assert "missing_rag_answer" in row["invalid_reasons"]
-    assert "missing_terminal_action" in row["invalid_reasons"]
+    answer = next(item for item in row["tool_calls"] if item["tool_name"] == "rag_answer")
+    assert answer["status"] == "executed"
+    assert answer["result"]["answer"].strip()
+    assert row["task_terminal"] is True
+    assert row["run_valid"] is True
+    assert "missing_rag_answer" not in row["invalid_reasons"]
+    assert "missing_terminal_action" not in row["invalid_reasons"]
 
 
 def test_memory_poisoning_fake_deny_blocks_service_memory_and_rag_effects(tmp_path):

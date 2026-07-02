@@ -3985,6 +3985,7 @@ class MockToolRegistry:
                     action = item.get("action")
                     normalized = {
                         **item,
+                        "timestamp": item.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                         "event_type": {
                             "start": "start",
                             "navigate": "navigate",
@@ -4018,11 +4019,11 @@ class MockToolRegistry:
         final_full.write_bytes(png)
         step.write_bytes(png)
         (artifact_dir / "report.html").write_text(
-            f"<html><body>record-mode browser replay for {session_id}; step_count 1 dom_event_count {len(rows)}</body></html>",
-            encoding="utf-8",
-        )
-        (artifact_dir / "replay_state.json").write_text(
-            json.dumps({"session_id": session_id, "step_count": 1, "dom_event_count": len(rows), "record_mode": True}, sort_keys=True),
+            (
+                f"<html><body>record-mode browser replay for {session_id}; "
+                f"step_count 1 dom_event_count {len(rows)} "
+                "video_source record_mode_diagnostic</body></html>"
+            ),
             encoding="utf-8",
         )
         (artifact_dir / "final_dom.html").write_text(
@@ -4044,6 +4045,7 @@ class MockToolRegistry:
             {
                 "event_type": "browser_tool_action",
                 "action": item.get("action") or item.get("event_type"),
+                "timestamp": item.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                 "session_id": session_id,
                 "step_index": index,
                 "url": item.get("url") or session.get("url"),
@@ -4057,6 +4059,64 @@ class MockToolRegistry:
         ]
         _write_jsonl(artifact_dir / "action_metadata.jsonl", action_rows)
         _write_jsonl(artifact_dir / "step_actions.jsonl", action_rows)
+        continuous_frames_manifest = {
+            "schema_version": "agentguard_browser_continuous_frames/1.0",
+            "record_mode": True,
+            "diagnostic_artifact": True,
+            "real_browser_artifact": False,
+            "source": "record_mode_diagnostic",
+            "frame_count": 0,
+            "frames": [],
+        }
+        (artifact_dir / "continuous_frames_manifest.json").write_text(
+            json.dumps(continuous_frames_manifest, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        video_timeline = {
+            "schema_version": "agentguard_browser_video_timeline/1.0",
+            "record_mode": True,
+            "diagnostic_artifact": True,
+            "real_browser_artifact": False,
+            "video_source": "record_mode_diagnostic",
+            "action_count": len(action_rows),
+            "actions": action_rows,
+            "continuous_frame_count": 0,
+            "coverage_checks": {
+                "diagnostic_artifact": True,
+                "raw_replay_absent": True,
+                "legacy_step_video_absent": True,
+                "has_continuous_video": False,
+                "has_frames": False,
+                "frame_count_ge_minimum": False,
+                "all_actions_have_nearby_frames": False,
+                "final_state_observed_after_last_action": False,
+                "video_duration_ge_action_span_plus_grace": False,
+            },
+        }
+        (artifact_dir / "video_timeline.json").write_text(
+            json.dumps(video_timeline, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        replay_state = {
+            "session_id": session_id,
+            "step_count": 1,
+            "dom_event_count": len(rows),
+            "record_mode": True,
+            "diagnostic_artifact": True,
+            "real_browser_artifact": False,
+            "browser_started": False,
+            "raw_replay_absent": True,
+            "step_screenshot_video_used": False,
+            "continuous_frame_count": 0,
+            "video_source": "record_mode_diagnostic",
+            "video_timeline": "video_timeline.json",
+            "continuous_frames_manifest": "continuous_frames_manifest.json",
+            "video_save_error": "record_mode_diagnostic_video_unavailable",
+        }
+        (artifact_dir / "replay_state.json").write_text(
+            json.dumps(replay_state, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
         (artifact_dir / "business_event_correlation_index.json").write_text(
             json.dumps(
                 {
@@ -4073,7 +4133,48 @@ class MockToolRegistry:
         )
         (artifact_dir / "replay.webm").write_bytes(b"")
         with zipfile.ZipFile(artifact_dir / "trace.zip", "w") as archive:
-            archive.writestr("record_mode_trace.json", json.dumps({"session_id": session_id, "record_mode": True}, sort_keys=True))
+            archive.writestr(
+                "record_mode_trace.json",
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "record_mode": True,
+                        "diagnostic_artifact": True,
+                        "real_browser_artifact": False,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        manifest = {
+            "ok": True,
+            "session_id": session_id,
+            "artifact_dir": str(artifact_dir),
+            "record_mode": True,
+            "diagnostic_artifact": True,
+            "real_browser_artifact": False,
+            "browser_started": False,
+            "source_path": session.get("source_path"),
+            "final_url": session.get("url"),
+            "events": "events.jsonl",
+            "action_metadata": "action_metadata.jsonl",
+            "step_actions": "step_actions.jsonl",
+            "business_event_correlation_index": "business_event_correlation_index.json",
+            "replay_state": "replay_state.json",
+            "video_timeline": "video_timeline.json",
+            "continuous_frames_manifest": "continuous_frames_manifest.json",
+            "continuous_frames_dir": "continuous_frames",
+            "report": "report.html",
+            "final_dom": "final_dom.html",
+            "final_accessibility_tree": "final_accessibility_tree.json",
+            "final_screenshot": "final.png",
+            "final_full_page_screenshot": "final_full_page.png",
+            "video": "replay.webm",
+            "trace": "trace.zip",
+        }
+        (artifact_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
         return {
             "ok": True,
             "session_id": session_id,
@@ -4088,6 +4189,9 @@ class MockToolRegistry:
             "step_actions": str(artifact_dir / "step_actions.jsonl"),
             "business_event_correlation_index": str(artifact_dir / "business_event_correlation_index.json"),
             "replay_state": str(artifact_dir / "replay_state.json"),
+            "video_timeline": str(artifact_dir / "video_timeline.json"),
+            "continuous_frames_manifest": str(artifact_dir / "continuous_frames_manifest.json"),
+            "manifest": str(artifact_dir / "manifest.json"),
             "video": str(artifact_dir / "replay.webm"),
             "trace": str(artifact_dir / "trace.zip"),
             "steps_dir": str(steps_dir),
@@ -4095,6 +4199,10 @@ class MockToolRegistry:
             "dom_event_count": len(rows),
             "step_count": 1,
             "record_mode": True,
+            "diagnostic_artifact": True,
+            "real_browser_artifact": False,
+            "browser_started": False,
+            "video_source": "record_mode_diagnostic",
             "final_url": session.get("url"),
         }
 

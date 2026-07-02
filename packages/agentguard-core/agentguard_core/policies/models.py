@@ -216,7 +216,6 @@ class PolicyBundle(BaseModel):
             "invoke-webrequest",
             "python -c",
             "base64 -d",
-            "license_txt.exe",
             "/payloads/",
             "reverse shell",
             "/dev/tcp",
@@ -225,7 +224,6 @@ class PolicyBundle(BaseModel):
             "crypto-miner",
             "crypto miner",
             "backdoor",
-            "agentguard_backdoor_plan",
             "remote maintenance",
         ]
     )
@@ -267,7 +265,6 @@ class PolicyBundle(BaseModel):
             "repo:write",
             "escalation",
             "cross_task",
-            "license_txt.exe",
             "/payloads/",
             "backdoor",
             "crypto-miner",

