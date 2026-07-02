@@ -14,6 +14,9 @@ class CoreClientProtocol(Protocol):
     def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
         ...
 
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        ...
+
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         ...
 
@@ -37,12 +40,29 @@ class AgentGuardCoreClient:
 
     def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
         if _api_mode(self.config) == "guard-api-v0.3":
-            response = self._post_json("/v1/guard/evaluate", _guard_api_v03_event(event))
-            decision = response.get("decision")
-            if isinstance(decision, dict):
-                return _decision_with_top_level_approval(decision, response)
-            return response
+            return self.evaluate_guard_event(_guard_api_v03_event(event))
         return self._post_json("/v1/evaluate/tool-call", event)
+
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        if _api_mode(self.config) != "guard-api-v0.3":
+            if event.get("event_type") == "tool_call_proposed":
+                return self.evaluate_tool_call(event)
+            return {
+                "decision_id": "dec_legacy_non_tool_allow",
+                "decision": "allow",
+                "risk_score": 0,
+                "severity": "low",
+                "rule_hits": [],
+                "reason": "Non-tool GuardEvent evaluation requires guard-api-v0.3.",
+                "safe_message": None,
+                "latency_ms": 0,
+                "approval": None,
+            }
+        response = self._post_json("/v1/guard/evaluate", event)
+        decision = response.get("decision")
+        if isinstance(decision, dict):
+            return _decision_with_top_level_approval(decision, response)
+        return response
 
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         if _api_mode(self.config) == "guard-api-v0.3":
@@ -158,6 +178,9 @@ class FakeDenyCoreClient:
         )
         return decision.model_dump()
 
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return self.evaluate_tool_call(event)
+
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
@@ -197,6 +220,9 @@ class FakeAskCoreClient:
         )
         return decision.model_dump()
 
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return self.evaluate_tool_call(event)
+
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
@@ -223,6 +249,9 @@ class FakeAllowCoreClient:
             latency_ms=0,
         )
         return decision.model_dump()
+
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return self.evaluate_tool_call(event)
 
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}

@@ -18,6 +18,15 @@ AttackType = Literal[
     "tool_hijacking",
     "benign",
 ]
+GuardEventType = Literal[
+    "tool_call_proposed",
+    "context_assembled",
+    "model_input_prepared",
+    "model_output_produced",
+    "tool_result_produced",
+    "memory_write_proposed",
+    "message_send_proposed",
+]
 
 
 def utc_now_iso() -> str:
@@ -79,6 +88,22 @@ class ToolCallEvent(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     derived_resources: list[DerivedResource] = Field(default_factory=list)
     pre_execution: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeGuardEvent(BaseModel):
+    schema_version: str = "0.3"
+    event_id: str = Field(default_factory=lambda: new_id("evt_runtime"))
+    event_type: GuardEventType
+    runtime: str = "langgraph"
+    trace_id: str
+    case_id: str | None = None
+    attack_type: AttackType | None = None
+    is_malicious: bool | None = None
+    timestamp: str = Field(default_factory=utc_now_iso)
+    pre_execution: bool = True
+    security_context: SecurityContext = Field(default_factory=SecurityContext)
+    payload: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
