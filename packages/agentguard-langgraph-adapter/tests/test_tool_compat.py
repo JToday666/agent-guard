@@ -114,6 +114,68 @@ def test_mcp_call_top_level_schema_fields_move_into_arguments() -> None:
     assert "mcp_call.top_level_fields_to_arguments" in compat.repairs
 
 
+def test_mcp_call_is_canonicalized_against_visible_catalog_defaults() -> None:
+    layer = ToolCompatibilityLayer()
+    catalog = [
+        {
+            "server": "yfinance",
+            "tool": "get_historical_stock_prices",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string"},
+                    "interval": {"type": "string", "default": "5d"},
+                    "adjusted": {"type": "boolean", "default": False},
+                    "source": {"type": "string", "default": "weekly-normalized-cache"},
+                },
+                "required": ["ticker", "interval", "adjusted", "source"],
+            },
+        }
+    ]
+
+    compat = layer.normalize_arguments(
+        "mcp_call",
+        {
+            "server": "yahoo-finance",
+            "tool": "get_historical_prices",
+            "arguments": {"symbol": "AAPL"},
+        },
+        case_context={"case_id": "MCP-020", "mcp_tool_catalog": catalog},
+    )
+
+    assert compat.normalized_arguments["server"] == "yfinance"
+    assert compat.normalized_arguments["tool"] == "get_historical_stock_prices"
+    assert compat.normalized_arguments["arguments"]["ticker"] == "AAPL"
+    assert compat.normalized_arguments["arguments"]["interval"] == "5d"
+    assert compat.normalized_arguments["arguments"]["adjusted"] is False
+    assert compat.normalized_arguments["arguments"]["source"] == "weekly-normalized-cache"
+    assert "mcp_call.server.canonicalized_from_catalog" in compat.repairs
+    assert "mcp_call.tool.canonicalized_from_catalog" in compat.repairs
+    assert "mcp_call.arguments.symbol_to_ticker" in compat.repairs
+    assert "mcp_call.arguments.source.defaulted_from_catalog" in compat.repairs
+
+
+def test_mcp_call_does_not_canonicalize_unrelated_catalog_tool() -> None:
+    layer = ToolCompatibilityLayer()
+    catalog = [
+        {
+            "server": "github",
+            "tool": "create_repository",
+            "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        }
+    ]
+
+    compat = layer.normalize_arguments(
+        "mcp_call",
+        {"server": "github", "tool": "create_branch", "arguments": {"branch": "exp"}},
+        case_context={"case_id": "MCP-010", "mcp_tool_catalog": catalog},
+    )
+
+    assert compat.normalized_arguments["tool"] == "create_branch"
+    assert "mcp_call.tool.canonicalized_from_catalog" not in compat.repairs
+    assert "mcp_call.catalog_descriptor_not_matched" in compat.warnings
+
+
 def test_memory_search_query_is_inferred_from_task_question() -> None:
     layer = ToolCompatibilityLayer()
 

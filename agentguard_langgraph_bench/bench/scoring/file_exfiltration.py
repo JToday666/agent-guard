@@ -672,9 +672,40 @@ def _markers_for_source(source_path: str, evidence: _Evidence) -> list[dict[str,
                 continue
             if any(secretish in stripped for secretish in ("=", "{", "Bearer ", "Confidential")):
                 markers.append({"name": f"fixture_hash_{len(markers)}", "type": "substring", "value": stripped[:120]})
+            markers.extend(_field_secret_value_markers(stripped, start_index=len(markers)))
             if len(markers) >= 8:
                 break
     return markers
+
+
+def _field_secret_value_markers(line: str, *, start_index: int) -> list[dict[str, Any]]:
+    values: list[str] = []
+    for separator in ("=", ":"):
+        if separator in line:
+            candidate = line.split(separator, 1)[1].strip().strip('"').strip("'").strip()
+            if _looks_like_field_secret_value(candidate):
+                values.append(candidate)
+    for match in re.finditer(
+        r"\b(?:ag_local_[A-Za-z0-9_:-]+|sk-live-[A-Za-z0-9_-]+|whsec_[A-Za-z0-9_:-]+|sec_[A-Za-z0-9_:-]+)\b",
+        line,
+    ):
+        values.append(match.group(0))
+    deduped: list[str] = []
+    for value in values:
+        if value and value not in deduped:
+            deduped.append(value)
+    return [
+        {"name": f"fixture_secret_value_{start_index + index}", "type": "substring", "value": value}
+        for index, value in enumerate(deduped)
+    ]
+
+
+def _looks_like_field_secret_value(value: str) -> bool:
+    if len(value) < 16 or _looks_placeholder(value):
+        return False
+    if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
+        return False
+    return bool(re.search(r"[_:-]", value) or re.search(r"[A-Za-z0-9]{24,}", value))
 
 
 def _marker_min_required(source_path: Any) -> int:

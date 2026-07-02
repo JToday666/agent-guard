@@ -20,6 +20,8 @@ DEFAULT_LLM_REQUEST_TIMEOUT = 60.0
 DEFAULT_LLM_MAX_RETRIES = 1
 DEFAULT_INSTRUMENTATION_PLAN_MODE = "autonomous"
 DEFAULT_AGENT_VISIBLE_PAYLOAD_MODE = "original"
+DEFAULT_LANGGRAPH_RECURSION_LIMIT = 100
+LLM_ENV_KEY_PREFIXES = ("AGENTGUARD_LLM_", "DEEPSEEK_", "OPENAI_")
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -46,6 +48,8 @@ def _load_env_file(path: Path) -> None:
         if parsed is None:
             continue
         key, value = parsed
+        if not key.startswith(LLM_ENV_KEY_PREFIXES):
+            continue
         os.environ.setdefault(key, value)
 
 
@@ -156,8 +160,13 @@ class BenchConfig:
     llm_temperature: float = 0.0
     llm_fallback_to_case_plan: bool = False
     llm_max_tool_rounds: int = DEFAULT_LLM_MAX_TOOL_ROUNDS
+    max_wall_clock_seconds: float | None = None
     llm_request_timeout: float = DEFAULT_LLM_REQUEST_TIMEOUT
     llm_max_retries: int = DEFAULT_LLM_MAX_RETRIES
+    langgraph_recursion_limit: int = DEFAULT_LANGGRAPH_RECURSION_LIMIT
+    langgraph_graph_module: str = ""
+    langgraph_graph_object: str = ""
+    browser_action_timeout: float | None = None
     instrumentation_plan_mode: str = DEFAULT_INSTRUMENTATION_PLAN_MODE
     browser_mode: str = "record"
     browser_engine: str = "chromium"
@@ -191,6 +200,7 @@ class BenchConfig:
         timeout: float | None = None,
         fail_closed: bool = True,
         defense_enabled: bool = True,
+        runtime: str | None = None,
         sandbox_dir: str | Path | None = None,
         results_dir: str | Path | None = None,
         llm_enabled: bool | None = None,
@@ -201,8 +211,13 @@ class BenchConfig:
         llm_temperature: float | None = None,
         llm_fallback_to_case_plan: bool | None = None,
         llm_max_tool_rounds: int | None = None,
+        max_wall_clock_seconds: float | None = None,
         llm_request_timeout: float | None = None,
         llm_max_retries: int | None = None,
+        langgraph_recursion_limit: int | None = None,
+        langgraph_graph_module: str | None = None,
+        langgraph_graph_object: str | None = None,
+        browser_action_timeout: float | None = None,
         instrumentation_plan_mode: str | None = None,
         browser_mode: str | None = None,
         browser_engine: str | None = None,
@@ -255,13 +270,35 @@ class BenchConfig:
             raise ValueError("llm_request_timeout must be greater than 0")
         if resolved_llm_max_retries < 0:
             raise ValueError("llm_max_retries must be greater than or equal to 0")
+        resolved_langgraph_recursion_limit = (
+            _env_int_strict("AGENTGUARD_LANGGRAPH_RECURSION_LIMIT", DEFAULT_LANGGRAPH_RECURSION_LIMIT)
+            if langgraph_recursion_limit is None
+            else langgraph_recursion_limit
+        )
+        if resolved_langgraph_recursion_limit <= 0:
+            raise ValueError("langgraph_recursion_limit must be greater than 0")
+        resolved_max_wall_clock_seconds = (
+            _env_float("AGENTGUARD_MAX_WALL_CLOCK_SECONDS", 0.0)
+            if max_wall_clock_seconds is None
+            else max_wall_clock_seconds
+        )
+        if resolved_max_wall_clock_seconds is not None and resolved_max_wall_clock_seconds <= 0:
+            resolved_max_wall_clock_seconds = None
+        resolved_browser_action_timeout = (
+            _env_float("AGENTGUARD_BROWSER_ACTION_TIMEOUT", 0.0)
+            if browser_action_timeout is None
+            else browser_action_timeout
+        )
+        if resolved_browser_action_timeout is not None and resolved_browser_action_timeout <= 0:
+            resolved_browser_action_timeout = None
 
         return cls(
-            core_base_url=core_base_url or cls.core_base_url,
-            token=token or cls.token,
-            timeout=timeout if timeout is not None else cls.timeout,
+            core_base_url=core_base_url or "http://localhost:8000",
+            token=token or "demo-token",
+            timeout=timeout if timeout is not None else 5.0,
             fail_closed=fail_closed,
             defense_enabled=defense_enabled,
+            runtime=(runtime or os.getenv("AGENTGUARD_BENCH_RUNTIME") or "langgraph").strip().lower(),
             sandbox_dir=Path(sandbox_dir) if sandbox_dir is not None else DEFAULT_SANDBOX_DIR,
             results_dir=Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR,
             llm_enabled=_env_bool("AGENTGUARD_LLM_ENABLED", False) if llm_enabled is None else llm_enabled,
@@ -280,8 +317,13 @@ class BenchConfig:
                 if llm_max_tool_rounds is None
                 else llm_max_tool_rounds
             ),
+            max_wall_clock_seconds=resolved_max_wall_clock_seconds,
             llm_request_timeout=resolved_llm_request_timeout,
             llm_max_retries=resolved_llm_max_retries,
+            langgraph_recursion_limit=resolved_langgraph_recursion_limit,
+            langgraph_graph_module=(langgraph_graph_module or os.getenv("AGENTGUARD_LANGGRAPH_GRAPH_MODULE") or "").strip(),
+            langgraph_graph_object=(langgraph_graph_object or os.getenv("AGENTGUARD_LANGGRAPH_GRAPH_OBJECT") or "").strip(),
+            browser_action_timeout=resolved_browser_action_timeout,
             instrumentation_plan_mode=(
                 instrumentation_plan_mode
                 or os.getenv("AGENTGUARD_INSTRUMENTATION_PLAN_MODE")

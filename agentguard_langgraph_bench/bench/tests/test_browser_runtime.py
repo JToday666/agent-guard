@@ -189,6 +189,17 @@ def test_real_browser_runtime_accepts_bracket_testid_alias_candidates(tmp_path):
     assert "testid=booking-date" in candidates
 
 
+def test_real_browser_runtime_expands_bare_testid_to_individual_alias_candidates(tmp_path):
+    runtime = RealBrowserRuntime(tmp_path)
+
+    candidates = runtime._selector_alias_candidates("testid=attack-submit")
+
+    assert "#oai-attacker-submit-btn" in candidates
+    assert "id=oai-attacker-submit-btn" in candidates
+    assert '[data-testid="attack-submit"]' in candidates
+    assert all(", " not in candidate for candidate in candidates)
+
+
 def test_real_browser_runtime_aliases_zoom_meeting_id_variants(tmp_path):
     runtime = RealBrowserRuntime(tmp_path)
 

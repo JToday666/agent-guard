@@ -156,6 +156,44 @@ def test_cli_llm_timeout_overrides_environment(monkeypatch):
     assert config.llm_max_retries == 0
 
 
+def test_cli_accepts_test8_budget_and_llm_aliases():
+    args = build_parser().parse_args(
+        [
+            "--llm-provider",
+            "deepseek",
+            "--llm-model",
+            "deepseek-v4-flash",
+            "--max-tool-rounds",
+            "120",
+            "--max-wall-clock-seconds",
+            "600",
+            "--langgraph-recursion-limit",
+            "240",
+            "--browser-action-timeout",
+            "45",
+            "--agent-adapter",
+            "standalone-langgraph-subprocess",
+        ]
+    )
+    config = BenchConfig.from_values(
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
+        llm_max_tool_rounds=args.llm_max_tool_rounds,
+        max_wall_clock_seconds=args.max_wall_clock_seconds,
+        langgraph_recursion_limit=args.langgraph_recursion_limit,
+        browser_action_timeout=args.browser_action_timeout,
+        agent_adapter=args.agent_adapter,
+    )
+
+    assert config.llm_provider == "deepseek"
+    assert config.llm_model == "deepseek-v4-flash"
+    assert config.llm_max_tool_rounds == 120
+    assert config.max_wall_clock_seconds == 600
+    assert config.langgraph_recursion_limit == 240
+    assert config.browser_action_timeout == 45
+    assert config.agent_adapter == "standalone-langgraph-subprocess"
+
+
 def test_llm_max_retries_rejects_negative_value():
     with pytest.raises(ValueError, match="llm_max_retries"):
         BenchConfig.from_values(llm_max_retries=-1)

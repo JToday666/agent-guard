@@ -32,7 +32,10 @@ def runtime_limits_for_case(case: Any, config: Any) -> RuntimeLimits:
     max_rounds = _positive_int(payload.get("max_tool_rounds"), None)
     if max_rounds is None:
         max_rounds = max(1, int(getattr(config, "llm_max_tool_rounds", 1) or 1))
-    max_wall_clock = _positive_float(payload.get("max_wall_clock_seconds"), None)
+    max_wall_clock = _positive_float(
+        payload.get("max_wall_clock_seconds"),
+        _positive_float(getattr(config, "max_wall_clock_seconds", None), None),
+    )
     max_repeated = _positive_int(payload.get("max_repeated_actions"), DEFAULT_MAX_REPEATED_ACTIONS) or DEFAULT_MAX_REPEATED_ACTIONS
     return RuntimeLimits(
         max_tool_rounds=max_rounds,

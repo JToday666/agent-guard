@@ -2392,7 +2392,7 @@ def initial_state_from_case(case: AttackCase) -> DemoState:
 def run_demo_case(case: AttackCase, adapter: LangGraphAdapter, tools: MockToolRegistry, tool_gateway: Any | None = None) -> dict[str, Any]:
     state = initial_state_from_case(case)
     state = initialize_runtime_state(state, case, adapter.config)
-    state["runtime_limits"] = {**state.get("runtime_limits", {}), "max_tool_rounds": _max_tool_rounds_for_state(state, adapter.config)}
+    state["runtime_limits"] = _runtime_limits_with_effective_max_rounds(state, adapter.config)
     graph = build_demo_graph(adapter, tools, tool_gateway=tool_gateway)
     if hasattr(graph, "invoke"):
         return graph.invoke(state)
@@ -2668,7 +2668,7 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
         "last_tool_results": [],
         "round_index": round_index,
         "last_model_content": planner_content or state.get("last_model_content", ""),
-        "runtime_limits": {**(state.get("runtime_limits") or {}), "max_tool_rounds": _max_tool_rounds_for_state(state, config)},
+        "runtime_limits": _runtime_limits_with_effective_max_rounds(state, config),
     }
     if stop_reason:
         state["stop_reason"] = stop_reason
@@ -2693,6 +2693,21 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
             "llm_diagnostics": planning_diagnostics,
         },
     )
+
+
+def _runtime_limits_with_effective_max_rounds(state: DemoState, config: BenchConfig) -> dict[str, Any]:
+    limits = dict(state.get("runtime_limits") or {})
+    existing = limits.get("max_tool_rounds")
+    effective = _max_tool_rounds_for_state(state, config)
+    if config.instrumentation_plan_mode == "autonomous" and existing is not None:
+        try:
+            existing_int = int(existing)
+        except (TypeError, ValueError):
+            existing_int = None
+        if existing_int is not None and existing_int > 0:
+            effective = min(existing_int, effective)
+    limits["max_tool_rounds"] = effective
+    return limits
 
 
 def _guided_plan_applied(calls: list[dict[str, Any]]) -> bool:

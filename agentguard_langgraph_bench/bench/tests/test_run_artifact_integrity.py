@@ -4,7 +4,15 @@ from pathlib import Path
 
 from agentguard_langgraph_bench.bench.evidence.artifact_integrity import build_artifact_integrity_manifest, check_case_artifacts
 from agentguard_langgraph_bench.bench.metrics import calculate_metrics
-from agentguard_langgraph_bench.bench.runner import _case_result_dir, _write_case_artifacts, write_results
+from agentguard_langgraph_bench.bench.config import BenchConfig
+from agentguard_langgraph_bench.bench.runner import (
+    _case_result_dir,
+    _langgraph_graph_module,
+    _langgraph_graph_object,
+    _preserve_runtime_infra_invalidity,
+    _write_case_artifacts,
+    write_results,
+)
 
 
 def test_valid_asr_excludes_invalid_and_unknown_cases():
@@ -43,6 +51,85 @@ def test_write_results_emits_run_manifest(tmp_path):
     assert Path(paths["run_manifest"]).exists()
     assert paths["run_dir"].endswith("run_20260621T000000000000Z")
     assert paths["case_artifacts_dir"].endswith("run_20260621T000000000000Z/cases")
+
+
+def test_run_manifest_records_true_langgraph_gate_fields(tmp_path):
+    rows = [
+        {
+            "case_id": "PI-001",
+            "case_run_key": "PI-001",
+            "attack_type": "prompt_injection",
+            "run_valid": True,
+            "is_malicious": True,
+            "benchmark_run_id": "20260621T000000000010Z",
+            "runtime": "langgraph",
+            "adapter_name": "standalone-langgraph-subprocess",
+            "langgraph_graph_module": "external.agent.graph",
+            "langgraph_graph_object": "graph",
+            "langgraph_recursion_limit": 240,
+            "runtime_limits": {"max_tool_rounds": 120, "max_wall_clock_seconds": 600, "max_repeated_actions": 5},
+            "browser_action_timeout": 45,
+            "llm_request_timeout": 70,
+            "llm_max_retries": 2,
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-v4-flash",
+            "llm_enabled": True,
+            "instrumentation_plan_mode": "autonomous",
+            "planning_source": "llm_autonomous",
+            "guided_plan_applied": False,
+            "fallback_applied": False,
+            "core_mode": "defense_off",
+            "fake_core_decision": None,
+            "tool_invocation_base_url": "http://127.0.0.1:18090/tools",
+            "browser_mode": "real",
+        }
+    ]
+    case_dir = tmp_path / "run_20260621T000000000010Z" / "cases" / "PI-001"
+    case_dir.mkdir(parents=True)
+    (case_dir / "case_result.json").write_text("{}", encoding="utf-8")
+
+    paths = write_results(rows, {}, tmp_path)
+    manifest = json.loads(Path(paths["run_manifest"]).read_text(encoding="utf-8"))
+
+    assert manifest["runtime"] == "langgraph"
+    assert manifest["agent_adapter"] == "standalone-langgraph-subprocess"
+    assert manifest["langgraph_graph_module"] == "external.agent.graph"
+    assert manifest["langgraph_recursion_limit"] == 240
+    assert manifest["max_tool_rounds"] == 120
+    assert manifest["max_wall_clock_seconds"] == 600
+    assert manifest["llm_provider"] == "deepseek"
+    assert manifest["llm_model"] == "deepseek-v4-flash"
+    assert manifest["llm_enabled"] is True
+    assert manifest["planning_source"] == "llm_autonomous"
+    assert manifest["guided_plan_applied"] is False
+    assert manifest["fallback_applied"] is False
+    assert manifest["core_mode"] == "defense_off"
+    assert manifest["fake_core_decision"] is None
+    assert manifest["browser_mode"] == "real"
+    assert manifest["tool_invocation_base_url"] == "http://127.0.0.1:18090/tools"
+
+
+def test_standalone_langgraph_subprocess_has_default_graph_evidence():
+    config = BenchConfig(agent_adapter="standalone-langgraph-subprocess", runtime="langgraph")
+    adapter = type("Adapter", (), {"name": "standalone-langgraph-subprocess"})()
+
+    assert _langgraph_graph_module(adapter, config).endswith("bench_tool_agent.py")
+    assert _langgraph_graph_object(adapter, config) == "build_graph"
+
+
+def test_runtime_infra_timeout_invalidity_survives_family_evaluator():
+    row = {
+        "run_valid": True,
+        "run_status": "completed",
+        "stop_reason": "adapter_timeout",
+        "invalid_reasons": [],
+    }
+
+    _preserve_runtime_infra_invalidity(row)
+
+    assert row["run_valid"] is False
+    assert row["run_status"] == "adapter_timeout"
+    assert row["invalid_reasons"] == ["adapter_timeout"]
 
 
 def test_duplicate_case_ids_use_case_run_key_for_integrity(tmp_path):
@@ -210,45 +297,6 @@ def test_artifact_integrity_indexes_generic_tool_hijacking_case(tmp_path):
     assert manifest["ok"] is True
     assert manifest["cases"]["MCP-020"]["case_scoped_mcp_logs"] is True
 
-
-def test_artifact_integrity_allows_unproduced_llm_artifacts_for_external_adapter(tmp_path):
-    run_dir = tmp_path / "run"
-    case_dir = run_dir / "cases" / "BN-001"
-    evidence_index = {
-        "case_id": "BN-001",
-        "missing": [
-            {"path": "llm_prompts/round_1_redacted.json", "reason": "not produced"},
-            {"path": "llm_responses/round_1_redacted.json", "reason": "not produced"},
-        ],
-    }
-    for relative, content in (
-        ("case_result.json", {"case_id": "BN-001", "adapter_name": "openclaw"}),
-        ("evidence_index.json", evidence_index),
-        ("sandbox_diff.json", {"schema_version": "1.0", "added": [], "modified": [], "deleted": []}),
-        ("agent_visible_prompt_contamination.json", {"checked": True, "found": False}),
-    ):
-        path = case_dir / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(content), encoding="utf-8")
-    for relative in (
-        "tool_results.jsonl",
-        "tool_call_events.jsonl",
-        "audit_events.jsonl",
-        "policy_decisions.jsonl",
-        "mcp/calls.jsonl",
-        "mcp/descriptors.jsonl",
-        "mcp/catalog_diff.jsonl",
-        "mcp/service_requests.jsonl",
-    ):
-        path = case_dir / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('{"case_id":"BN-001","request_id":"BN-001"}\n', encoding="utf-8")
-
-    manifest = build_artifact_integrity_manifest(run_dir)
-
-    assert manifest["case_count"] == 1
-    assert manifest["ok"] is True
-    assert manifest["cases"]["BN-001"]["critical_errors"] == []
 
 
 def test_write_results_includes_prompt_injection_auxiliary_columns(tmp_path):

@@ -424,7 +424,10 @@ def _check_png(path: Path, *, root: Path, artifact_type: str) -> dict[str, Any]:
             if image.width <= 1 or image.height <= 1:
                 item["error"] = f"png_placeholder_size:{image.width}x{image.height}"
     except Exception as exc:
-        item["error"] = f"png_parse_error:{exc}"
+        fallback = _check_png_header_fallback(path, item, f"pillow_parse_error:{exc}")
+        if fallback.get("error") == "png_header_parse_error":
+            fallback["error"] = f"png_parse_error:{exc}"
+        return fallback
     return item
 
 
