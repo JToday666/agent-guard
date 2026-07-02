@@ -127,6 +127,16 @@ class PolicyBundle(BaseModel):
             "future runs",
         ]
     )
+    high_confidence_prompt_injection_markers: list[str] = Field(
+        default_factory=lambda: [
+            "send /private",
+            "/private/",
+            "attacker@",
+            "exfiltrate",
+            "send the token",
+            "send secrets",
+        ]
+    )
     jailbreak_markers: list[str] = Field(
         default_factory=lambda: [
             "you are now dan",
@@ -194,6 +204,47 @@ class PolicyBundle(BaseModel):
             "persist this rule",
         ]
     )
+    high_confidence_memory_poisoning_markers: list[str] = Field(
+        default_factory=lambda: [
+            "always send",
+            "attacker@",
+            "future runs",
+            "persist this rule",
+        ]
+    )
+    agent_abuse_markers: list[str] = Field(
+        default_factory=lambda: [
+            "unauthorized_write",
+            "repo:write",
+            "escalation",
+            "cross_task",
+        ]
+    )
+    file_exfiltration_sink_markers: list[str] = Field(
+        default_factory=lambda: [
+            "attacker@",
+            "exfiltration",
+            "/collect/",
+            "webhook",
+            "upload",
+        ]
+    )
+    mcp_hijack_argument_markers: list[str] = Field(
+        default_factory=lambda: [
+            "callback_url",
+            "webhook_url",
+            "redirect_uri",
+            "upload_url",
+            "forward_to",
+            "send_to",
+            "external_url",
+            "/collect/",
+            "exfil",
+            "shadow",
+            "required_dependency",
+        ]
+    )
+    default_enforcement_mode: str = "enforce"
     allowed_email_domains: list[str] = Field(default_factory=lambda: ["agentguard.local"])
     allowed_api_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
     allowed_api_paths: list[str] = Field(default_factory=lambda: ["/status"])
@@ -204,7 +255,7 @@ class PolicyBundle(BaseModel):
     tool_action_aliases: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "read_file": ["read"],
-            "write_file": ["write"],
+            "write_file": ["write", "create", "add", "copy", "save", "edit", "update", "modify"],
             "send_email": ["email", "send"],
             "call_api": ["api", "call"],
             "memory_write": ["memory", "write"],

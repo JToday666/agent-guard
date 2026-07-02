@@ -29,6 +29,7 @@ class ApprovalRequest(BaseModel):
     reason: str
     risk_score: int = Field(ge=0, le=100)
     severity: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=utc_now_iso)
     expires_at: str | None = None
     resolved_at: str | None = None

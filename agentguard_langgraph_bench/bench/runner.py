@@ -87,7 +87,12 @@ def run_cases(
     agent_adapter = agent_adapter or load_agent_adapter(config)
     guard_config = GuardConfig.from_bench_config(config, runtime=agent_adapter.runtime, agent_id=agent_adapter.name)
     guard_adapter = GuardAdapter(config=guard_config, core_client=core_client)
-    tool_gateway = GuardedToolGateway(guard_adapter=guard_adapter, tool_runtime=tools)
+    tool_gateway = GuardedToolGateway(
+        guard_adapter=guard_adapter,
+        tool_runtime=tools,
+        approval_mode=config.approval_mode,
+        approval_timeout=config.approval_timeout,
+    )
     tool_server = None
     if config.tool_server_mode == "http":
         tool_server = BenchmarkToolServer(tool_gateway, host=config.tool_server_host, port=config.tool_server_port).start()
@@ -1977,6 +1982,17 @@ def _decision_record(tool_result: dict[str, Any], row: dict[str, Any]) -> dict[s
         "blocked": tool_result.get("blocked"),
         "side_effects": tool_result.get("side_effects") or [],
         "audit_id": audit.get("audit_id"),
+        "approval_mode": tool_result.get("approval_mode"),
+        "approval_id": tool_result.get("approval_id"),
+        "approval_consumed": bool(tool_result.get("approval_consumed")),
+        "approval_decision": tool_result.get("approval_decision"),
+        "approval_wait_latency_ms": tool_result.get("approval_wait_latency_ms"),
+        "approved_arguments_hash": tool_result.get("approved_arguments_hash"),
+        "tool_executed_after_approval": bool(tool_result.get("tool_executed_after_approval")),
+        "block_semantics": tool_result.get("block_semantics"),
+        "counts_as_effective_block": bool(tool_result.get("counts_as_effective_block")),
+        "sanitize_applied": bool(tool_result.get("sanitize_applied")),
+        "quarantine_applied": bool(tool_result.get("quarantine_applied")),
     }
 
 
@@ -3008,6 +3024,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--defense", choices=["on", "off"], default="off")
     parser.add_argument("--fail-open-debug", action="store_true", help="Allow local debug execution if Core fails")
+    parser.add_argument(
+        "--approval-mode",
+        choices=["fail-closed", "wait"],
+        default="fail-closed",
+        help="How benchmark tools handle Core ask decisions. Default keeps legacy fail-closed behavior.",
+    )
+    parser.add_argument(
+        "--approval-timeout",
+        type=float,
+        default=60.0,
+        help="Seconds to poll Guard API for approval resolution when --approval-mode wait is enabled.",
+    )
     parser.add_argument("--fake-core", action="store_true", help="Use a local fake Core instead of HTTP Core")
     parser.add_argument("--fake-core-decision", choices=["allow", "deny", "ask"], default="deny", help="Decision returned by local fake Core")
     parser.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
@@ -3141,6 +3169,8 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         fail_closed=not args.fail_open_debug,
         defense_enabled=defense_enabled,
+        approval_mode=args.approval_mode,
+        approval_timeout=args.approval_timeout,
         runtime=args.runtime or None,
         sandbox_dir=args.sandbox_dir,
         results_dir=args.results_dir,

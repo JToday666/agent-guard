@@ -7,7 +7,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from agentguard_langgraph_adapter import BROWSER_TOOLS, ToolCompatibilityLayer
+from agentguard_langgraph_adapter import BROWSER_TOOLS, ToolCompatibilityLayer  # noqa: E402
 
 
 def test_runtime_policy_hides_browser_tools_for_non_browser_source_path() -> None:

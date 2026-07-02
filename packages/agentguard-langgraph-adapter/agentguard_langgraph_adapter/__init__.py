@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .config import AgentGuardLangGraphConfig
 from .core_client import AgentGuardCoreClient, CoreClientError, CoreClientProtocol, FakeAllowCoreClient, FakeAskCoreClient, FakeDenyCoreClient
-from .event_models import AuditEvent, PolicyDecision, ToolCallEvent, ToolExecutionResult
+from .event_models import AuditEvent, PolicyDecision, RuntimeGuardEvent, ToolCallEvent, ToolExecutionResult
 from .langgraph_adapter import LangGraphAdapter, blocked_result, create_guarded_tool_node
 from .secure_tool_node import GuardedToolNode, SecureToolNode
 from .tool_gateway import GuardedToolGateway
@@ -29,6 +29,7 @@ __all__ = [
     "GuardedToolGateway",
     "LangGraphAdapter",
     "PolicyDecision",
+    "RuntimeGuardEvent",
     "SecureToolNode",
     "ToolCallEvent",
     "ToolExecutionResult",

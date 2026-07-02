@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import urlparse
 
@@ -26,6 +27,12 @@ class OutboundDetector(Detector):
                 return []
             target = str(event.payload.arguments.get("to") or "")
             if not is_allowed_recipient(target, policies):
+                if any(
+                    (resource.data_classification or "").lower() == "sensitive"
+                    and resource.direction.lower() == "outbound"
+                    for resource in event.payload.derived_resources
+                ):
+                    return []
                 has_sensitive_content = tool_email_has_sensitive_text(event.payload.arguments, policies)
                 result = apply_rule_override(
                     DetectionResult(
@@ -58,6 +65,29 @@ class OutboundDetector(Detector):
             if is_rule_disabled(rule_id, policies):
                 return []
             target = str(event.payload.arguments.get("url") or "")
+            has_sensitive_content = tool_api_has_sensitive_text(event.payload.arguments, policies)
+            if not is_allowed_api_target(target, policies) and has_sensitive_content:
+                result = apply_rule_override(
+                    DetectionResult(
+                        decision="deny",
+                        risk_score=84,
+                        category="outbound_dlp",
+                        rule_hit=RuleHit(
+                            rule_id=rule_id,
+                            rule_name="Outbound API Sensitive Data",
+                            severity="high",
+                            evidence=[
+                                f"url={target}",
+                                "sensitive_text_match=true",
+                            ],
+                        ),
+                        reason="The API call sends sensitive text to an external endpoint.",
+                        approval_resource=None,
+                        severity="high",
+                    ),
+                    policies,
+                )
+                return [result] if result is not None else []
             if is_collection_endpoint(target, policies):
                 result = apply_rule_override(
                     DetectionResult(
@@ -89,6 +119,12 @@ class OutboundDetector(Detector):
             return []
         target = payload.recipient
         if is_allowed_recipient(target, policies):
+            return []
+        if any(
+            (resource.data_classification or "").lower() == "sensitive"
+            and resource.direction.lower() == "outbound"
+            for resource in payload.derived_resources
+        ):
             return []
         has_sensitive_content = payload.contains_sensitive_data or has_sensitive_text(
             payload.content_preview, policies
@@ -134,11 +170,19 @@ def is_allowed_recipient(recipient: str, policies: PolicyBundle) -> bool:
 def is_collection_endpoint(url: str, policies: PolicyBundle) -> bool:
     lowered = url.lower()
     parsed = urlparse(lowered)
-    allowed_hosts = {item.lower() for item in policies.allowed_api_hosts}
-    allowed_paths = {item.lower() for item in policies.allowed_api_paths}
-    if parsed.hostname in allowed_hosts and parsed.path.lower() in allowed_paths:
+    if _is_allowed_api_url(parsed, policies):
         return False
     return any(marker.lower() in lowered for marker in policies.collection_path_markers)
+
+
+def is_allowed_api_target(url: str, policies: PolicyBundle) -> bool:
+    return _is_allowed_api_url(urlparse(url.lower()), policies)
+
+
+def _is_allowed_api_url(parsed: Any, policies: PolicyBundle) -> bool:
+    allowed_hosts = {item.lower() for item in policies.allowed_api_hosts}
+    allowed_paths = {item.lower() for item in policies.allowed_api_paths}
+    return parsed.hostname in allowed_hosts and parsed.path.lower() in allowed_paths
 
 
 def tool_email_has_sensitive_text(arguments: dict[str, Any], policies: PolicyBundle) -> bool:
@@ -146,3 +190,27 @@ def tool_email_has_sensitive_text(arguments: dict[str, Any], policies: PolicyBun
         has_sensitive_text(str(arguments.get(key) or ""), policies)
         for key in ("subject", "body", "content", "text")
     )
+
+
+def tool_api_has_sensitive_text(arguments: dict[str, Any], policies: PolicyBundle) -> bool:
+    candidates = [
+        arguments.get("body"),
+        arguments.get("data"),
+        arguments.get("json"),
+        arguments.get("payload"),
+        arguments.get("headers"),
+        arguments.get("params"),
+        arguments.get("query"),
+    ]
+    return any(has_sensitive_text(_preview(value), policies) for value in candidates)
+
+
+def _preview(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)

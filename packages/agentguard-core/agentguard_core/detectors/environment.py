@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..decisions import DetectionResult, RuleHit
 from ..events import GuardEvent, ToolResultPayload
-from ..matchers import has_instruction_like_text
+from ..matchers import has_high_confidence_memory_poisoning_text, has_instruction_like_text
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
 
@@ -22,6 +22,10 @@ class EnvironmentPoisoningDetector(Detector):
         if not (
             event.payload.contains_instruction_like_text
             or has_instruction_like_text(event.payload.result.content_preview, policies)
+        ):
+            return []
+        if (event.payload.will_enter_context or event.payload.will_persist) and has_high_confidence_memory_poisoning_text(
+            event.payload.result.content_preview, policies
         ):
             return []
         call_id = event.payload.tool.call_id

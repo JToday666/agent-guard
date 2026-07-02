@@ -156,6 +156,20 @@ export function buildToolCallGuardEvent(
   const toolArgs = toolArguments(event, context);
   const derivedResources = derivedResourcesForTool(event, context, toolArgs);
   const derivedPaths = derivedPathTargets(event, context, derivedResources);
+  const runtimePolicy = runtimePolicyForTool(event, context);
+  const securityMetadata: JsonObject = {
+    session_key: context.sessionKey ?? null,
+    tool_kind: event.toolKind ?? context.toolKind ?? null,
+    tool_input_kind: event.toolInputKind ?? context.toolInputKind ?? null,
+  };
+  const eventMetadata: JsonObject = {
+    openclaw_hook: "before_tool_call",
+    session_key: context.sessionKey ?? null,
+  };
+  if (runtimePolicy) {
+    securityMetadata.runtime_policy = runtimePolicy;
+    eventMetadata.runtime_policy = runtimePolicy;
+  }
 
   return {
     schema_version: "0.3",
@@ -181,11 +195,7 @@ export function buildToolCallGuardEvent(
       model_intent: null,
       context_sources: [],
       derived_paths: derivedPaths,
-      metadata: {
-        session_key: context.sessionKey ?? null,
-        tool_kind: event.toolKind ?? context.toolKind ?? null,
-        tool_input_kind: event.toolInputKind ?? context.toolInputKind ?? null,
-      },
+      metadata: securityMetadata,
     },
     payload: {
       tool: {
@@ -198,10 +208,7 @@ export function buildToolCallGuardEvent(
       arguments: toolArgs,
       derived_resources: derivedResources,
     },
-    metadata: {
-      openclaw_hook: "before_tool_call",
-      session_key: context.sessionKey ?? null,
-    },
+    metadata: eventMetadata,
   };
 }
 
@@ -654,6 +661,62 @@ function definedMetadata(values: Record<string, unknown>): JsonObject {
   return metadata;
 }
 
+function runtimePolicyForTool(event: RuntimeSecurityFields, context: RuntimeSecurityFields): JsonObject | undefined {
+  const eventRecord = asRecord(event);
+  const contextRecord = asRecord(context);
+  for (const value of [
+    eventRecord.runtimePolicy,
+    eventRecord.runtime_policy,
+    contextRecord.runtimePolicy,
+    contextRecord.runtime_policy,
+  ]) {
+    const policy = sanitizedRuntimePolicy(value);
+    if (policy) {
+      return policy;
+    }
+  }
+
+  const toolName = stringMaybe(eventRecord.toolName) ?? stringMaybe(contextRecord.toolName);
+  if (!toolName) {
+    return undefined;
+  }
+  for (const mapValue of [
+    eventRecord.toolRuntimePolicies,
+    eventRecord.tool_runtime_policies,
+    contextRecord.toolRuntimePolicies,
+    contextRecord.tool_runtime_policies,
+  ]) {
+    const policy = sanitizedRuntimePolicy(asRecord(mapValue)[toolName]);
+    if (policy) {
+      return policy;
+    }
+  }
+  return undefined;
+}
+
+function sanitizedRuntimePolicy(value: unknown): JsonObject | undefined {
+  const record = asRecord(value);
+  const policy: JsonObject = {};
+  const copyKeys = [
+    "browser_expected",
+    "tool_manifest_scoped",
+    "declared_tools",
+    "mcp_boundary_required",
+  ];
+  for (const key of copyKeys) {
+    const field = record[key];
+    if (Array.isArray(field)) {
+      const strings = uniqueStrings(field.map((item) => stringMaybe(item)));
+      if (strings.length > 0) {
+        policy[key] = strings;
+      }
+    } else if (typeof field === "boolean" || typeof field === "string" || typeof field === "number") {
+      policy[key] = field;
+    }
+  }
+  return Object.keys(policy).length > 0 ? policy : undefined;
+}
+
 function firstNonEmpty(...values: Array<string | null | undefined>): string {
   for (const value of values) {
     if (typeof value === "string" && value.length > 0) {
@@ -670,8 +733,8 @@ function createLocalId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+function uniqueStrings(values: ReadonlyArray<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
 }
 
 function runtimeSecurityFields(
@@ -681,11 +744,98 @@ function runtimeSecurityFields(
 ): { userTask: string; sourceTrust: string; sourceType: string } {
   const eventRecord = asRecord(event);
   const contextRecord = asRecord(context);
+  const sourceType = (
+    stringMaybe(eventRecord.sourceType ?? eventRecord.source_type)
+    ?? stringMaybe(contextRecord.sourceType ?? contextRecord.source_type)
+    ?? "openclaw"
+  );
+  const explicitTrust = (
+    stringMaybe(eventRecord.sourceTrust ?? eventRecord.source_trust)
+    ?? stringMaybe(contextRecord.sourceTrust ?? contextRecord.source_trust)
+  );
   return {
     userTask: extractRuntimeUserTask([eventRecord, contextRecord], options) ?? "",
-    sourceTrust: stringMaybe(eventRecord.sourceTrust) ?? stringMaybe(contextRecord.sourceTrust) ?? "trusted",
-    sourceType: stringMaybe(eventRecord.sourceType) ?? stringMaybe(contextRecord.sourceType) ?? "openclaw",
+    sourceTrust: explicitTrust ?? inferSourceTrust(eventRecord, contextRecord, sourceType),
+    sourceType,
   };
+}
+
+function inferSourceTrust(
+  event: RuntimeSecurityFields & JsonObject,
+  context: RuntimeSecurityFields & JsonObject,
+  sourceType: string,
+): string {
+  const normalizedType = sourceType.toLowerCase();
+  if (isUntrustedSourceType(normalizedType)) {
+    return "untrusted";
+  }
+  const resources = normalizeDerivedResources(event.derivedResources ?? context.derivedResources);
+  if (resources.some((resource) => resourceLooksLikeInboundExternalContent(resource))) {
+    return "untrusted";
+  }
+  const paths = uniqueStrings(event.derivedPaths ?? context.derivedPaths ?? []);
+  if (paths.some(isHttpUrl) && runtimeContentWillEnterContext(event, context)) {
+    return "untrusted";
+  }
+  if (isTrustedSourceType(normalizedType)) {
+    return "trusted";
+  }
+  return "trusted";
+}
+
+function isUntrustedSourceType(value: string): boolean {
+  return [
+    "retrieved",
+    "retrieval",
+    "rag",
+    "tool_result",
+    "web",
+    "web_fetch",
+    "browser",
+    "search",
+    "search_result",
+    "remote",
+    "external",
+    "document",
+  ].some((marker) => value.includes(marker));
+}
+
+function isTrustedSourceType(value: string): boolean {
+  return ["trusted", "user", "system", "developer", "openclaw", "runtime", "plugin_manifest"].some(
+    (marker) => value === marker || value.startsWith(`${marker}_`),
+  );
+}
+
+function resourceLooksLikeInboundExternalContent(resource: DerivedResource): boolean {
+  if (resource.direction.toLowerCase() !== "inbound") {
+    return false;
+  }
+  const type = resource.resource_type.toLowerCase();
+  return (
+    isHttpUrl(resource.target)
+    || ["api", "web", "browser", "search", "document", "tool_result"].some((marker) => type.includes(marker))
+  );
+}
+
+function runtimeContentWillEnterContext(
+  event: RuntimeSecurityFields & JsonObject,
+  context: RuntimeSecurityFields & JsonObject,
+): boolean {
+  if (event.willEnterContext === true || context.willEnterContext === true) {
+    return true;
+  }
+  return Boolean(
+    event.prompt
+      ?? event.messages
+      ?? event.context
+      ?? event.result
+      ?? event.output
+      ?? context.prompt
+      ?? context.messages
+      ?? context.context
+      ?? context.result
+      ?? context.output,
+  );
 }
 
 function extractRuntimeUserTask(
@@ -770,6 +920,12 @@ function derivedResourcesForTool(
       }),
     );
   }
+  if (event.toolName === "mcp_call") {
+    const resources = derivedResourcesForMcpCall(toolArgs);
+    if (resources.length > 0) {
+      return resources;
+    }
+  }
   const command = toolCommandText(toolArgs);
   if (
     command &&
@@ -802,6 +958,57 @@ function derivedResourcesForTool(
     ];
   }
   return [];
+}
+
+function derivedResourcesForMcpCall(toolArgs: JsonObject): DerivedResource[] {
+  const server = stringMaybe(toolArgs.server ?? toolArgs.mcp_server ?? toolArgs.target_server);
+  const tool = stringMaybe(toolArgs.tool ?? toolArgs.toolName ?? toolArgs.name ?? toolArgs.target_tool);
+  const resources: DerivedResource[] = [];
+  if (server || tool) {
+    resources.push({
+      resource_type: "mcp_tool",
+      operation: "call",
+      target: server && tool ? `${server}.${tool}` : (tool ?? server ?? "unknown"),
+      data_classification: null,
+      direction: "outbound",
+    });
+  }
+
+  const nestedArguments = asRecord(toolArgs.arguments ?? toolArgs.args ?? toolArgs.params);
+  for (const target of urlTargetsFromJson(nestedArguments)) {
+    resources.push({
+      resource_type: "api",
+      operation: "POST",
+      target,
+      data_classification: null,
+      direction: "outbound",
+    });
+  }
+  return resources;
+}
+
+function urlTargetsFromJson(value: unknown, depth = 0): string[] {
+  if (depth > 8) {
+    return [];
+  }
+  const direct = stringMaybe(value);
+  if (direct && isHttpUrl(direct)) {
+    return [direct];
+  }
+  if (Array.isArray(value)) {
+    return uniqueStrings(value.flatMap((item) => urlTargetsFromJson(item, depth + 1)));
+  }
+  const record = asRecord(value);
+  return uniqueStrings(Object.values(record).flatMap((item) => urlTargetsFromJson(item, depth + 1)));
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function derivedResourcesForToolResult(

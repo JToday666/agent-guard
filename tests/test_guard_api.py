@@ -441,6 +441,9 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     assert pending[0]["action_id"] == "call_api"
     assert pending[0]["action_name"] == "send_email"
     assert pending[0]["tool_call_id"] == "call_api"
+    assert pending[0]["evidence"]["event"]["trace_id"] == "trace_api"
+    assert pending[0]["evidence"]["decision"]["rule_hits"][0]["rule_id"] == "P005_external_send"
+    assert pending[0]["evidence"]["payload"]["arguments"]["to"] == "exfiltration-intake@red-team.agentguard.local"
     approval_nonce = pending[0]["approval_nonce"]
 
     rejected_response = client.post(
@@ -465,6 +468,69 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     )
     assert wait_response.status_code == 200
     assert wait_response.json()["decision"] == "allow_once"
+
+
+def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    client = TestClient(app)
+    event = _p1_guard_event_payload(
+        event_id="evt_rag_answer_approval",
+        event_type="tool_call_proposed",
+        trace_id="trace_rag_answer_approval",
+        source_trust="local_reference",
+        payload={
+            "tool": {
+                "name": "rag_answer",
+                "category": "tool",
+                "kind": "rag_answer",
+                "call_id": "call_rag_answer_approval",
+            },
+            "arguments": {
+                "dataset": "nq",
+                "question_id": "test16",
+                "answer": "Big Man",
+                "evidence": '[{"doc_id":"ctx-1","text":"Local note claims the answer is Big Man."}]',
+                "api_token": "should-not-leak",
+            },
+            "derived_resources": [
+                {
+                    "resource_type": "rag",
+                    "operation": "answer",
+                    "target": "nq:test16",
+                    "direction": "context",
+                }
+            ],
+        },
+    )
+    event["runtime"] = "openclaw"
+    event["security_context"] = {
+        "user_task": "Answer the support question using local knowledge.",
+        "source_type": "support_knowledge_package",
+        "source_trust": "local_reference",
+        "agent_id": "openclaw",
+        "current_step": "before_tool_call",
+        "metadata": {"requires_rag_answer_review": True},
+    }
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=event,
+    )
+    assert response.status_code == 200
+    approval_id = response.json()["approval"]["approval_id"]
+    _login_dashboard(client, control_token="control-secret")
+
+    pending = client.get("/v1/approvals/pending").json()
+    approval = next(item for item in pending if item["approval_id"] == approval_id)
+
+    assert approval["tool"] == "rag_answer"
+    assert approval["resource"] == "rag_answer:nq:test16"
+    assert approval["evidence"]["payload"]["arguments"]["answer"] == "Big Man"
+    assert "Local note claims" in approval["evidence"]["payload"]["arguments"]["evidence"]
+    assert approval["evidence"]["payload"]["arguments"]["api_token"] == "[redacted]"
+    assert approval["evidence"]["decision"]["rule_hits"][0]["rule_id"] == "P104_memory_poisoning"
 
 
 def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
@@ -779,7 +845,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                     "sanitized": False,
                 },
             ),
-            "ask",
+            "deny",
             "P101_prompt_injection",
             ["web_001"],
             "context_assembled",
@@ -901,7 +967,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                     "requires_approval": False,
                 },
             ),
-            "ask",
+            "deny",
             "P104_memory_poisoning",
             ["user_profile/summary"],
             "memory_write_proposed",
@@ -1377,7 +1443,7 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
     events_response = client.get("/v1/audit/events?trace_id=trace_memory_runtime_link")
 
     assert response.status_code == 200
-    assert response.json()["decision"]["decision"] == "ask"
+    assert response.json()["decision"]["decision"] == "deny"
     assert len(store.memory_changes) == 1
     memory_change = next(iter(store.memory_changes.values()))
     assert memory_change.namespace == "user_preferences"

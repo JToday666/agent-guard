@@ -26,10 +26,11 @@ type ApprovalWaiter = {
 const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   guardApiBaseUrl: "http://127.0.0.1:8088",
   adapterToken: "",
+  enforcementMode: "enforce",
   requestTimeoutMs: 5000,
   approvalPollIntervalMs: 1000,
   approvalTimeoutMs: 120000,
-  approvalWaitBudgetMs: 8000,
+  approvalWaitBudgetMs: 25000,
   diagnosticLogging: false,
   runtimeId: "openclaw",
   agentId: "main",
@@ -135,6 +136,7 @@ export class GuardApiClient {
         hook_count: input.hooks.length,
         expected_hook_count: this.config.enabledHooks.length,
         fail_closed_stages: this.config.failClosedStages,
+        enforcement_mode: this.config.enforcementMode,
       }),
     });
     return (await response.json()) as Record<string, unknown>;
@@ -200,6 +202,7 @@ export function buildPluginConfig(
   return {
     guardApiBaseUrl: nonEmptyString(input?.guardApiBaseUrl, DEFAULT_CONFIG.guardApiBaseUrl),
     adapterToken: nonEmptyString(input?.adapterToken, env.AGENTGUARD_ADAPTER_TOKEN ?? DEFAULT_CONFIG.adapterToken),
+    enforcementMode: enforcementMode(input?.enforcementMode, DEFAULT_CONFIG.enforcementMode),
     requestTimeoutMs: positiveInteger(input?.requestTimeoutMs, DEFAULT_CONFIG.requestTimeoutMs),
     approvalPollIntervalMs: positiveInteger(
       input?.approvalPollIntervalMs,
@@ -282,6 +285,13 @@ function stringArray(value: unknown, fallback: string[]): string[] {
   }
   const items = value.filter((item): item is string => typeof item === "string" && item.length > 0);
   return items.length > 0 ? [...items] : [...fallback];
+}
+
+function enforcementMode(
+  value: unknown,
+  fallback: AgentGuardPluginConfig["enforcementMode"],
+): AgentGuardPluginConfig["enforcementMode"] {
+  return value === "enforce" || value === "observe" || value === "disabled" ? value : fallback;
 }
 
 function redactionConfig(value: unknown, fallback: AgentGuardPluginConfig["redaction"]): AgentGuardPluginConfig["redaction"] {
