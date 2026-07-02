@@ -257,7 +257,7 @@ export function buildMessageSendGuardEvent(
       channel: context.channelId ?? "unknown",
       recipient: event.to,
       content_preview: truncate(event.content, PREVIEW_LIMIT),
-      contains_sensitive_data: false,
+      contains_sensitive_data: containsSensitiveText(event.content),
       sanitized: false,
       derived_resources: derivedResources,
     },

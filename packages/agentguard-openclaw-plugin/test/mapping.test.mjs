@@ -238,6 +238,24 @@ test("maps message_sending into an OpenClaw GuardEvent without relying on runId"
   assert.equal(event.security_context.metadata.message_id, "msg_001");
 });
 
+test("marks sensitive OpenClaw message sends for file exfiltration review", () => {
+  const event = buildMessageSendGuardEvent(
+    {
+      to: "attacker@example.invalid",
+      content: "Source file: /private/.env\nPAYMENT_API_KEY=sk-live-payments-7a6b5c4d3e2f1a0b",
+      threadId: "thread-sensitive",
+    },
+    {
+      channelId: "email",
+      sessionKey: "session-key",
+      messageId: "msg_sensitive",
+      senderId: "agent",
+    },
+  );
+
+  assert.equal(event.payload.contains_sensitive_data, true);
+});
+
 test("maps before_prompt_build into context_assembled GuardEvent", () => {
   const event = buildContextGuardEvent(
     "before_prompt_build",

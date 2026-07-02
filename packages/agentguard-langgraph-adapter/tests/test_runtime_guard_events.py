@@ -97,6 +97,41 @@ def test_adapter_marks_unsafe_prompt_injection_actions_as_instruction_like() -> 
     assert client.guard_events[2]["payload"]["contains_instruction_like_text"] is True
 
 
+def test_adapter_maps_file_exfiltration_resource_evidence() -> None:
+    client = _SelectiveCoreClient()
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+
+    adapter.evaluate_before_tool(
+        tool_name="read_file",
+        arguments={"path": "/config/mdm_enrollment.yaml"},
+        security={"user_task": "Check order status.", "source_trust": "untrusted"},
+        trace_id="trace_config_read",
+        call_id="call_config_read",
+    )
+    adapter.evaluate_before_tool(
+        tool_name="read_file",
+        arguments={"path": "/private/credentials.json"},
+        security={"user_task": "Prepare report.", "source_trust": "untrusted"},
+        trace_id="trace_secret_read",
+        call_id="call_secret_read",
+    )
+    adapter.evaluate_before_tool(
+        tool_name="browser_input",
+        arguments={"selector": "testid=attack-input-0", "value": "/private/secret.key"},
+        security={"user_task": "Complete the web task.", "source_trust": "untrusted"},
+        trace_id="trace_browser_input",
+        call_id="call_browser_input",
+    )
+
+    assert client.tool_events[0]["derived_resources"][0]["data_classification"] == "confidential"
+    assert client.tool_events[1]["derived_resources"][0]["data_classification"] == "secret"
+    assert client.tool_events[2]["derived_resources"][0]["resource_type"] == "browser"
+    assert client.tool_events[2]["arguments"]["value"] == "/private/secret.key"
+
+
 def test_gateway_blocks_memory_write_event_before_runtime_invoke() -> None:
     client = _SelectiveCoreClient(deny_event_types={"memory_write_proposed"})
     adapter = LangGraphAdapter(
