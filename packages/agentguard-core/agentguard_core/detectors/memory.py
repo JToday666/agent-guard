@@ -6,7 +6,11 @@ from ..decisions import DetectionResult, RuleHit
 from typing import Any
 
 from ..events import GuardEvent, MemoryEventPayload, ToolCallPayload, ToolResultPayload
-from ..matchers import has_high_confidence_memory_poisoning_text, has_memory_poisoning_text
+from ..matchers import (
+    has_high_confidence_memory_poisoning_text,
+    has_memory_poisoning_text,
+    memory_poisoning_intents,
+)
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
 
@@ -26,15 +30,17 @@ class MemoryPoisoningDetector(Detector):
         memory = event.payload.memory
         if memory.operation.lower() != "write" or not event.payload.will_persist:
             return []
-        high_confidence = (
-            memory.source_trust.lower() == "untrusted"
-            and has_high_confidence_memory_poisoning_text(memory.value_preview, policies)
-        )
+        source_trust = memory.source_trust.lower()
+        if source_trust in {"sanitized", "clean"}:
+            return []
+        intents = memory_poisoning_intents(memory.value_preview, policies)
+        high_confidence = has_high_confidence_memory_poisoning_text(memory.value_preview, policies)
+        has_poisoning_text = has_memory_poisoning_text(memory.value_preview, policies)
         should_review = (
             high_confidence
             or event.payload.requires_approval
-            or memory.source_trust.lower() == "untrusted"
-            or has_memory_poisoning_text(memory.value_preview, policies)
+            or source_trust not in {"trusted", "verified"}
+            or has_poisoning_text
         )
         if should_review:
             target = f"{memory.namespace}/{memory.key}"
@@ -52,6 +58,7 @@ class MemoryPoisoningDetector(Detector):
                             f"source_trust={memory.source_trust}",
                             f"requires_approval={event.payload.requires_approval}",
                             f"high_confidence={high_confidence}",
+                            *[f"memory_poisoning_intent={intent}" for intent in intents],
                         ],
                     ),
                     reason=(
@@ -77,7 +84,7 @@ class MemoryPoisoningDetector(Detector):
             return []
         if payload.tool.name not in {"rag_answer", "rag_retrieve"}:
             return []
-        evidence = _poisoned_rag_evidence(payload.arguments, event.security_context.metadata, policies)
+        evidence = _poisoned_rag_evidence(payload.arguments, event.security_context.metadata, event.metadata, policies)
         if not evidence and payload.tool.name == "rag_answer":
             evidence = _unverified_rag_answer_evidence(payload, event, policies)
             if not evidence:
@@ -139,28 +146,38 @@ class MemoryPoisoningDetector(Detector):
         if payload.sanitized or not (payload.will_enter_context or payload.will_persist):
             return []
         text = payload.result.content_preview
-        if not has_high_confidence_memory_poisoning_text(text, policies):
+        high_confidence = has_high_confidence_memory_poisoning_text(text, policies)
+        has_poisoning_text = has_memory_poisoning_text(text, policies)
+        if not high_confidence and not has_poisoning_text:
             return []
+        intents = memory_poisoning_intents(text, policies)
         call_id = payload.tool.call_id
         result = apply_rule_override(
             DetectionResult(
-                decision="deny",
-                risk_score=86,
+                decision="deny" if high_confidence else "ask",
+                risk_score=86 if high_confidence else 66,
                 category="memory_poisoning",
                 rule_hit=RuleHit(
                     rule_id=self.rule_id,
                     rule_name="Poisoned Persistent Tool Result",
-                    severity="high",
+                    severity="high" if high_confidence else "medium",
                     evidence=[
                         f"tool={payload.tool.name}",
                         f"tool_call_id={call_id}",
                         f"will_enter_context={payload.will_enter_context}",
                         f"will_persist={payload.will_persist}",
                         "sanitized=false",
+                        f"high_confidence={high_confidence}",
+                        *[f"memory_poisoning_intent={intent}" for intent in intents],
                     ],
                 ),
-                reason="High-confidence poisoned tool/RAG result was blocked before entering context or persistence.",
-                severity="high",
+                reason=(
+                    "High-confidence poisoned tool/RAG result was blocked before entering context or persistence."
+                    if high_confidence
+                    else "A tool/RAG result contains persistent memory poisoning text and requires review."
+                ),
+                approval_resource=None if high_confidence else f"tool_result:{call_id}",
+                severity="high" if high_confidence else "medium",
             ),
             policies,
         )
@@ -169,11 +186,12 @@ class MemoryPoisoningDetector(Detector):
 
 def _poisoned_rag_evidence(
     arguments: dict[str, Any],
-    metadata: dict[str, Any],
+    security_metadata: dict[str, Any],
+    event_metadata: dict[str, Any],
     policies: PolicyBundle,
 ) -> list[str]:
     evidence: list[str] = []
-    for label, text in _rag_text_fragments(arguments, metadata):
+    for label, text in _rag_text_fragments(arguments, security_metadata, event_metadata):
         if has_high_confidence_memory_poisoning_text(text, policies):
             evidence.append(f"{label}=high_confidence_instruction")
     return evidence
@@ -289,6 +307,20 @@ def _collect_rag_text_fragments(value: Any, fragments: list[tuple[str, str]], pa
         normalized_key = str(key).lower()
         if any(
             marker in normalized_key
-            for marker in ("answer", "context", "content", "doc", "evidence", "citation", "source", "text", "message")
+            for marker in (
+                "answer",
+                "context",
+                "content",
+                "doc",
+                "evidence",
+                "citation",
+                "source",
+                "text",
+                "message",
+                "memory",
+                "value",
+                "instruction",
+                "rule",
+            )
         ):
             _collect_rag_text_fragments(nested, fragments, f"{path}.{key}")

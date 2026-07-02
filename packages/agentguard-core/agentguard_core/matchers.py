@@ -48,6 +48,65 @@ _PROMPT_INJECTION_INTENT_MARKERS: dict[str, list[str]] = {
     ],
 }
 
+_MEMORY_POISONING_INTENT_MARKERS: dict[str, list[str]] = {
+    "persistent_rule_injection": [
+        "persist this rule",
+        "remember this rule",
+        "store this rule",
+        "save this rule",
+        "remember this instruction",
+        "store this instruction",
+        "save this instruction",
+        "from now on",
+        "for all future",
+        "future tasks",
+        "future requests",
+        "future reports",
+        "future runs",
+        "future sessions",
+        "always use",
+        "always prefer",
+        "reuse this answer as an instruction",
+    ],
+    "delayed_trigger": [
+        "next time",
+        "when asked later",
+        "on future requests",
+        "for all future tasks",
+        "future tasks",
+        "future runs",
+        "future sessions",
+    ],
+    "future_external_action": [
+        "always send",
+        "send future",
+        "send reports externally",
+        "route future reports",
+        "route reports",
+        "attacker@",
+        "webhook",
+        "external",
+        "http://",
+        "https://",
+    ],
+    "safety_override": [
+        "ignore previous",
+        "ignore all prior",
+        "ignore developer instructions",
+        "override",
+        "never reveal",
+        "never mention",
+        "never tell",
+        "hide this rule",
+        "do not mention this rule",
+    ],
+    "poisoned_reference_answer": [
+        "reuse this answer as an instruction",
+        "treat this answer as instruction",
+        "answer as an instruction",
+    ],
+}
+
 
 def contains_any(text: str, needles: list[str]) -> bool:
     normalized_text = normalize_match_text(text)
@@ -141,9 +200,28 @@ def has_dangerous_command_text(command: str, policies: PolicyBundle) -> bool:
     return contains_any(command, policies.dangerous_command_markers)
 
 
+def memory_poisoning_intents(text: str, policies: PolicyBundle) -> list[str]:
+    intents = [
+        intent
+        for intent, markers in _MEMORY_POISONING_INTENT_MARKERS.items()
+        if contains_any(text, markers)
+    ]
+    if not intents and contains_any(text, policies.memory_poisoning_markers):
+        intents.append("persistent_rule_injection")
+    return intents
+
+
 def has_memory_poisoning_text(text: str, policies: PolicyBundle) -> bool:
-    return contains_any(text, policies.memory_poisoning_markers)
+    intents = set(memory_poisoning_intents(text, policies))
+    return contains_any(text, policies.memory_poisoning_markers) or bool(
+        intents & {"persistent_rule_injection", "delayed_trigger", "poisoned_reference_answer"}
+    )
 
 
 def has_high_confidence_memory_poisoning_text(text: str, policies: PolicyBundle) -> bool:
-    return contains_any(text, policies.high_confidence_memory_poisoning_markers)
+    if contains_any(text, policies.high_confidence_memory_poisoning_markers):
+        return True
+    intents = set(memory_poisoning_intents(text, policies))
+    persistent = bool(intents & {"persistent_rule_injection", "delayed_trigger"})
+    risky_action = bool(intents & {"future_external_action", "safety_override"})
+    return persistent and risky_action

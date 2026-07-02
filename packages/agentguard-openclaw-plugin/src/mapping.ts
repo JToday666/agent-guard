@@ -1223,6 +1223,11 @@ function containsInstructionLikeText(value: string): boolean {
   return (
     /ignore\s+(all\s+)?previous\s+instructions|ignore\s+developer\s+instructions|disregard\s+previous/i.test(value) ||
     /override\s+the\s+system|system\s+message|developer\s+message|send\s+(the\s+)?token/i.test(value) ||
+    /persist\s+this\s+rule|remember\s+this\s+rule|store\s+this\s+rule|save\s+this\s+rule/i.test(value) ||
+    /remember\s+this\s+instruction|store\s+this\s+instruction|save\s+this\s+instruction/i.test(value) ||
+    /from\s+now\s+on|next\s+time|for\s+all\s+future|future\s+(tasks|requests|reports|runs|sessions)/i.test(value) ||
+    /always\s+send|send\s+reports\s+externally|route\s+future\s+reports/i.test(value) ||
+    /never\s+(mention|reveal|tell)|hide\s+this\s+rule|do\s+not\s+mention\s+this\s+rule/i.test(value) ||
     /identityverify|market-segment-submit|support-profile-confirm|managed-device\s+support\s+profile/i.test(value) ||
     /lead-verification-relax|reduce\s+verification\s+controls|weaken\s+verification/i.test(value)
   );

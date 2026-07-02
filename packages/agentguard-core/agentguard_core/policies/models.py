@@ -222,10 +222,22 @@ class PolicyBundle(BaseModel):
         default_factory=lambda: [
             "always send",
             "attacker@",
-            "ignore previous",
+            "from now on",
+            "next time",
+            "for all future",
+            "future tasks",
             "future reports",
             "future runs",
+            "future requests",
+            "remember this rule",
+            "store this rule",
+            "save this rule",
+            "remember this instruction",
+            "store this instruction",
+            "save this instruction",
             "persist this rule",
+            "route future reports",
+            "send reports externally",
         ]
     )
     high_confidence_memory_poisoning_markers: list[str] = Field(
@@ -234,6 +246,8 @@ class PolicyBundle(BaseModel):
             "attacker@",
             "future runs",
             "persist this rule",
+            "route future reports",
+            "send reports externally",
         ]
     )
     agent_abuse_markers: list[str] = Field(
