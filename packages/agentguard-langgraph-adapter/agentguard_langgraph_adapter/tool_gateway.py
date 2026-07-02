@@ -50,7 +50,7 @@ class GuardedToolGateway:
             audit_event.metadata["compatibility"] = dict(compatibility)
         self.guard_adapter.submit_audit_event(audit_event)
 
-        if decision.decision in {"deny", "ask"}:
+        if decision.decision == "deny" or _ask_was_not_approved(self.guard_adapter, decision):
             result = blocked_result(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -115,3 +115,22 @@ def _compatibility_from_event(event: Any) -> dict[str, Any]:
         if isinstance(dumped, dict) and isinstance(dumped.get("compatibility"), dict):
             return dict(dumped["compatibility"])
     return {}
+
+
+def _ask_was_not_approved(guard_adapter: Any, decision: Any) -> bool:
+    if getattr(decision, "decision", None) != "ask":
+        return False
+    approval_id = _approval_id(getattr(decision, "approval", None))
+    if not approval_id or not hasattr(guard_adapter, "wait_for_approval"):
+        return True
+    resolution = guard_adapter.wait_for_approval(approval_id)
+    if not isinstance(resolution, dict) or resolution.get("status") != "resolved":
+        return True
+    return str(resolution.get("decision") or "").lower() not in {"allow", "allow_once", "allow_session"}
+
+
+def _approval_id(approval: Any) -> str | None:
+    if isinstance(approval, dict):
+        value = approval.get("approval_id") or approval.get("id")
+        return str(value) if value else None
+    return None

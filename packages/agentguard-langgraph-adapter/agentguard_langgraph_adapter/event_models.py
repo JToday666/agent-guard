@@ -142,3 +142,14 @@ class ToolExecutionResult(BaseModel):
     compatibility: dict[str, Any] | None = None
     compatibility_retry: dict[str, Any] | None = None
     runtime_policy_blocked: bool = False
+    approval_mode: str | None = None
+    approval_id: str | None = None
+    approval_consumed: bool = False
+    approval_decision: str | None = None
+    approval_wait_latency_ms: int | None = None
+    approved_arguments_hash: str | None = None
+    tool_executed_after_approval: bool = False
+    block_semantics: str | None = None
+    counts_as_effective_block: bool = False
+    sanitize_applied: bool = False
+    quarantine_applied: bool = False

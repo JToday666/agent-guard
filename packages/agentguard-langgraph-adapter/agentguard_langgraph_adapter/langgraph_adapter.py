@@ -186,6 +186,20 @@ class LangGraphAdapter:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+        if not self.config.defense_enabled:
+            return {"status": "resolved", "decision": "allow_once"}
+        try:
+            assert self.core_client is not None
+            try:
+                return self.core_client.wait_for_approval(approval_id, timeout=timeout)
+            except TypeError:
+                return self.core_client.wait_for_approval(approval_id)
+        except CoreClientError as exc:
+            return {"status": "error", "decision": "deny" if self.config.fail_closed else None, "error": str(exc)}
+        except Exception as exc:
+            return {"status": "error", "decision": "deny" if self.config.fail_closed else None, "error": str(exc)}
+
 
 def classify_resource(target: str) -> str:
     lowered = target.lower()

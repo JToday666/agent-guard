@@ -296,6 +296,7 @@ class ApprovalService:
             reason=decision.reason,
             risk_score=decision.risk_score,
             severity=decision.severity,
+            evidence=_approval_evidence(event, decision, description),
             decision_options=decision.approval_intent.options,
             expires_at=(
                 datetime.now(timezone.utc) + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
@@ -543,6 +544,59 @@ def build_audit_event(
             description.metadata,
         ),
     )
+
+
+def _approval_evidence(
+    event: GuardEvent,
+    decision: GuardDecision,
+    description: EventDescription,
+) -> dict[str, object]:
+    return {
+        "event": {
+            "event_id": event.event_id,
+            "event_type": event.event_type,
+            "trace_id": event.trace_id,
+            "case_id": event.case_id,
+            "runtime": event.runtime,
+            "current_step": event.security_context.current_step,
+            "source_type": event.security_context.source_type,
+            "source_trust": event.security_context.source_trust,
+            "resource_targets": description.resource_targets,
+        },
+        "decision": {
+            "decision_id": decision.decision_id,
+            "decision": decision.decision,
+            "categories": list(decision.categories),
+            "rule_hits": [hit.model_dump(mode="json") for hit in decision.rule_hits],
+            "risk_score": decision.risk_score,
+            "severity": decision.severity,
+            "reason": decision.reason,
+        },
+        "payload": _approval_payload_preview(event.payload),
+    }
+
+
+def _approval_payload_preview(value: object) -> object:
+    if hasattr(value, "model_dump"):
+        return _approval_payload_preview(value.model_dump(mode="json"))  # type: ignore[attr-defined]
+    if isinstance(value, dict):
+        return {str(key): _approval_field_preview(str(key), nested) for key, nested in value.items()}
+    if isinstance(value, list):
+        return [_approval_payload_preview(item) for item in value[:20]]
+    if isinstance(value, str):
+        return value if len(value) <= 500 else f"{value[:500]}..."
+    return value
+
+
+def _approval_field_preview(key: str, value: object) -> object:
+    if _looks_sensitive_key(key):
+        return "[redacted]"
+    return _approval_payload_preview(value)
+
+
+def _looks_sensitive_key(key: str) -> bool:
+    normalized = key.lower()
+    return any(marker in normalized for marker in ("token", "secret", "password", "authorization", "credential"))
 
 
 def _config_audit_event(event: ConfigAuditEvent, result: ConfigAuditResult) -> AuditEvent:

@@ -20,6 +20,8 @@ DEFAULT_LLM_REQUEST_TIMEOUT = 60.0
 DEFAULT_LLM_MAX_RETRIES = 1
 DEFAULT_INSTRUMENTATION_PLAN_MODE = "autonomous"
 DEFAULT_AGENT_VISIBLE_PAYLOAD_MODE = "original"
+DEFAULT_APPROVAL_MODE = "fail-closed"
+DEFAULT_APPROVAL_TIMEOUT = 60.0
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -145,6 +147,8 @@ class BenchConfig:
     timeout: float = 5.0
     fail_closed: bool = True
     defense_enabled: bool = True
+    approval_mode: str = DEFAULT_APPROVAL_MODE
+    approval_timeout: float = DEFAULT_APPROVAL_TIMEOUT
     runtime: str = "langgraph"
     sandbox_dir: Path = DEFAULT_SANDBOX_DIR
     results_dir: Path = DEFAULT_RESULTS_DIR
@@ -191,6 +195,8 @@ class BenchConfig:
         timeout: float | None = None,
         fail_closed: bool = True,
         defense_enabled: bool = True,
+        approval_mode: str | None = None,
+        approval_timeout: float | None = None,
         sandbox_dir: str | Path | None = None,
         results_dir: str | Path | None = None,
         llm_enabled: bool | None = None,
@@ -256,12 +262,27 @@ class BenchConfig:
         if resolved_llm_max_retries < 0:
             raise ValueError("llm_max_retries must be greater than or equal to 0")
 
+        resolved_approval_mode = (
+            approval_mode or os.getenv("AGENTGUARD_BENCH_APPROVAL_MODE") or DEFAULT_APPROVAL_MODE
+        ).strip().lower()
+        if resolved_approval_mode not in {"fail-closed", "wait"}:
+            raise ValueError("approval_mode must be one of: fail-closed, wait")
+        resolved_approval_timeout = (
+            approval_timeout
+            if approval_timeout is not None
+            else _env_float("AGENTGUARD_BENCH_APPROVAL_TIMEOUT", DEFAULT_APPROVAL_TIMEOUT)
+        )
+        if resolved_approval_timeout <= 0:
+            raise ValueError("approval_timeout must be greater than 0")
+
         return cls(
             core_base_url=core_base_url or cls.core_base_url,
             token=token or cls.token,
             timeout=timeout if timeout is not None else cls.timeout,
             fail_closed=fail_closed,
             defense_enabled=defense_enabled,
+            approval_mode=resolved_approval_mode,
+            approval_timeout=resolved_approval_timeout,
             sandbox_dir=Path(sandbox_dir) if sandbox_dir is not None else DEFAULT_SANDBOX_DIR,
             results_dir=Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR,
             llm_enabled=_env_bool("AGENTGUARD_LLM_ENABLED", False) if llm_enabled is None else llm_enabled,

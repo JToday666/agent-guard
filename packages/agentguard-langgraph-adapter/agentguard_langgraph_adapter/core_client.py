@@ -17,6 +17,9 @@ class CoreClientProtocol(Protocol):
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         ...
 
+    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+        ...
+
 
 class CoreClientError(RuntimeError):
     pass
@@ -37,7 +40,7 @@ class AgentGuardCoreClient:
             response = self._post_json("/v1/guard/evaluate", _guard_api_v03_event(event))
             decision = response.get("decision")
             if isinstance(decision, dict):
-                return decision
+                return _decision_with_top_level_approval(decision, response)
             return response
         return self._post_json("/v1/evaluate/tool-call", event)
 
@@ -45,6 +48,31 @@ class AgentGuardCoreClient:
         if _api_mode(self.config) == "guard-api-v0.3":
             return self._post_json("/v1/audit/events", event)
         return self._post_json("/v1/audit/event", event)
+
+    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+        if _api_mode(self.config) != "guard-api-v0.3":
+            return {"status": "pending", "decision": None}
+        return self._get_json(f"/v1/approvals/{approval_id}/wait", timeout=timeout)
+
+    def _get_json(self, path: str, timeout: float | None = None) -> dict[str, Any]:
+        url = self.config.core_base_url.rstrip("/") + path
+        try:
+            with httpx.Client(timeout=timeout if timeout is not None else self.config.timeout) as client:
+                response = client.get(url, headers=self._headers())
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = _response_error_detail(exc.response)
+            raise CoreClientError(
+                f"Core returned HTTP {exc.response.status_code} for {path}{detail}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise CoreClientError(f"Core request failed for {path}: {exc}") from exc
+        except ValueError as exc:
+            raise CoreClientError(f"Core returned invalid JSON for {path}") from exc
+        if not isinstance(data, dict):
+            raise CoreClientError(f"Core returned non-object JSON for {path}")
+        return data
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = self.config.core_base_url.rstrip("/") + path
@@ -82,6 +110,13 @@ def _guard_api_v03_event(event: dict[str, Any]) -> dict[str, Any]:
         **{key: value for key, value in event.items() if key not in payload_keys},
         "payload": payload,
     }
+
+
+def _decision_with_top_level_approval(decision: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+    approval = response.get("approval")
+    if isinstance(approval, dict) and "approval" not in decision:
+        return {**decision, "approval": approval}
+    return decision
 
 
 def _response_error_detail(response: httpx.Response) -> str:
@@ -126,6 +161,9 @@ class FakeDenyCoreClient:
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
+    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+        return {"status": "resolved", "decision": "deny"}
+
 
 @dataclass(slots=True)
 class FakeAskCoreClient:
@@ -162,6 +200,9 @@ class FakeAskCoreClient:
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
+    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+        return {"status": "pending", "decision": None}
+
 
 @dataclass(slots=True)
 class FakeAllowCoreClient:
@@ -185,3 +226,6 @@ class FakeAllowCoreClient:
 
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
+
+    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+        return {"status": "resolved", "decision": "allow_once"}
