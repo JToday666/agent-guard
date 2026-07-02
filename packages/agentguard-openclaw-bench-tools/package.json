@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AgentGuard AttackBench tool bridge for OpenClaw",
+  "description": "Local task tool bridge for OpenClaw",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
