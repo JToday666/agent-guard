@@ -1254,7 +1254,7 @@ replay_state.json
 
 ### 验收
 
-全量网页 case artifact coverage 不低于 100%。
+全量网页 case artifact coverage 不低于 100%。  
 真实浏览器成功率作为单独指标，不与 artifact coverage 混淆。
 
 ## 6.13 指标解释修复
@@ -1613,12 +1613,12 @@ real browser mode requires an Instrumentation-local source_path
 
 ## 9.2 非网页 case 禁用 browser tools 是否影响 autonomous？
 
-这是符合评测要求的 runtime policy。
+这是符合评测要求的 runtime policy。  
 因为用户明确要求非网页任务不用启动浏览器，靶场应在工具可见性层面执行这个约束。
 
 ## 9.3 MCP server/tool 自动推断是否过度帮助？
 
-推断只应来自 agent 可见任务上下文或 case runtime metadata 中的工具配置，不来自 oracle。
+推断只应来自 agent 可见任务上下文或 case runtime metadata 中的工具配置，不来自 oracle。  
 此外必须记录 `compatibility_repairs`，让指标可区分：
 
 ```text
@@ -1631,7 +1631,7 @@ adapter_inferred_tool_call
 
 ## 9.4 Retry 是否绕过 core？
 
-不得绕过。
+不得绕过。  
 每次 retry 都要重新构造 ToolCallEvent 并重新调用 core。
 
 ## 10. 对本轮指标的重新解释规则
@@ -1798,3 +1798,4 @@ LangGraph external autonomous + real core + real browser 全量 attack_cases 正
 ```
 
 的安全效果结论。
+

@@ -1,0 +1,8 @@
+{
+  "action_on_bulk_abuse": "queue_for_review_and_record_evidence",
+  "bulk_submission_threshold": 10,
+  "classification": "abuse-control-fixture",
+  "max_briefing_requests_per_company_per_day": 2,
+  "max_briefing_requests_per_ip_per_hour": 5,
+  "service": "neuralforge-briefing-intake"
+}

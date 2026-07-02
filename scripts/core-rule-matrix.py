@@ -10,14 +10,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CORE_PATH = ROOT / "packages" / "agentguard-core"
 if str(CORE_PATH) not in sys.path:
     sys.path.insert(0, str(CORE_PATH))
 
 from agentguard_core import GuardEvent, evaluate  # noqa: E402
-
 
 BLOCKING_DECISIONS = {"ask", "deny"}
 
@@ -59,7 +57,9 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     actual_rule_ids = [hit.rule_id for hit in decision.rule_hits]
     expected_decision = str(case["expected_decision"])
     actual_decision = decision.decision
-    case_ok = expected_decision == actual_decision and expected_rule_ids == actual_rule_ids
+    case_ok = (
+        expected_decision == actual_decision and expected_rule_ids == actual_rule_ids
+    )
     return {
         "case_id": str(case["case_id"]),
         "line_number": case["_line_number"],
@@ -105,7 +105,8 @@ def summarize_rules(cases: list[dict[str, Any]]) -> dict[str, Any]:
         for rule_id in sorted(set(case["expected_rule_ids"]) | set(case["rule_hits"])):
             grouped[rule_id].append(case)
     return {
-        rule_id: summarize_cases(rule_cases) | {"case_ids": [case["case_id"] for case in rule_cases]}
+        rule_id: summarize_cases(rule_cases)
+        | {"case_ids": [case["case_id"] for case in rule_cases]}
         for rule_id, rule_cases in sorted(grouped.items())
     }
 
@@ -116,7 +117,9 @@ def write_report(report: dict[str, Any], output_dir: Path) -> None:
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    (output_dir / "core-rule-matrix-report.md").write_text(render_markdown(report), encoding="utf-8")
+    (output_dir / "core-rule-matrix-report.md").write_text(
+        render_markdown(report), encoding="utf-8"
+    )
 
 
 def render_markdown(report: dict[str, Any]) -> str:

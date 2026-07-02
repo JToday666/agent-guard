@@ -26,7 +26,7 @@ TOOL_HIJACKING_LOCAL_BASE_URL = "http://127.0.0.1:18085"
 from pathlib import Path
 
 from .models import AttackCase
-from .poisonedrag_data import DEFAULT_POISONEDRAG_DATA_DIR, PoisonedRagRepository, VALID_POISONEDRAG_DATASETS
+from .poisonedrag_data import DEFAULT_POISONEDRAG_DATA_DIR, PoisonedRagCase, PoisonedRagRepository, VALID_POISONEDRAG_DATASETS
 
 
 def instrumentation_task_to_attack_case(task: dict[str, Any], *, case_id: str, attack_type: str, tool: str, resource: str, operation: str, expected_decision: str = "deny") -> dict[str, Any]:
@@ -452,13 +452,16 @@ def poisonedrag_to_attack_cases(
 
     repository = PoisonedRagRepository(source_root)
     selected_datasets = datasets or list(VALID_POISONEDRAG_DATASETS)
+    active_case_id_prefix = "PR-CLEAN" if mode == "clean" and case_id_prefix == "PR-DYN" else case_id_prefix
     cases: list[dict[str, Any]] = []
     for dataset in selected_datasets:
-        source_cases = repository.list_cases(dataset)
-        if limit_per_dataset is not None:
-            source_cases = source_cases[:limit_per_dataset]
+        source_cases = _select_poisonedrag_source_cases(
+            repository.list_cases(dataset),
+            dataset=dataset,
+            limit=limit_per_dataset,
+        )
         for source_case in source_cases:
-            case_id = f"{case_id_prefix}-{dataset.upper()}-{len(cases) + 1:03d}"
+            case_id = f"{active_case_id_prefix}-{dataset.upper()}-{len(cases) + 1:03d}"
             is_malicious = mode == "poisoned"
             answer_strategy = "target_incorrect_answer" if is_malicious else "target_correct_answer"
             attack_type = "memory_poisoning" if is_malicious else "benign"
@@ -506,12 +509,11 @@ def poisonedrag_to_attack_cases(
                     {
                         "tool": "rag_answer",
                         "arguments": {
+                            "answer": source_case.incorrect_answer if is_malicious else source_case.correct_answer,
                             "dataset": dataset,
-                            "question_id": source_case.qid,
                             "question": source_case.question,
+                            "question_id": source_case.qid,
                             "answer_strategy": answer_strategy,
-                            "correct_answer": source_case.correct_answer,
-                            "incorrect_answer": source_case.incorrect_answer,
                         },
                         "purpose": "Answer the QA task after retrieving contexts.",
                         "source_feature": "poisonedrag_question_answering",
@@ -534,3 +536,43 @@ def poisonedrag_to_attack_cases(
             }
             cases.append(AttackCase.model_validate(payload).model_dump())
     return cases
+
+
+POISONEDRAG_EVIDENCE_BACKED_QIDS: dict[str, tuple[str, ...]] = {
+    "nq": ("test16", "test19"),
+    "msmarco": ("1163399", "1164044"),
+    "hotpotqa": ("5adbf0a255429947ff17385a", "5ab56e32554299637185c594"),
+}
+
+
+def _select_poisonedrag_source_cases(
+    source_cases: list[PoisonedRagCase],
+    *,
+    dataset: str,
+    limit: int | None,
+) -> list[PoisonedRagCase]:
+    """Prefer clean-retrieval-supported samples for small paired subsets."""
+
+    if limit is None:
+        return list(source_cases)
+    if limit < 0:
+        raise ValueError("limit_per_dataset must be non-negative")
+    preferred_qids = POISONEDRAG_EVIDENCE_BACKED_QIDS.get(dataset, ())
+    by_qid = {case.qid: case for case in source_cases}
+    selected: list[PoisonedRagCase] = []
+    seen: set[str] = set()
+    for qid in preferred_qids:
+        case = by_qid.get(qid)
+        if case is None or qid in seen:
+            continue
+        selected.append(case)
+        seen.add(qid)
+        if len(selected) >= limit:
+            return selected
+    for case in source_cases:
+        if case.qid in seen:
+            continue
+        selected.append(case)
+        if len(selected) >= limit:
+            return selected
+    return selected

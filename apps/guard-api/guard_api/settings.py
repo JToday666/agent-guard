@@ -10,6 +10,8 @@ DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agen
 DEFAULT_ADAPTER_TOKEN = "demo-token"
 DEFAULT_CONTROL_TOKEN = "demo-control-token"
 DEFAULT_ENVIRONMENT = "development"
+DEFAULT_STORAGE_BACKEND = "postgres"
+SUPPORTED_STORAGE_BACKENDS = {"postgres", "memory"}
 
 
 class GuardApiConfigurationError(RuntimeError):
@@ -19,6 +21,9 @@ class GuardApiConfigurationError(RuntimeError):
 @dataclass(slots=True)
 class GuardApiSettings:
     database_url: str = field(default_factory=lambda: os.getenv("AGENTGUARD_DATABASE_URL", DEFAULT_DATABASE_URL))
+    storage_backend: str = field(
+        default_factory=lambda: os.getenv("AGENTGUARD_STORAGE_BACKEND", DEFAULT_STORAGE_BACKEND).strip().lower()
+    )
     adapter_token: str = field(default_factory=lambda: os.getenv("AGENTGUARD_ADAPTER_TOKEN", DEFAULT_ADAPTER_TOKEN))
     control_token: str = field(default_factory=lambda: os.getenv("AGENTGUARD_CONTROL_TOKEN", DEFAULT_CONTROL_TOKEN))
     host: str = field(default_factory=lambda: os.getenv("AGENTGUARD_HOST", "127.0.0.1"))
@@ -29,8 +34,15 @@ class GuardApiSettings:
     approval_nonce_ttl_seconds: int = 900
 
     def validate_for_startup(self) -> None:
+        if self.storage_backend not in SUPPORTED_STORAGE_BACKENDS:
+            supported = ", ".join(sorted(SUPPORTED_STORAGE_BACKENDS))
+            raise GuardApiConfigurationError(
+                f"AGENTGUARD_STORAGE_BACKEND must be one of: {supported}"
+            )
         if self.environment.lower() != "production":
             return
+        if self.storage_backend == "memory":
+            raise GuardApiConfigurationError("Production startup requires persistent storage backend: postgres")
         default_variables = []
         if self.database_url == DEFAULT_DATABASE_URL:
             default_variables.append("AGENTGUARD_DATABASE_URL")

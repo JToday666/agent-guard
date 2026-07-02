@@ -377,6 +377,30 @@ def test_startup_initializes_control_plane_store() -> None:
     assert response.status_code == 200
 
 
+def test_startup_can_use_configured_memory_storage_backend() -> None:
+    settings = GuardApiSettings(storage_backend="memory", adapter_token="adapter-secret")
+    app = create_app(settings=settings)
+
+    with TestClient(app) as client:
+        response = client.get("/health?check_db=true")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "ok"}
+
+
+def test_production_rejects_memory_storage_backend() -> None:
+    settings = GuardApiSettings(
+        environment="production",
+        storage_backend="memory",
+        database_url="postgresql+psycopg://postgres:strong-password@127.0.0.1:5432/agent_guard",
+        adapter_token="adapter-secret",
+        control_token="control-secret",
+    )
+
+    with pytest.raises(GuardApiConfigurationError, match="persistent storage backend"):
+        settings.validate_for_startup()
+
+
 def test_startup_fails_when_control_plane_initialize_fails() -> None:
     app = create_app(store=FailingInitializeStore(), settings=GuardApiSettings(environment="development"))
 

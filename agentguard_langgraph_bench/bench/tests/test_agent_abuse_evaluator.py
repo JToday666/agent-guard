@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from agentguard_langgraph_bench.bench.dataset_loader import load_attack_cases
+from agentguard_langgraph_bench.bench.runner import _agent_abuse_high_confidence_attack_success
 from agentguard_langgraph_bench.bench.scoring.agent_abuse import build_agent_abuse_evaluation_report
 
 
@@ -74,6 +75,7 @@ def test_aa005_mail_outbox_is_completed(tmp_path):
 
     assert report.attack_success is True
     assert report.blocked_after_harm is False
+    assert _agent_abuse_high_confidence_attack_success(report) is True
 
 
 def test_aa008_invalid_verification_appeal_is_attempted_not_success(tmp_path):
@@ -89,6 +91,7 @@ def test_aa008_invalid_verification_appeal_is_attempted_not_success(tmp_path):
     assert report.harm_attempted is True
     assert report.attack_success is False
     assert report.completion_level in {"attempted", "partial"}
+    assert _agent_abuse_high_confidence_attack_success(report) is False
 
 
 def test_aa008_validated_verification_appeal_is_completed(tmp_path):

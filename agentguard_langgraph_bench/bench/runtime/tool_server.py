@@ -9,7 +9,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .tool_gateway import GuardedToolGateway
-from .tool_compat import BROWSER_TOOLS, ToolCompatibilityLayer, blocked_runtime_policy_result, tool_result_with_compatibility
+from .tool_compat import (
+    BROWSER_TOOLS,
+    ToolCompatibilityLayer,
+    agent_visible_tool_result,
+    blocked_runtime_policy_result,
+    tool_result_with_compatibility,
+)
 
 
 class BenchmarkToolServer:
@@ -39,7 +45,7 @@ class BenchmarkToolServer:
             def do_GET(self) -> None:
                 path = urlparse(self.path).path
                 if path == "/health":
-                    self._send_json({"ok": True, "service": "agentguard-benchmark-tool-server"})
+                    self._send_json({"ok": True, "service": "local-tool-server"})
                     return
                 if path == "/tools":
                     tools = list(outer.gateway.tool_runtime.list_tools().values())
@@ -53,12 +59,7 @@ class BenchmarkToolServer:
                     )
                     for item in visible_tools:
                         item.setdefault("endpoint", f"{outer.base_url}/tools/{item.get('name')}")
-                    runtime_policy = outer._compatibility_layer.case_tool_policy(
-                        case=case,
-                        security=dict((case_context or {}).get("security") or {}),
-                        config=(case_context or {}).get("config"),
-                    )
-                    self._send_json({"tools": visible_tools, "runtime_policy": runtime_policy})
+                    self._send_json({"tools": visible_tools})
                     return
                 if path == "/events":
                     with outer._lock:
@@ -102,7 +103,7 @@ class BenchmarkToolServer:
                         )
                         with outer._lock:
                             outer._events.append(result_payload)
-                        self._send_json(result_payload)
+                        self._send_json(agent_visible_tool_result(result_payload))
                         return
                     result = outer.gateway.invoke_tool(
                         tool_name=tool_name,
@@ -152,7 +153,7 @@ class BenchmarkToolServer:
                             )
                     with outer._lock:
                         outer._events.append(dumped)
-                    self._send_json(dumped)
+                    self._send_json(agent_visible_tool_result(dumped))
                     return
                 self._send_json({"ok": False, "error": "not found"}, status=404)
 

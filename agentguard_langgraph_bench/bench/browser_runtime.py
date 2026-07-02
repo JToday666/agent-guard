@@ -163,21 +163,20 @@ def _source_map() -> dict[str, str]:
             if isinstance(value, list):
                 rows.extend(item for item in value if isinstance(item, dict))
     for row in rows:
-        local_value = row.get("local_web_entry_source_path") or row.get("local_source_path")
-        if not local_value:
-            continue
-        local_source = _first_existing_unchecked(str(local_value))
-        if local_source is None:
-            continue
-        keys = [
-            row.get("local_web_entry_source_path"),
-            row.get("local_source_path"),
-            row.get("original_web_entry_source_path"),
-            row.get("original_source_path"),
-        ]
-        for key in keys:
-            if key:
-                mapping[_source_map_key(str(key))] = str(local_source)
+        local_source = _first_existing_unchecked(str(row.get("local_source_path") or ""))
+        local_web_entry = _first_existing_unchecked(
+            str(row.get("local_web_entry_source_path") or row.get("local_source_path") or "")
+        )
+        source_keys = [row.get("local_source_path"), row.get("original_source_path")]
+        web_entry_keys = [row.get("local_web_entry_source_path"), row.get("original_web_entry_source_path")]
+        if local_source is not None:
+            for key in source_keys:
+                if key:
+                    mapping[_source_map_key(str(key))] = str(local_source)
+        if local_web_entry is not None:
+            for key in web_entry_keys:
+                if key:
+                    mapping[_source_map_key(str(key))] = str(local_web_entry)
     _SOURCE_MAP_CACHE = mapping
     return _SOURCE_MAP_CACHE
 
@@ -466,6 +465,10 @@ class ContinuousFrame:
     error: str | None = None
 
 
+def _ffmpeg_concat_path(path: Path) -> str:
+    return path.resolve().as_posix().replace("'", r"'\''")
+
+
 class ContinuousFrameRecorder:
     def __init__(self, artifact_dir: Path, *, fps: float, viewport: dict[str, int]) -> None:
         self.artifact_dir = artifact_dir
@@ -585,7 +588,7 @@ class ContinuousFrameRecorder:
         concat_path = self.artifact_dir / "continuous_frames_concat.txt"
         lines: list[str] = []
         for idx, frame in enumerate(frames):
-            lines.append(f"file '{frame.path.as_posix()}'")
+            lines.append(f"file '{_ffmpeg_concat_path(frame.path)}'")
             if idx + 1 < len(frames):
                 duration = max(
                     0.10,
@@ -594,7 +597,7 @@ class ContinuousFrameRecorder:
             else:
                 duration = max(0.50, min(1.25, 1.0 / self.fps))
             lines.append(f"duration {duration:.3f}")
-        lines.append(f"file '{frames[-1].path.as_posix()}'")
+        lines.append(f"file '{_ffmpeg_concat_path(frames[-1].path)}'")
         concat_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         try:
             completed = subprocess.run(
@@ -1367,16 +1370,15 @@ class _RealBrowserRuntimeCore:
         if selector.startswith("id="):
             return session.page.locator(f'[id="{self._css_attr(selector[3:])}"]')
         if selector.startswith("testid="):
-            value = self._css_attr(selector.removeprefix("testid="))
-            selectors = [
-                f'[data-pw="{value}"]',
-                f'[data-testid="{value}"]',
-                f'[data-test="{value}"]',
-                f'[data-pw-testid="{value}"]',
-                f'[data-pw-testid-buckeye="{value}"]',
-            ]
-            selectors.extend(self._testid_alias_selectors(value))
-            return session.page.locator(", ".join(selectors))
+            selectors = self._testid_selector_candidates(selector.removeprefix("testid="))
+            for candidate in selectors:
+                locator = self._locator(session, selector=candidate).first
+                try:
+                    if locator.count() > 0:
+                        return locator
+                except Exception:
+                    continue
+            return session.page.locator(selectors[0] if selectors else selector)
         if selector.startswith("name="):
             return session.page.locator(f'[name="{self._css_attr(selector[5:])}"]')
         return session.page.locator(selector)
@@ -1394,18 +1396,11 @@ class _RealBrowserRuntimeCore:
 
     def _selector_alias_candidates(self, selector: str) -> list[str]:
         candidates = [selector]
+        if selector.startswith("testid="):
+            candidates.extend(self._testid_selector_candidates(selector.removeprefix("testid=")))
         for value in self._css_data_testid_values(selector):
-            escaped = self._css_attr(value)
-            candidates.extend(
-                [
-                    f'testid={value}',
-                    f'[data-pw="{escaped}"]',
-                    f'[data-testid="{escaped}"]',
-                    f'[data-test="{escaped}"]',
-                    f'[data-test-id="{escaped}"]',
-                ]
-            )
-            candidates.extend(self._testid_alias_selectors(value))
+            candidates.append(f"testid={value}")
+            candidates.extend(self._testid_selector_candidates(value))
         lowered = selector.lower()
         if lowered in {"#meetingid", "id=meetingid", '[id="meetingid"]', "[id='meetingid']"}:
             candidates.extend(
@@ -1440,6 +1435,23 @@ class _RealBrowserRuntimeCore:
 
     def _testid_alias_selectors(self, value: str) -> list[str]:
         return logical_selector_aliases(value)
+
+    def _testid_selector_candidates(self, value: str) -> list[str]:
+        escaped = self._css_attr(value)
+        candidates = [
+            f'[data-pw="{escaped}"]',
+            f'[data-testid="{escaped}"]',
+            f'[data-test="{escaped}"]',
+            f'[data-test-id="{escaped}"]',
+            f'[data-pw-testid="{escaped}"]',
+            f'[data-pw-testid-buckeye="{escaped}"]',
+        ]
+        candidates.extend(self._testid_alias_selectors(value))
+        deduped: list[str] = []
+        for item in candidates:
+            if item and item not in deduped:
+                deduped.append(item)
+        return deduped
 
     def _css_attr(self, value: str) -> str:
         return value.replace("\\", "\\\\").replace('"', '\\"')

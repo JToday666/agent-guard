@@ -251,6 +251,14 @@ class ToolCompatibilityLayer:
                 normalized["arguments"] = {**normalized.get("arguments", {}), **extra_arguments}
                 dropped.update(extra_arguments)
                 repairs.append("mcp_call.top_level_fields_to_arguments")
+            _normalize_mcp_call_against_catalog(
+                normalized,
+                case_context=case_context,
+                security=security,
+                repairs=repairs,
+                added=added,
+                warnings=warnings,
+            )
 
         elif tool_name == "rag_retrieve":
             for source in ("question", "prompt", "q"):
@@ -595,6 +603,156 @@ def _infer_mcp_target(
     if payload.get("tool"):
         inferred["tool"] = str(payload["tool"])
     return inferred
+
+
+def _normalize_mcp_call_against_catalog(
+    payload: dict[str, Any],
+    *,
+    case_context: dict[str, Any] | None,
+    security: dict[str, Any] | None,
+    repairs: list[str],
+    added: dict[str, Any],
+    warnings: list[str],
+) -> None:
+    catalog = _mcp_catalog_from_context(case_context, security)
+    if not catalog:
+        return
+    descriptor = _select_mcp_descriptor(catalog, payload, repairs)
+    if descriptor is None:
+        warnings.append("mcp_call.catalog_descriptor_not_matched")
+        return
+    server = _descriptor_server(descriptor)
+    tool = _descriptor_tool(descriptor)
+    if server and payload.get("server") != server:
+        payload["server"] = server
+        repairs.append("mcp_call.server.canonicalized_from_catalog")
+    if tool and payload.get("tool") != tool:
+        payload["tool"] = tool
+        repairs.append("mcp_call.tool.canonicalized_from_catalog")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+        payload["arguments"] = arguments
+    schema = descriptor.get("input_schema") if isinstance(descriptor.get("input_schema"), dict) else {}
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    _apply_mcp_argument_aliases(arguments, properties, repairs)
+    for key, spec in properties.items():
+        if arguments.get(key) not in (None, ""):
+            continue
+        if isinstance(spec, dict) and "default" in spec:
+            arguments[key] = spec["default"]
+            added[f"arguments.{key}"] = spec["default"]
+            repairs.append(f"mcp_call.arguments.{key}.defaulted_from_catalog")
+
+
+def _mcp_catalog_from_context(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> list[dict[str, Any]]:
+    case_context = case_context or {}
+    security = security or {}
+    for container in (
+        case_context,
+        security,
+        _metadata_from_context(case_context, security),
+    ):
+        for key in ("mcp_tool_catalog", "public_mcp_tool_catalog", "tool_catalog", "selected_tool_catalog"):
+            value = container.get(key) if isinstance(container, dict) else None
+            if isinstance(value, list):
+                return [dict(item) for item in value if isinstance(item, dict)]
+    return []
+
+
+def _select_mcp_descriptor(catalog: list[dict[str, Any]], payload: dict[str, Any], repairs: list[str]) -> dict[str, Any] | None:
+    descriptors = [dict(item) for item in catalog if _descriptor_server(item) and _descriptor_tool(item)]
+    if not descriptors:
+        return None
+    requested_server = str(payload.get("server") or "").strip()
+    requested_tool = str(payload.get("tool") or "").strip()
+    server = _canonical_mcp_server(requested_server, descriptors)
+    candidates = [item for item in descriptors if not server or _descriptor_server(item) == server]
+    if requested_server and server and requested_server != server:
+        repairs.append("mcp_call.server.alias_matched_catalog")
+    descriptor = _canonical_mcp_tool(requested_tool, candidates or descriptors)
+    if descriptor is not None and requested_tool and requested_tool != _descriptor_tool(descriptor):
+        repairs.append("mcp_call.tool.alias_matched_catalog")
+    return descriptor
+
+
+def _canonical_mcp_server(requested: str, catalog: list[dict[str, Any]]) -> str:
+    servers = sorted({_descriptor_server(item) for item in catalog if _descriptor_server(item)})
+    if not requested:
+        return servers[0] if len(servers) == 1 else ""
+    for server in servers:
+        if requested == server or _compact_name(requested) == _compact_name(server):
+            return server
+    return servers[0] if len(servers) == 1 else ""
+
+
+def _canonical_mcp_tool(requested: str, catalog: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not catalog:
+        return None
+    if not requested:
+        return catalog[0] if len(catalog) == 1 else None
+    reserved = {"list_tools", "tools", "help", "describe_tools", "describe"}
+    if _compact_name(requested) in {_compact_name(item) for item in reserved}:
+        return None
+    for item in catalog:
+        tool = _descriptor_tool(item)
+        if requested == tool or _compact_name(requested) == _compact_name(tool):
+            return item
+    scored = sorted(((_tool_similarity(requested, item), item) for item in catalog), key=lambda pair: pair[0], reverse=True)
+    if scored and scored[0][0] >= 0.5:
+        return scored[0][1]
+    return None
+
+
+def _apply_mcp_argument_aliases(arguments: dict[str, Any], properties: dict[str, Any], repairs: list[str]) -> None:
+    aliases = {
+        "ticker": ("symbol", "stock", "stock_symbol"),
+        "query": ("q", "search_query"),
+        "repo": ("repository", "repo_name"),
+        "repository": ("repo", "repo_name"),
+        "source_branch": ("source", "branch_source"),
+        "url": ("href", "link"),
+        "path": ("file_path", "filename", "filepath"),
+    }
+    for target, sources in aliases.items():
+        if target not in properties or arguments.get(target) not in (None, ""):
+            continue
+        for source in sources:
+            if arguments.get(source) not in (None, ""):
+                arguments[target] = arguments[source]
+                repairs.append(f"mcp_call.arguments.{source}_to_{target}")
+                break
+
+
+def _descriptor_server(item: dict[str, Any]) -> str:
+    return str(item.get("server") or item.get("server_name") or "").strip()
+
+
+def _descriptor_tool(item: dict[str, Any]) -> str:
+    return str(item.get("tool") or item.get("tool_name") or item.get("name") or "").strip()
+
+
+def _compact_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _tool_similarity(requested: str, descriptor: dict[str, Any]) -> float:
+    requested_tokens = _tool_tokens(requested)
+    descriptor_tokens = _tool_tokens(
+        " ".join(
+            str(descriptor.get(key) or "")
+            for key in ("tool", "tool_name", "name", "title")
+        )
+    )
+    if not requested_tokens or not descriptor_tokens:
+        return 0.0
+    overlap = len(requested_tokens & descriptor_tokens)
+    return overlap / min(len(requested_tokens), len(descriptor_tokens))
+
+
+def _tool_tokens(value: str) -> set[str]:
+    stopwords = {"get", "set", "create", "update", "delete", "list", "tool", "tools", "call", "mcp"}
+    return {token for token in re.split(r"[^a-z0-9]+", str(value or "").lower()) if token and token not in stopwords}
 
 
 def _poisonedrag_defaults(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> dict[str, Any]:
