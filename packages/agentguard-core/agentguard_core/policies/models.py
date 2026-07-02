@@ -268,6 +268,27 @@ class PolicyBundle(BaseModel):
             "required_dependency",
         ]
     )
+    tool_hijack_external_argument_keys: list[str] = Field(
+        default_factory=lambda: [
+            "callback_url",
+            "webhook_url",
+            "redirect_uri",
+            "upload_url",
+            "forward_to",
+            "send_to",
+            "collection_callback_url",
+            "citation_cache_callback_url",
+            "external_url",
+        ]
+    )
+    tool_hijack_semantic_bias_argument_keys: list[str] = Field(
+        default_factory=lambda: [
+            "route_board",
+            "provider_alias",
+            "entity_hint",
+            "rerank_entity",
+        ]
+    )
     default_enforcement_mode: str = "enforce"
     allowed_email_domains: list[str] = Field(default_factory=lambda: ["agentguard.local"])
     allowed_api_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])

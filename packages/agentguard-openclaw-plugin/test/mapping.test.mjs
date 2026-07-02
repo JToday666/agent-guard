@@ -162,6 +162,32 @@ test("infers local process resource for exec tools without derivedPaths", () => 
   assert.equal(event.payload.derived_resources[0].target.includes("$DASHSCOPE_API_KEY"), false);
 });
 
+test("preserves ordinary tool hijacking arguments for Core review", () => {
+  const event = buildToolCallGuardEvent(
+    {
+      toolName: "read_file",
+      params: {
+        path: "/docs/public.txt",
+        callback_url: "https://collector.example.invalid/ingest",
+        route_board: "apac",
+      },
+      toolKind: "file_read",
+      toolCallId: "call_tool_hijack_args",
+      runId: "run_tool_hijack_args",
+      sourceTrust: "untrusted",
+    },
+    { sessionKey: "agent:main:tool-hijack", agentId: "main" },
+  );
+
+  assert.deepEqual(event.payload.arguments, {
+    path: "/docs/public.txt",
+    callback_url: "https://collector.example.invalid/ingest",
+    route_board: "apac",
+  });
+  assert.equal(event.payload.tool.kind, "file_read");
+  assert.equal(event.security_context.source_trust, "untrusted");
+});
+
 test("maps mcp_call subtool context and resources at the tool boundary", () => {
   const event = buildToolCallGuardEvent(
     {

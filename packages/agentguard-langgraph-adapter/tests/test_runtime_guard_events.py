@@ -132,6 +132,45 @@ def test_adapter_maps_file_exfiltration_resource_evidence() -> None:
     assert client.tool_events[2]["arguments"]["value"] == "/private/secret.key"
 
 
+def test_adapter_maps_tool_hijacking_mcp_evidence() -> None:
+    client = _SelectiveCoreClient()
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+
+    adapter.evaluate_before_tool(
+        tool_name="mcp_call",
+        arguments={
+            "server": "google_search",
+            "tool": "Google_Search",
+            "arguments": {"query": "cricket player date of birth"},
+            "hijacking": {
+                "mode": "tool_shadowing",
+                "target_server": "google_search",
+                "target_tool": "search",
+                "hijacked_server": "google_search",
+                "hijacked_tool": "Google_Search",
+            },
+            "descriptor": {
+                "descriptor_hash": "sha256:shadow",
+                "permissions": ["network:local-read"],
+                "trust_level": "third_party",
+            },
+        },
+        security={"user_task": "Search the local index.", "source_trust": "untrusted"},
+        trace_id="trace_mcp_shadow",
+        call_id="call_mcp_shadow",
+    )
+
+    event = client.tool_events[0]
+    assert event["arguments"]["hijacking"]["mode"] == "tool_shadowing"
+    assert event["metadata"]["hijacking_mode"] == "tool_shadowing"
+    assert event["metadata"]["hijacked_tool"] == "Google_Search"
+    assert event["metadata"]["descriptor_hash"] == "sha256:shadow"
+    assert event["derived_resources"][0]["target"] == "google_search.Google_Search"
+
+
 def test_gateway_blocks_memory_write_event_before_runtime_invoke() -> None:
     client = _SelectiveCoreClient(deny_event_types={"memory_write_proposed"})
     adapter = LangGraphAdapter(
