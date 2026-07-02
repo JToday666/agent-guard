@@ -22,9 +22,16 @@ import {
 import {
   containsSensitiveCredentialText,
   redactUnknownCredentials,
+  sanitizePersistentInstructionPoisoning,
   stringPreview,
 } from "./security.js";
-import type { DerivedResource, GuardEvent, JsonObject, OpenClawPluginConfigInput } from "./types.js";
+import type {
+  DerivedResource,
+  GuardEvaluationResponse,
+  GuardEvent,
+  JsonObject,
+  OpenClawPluginConfigInput,
+} from "./types.js";
 
 const PLUGIN_VERSION = "0.1.0";
 
@@ -63,6 +70,7 @@ type SessionState = {
   model?: string;
   runId?: string;
   sessionId?: string;
+  toolRuntimePolicies?: Record<string, JsonObject>;
 };
 
 type TaskExtractionOptions = {
@@ -100,6 +108,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "before_tool_call",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context);
@@ -107,6 +118,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           const guardEvent = buildToolCallGuardEvent(cached.event, cached.context);
           rememberToolCallState(toolCallState, guardEvent);
           const decision = await client.evaluate(guardEvent);
+          if (isObserve(config)) {
+            return undefined;
+          }
           return await decisionToToolResult(decision, {
             waitForApproval: (approvalId) => client.waitForApproval(approvalId, config.approvalWaitBudgetMs),
           });
@@ -114,21 +128,27 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           logDiagnostic(config, "before_tool_call failed closed", {
             error: error instanceof Error ? error.message : String(error),
           });
-          return failClosedToolResult();
+          return isObserve(config) ? undefined : failClosedToolResult();
         }
       },
-      { priority: 100, timeoutMs: 10_000 },
+      { priority: 100, timeoutMs: blockingApprovalHookTimeoutMs(config) },
     );
 
     api.on(
       "message_sending",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context);
           const cached = withCachedRuntimeFields(sessionState, event, context);
           const guardEvent = buildMessageSendGuardEvent(cached.event, cached.context);
           const decision = await client.evaluate(guardEvent);
+          if (isObserve(config)) {
+            return undefined;
+          }
           return await decisionToMessageResult(decision, {
             waitForApproval: (approvalId) => client.waitForApproval(approvalId, config.approvalWaitBudgetMs),
           });
@@ -136,18 +156,24 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           logDiagnostic(config, "message_sending failed closed", {
             error: error instanceof Error ? error.message : String(error),
           });
-          return failClosedMessageResult();
+          return isObserve(config) ? undefined : failClosedMessageResult();
         }
       },
-      { priority: 100, timeoutMs: 10_000 },
+      { priority: 100, timeoutMs: blockingApprovalHookTimeoutMs(config) },
     );
 
     api.on(
       "before_install",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           const result = await client.evaluateConfigAudit(buildBeforeInstallConfigAuditEvent(event, context));
+          if (isObserve(config)) {
+            return undefined;
+          }
           return result.decision === "block"
             ? { block: true, blockReason: "Blocked by AgentGuard config audit." }
             : undefined;
@@ -155,7 +181,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           logDiagnostic(config, "before_install failed closed", {
             error: error instanceof Error ? error.message : String(error),
           });
-          return { block: true, blockReason: "AgentGuard is unavailable; blocked by fail-closed policy." };
+          return isObserve(config)
+            ? undefined
+            : { block: true, blockReason: "AgentGuard is unavailable; blocked by fail-closed policy." };
         }
       },
       { priority: 100, timeoutMs: 10_000 },
@@ -164,6 +192,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "message_received",
       (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context, { contentFallback: true });
@@ -188,11 +219,17 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "before_prompt_build",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context, { promptFallback: true });
           const cached = withCachedRuntimeFields(sessionState, event, context);
-          await client.evaluate(buildContextGuardEvent("before_prompt_build", cached.event, cached.context));
+          const decision = await client.evaluate(buildContextGuardEvent("before_prompt_build", cached.event, cached.context));
+          if (shouldRuntimeBlock(config, decision)) {
+            return decisionToBlockResult(decision) as never;
+          }
         } catch (error) {
           logDiagnostic(config, "before_prompt_build observation failed", {
             error: error instanceof Error ? error.message : String(error),
@@ -206,11 +243,17 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "llm_input",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context, { promptFallback: true });
           const cached = withCachedRuntimeFields(sessionState, event, context);
-          await client.evaluate(buildModelGuardEvent("llm_input", cached.event, cached.context));
+          const decision = await client.evaluate(buildModelGuardEvent("llm_input", cached.event, cached.context));
+          if (shouldRuntimeBlock(config, decision)) {
+            return decisionToBlockResult(decision) as never;
+          }
         } catch (error) {
           logDiagnostic(config, "llm_input observation failed", {
             error: error instanceof Error ? error.message : String(error),
@@ -224,6 +267,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "llm_output",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context);
@@ -242,18 +288,22 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "tool_result_persist",
       (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           const cached = withCachedToolContext(sessionState, toolCallState, event, context);
           const message = asRecord(event).message;
           const redacted = redactUnknownCredentials(message);
-          void client.evaluate(buildToolResultGuardEvent(cached.event, cached.context)).catch((error) => {
-            logDiagnostic(config, "tool_result_persist observation failed", {
+          const sanitized = sanitizePersistentInstructionPoisoning(redacted.value);
+          void client.evaluate(buildToolResultGuardEvent({ ...cached.event, message: redacted.value }, cached.context)).catch((error) => {
+            logDiagnostic(config, "tool_result_persist evaluation failed", {
               error: error instanceof Error ? error.message : String(error),
             });
           });
-          if (redacted.changed) {
-            return { message: redacted.value as never };
+          if (isEnforcing(config) && (redacted.changed || sanitized.changed)) {
+            return { message: sanitized.value as never };
           }
         } catch (error) {
           logDiagnostic(config, "tool_result_persist mapping failed", {
@@ -269,6 +319,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "before_message_write",
       (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context);
@@ -282,7 +335,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
             });
           const message = asRecord(event).message;
           const redacted = redactUnknownCredentials(message);
-          return redacted.changed ? { message: redacted.value as never } : undefined;
+          return isEnforcing(config) && redacted.changed ? { message: redacted.value as never } : undefined;
         } catch (error) {
           logDiagnostic(config, "before_message_write redaction failed", {
             error: error instanceof Error ? error.message : String(error),
@@ -296,6 +349,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     api.on(
       "before_agent_finalize",
       async (event, context) => {
+        if (isDisabled(config)) {
+          return undefined;
+        }
         const client = makeClient();
         try {
           rememberSessionState(sessionState, event, context);
@@ -315,13 +371,13 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           let shouldRevise = containsSensitiveCredentialText(content);
           try {
             const decision = await client.evaluate(guardEvent);
-            shouldRevise ||= decision.decision.decision === "deny";
+            shouldRevise ||= isEnforcing(config) && decision.decision.decision === "deny";
           } catch (error) {
             logDiagnostic(config, "before_agent_finalize evaluation failed", {
               error: error instanceof Error ? error.message : String(error),
             });
           }
-          if (!shouldRevise) {
+          if (!isEnforcing(config) || !shouldRevise) {
             return undefined;
           }
           const revisionKey = firstNonEmptyString(
@@ -358,6 +414,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       api.on(
         hookName,
         (event: unknown, context: Record<string, unknown>) => {
+          if (isDisabled(config)) {
+            return undefined;
+          }
           const client = makeClient();
           try {
             const eventRecord = asRecord(event);
@@ -402,19 +461,123 @@ function rememberSessionState(
   const existing = cacheState(cache, event, context) ?? {};
   const explicitUserTask = extractExplicitUserTask(event, context);
   const fallbackUserTask = extractUserTask(event, context, options);
+  const sourceTrust = stringMaybe(eventRecord.sourceTrust ?? eventRecord.source_trust)
+    ?? stringMaybe(contextRecord.sourceTrust ?? contextRecord.source_trust)
+    ?? existing.sourceTrust;
+  const sourceType = stringMaybe(eventRecord.sourceType ?? eventRecord.source_type)
+    ?? stringMaybe(contextRecord.sourceType ?? contextRecord.source_type)
+    ?? existing.sourceType;
+  const trustedRuntimePolicy = sourceTrust === "trusted";
+  const extractedRuntimePolicies = trustedRuntimePolicy ? extractToolRuntimePolicies(event, context) : {};
+  const toolRuntimePolicies = mergeToolRuntimePolicies(existing.toolRuntimePolicies, extractedRuntimePolicies);
   const next: SessionState = {
     ...existing,
     userTask: explicitUserTask ?? existing.userTask ?? fallbackUserTask,
-    sourceTrust: stringMaybe(eventRecord.sourceTrust) ?? stringMaybe(contextRecord.sourceTrust) ?? existing.sourceTrust,
-    sourceType: stringMaybe(eventRecord.sourceType) ?? stringMaybe(contextRecord.sourceType) ?? existing.sourceType,
+    sourceTrust,
+    sourceType,
     provider: stringMaybe(eventRecord.provider) ?? stringMaybe(contextRecord.provider) ?? existing.provider,
     model: stringMaybe(eventRecord.model) ?? stringMaybe(contextRecord.model) ?? existing.model,
     runId: stringMaybe(eventRecord.runId) ?? stringMaybe(contextRecord.runId) ?? existing.runId,
     sessionId: stringMaybe(eventRecord.sessionId) ?? stringMaybe(contextRecord.sessionId) ?? existing.sessionId,
+    toolRuntimePolicies: Object.keys(toolRuntimePolicies).length > 0 ? toolRuntimePolicies : existing.toolRuntimePolicies,
   };
   for (const key of keys) {
     setLimited(cache, key, next);
   }
+}
+
+function extractToolRuntimePolicies(...values: unknown[]): Record<string, JsonObject> {
+  const policies: Record<string, JsonObject> = {};
+  for (const value of values) {
+    collectToolRuntimePolicies(value, policies);
+  }
+  return policies;
+}
+
+function collectToolRuntimePolicies(
+  value: unknown,
+  policies: Record<string, JsonObject>,
+  depth = 0,
+): void {
+  if (depth > 6 || value === null || value === undefined) {
+    return;
+  }
+  if (typeof value === "string") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectToolRuntimePolicies(item, policies, depth + 1);
+    }
+    return;
+  }
+
+  const record = asRecord(value);
+  collectToolDescriptorPolicy(record, policies);
+  for (const key of [
+    "tools",
+    "availableTools",
+    "available_tools",
+    "toolManifest",
+    "tool_manifest",
+    "toolDefinitions",
+    "tool_definitions",
+    "toolDescriptors",
+    "tool_descriptors",
+    "toolPlan",
+    "tool_plan",
+  ]) {
+    collectToolRuntimePolicies(record[key], policies, depth + 1);
+  }
+  collectToolRuntimePolicies(record.messages, policies, depth + 1);
+}
+
+function collectToolDescriptorPolicy(value: unknown, policies: Record<string, JsonObject>): void {
+  const record = asRecord(value);
+  const toolName = stringMaybe(record.name ?? record.toolName ?? record.tool_name);
+  const runtimePolicy = normalizedRuntimePolicy(record.runtime_policy ?? record.runtimePolicy);
+  if (toolName && runtimePolicy) {
+    policies[toolName] = {
+      ...(policies[toolName] ?? {}),
+      ...runtimePolicy,
+    };
+  }
+}
+
+function normalizedRuntimePolicy(value: unknown): JsonObject | undefined {
+  const record = asRecord(value);
+  const policy: JsonObject = {};
+  for (const key of [
+    "browser_expected",
+    "tool_manifest_scoped",
+    "declared_tools",
+    "mcp_boundary_required",
+  ]) {
+    const field = record[key];
+    if (Array.isArray(field)) {
+      const strings = uniqueStrings(field.map((item) => stringMaybe(item)));
+      if (strings.length > 0) {
+        policy[key] = strings;
+      }
+    } else if (typeof field === "boolean" || typeof field === "string" || typeof field === "number") {
+      policy[key] = field;
+    }
+  }
+  return Object.keys(policy).length > 0 ? policy : undefined;
+}
+
+function mergeToolRuntimePolicies(
+  existing: Record<string, JsonObject> | undefined,
+  next: Record<string, JsonObject>,
+): Record<string, JsonObject> {
+  const merged: Record<string, JsonObject> = { ...(existing ?? {}) };
+  for (const [toolName, runtimePolicy] of Object.entries(next)) {
+    merged[toolName] = {
+      ...(merged[toolName] ?? {}),
+      ...runtimePolicy,
+    };
+  }
+  return merged;
 }
 
 function withCachedRuntimeFields<T extends object, C extends object>(
@@ -508,6 +671,11 @@ function mergeRuntimeFields(value: object, state: SessionState): JsonObject {
   record.model = stringMaybe(record.model) ?? state.model;
   record.runId = stringMaybe(record.runId) ?? state.runId;
   record.sessionId = stringMaybe(record.sessionId) ?? state.sessionId;
+  const toolName = stringMaybe(record.toolName);
+  const runtimePolicy = toolName ? state.toolRuntimePolicies?.[toolName] : undefined;
+  if (runtimePolicy && Object.keys(asRecord(record.runtimePolicy ?? record.runtime_policy)).length === 0) {
+    record.runtimePolicy = runtimePolicy;
+  }
   return record;
 }
 
@@ -644,8 +812,35 @@ function firstNonEmptyString(...values: Array<string | undefined>): string {
   return "unknown";
 }
 
+function isDisabled(config: ReturnType<typeof buildPluginConfig>): boolean {
+  return config.enforcementMode === "disabled";
+}
+
+function isObserve(config: ReturnType<typeof buildPluginConfig>): boolean {
+  return config.enforcementMode === "observe";
+}
+
+function isEnforcing(config: ReturnType<typeof buildPluginConfig>): boolean {
+  return config.enforcementMode === "enforce";
+}
+
+function blockingApprovalHookTimeoutMs(config: ReturnType<typeof buildPluginConfig>): number {
+  return Math.max(10_000, config.approvalWaitBudgetMs + 2_000);
+}
+
+function shouldRuntimeBlock(config: ReturnType<typeof buildPluginConfig>, response: GuardEvaluationResponse): boolean {
+  return isEnforcing(config) && response.decision.decision !== "allow";
+}
+
+function decisionToBlockResult(response: GuardEvaluationResponse): { block: true; blockReason: string } {
+  return {
+    block: true,
+    blockReason: response.decision.safe_message || response.decision.reason || "Blocked by AgentGuard policy.",
+  };
+}
+
 function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeClient: () => GuardApiClient): void {
-  if (!config.adapterToken) {
+  if (!config.adapterToken || isDisabled(config)) {
     return;
   }
   const submit = () => {
@@ -668,6 +863,7 @@ function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeCli
           observation_hooks: [...OBSERVATION_HOOKS, "message_received"],
           redaction_hooks: ["tool_result_persist", "before_message_write", "before_agent_finalize"],
           fail_closed_stages: config.failClosedStages,
+          enforcement_mode: config.enforcementMode,
           redaction: config.redaction,
         },
       })

@@ -20,10 +20,11 @@ test("buildPluginConfig uses safe defaults and env token fallback", () => {
 
   assert.equal(config.guardApiBaseUrl, "http://127.0.0.1:8088");
   assert.equal(config.adapterToken, "env-token");
+  assert.equal(config.enforcementMode, "enforce");
   assert.equal(config.requestTimeoutMs, 5000);
   assert.equal(config.approvalPollIntervalMs, 1000);
   assert.equal(config.approvalTimeoutMs, 120000);
-  assert.equal(config.approvalWaitBudgetMs, 8000);
+  assert.equal(config.approvalWaitBudgetMs, 25000);
   assert.equal(config.diagnosticLogging, false);
 });
 
@@ -34,6 +35,7 @@ test("buildPluginConfig accepts approval budget and diagnostic logging", () => {
       diagnosticLogging: true,
       runtimeId: "openclaw-gateway",
       agentId: "openclaw-main",
+      enforcementMode: "observe",
       enabledHooks: ["before_tool_call", "message_sending"],
       failClosedStages: ["before_tool_call"],
       redaction: { enabled: true, previewLimit: 1200 },
@@ -46,6 +48,7 @@ test("buildPluginConfig accepts approval budget and diagnostic logging", () => {
   assert.equal(config.diagnosticLogging, true);
   assert.equal(config.runtimeId, "openclaw-gateway");
   assert.equal(config.agentId, "openclaw-main");
+  assert.equal(config.enforcementMode, "observe");
   assert.deepEqual(config.enabledHooks, ["before_tool_call", "message_sending"]);
   assert.deepEqual(config.failClosedStages, ["before_tool_call"]);
   assert.deepEqual(config.redaction, { enabled: true, previewLimit: 1200 });

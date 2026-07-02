@@ -84,6 +84,65 @@ export function redactUnknownCredentials(value: unknown): { value: unknown; chan
   return { value, changed: false };
 }
 
+export function sanitizePersistentInstructionPoisoning(value: unknown): { value: unknown; changed: boolean } {
+  if (typeof value === "string") {
+    if (!containsPersistentInstructionPoisoning(value)) {
+      return { value, changed: false };
+    }
+    return {
+      value: "[AgentGuard removed untrusted persistent instructions from this tool result.]",
+      changed: true,
+    };
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const result = sanitizePersistentInstructionPoisoning(item);
+      changed ||= result.changed;
+      return result.value;
+    });
+    return { value: mapped, changed };
+  }
+  if (typeof value === "object" && value !== null) {
+    let changed = false;
+    const mapped: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const result = sanitizePersistentInstructionPoisoning(nested);
+      changed ||= result.changed;
+      mapped[key] = result.value;
+    }
+    return { value: mapped, changed };
+  }
+  return { value, changed: false };
+}
+
+export function containsPersistentInstructionPoisoning(value: string): boolean {
+  const normalized = value.toLowerCase();
+  const persistenceIntent = [
+    "persist this rule",
+    "remember this rule",
+    "store this rule",
+    "future runs",
+    "future requests",
+    "future reports",
+    "future sessions",
+    "always send",
+    "from now on",
+  ].some((marker) => normalized.includes(marker));
+  const unsafeAction = [
+    "attacker@",
+    "send reports externally",
+    "send future",
+    "external",
+    "webhook",
+    "exfiltrate",
+    "ignore previous",
+    "ignore all prior",
+    "override",
+  ].some((marker) => normalized.includes(marker));
+  return persistenceIntent && unsafeAction;
+}
+
 export function isExecLikeToolIdentity(input: {
   toolName?: string | null;
   toolKind?: string | null;

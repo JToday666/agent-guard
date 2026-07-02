@@ -3,6 +3,7 @@ export type JsonObject = Record<string, unknown>;
 export type AgentGuardPluginConfig = {
   guardApiBaseUrl: string;
   adapterToken: string;
+  enforcementMode: "enforce" | "observe" | "disabled";
   requestTimeoutMs: number;
   approvalPollIntervalMs: number;
   approvalTimeoutMs: number;
