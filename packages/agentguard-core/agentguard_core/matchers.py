@@ -10,6 +10,45 @@ from .credentials import has_credential_value_text
 from .policies import PolicyBundle
 
 
+_PROMPT_INJECTION_INTENT_MARKERS: dict[str, list[str]] = {
+    "override_instruction": [
+        "ignore developer instructions",
+        "developer message",
+        "system message",
+        "override the system",
+    ],
+    "secret_exfiltration": [
+        "send /private",
+        "/private/",
+        "attacker@",
+        "exfiltrate",
+        "send the token",
+        "send secrets",
+        "credential bundle",
+    ],
+    "unsafe_external_action": [
+        "identityverify",
+        "market-segment-submit",
+        "connector-diagnostic-submit",
+        "bulk-lead-submit",
+        "route-suggestion-apply",
+    ],
+    "security_control_weakening": [
+        "lead-verification-relax",
+        "reduce verification controls",
+        "weaken verification",
+        "reduced verification route",
+    ],
+    "system_or_account_configuration_change": [
+        "support-profile-confirm",
+        "managed-device support profile",
+        "apply support profile",
+        "configuration change",
+        "account configuration",
+    ],
+}
+
+
 def contains_any(text: str, needles: list[str]) -> bool:
     normalized_text = normalize_match_text(text)
     return any(_marker_matches(normalized_text, needle) for needle in needles)
@@ -39,9 +78,46 @@ def has_instruction_like_text(text: str, policies: PolicyBundle) -> bool:
     return contains_any(text, policies.prompt_injection_markers)
 
 
-def has_high_confidence_prompt_injection_text(text: str, policies: PolicyBundle) -> bool:
-    return has_instruction_like_text(text, policies) and contains_any(
-        text, policies.high_confidence_prompt_injection_markers
+def prompt_injection_intents(text: str, policies: PolicyBundle) -> list[str]:
+    intents = [
+        intent
+        for intent, markers in _PROMPT_INJECTION_INTENT_MARKERS.items()
+        if contains_any(text, markers)
+    ]
+    if not intents and contains_any(text, policies.high_confidence_prompt_injection_markers):
+        intents.append("unsafe_external_action")
+    return intents
+
+
+def environment_poisoning_intents(text: str, policies: PolicyBundle) -> list[str]:
+    return [
+        intent
+        for intent in prompt_injection_intents(text, policies)
+        if intent != "override_instruction"
+    ]
+
+
+def has_high_confidence_prompt_injection_text(
+    text: str,
+    policies: PolicyBundle,
+    *,
+    contains_instruction_like_text: bool = False,
+) -> bool:
+    return (
+        contains_instruction_like_text or has_instruction_like_text(text, policies)
+    ) and bool(prompt_injection_intents(text, policies))
+
+
+def has_high_confidence_environment_poisoning_text(
+    text: str,
+    policies: PolicyBundle,
+    *,
+    contains_instruction_like_text: bool = False,
+) -> bool:
+    return (
+        contains_instruction_like_text or has_instruction_like_text(text, policies)
+    ) and bool(
+        environment_poisoning_intents(text, policies)
     )
 
 

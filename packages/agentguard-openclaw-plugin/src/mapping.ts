@@ -1220,8 +1220,11 @@ function buildInstallFindings(input: {
 }
 
 function containsInstructionLikeText(value: string): boolean {
-  return /ignore\s+(all\s+)?previous\s+instructions|system\s+prompt|send\s+(the\s+)?token|developer\s+message/i.test(
-    value,
+  return (
+    /ignore\s+(all\s+)?previous\s+instructions|ignore\s+developer\s+instructions|disregard\s+previous/i.test(value) ||
+    /override\s+the\s+system|system\s+message|developer\s+message|send\s+(the\s+)?token/i.test(value) ||
+    /identityverify|market-segment-submit|support-profile-confirm|managed-device\s+support\s+profile/i.test(value) ||
+    /lead-verification-relax|reduce\s+verification\s+controls|weaken\s+verification/i.test(value)
   );
 }
 

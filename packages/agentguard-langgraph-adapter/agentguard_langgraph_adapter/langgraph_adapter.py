@@ -658,6 +658,16 @@ def _contains_instruction_like_text(value: str) -> bool:
             "persist this rule",
             "future runs",
             "always send",
+            "developer message",
+            "system message",
+            "ignore developer instructions",
+            "identityverify",
+            "market-segment-submit",
+            "support-profile-confirm",
+            "managed-device support profile",
+            "lead-verification-relax",
+            "reduce verification controls",
+            "weaken verification",
         )
     )
 

@@ -122,9 +122,18 @@ class PolicyBundle(BaseModel):
             "ignore all previous instructions",
             "disregard previous instructions",
             "override the system",
+            "ignore developer instructions",
+            "developer message",
+            "system message",
             "send /private",
             "persist this rule",
             "future runs",
+            "identityverify",
+            "market-segment-submit",
+            "support-profile-confirm",
+            "managed-device support profile",
+            "lead-verification-relax",
+            "reduce verification controls",
         ]
     )
     high_confidence_prompt_injection_markers: list[str] = Field(
@@ -135,6 +144,16 @@ class PolicyBundle(BaseModel):
             "exfiltrate",
             "send the token",
             "send secrets",
+            "ignore developer instructions",
+            "developer message",
+            "system message",
+            "identityverify",
+            "market-segment-submit",
+            "support-profile-confirm",
+            "managed-device support profile",
+            "lead-verification-relax",
+            "reduce verification controls",
+            "weaken verification",
         ]
     )
     jailbreak_markers: list[str] = Field(

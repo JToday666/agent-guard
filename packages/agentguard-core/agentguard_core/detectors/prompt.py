@@ -5,9 +5,9 @@ from __future__ import annotations
 from ..decisions import DetectionResult, RuleHit
 from ..events import ContextBuildPayload, GuardEvent, ModelCallPayload
 from ..matchers import (
-    has_high_confidence_prompt_injection_text,
     has_instruction_like_text,
     has_jailbreak_text,
+    prompt_injection_intents,
 )
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
@@ -28,8 +28,12 @@ class PromptInjectionDetector(Detector):
         for source in event.payload.sources:
             if source.source_trust.lower() != "untrusted":
                 continue
-            high_confidence = has_high_confidence_prompt_injection_text(source.summary, policies)
-            if source.contains_instruction_like_text or has_instruction_like_text(source.summary, policies):
+            instruction_like = source.contains_instruction_like_text or has_instruction_like_text(
+                source.summary, policies
+            )
+            if instruction_like:
+                intents = prompt_injection_intents(source.summary, policies)
+                high_confidence = bool(intents)
                 result = apply_rule_override(
                     DetectionResult(
                         decision="deny" if high_confidence else "ask",
@@ -46,6 +50,10 @@ class PromptInjectionDetector(Detector):
                                 "will_enter_context=true",
                                 "sanitized=false",
                                 f"high_confidence={high_confidence}",
+                                *[
+                                    f"prompt_injection_intent={intent}"
+                                    for intent in intents
+                                ],
                             ],
                         ),
                         reason="Untrusted instruction-like content is about to enter the model context.",
@@ -71,12 +79,13 @@ class PromptInjectionDetector(Detector):
             return []
         if has_jailbreak_text(payload.content_preview, policies):
             return []
-        if not (
-            payload.contains_instruction_like_text
-            or has_instruction_like_text(payload.content_preview, policies)
-        ):
+        instruction_like = payload.contains_instruction_like_text or has_instruction_like_text(
+            payload.content_preview, policies
+        )
+        if not instruction_like:
             return []
-        high_confidence = has_high_confidence_prompt_injection_text(payload.content_preview, policies)
+        intents = prompt_injection_intents(payload.content_preview, policies)
+        high_confidence = bool(intents)
 
         result = apply_rule_override(
             DetectionResult(
@@ -93,6 +102,10 @@ class PromptInjectionDetector(Detector):
                         f"contains_instruction_like_text={payload.contains_instruction_like_text}",
                         "sanitized=false",
                         f"high_confidence={high_confidence}",
+                        *[
+                            f"prompt_injection_intent={intent}"
+                            for intent in intents
+                        ],
                     ],
                 ),
                 reason=(
