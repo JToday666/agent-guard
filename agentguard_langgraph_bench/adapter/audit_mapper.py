@@ -1,13 +1,5 @@
-"""AuditEvent mapping helpers for the LangGraph adapter layer."""
+"""Compatibility wrapper for :mod:`agentguard_langgraph_adapter.audit_mapper`."""
 
 from __future__ import annotations
 
-from .event_models import AuditEvent, PolicyDecision, ToolCallEvent
-from .langgraph_adapter import LangGraphAdapter
-
-
-def build_audit_event(adapter: LangGraphAdapter, event: ToolCallEvent, decision: PolicyDecision) -> AuditEvent:
-    return adapter.build_audit_event(event, decision)
-
-
-__all__ = ["build_audit_event"]
+from agentguard_langgraph_adapter.audit_mapper import *  # noqa: F403

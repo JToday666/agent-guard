@@ -548,6 +548,7 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
     errors: list[str] = []
     critical_errors: list[str] = []
     state_path = case_dir / "replay_state.json"
+    manifest_path = case_dir / "manifest.json"
     report_path = case_dir / "report.html"
     frames_path = case_dir / "replay_frames.txt"
     raw_video_path = case_dir / "raw_replay.webm"
@@ -556,6 +557,12 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
     continuous_frames_dir = case_dir / "continuous_frames"
     if raw_video_path.exists():
         critical_errors.append("raw_replay_must_not_exist")
+    manifest = _read_json(manifest_path)
+    if isinstance(manifest, dict):
+        if manifest.get("diagnostic_artifact") is True and manifest.get("real_browser_artifact") is True:
+            critical_errors.append("artifact_manifest_conflicting_diagnostic_and_real_browser")
+        if manifest.get("real_browser_artifact") is True and manifest.get("browser_started") is not True:
+            critical_errors.append("real_browser_artifact_without_browser_started")
     state: dict[str, Any] | None = None
     if state_path.exists():
         try:
@@ -564,6 +571,8 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
         except Exception as exc:
             critical_errors.append(f"replay_state_parse_error:{exc}")
     if state is not None:
+        if state.get("diagnostic_artifact") is True and state.get("real_browser_artifact") is True:
+            critical_errors.append("replay_state_conflicting_diagnostic_and_real_browser")
         if state.get("video_source") != "continuous_frame_sampler" and not _is_diagnostic_artifact(case_dir):
             critical_errors.append("replay_state_video_source_not_continuous_frame_sampler")
         if state.get("video_source") == "step_screenshots":
@@ -645,7 +654,7 @@ def _cross_check_case(case_dir: Path, artifacts: list[dict[str, Any]]) -> dict[s
         warnings.append("continuous_frames_manifest_count_mismatch")
     if isinstance(frames_manifest, dict) and frames_manifest.get("source") not in {None, "time_sampler"}:
         warnings.append("continuous_frames_manifest_source_not_time_sampler")
-    if _case_key_for_replay_dir(case_dir) == "AA-004":
+    if _case_key_for_replay_dir(case_dir) == "AA-004" and not _is_diagnostic_artifact(case_dir):
         final_dom = case_dir / "final_dom.html"
         dom = final_dom.read_text(encoding="utf-8", errors="replace") if final_dom.exists() else ""
         for marker in ("Quarterly Planning Sync", "meeting_room_joined", "meeting_disruption_sent"):

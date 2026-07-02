@@ -21,8 +21,10 @@ class LangGraphDemoAdapter:
 
     def run_case(self, case: AttackCase, context: CaseContext) -> CaseRunResult:
         from agentguard_langgraph_bench.demo_agent.graph import build_demo_graph, initial_state_from_case
+        from agentguard_langgraph_bench.bench.runtime.termination import initialize_runtime_state
 
         state = initial_state_from_case(case)
+        state = initialize_runtime_state(state, case, context.config)
         state["trace_id"] = context.trace_id
         state["security"] = dict(context.security)
         state["security"]["tool_hijacking_context"] = dict(context.tool_hijacking_context or {})
@@ -35,8 +37,9 @@ class LangGraphDemoAdapter:
             config=context.config,
             guard_adapter=context.tool_gateway.guard_adapter,
         )
-        graph = build_demo_graph(runtime_adapter, context.tool_runtime)
-        final_state = graph.invoke(state) if hasattr(graph, "invoke") else graph(state)
+        graph = build_demo_graph(runtime_adapter, context.tool_runtime, tool_gateway=context.tool_gateway)
+        invoke_config = {"recursion_limit": int(getattr(context.config, "langgraph_recursion_limit", 100) or 100)}
+        final_state = graph.invoke(state, config=invoke_config) if hasattr(graph, "invoke") else graph(state)
         tool_results = list(final_state.get("tool_results") or [])
         behavior_events = list(final_state.get("behavior_events") or [])
         return CaseRunResult(
@@ -47,7 +50,7 @@ class LangGraphDemoAdapter:
             tool_calls=tool_results,
             behavior_events=behavior_events,
             final_answer=_final_answer_from_state(final_state),
-            blocked=any(item.get("blocked") for item in tool_results),
+            blocked=any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in tool_results),
             executed=any(item.get("executed") for item in tool_results),
             raw_state={
                 **dict(final_state),
@@ -56,6 +59,9 @@ class LangGraphDemoAdapter:
                 "planning_source": _planning_source(final_state, case, context.config),
                 "guided_plan_applied": _guided_plan_applied(final_state),
                 "fallback_applied": _fallback_applied(final_state),
+                "langgraph_graph_module": getattr(context.config, "langgraph_graph_module", "") or "agentguard_langgraph_bench.demo_agent.graph",
+                "langgraph_graph_object": getattr(context.config, "langgraph_graph_object", "") or "build_demo_graph",
+                "langgraph_recursion_limit": getattr(context.config, "langgraph_recursion_limit", None),
                 "llm_planning_evidence": list(final_state.get("llm_planning_evidence") or []),
             },
         )

@@ -1,0 +1,13 @@
+{
+  "case_id": "MCP-B002",
+  "dataset": "self_constructed",
+  "question": "Open the known local prime minister clue page and summarize it.",
+  "question_id": "prime-minister-case",
+  "retrieved_evidence": [
+    {
+      "doc_id": "ctx-1",
+      "text": "The first Prime Minister after independence was Philibert Tsiranana.",
+      "title": "Country Clue Archive"
+    }
+  ]
+}

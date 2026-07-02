@@ -28,6 +28,7 @@ from guard_api.services import (
 )
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters, PolicySnapshotRecord
+from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
 
@@ -75,7 +76,11 @@ def create_app(
     policy_provider: Callable[[], PolicyBundle] | None = None,
 ) -> FastAPI:
     settings = settings or GuardApiSettings()
-    store = store or PostgresControlPlaneStore(settings.database_url)
+    if store is None:
+        if settings.storage_backend == "memory":
+            store = MemoryControlPlaneStore()
+        else:
+            store = PostgresControlPlaneStore(settings.database_url)
     auth = CapabilityAuthService(settings=settings, store=store)
     audit_service = AuditService(store=store)
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)

@@ -4,7 +4,15 @@ from pathlib import Path
 
 from agentguard_langgraph_bench.bench.evidence.artifact_integrity import build_artifact_integrity_manifest, check_case_artifacts
 from agentguard_langgraph_bench.bench.metrics import calculate_metrics
-from agentguard_langgraph_bench.bench.runner import _case_result_dir, _write_case_artifacts, write_results
+from agentguard_langgraph_bench.bench.config import BenchConfig
+from agentguard_langgraph_bench.bench.runner import (
+    _case_result_dir,
+    _langgraph_graph_module,
+    _langgraph_graph_object,
+    _preserve_runtime_infra_invalidity,
+    _write_case_artifacts,
+    write_results,
+)
 
 
 def test_valid_asr_excludes_invalid_and_unknown_cases():
@@ -43,6 +51,119 @@ def test_write_results_emits_run_manifest(tmp_path):
     assert Path(paths["run_manifest"]).exists()
     assert paths["run_dir"].endswith("run_20260621T000000000000Z")
     assert paths["case_artifacts_dir"].endswith("run_20260621T000000000000Z/cases")
+
+
+def test_run_manifest_records_true_langgraph_gate_fields(tmp_path):
+    rows = [
+        {
+            "case_id": "PI-001",
+            "case_run_key": "PI-001",
+            "attack_type": "prompt_injection",
+            "run_valid": True,
+            "is_malicious": True,
+            "benchmark_run_id": "20260621T000000000010Z",
+            "runtime": "langgraph",
+            "adapter_name": "standalone-langgraph-subprocess",
+            "langgraph_graph_module": "external.agent.graph",
+            "langgraph_graph_object": "graph",
+            "langgraph_recursion_limit": 240,
+            "runtime_limits": {"max_tool_rounds": 120, "max_wall_clock_seconds": 600, "max_repeated_actions": 5},
+            "browser_action_timeout": 45,
+            "llm_request_timeout": 70,
+            "llm_max_retries": 2,
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-v4-flash",
+            "llm_enabled": True,
+            "instrumentation_plan_mode": "autonomous",
+            "planning_source": "llm_autonomous",
+            "guided_plan_applied": False,
+            "fallback_applied": False,
+            "core_mode": "defense_off",
+            "fake_core_decision": None,
+            "tool_invocation_base_url": "http://127.0.0.1:18090/tools",
+            "browser_mode": "real",
+        }
+    ]
+    case_dir = tmp_path / "run_20260621T000000000010Z" / "cases" / "PI-001"
+    case_dir.mkdir(parents=True)
+    (case_dir / "case_result.json").write_text("{}", encoding="utf-8")
+
+    paths = write_results(rows, {}, tmp_path)
+    manifest = json.loads(Path(paths["run_manifest"]).read_text(encoding="utf-8"))
+
+    assert manifest["runtime"] == "langgraph"
+    assert manifest["agent_adapter"] == "standalone-langgraph-subprocess"
+    assert manifest["langgraph_graph_module"] == "external.agent.graph"
+    assert manifest["langgraph_recursion_limit"] == 240
+    assert manifest["max_tool_rounds"] == 120
+    assert manifest["max_wall_clock_seconds"] == 600
+    assert manifest["llm_provider"] == "deepseek"
+    assert manifest["llm_model"] == "deepseek-v4-flash"
+    assert manifest["llm_enabled"] is True
+    assert manifest["planning_source"] == "llm_autonomous"
+    assert manifest["guided_plan_applied"] is False
+    assert manifest["fallback_applied"] is False
+    assert manifest["core_mode"] == "defense_off"
+    assert manifest["fake_core_decision"] is None
+    assert manifest["browser_mode"] == "real"
+    assert manifest["tool_invocation_base_url"] == "http://127.0.0.1:18090/tools"
+
+
+def test_standalone_langgraph_subprocess_has_default_graph_evidence():
+    config = BenchConfig(agent_adapter="standalone-langgraph-subprocess", runtime="langgraph")
+    adapter = type("Adapter", (), {"name": "standalone-langgraph-subprocess"})()
+
+    assert _langgraph_graph_module(adapter, config).endswith("bench_tool_agent.py")
+    assert _langgraph_graph_object(adapter, config) == "build_graph"
+
+
+def test_runtime_infra_timeout_invalidity_survives_family_evaluator():
+    row = {
+        "run_valid": True,
+        "run_status": "completed",
+        "stop_reason": "adapter_timeout",
+        "invalid_reasons": [],
+    }
+
+    _preserve_runtime_infra_invalidity(row)
+
+    assert row["run_valid"] is False
+    assert row["run_status"] == "adapter_timeout"
+    assert row["invalid_reasons"] == ["adapter_timeout"]
+
+
+def test_duplicate_case_ids_use_case_run_key_for_integrity(tmp_path):
+    rows = [
+        {
+            "case_id": "PR-001",
+            "case_run_key": "PR-001__memory_poisoning__1",
+            "dataset_file": "memory_poisoning.jsonl",
+            "attack_type": "memory_poisoning",
+            "run_valid": True,
+            "is_malicious": True,
+            "benchmark_run_id": "20260621T000000000099Z",
+        },
+        {
+            "case_id": "PR-001",
+            "case_run_key": "PR-001__memory_poisoning_stateful__8",
+            "dataset_file": "memory_poisoning_stateful.jsonl",
+            "attack_type": "memory_poisoning",
+            "run_valid": True,
+            "is_malicious": True,
+            "benchmark_run_id": "20260621T000000000099Z",
+        },
+    ]
+    for row in rows:
+        case_dir = tmp_path / "run_20260621T000000000099Z" / "cases" / row["case_run_key"]
+        case_dir.mkdir(parents=True)
+        (case_dir / "case_result.json").write_text(json.dumps(row), encoding="utf-8")
+
+    paths = write_results(rows, {}, tmp_path)
+    manifest = json.loads(Path(paths["run_manifest"]).read_text(encoding="utf-8"))
+
+    assert manifest["duplicate_case_ids"] == ["PR-001"]
+    assert manifest["duplicate_case_run_keys"] == []
+    assert manifest["run_integrity_ok"] is True
 
 
 def test_write_results_preserves_top_level_memory_poisoning_summary(tmp_path):
@@ -294,7 +415,33 @@ def test_write_case_artifacts_creates_diagnostic_browser_replay_for_autonomous_p
     assert '"diagnostic_artifact": true' in integrity
 
 
-def test_file_exfiltration_browser_case_missing_replay_is_reported_not_masked(tmp_path):
+def test_write_case_artifacts_creates_diagnostic_browser_replay_for_prompt_injection_stall(tmp_path):
+    row = {
+        "case_id": "PI-009",
+        "attack_type": "prompt_injection",
+        "run_valid": False,
+        "run_status": "llm_planning_error",
+        "stop_reason": "llm_planning_error",
+        "is_malicious": True,
+        "benchmark_run_id": "20260621T000000000012Z",
+        "instrumentation_plan_mode": "autonomous",
+        "agent_visible_payload_mode": "original",
+        "llm_request_count": 1,
+        "llm_timeout_count": 1,
+        "browser_recordings": [],
+    }
+    case_dir = tmp_path / "run_20260621T000000000012Z" / "cases" / "PI-009"
+
+    _write_case_artifacts(case_dir, row, {"case_id": "PI-009"})
+    paths = write_results([row], {}, tmp_path)
+
+    assert (case_dir / "browser_replay" / "manifest.json").exists()
+    assert row["browser_recordings"][0]["diagnostic_artifact"] is True
+    manifest = Path(paths["run_manifest"]).read_text(encoding="utf-8")
+    assert '"artifact_missing_case_ids": []' in manifest
+
+
+def test_file_exfiltration_browser_case_missing_replay_gets_diagnostic_artifact(tmp_path):
     row = {
         "case_id": "FE-001",
         "attack_type": "file_exfiltration",
@@ -312,10 +459,10 @@ def test_file_exfiltration_browser_case_missing_replay_is_reported_not_masked(tm
     paths = write_results([row], {}, tmp_path)
     manifest = Path(paths["run_manifest"]).read_text(encoding="utf-8")
 
-    assert not (case_dir / "browser_replay" / "manifest.json").exists()
-    assert '"run_integrity_ok": false' in manifest
-    assert '"artifact_missing_case_ids": [' in manifest
-    assert '"FE-001"' in manifest
+    assert (case_dir / "browser_replay" / "manifest.json").exists()
+    assert row["browser_recordings"][0]["diagnostic_artifact"] is True
+    assert '"run_integrity_ok": true' in manifest
+    assert '"artifact_missing_case_ids": []' in manifest
 
 
 def test_case_side_effect_archive_uses_only_current_sandbox_diff(tmp_path):
@@ -565,6 +712,47 @@ def test_write_case_artifacts_completes_incomplete_replay_from_tool_calls(tmp_pa
     assert '"diagnostic_artifact": true' in manifest
 
 
+def test_write_case_artifacts_does_not_mark_started_real_browser_failure_diagnostic(tmp_path):
+    source = tmp_path / "sandbox" / "browser" / "replay_artifacts" / "PI-001"
+    source.mkdir(parents=True)
+    for name in ("events.jsonl", "action_metadata.jsonl", "step_actions.jsonl"):
+        (source / name).write_text('{"timestamp":"2026-06-26T00:00:00Z"}\n', encoding="utf-8")
+    (source / "manifest.json").write_text(
+        json.dumps({"ok": False, "real_browser_artifact": True, "browser_started": True, "diagnostic_artifact": False}),
+        encoding="utf-8",
+    )
+    (source / "replay_state.json").write_text(
+        json.dumps({"ok": False, "real_browser_artifact": True, "browser_started": True, "diagnostic_artifact": False}),
+        encoding="utf-8",
+    )
+    row = {
+        "case_id": "PI-001",
+        "browser_recordings": [
+            {
+                "ok": False,
+                "session_id": "PI-001",
+                "artifact_dir": str(source),
+                "manifest": str(source / "manifest.json"),
+                "replay_state": str(source / "replay_state.json"),
+                "events": str(source / "events.jsonl"),
+                "action_metadata": str(source / "action_metadata.jsonl"),
+                "step_actions": str(source / "step_actions.jsonl"),
+                "real_browser_artifact": True,
+                "browser_started": True,
+            }
+        ],
+        "tool_calls": [],
+    }
+    case_dir = tmp_path / "case"
+
+    _write_case_artifacts(case_dir, row, None)
+
+    manifest = json.loads((case_dir / "browser_replay" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["real_browser_artifact"] is True
+    assert manifest["browser_started"] is True
+    assert manifest["diagnostic_artifact"] is False
+
+
 def test_diagnostic_replay_keeps_errors_but_not_critical_integrity_failure(tmp_path):
     replay = tmp_path / "case" / "browser_replay"
     replay.mkdir(parents=True)
@@ -601,6 +789,35 @@ def test_diagnostic_replay_keeps_errors_but_not_critical_integrity_failure(tmp_p
     assert result["ok"] is True
     assert result["critical_errors"] == []
     assert "html_missing_references" in result["errors"]
+
+
+def test_aa004_diagnostic_replay_does_not_require_real_browser_terminal_markers(tmp_path):
+    replay = tmp_path / "cases" / "AA-004" / "browser_replay"
+    replay.mkdir(parents=True)
+    (replay / "manifest.json").write_text('{"diagnostic_artifact": true}', encoding="utf-8")
+    (replay / "events.jsonl").write_text('{"event_type":"planner_stalled_before_browser_start"}\n', encoding="utf-8")
+    (replay / "action_metadata.jsonl").write_text('{"timestamp":"2026-06-26T00:00:00Z"}\n', encoding="utf-8")
+    (replay / "step_actions.jsonl").write_text('{"timestamp":"2026-06-26T00:00:00Z"}\n', encoding="utf-8")
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+        b"\x90wS\xde"
+    )
+    (replay / "final.png").write_bytes(png)
+    (replay / "final_full_page.png").write_bytes(png)
+    (replay / "final_dom.html").write_text("<html><body>diagnostic</body></html>", encoding="utf-8")
+    (replay / "final_accessibility_tree.json").write_text('{"ok": true}', encoding="utf-8")
+    (replay / "business_event_correlation_index.json").write_text('{"schema_version":"1.0"}', encoding="utf-8")
+    (replay / "report.html").write_text("<html>diagnostic</html>", encoding="utf-8")
+    (replay / "replay_state.json").write_text('{"diagnostic_artifact": true, "raw_replay_absent": true}', encoding="utf-8")
+    (replay / "video_timeline.json").write_text("{}", encoding="utf-8")
+    (replay / "replay.webm").write_bytes(b"")
+    (replay / "trace.zip").write_bytes(b"")
+
+    result = check_case_artifacts(replay, root=tmp_path)
+
+    assert not any(str(item).startswith("aa004_final_dom_missing") for item in result["critical_errors"])
 
 
 def test_html_integrity_ignores_snapshot_external_link_protocol(tmp_path):

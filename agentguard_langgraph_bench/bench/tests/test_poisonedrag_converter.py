@@ -32,3 +32,11 @@ def test_poisonedrag_converter_emits_clean_baseline_cases():
     assert case.is_malicious is False
     assert case.expected_decision == "allow"
     assert answer.arguments["answer_strategy"] == "target_correct_answer"
+
+
+def test_poisonedrag_converter_prefers_evidence_backed_hotpotqa_subset():
+    cases = poisonedrag_to_attack_cases(poisonedrag_root(), datasets=["hotpotqa"], limit_per_dataset=2)
+
+    qids = [AttackCase.model_validate(case).metadata["original_id"] for case in cases]
+
+    assert qids == ["5adbf0a255429947ff17385a", "5ab56e32554299637185c594"]

@@ -10,7 +10,7 @@ from agentguard_langgraph_bench.adapter import FakeAllowCoreClient, LangGraphAda
 from agentguard_langgraph_bench.adapter.event_models import PolicyDecision
 from agentguard_langgraph_bench.adapters.langgraph_demo.adapter import LangGraphDemoAdapter
 from agentguard_langgraph_bench.bench.config import BenchConfig
-from agentguard_langgraph_bench.bench.models import AttackCase
+from agentguard_langgraph_bench.bench.models import AttackCase, ToolPlanStep
 from agentguard_langgraph_bench.bench.runner import build_case_context, build_parser
 from agentguard_langgraph_bench.bench.runner import run_cases
 from agentguard_langgraph_bench.bench.runtime.tool_gateway import GuardedToolGateway
@@ -154,6 +154,44 @@ def test_cli_llm_timeout_overrides_environment(monkeypatch):
 
     assert config.llm_request_timeout == 70.0
     assert config.llm_max_retries == 0
+
+
+def test_cli_accepts_test8_budget_and_llm_aliases():
+    args = build_parser().parse_args(
+        [
+            "--llm-provider",
+            "deepseek",
+            "--llm-model",
+            "deepseek-v4-flash",
+            "--max-tool-rounds",
+            "120",
+            "--max-wall-clock-seconds",
+            "600",
+            "--langgraph-recursion-limit",
+            "240",
+            "--browser-action-timeout",
+            "45",
+            "--agent-adapter",
+            "standalone-langgraph-subprocess",
+        ]
+    )
+    config = BenchConfig.from_values(
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
+        llm_max_tool_rounds=args.llm_max_tool_rounds,
+        max_wall_clock_seconds=args.max_wall_clock_seconds,
+        langgraph_recursion_limit=args.langgraph_recursion_limit,
+        browser_action_timeout=args.browser_action_timeout,
+        agent_adapter=args.agent_adapter,
+    )
+
+    assert config.llm_provider == "deepseek"
+    assert config.llm_model == "deepseek-v4-flash"
+    assert config.llm_max_tool_rounds == 120
+    assert config.max_wall_clock_seconds == 600
+    assert config.langgraph_recursion_limit == 240
+    assert config.browser_action_timeout == 45
+    assert config.agent_adapter == "standalone-langgraph-subprocess"
 
 
 def test_llm_max_retries_rejects_negative_value():
@@ -678,6 +716,19 @@ def test_memory_poisoning_empty_rag_answer_observation_keeps_submission_pending(
 
 def test_llm_graph_loops_over_tool_observations_and_asks_core_each_step(monkeypatch, tmp_path):
     case = sample_case()
+    case.metadata["web_entry_source_path"] = "agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-005/index.html"
+    case.tool_plan = [
+        ToolPlanStep.model_validate(
+            {
+                "tool": "browser_start",
+                "arguments": {
+                    "run_id": case.case_id,
+                    "source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-005/index.html",
+                    "url": "http://127.0.0.1:18080/local-instrumentation/client_workflows/PI-005/index.html",
+                },
+            }
+        )
+    ]
     (tmp_path / "files" / "docs").mkdir(parents=True)
     (tmp_path / "files" / "docs" / "public.txt").write_text("public document", encoding="utf-8")
 

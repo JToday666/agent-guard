@@ -12,6 +12,12 @@ const PLUGIN_ROOT = path.join(ROOT, "packages", "agentguard-openclaw-plugin");
 const DEV_ROOT = path.join(ROOT, ".openclaw-dev");
 const STAGING_DIR = path.join(DEV_ROOT, PLUGIN_ID);
 const BACKUP_DIR = path.join(DEV_ROOT, "backups");
+const CODE_ROOT = path.resolve(ROOT, "..");
+const LOCAL_OPENCLAW_HOME = path.join(CODE_ROOT, ".openclaw-home");
+const LOCAL_OPENCLAW_STATE_DIR = path.join(CODE_ROOT, ".openclaw");
+const LOCAL_OPENCLAW_CONFIG_PATH = path.join(LOCAL_OPENCLAW_STATE_DIR, "openclaw.json");
+const LOCAL_TOOLS_BIN = path.join(CODE_ROOT, ".tools", "bin");
+const LOCAL_NODE_BIN = path.join(CODE_ROOT, ".tools", "node-v24.15.0-linux-x64", "bin");
 const REQUIRED_HOOKS = [
   "after_compaction",
   "before_compaction",
@@ -181,6 +187,10 @@ function backupOpenClawConfig(reason) {
 }
 
 function resolveOpenClawConfigPath() {
+  const explicit = process.env.OPENCLAW_CONFIG_PATH?.trim() || LOCAL_OPENCLAW_CONFIG_PATH;
+  if (explicit) {
+    return expandHome(explicit);
+  }
   const result = run("openclaw", ["config", "file"], { allowFailure: true, capture: true });
   if (result.status === 0) {
     const line = result.stdout
@@ -285,7 +295,7 @@ function uninstallExistingPlugin() {
     allowFailure: true,
     capture: true,
   });
-  if (result.status !== 0 && !looksLikeMissingPlugin(result)) {
+  if (result.status !== 0 && !looksLikeMissingPlugin(result) && combinedOutput(result).trim()) {
     throw new Error(`Failed to remove existing ${PLUGIN_ID} install:\n${combinedOutput(result)}`);
   }
 }
@@ -338,6 +348,7 @@ function stripEnvValue(value) {
 function run(cmd, args, options = {}) {
   const result = spawnSync(cmd, args, {
     cwd: ROOT,
+    env: localCommandEnv(),
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
   });
@@ -348,6 +359,26 @@ function run(cmd, args, options = {}) {
     throw new Error(`Command failed: ${cmd} ${args.join(" ")}\n${combinedOutput(result)}`);
   }
   return result;
+}
+
+function localCommandEnv() {
+  const pathEntries = [
+    LOCAL_TOOLS_BIN,
+    LOCAL_NODE_BIN,
+    path.join(ROOT, "node_modules", ".pnpm", "node_modules", ".bin"),
+    path.join(PLUGIN_ROOT, "node_modules", ".bin"),
+    process.env.PATH ?? "",
+  ].filter(Boolean);
+  return {
+    ...process.env,
+    PATH: pathEntries.join(path.delimiter),
+    OPENCLAW_HOME: process.env.OPENCLAW_HOME || LOCAL_OPENCLAW_HOME,
+    OPENCLAW_STATE_DIR: process.env.OPENCLAW_STATE_DIR || LOCAL_OPENCLAW_STATE_DIR,
+    OPENCLAW_CONFIG_PATH: process.env.OPENCLAW_CONFIG_PATH || LOCAL_OPENCLAW_CONFIG_PATH,
+    COREPACK_HOME: process.env.COREPACK_HOME || path.join(CODE_ROOT, ".cache", "corepack"),
+    npm_config_cache: process.env.npm_config_cache || path.join(CODE_ROOT, ".cache", "npm"),
+    PNPM_HOME: process.env.PNPM_HOME || LOCAL_TOOLS_BIN,
+  };
 }
 
 function combinedOutput(result) {

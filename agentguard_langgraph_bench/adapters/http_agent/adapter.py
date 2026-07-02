@@ -7,7 +7,9 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from agentguard_langgraph_bench.adapters.metadata import safe_agent_metadata as _safe_agent_metadata
 from agentguard_langgraph_bench.bench.models import AttackCase
+from agentguard_langgraph_bench.bench.scoring.tool_hijacking import case_extra_list
 from agentguard_langgraph_bench.bench.runtime.agent_protocol import CaseContext, CaseRunResult
 
 
@@ -49,7 +51,7 @@ class HttpAgentAdapter:
             final_answer=str(response.get("final_answer") or ""),
             raw_logs=list(response.get("logs") or []) if isinstance(response.get("logs"), list) else [],
             raw_state={"agent_response": response},
-            blocked=any(item.get("blocked") for item in tool_calls),
+            blocked=any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in tool_calls),
             executed=any(item.get("executed") for item in tool_calls),
             error=error,
         )
@@ -63,31 +65,38 @@ def create_adapter(config: Any) -> HttpAgentAdapter:
 
 
 def _agent_payload(case: AttackCase, context: CaseContext, tool_server_url: str) -> dict[str, Any]:
+    mcp_catalog_view = _mcp_catalog_view(context)
     return {
         "case_id": case.case_id,
         "trace_id": context.trace_id,
         "input": case.input.model_dump(),
         "metadata": _safe_agent_metadata(case.metadata),
+        "mcp_catalog_view": mcp_catalog_view,
+        "mcp_tool_catalog": _agent_visible_mcp_tool_catalog(case, context, mcp_catalog_view),
         "tool_manifest_url": f"{tool_server_url}/tools",
         "tool_invocation_base_url": f"{tool_server_url}/tools",
     }
 
 
-def _safe_agent_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    blocked = {
-        "expected_decision",
-        "success_condition",
-        "normal_oracle",
-        "attack_oracle",
-        "task_oracle",
-        "safety_oracle",
-        "sequence_oracle",
-        "permission_oracle",
-        "response_oracle",
-        "incorrect_answer",
-        "target_incorrect_answer",
-    }
-    return {key: value for key, value in metadata.items() if key not in blocked}
+def _mcp_catalog_view(context: CaseContext) -> str:
+    view = str(getattr(context.config, "tool_catalog_view", "") or "").strip()
+    return view if view in {"clean", "poisoned"} else "poisoned"
+
+
+def _agent_visible_mcp_tool_catalog(case: AttackCase, context: CaseContext, view: str) -> list[dict[str, Any]]:
+    if case.attack_type != "tool_hijacking":
+        return []
+    catalog = case_extra_list(case, f"{view}_tool_catalog")
+    if not catalog and view == "poisoned":
+        catalog = case_extra_list(case, "clean_tool_catalog")
+    if not catalog and view == "clean":
+        catalog = case_extra_list(case, "poisoned_tool_catalog")
+    return [_public_mcp_descriptor(item) for item in catalog if isinstance(item, dict)]
+
+
+def _public_mcp_descriptor(item: dict[str, Any]) -> dict[str, Any]:
+    allowed = ("server", "server_name", "tool", "tool_name", "name", "title", "description", "input_schema", "permissions", "trust_level", "version")
+    return {key: item[key] for key in allowed if key in item}
 
 
 def _post_json(endpoint: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:

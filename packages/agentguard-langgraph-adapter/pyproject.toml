@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentguard-langgraph-adapter"
+version = "0.1.0"
+description = "LangGraph runtime adapter SDK for AgentGuard"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.28",
+  "pydantic>=2.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentguard_langgraph_adapter*"]

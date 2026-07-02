@@ -2389,18 +2389,19 @@ def initial_state_from_case(case: AttackCase) -> DemoState:
     }
 
 
-def run_demo_case(case: AttackCase, adapter: LangGraphAdapter, tools: MockToolRegistry) -> dict[str, Any]:
+def run_demo_case(case: AttackCase, adapter: LangGraphAdapter, tools: MockToolRegistry, tool_gateway: Any | None = None) -> dict[str, Any]:
     state = initial_state_from_case(case)
     state = initialize_runtime_state(state, case, adapter.config)
-    state["runtime_limits"] = {**state.get("runtime_limits", {}), "max_tool_rounds": _max_tool_rounds_for_state(state, adapter.config)}
-    graph = build_demo_graph(adapter, tools)
+    state["runtime_limits"] = _runtime_limits_with_effective_max_rounds(state, adapter.config)
+    graph = build_demo_graph(adapter, tools, tool_gateway=tool_gateway)
     if hasattr(graph, "invoke"):
         return graph.invoke(state)
     return graph(state)
 
 
-def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry) -> Any:
+def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_gateway: Any | None = None) -> Any:
     """Build a StateGraph when LangGraph is installed, otherwise return a direct runner callable."""
+    guarded_tool_node = create_guarded_tool_node(adapter, tools, gateway=tool_gateway)
     try:
         from langgraph.graph import END, StateGraph
     except Exception:
@@ -2410,7 +2411,7 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry) -> Any:
                 state = _plan_tool_capture(state, adapter.config, tools)
                 if not state.get("tool_calls"):
                     break
-                state = create_guarded_tool_node(adapter, tools)(state)
+                state = guarded_tool_node(state)
                 case_for_terminal = _case_from_state(state)
                 if _terminal_reason_from_tool_results(state.get("last_tool_results") or [], adapter.config, case_for_terminal) or not _should_continue_tool_loop(state, adapter.config):
                     break
@@ -2434,7 +2435,7 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry) -> Any:
     graph = StateGraph(DemoState)
     graph.add_node("pre_model", pre_model)
     graph.add_node("plan_tool", plan_tool)
-    graph.add_node("guarded_tools", create_guarded_tool_node(adapter, tools))
+    graph.add_node("guarded_tools", guarded_tool_node)
     graph.add_node("post_tool", post_tool)
     graph.add_node("finalize", finalize)
     graph.set_entry_point("pre_model")
@@ -2467,7 +2468,7 @@ def _should_continue_tool_loop(state: DemoState, config: BenchConfig) -> bool:
         return False
     if not state.get("last_tool_results"):
         return False
-    if any(item.get("blocked") for item in state.get("last_tool_results") or []):
+    if any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in state.get("last_tool_results") or []):
         return False
     if int(state.get("round_index") or 0) >= _max_tool_rounds_for_state(state, config):
         return False
@@ -2498,7 +2499,7 @@ def _with_task_terminal_state(state: DemoState, config: BenchConfig | None = Non
 
 def _terminal_reason_from_tool_results(tool_results: list[dict[str, Any]], config: BenchConfig | None = None, case: AttackCase | None = None) -> str:
     for item in reversed(tool_results):
-        if item.get("blocked"):
+        if item.get("blocked") and not item.get("runtime_policy_blocked"):
             return "blocked"
         if item.get("status") != "executed" or item.get("error"):
             continue
@@ -2667,7 +2668,7 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
         "last_tool_results": [],
         "round_index": round_index,
         "last_model_content": planner_content or state.get("last_model_content", ""),
-        "runtime_limits": {**(state.get("runtime_limits") or {}), "max_tool_rounds": _max_tool_rounds_for_state(state, config)},
+        "runtime_limits": _runtime_limits_with_effective_max_rounds(state, config),
     }
     if stop_reason:
         state["stop_reason"] = stop_reason
@@ -2692,6 +2693,21 @@ def _plan_tool_capture(state: DemoState, config: BenchConfig, tools: MockToolReg
             "llm_diagnostics": planning_diagnostics,
         },
     )
+
+
+def _runtime_limits_with_effective_max_rounds(state: DemoState, config: BenchConfig) -> dict[str, Any]:
+    limits = dict(state.get("runtime_limits") or {})
+    existing = limits.get("max_tool_rounds")
+    effective = _max_tool_rounds_for_state(state, config)
+    if config.instrumentation_plan_mode == "autonomous" and existing is not None:
+        try:
+            existing_int = int(existing)
+        except (TypeError, ValueError):
+            existing_int = None
+        if existing_int is not None and existing_int > 0:
+            effective = min(existing_int, effective)
+    limits["max_tool_rounds"] = effective
+    return limits
 
 
 def _guided_plan_applied(calls: list[dict[str, Any]]) -> bool:
@@ -2735,7 +2751,7 @@ def _planning_source_for_calls(
 def _post_tool_capture(state: DemoState, config: BenchConfig) -> DemoState:
     state = _with_task_terminal_state(state, config)
     if not config.llm_enabled and state.get("last_tool_results") and not state.get("stop_reason"):
-        if any(item.get("blocked") for item in state.get("last_tool_results") or []):
+        if any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in state.get("last_tool_results") or []):
             state = {**state, "stop_reason": "blocked"}
         else:
             state = {**state, "stop_reason": "completed"}
@@ -2748,7 +2764,7 @@ def _post_tool_capture(state: DemoState, config: BenchConfig) -> DemoState:
         pass
     if state.get("stop_reason"):
         return state
-    if any(item.get("blocked") for item in state.get("last_tool_results") or []):
+    if any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in state.get("last_tool_results") or []):
         return {**state, "stop_reason": "blocked"}
     if state.get("last_tool_results"):
         if config.llm_enabled and int(state.get("round_index") or 0) >= _max_tool_rounds_for_state(state, config):

@@ -18,12 +18,14 @@ def test_selector_matching_id_hash_equivalence():
     assert selector_matches("#identityVerify", None, {"id": "identityVerify"})
     assert selector_matches("id=identityVerify", None, {"id": "identityVerify"})
     assert selector_matches('[id="identityVerify"]', None, {"id": "identityVerify"})
+    assert selector_matches("#meetingId", None, {"id": "meetingID"})
 
 
 def test_selector_matching_testid_equivalence():
     assert selector_matches("[data-testid='market-segment-submit']", None, {"testId": "market-segment-submit"})
     assert selector_matches("testid=market-segment-submit", None, {"testId": "market-segment-submit"})
     assert selector_matches("[data-test-id=\"market-segment-submit\"]", None, {"testId": "market-segment-submit"})
+    assert selector_matches('[testId="market-segment-submit"]', None, {"testId": "market-segment-submit"})
 
 
 def test_selector_matching_name_and_text_equivalence():

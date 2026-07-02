@@ -11,7 +11,7 @@ from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
 from guard_api.services import PolicyService
-from guard_api.settings import GuardApiSettings
+from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
 
@@ -363,6 +363,30 @@ def test_startup_initializes_control_plane_store() -> None:
         response = client.get("/health")
 
     assert response.status_code == 200
+
+
+def test_startup_can_use_configured_memory_storage_backend() -> None:
+    settings = GuardApiSettings(storage_backend="memory", adapter_token="adapter-secret")
+    app = create_app(settings=settings)
+
+    with TestClient(app) as client:
+        response = client.get("/health?check_db=true")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "ok"}
+
+
+def test_production_rejects_memory_storage_backend() -> None:
+    settings = GuardApiSettings(
+        environment="production",
+        storage_backend="memory",
+        database_url="postgresql+psycopg://postgres:strong-password@127.0.0.1:5432/agent_guard",
+        adapter_token="adapter-secret",
+        control_token="control-secret",
+    )
+
+    with pytest.raises(GuardApiConfigurationError, match="persistent storage backend"):
+        settings.validate_for_startup()
 
 
 def test_startup_fails_when_control_plane_initialize_fails() -> None:

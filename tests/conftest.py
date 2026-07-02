@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 for relative in (
+    "packages/agentguard-langgraph-adapter",
     "packages/agentguard-core",
     "apps/guard-api",
     "agentguard_langgraph_bench/src",

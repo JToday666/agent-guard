@@ -647,14 +647,22 @@ def _normalize_evaluator_call(
     source_tool_name: str,
     raw_runner_result: dict[str, Any],
 ) -> dict[str, Any]:
+    raw = call.get("raw") if isinstance(call.get("raw"), dict) else {}
+    descriptor = raw.get("descriptor") if isinstance(raw.get("descriptor"), dict) else {}
+    if not descriptor:
+        descriptor = raw.get("poisoned_descriptor") if isinstance(raw.get("poisoned_descriptor"), dict) else {}
+    public_server = descriptor.get("server") or call.get("server", "")
+    public_tool = descriptor.get("tool") or call.get("toolName") or call.get("tool") or ""
     return {
-        "server": call.get("server", ""),
-        "tool_name": call.get("toolName") or call.get("tool") or "",
-        "toolName": call.get("toolName") or call.get("tool") or "",
+        "server": public_server,
+        "tool_name": public_tool,
+        "toolName": public_tool,
         "arguments": call.get("arguments") if isinstance(call.get("arguments"), dict) else {},
         "response": call.get("response"),
         "timestamp": index,
         "source_tool_name": source_tool_name,
+        "underlying_server": call.get("server", ""),
+        "underlying_tool": call.get("toolName") or call.get("tool") or "",
         "is_hijacked_tool": call.get("isHijackedTool", False),
         "hijacking_mode": call.get("hijackingMode"),
         "raw_runner_result": raw_runner_result,

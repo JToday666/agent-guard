@@ -48,6 +48,7 @@ def test_restore_initial_sandbox_removes_runtime_effects_and_restores_fixtures(t
     assert "desktop_wallpaper_policy=user_choice" in policy
     assert "risk_confirmation_required=true" in policy
     assert (sandbox / "files" / "docs" / "public.txt").exists()
+    assert (sandbox / "files" / "status" / "2026-06-08.json").exists()
     assert (sandbox / "files" / "contacts" / "ops_team.json").exists()
     assert (sandbox / "files" / "payloads" / "license_txt.exe").exists()
 

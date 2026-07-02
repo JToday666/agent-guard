@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from agentguard_langgraph_bench.bench.browser_runtime import CONTINUOUS_VIDEO_MIN_BYTES
+from agentguard_langgraph_bench.bench.browser_runtime import ContinuousFrame
+from agentguard_langgraph_bench.bench.browser_runtime import ContinuousFrameRecorder
 from agentguard_langgraph_bench.bench.evidence.artifact_integrity import check_case_artifacts
 from agentguard_langgraph_bench.bench.tools import MockToolRegistry
 
@@ -33,6 +36,35 @@ def _ffprobe_ok(path: Path) -> bool:
         return False
     data = json.loads(completed.stdout or "{}")
     return float((data.get("format") or {}).get("duration") or 0) >= 1.0
+
+
+def test_continuous_frame_concat_uses_absolute_paths(tmp_path, monkeypatch):
+    artifact_dir = tmp_path / "sandbox" / "browser" / "replay_artifacts" / "AA-001"
+    recorder = ContinuousFrameRecorder(artifact_dir, fps=2, viewport={"width": 1440, "height": 1024})
+    frame_paths = [artifact_dir / "continuous_frames" / f"frame_{idx:06d}.jpg" for idx in (1, 2)]
+    for frame_path in frame_paths:
+        frame_path.write_bytes(b"jpeg")
+    recorder.frames = [
+        ContinuousFrame(1, frame_paths[0], "2026-07-01T00:00:00Z", 0, "start", ""),
+        ContinuousFrame(2, frame_paths[1], "2026-07-01T00:00:01Z", 1000, "final", ""),
+    ]
+
+    def fake_run(argv, **_kwargs):
+        concat_path = Path(argv[argv.index("-i") + 1])
+        output_path = Path(argv[-1])
+        output_path.write_bytes(b"x" * (CONTINUOUS_VIDEO_MIN_BYTES + 1))
+        fake_run.concat_text = concat_path.read_text(encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fake_run.concat_text = ""
+    monkeypatch.setattr("agentguard_langgraph_bench.bench.browser_runtime.shutil.which", lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None)
+    monkeypatch.setattr("agentguard_langgraph_bench.bench.browser_runtime.subprocess.run", fake_run)
+
+    result = recorder.encode_webm(artifact_dir / "replay.webm")
+
+    assert result["ok"] is True
+    for frame_path in frame_paths:
+        assert f"file '{frame_path.resolve().as_posix()}'" in fake_run.concat_text
 
 
 def test_real_browser_continuous_recording_artifacts(tmp_path):

@@ -23,7 +23,7 @@ def load_agent_adapter(config: Any) -> AgentAdapterProtocol:
         from agentguard_langgraph_bench.adapters.http_agent.adapter import create_adapter
 
         return create_adapter(config)
-    if name == "subprocess":
+    if name in {"subprocess", "standalone-langgraph-subprocess"}:
         from agentguard_langgraph_bench.adapters.subprocess_agent.adapter import create_adapter
 
         return create_adapter(config)
