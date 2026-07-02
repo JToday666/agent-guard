@@ -40,9 +40,17 @@ export const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: "/investigations/:trace_id",
-    name: "investigation-detail",
-    component: () => import("../pages/InvestigationDetailPage.vue"),
+    path: "/evidence",
+    name: "evidence",
+    component: () => import("../pages/EvidencePage.vue"),
+    meta: {
+      keepAlive: true,
+    },
+  },
+  {
+    path: "/evidence/:trace_id",
+    name: "evidence-detail",
+    component: () => import("../pages/EvidenceDetailPage.vue"),
     meta: {
       keepAlive: true,
     },

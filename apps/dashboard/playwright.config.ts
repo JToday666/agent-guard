@@ -13,6 +13,7 @@ export default defineConfig({
   ],
   reporter: "list",
   testDir: "e2e",
+  testIgnore: /api-mode\.spec\.ts/,
   use: {
     baseURL,
     screenshot: "only-on-failure",

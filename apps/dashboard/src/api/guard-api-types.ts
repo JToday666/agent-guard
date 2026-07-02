@@ -65,6 +65,36 @@ export interface GuardEvalMetricsDto {
   average_latency_ms: number | null;
 }
 
+export interface GuardEvaluationAttackSummaryDto {
+  asr_before: number | null;
+  asr_after: number | null;
+}
+
+export interface GuardEvaluationCaseDto {
+  case_id: string;
+  attack_type: string;
+  runtime: string;
+  expected_decision: DecisionStatus;
+  actual_decision: DecisionStatus;
+  blocked: boolean;
+  attack_success: boolean;
+  trace_id: string;
+}
+
+export interface GuardEvaluationRunDto {
+  run_id: string;
+  run_at: string;
+  dataset_id?: string | null;
+  dataset_version?: string | null;
+  asr_before?: number | null;
+  asr_after?: number | null;
+  per_attack?: Record<string, GuardEvaluationAttackSummaryDto>;
+  per_family?: Record<string, unknown>;
+  per_rule?: Record<string, unknown>;
+  cases?: GuardEvaluationCaseDto[];
+  [key: string]: unknown;
+}
+
 export interface GuardApprovalResolutionDto {
   approval_id: string;
   status: string;
@@ -104,41 +134,49 @@ export interface GuardPolicyHistoryDto {
 export interface GuardAuditIntegrityDto {
   valid: boolean;
   event_count: number;
-  head_hash: string;
+  head_hash: string | null;
   first_broken_audit_id: string | null;
 }
 
-export interface GuardProvenanceNodeDto {
-  node_id: string;
+export interface GuardConfigAuditFindingDto {
+  finding_id: string;
+  severity: RiskSeverity;
+  category: string;
+  title: string;
+  subject: string;
+  description: string;
+  evidence: string[];
+  recommendation?: string | null;
+}
+
+export interface GuardConfigAuditFindingRecordDto {
+  runtime: string;
+  target_type: string;
+  target_id: string;
   trace_id: string;
-  kind: string;
-  ref_id: string;
-  label: string;
+  event_id: string;
   timestamp: string;
-  metadata: Record<string, unknown>;
+  finding: GuardConfigAuditFindingDto;
 }
 
-export interface GuardProvenanceEdgeDto {
-  edge_id: string;
-  trace_id: string;
-  source_node_id: string;
-  target_node_id: string;
-  relation: string;
-  timestamp: string;
-  metadata: Record<string, unknown>;
-}
-
-export interface GuardProvenanceDto {
-  trace_id: string;
-  nodes: GuardProvenanceNodeDto[];
-  edges: GuardProvenanceEdgeDto[];
-}
-
-export interface GuardAuditIntegrityDto {
-  valid: boolean;
-  event_count: number;
-  head_hash: string;
-  first_broken_audit_id: string | null;
+export interface GuardAdapterStatusDto {
+  status: "loaded" | "not_loaded" | "error" | "unknown";
+  loaded: boolean;
+  hook_count: number | null;
+  expected_hook_count: number;
+  last_verified_at: string | null;
+  last_heartbeat_at?: string | null;
+  error: string | null;
+  source: string | null;
+  runtime?: string | null;
+  runtime_id?: string | null;
+  agent_id?: string | null;
+  plugin_version?: string | null;
+  runtime_version?: string | null;
+  capabilities?: Record<string, unknown>;
+  hooks?: string[];
+  fail_closed_stages?: string[];
+  [key: string]: unknown;
 }
 
 export interface GuardProvenanceNodeDto {

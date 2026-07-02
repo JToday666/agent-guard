@@ -1,7 +1,7 @@
 <template>
   <section class="overview-page workspace-panel" aria-labelledby="overview-title">
     <header class="page-header overview-header">
-      <div><p>安全态势</p><h1 id="overview-title">安全总览</h1></div>
+      <div><h1 id="overview-title">安全总览</h1></div>
       <div class="overview-header__actions"><DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" /><button type="button" :aria-busy="store.isRefreshing" :disabled="store.isRefreshing" @click="handleRefresh">{{ store.isRefreshing ? "刷新中" : "刷新数据" }}</button></div>
     </header>
 
@@ -12,22 +12,22 @@
 
       <div class="analysis-grid section-divider">
         <section class="analysis-panel analysis-panel--trend" aria-labelledby="trend-title">
-          <header><div><h2 id="trend-title">决策趋势</h2><p>当前事件窗口内的放行、审批与拒绝变化</p></div><RouterLink class="page-action" to="/investigations">进入调查</RouterLink></header>
+          <header><div><h2 id="trend-title">决策趋势</h2><p>查看最近审计事件中放行、审批与拒绝的变化</p></div><RouterLink class="page-action" to="/investigations">进入调查</RouterLink></header>
           <DecisionTrendChart :points="store.decisionTrend" />
         </section>
         <section class="analysis-panel" aria-labelledby="distribution-title">
-          <header><div><h2 id="distribution-title">攻击类型</h2><p>按事件量排序</p></div></header>
+          <header><div><h2 id="distribution-title">攻击类型</h2><p>按审计事件数量排序</p></div></header>
           <AttackDistributionChart :items="store.attackDistribution" />
         </section>
       </div>
 
       <div class="analysis-grid section-divider">
         <section class="analysis-panel" aria-labelledby="rule-title">
-          <header><div><h2 id="rule-title">规则命中 Top 6</h2><p>触发最多的安全规则</p></div><RouterLink class="page-action" to="/investigations">进入调查</RouterLink></header>
+          <header><div><h2 id="rule-title">规则命中 Top 6</h2><p>最常触发的风险判断</p></div><RouterLink class="page-action" to="/investigations">进入调查</RouterLink></header>
           <RuleTopNChart :items="store.ruleDistribution" />
         </section>
         <section class="analysis-panel" aria-labelledby="asr-summary-title">
-          <header><div><h2 id="asr-summary-title">防御效果摘要</h2><p>来自评测指标</p></div><RouterLink class="page-action" to="/evaluation">查看评测</RouterLink></header>
+          <header><div><h2 id="asr-summary-title">防御效果摘要</h2><p>查看阻断、误报和延迟表现</p></div><RouterLink class="page-action" to="/evaluation">查看评测</RouterLink></header>
           <dl class="asr-summary">
             <div><dt>阻断率</dt><dd>{{ formatPercent(store.metrics.blockRate) }}</dd></div>
             <div><dt>误报率 FPR</dt><dd>{{ formatPercent(store.metrics.fpr) }}</dd></div>
@@ -52,9 +52,9 @@
       </section>
 
       <section class="risk-feed section-divider" aria-labelledby="risk-feed-title">
-        <header><div><h2 id="risk-feed-title">需要关注的高风险事件</h2><p>严重与高风险事件按最新时间排列</p></div><RouterLink class="page-action" to="/investigations?severity=high">查看全部</RouterLink></header>
+        <header><div><h2 id="risk-feed-title">高风险事件</h2><p>严重与高风险事件按最新时间排列</p></div><RouterLink class="page-action" to="/investigations?severity=high">查看全部</RouterLink></header>
         <div v-if="highRiskEvents.length" class="risk-feed__rows">
-          <RouterLink v-for="event in highRiskEvents" :key="event.id" :to="`/investigations/${event.traceId}`">
+          <RouterLink v-for="event in highRiskEvents" :key="event.id" :to="`/evidence/${event.traceId}`">
             <time>{{ event.time }}</time><StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" /><code>{{ event.tool }}</code><span>{{ event.resource }}</span><span class="risk-rail"><i :style="{ width: `${event.riskScore}%` }"></i></span><strong>{{ event.riskScore }}</strong>
           </RouterLink>
         </div>
@@ -66,15 +66,15 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import AttackDistributionChart from "../components/Charts/AttackDistributionChart.vue";
-import RuleTopNChart from "../components/Charts/RuleTopNChart.vue";
-import DecisionTrendChart from "../components/Charts/DecisionTrendChart.vue";
-import DataFreshness from "../components/DataFreshness.vue";
-import EmptyState from "../components/EmptyState.vue";
-import MetricStrip from "../components/MetricStrip.vue";
-import StatusBadge from "../components/StatusBadge.vue";
-import ErrorState from "../components/States/ErrorState.vue";
-import LoadingState from "../components/States/LoadingState.vue";
+import AttackDistributionChart from "../components/charts/AttackDistributionChart.vue";
+import RuleTopNChart from "../components/charts/RuleTopNChart.vue";
+import DecisionTrendChart from "../components/charts/DecisionTrendChart.vue";
+import DataFreshness from "../components/common/DataFreshness.vue";
+import EmptyState from "../components/common/EmptyState.vue";
+import MetricStrip from "../components/common/MetricStrip.vue";
+import StatusBadge from "../components/common/StatusBadge.vue";
+import ErrorState from "../components/states/ErrorState.vue";
+import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
 import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
 
@@ -99,7 +99,7 @@ function handleRefresh() { void store.refresh(); }
 .overview-header { margin-bottom: 0; }
 .overview-header__actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .overview-header__actions button { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-2); cursor: pointer; min-height: 2.25rem; padding: 0 var(--space-3); }
-.analysis-grid { display: grid; gap: clamp(var(--space-6), 4vw, 3rem); grid-template-columns: minmax(0, 1.55fr) minmax(18rem, .75fr); }
+.analysis-grid { display: grid; gap: clamp(var(--space-6), 4vw, 3rem); grid-template-columns: minmax(0, 1.55fr) minmax(min(100%, 18rem), .75fr); }
 .analysis-panel { display: grid; gap: var(--space-5); min-width: 0; }
 .analysis-panel > header, .risk-feed > header { align-items: start; display: flex; gap: var(--space-4); justify-content: space-between; }
 .analysis-panel h2, .analysis-panel p, .risk-feed h2, .risk-feed p { margin: 0; }
@@ -124,4 +124,5 @@ function handleRefresh() { void store.refresh(); }
 .asr-summary dt { color: var(--color-text-subtle); font-size: var(--font-size-12); }
 .asr-summary dd { font-size: var(--font-size-18); font-weight: var(--font-weight-bold); margin: 0; }
 @media (max-width: 640px) { .risk-feed__rows > a { align-items: start; grid-template-columns: auto 1fr auto; padding: var(--space-3) 0; } .risk-feed__rows code, .risk-feed__rows span:not(.risk-rail) { grid-column: 1 / -1; } .risk-rail { grid-column: 1 / 3; width: 100%; } }
+@media (max-width: 980px) { .analysis-grid { grid-template-columns: 1fr; } }
 </style>

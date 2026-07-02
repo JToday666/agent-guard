@@ -19,6 +19,7 @@ AgentGuard Dashboard 是监督端前端应用，只通过 Guard API 读取审计
 pnpm dashboard:dev
 pnpm dashboard:dev:mock
 pnpm dashboard:test:e2e
+pnpm dashboard:test:e2e:api
 pnpm dashboard:typecheck
 pnpm dashboard:build
 pnpm --filter @agentguard/dashboard test:unit
@@ -62,6 +63,14 @@ pnpm dashboard:test:e2e
 
 测试使用 mock 数据，在 Chromium 中覆盖桌面、平板和手机视口，不需要启动 Guard API。
 
+API 模式烟测使用非 mock Vite 服务，并由 Playwright 拦截 Guard API 返回真实形状数据：
+
+```bash
+pnpm dashboard:test:e2e:api
+```
+
+该命令覆盖浏览器会话初始化、总览、证据链、系统页和局部接口失败降级，不需要本机 Guard API 运行。
+
 ## API 模式联调
 
 API 模式需要本机已经安装项目依赖，并准备好根 `.env`、PostgreSQL 用户和对应数据库。
@@ -101,7 +110,7 @@ Dashboard 在页面可见时每 10 秒串行刷新事件、指标、审批、健
 2. 事件调查：筛选阻断事件，查看原因、命中规则、资源与 Trace ID，导出 CSV。
 3. 证据链：进入 Trace 详情，查看审计事件时间线、溯源图与节点证据，点击节点联动时间线。
 4. 人工审批：处理 `ask` 决策，仅支持 `allow_once` 和 `deny`。
-5. 安全评测：查看 Block Rate、FPR、FNR、判定延迟、混淆矩阵和 runtime 延迟对比；ASR 仅在 API 提供 before / after 数据时展示。
+5. 安全评测：查看阻断率、误报率、漏报率、判定延迟、混淆矩阵和运行时延迟对比；攻击成功率仅在 API 提供防护前后数据时展示。
 6. 系统状态：查看 Guard API 健康、browser session、轮询状态、审计链完整性、运行时适配器活动、配置审计摘要和只读策略快照。
 
 ## 测试文件边界

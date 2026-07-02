@@ -1,10 +1,10 @@
 {
   "name": "agent-guard",
   "private": true,
-  "packageManager": "pnpm@11.5.2",
+  "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b",
   "engines": {
-    "node": "24.15.0",
-    "pnpm": "11.5.2"
+    "node": "24.18.0",
+    "pnpm": "11.9.0"
   },
   "scripts": {
     "cli:health": "uv run agentguardctl health --check-db",
@@ -13,10 +13,13 @@
     "dashboard:dev": "pnpm --filter @agentguard/dashboard dev",
     "dashboard:dev:mock": "pnpm --filter @agentguard/dashboard dev:mock",
     "dashboard:test:e2e": "pnpm --filter @agentguard/dashboard test:e2e",
+    "dashboard:test:e2e:api": "pnpm --filter @agentguard/dashboard test:e2e:api",
     "dashboard:typecheck": "pnpm --filter @agentguard/dashboard typecheck",
     "dashboard:build": "pnpm --filter @agentguard/dashboard build",
     "openclaw:plugin:install": "node scripts/openclaw-plugin-dev.mjs install",
     "openclaw:plugin:verify": "node scripts/openclaw-plugin-dev.mjs verify",
+    "openclaw:plugin:e2e": "pnpm --filter @agentguard/openclaw-plugin build && node scripts/openclaw-e2e-runner.mjs",
+    "openclaw:plugin:reliability": "pnpm --filter @agentguard/openclaw-plugin build && node scripts/openclaw-e2e-runner.mjs reliability --iterations 50",
     "openclaw:plugin:uninstall": "node scripts/openclaw-plugin-dev.mjs uninstall"
   }
 }

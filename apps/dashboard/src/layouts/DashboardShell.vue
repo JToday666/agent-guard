@@ -23,7 +23,7 @@
             <strong>无法建立监督端会话</strong>
             <p>{{ authStore.error ?? "会话无效或启动链接已过期。" }}</p>
           </div>
-          <button type="button" @click="handleRetryAuthentication">重新检查</button>
+          <button type="button" @click="handleInitializeDashboard">重新检查</button>
         </section>
         <template v-else>
           <section
@@ -40,11 +40,31 @@
               重试
             </button>
           </section>
-          <RouterView v-slot="{ Component, route }">
-            <KeepAlive>
-              <component :is="Component" v-if="route.meta.keepAlive" :key="String(route.name ?? route.path)" />
-            </KeepAlive>
-            <component :is="Component" v-if="!route.meta.keepAlive" :key="route.fullPath" />
+          <ErrorState
+            v-if="routeRenderFailed"
+            class="route-error"
+            title="页面渲染异常"
+            message="当前页面暂时无法渲染，请重新加载 Dashboard。"
+            @retry="handleReloadDashboard"
+          />
+          <RouterView v-else v-slot="{ Component, route }">
+            <div class="dashboard-route-stage">
+              <Transition name="dashboard-route">
+                <KeepAlive v-if="route.meta.keepAlive">
+                  <component
+                    :is="Component"
+                    :key="String(route.name ?? route.path)"
+                    class="dashboard-route-view"
+                  />
+                </KeepAlive>
+                <component
+                  :is="Component"
+                  v-else
+                  :key="route.fullPath"
+                  class="dashboard-route-view"
+                />
+              </Transition>
+            </div>
           </RouterView>
         </template>
       </main>
@@ -53,11 +73,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onErrorCaptured, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
-import AppSidebar from "../components/AppSidebar.vue";
-import AppTopBar from "../components/AppTopBar.vue";
-import LoadingState from "../components/States/LoadingState.vue";
+import AppSidebar from "../components/layout/AppSidebar.vue";
+import AppTopBar from "../components/layout/AppTopBar.vue";
+import ErrorState from "../components/states/ErrorState.vue";
+import LoadingState from "../components/states/LoadingState.vue";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
 
@@ -66,8 +88,10 @@ defineOptions({
 });
 
 const isSidebarCollapsed = ref(false);
+const routeRenderFailed = ref(false);
 const authStore = useAuthStore();
 const dashboardStore = useDashboardStore();
+const route = useRoute();
 
 async function handleInitializeDashboard(): Promise<void> {
   await authStore.bootstrap();
@@ -85,13 +109,26 @@ function handleToggleSidebar(): void {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
 }
 
-async function handleRetryAuthentication(): Promise<void> {
-  await handleInitializeDashboard();
-}
 
 function handleRefreshDashboard(): void {
   void dashboardStore.refresh();
 }
+
+function handleReloadDashboard(): void {
+  window.location.reload();
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    routeRenderFailed.value = false;
+  },
+);
+
+onErrorCaptured(() => {
+  routeRenderFailed.value = true;
+  return false;
+});
 </script>
 
 <style scoped lang="scss">
@@ -113,7 +150,42 @@ function handleRefreshDashboard(): void {
 
 .dashboard-shell__workspace {
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.dashboard-route-stage {
+  min-width: 0;
+  position: relative;
+}
+
+.dashboard-route-view {
+  display: block;
+}
+
+.dashboard-route-enter-active,
+.dashboard-route-leave-active {
+  transition:
+    opacity var(--transition-base),
+    transform var(--transition-base);
+  will-change: opacity, transform;
+}
+
+.dashboard-route-leave-active {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 100%;
+}
+
+.dashboard-route-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.dashboard-route-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
 }
 
 .session-error {
@@ -129,6 +201,10 @@ function handleRefreshDashboard(): void {
 }
 
 .session-loading {
+  margin: var(--space-6);
+}
+
+.route-error {
   margin: var(--space-6);
 }
 
@@ -188,6 +264,19 @@ function handleRefreshDashboard(): void {
     max-width: none;
     right: var(--space-3);
     top: var(--space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-route-enter-active,
+  .dashboard-route-leave-active {
+    transition: none;
+  }
+
+  .dashboard-route-enter-from,
+  .dashboard-route-leave-to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

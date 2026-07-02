@@ -12,7 +12,6 @@
 
 .workspace-panel {
   align-content: start;
-  animation: page-enter 0.18s ease both;
   min-height: calc(100vh - var(--top-bar-height));
   min-width: 0;
   padding: var(--space-7) clamp(var(--space-4), 2.4vw, 2.5rem);
@@ -39,10 +38,23 @@
   }
 
   h1 {
+    align-items: center;
+    color: var(--color-link);
+    display: inline-flex;
     font-size: var(--font-size-28);
     font-weight: var(--font-weight-bold);
+    gap: var(--space-3);
+    letter-spacing: -0.01em;
     line-height: var(--line-height-tight);
     overflow-wrap: anywhere;
+
+    &::before {
+      background: linear-gradient(160deg, var(--color-active) 0%, #14b8a6 100%);
+      border-radius: var(--radius-pill);
+      content: "";
+      flex: 0 0 0.25rem;
+      height: 1.35em;
+    }
   }
 }
 

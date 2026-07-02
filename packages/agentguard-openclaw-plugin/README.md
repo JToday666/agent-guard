@@ -49,11 +49,15 @@ Expected runtime hooks after install:
 
 - P1 enforcement: `before_tool_call`, `message_sending`
 - P2 config gate: `before_install`
-- P2 evaluation/observation: `tool_result_persist`, `gateway_start`,
-  `gateway_stop`, `session_start`, `session_end`, `before_compaction`,
-  `after_compaction`, `subagent_spawned`, `subagent_ended`,
-  `model_call_started`, `model_call_ended`, `cron_changed`,
-  `resolve_exec_env`
+- P2 evaluation/observation: `before_prompt_build`, `llm_input`,
+  `llm_output`, `tool_result_persist`, `gateway_start`, `gateway_stop`,
+  `session_start`, `session_end`, `before_compaction`, `after_compaction`,
+  `subagent_spawned`, `subagent_ended`, `model_call_started`,
+  `model_call_ended`, `cron_changed`, `resolve_exec_env`
+
+`llm_input` and `llm_output` require
+`plugins.entries.agentguard-security.hooks.allowConversationAccess=true` in the
+OpenClaw config. The repository-level development installer writes this setting.
 
 To remove the development install from the local OpenClaw profile:
 
@@ -67,4 +71,19 @@ Dashboard/API acceptance uses the Dashboard/browser session cookie:
 curl -s "http://127.0.0.1:8088/v1/audit/events?runtime=openclaw"
 curl -s "http://127.0.0.1:8088/v1/audit/integrity"
 curl -s "http://127.0.0.1:8088/v1/traces/<trace_id>/provenance"
+```
+
+Full hook reliability acceptance uses the isolated PostgreSQL test database
+from `AGENTGUARD_TEST_DATABASE_URL`:
+
+```bash
+pnpm openclaw:plugin:reliability
+```
+
+The reliability runner triggers all 19 registered hooks 50 times each, starts a
+temporary Guard API pointed at the `_test` database, and writes:
+
+```text
+/tmp/agentguard-openclaw-reliability-report.json
+/tmp/agentguard-openclaw-reliability-acceptance-report.md
 ```

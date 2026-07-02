@@ -3,11 +3,17 @@ import test from "node:test";
 
 import {
   mapApproval,
+  mapAdapterStatus,
   mapAuditEvent,
+  mapAuditIntegrity,
+  mapConfigAuditFindingRecord,
+  mapEvaluationRun,
   mapPolicyHistory,
   mapPolicySummary,
+  mapProvenance,
   mapTraceDetail,
 } from "./guard-api-mappers.ts";
+import type { GuardAuditIntegrityDto } from "./guard-api-types.ts";
 
 test("maps Guard API audit evidence without inventing missing fields", () => {
   const event = mapAuditEvent({
@@ -40,6 +46,35 @@ test("maps Guard API audit evidence without inventing missing fields", () => {
   assert.equal(event.userTask, null);
   assert.equal(event.approvalId, "app_1");
   assert.deepEqual(event.resourceTargets, ["/private/token.txt"]);
+});
+
+test("maps sparse audit DTOs without throwing on missing arrays or records", () => {
+  const event = mapAuditEvent({
+    audit_id: "audit_sparse",
+    schema_version: "0.3",
+    trace_id: "trace_sparse",
+    case_id: null,
+    runtime: "langgraph",
+    timestamp: "2026-06-22T06:30:00Z",
+    stage: "before_tool_call",
+    event_type: "tool_call_proposed",
+    attack_type: null,
+    is_malicious: null,
+    decision: "allow",
+    risk_score: 0,
+    severity: "low",
+    blocked: false,
+    reason: "Allowed",
+    latency_ms: null,
+  } as unknown as Parameters<typeof mapAuditEvent>[0]);
+
+  assert.equal(event.id, "audit_sparse");
+  assert.equal(event.resource, "未提供");
+  assert.equal(event.approvalId, undefined);
+  assert.deepEqual(event.resourceTargets, []);
+  assert.deepEqual(event.ruleHits, []);
+  assert.equal(event.userTask, null);
+  assert.equal(event.agentAction, "tool_call_proposed");
 });
 
 test("maps P1 audit metadata into readable action and resource fields", () => {
@@ -247,6 +282,27 @@ test("maps trace detail response through existing event and approval mappers", (
   assert.equal(detail.metrics.fnr, 0.25);
 });
 
+test("maps sparse trace detail responses with empty collections and metrics", () => {
+  const detail = mapTraceDetail({
+    trace_id: "trace_sparse",
+  } as unknown as Parameters<typeof mapTraceDetail>[0]);
+
+  assert.equal(detail.id, "trace_sparse");
+  assert.deepEqual(detail.events, []);
+  assert.deepEqual(detail.approvals, []);
+  assert.deepEqual(detail.metrics, {
+    eventCount: 0,
+    allowCount: 0,
+    denyCount: 0,
+    askCount: 0,
+    blockedCount: 0,
+    blockRate: null,
+    fpr: null,
+    fnr: null,
+    averageLatencyMs: null,
+  });
+});
+
 test("maps current policy with latest history metadata", () => {
   const history = mapPolicyHistory([
     {
@@ -281,4 +337,167 @@ test("maps current policy with latest history metadata", () => {
   assert.equal(summary.disabledRuleCount, 1);
   assert.equal(summary.ruleOverrideCount, 1);
   assert.equal(summary.toolProfileCount, 1);
+});
+
+test("maps an empty audit integrity chain with a null head hash", () => {
+  const dto: GuardAuditIntegrityDto = {
+    valid: true,
+    event_count: 0,
+    head_hash: null,
+    first_broken_audit_id: null,
+  };
+
+  assert.deepEqual(mapAuditIntegrity(dto), {
+    valid: true,
+    eventCount: 0,
+    headHash: null,
+    firstBrokenAuditId: null,
+  });
+});
+
+test("maps latest evaluation run into a rich dashboard summary", () => {
+  const evaluation = mapEvaluationRun(
+    {
+      run_id: "eval_20260628",
+      run_at: "2026-06-28T00:00:00+00:00",
+      dataset_id: "attackbench",
+      dataset_version: "v1",
+      asr_before: 0.72,
+      asr_after: 0.08,
+      per_attack: {
+        prompt_injection: { asr_before: 0.8, asr_after: 0.1 },
+        memory_poisoning: { asr_before: 0.58, asr_after: null },
+      },
+      cases: [
+        {
+          case_id: "PI-001",
+          attack_type: "prompt_injection",
+          runtime: "openclaw",
+          expected_decision: "deny",
+          actual_decision: "ask",
+          blocked: true,
+          attack_success: false,
+          trace_id: "trace_eval_001",
+        },
+      ],
+    },
+    {
+      eventCount: 8,
+      allowCount: 3,
+      denyCount: 3,
+      askCount: 2,
+      blockedCount: 5,
+      blockRate: 0.625,
+      fpr: 0.016,
+      fnr: 0.048,
+      averageLatencyMs: 3.4,
+    },
+  );
+
+  assert.equal(evaluation.runId, "eval_20260628");
+  assert.equal(evaluation.datasetLabel, "attackbench / v1");
+  assert.equal(evaluation.asrBefore, 0.72);
+  assert.equal(evaluation.asrAfter, 0.08);
+  assert.equal(evaluation.perAttack[0]?.attackType, "prompt_injection");
+  assert.equal(evaluation.perAttack[0]?.reduction, 0.7000000000000001);
+  assert.equal(evaluation.perAttack[1]?.reduction, null);
+  assert.equal(evaluation.cases[0]?.traceId, "trace_eval_001");
+  assert.equal(evaluation.cases[0]?.attackSuccess, false);
+  assert.equal(evaluation.blockRate, 0.625);
+});
+
+test("maps config audit finding records with display-ready fields", () => {
+  const record = mapConfigAuditFindingRecord({
+    runtime: "openclaw",
+    target_type: "plugin_config",
+    target_id: "agentguard-security",
+    trace_id: "trace_cfg_findings",
+    event_id: "cfg_findings",
+    timestamp: "2026-06-28T00:00:00+00:00",
+    finding: {
+      finding_id: "finding_cfg_high",
+      severity: "high",
+      category: "openclaw.plugin",
+      title: "Raw conversation access enabled",
+      subject: "hooks.allowConversationAccess",
+      description: "Plugin can read raw conversation content.",
+      evidence: ["allowConversationAccess=true"],
+      recommendation: "Disable raw conversation access unless required.",
+    },
+  });
+
+  assert.equal(record.runtime, "openclaw");
+  assert.equal(record.targetId, "agentguard-security");
+  assert.equal(record.finding.title, "Raw conversation access enabled");
+  assert.deepEqual(record.finding.evidence, ["allowConversationAccess=true"]);
+});
+
+test("maps sparse config findings with safe display fallbacks", () => {
+  const record = mapConfigAuditFindingRecord({
+    runtime: "openclaw",
+    target_type: "plugin_config",
+    target_id: "agentguard-security",
+    trace_id: "trace_cfg_sparse",
+    event_id: "cfg_sparse",
+    timestamp: "2026-06-28T00:00:00+00:00",
+    finding: {
+      finding_id: "finding_sparse",
+      severity: "medium",
+      title: "Hook coverage changed",
+    },
+  } as unknown as Parameters<typeof mapConfigAuditFindingRecord>[0]);
+
+  assert.equal(record.finding.category, "未分类");
+  assert.equal(record.finding.subject, "未提供");
+  assert.equal(record.finding.description, "未提供");
+  assert.deepEqual(record.finding.evidence, []);
+  assert.equal(record.finding.recommendation, null);
+});
+
+test("maps OpenClaw adapter status with hook coverage", () => {
+  const status = mapAdapterStatus({
+    status: "loaded",
+    loaded: true,
+    hook_count: 16,
+    expected_hook_count: 16,
+    last_verified_at: "2026-06-28T00:00:00+00:00",
+    last_heartbeat_at: "2026-06-28T00:01:00+00:00",
+    error: null,
+    source: "agentguardctl",
+    plugin_version: "0.1.0",
+    runtime_version: "2026.6.6",
+    capabilities: { event_types: ["tool_call_proposed"] },
+    hooks: ["before_tool_call"],
+    fail_closed_stages: ["before_install"],
+  });
+
+  assert.equal(status.loaded, true);
+  assert.equal(status.hookCoverage, 1);
+  assert.equal(status.pluginVersion, "0.1.0");
+  assert.deepEqual(status.failClosedStages, ["before_install"]);
+});
+
+test("maps sparse adapter and provenance responses with safe defaults", () => {
+  const status = mapAdapterStatus({
+    status: "unknown",
+    loaded: false,
+    hook_count: null,
+    last_verified_at: null,
+    error: null,
+    source: null,
+  } as unknown as Parameters<typeof mapAdapterStatus>[0]);
+
+  assert.equal(status.expectedHookCount, 16);
+  assert.equal(status.hookCoverage, null);
+  assert.deepEqual(status.capabilities, {});
+  assert.deepEqual(status.hooks, []);
+  assert.deepEqual(status.failClosedStages, []);
+
+  const provenance = mapProvenance({
+    trace_id: "trace_sparse",
+  } as unknown as Parameters<typeof mapProvenance>[0]);
+
+  assert.equal(provenance.traceId, "trace_sparse");
+  assert.deepEqual(provenance.nodes, []);
+  assert.deepEqual(provenance.edges, []);
 });

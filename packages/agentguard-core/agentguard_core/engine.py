@@ -15,6 +15,7 @@ from .detectors import (
     SensitiveResourceDetector,
     TaskMismatchDetector,
     ToolHijackDetector,
+    UnprofiledToolResourceDetector,
 )
 from .decisions import GuardDecision, build_guard_decision
 from .events import GuardEvent
@@ -26,6 +27,7 @@ class GuardEngine:
         self.detectors = detectors or [
             SensitiveResourceDetector(),
             ToolHijackDetector(),
+            UnprofiledToolResourceDetector(),
             OutboundDetector(),
             TaskMismatchDetector(),
             PromptInjectionDetector(),

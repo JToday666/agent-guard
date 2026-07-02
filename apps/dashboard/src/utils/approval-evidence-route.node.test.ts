@@ -26,16 +26,16 @@ function approval(eventId: string): ApprovalRequest {
 test("builds separate trace and event evidence destinations", () => {
   assert.deepEqual(getApprovalEvidenceRoutes(approval("event-2")), {
     event: {
-      path: "/investigations/trace-2",
+      path: "/evidence/trace-2",
       query: { event_id: "event-2" },
     },
-    trace: { path: "/investigations/trace-2" },
+    trace: { path: "/evidence/trace-2" },
   });
 });
 
 test("omits the event destination when approval has no event id", () => {
   assert.deepEqual(getApprovalEvidenceRoutes(approval("")), {
     event: null,
-    trace: { path: "/investigations/trace-2" },
+    trace: { path: "/evidence/trace-2" },
   });
 });

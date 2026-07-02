@@ -22,10 +22,13 @@ const REQUIRED_HOOKS = [
   "after_compaction",
   "before_compaction",
   "before_install",
+  "before_prompt_build",
   "before_tool_call",
   "cron_changed",
   "gateway_start",
   "gateway_stop",
+  "llm_input",
+  "llm_output",
   "message_sending",
   "model_call_ended",
   "model_call_started",
@@ -51,7 +54,7 @@ async function main() {
     return;
   }
   if (command === "verify") {
-    verify();
+    await verify({ record: flags.has("--record") });
     return;
   }
   if (command === "uninstall") {
@@ -82,7 +85,7 @@ function install() {
       entries: {
         [PLUGIN_ID]: {
           enabled: true,
-          hooks: { timeoutMs: 10000 },
+          hooks: { timeoutMs: 10000, allowConversationAccess: true },
           config: {
             guardApiBaseUrl,
             adapterToken,
@@ -100,35 +103,73 @@ function install() {
   console.log(`Installed ${PLUGIN_ID} from ${relativePath(STAGING_DIR)}.`);
 }
 
-function verify() {
-  const inspect = run("openclaw", ["plugins", "inspect", PLUGIN_ID, "--runtime", "--json"], {
-    capture: true,
-  });
-  const parsed = parseJsonObject(inspect.stdout);
-  const plugin = parsed.plugin ?? {};
-  const typedHooks = Array.isArray(parsed.typedHooks) ? parsed.typedHooks : [];
-  const hookNames = new Set(typedHooks.map((hook) => hook?.name).filter(Boolean));
-  const missingHooks = REQUIRED_HOOKS.filter((hookName) => !hookNames.has(hookName));
+async function verify({ record }) {
+  try {
+    const inspect = run("openclaw", ["plugins", "inspect", PLUGIN_ID, "--runtime", "--json"], {
+      capture: true,
+    });
+    const parsed = parseJsonObject(inspect.stdout);
+    const plugin = parsed.plugin ?? {};
+    const typedHooks = Array.isArray(parsed.typedHooks) ? parsed.typedHooks : [];
+    const diagnostics = Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [];
+    const hookNames = new Set(typedHooks.map((hook) => hook?.name).filter(Boolean));
+    const missingHooks = REQUIRED_HOOKS.filter((hookName) => !hookNames.has(hookName));
+    const conversationAccessDiagnostics = diagnostics
+      .map((item) => String(item?.message ?? ""))
+      .filter((message) => /allowConversationAccess=true/.test(message));
 
-  const failures = [];
-  if (plugin.status !== "loaded") {
-    failures.push(`expected plugin status=loaded, got ${String(plugin.status)}`);
-  }
-  if (plugin.hookCount !== 16) {
-    failures.push(`expected hookCount=16, got ${String(plugin.hookCount)}`);
-  }
-  if (!pluginUsesStaging(plugin)) {
-    failures.push(`expected plugin source/rootDir to use ${relativePath(STAGING_DIR)}, got ${plugin.source ?? plugin.rootDir}`);
-  }
-  if (missingHooks.length > 0) {
-    failures.push(`missing hooks: ${missingHooks.join(", ")}`);
-  }
-  if (failures.length > 0) {
-    throw new Error(`OpenClaw plugin verification failed:\n- ${failures.join("\n- ")}`);
-  }
+    const failures = [];
+    if (plugin.status !== "loaded") {
+      failures.push(`expected plugin status=loaded, got ${String(plugin.status)}`);
+    }
+    if (plugin.hookCount !== REQUIRED_HOOKS.length) {
+      failures.push(`expected hookCount=${REQUIRED_HOOKS.length}, got ${String(plugin.hookCount)}`);
+    }
+    if (!pluginUsesStaging(plugin)) {
+      failures.push(`expected plugin source/rootDir to use ${relativePath(STAGING_DIR)}, got ${plugin.source ?? plugin.rootDir}`);
+    }
+    if (missingHooks.length > 0) {
+      failures.push(`missing hooks: ${missingHooks.join(", ")}`);
+    }
+    if (conversationAccessDiagnostics.length > 0) {
+      failures.push(conversationAccessDiagnostics.join("; "));
+    }
+    if (failures.length > 0) {
+      throw new Error(`OpenClaw plugin verification failed:\n- ${failures.join("\n- ")}`);
+    }
 
-  waitForGateway();
-  console.log(`Verified ${PLUGIN_ID}: status=loaded, hookCount=16.`);
+    waitForGateway();
+    const status = {
+      status: "loaded",
+      loaded: true,
+      hook_count: plugin.hookCount,
+      expected_hook_count: REQUIRED_HOOKS.length,
+      last_verified_at: new Date().toISOString(),
+      error: null,
+      source: "openclaw-plugin-dev",
+    };
+    if (record) {
+      await recordOpenClawStatus(status);
+    }
+    console.log(`Verified ${PLUGIN_ID}: status=loaded, hookCount=${REQUIRED_HOOKS.length}.`);
+  } catch (error) {
+    if (record) {
+      try {
+        await recordOpenClawStatus({
+          status: "error",
+          loaded: false,
+          hook_count: null,
+          expected_hook_count: REQUIRED_HOOKS.length,
+          last_verified_at: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+          source: "openclaw-plugin-dev",
+        });
+      } catch (recordError) {
+        console.warn(`Failed to record OpenClaw verification status: ${recordError instanceof Error ? recordError.message : String(recordError)}`);
+      }
+    }
+    throw error;
+  }
 }
 
 function uninstall({ cleanStaging }) {
@@ -325,6 +366,26 @@ function readDotEnv() {
   return parsed;
 }
 
+async function recordOpenClawStatus(status) {
+  const env = readDotEnv();
+  const controlToken = requireEnv(env, "AGENTGUARD_CONTROL_TOKEN");
+  const host = env.AGENTGUARD_HOST || "127.0.0.1";
+  const port = env.AGENTGUARD_PORT || "8088";
+  const apiBaseUrl = (env.AGENTGUARD_API_URL || `http://${host}:${port}`).replace(/\/+$/, "");
+  const response = await fetch(`${apiBaseUrl}/v1/adapters/openclaw/status`, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${controlToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(status),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Guard API status record failed: HTTP ${response.status} ${body}`);
+  }
+}
+
 function requireEnv(env, key) {
   const value = env[key];
   if (typeof value !== "string" || value.trim() === "") {
@@ -421,6 +482,6 @@ function relativePath(value) {
 function usage() {
   console.log(`Usage:
   node scripts/openclaw-plugin-dev.mjs install
-  node scripts/openclaw-plugin-dev.mjs verify
+  node scripts/openclaw-plugin-dev.mjs verify [--record]
   node scripts/openclaw-plugin-dev.mjs uninstall [--clean-staging]`);
 }

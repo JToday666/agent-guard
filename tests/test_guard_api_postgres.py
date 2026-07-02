@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
 
@@ -17,6 +16,7 @@ from guard_api.models import ApprovalRequest
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, EvalMetricFilters
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from postgres_test_utils import get_test_database_url, reset_control_plane_schema
 
 
 def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
@@ -29,16 +29,14 @@ def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
 
 
 def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_{run_id}"
     approval_id = f"app_pg_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -81,9 +79,7 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
 
 
 def test_postgres_store_persists_auth_state_across_instances() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     approval_id = f"app_pg_auth_{run_id}"
@@ -92,7 +88,7 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
     session_id: str | None = None
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         settings = GuardApiSettings(control_token="control-secret")
         first_auth = CapabilityAuthService(settings=settings, store=store)
@@ -133,10 +129,93 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
         _cleanup_auth_rows(database_url, approval_id, launch_code, session_id)
 
 
+def test_postgres_store_roundtrips_dashboard_todo_state() -> None:
+    database_url = get_test_database_url()
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        evaluation = store.save_evaluation_run(
+            {
+                "run_id": "eval_pg_latest",
+                "run_at": "2026-06-28T00:00:00+00:00",
+                "asr_before": 0.75,
+                "asr_after": 0.05,
+                "per_attack": {"prompt_injection": {"asr_before": 0.8, "asr_after": 0.1}},
+                "cases": [
+                    {
+                        "case_id": "PI-PG",
+                        "attack_type": "prompt_injection",
+                        "runtime": "openclaw",
+                        "expected_decision": "deny",
+                        "actual_decision": "deny",
+                        "blocked": True,
+                        "attack_success": False,
+                        "trace_id": "trace_pg_eval",
+                    }
+                ],
+            }
+        )
+        store.save_adapter_status(
+            "openclaw",
+            {
+                "status": "loaded",
+                "loaded": True,
+                "hook_count": 16,
+                "expected_hook_count": 16,
+                "last_verified_at": "2026-06-28T00:01:00+00:00",
+                "error": None,
+                "source": "agentguardctl",
+            },
+        )
+
+        from agentguard_core import ConfigAuditEvent, ConfigAuditFinding
+
+        event = ConfigAuditEvent(
+            event_id="cfg_pg_findings",
+            runtime="openclaw",
+            target_type="plugin_config",
+            target_id="agentguard-security",
+            action="before_install",
+            metadata={"trace_id": "trace_pg_findings"},
+            timestamp="2026-06-28T00:02:00+00:00",
+        )
+        finding = ConfigAuditFinding(
+            finding_id="finding_pg_high",
+            severity="high",
+            category="openclaw.plugin",
+            title="Raw conversation access enabled",
+            subject="hooks.allowConversationAccess",
+            description="Plugin can read raw conversation content.",
+        )
+        store.add_config_audit_finding(event, finding)
+
+        restarted = PostgresControlPlaneStore(database_url)
+        latest = restarted.get_latest_evaluation_run()
+        status = restarted.get_adapter_status("openclaw")
+        findings = restarted.list_config_audit_findings(
+            trace_id="trace_pg_findings",
+            target_id="agentguard-security",
+            severity="high",
+            limit=10,
+        )
+
+        assert evaluation["run_id"] == "eval_pg_latest"
+        assert latest is not None
+        assert latest["run_id"] == "eval_pg_latest"
+        assert latest["cases"][0]["trace_id"] == "trace_pg_eval"
+        assert status is not None
+        assert status["status"] == "loaded"
+        assert status["hook_count"] == 16
+        assert len(findings) == 1
+        assert findings[0].trace_id == "trace_pg_findings"
+        assert findings[0].finding.finding_id == "finding_pg_high"
+    finally:
+        reset_control_plane_schema(database_url)
+
+
 def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_payload() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     approval_id = f"app_pg_legacy_subject_{run_id}"
@@ -146,7 +225,7 @@ def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_p
     subject_id = f"call_pg_legacy_subject_{run_id}"
     engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         legacy_payload = {
             "approval_id": approval_id,
             "trace_id": trace_id,
@@ -272,20 +351,18 @@ def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_p
         assert approval.action_name == "send_email"
         assert approval.tool_call_id == subject_id
     finally:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
 
 
 def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_metric_{run_id}"
     other_trace_id = f"trace_pg_other_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -340,13 +417,11 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
 
 
 def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         first_record = store.save_policy_snapshot(
             PolicyBundle(
@@ -383,13 +458,11 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
 
 
 def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     worker_count = 16
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         PostgresControlPlaneStore(database_url).initialize()
 
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -414,13 +487,11 @@ def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() 
 
 
 def test_postgres_migration_creates_policy_snapshots_table() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
@@ -449,16 +520,14 @@ def test_postgres_migration_creates_policy_snapshots_table() -> None:
 
 
 def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     run_id = uuid4().hex
     trace_id = f"trace_pg_route_{run_id}"
     approval_id = f"app_pg_route_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     try:
-        _reset_control_plane_schema(database_url)
+        reset_control_plane_schema(database_url)
         store.initialize()
         store.add_audit_event(
             _audit_event(
@@ -507,6 +576,72 @@ def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
         _cleanup_test_rows(database_url, trace_id, approval_id)
 
 
+def test_postgres_store_persists_terminal_control_plane_registry_state() -> None:
+    database_url = get_test_database_url()
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        credential = {
+            "credential_id": "cred_pg_openclaw",
+            "token_hash": _token_hash("pg-generated-token"),
+            "principal_type": "component",
+            "principal_id": "openclaw-main",
+            "role": "adapter",
+            "scopes": ["adapter:status:write"],
+            "runtime": "openclaw",
+            "agent_id": "main",
+        }
+        store.create_credential(credential)
+        store.save_adapter_status(
+            "openclaw",
+            {
+                "status": "loaded",
+                "loaded": True,
+                "runtime": "openclaw",
+                "agent_id": "main",
+                "plugin_version": "0.1.0",
+                "runtime_version": "2026.6.6",
+                "capabilities": {"event_types": ["tool_call_proposed"]},
+                "hooks": ["before_tool_call"],
+                "last_heartbeat_at": "2026-06-28T00:03:00+00:00",
+            },
+        )
+        store.save_evaluation_run(
+            {
+                "run_id": "eval_pg_terminal",
+                "run_at": "2026-06-28T00:04:00+00:00",
+                "dataset_id": "attackbench",
+                "dataset_version": "v1",
+                "per_family": {"prompt_injection": {"case_count": 1}},
+                "per_rule": {"P101_prompt_injection": {"hit_count": 1}},
+                "cases": [],
+            }
+        )
+
+        restarted = PostgresControlPlaneStore(database_url)
+        stored_credential = restarted.get_credential_by_token_hash(_token_hash("pg-generated-token"))
+        listed_credentials = restarted.list_credentials()
+        status = restarted.get_adapter_status("openclaw")
+        runs = restarted.list_evaluation_runs(dataset_id="attackbench", dataset_version="v1")
+        run = restarted.get_evaluation_run("eval_pg_terminal")
+        revoked = restarted.revoke_credential("cred_pg_openclaw", revoked_at="2026-06-28T00:05:00+00:00")
+
+        assert stored_credential is not None
+        assert stored_credential.principal_id == "openclaw-main"
+        assert [item.credential_id for item in listed_credentials] == ["cred_pg_openclaw"]
+        assert status is not None
+        assert status["last_heartbeat_at"] == "2026-06-28T00:03:00+00:00"
+        assert status["capabilities"]["event_types"] == ["tool_call_proposed"]
+        assert [item["run_id"] for item in runs] == ["eval_pg_terminal"]
+        assert run is not None
+        assert run["per_rule"]["P101_prompt_injection"]["hit_count"] == 1
+        assert revoked.revoked_at == "2026-06-28T00:05:00+00:00"
+        assert restarted.get_credential_by_token_hash(_token_hash("pg-generated-token")) is None
+    finally:
+        reset_control_plane_schema(database_url)
+
+
 def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None) -> None:
     try:
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
@@ -522,29 +657,6 @@ def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None
             )
     except Exception:
         return None
-
-
-def _reset_control_plane_schema(database_url: str) -> None:
-    engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
-    with engine.begin() as conn:
-        for table in [
-            "action_critic_reviews",
-            "memory_guard_changes",
-            "config_audit_findings",
-            "provenance_edges",
-            "provenance_nodes",
-            "audit_integrity_heads",
-            "policy_snapshot_history",
-            "policy_snapshots",
-            "approval_nonces",
-            "browser_sessions",
-            "launch_codes",
-            "approval_requests",
-            "approvals",
-            "audit_events",
-            "alembic_version",
-        ]:
-            conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
 
 
 def _cleanup_auth_rows(

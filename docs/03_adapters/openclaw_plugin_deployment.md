@@ -89,7 +89,8 @@ pnpm openclaw:plugin:install
 4. 备份当前 OpenClaw config 到 `.openclaw-dev/backups/`
 5. 尝试卸载旧的 `agentguard-security`
 6. 执行 `openclaw plugins install -l .openclaw-dev/agentguard-security`
-7. patch OpenClaw config，写入 enabled、Guard API URL、adapter token 和短测试 timeout
+7. patch OpenClaw config，写入 enabled、Guard API URL、adapter token、短测试 timeout 和
+   `hooks.allowConversationAccess=true`
 8. 执行 `openclaw plugins registry --refresh`
 9. 执行 `openclaw gateway restart --safe`
 10. 轮询 `openclaw gateway status`，直到 runtime running 且 connectivity probe ok
@@ -115,8 +116,9 @@ pnpm openclaw:plugin:verify
 该命令会执行 `openclaw plugins inspect agentguard-security --runtime --json` 并校验：
 
 - `plugin.status=loaded`
-- `plugin.hookCount=16`
+- `plugin.hookCount=19`
 - `plugin.source` 或 `plugin.rootDir` 指向 `.openclaw-dev/agentguard-security`
+- runtime diagnostics 不包含 `allowConversationAccess=true` 缺失导致的 hook block
 - Gateway `Runtime: running`
 - Gateway `Connectivity probe: ok`
 
@@ -125,6 +127,9 @@ pnpm openclaw:plugin:verify
 ```text
 before_tool_call
 message_sending
+before_prompt_build
+llm_input
+llm_output
 before_install
 tool_result_persist
 gateway_start
@@ -149,7 +154,79 @@ openclaw plugins inspect agentguard-security --runtime --json
 openclaw gateway status
 ```
 
-## 7. 卸载与回滚
+## 7. E2E 验收
+
+Guard API 和插件安装验证通过后，运行 repo 内确定性 E2E runner：
+
+```bash
+pnpm openclaw:plugin:e2e
+```
+
+该命令会构建插件并执行 `scripts/openclaw-e2e-runner.mjs`。runner 自动读取根 `.env`，要求 `AGENTGUARD_ADAPTER_TOKEN` 和 `AGENTGUARD_CONTROL_TOKEN` 可用，并默认连接 `http://${AGENTGUARD_HOST:-127.0.0.1}:${AGENTGUARD_PORT:-8088}`。
+
+覆盖 hooks：
+
+- `before_tool_call`
+- `message_sending`
+- `before_prompt_build`
+- `llm_input`
+- `llm_output`
+- `before_install`
+- `tool_result_persist`
+- `session_start`
+
+输出文件：
+
+```text
+/tmp/agentguard-openclaw-e2e-report.json
+/tmp/agentguard-openclaw-e2e-acceptance-report.md
+```
+
+验收重点：
+
+- `ok=true`
+- OpenClaw audit events 包含 `tool_call_proposed`、`message_send_proposed`、`config_audit`、`tool_result_produced` 和 `runtime_observation`
+- audit integrity `valid=true`
+- provenance 至少包含 `event`、`decision` 和 `audit` 节点
+
+全 Hook 可靠性验收使用独立测试库，要求 `.env` 中存在
+`AGENTGUARD_TEST_DATABASE_URL`，且数据库名为 `agent_guard_test` 或以
+`_test` 结尾：
+
+```bash
+pnpm openclaw:plugin:reliability
+```
+
+该命令会构建插件、重置测试库控制平面表、启动指向测试库的 Guard
+API、复核 OpenClaw runtime 插件加载状态，并触发 19 个 hook 各 50 次，
+共 950 条预期审计事件。若 `127.0.0.1:8088` 已有 Guard API 监听，runner
+会直接停止，避免误写开发库。
+
+输出文件：
+
+```text
+/tmp/agentguard-openclaw-reliability-report.json
+/tmp/agentguard-openclaw-reliability-acceptance-report.md
+```
+
+验收重点：
+
+- `ok=true`
+- `missing_traces=[]`、`duplicate_trace_ids=[]`、`non_openclaw_count=0`
+- 审计事件计数符合 `tool_call_proposed=50`、`context_assembled=50`、
+  `model_input_prepared=50`、`model_output_produced=50`、
+  `message_send_proposed=50`、`config_audit=50`、
+  `tool_result_produced=50`、`runtime_observation=600`
+- adapter status 显示 `loaded=true`、`hook_count=19`、
+  `expected_hook_count=19`
+- audit integrity `valid=true`
+- 阻断型 hook：`before_tool_call` 返回 `block=true`，
+  `message_sending` 返回 `cancel=true`，`before_install` 返回 `block=true`
+
+`openclaw:plugin:e2e` 和 `openclaw:plugin:reliability` 会把摘要写入
+`/v1/adapters/openclaw/status` 的 `capabilities.release_gates`，用于后续发布前查询。
+
+## 8. 卸载与回滚
 
 卸载开发安装：
 
@@ -180,7 +257,7 @@ pnpm openclaw:plugin:verify
 
 预期应失败并提示 `Plugin not found: agentguard-security` 或插件未加载。
 
-## 8. 故障排查
+## 9. 故障排查
 
 ### runtime 仍指向旧 `/tmp` staging
 
@@ -198,6 +275,28 @@ pnpm openclaw:plugin:verify
 ```text
 /home/today/dev/agent-guard/.openclaw-dev/agentguard-security/dist/index.js
 ```
+
+### llm hooks 被 runtime 拦截
+
+`llm_input` 和 `llm_output` 读取 raw prompt/output。非 bundled 插件必须在 OpenClaw config 里显式配置：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "agentguard-security": {
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
+  }
+}
+```
+
+`pnpm openclaw:plugin:install` 会自动写入该配置。若 `pnpm openclaw:plugin:verify`
+仍显示缺少 `llm_input` / `llm_output`，先运行安装脚本刷新配置和 registry，再复查
+`openclaw plugins inspect agentguard-security --runtime --json` 里的 diagnostics。
 
 ### install safety scan 拦截
 
@@ -227,7 +326,7 @@ plugin entry does not expose defineToolPlugin metadata
 
 `openclaw gateway restart --safe` 过程中可能短暂返回 `gateway closed (1006 abnormal closure)`。安装脚本会继续轮询 `openclaw gateway status`，只要最终 `Runtime: running` 且 `Connectivity probe: ok` 即可。
 
-## 9. E2E 复查入口
+## 10. E2E 复查入口
 
 最近一次本机真实 E2E 验收报告：
 
@@ -235,4 +334,4 @@ plugin entry does not expose defineToolPlugin metadata
 /tmp/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
-该验收使用 OpenClaw 2026.6.6、Guard API、独立 PostgreSQL 测试库和确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。
+该验收使用 OpenClaw 2026.6.6、Guard API、PostgreSQL 和 repo 内确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_prompt_build`、`llm_input`、`llm_output`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。

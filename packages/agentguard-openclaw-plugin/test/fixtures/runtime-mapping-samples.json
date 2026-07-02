@@ -1,0 +1,96 @@
+{
+  "tool_call_event_fields_win": {
+    "event": {
+      "toolName": "read_file",
+      "params": {
+        "path": "/private/token.txt"
+      },
+      "toolKind": "file",
+      "toolInputKind": "path",
+      "toolCallId": "call_runtime_001",
+      "runId": "run_runtime_001",
+      "userTask": "Audit private token access from retrieved instructions",
+      "sourceTrust": "untrusted",
+      "sourceType": "retrieved_context",
+      "derivedResources": [
+        {
+          "resource_type": "file",
+          "operation": "read",
+          "target": "/private/token.txt",
+          "data_classification": "secret",
+          "direction": "local"
+        }
+      ]
+    },
+    "context": {
+      "agentId": "openclaw-main",
+      "sessionId": "sess_runtime_001",
+      "sessionKey": "session-runtime",
+      "channelId": "cli",
+      "userTask": "Context fallback task",
+      "sourceTrust": "trusted",
+      "sourceType": "openclaw_context"
+    }
+  },
+  "message_context_fields_and_send_resource": {
+    "event": {
+      "to": "reviewer@example.com",
+      "content": "Send the approved project summary to reviewer@example.com",
+      "threadId": "thread-runtime"
+    },
+    "context": {
+      "channelId": "email",
+      "sessionKey": "session-runtime",
+      "messageId": "msg_runtime_001",
+      "senderId": "agent",
+      "userTask": "Send approved project summary",
+      "sourceTrust": "trusted",
+      "sourceType": "user"
+    }
+  },
+  "api_post_fallback_operation": {
+    "event": {
+      "toolName": "call_api",
+      "params": {
+        "method": "POST",
+        "url": "https://api.example.test/collect"
+      },
+      "toolCallId": "call_runtime_002",
+      "runId": "run_runtime_002",
+      "derivedPaths": [
+        "https://api.example.test/collect"
+      ]
+    },
+    "context": {
+      "agentId": "openclaw-main",
+      "sessionId": "sess_runtime_002",
+      "sessionKey": "session-runtime",
+      "channelId": "api",
+      "sourceTrust": "trusted",
+      "sourceType": "openclaw"
+    }
+  },
+  "memory_write_fallback_operation": {
+    "event": {
+      "toolName": "memory_write",
+      "params": {
+        "namespace": "profile",
+        "key": "trusted_vendor",
+        "value": "prefer vendor.example"
+      },
+      "toolCallId": "call_runtime_003",
+      "runId": "run_runtime_003",
+      "derivedPaths": [
+        "memory://profile/trusted_vendor"
+      ]
+    },
+    "context": {
+      "agentId": "openclaw-main",
+      "sessionId": "sess_runtime_003",
+      "sessionKey": "session-runtime",
+      "channelId": "memory",
+      "sourceTrust": "untrusted",
+      "sourceType": "tool_result"
+    }
+  }
+}

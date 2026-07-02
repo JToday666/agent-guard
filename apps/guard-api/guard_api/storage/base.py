@@ -16,7 +16,13 @@ from agentguard_core import (
     ProvenanceNode,
 )
 
-from guard_api.models import ApprovalRequest
+from guard_api.models import (
+    AdapterStatusRecord,
+    ApprovalRequest,
+    ConfigAuditFindingRecord,
+    CredentialRecord,
+    EvaluationRun,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +120,56 @@ class ControlPlaneStore(Protocol):
         event: ConfigAuditEvent,
         finding: ConfigAuditFinding,
     ) -> ConfigAuditFinding:
+        ...
+
+    def list_config_audit_findings(
+        self,
+        *,
+        trace_id: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        severity: str | None = None,
+        limit: int = 100,
+    ) -> list[ConfigAuditFindingRecord]:
+        ...
+
+    def save_evaluation_run(self, run: EvaluationRun | dict) -> dict:
+        ...
+
+    def get_latest_evaluation_run(self) -> dict | None:
+        ...
+
+    def get_evaluation_run(self, run_id: str) -> dict | None:
+        ...
+
+    def list_evaluation_runs(
+        self,
+        *,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        ...
+
+    def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict) -> dict:
+        ...
+
+    def get_adapter_status(self, adapter_id: str) -> dict | None:
+        ...
+
+    def list_adapter_statuses(self) -> dict[str, dict]:
+        ...
+
+    def create_credential(self, credential: CredentialRecord | dict) -> CredentialRecord:
+        ...
+
+    def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
+        ...
+
+    def list_credentials(self) -> list[CredentialRecord]:
+        ...
+
+    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
         ...
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:

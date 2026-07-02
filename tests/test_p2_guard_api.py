@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -19,6 +17,7 @@ from guard_api.main import create_app
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from postgres_test_utils import get_test_database_url, reset_control_plane_schema
 
 
 def _login(client: TestClient, *, control_token: str = "control-secret") -> None:
@@ -272,12 +271,10 @@ def test_memory_guard_change_lifecycle() -> None:
 
 
 def test_p2_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> None:
-    database_url = os.getenv("AGENTGUARD_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("AGENTGUARD_TEST_DATABASE_URL is not configured")
+    database_url = get_test_database_url()
 
     store = PostgresControlPlaneStore(database_url)
-    _reset_p2_postgres_schema(database_url)
+    reset_control_plane_schema(database_url)
     store.initialize()
 
     audit = AuditEvent(
@@ -361,28 +358,8 @@ def test_p2_postgres_store_roundtrips_integrity_provenance_config_and_memory() -
         finding_count = conn.execute(text("SELECT COUNT(*) FROM config_audit_findings")).scalar_one()
     assert finding_count == 1
     tampered = store.verify_audit_integrity()
-    assert tampered.valid is False
-    assert tampered.first_broken_audit_id == "audit_p2_pg_1"
-
-
-def _reset_p2_postgres_schema(database_url: str) -> None:
-    engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
-    with engine.begin() as conn:
-        for table in [
-            "action_critic_reviews",
-            "memory_guard_changes",
-            "config_audit_findings",
-            "provenance_edges",
-            "provenance_nodes",
-            "audit_integrity_heads",
-            "policy_snapshot_history",
-            "policy_snapshots",
-            "approval_nonces",
-            "browser_sessions",
-            "launch_codes",
-            "approval_requests",
-            "approvals",
-            "audit_events",
-            "alembic_version",
-        ]:
-            conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+    try:
+        assert tampered.valid is False
+        assert tampered.first_broken_audit_id == "audit_p2_pg_1"
+    finally:
+        reset_control_plane_schema(database_url)

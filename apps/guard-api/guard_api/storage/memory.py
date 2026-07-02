@@ -18,7 +18,13 @@ from agentguard_core import (
     utc_now_iso,
 )
 
-from guard_api.models import ApprovalRequest
+from guard_api.models import (
+    AdapterStatusRecord,
+    ApprovalRequest,
+    ConfigAuditFindingRecord,
+    CredentialRecord,
+    EvaluationRun,
+)
 from guard_api.storage.base import (
     AuditEventFilters,
     AuditIntegrityStatus,
@@ -38,6 +44,9 @@ class MemoryControlPlaneStore:
     provenance_nodes: dict[str, ProvenanceNode] = field(default_factory=dict)
     provenance_edges: dict[str, ProvenanceEdge] = field(default_factory=dict)
     config_audit_findings: list[dict[str, Any]] = field(default_factory=list)
+    evaluation_runs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    adapter_statuses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    credentials: dict[str, CredentialRecord] = field(default_factory=dict)
     action_critic_reviews: dict[str, ActionCriticReview] = field(default_factory=dict)
     memory_changes: dict[str, MemoryGuardChange] = field(default_factory=dict)
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
@@ -105,6 +114,86 @@ class MemoryControlPlaneStore:
             }
         )
         return finding
+
+    def list_config_audit_findings(
+        self,
+        *,
+        trace_id: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        severity: str | None = None,
+        limit: int = 100,
+    ) -> list[ConfigAuditFindingRecord]:
+        rows = [_config_finding_record(row) for row in self.config_audit_findings]
+        if trace_id is not None:
+            rows = [row for row in rows if row.trace_id == trace_id]
+        if target_id is not None:
+            rows = [row for row in rows if row.target_id == target_id]
+        if target_type is not None:
+            rows = [row for row in rows if row.target_type == target_type]
+        if severity is not None:
+            rows = [row for row in rows if row.finding.severity == severity]
+        rows.sort(key=lambda row: (row.timestamp, row.finding.finding_id), reverse=True)
+        return rows[: _bounded_limit(limit)]
+
+    def save_evaluation_run(self, run: EvaluationRun | dict[str, Any]) -> dict[str, Any]:
+        payload = EvaluationRun.model_validate(run).model_dump(mode="json")
+        self.evaluation_runs[payload["run_id"]] = payload
+        return payload
+
+    def get_latest_evaluation_run(self) -> dict[str, Any] | None:
+        if not self.evaluation_runs:
+            return None
+        return max(self.evaluation_runs.values(), key=lambda run: (str(run["run_at"]), str(run["run_id"])))
+
+    def get_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
+        return self.evaluation_runs.get(run_id)
+
+    def list_evaluation_runs(
+        self,
+        *,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows = list(self.evaluation_runs.values())
+        if dataset_id is not None:
+            rows = [run for run in rows if run.get("dataset_id") == dataset_id]
+        if dataset_version is not None:
+            rows = [run for run in rows if run.get("dataset_version") == dataset_version]
+        rows.sort(key=lambda run: (str(run["run_at"]), str(run["run_id"])), reverse=True)
+        return rows[: _bounded_limit(limit)]
+
+    def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]) -> dict[str, Any]:
+        payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
+        self.adapter_statuses[adapter_id] = payload
+        return payload
+
+    def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
+        return self.adapter_statuses.get(adapter_id)
+
+    def list_adapter_statuses(self) -> dict[str, dict[str, Any]]:
+        return dict(self.adapter_statuses)
+
+    def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
+        record = CredentialRecord.model_validate(credential)
+        self.credentials[record.credential_id] = record
+        return record
+
+    def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
+        for credential in self.credentials.values():
+            if credential.token_hash == token_hash and credential.revoked_at is None:
+                return credential
+        return None
+
+    def list_credentials(self) -> list[CredentialRecord]:
+        return sorted(self.credentials.values(), key=lambda credential: credential.created_at)
+
+    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
+        credential = self.credentials[credential_id]
+        revoked = credential.model_copy(update={"revoked_at": revoked_at})
+        self.credentials[credential_id] = revoked
+        return revoked
 
     def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
         self.action_critic_reviews[review.review_id] = review
@@ -314,6 +403,20 @@ def _aggregate_metrics(events: list[AuditEvent]) -> EvalMetrics:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
+    event = ConfigAuditEvent.model_validate(row["event"])
+    finding = ConfigAuditFinding.model_validate(row["finding"])
+    return ConfigAuditFindingRecord(
+        runtime=event.runtime,
+        target_type=event.target_type,
+        target_id=event.target_id,
+        trace_id=str(event.metadata.get("trace_id") or event.event_id),
+        event_id=event.event_id,
+        timestamp=event.timestamp,
+        finding=finding,
+    )
 
 
 def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:

@@ -1,15 +1,43 @@
-# 后端待处理项（前端预留能力）
+# 已完成后端能力与剩余接入项
+
+## 状态
+
+本文件记录原前端预留能力的后端落地状态。三项后端能力均已完成：
+
+- 安全评测 ASR 数据：已提供导入、latest 查询和 dataset registry 汇总接口。
+- 配置审计 findings：已提供只读查询接口。
+- OpenClaw 插件验证状态：已提供最近一次 verify、E2E 和 reliability 状态摘要写入与读取接口。
+- 运行时监控指标：已提供 `/v1/metrics/runtime`，可按 runtime 聚合审计事件、hook 活跃度和 adapter 状态。
+
+Dashboard 已完成展示接入：安全评测页读取 latest evaluation，系统状态页读取配置审计 findings 与 OpenClaw verify/status。mock 数据源已补齐有数据状态，便于本地查看真实数据形态下的页面效果。
 
 ## 安全评测 ASR 数据接口
 
-**背景**：前端评测页已预留 `asrBefore / asrAfter` 字段显示，但当前 Guard API `/v1/metrics/eval` 不返回 ASR 数据。
+后端采用“导入并保存”方案，评测结果由 CLI/API 写入 Guard API，再由 Dashboard 或 CLI 读取最新一次 run。
 
-**建议方案**：新增只读接口 `GET /v1/evaluations/latest`，返回：
+### 写入
+
+`POST /v1/evaluations`
+
+- 鉴权：control token。
+- 用途：导入 AttackBench/Core matrix 等评测结果。
+- ASR 字段允许 `null`；非 `null` 时必须在 `[0, 1]`。
 
 ```json
 {
-  "run_id": "string",
-  "run_at": "ISO8601",
+  "run_id": "eval_20260628",
+  "run_at": "2026-06-28T00:00:00+00:00",
+  "dataset_id": "attackbench",
+  "dataset_version": "v1",
+  "dataset_digest": "sha256:...",
+  "dataset_locked": true,
+  "regression_gate": {
+    "status": "passed",
+    "baseline_run_id": "eval_baseline",
+    "max_allowed_regression": 0.02,
+    "asr_delta": -0.684,
+    "failed_case_ids": []
+  },
   "asr_before": 0.732,
   "asr_after": 0.048,
   "per_attack": {
@@ -19,9 +47,15 @@
     {
       "case_id": "PI-001",
       "attack_type": "prompt_injection",
-      "runtime": "langgraph",
+      "runtime": "openclaw",
+      "case_digest": "sha256:...",
+      "provenance": {
+        "source": "attackbench",
+        "source_path": "bench/datasets/attack_cases/prompt_injection.jsonl",
+        "line": 1
+      },
       "expected_decision": "deny",
-      "actual_decision": "deny",
+      "actual_decision": "ask",
       "blocked": true,
       "attack_success": false,
       "trace_id": "trace_001"
@@ -30,30 +64,68 @@
 }
 ```
 
-**前端已就绪**：`EvaluationSummary.asrBefore / asrAfter` 类型已定义，显示逻辑已实现，空状态文案已更新为"请运行 AttackBench 评测并导入结果"。
+### 读取
 
-**优先级**：P1（竞赛展示时如有真实评测数据，建议接入）
+`GET /v1/evaluations/latest`
 
----
+- 鉴权：browser session 或 control token。
+- 无数据：`404 EVALUATION_NOT_FOUND`。
+
+`GET /v1/evaluations/datasets`
+
+- 鉴权：browser session 或 control token。
+- 用途：从已保存 evaluation run 汇总 dataset 版本、锁定状态、case provenance 覆盖、latest run 和 regression gate 摘要。
+
+### CLI
+
+```bash
+uv run agentguardctl eval import /path/to/evaluation-run.json
+```
 
 ## 配置审计 findings 只读接口
 
-**背景**：配置审计结果落成 `event_type=config_audit` 的 AuditEvent，metadata 含 `finding_count`，但无法查询完整 finding 列表（title / evidence / recommendation）。
+`GET /v1/config-audit/findings?trace_id=&target_id=&target_type=&severity=&limit=`
 
-**建议方案**：`GET /v1/config-audit/findings?trace_id=&target_id=`
-
-**前端现状**：系统状态页配置审计区块显示 finding_count，不展示 finding 详情（因为接口不存在）。
-
-**优先级**：P2
-
----
+- 鉴权：browser session 或 control token。
+- 数据来源：`/v1/config-audit/evaluate` 写入的 `config_audit_findings`。
+- 返回 finding 原文，并附带 `runtime`、`target_type`、`target_id`、`trace_id`、`event_id`、`timestamp`。
 
 ## OpenClaw 插件验证状态接口
 
-**背景**：CLI `agentguardctl openclaw verify` 能验证插件安装状态，但前端无法调用 CLI，也没有对应 REST 接口。
+OpenClaw 状态不是每次 Dashboard 刷新实时 shell 探测，而是最近一次 verify 上报结果。
 
-**建议方案**：`GET /v1/adapters/openclaw/status`，返回插件是否 loaded、hookCount、最近 verify 时间。
+### 写入
 
-**前端现状**：系统状态页显示"未接入验证结果"，只基于审计事件统计 OpenClaw 活动。
+`PUT /v1/adapters/openclaw/status`
 
-**优先级**：P2
+- 鉴权：control token。
+- 写入方：`agentguardctl openclaw verify --record` 或 `scripts/openclaw-plugin-dev.mjs verify --record`。
+
+```json
+{
+  "status": "loaded",
+  "loaded": true,
+  "hook_count": 19,
+  "expected_hook_count": 19,
+  "last_verified_at": "2026-06-28T00:00:00+00:00",
+  "error": null,
+  "source": "agentguardctl"
+}
+```
+
+E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`，用于后续发布前复查。
+
+### 读取
+
+`GET /v1/adapters/openclaw/status`
+
+- 鉴权：browser session 或 control token。
+- 无记录：返回 `status="unknown"`。
+
+## 前端接入状态
+
+以下 Dashboard 展示已接入：
+
+- `EvaluationPage` 读取 `/v1/evaluations/latest`，展示 latest run、ASR before/after、per-attack ASR 和 cases 样本追踪。
+- `SystemPage` 读取 `/v1/adapters/openclaw/status`，展示 OpenClaw verify/heartbeat、hook 覆盖、版本、来源和错误状态。
+- `SystemPage` 读取 `/v1/config-audit/findings`，展示配置审计 finding 明细、严重性分布、目标、建议和证据链入口。

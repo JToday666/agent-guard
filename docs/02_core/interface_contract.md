@@ -46,6 +46,12 @@ Runtime Native Event
 | `GET /v1/audit/events` | P0 | Dashboard/CLI 事件列表，可按 query 过滤 |
 | `GET /v1/audit/integrity` | P0 | Dashboard/CLI 审计完整性状态 |
 | `GET /v1/metrics/eval` | P0 | 评测指标，可按 query 过滤 |
+| `GET /v1/metrics/runtime` | P1 | 运行时监控指标，聚合审计事件、hook 活跃度和 adapter status |
+| `POST /v1/evaluations` | P1 | 导入并保存 AttackBench/Core matrix 等评测 run |
+| `GET /v1/evaluations` | P1 | 查询已保存评测 run，可按 dataset 过滤 |
+| `GET /v1/evaluations/datasets` | P1 | 从已保存评测 run 汇总 dataset registry、版本锁定、case provenance 覆盖和 regression gate 摘要 |
+| `GET /v1/evaluations/latest` | P1 | 查询最近一次评测 run |
+| `GET /v1/evaluations/{run_id}` | P1 | 按 run_id 查询评测 run |
 | `POST /v1/auth/browser/launch` | P0 | 创建 Dashboard launch code |
 | `POST /v1/auth/browser/exchange` | P0 | launch code 换 browser session |
 | `GET /v1/auth/browser/me` | P0 | Dashboard 会话恢复 |
@@ -58,10 +64,15 @@ Runtime Native Event
 | `GET /v1/policies/current` | P0 | 当前策略快照查询 |
 | `PUT /v1/policies/current` | P0 | 替换当前策略快照 |
 | `GET /v1/policies/history` | P0 | 策略快照历史 |
-| `POST /v1/eval/runs` | P1 | 创建评测任务 |
-| `GET /v1/metrics/runtime` | P1 | 运行时监控指标 |
+| `GET /v1/config-audit/findings` | P2 | 查询 Config Audit findings |
+| `POST /v1/config-audit/evaluate` | P2 | Adapter/Plugin 上报配置审计事件并得到阻断结果 |
+| `PUT /v1/adapters/{adapter_id}/status` | P2 | 写入 adapter 最近一次 verify/status 结果 |
+| `POST /v1/adapters/{adapter_id}/heartbeat` | P2 | Adapter/Plugin 上报 heartbeat 和能力信息 |
+| `GET /v1/adapters/{adapter_id}/status` | P2 | 查询 adapter 最近状态 |
 
 目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
+历史文档中的 `POST /v1/eval/runs` 已统一为当前实现的 `/v1/evaluations` 系列接口。
+`GET /v1/metrics/eval` 面向评测统计；`GET /v1/metrics/runtime` 面向运行时健康和 hook 活跃度，不替代评测指标。
 
 ## 4. 鉴权与状态
 
@@ -121,6 +132,16 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 | `limit`    | 返回条数，默认 500，最大 1000 |
 
 `GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
+
+`GET /v1/metrics/runtime` 支持 `runtime` 和 `limit`。返回总体审计事件计数、阻断率、平均延迟、`by_runtime` 分组、`hook_activity` 计数、`adapters` 最近状态和 `active_adapter_count`。
+
+`POST /v1/evaluations` 由 control token + `evaluation:write` 写入评测 run；`GET /v1/evaluations`、`GET /v1/evaluations/datasets`、`GET /v1/evaluations/latest` 和 `GET /v1/evaluations/{run_id}` 接受 browser session 或 control token + `evaluation:read`。
+列表查询支持 `dataset_id`、`dataset_version` 和 `limit`。评测 run 支持 `dataset_digest`、`dataset_locked`、`regression_gate`，case 支持 `case_digest` 与 `provenance`；dataset registry 当前由已保存 run 聚合生成。
+
+`GET /v1/config-audit/findings` 接受 browser session 或 control token + `config-audit:read`，支持 `trace_id`、`target_id`、`target_type`、`severity`、`limit`。
+`POST /v1/config-audit/evaluate` 由 adapter token + `event:evaluate` 写入配置审计结果。
+
+`PUT /v1/adapters/{adapter_id}/status` 由 control token + `adapter:status:write` 写入最近一次 verify/status；`POST /v1/adapters/{adapter_id}/heartbeat` 接受 adapter heartbeat 写入；`GET /v1/adapters/{adapter_id}/status` 接受 browser session 或 control token + `adapter:read`。
 
 `GET /v1/policies/current` 和 `PUT /v1/policies/current` 只管理一个当前 `PolicyBundle`
 快照，请求和响应仍是裸 `PolicyBundle`，不包 envelope。Guard API 从存储读取该快照并传入 `agentguard-core.evaluate(event, policies)`；
