@@ -72,6 +72,16 @@ def test_attackcase_source_groups_keep_requested_dataset_split():
     assert groups["poisonedrag_qa"] >= 10
 
 
+def test_attackcase_directory_load_uses_primary_memory_poisoning_file_only():
+    dataset_dir = Path(__file__).resolve().parents[1] / "datasets" / "attack_cases"
+    cases = load_attack_cases(dataset_dir)
+    memory_cases = [case for case in cases if case.attack_type == "memory_poisoning"]
+
+    assert len(memory_cases) == 10
+    assert {case.metadata["dataset_file"] for case in memory_cases} == {"memory_poisoning.jsonl"}
+    assert {case.metadata.get("source_group") for case in memory_cases} == {"poisonedrag_qa"}
+
+
 def test_mcpsafety_tool_hijacking_cases_cover_main_modes():
     dataset_dir = Path(__file__).resolve().parents[1] / "datasets" / "attack_cases"
     cases = load_attack_cases(dataset_dir / "tool_hijacking.jsonl")
