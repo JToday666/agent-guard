@@ -26,7 +26,14 @@ from agentguard_core import (
 )
 from agentguard_core.resources import derive_resources
 
-from guard_api.models import ApprovalRequest, EvaluationApproval, GuardEvaluationResponse
+from guard_api.llm_approval import LlmApprovalReviewer
+from guard_api.models import (
+    ApprovalRequest,
+    EvaluationApproval,
+    GuardEvaluationResponse,
+    LlmApprovalReview,
+    LlmApprovalReviewInput,
+)
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
     AuditEventFilters,
@@ -267,9 +274,16 @@ class MemoryGuardService:
 
 
 class ApprovalService:
-    def __init__(self, *, store: ControlPlaneStore, settings: GuardApiSettings) -> None:
+    def __init__(
+        self,
+        *,
+        store: ControlPlaneStore,
+        settings: GuardApiSettings,
+        llm_reviewer: LlmApprovalReviewer | None = None,
+    ) -> None:
         self.store = store
         self.settings = settings
+        self.llm_reviewer = llm_reviewer
 
     def create_for_decision(
         self,
@@ -304,6 +318,50 @@ class ApprovalService:
         )
         return self.store.create_approval(approval)
 
+    def auto_review_with_llm(self, approval: ApprovalRequest | None) -> ApprovalRequest | None:
+        if approval is None or not self.settings.llm_approval_enabled:
+            return approval
+        if self.llm_reviewer is None:
+            return self._record_llm_review(
+                approval,
+                LlmApprovalReview(
+                    status="error",
+                    error="LLM approval configuration is incomplete.",
+                ),
+            )
+        try:
+            review = LlmApprovalReview.model_validate(
+                self.llm_reviewer.review(LlmApprovalReviewInput.from_approval(approval))
+            )
+        except Exception as exc:
+            return self._record_llm_review(
+                approval,
+                LlmApprovalReview(
+                    status="error",
+                    error=_llm_review_error(exc),
+                ),
+            )
+
+        if review.decision == "deny":
+            return self.resolve_approval(
+                approval.approval_id,
+                "deny",
+                resolution_source="llm",
+                resolved_by="llm-approval",
+                resolution_reason=review.reason,
+                llm_review=review.model_copy(update={"status": "resolved"}),
+            )
+        if review.decision == "allow_once" and _llm_can_allow_once(approval):
+            return self.resolve_approval(
+                approval.approval_id,
+                "allow_once",
+                resolution_source="llm",
+                resolved_by="llm-approval",
+                resolution_reason=review.reason,
+                llm_review=review.model_copy(update={"status": "resolved"}),
+            )
+        return self._record_llm_review(approval, review.model_copy(update={"status": "kept_pending"}))
+
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         pending: list[ApprovalRequest] = []
         for approval in self.store.list_pending_approvals():
@@ -319,12 +377,32 @@ class ApprovalService:
             return None
         return self._with_expired_status(approval)
 
-    def resolve_approval(self, approval_id: str, decision: str) -> ApprovalRequest:
+    def resolve_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        *,
+        resolution_source: str = "human",
+        resolved_by: str | None = None,
+        resolution_reason: str | None = None,
+        llm_review: LlmApprovalReview | None = None,
+    ) -> ApprovalRequest:
         approval = self.get_approval(approval_id)
         if approval is not None and approval.status == "expired":
             approval.decision = "deny"
             return approval
-        return self.store.resolve_approval(approval_id, decision)
+        return self.store.resolve_approval(
+            approval_id,
+            decision,
+            resolution_source=resolution_source,
+            resolved_by=resolved_by,
+            resolution_reason=resolution_reason,
+            llm_review=llm_review,
+        )
+
+    def _record_llm_review(self, approval: ApprovalRequest, review: LlmApprovalReview) -> ApprovalRequest:
+        updated = approval.model_copy(update={"llm_review": review})
+        return self.store.create_approval(updated)
 
     def _with_expired_status(self, approval: ApprovalRequest) -> ApprovalRequest:
         if self._is_expired(approval):
@@ -341,6 +419,19 @@ class ApprovalService:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         return expires_at < datetime.now(timezone.utc)
+
+
+def _llm_can_allow_once(approval: ApprovalRequest) -> bool:
+    if "allow_once" not in approval.decision_options:
+        return False
+    return approval.severity.lower() in {"low", "medium"}
+
+
+def _llm_review_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    if len(message) > 240:
+        message = f"{message[:240]}..."
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 class MetricService:
@@ -460,6 +551,7 @@ class EvaluationService:
             decision,
             requesting_principal_id=requesting_principal_id,
         )
+        approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(event, decision)
         self.audit_service.record_evaluation(
             event,

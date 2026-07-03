@@ -42,9 +42,16 @@ AGENTGUARD_ADAPTER_TOKEN=ag_adapter_xxx
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
 AGENTGUARD_HOST=127.0.0.1
 AGENTGUARD_PORT=8088
+AGENTGUARD_LLM_APPROVAL_ENABLED=false
+AGENTGUARD_LLM_APPROVAL_BASE_URL=https://api.openai.com/v1
+AGENTGUARD_LLM_APPROVAL_API_KEY=
+AGENTGUARD_LLM_APPROVAL_MODEL=
+AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS=3
 ```
 
 `.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、launch code、CSRF token、approval nonce 或 browser session。
+
+`AGENTGUARD_LLM_APPROVAL_ENABLED=true` 后，Guard API 会对 Core 已创建的 `ask` approval 尝试同步 LLM 自动审批。LLM 只消费 approval evidence；`deny` 不进入 LLM。低/中风险 `ask` 可被自动 resolve 为 `allow_once`，高/严重风险不允许被 LLM 自动放行。LLM 配置缺失、超时或返回非法 JSON 时，approval 保持 `pending`，仍可由人工审批接管。
 
 Guard API 需要 PostgreSQL，并要求 `AGENTGUARD_DATABASE_URL` 指向的用户和数据库已存在。启动 API 时会执行当前 migration。
 

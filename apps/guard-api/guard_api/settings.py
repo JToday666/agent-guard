@@ -11,6 +11,7 @@ DEFAULT_ADAPTER_TOKEN = "demo-token"
 DEFAULT_CONTROL_TOKEN = "demo-control-token"
 DEFAULT_ENVIRONMENT = "development"
 DEFAULT_STORAGE_BACKEND = "postgres"
+DEFAULT_LLM_APPROVAL_BASE_URL = "https://api.openai.com/v1"
 SUPPORTED_STORAGE_BACKENDS = {"postgres", "memory"}
 
 
@@ -32,6 +33,20 @@ class GuardApiSettings:
     browser_session_ttl_seconds: int = 3600
     launch_code_ttl_seconds: int = 300
     approval_nonce_ttl_seconds: int = 900
+    llm_approval_enabled: bool = field(
+        default_factory=lambda: _env_bool("AGENTGUARD_LLM_APPROVAL_ENABLED", default=False)
+    )
+    llm_approval_base_url: str = field(
+        default_factory=lambda: os.getenv("AGENTGUARD_LLM_APPROVAL_BASE_URL", DEFAULT_LLM_APPROVAL_BASE_URL)
+    )
+    llm_approval_api_key: str | None = field(default_factory=lambda: _optional_env("AGENTGUARD_LLM_APPROVAL_API_KEY"))
+    llm_approval_model: str | None = field(default_factory=lambda: _optional_env("AGENTGUARD_LLM_APPROVAL_MODEL"))
+    llm_approval_timeout_seconds: float = field(
+        default_factory=lambda: _env_float("AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0)
+    )
+
+    def llm_approval_configured(self) -> bool:
+        return bool(self.llm_approval_api_key and self.llm_approval_model)
 
     def validate_for_startup(self) -> None:
         if self.storage_backend not in SUPPORTED_STORAGE_BACKENDS:
@@ -53,3 +68,28 @@ class GuardApiSettings:
         if default_variables:
             names = ", ".join(default_variables)
             raise GuardApiConfigurationError(f"Production startup requires explicit configuration for: {names}")
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, *, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
