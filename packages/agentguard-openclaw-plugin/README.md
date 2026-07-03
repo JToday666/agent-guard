@@ -47,13 +47,15 @@ gateway status, and hook-trigger tests.
 
 Expected runtime hooks after install:
 
-- P1 enforcement: `before_tool_call`, `message_sending`
+- P1 enforcement: `before_tool_call`, `message_sending`,
+  `before_prompt_build`, `llm_input`
+- P1 output/result containment: `llm_output`, `before_agent_finalize`,
+  `tool_result_persist`
 - P2 config gate: `before_install`
-- P2 evaluation/observation: `before_prompt_build`, `llm_input`,
-  `llm_output`, `tool_result_persist`, `gateway_start`, `gateway_stop`,
-  `session_start`, `session_end`, `before_compaction`, `after_compaction`,
-  `subagent_spawned`, `subagent_ended`, `model_call_started`,
-  `model_call_ended`, `cron_changed`, `resolve_exec_env`
+- P2 observation: `gateway_start`, `gateway_stop`, `session_start`,
+  `session_end`, `before_compaction`, `after_compaction`, `subagent_spawned`,
+  `subagent_ended`, `model_call_started`, `model_call_ended`, `cron_changed`,
+  `resolve_exec_env`
 
 `llm_input` and `llm_output` require
 `plugins.entries.agentguard-security.hooks.allowConversationAccess=true` in the

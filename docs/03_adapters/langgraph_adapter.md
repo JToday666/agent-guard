@@ -28,8 +28,8 @@ LangGraph 侧是 AgentGuard 的 P0 运行环境和自动化评测靶场，实现
 | `SecureToolNode`          | P0 降级方案 | 当前版本不支持 wrapper 时，自定义 ToolNode 并在 tool invoke 前调用 Guard API |
 | 手写 `tool_node(state)`   | P0 降级方案 | prebuilt agent 不便插桩时，使用 StateGraph 手写工具节点                      |
 | `interrupt`               | P0-P1       | `ask` 决策的人工确认                                                         |
-| `pre_model_hook`          | P1          | 输入过滤、上下文隔离                                                         |
-| `post_model_hook`         | P1          | 模型输出检测                                                                 |
+| `pre_model_hook`          | P1          | 构造 `context_assembled` / `model_input_prepared`，`deny` 或未批准 `ask` 时阻断 planner |
+| `post_model_hook`         | P1          | 构造 `model_output_produced`，`deny` 或未批准 `ask` 时清空 tool calls 并终止本轮 |
 | memory/store wrapper      | P1-P2       | 记忆读写审计                                                                 |
 
 ## 4. 工具拦截兼容策略
@@ -42,6 +42,18 @@ LangGraph 版本更新较快，P0 实现不绑定单一 API 名称。工具执�
 → Guard API 调用 Core 并返回 GuardDecision
 → allow 才执行工具
 → deny / ask 不执行工具
+```
+
+模型前后拦截使用同一套决策语义：
+
+```text
+LangGraph state/messages
+→ pre_model_hook 构造 context/model-input GuardEvent
+→ allow 才进入 planner
+→ planner 输出 tool-call intent
+→ post_model_hook 构造 model-output GuardEvent
+→ allow 才把 tool_calls 交给 ToolNode
+→ deny / 未批准 ask 清空 tool_calls 并以 blocked 终止
 ```
 
 实现优先级：
@@ -99,5 +111,5 @@ flowchart TB
 1. `PI-001` 能诱导 Agent 生成 `read_file('/private/token.txt')`。
 2. 工具执行前拦截层能在工具执行前调用 Guard API，不依赖单一 LangGraph API 名称。
 3. Guard API 返回 `deny` 后 Mock Tool 不执行。
-4. `ask` 决策能通过 interrupt 暂停动作。
+4. `ask` 决策未获批准时按阻断处理；后续接入人工 interrupt 后再放行 `allow_once`。
 5. AttackBench runner 能读取 LangGraph trace 并统计结果。

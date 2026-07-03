@@ -82,6 +82,8 @@ class GuardedToolGateway:
                 approval_mode=self.approval_mode,
                 block_semantics="policy_deny",
                 counts_as_effective_block=True,
+                runtime_terminal=True,
+                terminal_reason="policy_deny",
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
             )
@@ -100,9 +102,12 @@ class GuardedToolGateway:
                     ),
                     approval_mode=self.approval_mode,
                     approval_id=approval_id,
+                    approval_resolution={"status": "not_waited", "decision": "deny", "reason": "approval_mode_fail_closed"},
                     approved_arguments_hash=arguments_hash,
                     block_semantics="ask_as_block",
                     counts_as_effective_block=False,
+                    runtime_terminal=True,
+                    terminal_reason="ask_as_block",
                 )
 
             approval_resolution, latency_ms = _wait_for_approval(
@@ -121,6 +126,7 @@ class GuardedToolGateway:
                 "approval_decision": approval_decision,
                 "approval_wait_latency_ms": latency_ms,
                 "approved_arguments_hash": approved_arguments_hash,
+                "approval_resolution": approval_resolution,
                 "tool_executed_after_approval": False,
             }
             if approval_decision in {"allow", "allow_once", "allow_session"}:
@@ -143,6 +149,8 @@ class GuardedToolGateway:
                         **approval_metadata,
                         block_semantics="approval_binding_mismatch",
                         counts_as_effective_block=False,
+                        runtime_terminal=True,
+                        terminal_reason="approval_binding_mismatch",
                         safe_message=f"Approval did not match the reviewed tool call: {mismatch_reason}",
                     )
             else:
@@ -165,6 +173,8 @@ class GuardedToolGateway:
                     **approval_metadata,
                     block_semantics=block_semantics,
                     counts_as_effective_block=counts_as_effective_block,
+                    runtime_terminal=True,
+                    terminal_reason=block_semantics,
                 )
 
         before = self.tool_runtime.snapshot()
@@ -188,9 +198,13 @@ class GuardedToolGateway:
                 approval_decision=approval_decision if decision.decision == "ask" else None,
                 approval_wait_latency_ms=latency_ms if decision.decision == "ask" else None,
                 approved_arguments_hash=approved_arguments_hash if decision.decision == "ask" else None,
+                approval_resolution=approval_resolution if decision.decision == "ask" else None,
                 tool_executed_after_approval=True if decision.decision == "ask" else False,
                 block_semantics="approval_allow_continue" if decision.decision == "ask" else None,
                 counts_as_effective_block=False,
+                runtime_terminal=False,
+                terminal_reason=None,
+                rag_answer_provenance=result.get("rag_answer_provenance") if tool_name == "rag_answer" and isinstance(result, dict) else None,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
             )
@@ -214,6 +228,7 @@ class GuardedToolGateway:
                 approval_decision=approval_decision if decision.decision == "ask" else None,
                 approval_wait_latency_ms=latency_ms if decision.decision == "ask" else None,
                 approved_arguments_hash=approved_arguments_hash if decision.decision == "ask" else None,
+                approval_resolution=approval_resolution if decision.decision == "ask" else None,
                 tool_executed_after_approval=True if decision.decision == "ask" else False,
                 block_semantics="approval_allow_continue" if decision.decision == "ask" else None,
                 counts_as_effective_block=False,
@@ -238,6 +253,8 @@ class GuardedToolGateway:
             payload["_phase"] = metadata.get("phase")
             payload["_source_tool_call_id"] = call_id
             payload["_created_by"] = "agent_tool_call"
+            if tool_name == "rag_answer":
+                self._enrich_rag_answer_arguments(payload)
             return payload
         if tool_name != "mcp_call":
             return arguments
@@ -267,6 +284,25 @@ class GuardedToolGateway:
             payload.setdefault("descriptor_diff", descriptor_diff)
         payload.setdefault("hijacking", hijacking)
         return payload
+
+    def _enrich_rag_answer_arguments(self, payload: dict[str, Any]) -> None:
+        latest = getattr(self.tool_runtime, "latest_rag_retrieval", None)
+        if not callable(latest):
+            return
+        provenance = latest(
+            case_id=payload.get("_case_id"),
+            dataset=str(payload.get("dataset") or ""),
+            question_id=str(payload.get("question_id") or ""),
+        )
+        if not isinstance(provenance, dict):
+            return
+        if not payload.get("contexts") and provenance.get("contexts"):
+            payload["contexts"] = list(provenance.get("contexts") or [])
+        for key in ("context_docs", "source_trust", "answer_source", "rag_answer_provenance"):
+            if payload.get(key) in (None, "", []):
+                value = provenance.get(key)
+                if value not in (None, "", []):
+                    payload[key] = value
 
 
 def _catalog_from_context(context: dict[str, Any], key: str) -> list[dict[str, Any]]:

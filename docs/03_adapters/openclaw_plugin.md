@@ -8,7 +8,7 @@
 packages/agentguard-openclaw-plugin/
 ```
 
-它不是 `agentguard_langgraph_bench/adapters/openclaw/` 的 AttackBench 外部 adapter。当前范围是 OpenClaw runtime 插件：P1 注册 `before_tool_call` 和 `message_sending` 执行前阻断面，把事件映射成 `GuardEvent(schema_version="0.3", runtime="openclaw")`，调用 Guard API，并按 `GuardDecision` 放行、阻断或等待审批；同时接入 `before_prompt_build`、`llm_input`、`llm_output` 作为 prompt/model 评估型观测面。P2 增加 `before_install` 配置审计、`tool_result_persist` 工具结果事件，以及 session/gateway/model/subagent/cron/exec-env 观察型审计。
+它不是 `agentguard_langgraph_bench/adapters/openclaw/` 的 AttackBench 外部 adapter。当前范围是 OpenClaw runtime 插件：P1 注册 `before_tool_call`、`message_sending`、`before_prompt_build` 和 `llm_input` 执行型阻断面，把事件映射成 `GuardEvent(schema_version="0.3", runtime="openclaw")`，调用 Guard API，并按 `GuardDecision` 放行、阻断或等待审批；`llm_output` 与 `before_agent_finalize` 串联为最终输出 revise 面。P2 增加 `before_install` 配置审计、`tool_result_persist` 工具结果隔离，以及 session/gateway/model/subagent/cron/exec-env 观察型审计。
 
 关联入口：
 
@@ -60,10 +60,11 @@ packages/agentguard-openclaw-plugin/
 | --- | --- | --- |
 | `before_tool_call` | 已实现并通过本机 OpenClaw runtime 验证 | 映射为 `tool_call_proposed`；`allow` 放行，`deny` block，`ask` 等待 Guard approval |
 | `message_sending` | 已实现并通过本机 OpenClaw runtime 验证 | 映射为 `message_send_proposed`；`allow` 放行，`deny`/拒绝/超时 cancel |
-| `before_prompt_build` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `context_assembled`；调用 Guard API 写审计/provenance；不改写 prompt |
-| `llm_input` / `llm_output` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `model_input_prepared` / `model_output_produced`；调用 Guard API 写审计/provenance；不阻断模型调用 |
+| `before_prompt_build` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `context_assembled`；`allow` 放行，`deny`/未批准 `ask` block；Guard API 失败按默认 fail-closed block |
+| `llm_input` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `model_input_prepared`；`allow` 放行，`deny`/未批准 `ask` block；Guard API 失败按默认 fail-closed block |
+| `llm_output` / `before_agent_finalize` | 已实现，需运行本机 OpenClaw hook 复验 | 映射为 `model_output_produced`；最终输出命中 `deny`/未批准 `ask` 或本地凭据检测时要求 runtime revise |
 | `before_install` | 已实现，需运行本机 OpenClaw install 验证 | 调用 Guard API config audit；high/critical 阻断安装；Guard API 失败 fail-closed |
-| `tool_result_persist` | 已实现，需运行本机 OpenClaw hook 验证 | 映射为 `tool_result_produced`，调用 Guard evaluate 写审计/provenance；失败 fail-open |
+| `tool_result_persist` | 已实现，需运行本机 OpenClaw hook 验证 | 映射为 `tool_result_produced`；`deny`/未批准 `ask` 不持久化原文，返回安全占位；本地凭据和持久化指令仍会同步清洗 |
 | `gateway_start` / `gateway_stop` | 已实现，需运行本机 OpenClaw runtime 验证 | observation-only，写 `AuditEvent(event_type=runtime_observation, runtime=openclaw)`；失败 fail-open |
 | `session_start` / `session_end` | 已实现，需运行本机 OpenClaw runtime 验证 | observation-only，记录会话边界 |
 | `before_compaction` / `after_compaction` | 已实现，需运行本机 OpenClaw runtime 验证 | observation-only，记录压缩前后事件 |
@@ -78,9 +79,9 @@ packages/agentguard-openclaw-plugin/
 
 `message_sending` 使用 `to`、`content`、`channelId`、`sessionKey`、`messageId` 构造 `message_send_proposed`。该 hook 不强依赖 `runId`，优先用 `sessionKey` 关联 trace。
 
-`tool_result_persist` 使用工具名、调用 id、结果内容预览、content type、是否进入上下文和是否持久化构造 `tool_result_produced`。该 hook 不作为阻断面；Guard API 失败时不影响 OpenClaw 持久化路径。
+`tool_result_persist` 使用工具名、调用 id、结果内容预览、content type、是否进入上下文和是否持久化构造 `tool_result_produced`。该 hook 是工具结果进入持久化上下文前的隔离面；Guard API 返回 `deny` 或未批准 `ask` 时，插件返回安全占位消息，不让原始工具结果持久化。
 
-`before_prompt_build` 使用 prompt、session messages 和 source trust 构造 `context_assembled`。`llm_input` / `llm_output` 使用 prompt/output preview、provider、model 和 tool plan 构造模型输入/输出事件。三者当前只写入 Guard API 审计与 provenance，不做 prompt 改写、模型输出重写或原生 `requireApproval` 接管。非 bundled 插件要启用 `llm_input` / `llm_output`，OpenClaw config 必须为 `agentguard-security` 设置 `hooks.allowConversationAccess=true`。
+`before_prompt_build` 使用 prompt、session messages 和 source trust 构造 `context_assembled`。`llm_input` / `llm_output` 使用 prompt/output preview、provider、model 和 tool plan 构造模型输入/输出事件。`before_prompt_build` 与 `llm_input` 是前置阻断面；`llm_output` 的最终发送控制由 `before_agent_finalize` revise 承接。非 bundled 插件要启用 `llm_input` / `llm_output`，OpenClaw config 必须为 `agentguard-security` 设置 `hooks.allowConversationAccess=true`。
 
 `before_install` 构造 `ConfigAuditEvent(runtime="openclaw")`，当前会识别 `allowConversationAccess`、`allowPromptInjection` 和 exec-like 权限等高风险配置。`high`/`critical` findings 会返回 block。
 
@@ -91,13 +92,13 @@ P2 observation hooks 构造 `AuditEvent(event_type="runtime_observation", runtim
 | GuardDecision / Approval | OpenClaw 行为 |
 | --- | --- |
 | `allow` | 放行，返回 `undefined` |
-| `deny` | 工具调用返回 `block`；消息发送返回 `cancel` |
+| `deny` | 工具调用、prompt build、model input 返回 `block`；消息发送返回 `cancel`；工具结果和最终输出返回安全替代或 revise |
 | `ask` + `allow_once` | 插件轮询 Guard API approval wait 后放行 |
 | `ask` + `deny` / `timeout` / `error` | fail-closed：工具 block，消息 cancel |
 
 P1 审批真源是 AgentGuard Guard API / Dashboard。OpenClaw `requireApproval` 不作为 P1 审批权威源。
 
-Guard API evaluate 失败、请求超时、approval wait 超时或失败时固定 fail-closed。
+默认 fail-closed stages 包含 `before_tool_call`、`message_sending`、`before_install`、`before_prompt_build` 和 `llm_input`。Guard API evaluate 失败、请求超时、approval wait 超时或失败时，这些执行前面固定 fail-closed。
 
 ## 7. 鉴权边界
 

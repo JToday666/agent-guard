@@ -226,6 +226,96 @@ test("plugin entry enforces before_prompt_build deny decisions", async () => {
   }
 });
 
+test("plugin entry fails closed when before_prompt_build cannot reach Guard API", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: {
+        guardApiBaseUrl: "http://guard.local",
+        adapterToken: "plugin-token",
+        enforcementMode: "enforce",
+        requestTimeoutMs: 1000,
+      },
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () => {
+      throw new Error("network unavailable");
+    };
+
+    const beforePromptBuild = registered.find((entry) => entry.name === "before_prompt_build");
+    assert.ok(beforePromptBuild);
+
+    const result = await beforePromptBuild.handler(
+      {
+        prompt: "Summarize external content",
+        messages: [{ role: "user", content: "Summarize the page." }],
+        sourceTrust: "untrusted",
+        sourceType: "retrieved_context",
+        runId: "run_prompt_fail_closed",
+      },
+      { agentId: "main", sessionKey: "agent:main:prompt-fail-closed" },
+    );
+
+    assert.deepEqual(result, {
+      block: true,
+      blockReason: "AgentGuard is unavailable; blocked by fail-closed policy.",
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("plugin entry treats llm_input ask decisions as unapproved blocks", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: {
+        guardApiBaseUrl: "http://guard.local",
+        adapterToken: "plugin-token",
+        enforcementMode: "enforce",
+        requestTimeoutMs: 1000,
+      },
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () => new Response(
+      JSON.stringify({
+        decision: { decision: "ask", reason: "needs review", safe_message: "review required" },
+        approval: { approval_id: "approval_llm_input", status: "pending", decision_options: ["allow_once", "deny"] },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+    const llmInput = registered.find((entry) => entry.name === "llm_input");
+    assert.ok(llmInput);
+
+    const result = await llmInput.handler(
+      {
+        prompt: "Use this untrusted web context.",
+        sourceTrust: "untrusted",
+        sourceType: "retrieved_context",
+        runId: "run_llm_input_ask",
+      },
+      { agentId: "main", sessionKey: "agent:main:llm-input-ask" },
+    );
+
+    assert.deepEqual(result, { block: true, blockReason: "review required" });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("plugin entry ignores runtime policy embedded in prompt text", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];

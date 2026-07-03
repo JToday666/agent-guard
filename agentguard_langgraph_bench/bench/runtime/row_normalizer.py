@@ -8,19 +8,25 @@ from typing import Any
 
 def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any) -> dict[str, Any]:
     tool_results = list(result.tool_calls or [])
+    raw_state = dict(result.raw_state or {})
     decisions = [item.get("decision") for item in tool_results if item.get("decision")]
     side_effects = result.side_effects or [
         effect
         for item in tool_results
         for effect in item.get("side_effects", [])
     ]
-    blocked = bool(result.blocked) or any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in tool_results)
+    blocked = (
+        bool(result.blocked)
+        or str(raw_state.get("stop_reason") or "") == "blocked"
+        or any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in tool_results)
+    )
     executed = bool(result.executed) or any(item.get("executed") for item in tool_results)
     behavior_events = list(result.behavior_events or [])
-    raw_state = dict(result.raw_state or {})
     provenance = _autonomous_provenance(tool_results, raw_state, config)
     validity = _run_validity(tool_results, raw_state, blocked, case, config, provenance=provenance)
     llm_request_diagnostics = _collect_llm_request_diagnostics(raw_state)
+    terminal_reason = raw_state.get("task_terminal_reason") or _terminal_reason_from_tools(tool_results)
+    task_terminal = bool(raw_state.get("task_terminal")) or bool(terminal_reason)
 
     return {
         "case_id": case.case_id,
@@ -61,8 +67,8 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         "llm_request_count": len(llm_request_diagnostics),
         "llm_timeout_count": sum(1 for item in llm_request_diagnostics if item.get("outcome") == "timeout"),
         "llm_retry_count": sum(int(item.get("retry_count") or 0) for item in llm_request_diagnostics),
-        "task_terminal": bool(raw_state.get("task_terminal")),
-        "task_terminal_reason": raw_state.get("task_terminal_reason"),
+        "task_terminal": task_terminal,
+        "task_terminal_reason": terminal_reason,
         "completed_round_index": raw_state.get("completed_round_index"),
         "stop_reason": raw_state.get("stop_reason"),
         "runtime_limits": raw_state.get("runtime_limits") or {},
@@ -112,6 +118,17 @@ def _collect_llm_request_diagnostics(raw_state: dict[str, Any]) -> list[dict[str
         if isinstance(payload, dict):
             diagnostics.append(payload)
     return diagnostics
+
+
+def _terminal_reason_from_tools(tool_results: list[dict[str, Any]]) -> str | None:
+    reasons = [
+        str(item.get("terminal_reason") or "")
+        for item in tool_results
+        if item.get("runtime_terminal") and not item.get("runtime_policy_blocked")
+    ]
+    if "security_block_terminal" in reasons:
+        return "security_block_terminal"
+    return next((reason for reason in reasons if reason), None)
 
 
 def _run_validity(
@@ -366,7 +383,6 @@ def _tool_error_reason(item: dict[str, Any]) -> str:
 
 def _memory_poisoning_invalid_reasons(tool_results: list[dict[str, Any]], case: Any) -> list[str]:
     reasons: list[str] = []
-    target_tool = str(getattr(getattr(case, "target_behavior", None), "tool", "") or "")
     phase = str(getattr(case, "metadata", {}).get("phase") or getattr(case, "phase", "") or "")
     has_terminal = _memory_poisoning_has_terminal_action(tool_results, case)
     if not has_terminal:

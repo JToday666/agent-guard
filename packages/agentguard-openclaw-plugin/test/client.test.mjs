@@ -26,6 +26,13 @@ test("buildPluginConfig uses safe defaults and env token fallback", () => {
   assert.equal(config.approvalTimeoutMs, 120000);
   assert.equal(config.approvalWaitBudgetMs, 25000);
   assert.equal(config.diagnosticLogging, false);
+  assert.deepEqual(config.failClosedStages, [
+    "before_tool_call",
+    "message_sending",
+    "before_install",
+    "before_prompt_build",
+    "llm_input",
+  ]);
 });
 
 test("buildPluginConfig accepts approval budget and diagnostic logging", () => {

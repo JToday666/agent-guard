@@ -124,6 +124,8 @@ class LangGraphAdapter:
             return _allow_decision("Defense is disabled for this benchmark run.")
         try:
             assert self.core_client is not None
+            if not hasattr(self.core_client, "evaluate_guard_event"):
+                return _allow_decision("Core client does not implement runtime guard events; allowed for compatibility.")
             raw_decision = self.core_client.evaluate_guard_event(_event_dump(event))
             return PolicyDecision.model_validate(raw_decision)
         except Exception as exc:
@@ -277,7 +279,7 @@ class LangGraphAdapter:
             security,
             current_step="context_assembled",
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
         )
         return RuntimeGuardEvent(
             event_type="context_assembled",
@@ -314,7 +316,7 @@ class LangGraphAdapter:
             security,
             current_step=current_step,
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
         )
         preview = _preview(content)
         return RuntimeGuardEvent(
@@ -356,7 +358,7 @@ class LangGraphAdapter:
             security,
             current_step="tool_result_produced",
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
             resources=derive_resources(tool_name, arguments),
         )
         preview = _preview(result)
@@ -406,7 +408,7 @@ class LangGraphAdapter:
             {**security, "source_trust": source_trust},
             current_step="memory_write_proposed",
             runtime=self.config.runtime,
-            agent_id=self.config.agent_id,
+            agent_id=_config_agent_id(self.config),
         )
         return RuntimeGuardEvent(
             event_type="memory_write_proposed",
@@ -534,6 +536,10 @@ def _event_dump(event: RuntimeGuardEvent | ToolCallEvent | dict[str, Any]) -> di
     return event.model_dump()
 
 
+def _config_agent_id(config: Any) -> str:
+    return str(getattr(config, "agent_id", None) or "langgraph_demo")
+
+
 def _security_context(
     security: dict[str, Any],
     *,
@@ -650,8 +656,35 @@ def _contains_instruction_like_text(value: str) -> bool:
             "disregard previous",
             "override",
             "persist this rule",
+            "remember this rule",
+            "store this rule",
+            "save this rule",
+            "remember this instruction",
+            "store this instruction",
+            "save this instruction",
+            "from now on",
+            "next time",
+            "for all future",
+            "future tasks",
             "future runs",
+            "future requests",
+            "future reports",
             "always send",
+            "send reports externally",
+            "route future reports",
+            "never mention",
+            "never reveal",
+            "never tell",
+            "developer message",
+            "system message",
+            "ignore developer instructions",
+            "identityverify",
+            "market-segment-submit",
+            "support-profile-confirm",
+            "managed-device support profile",
+            "lead-verification-relax",
+            "reduce verification controls",
+            "weaken verification",
         )
     )
 
@@ -897,4 +930,6 @@ def blocked_result(
         side_effects=[],
         event=event.model_dump(),
         audit_event=audit_event.model_dump(),
+        block_semantics="policy_deny" if decision.decision == "deny" else "approval_block",
+        counts_as_effective_block=decision.decision == "deny",
     )

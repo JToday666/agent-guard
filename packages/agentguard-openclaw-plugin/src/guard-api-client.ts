@@ -58,7 +58,7 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
     "cron_changed",
     "resolve_exec_env",
   ],
-  failClosedStages: ["before_tool_call", "message_sending", "before_install"],
+  failClosedStages: ["before_tool_call", "message_sending", "before_install", "before_prompt_build", "llm_input"],
   redaction: { enabled: true, previewLimit: 2000 },
   heartbeatIntervalMs: 60000,
 };

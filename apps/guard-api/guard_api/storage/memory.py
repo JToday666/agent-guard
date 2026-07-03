@@ -24,6 +24,7 @@ from guard_api.models import (
     ConfigAuditFindingRecord,
     CredentialRecord,
     EvaluationRun,
+    LlmApprovalReview,
 )
 from guard_api.storage.base import (
     AuditEventFilters,
@@ -258,11 +259,28 @@ class MemoryControlPlaneStore:
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         return self.approvals.get(approval_id)
 
-    def resolve_approval(self, approval_id: str, decision: str) -> ApprovalRequest:
+    def resolve_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        *,
+        resolution_source: str | None = None,
+        resolved_by: str | None = None,
+        resolution_reason: str | None = None,
+        llm_review: LlmApprovalReview | None = None,
+    ) -> ApprovalRequest:
         approval = self.approvals[approval_id]
         approval.status = "resolved"
         approval.decision = decision  # type: ignore[assignment]
         approval.resolved_at = utc_now_iso()
+        if resolution_source is not None:
+            approval.resolution_source = resolution_source  # type: ignore[assignment]
+        if resolved_by is not None:
+            approval.resolved_by = resolved_by
+        if resolution_reason is not None:
+            approval.resolution_reason = resolution_reason
+        if llm_review is not None:
+            approval.llm_review = llm_review  # type: ignore[assignment]
         self.approvals[approval_id] = approval
         return approval
 

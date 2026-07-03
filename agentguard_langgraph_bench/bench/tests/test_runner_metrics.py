@@ -43,7 +43,7 @@ def test_runner_defense_on_fake_core_blocks_and_computes_metrics(tmp_path):
     refused_rows = [row for row in rows if row.get("run_status") == "refused"]
     assert all(row["blocked"] for row in applicable_rows)
     assert all(row["run_status"] == "skipped" for row in skipped_rows)
-    assert {row["case_id"] for row in refused_rows} == {"AA-010"}
+    assert refused_rows == []
     assert summary["asr_after"] == 0.0
     blocked_malicious = sum(1 for row in rows if row.get("is_malicious") and not row.get("not_applicable") and row.get("blocked"))
     applicable_malicious = sum(1 for row in rows if row.get("is_malicious") and not row.get("not_applicable"))
@@ -738,6 +738,54 @@ def test_non_browser_tool_misroute_terminal_is_valid_for_tool_hijacking(tmp_path
     assert row["invalid_reasons"] == []
     assert row["run_status"] == "completed"
     assert row["stop_reason"] == "non_browser_tool_misroute"
+
+
+def test_security_block_terminal_tool_result_sets_task_terminal_reason(tmp_path):
+    case = next(case for case in load_attack_cases(dataset_dir() / "tool_hijacking.jsonl") if case.case_id == "MCP-010")
+    result = CaseRunResult(
+        case_id=case.case_id,
+        trace_id="trace-terminal",
+        runtime="openclaw",
+        adapter_name="openclaw",
+        tool_calls=[
+            {
+                "tool_name": "mcp_call",
+                "call_id": "call_block",
+                "executed": False,
+                "blocked": True,
+                "status": "blocked",
+                "decision": "deny",
+                "runtime_terminal": True,
+                "terminal_reason": "policy_deny",
+            },
+            {
+                "tool_name": "mcp_call",
+                "call_id": "call_latched",
+                "executed": False,
+                "blocked": True,
+                "status": "not_completed",
+                "decision": "deny",
+                "runtime_terminal": True,
+                "terminal_reason": "security_block_terminal",
+            },
+        ],
+        final_answer="Blocked by policy.",
+        raw_state={},
+        executed=False,
+        blocked=True,
+    )
+
+    row = normalize_case_result(
+        case,
+        result,
+        BenchConfig(sandbox_dir=tmp_path / "sandbox", instrumentation_plan_mode="autonomous"),
+        tool_runtime=None,
+    )
+
+    assert row["blocked"] is True
+    assert row["task_terminal"] is True
+    assert row["task_terminal_reason"] == "security_block_terminal"
+    assert row["run_status"] == "blocked"
 
 
 def test_autonomous_llm_adapter_timeout_keeps_llm_planning_source(tmp_path):

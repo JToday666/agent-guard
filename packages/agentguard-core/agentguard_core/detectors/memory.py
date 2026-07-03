@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 from ..decisions import DetectionResult, RuleHit
 from typing import Any
 
 from ..events import GuardEvent, MemoryEventPayload, ToolCallPayload, ToolResultPayload
-from ..matchers import has_high_confidence_memory_poisoning_text, has_memory_poisoning_text
+from ..matchers import (
+    has_high_confidence_memory_poisoning_text,
+    has_memory_poisoning_text,
+    memory_poisoning_intents,
+)
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
 
@@ -26,15 +32,17 @@ class MemoryPoisoningDetector(Detector):
         memory = event.payload.memory
         if memory.operation.lower() != "write" or not event.payload.will_persist:
             return []
-        high_confidence = (
-            memory.source_trust.lower() == "untrusted"
-            and has_high_confidence_memory_poisoning_text(memory.value_preview, policies)
-        )
+        source_trust = memory.source_trust.lower()
+        if source_trust in {"sanitized", "clean"}:
+            return []
+        intents = memory_poisoning_intents(memory.value_preview, policies)
+        high_confidence = has_high_confidence_memory_poisoning_text(memory.value_preview, policies)
+        has_poisoning_text = has_memory_poisoning_text(memory.value_preview, policies)
         should_review = (
             high_confidence
             or event.payload.requires_approval
-            or memory.source_trust.lower() == "untrusted"
-            or has_memory_poisoning_text(memory.value_preview, policies)
+            or source_trust not in {"trusted", "verified"}
+            or has_poisoning_text
         )
         if should_review:
             target = f"{memory.namespace}/{memory.key}"
@@ -52,6 +60,7 @@ class MemoryPoisoningDetector(Detector):
                             f"source_trust={memory.source_trust}",
                             f"requires_approval={event.payload.requires_approval}",
                             f"high_confidence={high_confidence}",
+                            *[f"memory_poisoning_intent={intent}" for intent in intents],
                         ],
                     ),
                     reason=(
@@ -77,7 +86,7 @@ class MemoryPoisoningDetector(Detector):
             return []
         if payload.tool.name not in {"rag_answer", "rag_retrieve"}:
             return []
-        evidence = _poisoned_rag_evidence(payload.arguments, event.security_context.metadata, policies)
+        evidence = _poisoned_rag_evidence(payload.arguments, event.security_context.metadata, event.metadata, policies)
         if not evidence and payload.tool.name == "rag_answer":
             evidence = _unverified_rag_answer_evidence(payload, event, policies)
             if not evidence:
@@ -139,28 +148,67 @@ class MemoryPoisoningDetector(Detector):
         if payload.sanitized or not (payload.will_enter_context or payload.will_persist):
             return []
         text = payload.result.content_preview
-        if not has_high_confidence_memory_poisoning_text(text, policies):
-            return []
+        high_confidence = has_high_confidence_memory_poisoning_text(text, policies)
+        has_poisoning_text = has_memory_poisoning_text(text, policies)
+        if not high_confidence and not has_poisoning_text:
+            evidence = _unverified_rag_tool_result_evidence(payload, event)
+            if not evidence:
+                return []
+            result = apply_rule_override(
+                DetectionResult(
+                    decision="ask",
+                    risk_score=64,
+                    category="memory_poisoning",
+                    rule_hit=RuleHit(
+                        rule_id=self.rule_id,
+                        rule_name="Unverified RAG Answer Result",
+                        severity="medium",
+                        evidence=[
+                            f"tool={payload.tool.name}",
+                            f"tool_call_id={payload.tool.call_id}",
+                            f"source_trust={event.security_context.source_trust}",
+                            f"source_type={event.security_context.source_type}",
+                            *evidence,
+                        ],
+                    ),
+                    reason=(
+                        "A RAG answer result derived from unverified local or retrieved knowledge requires review "
+                        "before it enters context or persistence."
+                    ),
+                    approval_resource=f"tool_result:{payload.tool.call_id}",
+                    severity="medium",
+                ),
+                policies,
+            )
+            return [result] if result is not None else []
+        intents = memory_poisoning_intents(text, policies)
         call_id = payload.tool.call_id
         result = apply_rule_override(
             DetectionResult(
-                decision="deny",
-                risk_score=86,
+                decision="deny" if high_confidence else "ask",
+                risk_score=86 if high_confidence else 66,
                 category="memory_poisoning",
                 rule_hit=RuleHit(
                     rule_id=self.rule_id,
                     rule_name="Poisoned Persistent Tool Result",
-                    severity="high",
+                    severity="high" if high_confidence else "medium",
                     evidence=[
                         f"tool={payload.tool.name}",
                         f"tool_call_id={call_id}",
                         f"will_enter_context={payload.will_enter_context}",
                         f"will_persist={payload.will_persist}",
                         "sanitized=false",
+                        f"high_confidence={high_confidence}",
+                        *[f"memory_poisoning_intent={intent}" for intent in intents],
                     ],
                 ),
-                reason="High-confidence poisoned tool/RAG result was blocked before entering context or persistence.",
-                severity="high",
+                reason=(
+                    "High-confidence poisoned tool/RAG result was blocked before entering context or persistence."
+                    if high_confidence
+                    else "A tool/RAG result contains persistent memory poisoning text and requires review."
+                ),
+                approval_resource=None if high_confidence else f"tool_result:{call_id}",
+                severity="high" if high_confidence else "medium",
             ),
             policies,
         )
@@ -169,11 +217,12 @@ class MemoryPoisoningDetector(Detector):
 
 def _poisoned_rag_evidence(
     arguments: dict[str, Any],
-    metadata: dict[str, Any],
+    security_metadata: dict[str, Any],
+    event_metadata: dict[str, Any],
     policies: PolicyBundle,
 ) -> list[str]:
     evidence: list[str] = []
-    for label, text in _rag_text_fragments(arguments, metadata):
+    for label, text in _rag_text_fragments(arguments, security_metadata, event_metadata):
         if has_high_confidence_memory_poisoning_text(text, policies):
             evidence.append(f"{label}=high_confidence_instruction")
     return evidence
@@ -200,9 +249,10 @@ def _unverified_rag_answer_evidence(
         for label, text in _rag_text_fragments(payload.arguments, event.security_context.metadata, event.metadata)
         if has_memory_poisoning_text(text, policies)
     ]
-    if not explicit_review and not poisoning_evidence:
-        return []
     if not explicit_review and _is_low_risk_mcp_metadata_answer(payload, event, policies):
+        return []
+    provenance_evidence = _unverified_rag_submission_evidence(payload.arguments, event, payload.derived_resources)
+    if not explicit_review and not poisoning_evidence and not provenance_evidence:
         return []
     evidence = [
         f"tool={payload.tool.name}",
@@ -212,7 +262,124 @@ def _unverified_rag_answer_evidence(
     if explicit_review:
         evidence.append("requires_review=explicit_rag_answer_review")
     evidence.extend(poisoning_evidence)
+    evidence.extend(provenance_evidence)
     return evidence
+
+
+def _unverified_rag_tool_result_evidence(payload: ToolResultPayload, event: GuardEvent) -> list[str]:
+    source_trust = event.security_context.source_trust.lower()
+    if source_trust in {"trusted", "verified", "sanitized", "clean"}:
+        return []
+    if not _is_rag_answer_result(payload):
+        return []
+    result_object = _json_object_from_preview(payload.result.content_preview)
+    return _unverified_rag_submission_evidence(result_object, event, payload.derived_resources)
+
+
+def _unverified_rag_submission_evidence(
+    arguments: dict[str, Any],
+    event: GuardEvent,
+    derived_resources: list[Any],
+) -> list[str]:
+    if not _has_unverified_rag_answer_source(arguments, event, derived_resources):
+        return []
+    if not _has_context_evidence(arguments, event.metadata):
+        return []
+    evidence = ["unverified_rag_answer_submission=true", "context_evidence=present"]
+    answer_source = _rag_answer_source(arguments, event.metadata)
+    if answer_source:
+        evidence.append(f"answer_source={answer_source}")
+    context_count = _context_evidence_count(arguments, event.metadata)
+    if context_count is not None:
+        evidence.append(f"context_count={context_count}")
+    return evidence
+
+
+def _has_unverified_rag_answer_source(
+    arguments: dict[str, Any],
+    event: GuardEvent,
+    derived_resources: list[Any],
+) -> bool:
+    source_type = event.security_context.source_type.lower()
+    answer_source = (_rag_answer_source(arguments, event.metadata) or "").lower()
+    if any(marker in source_type for marker in ("support", "knowledge", "rag", "retriev", "local_reference")):
+        return True
+    if any(marker in answer_source for marker in ("support", "knowledge", "rag", "retriev", "local")):
+        return True
+    return any(
+        getattr(resource, "resource_type", "").lower() == "rag"
+        and getattr(resource, "operation", "").lower() in {"answer", "submit", "persist"}
+        for resource in derived_resources
+    )
+
+
+def _is_rag_answer_result(payload: ToolResultPayload) -> bool:
+    if payload.tool.name == "rag_answer" or (payload.tool.kind or "") == "rag_answer":
+        return True
+    return any(
+        resource.resource_type.lower() == "rag" and resource.operation.lower() in {"answer", "submit", "persist"}
+        for resource in payload.derived_resources
+    )
+
+
+def _rag_answer_source(arguments: dict[str, Any], event_metadata: dict[str, Any]) -> str | None:
+    direct = _string_value(arguments.get("answer_source") or arguments.get("answerSource") or arguments.get("source"))
+    if direct:
+        return direct
+    provenance = event_metadata.get("rag_answer_provenance")
+    if isinstance(provenance, dict):
+        return _string_value(
+            provenance.get("answer_source")
+            or provenance.get("answerSource")
+            or provenance.get("source")
+        )
+    return None
+
+
+def _has_context_evidence(arguments: dict[str, Any], event_metadata: dict[str, Any]) -> bool:
+    count = _context_evidence_count(arguments, event_metadata)
+    if count is not None and count > 0:
+        return True
+    return any(key in arguments for key in ("context", "evidence", "citation", "citations", "sources", "memory_refs"))
+
+
+def _context_evidence_count(arguments: dict[str, Any], event_metadata: dict[str, Any]) -> int | None:
+    for key in ("contexts", "context_docs", "documents", "memory_refs", "references"):
+        value = arguments.get(key)
+        if isinstance(value, list):
+            return len([item for item in value if str(item or "").strip()])
+        if isinstance(value, dict):
+            return len(value)
+    provenance = event_metadata.get("rag_answer_provenance")
+    if isinstance(provenance, dict):
+        if _truthy(provenance.get("has_context_evidence")):
+            count = provenance.get("context_count")
+            if isinstance(count, int) and count >= 0:
+                return count
+            return 1
+    return None
+
+
+def _json_object_from_preview(value: str) -> dict[str, Any]:
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        return {"contexts": parsed}
+    return {}
+
+
+def _string_value(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
 
 
 def _truthy(value: Any) -> bool:
@@ -289,6 +456,20 @@ def _collect_rag_text_fragments(value: Any, fragments: list[tuple[str, str]], pa
         normalized_key = str(key).lower()
         if any(
             marker in normalized_key
-            for marker in ("answer", "context", "content", "doc", "evidence", "citation", "source", "text", "message")
+            for marker in (
+                "answer",
+                "context",
+                "content",
+                "doc",
+                "evidence",
+                "citation",
+                "source",
+                "text",
+                "message",
+                "memory",
+                "value",
+                "instruction",
+                "rule",
+            )
         ):
             _collect_rag_text_fragments(nested, fragments, f"{path}.{key}")

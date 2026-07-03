@@ -50,6 +50,40 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _probe_result(
+    *,
+    start: dict,
+    text: dict,
+    recording: dict,
+    source: str,
+    browser_engine: str,
+) -> dict:
+    screenshot = Path(start.get("screenshot", ""))
+    trace_exists = bool(recording.get("trace")) and Path(str(recording["trace"])).exists()
+    report_exists = bool(recording.get("report")) and Path(str(recording["report"])).exists()
+    video_exists = bool(recording.get("video")) and Path(str(recording["video"])).exists()
+    return {
+        "ok": bool(start.get("real_browser"))
+        and screenshot.exists()
+        and bool(text.get("text"))
+        and trace_exists
+        and report_exists,
+        "real_browser": start.get("real_browser"),
+        "browser_engine": browser_engine,
+        "source_path": source,
+        "url": start.get("url", ""),
+        "screenshot": str(screenshot),
+        "screenshot_exists": screenshot.exists(),
+        "recording": recording,
+        "video_exists": video_exists,
+        "trace_exists": trace_exists,
+        "report_exists": report_exists,
+        "step_count": len(recording.get("step_screenshots") or []),
+        "text_len": len(text.get("text", "")),
+        "text_preview": text.get("text", "")[:200].replace("\n", " "),
+    }
+
+
 def main() -> int:
     args = build_parser().parse_args()
     sandbox = Path(args.sandbox)
@@ -60,23 +94,13 @@ def main() -> int:
         start = tools.browser_start("instrumentation://" + source, run_id="probe", source_path=source)
         text = tools.browser_extract_text(session_id="probe")
         recording = tools.finalize_browser_session("probe") or {}
-        screenshot = Path(start.get("screenshot", ""))
-        result = {
-            "ok": bool(start.get("real_browser")) and screenshot.exists() and bool(text.get("text")) and bool(recording.get("video")),
-            "real_browser": start.get("real_browser"),
-            "browser_engine": args.browser_engine,
-            "source_path": source,
-            "url": start.get("url", ""),
-            "screenshot": str(screenshot),
-            "screenshot_exists": screenshot.exists(),
-            "recording": recording,
-            "video_exists": bool(recording.get("video")) and Path(str(recording["video"])).exists(),
-            "trace_exists": bool(recording.get("trace")) and Path(str(recording["trace"])).exists(),
-            "report_exists": bool(recording.get("report")) and Path(str(recording["report"])).exists(),
-            "step_count": len(recording.get("step_screenshots") or []),
-            "text_len": len(text.get("text", "")),
-            "text_preview": text.get("text", "")[:200].replace("\n", " "),
-        }
+        result = _probe_result(
+            start=start,
+            text=text,
+            recording=recording,
+            source=source,
+            browser_engine=args.browser_engine,
+        )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     finally:
         tools.close()

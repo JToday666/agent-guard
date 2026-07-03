@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import pytest
 
 from agentguard_langgraph_bench.bench.browser_runtime import RealBrowserRuntime, RECORDER_SCRIPT
+from agentguard_langgraph_bench.bench.scripts.real_browser_probe import _probe_result
 
 
 def test_strict_browser_runtime_allows_configured_local_service_port(tmp_path):
@@ -58,6 +59,28 @@ def test_recorder_redacts_password_values():
     assert "value_length" in RECORDER_SCRIPT
 
 
+def test_real_browser_probe_success_does_not_require_video(tmp_path):
+    screenshot = tmp_path / "start.png"
+    trace = tmp_path / "trace.zip"
+    report = tmp_path / "report.html"
+    screenshot.write_bytes(b"png")
+    trace.write_bytes(b"zip")
+    report.write_text("<html></html>", encoding="utf-8")
+
+    result = _probe_result(
+        start={"real_browser": True, "screenshot": str(screenshot), "url": "http://127.0.0.1/page"},
+        text={"text": "visible page text"},
+        recording={"trace": str(trace), "report": str(report), "video": None, "step_screenshots": [str(screenshot)]},
+        source="page.html",
+        browser_engine="chromium",
+    )
+
+    assert result["ok"] is True
+    assert result["video_exists"] is False
+    assert result["trace_exists"] is True
+    assert result["report_exists"] is True
+
+
 def test_final_dom_relative_references_are_archived_from_source_dir(tmp_path):
     source_dir = tmp_path / "pages"
     artifact_dir = tmp_path / "artifacts"
@@ -74,6 +97,25 @@ def test_final_dom_relative_references_are_archived_from_source_dir(tmp_path):
 
     assert (artifact_dir / "styles.css").exists()
     assert not (artifact_dir / "escape.js").exists()
+
+
+def test_real_browser_runtime_promotes_artifact_dir_over_stale_non_empty_dir(tmp_path):
+    runtime = RealBrowserRuntime(tmp_path)
+    try:
+        artifact_dir = tmp_path / "browser" / "replay_artifacts" / "PI-001"
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / "old.txt").write_text("old", encoding="utf-8")
+        starting_dir = artifact_dir.parent / ".starting-PI-001-test"
+        starting_dir.mkdir()
+        (starting_dir / "manifest.json").write_text("new", encoding="utf-8")
+
+        runtime._core._promote_artifact_dir(starting_dir, artifact_dir)
+    finally:
+        runtime.close_all()
+
+    assert (artifact_dir / "manifest.json").read_text(encoding="utf-8") == "new"
+    assert not (artifact_dir / "old.txt").exists()
+    assert not starting_dir.exists()
 
 
 def test_real_browser_runtime_public_calls_are_serialized_on_worker_thread(tmp_path):

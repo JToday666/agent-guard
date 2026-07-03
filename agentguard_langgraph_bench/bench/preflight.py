@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +58,8 @@ def run_preflight(
     check_browser_artifacts: bool = False,
     check_tool_manifest: bool = False,
     check_langgraph_runtime: bool = False,
+    check_real_browser_runtime: bool = False,
+    browser_engine: str = "chromium",
     check_prompt_contamination: bool = True,
 ) -> PreflightReport:
     report = PreflightReport()
@@ -75,6 +79,8 @@ def run_preflight(
         _check_tool_catalogs(cases, sandbox_path, report)
     if check_langgraph_runtime:
         _check_langgraph_runtime(report)
+    if check_real_browser_runtime:
+        _check_real_browser_runtime(report, browser_engine=browser_engine)
     if check_prompt_contamination:
         _check_prompt_contamination(cases, report)
         _check_agent_visible_metadata(cases, report)
@@ -240,6 +246,44 @@ def _check_langgraph_runtime(report: PreflightReport) -> None:
         report.error("langgraph_demo_import_failed", "demo LangGraph graph is not importable", error=str(exc))
 
 
+def _check_real_browser_runtime(report: PreflightReport, *, browser_engine: str = "chromium") -> None:
+    engine = str(browser_engine or "chromium").strip().lower()
+    report.checked["real_browser_engine"] = engine
+    if importlib.util.find_spec("playwright") is None or importlib.util.find_spec("playwright.sync_api") is None:
+        report.checked["playwright_python_package"] = False
+        report.error(
+            "missing_playwright_python_package",
+            "Playwright Python package is not importable; run uv sync from the repository root.",
+            package="playwright",
+        )
+        return
+    report.checked["playwright_python_package"] = True
+    if engine != "chromium":
+        report.warning(
+            "unsupported_real_browser_engine_check",
+            f"real-browser executable preflight only knows how to verify chromium, got {engine}",
+            browser_engine=engine,
+        )
+        return
+
+    from .browser_runtime import INSTRUMENTATION_ROOT
+
+    browser_root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or (INSTRUMENTATION_ROOT / ".playwright-browsers"))
+    report.checked["playwright_browsers_path"] = str(browser_root)
+    candidates = sorted(browser_root.glob("chromium-*/chrome-linux*/chrome")) + sorted(
+        browser_root.glob("chromium-*/chrome-linux*/chrome-wrapper")
+    ) + sorted(
+        browser_root.glob("chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell")
+    )
+    if not any(path.is_file() and os.access(path, os.X_OK) for path in candidates):
+        report.error(
+            "missing_playwright_chromium",
+            "Playwright Chromium executable is missing; install Chromium or set PLAYWRIGHT_BROWSERS_PATH.",
+            browser_engine=engine,
+            playwright_browsers_path=str(browser_root),
+        )
+
+
 def _check_prompt_contamination(cases: list[Any], report: PreflightReport) -> None:
     checked = 0
     for case in cases:
@@ -281,6 +325,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--check-browser-artifacts", action="store_true")
     parser.add_argument("--check-tool-manifest", action="store_true")
     parser.add_argument("--check-langgraph-runtime", action="store_true")
+    parser.add_argument("--check-real-browser-runtime", action="store_true")
+    parser.add_argument("--browser-engine", default="chromium")
     parser.add_argument("--no-prompt-contamination-check", action="store_true")
     return parser
 
@@ -294,6 +340,8 @@ def main(argv: list[str] | None = None) -> int:
         check_browser_artifacts=args.check_browser_artifacts,
         check_tool_manifest=args.check_tool_manifest,
         check_langgraph_runtime=args.check_langgraph_runtime,
+        check_real_browser_runtime=args.check_real_browser_runtime,
+        browser_engine=args.browser_engine,
         check_prompt_contamination=not args.no_prompt_contamination_check,
     )
     print(json.dumps(report.model_dump(), ensure_ascii=False, indent=2, sort_keys=True))

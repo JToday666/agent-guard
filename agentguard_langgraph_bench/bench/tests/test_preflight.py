@@ -1,4 +1,5 @@
 import json
+import importlib.util
 
 from agentguard_langgraph_bench.bench.preflight import run_preflight
 
@@ -67,3 +68,42 @@ def test_preflight_checks_filtered_agent_visible_metadata(tmp_path):
 
     assert report.ok is True
     assert report.checked["agent_visible_metadata"] == 1
+
+
+def test_preflight_real_browser_reports_missing_playwright_python_package(monkeypatch, tmp_path):
+    dataset = tmp_path / "cases.jsonl"
+    dataset.write_text("", encoding="utf-8")
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name in {"playwright", "playwright.sync_api"}:
+            return None
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+    report = run_preflight(
+        dataset=dataset,
+        sandbox_dir=tmp_path / "sandbox",
+        check_real_browser_runtime=True,
+    )
+
+    assert report.ok is False
+    assert report.errors[0]["code"] == "missing_playwright_python_package"
+
+
+def test_preflight_real_browser_reports_missing_chromium(monkeypatch, tmp_path):
+    dataset = tmp_path / "cases.jsonl"
+    dataset.write_text("", encoding="utf-8")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args, **kwargs: object())
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "missing-browsers"))
+
+    report = run_preflight(
+        dataset=dataset,
+        sandbox_dir=tmp_path / "sandbox",
+        check_real_browser_runtime=True,
+    )
+
+    assert report.ok is False
+    assert report.errors[0]["code"] == "missing_playwright_chromium"
+    assert report.checked["playwright_python_package"] is True

@@ -17,6 +17,7 @@ from ..matchers import (
     has_high_confidence_memory_poisoning_text,
     has_instruction_like_text,
     has_memory_poisoning_text,
+    normalize_match_text,
 )
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
@@ -47,6 +48,8 @@ class ToolHijackDetector(Detector):
             evidence.append(f"tool_category={category}")
         if kind and profile_kinds and kind not in profile_kinds:
             evidence.append(f"tool_kind={kind}")
+
+        evidence.extend(tool_argument_hijack_evidence(event, policies))
 
         for resource in derive_resources(event):
             direction = resource.direction.lower()
@@ -171,6 +174,60 @@ def action_aliases(tool_name: str, policies: PolicyBundle) -> set[str]:
     aliases = {tool_name.lower(), verb_for_tool(tool_name).lower()}
     aliases.update(alias.lower() for alias in policies.tool_action_aliases.get(tool_name, []))
     return aliases
+
+
+def tool_argument_hijack_evidence(event: GuardEvent, policies: PolicyBundle) -> list[str]:
+    if not isinstance(event.payload, ToolCallPayload):
+        return []
+    if event.security_context.source_trust.lower() in {"trusted", "verified", "sanitized", "clean"}:
+        return []
+
+    evidence: list[str] = []
+    external_keys = {_compact_key(key) for key in policies.tool_hijack_external_argument_keys}
+    semantic_keys = {_compact_key(key) for key in policies.tool_hijack_semantic_bias_argument_keys}
+    for key_path, value in _argument_items(event.payload.arguments):
+        key_name = key_path.rsplit(".", 1)[-1]
+        compact_key = _compact_key(key_name)
+        value_text = normalize_match_text(str(value))
+        if compact_key in external_keys and _argument_value_points_to_external_sink(value_text):
+            if "callback" in compact_key:
+                evidence.append(f"unsafe_callback_argument={key_name}")
+            else:
+                evidence.append(f"external_sink_argument={key_name}")
+        if compact_key in semantic_keys and str(value).strip():
+            evidence.append(f"semantic_bias_argument={key_name}")
+    return list(dict.fromkeys(evidence))
+
+
+def _argument_items(value: Any, prefix: str = "") -> list[tuple[str, Any]]:
+    if isinstance(value, dict):
+        items: list[tuple[str, Any]] = []
+        for key, child in value.items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            items.extend(_argument_items(child, path))
+        return items
+    if isinstance(value, list):
+        items = []
+        for index, child in enumerate(value):
+            path = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            items.extend(_argument_items(child, path))
+        return items
+    return [(prefix, value)] if prefix else []
+
+
+def _compact_key(value: str) -> str:
+    return "".join(ch for ch in normalize_match_text(value) if ch.isalnum())
+
+
+def _argument_value_points_to_external_sink(value: str) -> bool:
+    return bool(value) and (
+        "http://" in value
+        or "https://" in value
+        or "/collect/" in value
+        or "webhook" in value
+        or "exfil" in value
+    )
 
 
 def task_allows_tool_action(user_task: str, tool_name: str, policies: PolicyBundle) -> bool:

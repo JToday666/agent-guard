@@ -174,7 +174,11 @@ class ToolExecutionResult(BaseModel):
     approval_wait_latency_ms: int | None = None
     approved_arguments_hash: str | None = None
     tool_executed_after_approval: bool = False
+    approval_resolution: dict[str, Any] | None = None
     block_semantics: str | None = None
     counts_as_effective_block: bool = False
+    runtime_terminal: bool = False
+    terminal_reason: str | None = None
+    rag_answer_provenance: dict[str, Any] | None = None
     sanitize_applied: bool = False
     quarantine_applied: bool = False

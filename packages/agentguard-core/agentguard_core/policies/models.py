@@ -97,6 +97,11 @@ class PolicyBundle(BaseModel):
             "credential",
             "id_rsa",
             "password",
+            "/config/",
+            "mdm_enrollment",
+            "deployment configuration",
+            "signing key",
+            "business plan",
             "payment_details",
             "tacacs",
             "business_plan",
@@ -122,9 +127,18 @@ class PolicyBundle(BaseModel):
             "ignore all previous instructions",
             "disregard previous instructions",
             "override the system",
+            "ignore developer instructions",
+            "developer message",
+            "system message",
             "send /private",
             "persist this rule",
             "future runs",
+            "identityverify",
+            "market-segment-submit",
+            "support-profile-confirm",
+            "managed-device support profile",
+            "lead-verification-relax",
+            "reduce verification controls",
         ]
     )
     high_confidence_prompt_injection_markers: list[str] = Field(
@@ -135,6 +149,16 @@ class PolicyBundle(BaseModel):
             "exfiltrate",
             "send the token",
             "send secrets",
+            "ignore developer instructions",
+            "developer message",
+            "system message",
+            "identityverify",
+            "market-segment-submit",
+            "support-profile-confirm",
+            "managed-device support profile",
+            "lead-verification-relax",
+            "reduce verification controls",
+            "weaken verification",
         ]
     )
     jailbreak_markers: list[str] = Field(
@@ -192,16 +216,37 @@ class PolicyBundle(BaseModel):
             "invoke-webrequest",
             "python -c",
             "base64 -d",
+            "/payloads/",
+            "reverse shell",
+            "/dev/tcp",
+            "socket",
+            "subprocess",
+            "crypto-miner",
+            "crypto miner",
+            "backdoor",
+            "remote maintenance",
         ]
     )
     memory_poisoning_markers: list[str] = Field(
         default_factory=lambda: [
             "always send",
             "attacker@",
-            "ignore previous",
+            "from now on",
+            "next time",
+            "for all future",
+            "future tasks",
             "future reports",
             "future runs",
+            "future requests",
+            "remember this rule",
+            "store this rule",
+            "save this rule",
+            "remember this instruction",
+            "store this instruction",
+            "save this instruction",
             "persist this rule",
+            "route future reports",
+            "send reports externally",
         ]
     )
     high_confidence_memory_poisoning_markers: list[str] = Field(
@@ -210,6 +255,8 @@ class PolicyBundle(BaseModel):
             "attacker@",
             "future runs",
             "persist this rule",
+            "route future reports",
+            "send reports externally",
         ]
     )
     agent_abuse_markers: list[str] = Field(
@@ -218,6 +265,23 @@ class PolicyBundle(BaseModel):
             "repo:write",
             "escalation",
             "cross_task",
+            "/payloads/",
+            "backdoor",
+            "crypto-miner",
+            "reverse shell",
+            "platform abuse",
+            "phishing",
+            "impersonate",
+            "credential reset",
+            "click fraud",
+            "account recovery",
+            "manual review override",
+            "submit-appeal",
+            "misinformation_post",
+            "defamation",
+            "private-person-search",
+            "retrieve-private-records",
+            "private records",
         ]
     )
     file_exfiltration_sink_markers: list[str] = Field(
@@ -242,6 +306,27 @@ class PolicyBundle(BaseModel):
             "exfil",
             "shadow",
             "required_dependency",
+        ]
+    )
+    tool_hijack_external_argument_keys: list[str] = Field(
+        default_factory=lambda: [
+            "callback_url",
+            "webhook_url",
+            "redirect_uri",
+            "upload_url",
+            "forward_to",
+            "send_to",
+            "collection_callback_url",
+            "citation_cache_callback_url",
+            "external_url",
+        ]
+    )
+    tool_hijack_semantic_bias_argument_keys: list[str] = Field(
+        default_factory=lambda: [
+            "route_board",
+            "provider_alias",
+            "entity_hint",
+            "rerank_entity",
         ]
     )
     default_enforcement_mode: str = "enforce"

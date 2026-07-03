@@ -257,7 +257,7 @@ export function buildMessageSendGuardEvent(
       channel: context.channelId ?? "unknown",
       recipient: event.to,
       content_preview: truncate(event.content, PREVIEW_LIMIT),
-      contains_sensitive_data: false,
+      contains_sensitive_data: containsSensitiveText(event.content),
       sanitized: false,
       derived_resources: derivedResources,
     },
@@ -280,6 +280,7 @@ export function buildToolResultGuardEvent(
   const security = runtimeSecurityFields(event, context);
   const derivedResources = derivedResourcesForToolResult(event, context, toolName);
   const derivedPaths = derivedPathTargets(event, context, derivedResources);
+  const ragAnswerProvenance = ragAnswerProvenanceForToolResult(event.result ?? event.message, toolName);
 
   return {
     schema_version: "0.3",
@@ -332,6 +333,7 @@ export function buildToolResultGuardEvent(
     metadata: {
       openclaw_hook: "tool_result_persist",
       session_key: context.sessionKey ?? null,
+      ...(ragAnswerProvenance ? { rag_answer_provenance: ragAnswerProvenance } : {}),
     },
   };
 }
@@ -926,6 +928,18 @@ function derivedResourcesForTool(
       return resources;
     }
   }
+  const browserTarget = browserTargetText(toolArgs);
+  if (isBrowserToolIdentity(event.toolName, event.toolKind ?? context.toolKind, event.toolInputKind ?? context.toolInputKind) && browserTarget) {
+    return [
+      {
+        resource_type: "browser",
+        operation: browserOperation(event.toolName, event.toolKind ?? context.toolKind),
+        target: browserTarget,
+        data_classification: null,
+        direction: "runtime",
+      },
+    ];
+  }
   const command = toolCommandText(toolArgs);
   if (
     command &&
@@ -1105,6 +1119,15 @@ function inferDerivedResource(input: {
   const toolName = input.toolName.toLowerCase();
   const toolIdentity = `${input.toolName} ${input.toolKind ?? ""} ${input.toolInputKind ?? ""}`.toLowerCase();
   const method = stringMaybe(input.params.method)?.toUpperCase();
+  if (isBrowserToolIdentity(input.toolName, input.toolKind, input.toolInputKind)) {
+    return {
+      resource_type: "browser",
+      operation: browserOperation(input.toolName, input.toolKind),
+      target: input.target,
+      data_classification: null,
+      direction: "runtime",
+    };
+  }
   if (toolName === "call_api" || toolIdentity.includes("api") || toolIdentity.includes("http") || /^https?:\/\//i.test(input.target)) {
     return {
       resource_type: "api",
@@ -1173,6 +1196,28 @@ function operationFromToolIdentity(identity: string, writeOperation: string, rea
   return "unknown";
 }
 
+function isBrowserToolIdentity(toolName: string, toolKind?: string, toolInputKind?: string): boolean {
+  const identity = `${toolName} ${toolKind ?? ""} ${toolInputKind ?? ""}`.toLowerCase();
+  return identity.includes("browser");
+}
+
+function browserOperation(toolName: string, toolKind?: string): string {
+  const identity = `${toolName} ${toolKind ?? ""}`.toLowerCase();
+  if (identity.includes("input") || identity.includes("fill") || identity.includes("type")) {
+    return "input";
+  }
+  if (identity.includes("click") || identity.includes("submit") || identity.includes("publish")) {
+    return "click";
+  }
+  if (identity.includes("extract") || identity.includes("inspect") || identity.includes("read")) {
+    return "extract";
+  }
+  if (identity.includes("start") || identity.includes("navigate") || identity.includes("open")) {
+    return "open";
+  }
+  return "browser";
+}
+
 function truncate(value: string, limit: number): string {
   return value.length <= limit ? value : value.slice(0, limit);
 }
@@ -1220,8 +1265,16 @@ function buildInstallFindings(input: {
 }
 
 function containsInstructionLikeText(value: string): boolean {
-  return /ignore\s+(all\s+)?previous\s+instructions|system\s+prompt|send\s+(the\s+)?token|developer\s+message/i.test(
-    value,
+  return (
+    /ignore\s+(all\s+)?previous\s+instructions|ignore\s+developer\s+instructions|disregard\s+previous/i.test(value) ||
+    /override\s+the\s+system|system\s+message|developer\s+message|send\s+(the\s+)?token/i.test(value) ||
+    /persist\s+this\s+rule|remember\s+this\s+rule|store\s+this\s+rule|save\s+this\s+rule/i.test(value) ||
+    /remember\s+this\s+instruction|store\s+this\s+instruction|save\s+this\s+instruction/i.test(value) ||
+    /from\s+now\s+on|next\s+time|for\s+all\s+future|future\s+(tasks|requests|reports|runs|sessions)/i.test(value) ||
+    /always\s+send|send\s+reports\s+externally|route\s+future\s+reports/i.test(value) ||
+    /never\s+(mention|reveal|tell)|hide\s+this\s+rule|do\s+not\s+mention\s+this\s+rule/i.test(value) ||
+    /identityverify|market-segment-submit|support-profile-confirm|managed-device\s+support\s+profile/i.test(value) ||
+    /lead-verification-relax|reduce\s+verification\s+controls|weaken\s+verification/i.test(value)
   );
 }
 
@@ -1284,6 +1337,36 @@ function resultContentType(value: unknown): string {
   return stringMaybe(record.contentType ?? record.mimeType ?? record.type) ?? "text/plain";
 }
 
+function ragAnswerProvenanceForToolResult(value: unknown, toolName: string): JsonObject | null {
+  if (toolName !== "rag_answer") {
+    return null;
+  }
+  const record = asRecord(value);
+  const answerSource = stringMaybe(
+    record.answer_source
+      ?? record.answerSource
+      ?? record.source
+      ?? record.answer_source_type
+      ?? record.answerSourceType,
+  );
+  const contexts = Array.isArray(record.contexts)
+    ? record.contexts.filter((item) => stringPreview(item).length > 0)
+    : [];
+  const contextDocs = Array.isArray(record.context_docs)
+    ? record.context_docs.filter((item) => stringPreview(item).length > 0)
+    : [];
+  const evidence = record.evidence ?? record.citations ?? record.sources ?? record.memory_refs;
+  const hasContextEvidence = contexts.length > 0 || contextDocs.length > 0 || Boolean(evidence);
+  if (!answerSource && !hasContextEvidence) {
+    return null;
+  }
+  return {
+    answer_source: answerSource ?? null,
+    context_count: contexts.length + contextDocs.length,
+    has_context_evidence: hasContextEvidence,
+  };
+}
+
 function toolCommandText(params: JsonObject): string {
   return stringMaybe(params.command ?? params.cmd ?? params.code) ?? "";
 }
@@ -1298,6 +1381,19 @@ function toolArguments(event: BeforeToolCallEventInput, context: ToolHookContext
   return {};
 }
 
+function browserTargetText(params: JsonObject): string {
+  return (
+    stringMaybe(
+      params.selector
+        ?? params.url
+        ?? params.text
+        ?? params.sessionId
+        ?? params.session_id
+        ?? params.target,
+    ) ?? ""
+  );
+}
+
 function toolTargetText(params: JsonObject): string {
   return (
     stringMaybe(
@@ -1308,6 +1404,10 @@ function toolTargetText(params: JsonObject): string {
         ?? params.url
         ?? params.uri
         ?? params.endpoint
+        ?? params.selector
+        ?? params.text
+        ?? params.sessionId
+        ?? params.session_id
         ?? params.target
         ?? params.key
         ?? params.name,

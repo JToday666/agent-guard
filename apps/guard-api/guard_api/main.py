@@ -16,6 +16,7 @@ from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent, MemoryGuar
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.errors import error_response, http_error_code, validation_error_details
+from guard_api.llm_approval import HttpLlmApprovalReviewer, LlmApprovalReviewer
 from guard_api.models import AdapterStatusRecord, CredentialCreateRequest, EvaluationRun
 from guard_api.services import (
     ApprovalService,
@@ -170,6 +171,7 @@ def create_app(
     settings: GuardApiSettings | None = None,
     policy_bundle: PolicyBundle | None = None,
     policy_provider: Callable[[], PolicyBundle] | None = None,
+    llm_approval_reviewer: LlmApprovalReviewer | None = None,
 ) -> FastAPI:
     settings = settings or GuardApiSettings()
     if store is None:
@@ -181,7 +183,11 @@ def create_app(
     audit_service = AuditService(store=store)
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
     memory_guard_service = MemoryGuardService(store=store)
-    approval_service = ApprovalService(store=store, settings=settings)
+    approval_service = ApprovalService(
+        store=store,
+        settings=settings,
+        llm_reviewer=llm_approval_reviewer or HttpLlmApprovalReviewer.from_settings(settings),
+    )
     metric_service = MetricService(store=store)
     trace_service = TraceService(store=store)
     policy_service = PolicyService(
@@ -717,11 +723,23 @@ def create_app(
             raise ApiAuthError("APPROVAL_NOT_FOUND", status_code=404)
         if approval.requesting_principal_id != context.principal_id:
             raise ApiAuthError("APPROVAL_WAIT_DENIED", status_code=403)
-        if approval.status == "resolved":
-            return {"status": "resolved", "decision": approval.decision}
-        return {"status": approval.status, "decision": "deny" if approval.status != "pending" else None}
+        return _approval_wait_payload(approval)
 
     return app
+
+
+def _approval_wait_payload(approval: Any) -> dict[str, Any]:
+    decision = approval.decision
+    if approval.status not in {"pending", "resolved"} and decision is None:
+        decision = "deny"
+    return {
+        "status": approval.status,
+        "decision": decision,
+        "resolution_source": approval.resolution_source,
+        "resolved_by": approval.resolved_by,
+        "resolution_reason": approval.resolution_reason,
+        "llm_review": approval.llm_review.model_dump() if approval.llm_review is not None else None,
+    }
 
 
 app = create_app()

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agentguard_core import AuditEvent, PolicyBundle, ToolProfile
+from agentguard_core import AuditEvent, PolicyBundle, RuleOverride, ToolProfile
 from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.llm_approval import HttpLlmApprovalReviewer
 from guard_api.main import create_app
-from guard_api.models import ApprovalRequest
+from guard_api.models import ApprovalRequest, LlmApprovalReviewInput
 from guard_api.services import PolicyService
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 import guard_api.storage.memory as memory_store_module
@@ -33,6 +36,39 @@ class TrackingInitializeStore(MemoryControlPlaneStore):
 class FailingInitializeStore(MemoryControlPlaneStore):
     def initialize(self) -> None:
         raise RuntimeError("control plane initialize failed")
+
+
+class FakeLlmApprovalReviewer:
+    def __init__(
+        self,
+        result: dict | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.result = result or {
+            "decision": "allow_once",
+            "confidence": 0.91,
+            "reason": "Evidence is low risk for a one-time approval.",
+            "evidence_refs": ["decision.rule_hits[0]"],
+        }
+        self.error = error
+        self.inputs: list[dict] = []
+
+    def review(self, request: object) -> dict:
+        self.inputs.append(request.model_dump(mode="json"))  # type: ignore[attr-defined]
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _llm_approval_settings() -> GuardApiSettings:
+    return GuardApiSettings(
+        adapter_token="adapter-secret",
+        control_token="control-secret",
+        llm_approval_enabled=True,
+        llm_approval_api_key="test-key",
+        llm_approval_model="test-model",
+    )
 
 
 def _guard_event_payload(
@@ -467,7 +503,271 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
         headers={"Authorization": "Bearer adapter-secret"},
     )
     assert wait_response.status_code == 200
-    assert wait_response.json()["decision"] == "allow_once"
+    wait_body = wait_response.json()
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "human"
+
+
+def test_llm_auto_approval_does_not_review_deny_decisions() -> None:
+    store = MemoryControlPlaneStore()
+    reviewer = FakeLlmApprovalReviewer()
+    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(
+            trace_id="trace_llm_deny_skip",
+            tool_name="read_file",
+            tool_category="file",
+            tool_kind="file_read",
+            arguments={"path": "/private/token.txt"},
+            user_task="Summarize public docs only",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"]["decision"] == "deny"
+    assert response.json()["approval"] is None
+    assert reviewer.inputs == []
+    assert store.list_pending_approvals() == []
+
+
+def test_llm_auto_approval_allows_medium_risk_ask_once() -> None:
+    store = MemoryControlPlaneStore()
+    reviewer = FakeLlmApprovalReviewer(
+        {
+            "decision": "allow_once",
+            "confidence": 0.94,
+            "reason": "External message contains no sensitive data and is bounded to one send.",
+            "evidence_refs": ["decision.rule_hits[0]", "payload.arguments.to"],
+        }
+    )
+    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(trace_id="trace_llm_allow_once"),
+    )
+    body = response.json()
+    approval_id = body["approval"]["approval_id"]
+    approval = store.get_approval(approval_id)
+    wait_response = client.get(
+        f"/v1/approvals/{approval_id}/wait",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+
+    assert response.status_code == 200
+    assert body["decision"]["decision"] == "ask"
+    assert body["approval"]["status"] == "resolved"
+    assert approval is not None
+    assert approval.status == "resolved"
+    assert approval.decision == "allow_once"
+    assert approval.resolution_source == "llm"
+    assert approval.resolved_by == "llm-approval"
+    assert approval.resolution_reason == "External message contains no sensitive data and is bounded to one send."
+    assert approval.llm_review is not None
+    assert approval.llm_review.status == "resolved"
+    assert approval.llm_review.decision == "allow_once"
+    assert body["approval"]["llm_review"]["status"] == "resolved"
+    assert body["approval"]["llm_review"]["decision"] == "allow_once"
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "llm"
+    assert wait_body["resolved_by"] == "llm-approval"
+    assert wait_body["resolution_reason"] == "External message contains no sensitive data and is bounded to one send."
+    assert wait_body["llm_review"]["status"] == "resolved"
+    assert wait_body["llm_review"]["decision"] == "allow_once"
+    assert len(reviewer.inputs) == 1
+    assert set(reviewer.inputs[0]) == {"evidence", "reason", "resource", "risk_score", "runtime", "severity"}
+    assert reviewer.inputs[0]["evidence"]["event"]["trace_id"] == "trace_llm_allow_once"
+
+
+def test_llm_auto_approval_can_deny_ask() -> None:
+    store = MemoryControlPlaneStore()
+    reviewer = FakeLlmApprovalReviewer(
+        {
+            "decision": "deny",
+            "confidence": 0.88,
+            "reason": "Reviewer identified suspicious external recipient evidence.",
+            "evidence_refs": ["decision.rule_hits[0]"],
+        }
+    )
+    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(trace_id="trace_llm_deny_ask"),
+    )
+    approval_id = response.json()["approval"]["approval_id"]
+    approval = store.get_approval(approval_id)
+    wait_response = client.get(
+        f"/v1/approvals/{approval_id}/wait",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+
+    assert response.status_code == 200
+    assert approval is not None
+    assert approval.status == "resolved"
+    assert approval.decision == "deny"
+    assert approval.resolution_source == "llm"
+    assert approval.llm_review is not None
+    assert approval.llm_review.status == "resolved"
+    assert approval.llm_review.decision == "deny"
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "deny"
+    assert wait_body["resolution_source"] == "llm"
+    assert wait_body["resolved_by"] == "llm-approval"
+    assert wait_body["llm_review"]["decision"] == "deny"
+
+
+def test_llm_auto_approval_keeps_high_risk_allow_once_pending() -> None:
+    store = MemoryControlPlaneStore()
+    reviewer = FakeLlmApprovalReviewer()
+    policy_bundle = PolicyBundle(
+        rule_overrides={"P005_external_send": RuleOverride(decision="ask", risk_score=75, severity="high")}
+    )
+    app = create_app(
+        store=store,
+        settings=_llm_approval_settings(),
+        policy_bundle=policy_bundle,
+        llm_approval_reviewer=reviewer,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(trace_id="trace_llm_high_pending"),
+    )
+    body = response.json()
+    approval_id = body["approval"]["approval_id"]
+    approval = store.get_approval(approval_id)
+
+    assert response.status_code == 200
+    assert body["decision"]["severity"] == "high"
+    assert body["approval"]["status"] == "pending"
+    assert approval is not None
+    assert approval.status == "pending"
+    assert approval.decision is None
+    assert approval.llm_review is not None
+    assert approval.llm_review.status == "kept_pending"
+    assert approval.llm_review.decision == "allow_once"
+
+
+def test_llm_auto_approval_error_keeps_approval_pending() -> None:
+    store = MemoryControlPlaneStore()
+    reviewer = FakeLlmApprovalReviewer(error=ValueError("invalid JSON from model"))
+    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(trace_id="trace_llm_error_pending"),
+    )
+    approval_id = response.json()["approval"]["approval_id"]
+    approval = store.get_approval(approval_id)
+
+    assert response.status_code == 200
+    assert approval is not None
+    assert approval.status == "pending"
+    assert approval.decision is None
+    assert approval.llm_review is not None
+    assert approval.llm_review.status == "error"
+    assert "invalid JSON" in (approval.llm_review.error or "")
+
+
+def test_llm_auto_approval_missing_config_records_error_without_resolving() -> None:
+    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(
+        adapter_token="adapter-secret",
+        control_token="control-secret",
+        llm_approval_enabled=True,
+    )
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(trace_id="trace_llm_missing_config"),
+    )
+    approval_id = response.json()["approval"]["approval_id"]
+    approval = store.get_approval(approval_id)
+
+    assert response.status_code == 200
+    assert approval is not None
+    assert approval.status == "pending"
+    assert approval.llm_review is not None
+    assert approval.llm_review.status == "error"
+    assert "configuration" in (approval.llm_review.error or "").lower()
+
+
+def test_http_llm_approval_reviewer_sends_evidence_only_request() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("authorization")
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "decision": "deny",
+                                    "confidence": 0.86,
+                                    "reason": "Suspicious evidence.",
+                                    "evidence_refs": ["decision.rule_hits[0]"],
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    reviewer = HttpLlmApprovalReviewer(
+        base_url="https://llm.example/v1",
+        api_key="secret-key",
+        model="approval-model",
+        timeout_seconds=1,
+        client=client,
+    )
+    request = LlmApprovalReviewInput(
+        runtime="openclaw",
+        resource="external@example.invalid",
+        reason="External send requires review.",
+        risk_score=62,
+        severity="medium",
+        evidence={"decision": {"rule_hits": [{"rule_id": "P005_external_send"}]}},
+    )
+
+    review = reviewer.review(request)
+    sent_payload = captured["payload"]
+    assert isinstance(sent_payload, dict)
+    sent_input = json.loads(sent_payload["messages"][1]["content"])  # type: ignore[index]
+
+    assert captured["url"] == "https://llm.example/v1/chat/completions"
+    assert captured["authorization"] == "Bearer secret-key"
+    assert sent_payload["model"] == "approval-model"
+    assert set(sent_input) == {"evidence", "reason", "resource", "risk_score", "runtime", "severity"}
+    assert sent_input["evidence"]["decision"]["rule_hits"][0]["rule_id"] == "P005_external_send"
+    assert review.decision == "deny"
+    assert review.provider == "openai-compatible"
+    assert review.model == "approval-model"
 
 
 def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
@@ -820,7 +1120,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
     (
         "event",
         "expected_decision",
-        "expected_rule_id",
+        "expected_rule_ids",
         "expected_resource_targets",
         "expected_action_name",
     ),
@@ -846,7 +1146,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P101_prompt_injection",
+            ["P101_prompt_injection"],
             ["web_001"],
             "context_assembled",
         ),
@@ -867,7 +1167,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "ask",
-            "P101_prompt_injection",
+            ["P101_prompt_injection"],
             ["gpt-4.1-mini"],
             "model_input_prepared",
         ),
@@ -888,7 +1188,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P102_jailbreak",
+            ["P102_jailbreak"],
             ["gpt-4.1-mini"],
             "model_input_prepared",
         ),
@@ -909,7 +1209,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P102_jailbreak",
+            ["P102_jailbreak"],
             ["gpt-4.1-mini"],
             "model_output_produced",
         ),
@@ -946,7 +1246,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "ask",
-            "P105_environment_poisoning",
+            ["P105_environment_poisoning"],
             ["https://docs.example.test/tool-result", "call_fetch_result"],
             "tool_result_produced",
         ),
@@ -968,7 +1268,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P104_memory_poisoning",
+            ["P104_memory_poisoning"],
             ["user_profile/summary"],
             "memory_write_proposed",
         ),
@@ -987,7 +1287,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P005_external_send",
+            ["P107_file_exfiltration", "P005_external_send"],
             ["external@example.com"],
             "message_send_proposed",
         ),
@@ -1006,7 +1306,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "ask",
-            "P005_external_send",
+            ["P005_external_send"],
             ["external@example.com"],
             "message_send_proposed",
         ),
@@ -1015,7 +1315,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
 def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     event: dict,
     expected_decision: str,
-    expected_rule_id: str,
+    expected_rule_ids: list[str],
     expected_resource_targets: list[str],
     expected_action_name: str,
 ) -> None:
@@ -1032,7 +1332,7 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert response.status_code == 200
     evaluation = response.json()
     assert evaluation["decision"]["decision"] == expected_decision
-    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == [expected_rule_id]
+    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == expected_rule_ids
     if expected_decision == "ask":
         assert evaluation["approval"] is not None
         approval_id = evaluation["approval"]["approval_id"]
@@ -1049,7 +1349,7 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert audit_event["event_type"] == event["event_type"]
     assert audit_event["decision"] == expected_decision
     assert audit_event["resource_targets"] == expected_resource_targets
-    assert audit_event["rule_hits"] == [expected_rule_id]
+    assert audit_event["rule_hits"] == expected_rule_ids
     assert audit_event["links"]["event_id"] == event["event_id"]
     assert audit_event["metadata"]["action_id"] == event["event_id"]
     assert audit_event["metadata"]["action_name"] == expected_action_name
@@ -1126,7 +1426,10 @@ def test_guard_evaluate_uses_injected_policy_bundle_sensitive_text_marker() -> N
     assert response.status_code == 200
     evaluation = response.json()
     assert evaluation["decision"]["decision"] == "deny"
-    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == ["P005_external_send"]
+    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == [
+        "P107_file_exfiltration",
+        "P005_external_send",
+    ]
 
 
 def test_guard_evaluate_uses_injected_policy_bundle_tool_profile() -> None:
@@ -1788,7 +2091,10 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
     assert resolve_response.status_code == 200
     assert resolve_response.json()["decision"] == "allow_once"
     assert wait_response.status_code == 200
-    assert wait_response.json() == {"status": "resolved", "decision": "allow_once"}
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "human"
 
 
 def test_audit_events_plural_write_and_filter_for_dashboard() -> None:
@@ -1949,7 +2255,10 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
 
     assert resolve_response.status_code == 200
     assert wait_response.status_code == 200
-    assert wait_response.json() == {"status": "resolved", "decision": "allow_once"}
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "human"
 
 
 def _login_dashboard(client: TestClient, *, control_token: str = "demo-control-token") -> None:

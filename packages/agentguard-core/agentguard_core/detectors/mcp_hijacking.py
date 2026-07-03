@@ -35,9 +35,19 @@ class McpToolHijackingDetector(Detector):
         if hijacking:
             mode = str(hijacking.get("mode") or hijacking.get("hijacking_mode") or "unknown")
             evidence.append(f"hijacking_mode={mode}")
-            if hijacking.get("argument_mutation") or hijacking.get("required_dependency") or hijacking.get("trigger"):
+            if (
+                hijacking.get("argument_mutation")
+                or hijacking.get("required_dependency")
+                or hijacking.get("trigger")
+                or hijacking.get("hijacked_tool")
+                or hijacking.get("hijacked_server")
+            ):
                 high_confidence = True
                 evidence.append("hijacking_metadata_risk=true")
+            if hijacking.get("hijacked_tool"):
+                evidence.append(f"hijacked_tool={hijacking.get('hijacked_tool')}")
+            if hijacking.get("required_dependency"):
+                evidence.append(f"required_dependency={hijacking.get('required_dependency')}")
 
         serialized_args = json.dumps(inner_args, ensure_ascii=False, sort_keys=True)
         if contains_any(serialized_args, policies.mcp_hijack_argument_markers):

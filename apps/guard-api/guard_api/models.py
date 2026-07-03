@@ -10,6 +10,21 @@ from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_i
 from agentguard_core.models import ApprovalResolution
 
 
+class LlmApprovalReview(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    reviewer: str = "llm-approval"
+    status: Literal["reviewed", "resolved", "kept_pending", "error"] = "reviewed"
+    decision: ApprovalResolution | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reason: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    error: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    reviewed_at: str = Field(default_factory=utc_now_iso)
+
+
 class ApprovalRequest(BaseModel):
     approval_id: str = Field(default_factory=lambda: new_id("app"))
     trace_id: str
@@ -30,6 +45,10 @@ class ApprovalRequest(BaseModel):
     risk_score: int = Field(ge=0, le=100)
     severity: str
     evidence: dict[str, Any] = Field(default_factory=dict)
+    llm_review: LlmApprovalReview | None = None
+    resolution_source: Literal["human", "llm", "system"] | None = None
+    resolved_by: str | None = None
+    resolution_reason: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
     expires_at: str | None = None
     resolved_at: str | None = None
@@ -50,10 +69,35 @@ class ApprovalRequest(BaseModel):
         return values
 
 
+class LlmApprovalReviewInput(BaseModel):
+    runtime: str
+    resource: str
+    reason: str
+    risk_score: int = Field(ge=0, le=100)
+    severity: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_approval(cls, approval: ApprovalRequest) -> Self:
+        return cls(
+            runtime=approval.runtime,
+            resource=approval.resource,
+            reason=approval.reason,
+            risk_score=approval.risk_score,
+            severity=approval.severity,
+            evidence=approval.evidence,
+        )
+
+
 class EvaluationApproval(BaseModel):
     approval_id: str
     status: str
     decision_options: list[ApprovalResolution]
+    decision: ApprovalResolution | None = None
+    resolution_source: str | None = None
+    resolved_by: str | None = None
+    resolution_reason: str | None = None
+    llm_review: LlmApprovalReview | None = None
 
 
 class GuardEvaluationResponse(BaseModel):

@@ -113,6 +113,128 @@ def memory_poisoning_case() -> AttackCase:
     )
 
 
+class SelectiveRuntimeCore:
+    def __init__(self, *, deny_event_types: set[str] | None = None) -> None:
+        self.deny_event_types = deny_event_types or set()
+        self.tool_events: list[dict] = []
+        self.guard_events: list[dict] = []
+        self.audit_events: list[dict] = []
+
+    def evaluate_tool_call(self, event):
+        self.tool_events.append(event)
+        return _runtime_decision("allow")
+
+    def evaluate_guard_event(self, event):
+        self.guard_events.append(event)
+        return _runtime_decision("deny" if event["event_type"] in self.deny_event_types else "allow")
+
+    def submit_audit_event(self, event):
+        self.audit_events.append(event)
+        return {"ok": True, "audit_id": event.get("audit_id")}
+
+    def wait_for_approval(self, approval_id, timeout=None):
+        return {"status": "resolved", "decision": "deny"}
+
+
+def _runtime_decision(decision: str) -> dict:
+    return PolicyDecision(
+        decision_id=f"dec_{decision}",
+        decision=decision,
+        risk_score=90 if decision == "deny" else 0,
+        severity="high" if decision == "deny" else "low",
+        rule_hits=[],
+        reason=f"{decision} by test core",
+        safe_message="blocked by runtime guard" if decision == "deny" else None,
+        latency_ms=0,
+    ).model_dump()
+
+
+def test_demo_graph_blocks_context_before_planner(monkeypatch, tmp_path):
+    case = sample_case()
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        sandbox_dir=tmp_path,
+    )
+
+    def planner_should_not_run(*args, **kwargs):
+        raise AssertionError("planner should not run when context guard blocks")
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", planner_should_not_run)
+    core = SelectiveRuntimeCore(deny_event_types={"context_assembled"})
+
+    state = run_demo_case(case, LangGraphAdapter(config=config, core_client=core), MockToolRegistry(tmp_path))
+
+    assert state["stop_reason"] == "blocked"
+    assert state["task_terminal"] is True
+    assert state["tool_results"] == []
+    assert [event["event_type"] for event in core.guard_events] == ["context_assembled"]
+
+
+def test_demo_graph_blocks_model_input_before_planner(monkeypatch, tmp_path):
+    case = sample_case()
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        sandbox_dir=tmp_path,
+    )
+
+    def planner_should_not_run(*args, **kwargs):
+        raise AssertionError("planner should not run when model input guard blocks")
+
+    monkeypatch.setattr("agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm", planner_should_not_run)
+    core = SelectiveRuntimeCore(deny_event_types={"model_input_prepared"})
+
+    state = run_demo_case(case, LangGraphAdapter(config=config, core_client=core), MockToolRegistry(tmp_path))
+
+    assert state["stop_reason"] == "blocked"
+    assert state["task_terminal"] is True
+    assert state["tool_results"] == []
+    assert [event["event_type"] for event in core.guard_events] == ["context_assembled", "model_input_prepared"]
+
+
+def test_demo_graph_blocks_model_output_before_tool_execution(monkeypatch, tmp_path):
+    case = sample_case()
+    (tmp_path / "files" / "docs").mkdir(parents=True)
+    (tmp_path / "files" / "docs" / "public.txt").write_text("public document", encoding="utf-8")
+    config = BenchConfig(
+        defense_enabled=True,
+        llm_enabled=True,
+        llm_provider="deepseek",
+        llm_model="deepseek-v4-flash",
+        llm_api_key="sk-test",
+        llm_max_tool_rounds=1,
+        sandbox_dir=tmp_path,
+    )
+
+    monkeypatch.setattr(
+        "agentguard_langgraph_bench.demo_agent.graph.build_tool_plan_with_llm",
+        lambda *args, **kwargs: PlannerOutput(
+            [{"id": "llm_read", "name": "read_file", "args": {"path": "/docs/public.txt"}, "source_feature": "llm_tool_call"}],
+            "I will call read_file.",
+        ),
+    )
+    core = SelectiveRuntimeCore(deny_event_types={"model_output_produced"})
+
+    state = run_demo_case(case, LangGraphAdapter(config=config, core_client=core), MockToolRegistry(tmp_path))
+
+    assert state["stop_reason"] == "blocked"
+    assert state["task_terminal"] is True
+    assert state["tool_calls"] == []
+    assert state["tool_results"] == []
+    assert [event["event_type"] for event in core.guard_events] == [
+        "context_assembled",
+        "model_input_prepared",
+        "model_output_produced",
+    ]
+
+
 def test_deepseek_env_config(monkeypatch):
     monkeypatch.setenv("AGENTGUARD_LLM_ENABLED", "true")
     monkeypatch.setenv("AGENTGUARD_LLM_PROVIDER", "deepseek")

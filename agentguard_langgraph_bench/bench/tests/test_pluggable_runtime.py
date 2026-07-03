@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from agentguard_langgraph_bench.adapter.event_models import AuditEvent, PolicyDecision, ToolCallEvent, ToolDescriptor, ToolExecutionResult
 from agentguard_langgraph_bench.bench.config import BenchConfig
 from agentguard_langgraph_bench.bench.models import AttackCase, supports_runtime
 from agentguard_langgraph_bench.bench.runtime.adapter_loader import load_agent_adapter
@@ -119,6 +120,162 @@ def test_tool_server_calls_gateway_and_blocks(tmp_path):
         tools.close()
 
 
+def test_tool_server_latches_security_block_and_skips_later_side_effects(tmp_path):
+    import pytest
+    from urllib.request import Request, urlopen
+
+    class Runtime:
+        def list_tools(self):
+            return {
+                "write_file": {
+                    "name": "write_file",
+                    "kind": "file_write",
+                    "input_schema": {"type": "object"},
+                }
+            }
+
+    class TerminalGateway:
+        tool_runtime = Runtime()
+
+        def __init__(self):
+            self.calls = 0
+
+        def invoke_tool(self, *, tool_name, trace_id, call_id, **_kwargs):
+            self.calls += 1
+            return ToolExecutionResult(
+                tool_name=tool_name,
+                call_id=call_id or f"call_{self.calls}",
+                executed=False,
+                blocked=True,
+                decision="deny",
+                status="blocked",
+                safe_message="blocked",
+                event={"arguments": {}},
+                audit_event={"decision": "deny"},
+                block_semantics="policy_deny",
+                counts_as_effective_block=True,
+                runtime_terminal=True,
+                terminal_reason="policy_deny",
+            )
+
+    gateway = TerminalGateway()
+    try:
+        server = BenchmarkToolServer(gateway, port=0).start()
+    except PermissionError:
+        pytest.skip("local socket creation is unavailable in this sandbox")
+    try:
+        payload = {
+            "trace_id": "trace_terminal",
+            "call_id": "call_first",
+            "security": {"case_id": "MCP-TERM", "attack_type": "tool_hijacking", "is_malicious": True},
+            "arguments": {"path": "/reports/blocked.txt", "content": "blocked"},
+        }
+        for call_id in ("call_first", "call_second"):
+            payload["call_id"] = call_id
+            request = Request(
+                f"{server.base_url}/tools/write_file",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request, timeout=5) as response:  # noqa: S310 - local test server
+                body = json.loads(response.read().decode("utf-8"))
+            assert body["status"] == "not_completed"
+
+        events = server.events()
+        assert gateway.calls == 1
+        assert len(events) == 2
+        assert events[0]["runtime_terminal"] is True
+        assert events[0]["terminal_reason"] == "policy_deny"
+        assert events[1]["runtime_terminal"] is True
+        assert events[1]["terminal_reason"] == "security_block_terminal"
+        assert events[1]["executed"] is False
+        assert events[1]["status"] == "not_completed"
+
+        server.reset_case()
+        assert server.events() == []
+        assert server._terminal_by_case == {}
+    finally:
+        server.stop()
+
+
+def test_tool_server_infers_browser_navigate_real_session_context(tmp_path):
+    import pytest
+    from urllib.request import Request, urlopen
+
+    case = _case()
+    case.case_id = "PI-001"
+    case.attack_type = "prompt_injection"
+    case.metadata["web_entry_source_path"] = (
+        "agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-001/index.html"
+    )
+
+    class FakeRuntime:
+        def __init__(self):
+            self.starts = []
+            self.navigations = []
+
+        def start(self, *, session_id, url, source_path):
+            self.starts.append({"session_id": session_id, "url": url, "source_path": source_path})
+            return {"session_id": session_id, "url": url, "source_path": source_path, "real_browser": True}
+
+        def navigate(self, *, session_id, url):
+            self.navigations.append({"session_id": session_id, "url": url})
+            return {"session_id": session_id, "url": url, "real_browser": True}
+
+    tools = MockToolRegistry(tmp_path, browser_mode="real")
+    fake_runtime = FakeRuntime()
+    tools._real_browser_runtime = lambda: fake_runtime
+    gateway = GuardedToolGateway(
+        guard_adapter=LangGraphAdapter(config=BenchConfig(sandbox_dir=tmp_path), core_client=FakeAllowCoreClient()),
+        tool_runtime=tools,
+    )
+    try:
+        server = BenchmarkToolServer(gateway, port=0).start()
+    except PermissionError:
+        pytest.skip("local socket creation is unavailable in this sandbox")
+    try:
+        server.set_case_context(
+            case,
+            type(
+                "Context",
+                (),
+                {
+                    "security": {"case_id": "PI-001", "attack_type": "prompt_injection", "is_malicious": True},
+                    "config": BenchConfig(sandbox_dir=tmp_path, browser_mode="real"),
+                    "tool_hijacking_context": {},
+                },
+            )(),
+        )
+        payload = {
+            "trace_id": "trace_browser",
+            "call_id": "call_navigate_first",
+            "security": {"case_id": "PI-001", "attack_type": "prompt_injection", "is_malicious": True},
+            "arguments": {},
+        }
+        request = Request(
+            f"{server.base_url}/tools/browser_navigate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=5) as response:  # noqa: S310 - local test server
+            body = json.loads(response.read().decode("utf-8"))
+
+        assert body["tool_name"] == "browser_navigate"
+        assert body["result"]["real_browser"] is True
+        assert fake_runtime.starts[0]["session_id"] == "PI-001"
+        assert fake_runtime.starts[0]["source_path"].endswith("PI-001/index.html")
+        assert fake_runtime.starts[0]["url"]
+        assert fake_runtime.navigations[0]["session_id"] == "PI-001"
+        event = server.events()[0]
+        assert event["event"]["arguments"]["session_id"] == "PI-001"
+        assert event["event"]["arguments"]["source_path"].endswith("PI-001/index.html")
+    finally:
+        server.stop()
+        tools.close()
+
+
 def test_gateway_stamps_memory_provenance_over_model_supplied_internal_fields(tmp_path):
     config = BenchConfig(sandbox_dir=tmp_path, defense_enabled=False)
     tools = MockToolRegistry(tmp_path)
@@ -154,6 +311,102 @@ def test_gateway_stamps_memory_provenance_over_model_supplied_internal_fields(tm
         assert result.event["arguments"]["_source_tool_call_id"] == "call_real_memory_write"
     finally:
         tools.close()
+
+
+def test_gateway_enriches_rag_answer_with_latest_retrieval_provenance(tmp_path):
+    config = BenchConfig(sandbox_dir=tmp_path, defense_enabled=False)
+    tools = MockToolRegistry(tmp_path)
+    guard = _CaptureAllowGuard()
+    gateway = GuardedToolGateway(guard_adapter=guard, tool_runtime=tools)
+    security = {
+        "case_id": "PR-001",
+        "attack_type": "memory_poisoning",
+        "is_malicious": True,
+        "metadata": {"scenario_id": "PR-001", "phase": "answer"},
+    }
+    try:
+        retrieve = gateway.invoke_tool(
+            tool_name="rag_retrieve",
+            arguments={
+                "dataset": "nq",
+                "question_id": "test1",
+                "query": "How many episodes are in Chicago Fire season 4?",
+                "source": "local_support_knowledge",
+                "mode": "poisoned",
+            },
+            security=security,
+            trace_id="trace_rag",
+            call_id="call_retrieve",
+            case_context={"config": config, "metadata": security["metadata"], "case_id": "PR-001"},
+        )
+        answer = gateway.invoke_tool(
+            tool_name="rag_answer",
+            arguments={"dataset": "nq", "question_id": "test1", "answer": "24 episodes"},
+            security=security,
+            trace_id="trace_rag",
+            call_id="call_answer",
+            case_context={"config": config, "metadata": security["metadata"], "case_id": "PR-001"},
+        )
+
+        captured = guard.arguments_by_tool["rag_answer"]
+        assert retrieve.executed is True
+        assert captured["source_trust"] == "untrusted"
+        assert captured["context_docs"]
+        assert captured["answer_source"] == "rag_retrieve"
+        assert captured["rag_answer_provenance"]["retrieval_tool_call_id"] == "call_retrieve"
+        assert answer.result["source_trust"] == "untrusted"
+        assert answer.result["context_docs"] == captured["context_docs"]
+        assert answer.result["rag_answer_provenance"] == captured["rag_answer_provenance"]
+    finally:
+        tools.close()
+
+
+class _CaptureAllowGuard:
+    def __init__(self):
+        self.arguments_by_tool = {}
+
+    def evaluate_before_tool(
+        self,
+        *,
+        tool_name,
+        arguments,
+        security,
+        trace_id,
+        call_id=None,
+    ):
+        self.arguments_by_tool[tool_name] = dict(arguments)
+        event = ToolCallEvent(
+            trace_id=trace_id,
+            case_id=security.get("case_id"),
+            attack_type=security.get("attack_type"),
+            is_malicious=security.get("is_malicious"),
+            tool=ToolDescriptor(name=tool_name, category="tool", kind=tool_name, call_id=call_id or "call"),
+            arguments=arguments,
+        )
+        decision = PolicyDecision(
+            decision_id=f"dec_{tool_name}",
+            decision="allow",
+            risk_score=0,
+            severity="low",
+            rule_hits=[],
+            reason="allow",
+        )
+        return event, decision
+
+    def build_audit_event(self, event, decision):
+        return AuditEvent(
+            trace_id=event.trace_id,
+            case_id=event.case_id,
+            summary="allow",
+            decision=decision.decision,
+            risk_score=decision.risk_score,
+            severity=decision.severity,
+            blocked=decision.blocked,
+            reason=decision.reason,
+        )
+
+    def submit_audit_event(self, audit_event):
+        return {"ok": True, "audit_id": audit_event.audit_id}
 
 
 class _FakeToolServer:
