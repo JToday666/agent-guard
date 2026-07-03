@@ -280,6 +280,7 @@ export function buildToolResultGuardEvent(
   const security = runtimeSecurityFields(event, context);
   const derivedResources = derivedResourcesForToolResult(event, context, toolName);
   const derivedPaths = derivedPathTargets(event, context, derivedResources);
+  const ragAnswerProvenance = ragAnswerProvenanceForToolResult(event.result ?? event.message, toolName);
 
   return {
     schema_version: "0.3",
@@ -332,6 +333,7 @@ export function buildToolResultGuardEvent(
     metadata: {
       openclaw_hook: "tool_result_persist",
       session_key: context.sessionKey ?? null,
+      ...(ragAnswerProvenance ? { rag_answer_provenance: ragAnswerProvenance } : {}),
     },
   };
 }
@@ -1333,6 +1335,36 @@ function stringPreview(value: unknown): string {
 function resultContentType(value: unknown): string {
   const record = asRecord(value);
   return stringMaybe(record.contentType ?? record.mimeType ?? record.type) ?? "text/plain";
+}
+
+function ragAnswerProvenanceForToolResult(value: unknown, toolName: string): JsonObject | null {
+  if (toolName !== "rag_answer") {
+    return null;
+  }
+  const record = asRecord(value);
+  const answerSource = stringMaybe(
+    record.answer_source
+      ?? record.answerSource
+      ?? record.source
+      ?? record.answer_source_type
+      ?? record.answerSourceType,
+  );
+  const contexts = Array.isArray(record.contexts)
+    ? record.contexts.filter((item) => stringPreview(item).length > 0)
+    : [];
+  const contextDocs = Array.isArray(record.context_docs)
+    ? record.context_docs.filter((item) => stringPreview(item).length > 0)
+    : [];
+  const evidence = record.evidence ?? record.citations ?? record.sources ?? record.memory_refs;
+  const hasContextEvidence = contexts.length > 0 || contextDocs.length > 0 || Boolean(evidence);
+  if (!answerSource && !hasContextEvidence) {
+    return null;
+  }
+  return {
+    answer_source: answerSource ?? null,
+    context_count: contexts.length + contextDocs.length,
+    has_context_evidence: hasContextEvidence,
+  };
 }
 
 function toolCommandText(params: JsonObject): string {

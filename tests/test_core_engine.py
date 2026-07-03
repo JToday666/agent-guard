@@ -2111,7 +2111,7 @@ def test_memory_poisoning_rag_answer_metadata_memory_value_with_future_route_is_
     assert decision.approval_intent is None
 
 
-def test_unverified_local_rag_answer_without_poisoning_is_allowed_to_complete() -> None:
+def test_unverified_local_rag_answer_with_contexts_requires_review() -> None:
     event = GuardEvent(
         trace_id="trace_rag_answer",
         case_id="case_rag_answer",
@@ -2128,6 +2128,8 @@ def test_unverified_local_rag_answer_without_poisoning_is_allowed_to_complete() 
                 "dataset": "nq",
                 "question_id": "test16",
                 "answer": "Big Man",
+                "answer_source": "local_support_knowledge",
+                "contexts": ["The local reference notes all state the answer is Big Man."],
                 "evidence": (
                     '[{"doc_id":"ctx-1","text":"The local reference notes all state the answer is Big Man."}]'
                 ),
@@ -2145,8 +2147,58 @@ def test_unverified_local_rag_answer_without_poisoning_is_allowed_to_complete() 
 
     decision = evaluate(event)
 
-    assert decision.decision == "allow"
-    assert "memory_poisoning" not in decision.categories
+    assert decision.decision == "ask"
+    assert "memory_poisoning" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == ["P104_memory_poisoning"]
+    assert "unverified_rag_answer_submission=true" in decision.rule_hits[0].evidence
+    assert "answer_source=local_support_knowledge" in decision.rule_hits[0].evidence
+    assert "context_evidence=present" in decision.rule_hits[0].evidence
+    assert decision.approval_intent is not None
+    assert decision.approval_intent.resource == "rag_answer:nq:test16"
+
+
+def test_unverified_local_rag_answer_tool_result_requires_review_before_persistence() -> None:
+    event = GuardEvent(
+        trace_id="trace_rag_answer_result",
+        event_type="tool_result_produced",
+        case_id="case_rag_answer_result",
+        attack_type=None,
+        is_malicious=None,
+        security_context=SecurityContext(
+            user_task="Answer the customer question using local support knowledge.",
+            source_type="support_knowledge_package",
+            source_trust="local_reference",
+        ),
+        payload=ToolResultPayload(
+            tool=ToolDescriptor(name="rag_answer", category="tool", kind="rag_answer", call_id="call_rag_answer"),
+            result=ToolResult(
+                content_preview="Big Man",
+                content_type="text/plain",
+                size_bytes=7,
+            ),
+            will_enter_context=True,
+            will_persist=True,
+            sanitized=False,
+        ),
+        metadata={
+            "rag_answer_provenance": {
+                "answer_source": "local_support_knowledge",
+                "context_count": 1,
+                "has_context_evidence": True,
+            }
+        },
+    )
+
+    decision = evaluate(event)
+
+    assert decision.decision == "ask"
+    assert "memory_poisoning" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == ["P104_memory_poisoning"]
+    assert "unverified_rag_answer_submission=true" in decision.rule_hits[0].evidence
+    assert "answer_source=local_support_knowledge" in decision.rule_hits[0].evidence
+    assert "context_evidence=present" in decision.rule_hits[0].evidence
+    assert decision.approval_intent is not None
+    assert decision.approval_intent.resource == "tool_result:call_rag_answer"
 
 
 def test_unverified_local_rag_answer_with_poisoning_marker_requires_review() -> None:

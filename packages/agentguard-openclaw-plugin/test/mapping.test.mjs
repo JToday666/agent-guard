@@ -187,6 +187,38 @@ test("marks persistent memory poisoning tool results as instruction-like", () =>
   assert.equal(event.payload.result.content_preview.includes("route future reports"), true);
 });
 
+test("preserves unverified RAG answer provenance on tool result persistence", () => {
+  const event = buildToolResultGuardEvent(
+    {
+      toolName: "rag_answer",
+      toolKind: "rag_answer",
+      toolCallId: "call_rag_answer_review",
+      runId: "run_rag_answer_review",
+      result: {
+        content: "Big Man",
+        answerSource: "local_support_knowledge",
+        contexts: ["The local support reference states that the answer is Big Man."],
+      },
+      sourceTrust: "local_reference",
+      sourceType: "support_knowledge_package",
+      willEnterContext: true,
+      willPersist: true,
+    },
+    { sessionKey: "agent:main:memory-poisoning", agentId: "main" },
+  );
+
+  assert.equal(event.security_context.source_trust, "local_reference");
+  assert.equal(event.security_context.source_type, "support_knowledge_package");
+  assert.equal(event.payload.tool.name, "rag_answer");
+  assert.equal(event.payload.will_enter_context, true);
+  assert.equal(event.payload.will_persist, true);
+  assert.deepEqual(event.metadata.rag_answer_provenance, {
+    answer_source: "local_support_knowledge",
+    context_count: 1,
+    has_context_evidence: true,
+  });
+});
+
 test("infers browser resource from OpenClaw browser action arguments", () => {
   const event = buildToolCallGuardEvent(
     {

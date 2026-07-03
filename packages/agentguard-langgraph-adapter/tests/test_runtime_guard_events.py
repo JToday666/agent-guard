@@ -9,8 +9,10 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 from agentguard_langgraph_adapter.config import AgentGuardLangGraphConfig  # noqa: E402
+from agentguard_langgraph_adapter.core_client import _guard_api_v03_event  # noqa: E402
 from agentguard_langgraph_adapter.langgraph_adapter import LangGraphAdapter  # noqa: E402
 from agentguard_langgraph_adapter.tool_gateway import GuardedToolGateway  # noqa: E402
+from agentguard_core import GuardEvent, evaluate  # noqa: E402
 
 
 def test_adapter_evaluates_context_model_tool_result_and_memory_events() -> None:
@@ -369,6 +371,45 @@ def test_gateway_quarantines_poisoned_tool_result_before_context_admission() -> 
     assert result.counts_as_effective_block is True
 
 
+def test_gateway_blocks_unverified_local_rag_answer_review_before_runtime_invoke() -> None:
+    client = _InProcessCoreClient()
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+    runtime = _Runtime(result={"answer": "Big Man", "submitted": True})
+    gateway = GuardedToolGateway(guard_adapter=adapter, tool_runtime=runtime)
+
+    result = gateway.invoke_tool(
+        tool_name="rag_answer",
+        arguments={
+            "dataset": "nq",
+            "question_id": "test16",
+            "answer": "Big Man",
+            "answer_source": "local_support_knowledge",
+            "contexts": ["The local support reference states that the answer is Big Man."],
+        },
+        security={
+            "user_task": "Answer from support knowledge.",
+            "source_type": "support_knowledge_package",
+            "source_trust": "local_reference",
+        },
+        trace_id="trace_unverified_rag_answer",
+        call_id="call_unverified_rag_answer",
+    )
+
+    assert runtime.calls == []
+    assert result.blocked is True
+    assert result.executed is False
+    assert result.decision == "ask"
+    assert result.block_semantics == "approval_block"
+    assert result.event is not None
+    assert result.event["event_type"] == "tool_call_proposed"
+    assert result.event["arguments"]["contexts"] == ["The local support reference states that the answer is Big Man."]
+    assert client.tool_events[0]["security_context"]["source_type"] == "support_knowledge_package"
+    assert client.tool_events[0]["security_context"]["source_trust"] == "local_reference"
+
+
 class _SelectiveCoreClient:
     def __init__(self, deny_event_types: set[str] | None = None, deny_tool_names: set[str] | None = None) -> None:
         self.deny_event_types = deny_event_types or set()
@@ -434,3 +475,17 @@ def _decision(decision: str) -> dict[str, Any]:
         "latency_ms": 0,
         "approval": None,
     }
+
+
+class _InProcessCoreClient:
+    def __init__(self) -> None:
+        self.tool_events: list[dict[str, Any]] = []
+        self.guard_events: list[dict[str, Any]] = []
+
+    def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
+        self.tool_events.append(event)
+        return evaluate(GuardEvent.model_validate(_guard_api_v03_event(event))).model_dump(mode="json")
+
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        self.guard_events.append(event)
+        return evaluate(GuardEvent.model_validate(event)).model_dump(mode="json")

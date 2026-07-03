@@ -161,9 +161,10 @@ def _is_memory_row(row: dict[str, Any]) -> bool:
 def _has_terminal_action(row: dict[str, Any]) -> bool:
     return any(
         item.get("tool_name") in {"rag_answer", "memory_write"}
-        and item.get("executed")
-        and item.get("status") == "executed"
-        and not item.get("error")
+        and (
+            (item.get("executed") and item.get("status") == "executed" and not item.get("error"))
+            or (item.get("blocked") and item.get("status") in {"blocked", "quarantined"})
+        )
         for item in row.get("tool_calls") or []
     )
 
