@@ -146,6 +146,7 @@ def _synthetic_tool_hijacking_reference(path: str) -> str | None:
     first_tool = catalog[0] if catalog and isinstance(catalog[0], dict) else {}
     payload = {
         "reference_type": "local_tool_reference",
+        "case_id": case_id,
         "task": (case.get("input") or {}).get("payload"),
         "available_tool": {
             "server": first_tool.get("server"),
@@ -2178,6 +2179,43 @@ def _coerce_context_list(value: Any) -> list[str] | None:
     return [str(value)]
 
 
+def _coerce_doc_list(value: Any) -> list[dict[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return None
+    docs: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            docs.append(dict(item))
+        elif item is not None:
+            docs.append({"text": str(item)})
+    return docs
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _rag_retrieval_key(case_id: str | None, dataset: str, question_id: str) -> tuple[str, str, str]:
+    return (str(case_id or ""), str(dataset or ""), str(question_id or ""))
+
+
+def _rag_source_trust(internal_source: str, meta: dict[str, Any]) -> str:
+    try:
+        poison_count = int(meta.get("poison_context_count") or 0)
+    except (TypeError, ValueError):
+        poison_count = 0
+    if poison_count > 0 or str(meta.get("mode") or "").lower() == "poisoned":
+        return "untrusted"
+    if internal_source in {"sandbox_file", "provided", "attackcase", "poisonedrag"}:
+        return "trusted"
+    return "unknown"
+
+
 def _support_ids_from_url(value: Any) -> tuple[str, str]:
     if not value:
         return "", ""
@@ -2230,7 +2268,16 @@ def _normalize_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict
                 normalized["source"] = payload["source"]
             return normalized
         answer = _first_present(payload, "answer", "final_answer", "submitted_answer", "response", "result")
-        for key in ("mode", "used_memory", "memory_refs", "conflict_detected", "answer_source"):
+        for key in (
+            "mode",
+            "used_memory",
+            "memory_refs",
+            "conflict_detected",
+            "answer_source",
+            "source_trust",
+            "context_docs",
+            "rag_answer_provenance",
+        ):
             if key in payload:
                 normalized[key] = payload[key]
         for key in ("_case_id", "_scenario_id", "_phase", "_source_tool_call_id", "_created_by"):
@@ -2432,6 +2479,7 @@ class MockToolRegistry:
         self._real_browser_agent_abuse_api_fallback = False
         self._mcp_call_counts: dict[tuple[str, str], int] = {}
         self._poisonedrag_repository: PoisonedRagRepository | None = None
+        self._rag_retrieval_provenance: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     def read_file(self, path: str = "", **aliases: Any) -> str:
         if not path:
@@ -2853,6 +2901,8 @@ class MockToolRegistry:
                     resolved_url = f"{current.scheme}://{current.netloc}/local-instrumentation/{quote(relative, safe='/')}?mode=record&run_id=agentguard"
             else:
                 resolved_url = local_url_for_source(source_path) or url
+        if self.browser_mode == "real" and session_id not in self._browser_sessions:
+            self.browser_start(resolved_url or url, run_id=session_id, source_path=source_path)
         if self.browser_mode == "real" and resolved_url:
             parsed = urlparse(resolved_url)
             if parsed.scheme in {"http", "https"} and parsed.netloc.endswith(":18083"):
@@ -3723,6 +3773,25 @@ class MockToolRegistry:
                 "meta": meta,
                 "evidence_path": str(evidence_path),
             }
+        public_docs = [
+            {key: value for key, value in doc.items() if expose_internal_source_labels or key != "source"}
+            for doc in internal_docs
+        ]
+        source_trust = _rag_source_trust(internal_source, meta)
+        evidence_path = self.sandbox_dir / "rag" / "queries.jsonl"
+        rag_answer_provenance = {
+            "retrieval_tool_call_id": _source_tool_call_id,
+            "dataset": dataset,
+            "question_id": question_id,
+            "source": source_alias,
+            "internal_source": internal_source,
+            "mode": meta.get("mode", mode),
+            "source_trust": source_trust,
+            "context_doc_ids": [doc.get("internal_doc_id") or doc.get("doc_id") for doc in internal_docs],
+            "poison_context_count": meta.get("poison_context_count", 0),
+            "clean_context_count": meta.get("clean_context_count", 0),
+            "evidence_path": str(evidence_path),
+        }
         record = {
             "dataset": dataset,
             "question_id": question_id,
@@ -3734,7 +3803,11 @@ class MockToolRegistry:
             "internal_source": internal_source,
             "context_path": context_path,
             "contexts": selected,
+            "context_docs": public_docs,
             "context_doc_ids": [doc.get("internal_doc_id") or doc.get("doc_id") for doc in internal_docs],
+            "source_trust": source_trust,
+            "answer_source": "rag_retrieve",
+            "rag_answer_provenance": rag_answer_provenance,
             "poison_context_count": meta.get("poison_context_count", 0),
             "clean_context_count": meta.get("clean_context_count", 0),
             "internal_context_docs": internal_docs,
@@ -3744,12 +3817,19 @@ class MockToolRegistry:
             "source_tool_call_id": _source_tool_call_id,
             "created_by": _created_by or "agent_tool_call",
         }
-        evidence_path = self.sandbox_dir / "rag" / "queries.jsonl"
         _append_jsonl(evidence_path, record)
-        public_docs = [
-            {key: value for key, value in doc.items() if expose_internal_source_labels or key != "source"}
-            for doc in internal_docs
-        ]
+        self._remember_rag_retrieval(
+            case_id=_case_id,
+            dataset=dataset,
+            question_id=question_id,
+            payload={
+                "contexts": selected,
+                "context_docs": public_docs,
+                "source_trust": source_trust,
+                "answer_source": "rag_retrieve",
+                "rag_answer_provenance": rag_answer_provenance,
+            },
+        )
         return {
             "ok": True,
             "dataset": dataset,
@@ -3757,6 +3837,9 @@ class MockToolRegistry:
             "question": question,
             "contexts": selected,
             "context_docs": public_docs,
+            "source_trust": source_trust,
+            "answer_source": "rag_retrieve",
+            "rag_answer_provenance": rag_answer_provenance,
             "internal_context_docs": internal_docs,
             "poison_context_count": meta.get("poison_context_count", 0),
             "clean_context_count": meta.get("clean_context_count", 0),
@@ -3776,6 +3859,9 @@ class MockToolRegistry:
         memory_refs: list[str] | None = None,
         conflict_detected: bool | None = None,
         answer_source: str | None = None,
+        source_trust: str | None = None,
+        context_docs: list[dict[str, Any]] | None = None,
+        rag_answer_provenance: dict[str, Any] | None = None,
         _case_id: str | None = None,
         _scenario_id: str | None = None,
         _phase: str | None = None,
@@ -3790,6 +3876,22 @@ class MockToolRegistry:
         dataset = str(dataset or _first_present(ignored_evaluator_args, "source_dataset") or source_dataset or "")
         question_id = str(question_id or _first_present(ignored_evaluator_args, "qid", "id") or source_question_id or "")
         selected_contexts = list(contexts or _coerce_context_list(_first_present(ignored_evaluator_args, "context_used", "context", "evidence", "documents", "passages")) or [])
+        if source_trust is None:
+            source_trust = _string_or_none(ignored_evaluator_args.get("source_trust"))
+        if context_docs is None:
+            context_docs = _coerce_doc_list(ignored_evaluator_args.get("context_docs"))
+        if rag_answer_provenance is None and isinstance(ignored_evaluator_args.get("rag_answer_provenance"), dict):
+            rag_answer_provenance = dict(ignored_evaluator_args["rag_answer_provenance"])
+        latest = self.latest_rag_retrieval(case_id=_case_id, dataset=dataset, question_id=question_id)
+        if latest:
+            if not selected_contexts:
+                selected_contexts = list(latest.get("contexts") or [])
+            if context_docs is None:
+                context_docs = _coerce_doc_list(latest.get("context_docs"))
+            source_trust = source_trust or _string_or_none(latest.get("source_trust"))
+            answer_source = answer_source or _string_or_none(latest.get("answer_source"))
+            if rag_answer_provenance is None and isinstance(latest.get("rag_answer_provenance"), dict):
+                rag_answer_provenance = dict(latest["rag_answer_provenance"])
         final_answer = str(answer or "")
         record = {
             "dataset": dataset,
@@ -3797,11 +3899,14 @@ class MockToolRegistry:
             "question": question,
             "answer": final_answer,
             "contexts": selected_contexts,
+            "context_docs": context_docs or [],
+            "source_trust": source_trust,
             "mode": mode,
             "used_memory": used_memory,
             "memory_refs": memory_refs or [],
             "conflict_detected": conflict_detected,
             "answer_source": answer_source,
+            "rag_answer_provenance": rag_answer_provenance or {},
             "case_id": _case_id,
             "scenario_id": _scenario_id,
             "phase": _phase,
@@ -3813,6 +3918,26 @@ class MockToolRegistry:
         _append_jsonl(evidence_path, record)
         record["evidence_path"] = str(evidence_path)
         return record
+
+    def _remember_rag_retrieval(
+        self,
+        *,
+        case_id: str | None,
+        dataset: str,
+        question_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        key = _rag_retrieval_key(case_id, dataset, question_id)
+        self._rag_retrieval_provenance[key] = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+        fallback_key = _rag_retrieval_key(None, dataset, question_id)
+        self._rag_retrieval_provenance[fallback_key] = self._rag_retrieval_provenance[key]
+
+    def latest_rag_retrieval(self, *, case_id: str | None, dataset: str, question_id: str) -> dict[str, Any] | None:
+        for key in (_rag_retrieval_key(case_id, dataset, question_id), _rag_retrieval_key(None, dataset, question_id)):
+            payload = self._rag_retrieval_provenance.get(key)
+            if payload is not None:
+                return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+        return None
 
     def _poisonedrag_repo(self) -> PoisonedRagRepository:
         if self._poisonedrag_repository is None:

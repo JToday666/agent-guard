@@ -6,7 +6,6 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from agentguard_langgraph_bench.bench.browser_runtime import local_url_for_source, resolve_local_source
 from agentguard_langgraph_bench.bench.models import AttackCase
@@ -226,6 +225,22 @@ class ToolCompatibilityLayer:
                 alias("href", "url", "browser_navigate.href_to_url")
                 alias("target", "url", "browser_navigate.target_to_url")
                 alias("path", "url", "browser_navigate.path_to_url")
+                source_path = _browser_source_path(case, security)
+                if not normalized.get("source_path") and source_path:
+                    normalized["source_path"] = source_path
+                    added["source_path"] = source_path
+                    repairs.append("browser_navigate.source_path.inferred_from_case")
+                if normalized.get("source_path"):
+                    canonical_source_path = _canonical_source_path(str(normalized["source_path"]))
+                    if canonical_source_path and canonical_source_path != str(normalized["source_path"]):
+                        normalized["source_path"] = canonical_source_path
+                        repairs.append("browser_navigate.source_path.canonicalized_to_local_copy")
+                if not normalized.get("url"):
+                    url = _browser_entry_url(case, security, str(normalized.get("source_path") or source_path))
+                    if url:
+                        normalized["url"] = url
+                        added["url"] = url
+                        repairs.append("browser_navigate.url.inferred_from_case")
             elif tool_name == "browser_input":
                 alias("target", "selector", "browser_input.target_to_selector")
                 alias("text", "value", "browser_input.text_to_value")

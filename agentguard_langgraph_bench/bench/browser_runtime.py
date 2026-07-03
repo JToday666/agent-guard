@@ -740,6 +740,13 @@ class _RealBrowserRuntimeCore:
                 executable_path = self._chromium_executable_path()
                 if executable_path:
                     launch_kwargs["executable_path"] = str(executable_path)
+                else:
+                    expected = Path(str(getattr(browser_type, "executable_path", "") or ""))
+                    if not expected.is_file() or not os.access(expected, os.X_OK):
+                        raise BrowserRuntimeError(
+                            "missing_playwright_chromium: Playwright Chromium executable is missing or not executable; "
+                            "run `python -m playwright install chromium` or fix PLAYWRIGHT_BROWSERS_PATH."
+                        )
             browser = browser_type.launch(**launch_kwargs)
             context = browser.new_context(
                 java_script_enabled=True,
@@ -768,9 +775,7 @@ class _RealBrowserRuntimeCore:
             shutil.rmtree(starting_dir, ignore_errors=True)
             raise
 
-        if artifact_dir.exists():
-            shutil.rmtree(artifact_dir)
-        starting_dir.rename(artifact_dir)
+        self._promote_artifact_dir(starting_dir, artifact_dir)
         steps_dir = artifact_dir / "steps"
         screenshot = self.screenshot_dir / f"{_safe_artifact_name(session_id)}_start.png"
         start_step = steps_dir / "step_000_start.png"
@@ -1346,6 +1351,30 @@ class _RealBrowserRuntimeCore:
         if artifact_dir.exists():
             shutil.rmtree(artifact_dir)
         artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    def _promote_artifact_dir(self, starting_dir: Path, artifact_dir: Path) -> None:
+        replay_root = (self.sandbox_dir / "browser" / "replay_artifacts").resolve()
+        for candidate in (starting_dir, artifact_dir):
+            resolved = candidate.resolve()
+            if resolved == replay_root or replay_root not in resolved.parents:
+                raise BrowserRuntimeError(f"refusing to promote non-replay artifact directory: {candidate}")
+        stale_dir: Path | None = None
+        if artifact_dir.exists():
+            stale_dir = artifact_dir.parent / f".stale-{_safe_artifact_name(artifact_dir.name)}-{uuid.uuid4().hex}"
+            artifact_dir.rename(stale_dir)
+        try:
+            starting_dir.rename(artifact_dir)
+        except Exception:
+            if stale_dir is not None and stale_dir.exists() and not artifact_dir.exists():
+                try:
+                    stale_dir.rename(artifact_dir)
+                    stale_dir = None
+                except OSError:
+                    pass
+            raise
+        finally:
+            if stale_dir is not None and stale_dir.exists():
+                shutil.rmtree(stale_dir, ignore_errors=True)
 
     def _require_session(self, session_id: str) -> RealBrowserSession:
         session = self._sessions.get(session_id)

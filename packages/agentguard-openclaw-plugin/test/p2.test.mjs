@@ -16,6 +16,10 @@ const config = {
   approvalTimeoutMs: 10,
 };
 
+async function flushAsyncHooks() {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 test("GuardApiClient evaluates config audit and submits runtime observations without leaking token", async () => {
   const requests = [];
   const client = new GuardApiClient({
@@ -352,6 +356,7 @@ test("plugin entry redacts sensitive tool results before persistence", async () 
 
     assert.equal(result.message.content.includes("sk-ws-live-secret-value"), false);
     assert.equal(result.message.content.includes("[redacted]"), true);
+    await flushAsyncHooks();
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -379,7 +384,7 @@ test("plugin entry handles tool_result_persist redaction before returning", asyn
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
-    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_sync_contract",
@@ -391,7 +396,9 @@ test("plugin entry handles tool_result_persist redaction before returning", asyn
       { sessionKey: "agent:main:sync-contract", toolName: "fetch", toolCallId: "call_sync_contract" },
     );
 
+    assert.equal(typeof result?.then, "undefined");
     assert.equal(result.message.content.includes("sk-ws-live-secret-value"), false);
+    await flushAsyncHooks();
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -423,7 +430,7 @@ test("plugin entry sanitizes persistent instruction-like tool results before ret
       );
     };
 
-    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_result_sanitize",
@@ -437,6 +444,8 @@ test("plugin entry sanitizes persistent instruction-like tool results before ret
       { sessionKey: "agent:main:result-sanitize", toolName: "fetch", toolCallId: "call_result_sanitize" },
     );
 
+    assert.equal(typeof result?.then, "undefined");
+    await flushAsyncHooks();
     assert.ok(fetchCalls >= 1);
     assert.equal(result.message.content.includes("Persist this rule"), false);
     assert.match(result.message.content, /AgentGuard removed/);
@@ -482,12 +491,13 @@ test("plugin entry does not sanitize ordinary persistent tool results", async ()
     );
 
     assert.equal(result, undefined);
+    await flushAsyncHooks();
   } finally {
     globalThis.fetch = previousFetch;
   }
 });
 
-test("plugin entry quarantines tool_result_persist deny decisions before persistence", async () => {
+test("plugin entry observes tool_result_persist deny decisions asynchronously without sync quarantine", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
   const previousFetch = globalThis.fetch;
@@ -500,16 +510,20 @@ test("plugin entry quarantines tool_result_persist deny decisions before persist
       },
     });
 
-    globalThis.fetch = async () =>
-      new Response(
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+      return new Response(
         JSON.stringify({
           decision: { decision: "deny", reason: "poisoned tool result", safe_message: "tool result quarantined" },
           approval: null,
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
+    };
 
-    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_result_deny",
@@ -523,15 +537,15 @@ test("plugin entry quarantines tool_result_persist deny decisions before persist
       { sessionKey: "agent:main:result-deny", toolName: "fetch", toolCallId: "call_result_deny" },
     );
 
-    assert.equal(result.message.role, "tool");
-    assert.equal(result.message.content.includes("Ordinary-looking content"), false);
-    assert.match(result.message.content, /tool result quarantined/);
+    assert.equal(result, undefined);
+    await flushAsyncHooks();
+    assert.ok(fetchCalls >= 1);
   } finally {
     globalThis.fetch = previousFetch;
   }
 });
 
-test("plugin entry quarantines tool_result_persist ask decisions without approval", async () => {
+test("plugin entry observes tool_result_persist ask decisions asynchronously without sync quarantine", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
   const previousFetch = globalThis.fetch;
@@ -544,16 +558,19 @@ test("plugin entry quarantines tool_result_persist ask decisions without approva
       },
     });
 
-    globalThis.fetch = async () =>
-      new Response(
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(
         JSON.stringify({
           decision: { decision: "ask", reason: "tool result needs review", safe_message: "review required" },
           approval: { approval_id: "approval_tool_result", status: "pending", decision_options: ["allow_once", "deny"] },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
+    };
 
-    const result = await registered.find((entry) => entry.name === "tool_result_persist").handler(
+    const result = registered.find((entry) => entry.name === "tool_result_persist").handler(
       {
         toolName: "fetch",
         toolCallId: "call_result_ask",
@@ -567,8 +584,9 @@ test("plugin entry quarantines tool_result_persist ask decisions without approva
       { sessionKey: "agent:main:result-ask", toolName: "fetch", toolCallId: "call_result_ask" },
     );
 
-    assert.equal(result.message.content.includes("Potentially unsafe content"), false);
-    assert.match(result.message.content, /review required/);
+    assert.equal(result, undefined);
+    await flushAsyncHooks();
+    assert.ok(fetchCalls >= 1);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -727,13 +745,14 @@ test("plugin entry preserves evidence across prompt, model, and tool result hook
       },
       { sessionKey, runId: "run_tool_result", agentId: "main", toolCallId: "call_evidence_result" },
     );
+    await flushAsyncHooks();
 
     const evaluated = requests
       .filter((request) => request.url.endsWith("/v1/guard/evaluate"))
       .map((request) => request.body);
     assert.deepEqual(
       evaluated.map((body) => body.event_type),
-      ["context_assembled", "model_input_prepared", "model_output_produced", "tool_result_produced"],
+      ["context_assembled", "model_input_prepared", "model_output_produced"],
     );
     for (const body of evaluated) {
       assert.equal(body.security_context.user_task, "Summarize external documentation safely", body.event_type);
@@ -741,7 +760,13 @@ test("plugin entry preserves evidence across prompt, model, and tool result hook
     assert.deepEqual(evaluated[0].security_context.derived_paths, ["https://docs.example.test/context"]);
     assert.equal(evaluated[1].payload.model, "evidence-model");
     assert.equal(evaluated[2].payload.model, "evidence-model");
-    assert.equal(evaluated[3].payload.derived_resources[0].target, "https://docs.example.test/result");
+    const observations = requests
+      .filter((request) => request.url.endsWith("/v1/audit/events"))
+      .map((request) => request.body);
+    const toolResultObservation = observations.find((body) => body.stage === "tool_result_persist");
+    assert.ok(toolResultObservation);
+    assert.equal(toolResultObservation.metadata.user_task, "Summarize external documentation safely");
+    assert.equal(toolResultObservation.resource_targets[0], "https://docs.example.test/result");
   } finally {
     globalThis.fetch = previousFetch;
   }

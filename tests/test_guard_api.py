@@ -503,7 +503,9 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
         headers={"Authorization": "Bearer adapter-secret"},
     )
     assert wait_response.status_code == 200
-    assert wait_response.json()["decision"] == "allow_once"
+    wait_body = wait_response.json()
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "human"
 
 
 def test_llm_auto_approval_does_not_review_deny_decisions() -> None:
@@ -570,7 +572,16 @@ def test_llm_auto_approval_allows_medium_risk_ask_once() -> None:
     assert approval.llm_review is not None
     assert approval.llm_review.status == "resolved"
     assert approval.llm_review.decision == "allow_once"
-    assert wait_response.json() == {"status": "resolved", "decision": "allow_once"}
+    assert body["approval"]["llm_review"]["status"] == "resolved"
+    assert body["approval"]["llm_review"]["decision"] == "allow_once"
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "llm"
+    assert wait_body["resolved_by"] == "llm-approval"
+    assert wait_body["resolution_reason"] == "External message contains no sensitive data and is bounded to one send."
+    assert wait_body["llm_review"]["status"] == "resolved"
+    assert wait_body["llm_review"]["decision"] == "allow_once"
     assert len(reviewer.inputs) == 1
     assert set(reviewer.inputs[0]) == {"evidence", "reason", "resource", "risk_score", "runtime", "severity"}
     assert reviewer.inputs[0]["evidence"]["event"]["trace_id"] == "trace_llm_allow_once"
@@ -609,7 +620,12 @@ def test_llm_auto_approval_can_deny_ask() -> None:
     assert approval.llm_review is not None
     assert approval.llm_review.status == "resolved"
     assert approval.llm_review.decision == "deny"
-    assert wait_response.json() == {"status": "resolved", "decision": "deny"}
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "deny"
+    assert wait_body["resolution_source"] == "llm"
+    assert wait_body["resolved_by"] == "llm-approval"
+    assert wait_body["llm_review"]["decision"] == "deny"
 
 
 def test_llm_auto_approval_keeps_high_risk_allow_once_pending() -> None:
@@ -2075,7 +2091,10 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
     assert resolve_response.status_code == 200
     assert resolve_response.json()["decision"] == "allow_once"
     assert wait_response.status_code == 200
-    assert wait_response.json() == {"status": "resolved", "decision": "allow_once"}
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "human"
 
 
 def test_audit_events_plural_write_and_filter_for_dashboard() -> None:
@@ -2236,7 +2255,10 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
 
     assert resolve_response.status_code == 200
     assert wait_response.status_code == 200
-    assert wait_response.json() == {"status": "resolved", "decision": "allow_once"}
+    wait_body = wait_response.json()
+    assert wait_body["status"] == "resolved"
+    assert wait_body["decision"] == "allow_once"
+    assert wait_body["resolution_source"] == "human"
 
 
 def _login_dashboard(client: TestClient, *, control_token: str = "demo-control-token") -> None:

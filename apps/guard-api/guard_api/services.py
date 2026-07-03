@@ -567,6 +567,11 @@ class EvaluationService:
                     approval_id=approval.approval_id,
                     status=approval.status,
                     decision_options=approval.decision_options,
+                    decision=approval.decision,
+                    resolution_source=approval.resolution_source,
+                    resolved_by=approval.resolved_by,
+                    resolution_reason=approval.resolution_reason,
+                    llm_review=approval.llm_review,
                 )
                 if approval is not None
                 else None

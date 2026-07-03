@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from threading import Lock, Thread
 from typing import Any
 from urllib.parse import urlparse
@@ -28,6 +28,7 @@ class BenchmarkToolServer:
         self._server: HTTPServer | None = None
         self._thread: Thread | None = None
         self._active_case_context: dict[str, Any] | None = None
+        self._terminal_by_case: dict[str, dict[str, Any]] = {}
         self._compatibility_layer = ToolCompatibilityLayer(getattr(gateway.tool_runtime, "sandbox_dir", None))
 
     @property
@@ -71,8 +72,7 @@ class BenchmarkToolServer:
             def do_POST(self) -> None:
                 path = urlparse(self.path).path
                 if path == "/reset-case":
-                    with outer._lock:
-                        outer._events.clear()
+                    outer.reset_case(clear_context=True)
                     self._send_json({"ok": True})
                     return
                 if path.startswith("/tools/"):
@@ -93,6 +93,26 @@ class BenchmarkToolServer:
                         call_id=call_id,
                         config=(case_context or {}).get("config"),
                     )
+                    case_id = str(
+                        compatibility.case_tool_policy.get("case_id")
+                        or security.get("case_id")
+                        or (case_context or {}).get("case_id")
+                        or ""
+                    )
+                    terminal = outer._terminal_for_case(case_id)
+                    if terminal is not None:
+                        result_payload = outer._terminal_not_completed_result(
+                            tool_name=tool_name,
+                            call_id=call_id or f"terminal_{len(outer.events()) + 1}",
+                            trace_id=trace_id,
+                            case_id=case_id,
+                            terminal=terminal,
+                        )
+                        result_payload = tool_result_with_compatibility(result_payload, compatibility)
+                        with outer._lock:
+                            outer._events.append(result_payload)
+                        self._send_json(agent_visible_tool_result(result_payload))
+                        return
                     if tool_name in BROWSER_TOOLS and not compatibility.case_tool_policy.get("browser_available"):
                         result_payload = blocked_runtime_policy_result(
                             tool_name=tool_name,
@@ -153,6 +173,7 @@ class BenchmarkToolServer:
                             )
                     with outer._lock:
                         outer._events.append(dumped)
+                        outer._maybe_latch_terminal_locked(case_id, dumped)
                     self._send_json(agent_visible_tool_result(dumped))
                     return
                 self._send_json({"ok": False, "error": "not found"}, status=404)
@@ -168,13 +189,27 @@ class BenchmarkToolServer:
 
             def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
                 body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError) as exc:
+                    outer._record_server_event(
+                        {
+                            "tool_name": "_server",
+                            "call_id": "",
+                            "executed": False,
+                            "blocked": False,
+                            "decision": None,
+                            "status": "client_disconnected",
+                            "error": type(exc).__name__,
+                            "path": self.path,
+                        }
+                    )
 
-        self._server = HTTPServer((self.host, self.port), Handler)
+        self._server = ThreadingHTTPServer((self.host, self.port), Handler)
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
@@ -204,15 +239,75 @@ class BenchmarkToolServer:
     def case_context(self) -> dict[str, Any]:
         return dict(self._active_case_context or {})
 
-    def reset_case(self, *, clear_context: bool = False) -> None:
+    def reset_case(self, *, clear_context: bool = True) -> None:
         with self._lock:
             self._events.clear()
+            self._terminal_by_case.clear()
         if clear_context:
             self.clear_case_context()
 
     def events(self) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._events)
+
+    def _record_server_event(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            self._events.append(dict(event))
+
+    def _terminal_for_case(self, case_id: str) -> dict[str, Any] | None:
+        if not case_id:
+            return None
+        with self._lock:
+            terminal = self._terminal_by_case.get(case_id)
+            return dict(terminal) if terminal is not None else None
+
+    def _maybe_latch_terminal_locked(self, case_id: str, result: dict[str, Any]) -> None:
+        if not case_id or case_id in self._terminal_by_case:
+            return
+        if result.get("runtime_policy_blocked"):
+            return
+        if not result.get("blocked"):
+            return
+        if result.get("terminal_reason") == "security_block_terminal":
+            return
+        reason = str(result.get("terminal_reason") or result.get("block_semantics") or "security_block")
+        self._terminal_by_case[case_id] = {
+            "case_id": case_id,
+            "call_id": result.get("call_id"),
+            "tool_name": result.get("tool_name"),
+            "decision": result.get("decision") or "deny",
+            "terminal_reason": reason,
+        }
+
+    def _terminal_not_completed_result(
+        self,
+        *,
+        tool_name: str,
+        call_id: str,
+        trace_id: str,
+        case_id: str,
+        terminal: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "tool_name": tool_name,
+            "call_id": call_id,
+            "executed": False,
+            "blocked": True,
+            "decision": terminal.get("decision") or "deny",
+            "status": "not_completed",
+            "result": None,
+            "safe_message": "The requested action was not completed because this case already reached a terminal security block.",
+            "side_effects": [],
+            "event": {"trace_id": trace_id, "case_id": case_id, "arguments": {}},
+            "audit_event": None,
+            "runtime_terminal": True,
+            "terminal_reason": "security_block_terminal",
+            "block_semantics": "security_block_terminal",
+            "counts_as_effective_block": False,
+            "terminal_from_call_id": terminal.get("call_id"),
+            "terminal_from_tool_name": terminal.get("tool_name"),
+            "terminal_from_reason": terminal.get("terminal_reason"),
+        }
 
     def stop(self) -> None:
         if self._server is not None:

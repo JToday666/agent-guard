@@ -66,6 +66,9 @@ def test_gateway_wait_mode_executes_original_call_after_allow_once(tmp_path) -> 
     assert result.tool_executed_after_approval is True
     assert result.block_semantics == "approval_allow_continue"
     assert result.counts_as_effective_block is False
+    assert result.approval_resolution == {"status": "resolved", "decision": "allow_once"}
+    assert result.runtime_terminal is False
+    assert result.terminal_reason is None
     assert guard.wait_calls[0][0] == "app_wait"
     assert 0 < (guard.wait_calls[0][1] or 0) <= 1.0
     assert (tmp_path / "files" / "reports" / "approved.txt").read_text(encoding="utf-8") == "approved"
@@ -73,7 +76,16 @@ def test_gateway_wait_mode_executes_original_call_after_allow_once(tmp_path) -> 
 
 def test_gateway_wait_mode_blocks_after_consumed_deny(tmp_path) -> None:
     ensure_sandbox(tmp_path)
-    guard = _AskApprovalGuard({"status": "resolved", "decision": "deny"})
+    guard = _AskApprovalGuard(
+        {
+            "status": "resolved",
+            "decision": "deny",
+            "resolution_source": "llm",
+            "resolved_by": "llm-approval",
+            "resolution_reason": "Reviewer denied the action.",
+            "llm_review": {"status": "resolved", "decision": "deny", "reason": "unsafe"},
+        }
+    )
     gateway = GuardedToolGateway(
         guard_adapter=guard,
         tool_runtime=MockToolRegistry(tmp_path),
@@ -96,6 +108,10 @@ def test_gateway_wait_mode_blocks_after_consumed_deny(tmp_path) -> None:
     assert result.tool_executed_after_approval is False
     assert result.block_semantics == "approval_denied_before_harm"
     assert result.counts_as_effective_block is True
+    assert result.approval_resolution["resolution_source"] == "llm"
+    assert result.approval_resolution["llm_review"]["decision"] == "deny"
+    assert result.runtime_terminal is True
+    assert result.terminal_reason == "approval_denied_before_harm"
     assert not (tmp_path / "files" / "reports" / "denied.txt").exists()
 
 
@@ -123,6 +139,9 @@ def test_gateway_wait_mode_timeout_is_not_effective_block(tmp_path) -> None:
     assert result.approval_decision == "timeout"
     assert result.block_semantics == "approval_timeout_block"
     assert result.counts_as_effective_block is False
+    assert result.approval_resolution["status"] == "timeout"
+    assert result.runtime_terminal is True
+    assert result.terminal_reason == "approval_timeout_block"
     assert guard.wait_calls
     assert not (tmp_path / "files" / "reports" / "timeout.txt").exists()
 

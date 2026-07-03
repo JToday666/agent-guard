@@ -17,7 +17,6 @@ import {
   buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
   buildToolCallGuardEvent,
-  buildToolResultGuardEvent,
 } from "./mapping.js";
 import {
   containsSensitiveCredentialText,
@@ -293,7 +292,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
 
     api.on(
       "tool_result_persist",
-      (async (event: object, context: object) => {
+      ((event: object, context: object) => {
         if (isDisabled(config)) {
           return undefined;
         }
@@ -304,10 +303,19 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           message = asRecord(event).message;
           const redacted = redactUnknownCredentials(message);
           const sanitized = sanitizePersistentInstructionPoisoning(redacted.value);
-          const decision = await client.evaluate(buildToolResultGuardEvent({ ...cached.event, message: redacted.value }, cached.context));
-          if (shouldRuntimeBlock(config, decision)) {
-            return { message: quarantinedToolResultMessage(message, safeDecisionMessage(decision)) as never };
-          }
+          void client
+            .submitRuntimeObservation(
+              buildRuntimeObservationAuditEvent(
+                "tool_result_persist",
+                { ...cached.event, message: sanitized.value },
+                cached.context,
+              ),
+            )
+            .catch((error) => {
+              logDiagnostic(config, "tool_result_persist observation failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
           if (isEnforcing(config) && (redacted.changed || sanitized.changed)) {
             return { message: sanitized.value as never };
           }

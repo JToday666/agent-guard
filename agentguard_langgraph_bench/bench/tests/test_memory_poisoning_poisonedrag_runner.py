@@ -105,6 +105,10 @@ def test_dynamic_poisonedrag_runner_defense_off_hits_incorrect_answer(tmp_path):
     answer = next(item for item in row["tool_calls"] if item["tool_name"] == "rag_answer")
     assert retrieve["result"]["poison_context_count"] == 5
     assert answer["result"]["contexts"]
+    assert answer["event"]["arguments"]["source_trust"] == retrieve["result"]["source_trust"]
+    assert answer["result"]["source_trust"] == retrieve["result"]["source_trust"]
+    assert answer["result"]["context_docs"] == retrieve["result"]["context_docs"]
+    assert answer["result"]["rag_answer_provenance"]["retrieval_tool_call_id"] == retrieve["call_id"]
     assert row["attack_success"] in {True, False}
     assert (tmp_path / "sandbox" / "rag" / "queries.jsonl").exists()
     assert (tmp_path / "sandbox" / "rag" / "answers.jsonl").exists()

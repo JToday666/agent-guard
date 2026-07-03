@@ -723,11 +723,23 @@ def create_app(
             raise ApiAuthError("APPROVAL_NOT_FOUND", status_code=404)
         if approval.requesting_principal_id != context.principal_id:
             raise ApiAuthError("APPROVAL_WAIT_DENIED", status_code=403)
-        if approval.status == "resolved":
-            return {"status": "resolved", "decision": approval.decision}
-        return {"status": approval.status, "decision": "deny" if approval.status != "pending" else None}
+        return _approval_wait_payload(approval)
 
     return app
+
+
+def _approval_wait_payload(approval: Any) -> dict[str, Any]:
+    decision = approval.decision
+    if approval.status not in {"pending", "resolved"} and decision is None:
+        decision = "deny"
+    return {
+        "status": approval.status,
+        "decision": decision,
+        "resolution_source": approval.resolution_source,
+        "resolved_by": approval.resolved_by,
+        "resolution_reason": approval.resolution_reason,
+        "llm_review": approval.llm_review.model_dump() if approval.llm_review is not None else None,
+    }
 
 
 app = create_app()

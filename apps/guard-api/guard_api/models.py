@@ -93,6 +93,11 @@ class EvaluationApproval(BaseModel):
     approval_id: str
     status: str
     decision_options: list[ApprovalResolution]
+    decision: ApprovalResolution | None = None
+    resolution_source: str | None = None
+    resolved_by: str | None = None
+    resolution_reason: str | None = None
+    llm_review: LlmApprovalReview | None = None
 
 
 class GuardEvaluationResponse(BaseModel):

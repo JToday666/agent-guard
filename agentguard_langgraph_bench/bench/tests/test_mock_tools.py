@@ -170,6 +170,42 @@ def test_mock_tools_record_browser_mcp_and_rag_side_effects(tmp_path):
     assert (tmp_path / "rag" / "answers.jsonl").exists()
 
 
+def test_real_browser_navigate_auto_starts_missing_session(monkeypatch, tmp_path):
+    ensure_sandbox(tmp_path)
+    tools = MockToolRegistry(tmp_path, browser_mode="real")
+
+    class FakeRuntime:
+        def __init__(self):
+            self.starts = []
+            self.navigations = []
+
+        def start(self, *, session_id, url, source_path):
+            self.starts.append({"session_id": session_id, "url": url, "source_path": source_path})
+            return {"session_id": session_id, "url": url, "source_path": source_path, "real_browser": True}
+
+        def navigate(self, *, session_id, url):
+            self.navigations.append({"session_id": session_id, "url": url})
+            return {"session_id": session_id, "url": url, "real_browser": True, "step_screenshot": "step.png"}
+
+    fake_runtime = FakeRuntime()
+    monkeypatch.setattr(tools, "_real_browser_runtime", lambda: fake_runtime)
+
+    result = tools.browser_navigate(
+        "http://127.0.0.1:18083/local/page.html",
+        session_id="PI-001",
+        source_path="agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-001/index.html",
+    )
+
+    assert fake_runtime.starts[0]["session_id"] == "PI-001"
+    assert fake_runtime.starts[0]["source_path"] == (
+        "agentguard_langgraph_bench/bench/datasets/instrumentation/client_workflows/PI-001/index.html"
+    )
+    assert fake_runtime.starts[0]["url"]
+    assert fake_runtime.navigations == [{"session_id": "PI-001", "url": fake_runtime.starts[0]["url"]}]
+    assert result["real_browser"] is True
+    assert result["session_id"] == "PI-001"
+
+
 def test_rag_answer_records_only_raw_agent_answer(tmp_path):
     ensure_sandbox(tmp_path)
     tools = MockToolRegistry(tmp_path)
