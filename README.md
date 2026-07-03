@@ -1,58 +1,87 @@
 # AgentGuard
 
-AgentGuard 是面向大模型智能体的运行时行为监督与攻击检测系统。项目目标是让接入工具、文件、API、代码执行和记忆能力的 Agent 在执行外部动作前具备可审计、可解释、可阻断的安全控制。
+AgentGuard 是面向大模型智能体的运行时行为监督、攻击检测与审计系统。它不替代基础模型或 Agent 框架，而是在智能体准备执行外部动作时，将工具调用、消息发送、模型输入输出、工具结果和记忆写入等行为转换为统一安全事件，并在副作用发生前完成判定、阻断、审批和留证。
 
-## 架构定位
+本仓库可作为竞赛材料提交：代码、可执行入口、Dashboard、OpenClaw 插件、LangGraph 评测靶场和必要说明均在仓库内。若提交压缩包时移除顶层历史文档目录、报告目录和单独风险报告，评委仍可通过本文件、部署说明和各包 README 理解与运行项目。
 
-采用 **四层目标架构**：
+## 核心架构
 
-- **Runtime Adapter**：接入 LangGraph、OpenClaw 或通用工具运行时，负责事件映射和执行控制。
-- **Guard API / Control Plane**：统一 HTTP 入口，负责鉴权、策略管理、审计、告警、审批、指标和调用链状态。
-- **agentguard-core**：无状态安全判定库，负责事件规范化、检测器、策略匹配、风险评分和 `GuardDecision` 输出。
-- **Dashboard / Evaluation**：监督展示、审批处理、指标分析和 AttackBench 评测。
+AgentGuard 采用四层结构：
 
-LangGraph 和 OpenClaw 是四层架构下的运行时接入与演示场景，不再作为总体架构层级。
+| 层级 | 主要目录 | 职责 |
+| ---- | -------- | ---- |
+| Runtime Adapter | `packages/agentguard-langgraph-adapter/`、`packages/agentguard-openclaw-plugin/`、`agentguard_langgraph_bench/adapters/` | 接入 LangGraph、OpenClaw 或外部 Agent，把运行时行为映射为 GuardEvent，并执行 `allow`、`deny`、`ask` 决策。 |
+| Guard API / Control Plane | `apps/guard-api/` | 提供 HTTP 入口、鉴权、策略快照、审计入库、审批、指标、Trace、插件状态和 Dashboard 查询接口。 |
+| agentguard-core | `packages/agentguard-core/` | 无状态安全判定内核，负责事件规范化、检测器、策略匹配、风险评分和 GuardDecision 输出。 |
+| Dashboard / Evaluation | `apps/dashboard/`、`agentguard_langgraph_bench/bench/` | 展示审计、审批、证据链、评测指标，并运行 AttackBench 风格攻击样本。 |
 
-## 快速安装
+最小闭环：
 
-以下命令均在仓库根目录执行。首次准备依赖：
+```text
+AttackCase
+-> Runtime Adapter
+-> Guard API / Control Plane
+-> agentguard-core.evaluate(...)
+-> GuardDecision
+-> AuditEvent / Approval / Trace
+-> Dashboard / CLI / Evaluation report
+```
+
+## 已实现能力
+
+- 工具执行前拦截：文件读写、邮件外发、API 调用、代码执行、MCP 工具调用、消息发送和记忆写入等行为进入统一判定链路。
+- 三态决策：`allow` 直接放行，`deny` 阻断副作用，`ask` 进入人工审批或受限自动审批。
+- 可解释检测：覆盖敏感资源、外发泄露、工具画像不一致、任务偏离、危险命令、提示注入、模型输出泄露、环境污染、记忆污染和凭证风险。
+- 审计证据：Guard API 记录 AuditEvent、决策原因、规则命中、风险分、Trace ID、审计哈希链和 provenance graph。
+- Dashboard：提供总览、调查、证据链、审批、评测和系统状态页面。
+- 评测靶场：内置 LangGraph demo agent、OpenClaw 外部 Agent 适配、Mock Tools、浏览器和 MCP/RAG 沙箱。
+- OpenClaw 插件：hook-only security plugin，默认注册 22 个 hook，并对关键执行阶段 fail closed。
+
+## 数据集规模
+
+当前仓库内 AttackCase JSONL 共 112 条：
+
+| 数据集 | 用例数 |
+| ------ | -----: |
+| 主攻击与对照样本 | 100 |
+| PoisonedRAG 扩展样本 | 12 |
+
+主样本覆盖 `prompt_injection`、`tool_hijacking`、`memory_poisoning`、`file_exfiltration`、`agent_abuse` 和 `benign`。PoisonedRAG 扩展样本用于检索污染与记忆污染专项验证。
+
+## 环境准备
+
+要求：
+
+- Python 3.12 或更新版本，使用 `uv` 管理依赖和命令。
+- Node 24.18.0 和 pnpm 11.9.0。
+- PostgreSQL，用于 Guard API、审计、审批和指标存储。
+- 可选：OpenClaw 2026.6.6，用于真实 runtime plugin 验证。
+
+首次在仓库根目录准备依赖：
 
 ```bash
 uv sync
 pnpm install
-```
-
-创建本地后端配置，并确认配置的 PostgreSQL 用户和数据库已经存在：
-
-```bash
 cp .env.example .env
 ```
 
-`.env` 已被 Git 忽略，不得提交真实数据库密码、adapter token 或 control token。
-
-PostgreSQL 集成测试使用独立测试库，默认示例为：
-
-```dotenv
-AGENTGUARD_TEST_DATABASE_URL=postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
-```
-
-完整部署、安装、使用和故障排查说明见 [部署、安装与使用说明](docs/06_delivery/deployment_install_usage.md)。
+`.env` 只用于本机，不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。默认示例使用本地 PostgreSQL；正式演示前应确认 `AGENTGUARD_DATABASE_URL` 和 `AGENTGUARD_TEST_DATABASE_URL` 指向已存在的独立数据库。
 
 ## 本地真实 API 模式
 
-在第一个终端启动 Guard API。该命令会自动加载根 `.env`，无需显式传入 `--env-file`：
+第一个终端启动 Guard API：
 
 ```bash
 pnpm guard-api:dev
 ```
 
-在第二个终端启动 Dashboard：
+第二个终端启动 Dashboard：
 
 ```bash
 pnpm dashboard:dev
 ```
 
-在第三个终端加载 `.env` 并创建一次性 launch code：
+第三个终端加载 `.env` 并创建一次性 Dashboard 登录地址：
 
 ```bash
 set -a
@@ -61,13 +90,21 @@ set +a
 uv run agentguardctl launch
 ```
 
-命令会输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的完整地址。将该地址直接粘贴到目标浏览器后，Dashboard 使用 launch code 换取 browser session，并从地址栏移除 code。launch code 只能使用一次；VS Code 内置浏览器、外部浏览器和不同浏览器配置文件需要分别生成新地址。始终使用 `localhost`，不要与 `127.0.0.1` 混用，否则 cookie 不共享。
+命令输出形如 `http://localhost:5173/?launch_code=lc_xxx` 的地址。将该地址粘贴到浏览器后，Dashboard 会换取 HttpOnly browser session 并移除地址栏中的 code。launch code 只能使用一次；换浏览器、换浏览器配置文件或超时后需要重新生成。浏览器侧始终使用 `localhost:5173`，不要与 `127.0.0.1:5173` 混用。
 
-`agentguardctl launch` 只创建登录地址，不启动 Dashboard。如果浏览器显示 `ERR_CONNECTION_REFUSED localhost:5173`，先确认 `pnpm dashboard:dev` 正在运行。`pnpm guard-api:launch` 仍保留为兼容脚本。
+## Mock 模式
 
-## 无头 CLI
+只查看前端和演示页面时，可不启动 PostgreSQL 和 Guard API：
 
-无图形界面机器可以直接使用 CLI 验收 Guard API 和导出数据：
+```bash
+pnpm dashboard:dev:mock
+```
+
+打开终端输出的地址，默认是 `http://localhost:5173/`。Mock 模式使用本地场景数据，不建立 browser session，也不会自动切换到真实 API。
+
+## CLI 验收入口
+
+加载 `.env` 后可用 CLI 做无头验收：
 
 ```bash
 uv run agentguardctl health --check-db
@@ -76,50 +113,67 @@ uv run agentguardctl metrics --json
 uv run agentguardctl trace get <trace_id> --provenance
 uv run agentguardctl openclaw verify
 uv run agentguardctl eval run --help
-pnpm openclaw:plugin:e2e
 ```
 
-需要鉴权的命令读取 `AGENTGUARD_CONTROL_TOKEN`。CLI 默认连接 `AGENTGUARD_API_URL`，未设置时使用 `http://${AGENTGUARD_HOST:-127.0.0.1}:${AGENTGUARD_PORT:-8088}`。
+需要鉴权的命令读取 `AGENTGUARD_CONTROL_TOKEN`。CLI 默认连接 `AGENTGUARD_API_URL`；未设置时使用 `AGENTGUARD_HOST` 和 `AGENTGUARD_PORT`。
 
-OpenClaw E2E 会读取根 `.env`，触发 `before_tool_call`、`message_sending`、`before_install`、`tool_result_persist` 和 `session_start`，并输出 `/tmp/agentguard-openclaw-e2e-report.json` 与 `/tmp/agentguard-openclaw-e2e-acceptance-report.md`。
+## OpenClaw 验证入口
 
-## Mock 模式
-
-Mock 模式只需启动 Dashboard，不需要 PostgreSQL、Guard API、launch code 或 browser session：
+开发安装、验证和卸载 OpenClaw 插件：
 
 ```bash
-pnpm dashboard:dev:mock
+pnpm openclaw:plugin:install
+pnpm openclaw:plugin:verify
+pnpm openclaw:plugin:e2e
+pnpm openclaw:plugin:reliability
+pnpm openclaw:plugin:uninstall
 ```
 
-直接访问 `http://localhost:5173/`。该模式使用本地场景数据，不需要 PostgreSQL、Guard API、launch code 或 browser session。
+E2E 和 reliability 报告写入 `/tmp/agentguard-openclaw-*.json` 与 `/tmp/agentguard-openclaw-*.md`。插件的详细配置见 `packages/agentguard-openclaw-plugin/README.md`。
 
-## 开发入口
+## 靶场入口
 
-| 入口                                                                               | 说明                                              |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------- |
-| [docs/README.md](docs/README.md)                                                   | 完整文档地图和开发阅读路径                        |
-| [docs/06_delivery/deployment_install_usage.md](docs/06_delivery/deployment_install_usage.md) | 部署、安装、使用、无头 CLI 和故障排查             |
-| [docs/01_overview/architecture.md](docs/01_overview/architecture.md)               | 总体架构和运行链路                                |
-| [docs/02_core/interface_contract.md](docs/02_core/interface_contract.md)           | Guard API / Control Plane API、事件模型和决策契约 |
-| [docs/06_delivery/implementation_plan.md](docs/06_delivery/implementation_plan.md) | P0/P1/P2 开发顺序和验收标准                       |
+LangGraph / AttackBench 靶场可直接通过 runner 或 CLI 使用。常用入口：
 
-## 答辩入口
+```bash
+uv run agentguardctl eval run --help
+uv run python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langgraph_bench/bench/datasets/attack_cases --defense off
+uv run python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langgraph_bench/bench/datasets/attack_cases --defense on --fake-core
+```
 
-| 入口                                                                                                               | 说明                             |
-| ------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
-| [docs/00_requirements/requirement_traceability_matrix.md](docs/00_requirements/requirement_traceability_matrix.md) | 命题要求到模块和证据的追踪矩阵   |
-| [docs/05_redteam/attackbench.md](docs/05_redteam/attackbench.md)                                                   | 攻击样本、评测指标和 runner 设计 |
-| [docs/06_delivery/demo_script.md](docs/06_delivery/demo_script.md)                                                 | 防御前后对比演示脚本             |
+`--fake-core` 只用于验证 runner、沙箱和指标链路；真实防护效果应通过 Guard API 和当前策略链路验证。
 
-## 最小闭环
+## 推荐演示顺序
+
+1. 启动 Guard API 和 Dashboard，使用 launch code 登录真实 API 模式。
+2. 在 Dashboard 总览页确认健康状态、审计链、规则命中和指标。
+3. 运行一个攻击样本，展示工具执行前被阻断或进入审批。
+4. 在调查页查看命中规则、资源目标、风险原因和 Trace ID。
+5. 进入证据链页查看事件时间线、provenance graph 和审计完整性。
+6. 运行 OpenClaw E2E 或 AttackBench runner，展示跨运行时接入与批量评测能力。
+
+## 目录速览
 
 ```text
-AttackCase
-→ LangGraph Agent
-→ Runtime Adapter
-→ Guard API / Control Plane
-→ agentguard-core.evaluate(...)
-→ GuardDecision
-→ Control Plane state services
-→ Dashboard
+apps/
+  cli/                 # agentguardctl
+  guard-api/           # FastAPI Control Plane
+  dashboard/           # Vue Dashboard
+packages/
+  agentguard-core/     # 无状态安全判定库
+  agentguard-langgraph-adapter/
+  agentguard-openclaw-plugin/
+  agentguard-openclaw-bench-tools/
+agentguard_langgraph_bench/
+  bench/               # AttackCase、runner、沙箱、Mock Tools
+  adapter/             # 兼容导入路径
+  adapters/            # 外部 Agent adapter
+  demo_agent/          # LangGraph demo agent
+schemas/               # GuardEvent、GuardDecision、AuditEvent JSON Schema
+scripts/               # OpenClaw 和 LangGraph 辅助脚本
+tests/                 # 根项目测试
 ```
+
+## 提交包说明
+
+竞赛提交包建议保留本仓库源码、可执行入口、靶场数据、插件包、Dashboard 和本文件。顶层历史文档目录、报告目录和单独风险分析报告可作为论文或答辩材料单独提交，不需要放入可执行靶场压缩包。

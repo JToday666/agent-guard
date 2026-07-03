@@ -1,11 +1,51 @@
 # AgentGuard OpenClaw Plugin
 
-OpenClaw security plugin for AgentGuard. It registers P1 enforcement hooks
-(`before_tool_call`, `message_sending`) plus P2 config/provenance observation
-hooks. Enforcement hooks call Guard API and fail closed when Guard API is
-unavailable; observation hooks write audit/provenance evidence and fail open.
+`@agentguard/openclaw-plugin` 是 AgentGuard 的 OpenClaw runtime security plugin。它是 hook-only `definePluginEntry` 插件，不提供业务工具本身；插件负责在 OpenClaw 关键 hook 中构造 GuardEvent、调用 Guard API，并把 `allow`、`deny`、`ask` 映射为运行时控制结果。
 
-## Config
+## Hook 覆盖
+
+默认启用 22 个 hook：
+
+```text
+before_tool_call
+message_sending
+before_install
+before_prompt_build
+llm_input
+llm_output
+tool_result_persist
+message_received
+before_message_write
+before_agent_finalize
+gateway_start
+gateway_stop
+session_start
+session_end
+before_compaction
+after_compaction
+subagent_spawned
+subagent_ended
+model_call_started
+model_call_ended
+cron_changed
+resolve_exec_env
+```
+
+默认 fail-closed 阶段：
+
+```text
+before_tool_call
+message_sending
+before_install
+before_prompt_build
+llm_input
+```
+
+其他观察类 hook 以审计和证据记录为主，Guard API 不可用时不应阻断 OpenClaw 基础生命周期。
+
+## 配置
+
+OpenClaw plugin config 示例：
 
 ```json
 {
@@ -13,13 +53,17 @@ unavailable; observation hooks write audit/provenance evidence and fail open.
   "adapterToken": "<AGENTGUARD_ADAPTER_TOKEN>",
   "requestTimeoutMs": 5000,
   "approvalPollIntervalMs": 1000,
-  "approvalTimeoutMs": 120000
+  "approvalTimeoutMs": 120000,
+  "approvalWaitBudgetMs": 25000,
+  "diagnosticLogging": false
 }
 ```
 
-`adapterToken` can also be provided through `AGENTGUARD_ADAPTER_TOKEN`.
+`adapterToken` 也可以通过 `AGENTGUARD_ADAPTER_TOKEN` 提供。`llm_input` 和 `llm_output` 若需要访问对话内容，OpenClaw 配置中应允许对应 conversation access；仓库级开发安装脚本会写入所需设置。
 
-## Validation
+## 验证
+
+在仓库根目录运行：
 
 ```bash
 pnpm --filter @agentguard/openclaw-plugin build
@@ -27,65 +71,33 @@ pnpm --filter @agentguard/openclaw-plugin test
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 ```
 
-For local OpenClaw runtime validation, use the repository-level development
-installer:
+开发安装、验证、E2E、reliability 和卸载：
 
 ```bash
 pnpm openclaw:plugin:install
 pnpm openclaw:plugin:verify
-```
-
-The complete deployment, install, configuration, verification, uninstall, and
-troubleshooting guide is maintained in
-[`docs/03_adapters/openclaw_plugin_deployment.md`](../../docs/03_adapters/openclaw_plugin_deployment.md).
-
-`openclaw plugins validate --root ... --entry ...` in OpenClaw 2026.6.6
-validates simple tool plugin metadata exposed by `defineToolPlugin`. This
-package is a hook-only `definePluginEntry` plugin; if validate reports missing
-tool-plugin metadata, runtime validation should use install, inspect, doctor,
-gateway status, and hook-trigger tests.
-
-Expected runtime hooks after install:
-
-- P1 enforcement: `before_tool_call`, `message_sending`,
-  `before_prompt_build`, `llm_input`
-- P1 output/result containment: `llm_output`, `before_agent_finalize`,
-  `tool_result_persist`
-- P2 config gate: `before_install`
-- P2 observation: `gateway_start`, `gateway_stop`, `session_start`,
-  `session_end`, `before_compaction`, `after_compaction`, `subagent_spawned`,
-  `subagent_ended`, `model_call_started`, `model_call_ended`, `cron_changed`,
-  `resolve_exec_env`
-
-`llm_input` and `llm_output` require
-`plugins.entries.agentguard-security.hooks.allowConversationAccess=true` in the
-OpenClaw config. The repository-level development installer writes this setting.
-
-To remove the development install from the local OpenClaw profile:
-
-```bash
+pnpm openclaw:plugin:e2e
+pnpm openclaw:plugin:reliability
 pnpm openclaw:plugin:uninstall
 ```
 
-Dashboard/API acceptance uses the Dashboard/browser session cookie:
+`pnpm openclaw:plugin:e2e` 会读取根 `.env`，触发关键 hook，并输出 `/tmp/agentguard-openclaw-e2e-report.json` 和 `/tmp/agentguard-openclaw-e2e-acceptance-report.md`。
 
-```bash
-curl -s "http://127.0.0.1:8088/v1/audit/events?runtime=openclaw"
-curl -s "http://127.0.0.1:8088/v1/audit/integrity"
-curl -s "http://127.0.0.1:8088/v1/traces/<trace_id>/provenance"
-```
+`pnpm openclaw:plugin:reliability` 会对注册 hook 做重复触发，使用隔离 PostgreSQL 测试库，并输出 `/tmp/agentguard-openclaw-reliability-report.json` 和 `/tmp/agentguard-openclaw-reliability-acceptance-report.md`。
 
-Full hook reliability acceptance uses the isolated PostgreSQL test database
-from `AGENTGUARD_TEST_DATABASE_URL`:
+## 验收口径
 
-```bash
-pnpm openclaw:plugin:reliability
-```
+`openclaw plugins validate` 主要验证 simple tool plugin metadata。当前包是 hook-only plugin，如果该命令提示缺少 tool-plugin metadata，不应单独判定为失败。有效验收应以以下证据为准：
 
-The reliability runner triggers all 19 registered hooks 50 times each, starts a
-temporary Guard API pointed at the `_test` database, and writes:
+- `pnpm openclaw:plugin:verify` 成功。
+- OpenClaw runtime inspect 能看到 `agentguard-security` 已加载。
+- Guard API 收到 heartbeat、审计事件和 runtime adapter 状态。
+- `before_tool_call`、`message_sending`、`before_install`、`before_prompt_build`、`llm_input` 能按策略 fail closed。
+- Dashboard 或 CLI 能查询到 OpenClaw 相关 audit、trace 和 provenance 数据。
 
-```text
-/tmp/agentguard-openclaw-reliability-report.json
-/tmp/agentguard-openclaw-reliability-acceptance-report.md
-```
+## 边界
+
+- 插件不保存 Dashboard browser session。
+- 插件使用 adapter token，不使用 control token。
+- 插件不修改 AgentGuard Core 规则，不直接写数据库。
+- 插件不替代 OpenClaw 自身权限、沙箱、配置审计和安全扫描。
