@@ -22,6 +22,7 @@ from guard_api.models import (
     ConfigAuditFindingRecord,
     CredentialRecord,
     EvaluationRun,
+    LlmApprovalReview,
 )
 
 
@@ -213,7 +214,16 @@ class ControlPlaneStore(Protocol):
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         ...
 
-    def resolve_approval(self, approval_id: str, decision: str) -> ApprovalRequest:
+    def resolve_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        *,
+        resolution_source: str | None = None,
+        resolved_by: str | None = None,
+        resolution_reason: str | None = None,
+        llm_review: LlmApprovalReview | None = None,
+    ) -> ApprovalRequest:
         ...
 
     def expire_approval(self, approval_id: str) -> ApprovalRequest:
