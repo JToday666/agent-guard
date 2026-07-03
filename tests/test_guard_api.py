@@ -1104,7 +1104,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
     (
         "event",
         "expected_decision",
-        "expected_rule_id",
+        "expected_rule_ids",
         "expected_resource_targets",
         "expected_action_name",
     ),
@@ -1130,7 +1130,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P101_prompt_injection",
+            ["P101_prompt_injection"],
             ["web_001"],
             "context_assembled",
         ),
@@ -1151,7 +1151,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "ask",
-            "P101_prompt_injection",
+            ["P101_prompt_injection"],
             ["gpt-4.1-mini"],
             "model_input_prepared",
         ),
@@ -1172,7 +1172,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P102_jailbreak",
+            ["P102_jailbreak"],
             ["gpt-4.1-mini"],
             "model_input_prepared",
         ),
@@ -1193,7 +1193,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P102_jailbreak",
+            ["P102_jailbreak"],
             ["gpt-4.1-mini"],
             "model_output_produced",
         ),
@@ -1230,7 +1230,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "ask",
-            "P105_environment_poisoning",
+            ["P105_environment_poisoning"],
             ["https://docs.example.test/tool-result", "call_fetch_result"],
             "tool_result_produced",
         ),
@@ -1252,7 +1252,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P104_memory_poisoning",
+            ["P104_memory_poisoning"],
             ["user_profile/summary"],
             "memory_write_proposed",
         ),
@@ -1271,7 +1271,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "deny",
-            "P005_external_send",
+            ["P107_file_exfiltration", "P005_external_send"],
             ["external@example.com"],
             "message_send_proposed",
         ),
@@ -1290,7 +1290,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 },
             ),
             "ask",
-            "P005_external_send",
+            ["P005_external_send"],
             ["external@example.com"],
             "message_send_proposed",
         ),
@@ -1299,7 +1299,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
 def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     event: dict,
     expected_decision: str,
-    expected_rule_id: str,
+    expected_rule_ids: list[str],
     expected_resource_targets: list[str],
     expected_action_name: str,
 ) -> None:
@@ -1316,7 +1316,7 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert response.status_code == 200
     evaluation = response.json()
     assert evaluation["decision"]["decision"] == expected_decision
-    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == [expected_rule_id]
+    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == expected_rule_ids
     if expected_decision == "ask":
         assert evaluation["approval"] is not None
         approval_id = evaluation["approval"]["approval_id"]
@@ -1333,7 +1333,7 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert audit_event["event_type"] == event["event_type"]
     assert audit_event["decision"] == expected_decision
     assert audit_event["resource_targets"] == expected_resource_targets
-    assert audit_event["rule_hits"] == [expected_rule_id]
+    assert audit_event["rule_hits"] == expected_rule_ids
     assert audit_event["links"]["event_id"] == event["event_id"]
     assert audit_event["metadata"]["action_id"] == event["event_id"]
     assert audit_event["metadata"]["action_name"] == expected_action_name
@@ -1410,7 +1410,10 @@ def test_guard_evaluate_uses_injected_policy_bundle_sensitive_text_marker() -> N
     assert response.status_code == 200
     evaluation = response.json()
     assert evaluation["decision"]["decision"] == "deny"
-    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == ["P005_external_send"]
+    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == [
+        "P107_file_exfiltration",
+        "P005_external_send",
+    ]
 
 
 def test_guard_evaluate_uses_injected_policy_bundle_tool_profile() -> None:
