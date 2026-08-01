@@ -11,7 +11,9 @@ import {
 import { maskSensitiveText, redactSensitiveData } from "./data-redaction.ts";
 
 test("uses one Chinese vocabulary for security states", () => {
-  assert.equal(getDecisionLabel("deny"), "拒绝");
+  assert.equal(getDecisionLabel("deny"), "已阻断");
+  assert.equal(getDecisionLabel("ask"), "待审批");
+  assert.equal(getDecisionTone("deny"), "protective");
   assert.equal(getDecisionTone("ask"), "warning");
   assert.equal(getRiskSeverityLabel("critical"), "严重");
   assert.equal(getTraceStatusLabel("paused"), "等待审批");

@@ -1,9 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
-
-async function openResponsiveNavigation(page: Page) {
-  const menuButton = page.getByRole("button", { name: "菜单" });
-  if (await menuButton.isVisible()) await menuButton.click();
-}
+import { expect, test } from "@playwright/test";
 
 test("clicking a non-time event cell opens its evidence", async ({ page }) => {
   await page.goto("/investigations");
@@ -20,7 +15,7 @@ test("CSV export uses rule names without raw policy numbers", async ({ page }) =
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "导出 CSV" }).click(),
+    page.getByRole("button", { name: "导出当前筛选结果" }).click(),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("CSV 下载流不可用");
@@ -55,18 +50,18 @@ test("a missing event keeps the query and shows explicit feedback", async ({ pag
 
 test("approval route synchronization does not cancel navigation", async ({ page }) => {
   await page.goto("/approvals");
-  await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "系统" }).click();
+  await page.getByRole("link", { name: "系统状态" }).click();
 
   await expect(page).toHaveURL(/\/system$/);
   await page.waitForTimeout(400);
   await expect(page).toHaveURL(/\/system$/);
 });
 
-test("investigation search synchronization does not reopen a deactivated page", async ({ page }) => {
+test("investigation search synchronization does not reopen a deactivated page", async ({
+  page,
+}) => {
   await page.goto("/investigations?search=send");
-  await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "总览" }).click();
+  await page.getByRole("link", { name: "安全总览" }).click();
 
   await expect(page).toHaveURL(/\/overview$/);
   await page.waitForTimeout(400);
@@ -94,7 +89,9 @@ test("investigation selects preserve their closed and open states", async ({ pag
   await expect(menu).toBeVisible();
   await expect(menu).toHaveCSS("position", "absolute");
   await expect(menu).toHaveCSS("z-index", "40");
-  await expect(page.getByRole("option", { name: "全部" })).toHaveClass(/app-select__option--selected/);
+  await expect(page.getByRole("option", { name: "全部" })).toHaveClass(
+    /app-select__option--selected/,
+  );
 });
 
 test("investigation selects expose consistent combobox semantics", async ({ page }) => {
@@ -111,7 +108,7 @@ test("investigation select supports mouse selection and outside dismissal", asyn
   const runtimeSelect = page.getByRole("combobox", { name: /^运行时/ });
 
   await decisionSelect.click();
-  await page.getByRole("option", { name: "拒绝" }).click();
+  await page.getByRole("option", { name: "已阻断" }).click();
   await expect(page).toHaveURL(/decision=deny/);
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "false");
 
@@ -128,11 +125,11 @@ test("investigation select supports standard keyboard navigation", async ({ page
   await page.keyboard.press("ArrowDown");
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("End");
-  await expect(page.locator(".app-select__option--active")).toHaveText("放行");
+  await expect(page.locator(".app-select__option--active")).toHaveText("已放行");
   await page.keyboard.press("Home");
   await expect(page.locator(".app-select__option--active")).toHaveText("全部");
   await page.keyboard.press("ArrowUp");
-  await expect(page.locator(".app-select__option--active")).toHaveText("放行");
+  await expect(page.locator(".app-select__option--active")).toHaveText("已放行");
   await page.keyboard.press("Enter");
 
   await expect(page).toHaveURL(/decision=allow/);
@@ -165,10 +162,8 @@ test("investigation select closes when its KeepAlive page is deactivated", async
   const decisionSelect = page.getByRole("combobox", { name: /^决策/ });
   await decisionSelect.click();
 
-  await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "总览" }).click();
+  await page.getByRole("link", { name: "安全总览" }).click();
   await expect(page).toHaveURL(/\/overview$/);
-  await openResponsiveNavigation(page);
   await page.getByRole("link", { name: "事件调查", exact: true }).click();
   await expect(page).toHaveURL(/\/investigations$/);
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "false");

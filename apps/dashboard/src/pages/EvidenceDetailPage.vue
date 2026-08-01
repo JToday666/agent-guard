@@ -1,16 +1,23 @@
 <template>
-  <div class="evidence-detail" :class="{ 'evidence-detail--evidence': Boolean(selectedEvent) }">
-    <main class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
+  <div class="evidence-detail">
+    <section class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
       <header class="page-header">
         <div>
           <h1 id="trace-title">证据链</h1>
         </div>
-        <RouterLink class="page-action" to="/investigations">返回事件调查</RouterLink>
+        <div class="trace-header-actions">
+          <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+          <RouterLink class="page-action" to="/investigations">返回事件调查</RouterLink>
+        </div>
       </header>
-      <section v-if="traceDetailError && traceEvents.length" class="trace-detail-alert" role="status">
-        <strong>证据链加载失败</strong>
-        <p>{{ traceDetailError }}，当前显示已加载事件窗口中的证据。</p>
-      </section>
+      <InlineNotice
+        v-if="traceDetailError && traceEvents.length"
+        class="trace-detail-alert"
+        title="证据刷新未完成"
+        tone="warning"
+      >
+        <p>{{ traceDetailError }}</p>
+      </InlineNotice>
       <ErrorState
         v-if="traceDetailError && !traceEvents.length"
         :is-retrying="isTraceLoading"
@@ -19,16 +26,23 @@
       />
       <ErrorState
         v-else-if="store.status === 'error' && store.error"
-        :is-retrying="store.isRefreshing"
+        :is-retrying="store.isManualRefreshing"
         :message="store.error"
         @retry="store.refresh"
       />
       <LoadingState
-        v-else-if="(store.status === 'loading' && !store.events.length) || (isTraceLoading && !traceEvents.length)"
+        v-else-if="
+          (store.status === 'loading' && !store.events.length) ||
+          (isTraceLoading && !traceEvents.length)
+        "
       />
       <template v-else-if="trace">
         <MetricStrip :items="summaryItems" />
-        <section v-if="traceConclusion" class="trace-conclusion" aria-labelledby="trace-conclusion-title">
+        <section
+          v-if="traceConclusion"
+          class="trace-conclusion"
+          aria-labelledby="trace-conclusion-title"
+        >
           <header>
             <span>最终结论</span>
             <h2 id="trace-conclusion-title">{{ traceConclusion.title }}</h2>
@@ -41,9 +55,13 @@
             <div>
               <dt>命中规则</dt>
               <dd>
-                <template v-if="!traceConclusion.ruleHits.length"><span>未命中阻断规则</span></template>
+                <template v-if="!traceConclusion.ruleHits.length"
+                  ><span>未命中阻断规则</span></template
+                >
                 <template v-else
-                  ><code v-for="rule in traceConclusion.ruleHits" :key="rule">{{ ruleLabel(rule) }}</code></template
+                  ><code v-for="rule in traceConclusion.ruleHits" :key="rule">{{
+                    ruleLabel(rule)
+                  }}</code></template
                 >
               </dd>
             </div>
@@ -54,22 +72,6 @@
           </dl>
         </section>
         <div class="trace-body section-divider">
-          <section class="trace-provenance" aria-labelledby="provenance-title">
-            <header>
-              <div>
-                <h2 id="provenance-title">溯源图</h2>
-                <p>点击节点可定位对应事件证据</p>
-              </div>
-            </header>
-            <ProvenanceGraph
-              v-if="provenance"
-              :graph="provenance"
-              :selected-node-id="selectedProvenanceNodeId"
-              @select-node="handleSelectProvenanceNode"
-            />
-            <p v-else-if="provenanceError" class="provenance-error">溯源图加载失败：{{ provenanceError }}</p>
-            <p v-else class="provenance-placeholder">溯源图加载中…</p>
-          </section>
           <div class="trace-layout">
             <section class="trace-events" aria-labelledby="trace-events-title">
               <header>
@@ -102,7 +104,10 @@
                 <div>
                   <dt>最终状态</dt>
                   <dd>
-                    <StatusBadge :label="getTraceStatusLabel(trace.status)" :tone="getTraceStatusTone(trace.status)" />
+                    <StatusBadge
+                      :label="getTraceStatusLabel(trace.status)"
+                      :tone="getTraceStatusTone(trace.status)"
+                    />
                   </dd>
                 </div>
                 <div>
@@ -143,12 +148,31 @@
               >
             </aside>
           </div>
+
+          <section class="trace-provenance section-divider" aria-labelledby="provenance-title">
+            <header>
+              <div>
+                <h2 id="provenance-title">溯源关系</h2>
+                <p>以关系图补充时间线，点击节点可定位对应事件证据</p>
+              </div>
+            </header>
+            <InlineNotice v-if="provenanceError" title="溯源关系刷新未完成" tone="warning">
+              <p>{{ provenanceError }}</p>
+            </InlineNotice>
+            <ProvenanceGraph
+              v-if="provenance"
+              :graph="provenance"
+              :selected-node-id="selectedProvenanceNodeId"
+              @select-node="handleSelectProvenanceNode"
+            />
+            <p v-else-if="!provenanceError" class="provenance-placeholder">溯源关系加载中…</p>
+          </section>
         </div>
       </template>
       <EmptyState v-else title="未找到证据链" message="该证据链不存在，或已经离开当前数据窗口。"
         ><RouterLink to="/investigations">返回事件调查</RouterLink></EmptyState
       >
-    </main>
+    </section>
     <DetailDrawer
       :is-open="Boolean(selectedEventId)"
       eyebrow="节点证据"
@@ -156,19 +180,24 @@
       @close="handleCloseEvidence"
     >
       <EventEvidence v-if="selectedEvent" :event="selectedEvent" />
-      <EmptyState v-else title="未找到事件" message="该事件不存在、已离开当前数据窗口，或不属于当前证据链。" />
+      <EmptyState
+        v-else
+        title="未找到事件"
+        message="该事件不存在、已离开当前数据窗口，或不属于当前证据链。"
+      />
     </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import DataFreshness from "../components/common/DataFreshness.vue";
 import DetailDrawer from "../components/common/DetailDrawer.vue";
 import EmptyState from "../components/common/EmptyState.vue";
 import EventEvidence from "../components/evidence/EventEvidence.vue";
+import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
-import ProvenanceGraph from "../components/evidence/ProvenanceGraph.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
@@ -181,11 +210,18 @@ import {
 } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ProvenanceNode } from "../types/dashboard";
-import { formatDashboardDateTime, getTraceStatusLabel, getTraceStatusTone } from "../utils/dashboard-formatters";
+import {
+  formatDashboardDateTime,
+  getTraceStatusLabel,
+  getTraceStatusTone,
+} from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
 import { formatRuleIdsInTextForDisplay, ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EvidenceDetailPage" });
+const ProvenanceGraph = defineAsyncComponent(
+  () => import("../components/evidence/ProvenanceGraph.vue"),
+);
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
@@ -200,10 +236,14 @@ const traceEvents = computed(() =>
 );
 const detailIndex = computed(() => buildInvestigationIndex(traceEvents.value));
 const trace = computed(
-  () => buildTraceSummary(traceId.value, traceEvents.value) ?? store.traces.find((t) => t.id === traceId.value),
+  () =>
+    buildTraceSummary(traceId.value, traceEvents.value) ??
+    store.traces.find((t) => t.id === traceId.value),
 );
 const traceConclusion = computed(() => buildTraceConclusion(traceEvents.value));
-const selectedEventId = computed(() => (typeof route.query.event_id === "string" ? route.query.event_id : ""));
+const selectedEventId = computed(() =>
+  typeof route.query.event_id === "string" ? route.query.event_id : "",
+);
 const eventResolution = computed(() =>
   resolveInvestigationEvent(detailIndex.value, selectedEventId.value, traceId.value),
 );
@@ -263,7 +303,9 @@ watch(
   { immediate: true },
 );
 function handleTimelineSelectEvent(eventId: string) {
-  const matchNode = provenance.value?.nodes.find((n) => n.refId === `event:${eventId}` || n.refId === eventId);
+  const matchNode = provenance.value?.nodes.find(
+    (n) => n.refId === `event:${eventId}` || n.refId === eventId,
+  );
   void router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, {
@@ -287,9 +329,6 @@ function handleTraceRetry() {
 .evidence-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-}
-.evidence-detail--evidence {
-  grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem);
   height: calc(100vh - var(--top-bar-height));
   overflow: hidden;
 }
@@ -352,6 +391,13 @@ function handleTraceRetry() {
   display: grid;
   gap: var(--space-7);
 }
+.trace-header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
 .trace-provenance {
   display: grid;
   gap: var(--space-4);
@@ -372,12 +418,6 @@ function handleTraceRetry() {
   font-size: var(--font-size-12);
   margin-top: var(--space-1);
 }
-.provenance-error {
-  color: var(--color-danger);
-  font-size: var(--font-size-13);
-  margin: 0;
-  padding: var(--space-3) 0;
-}
 .provenance-placeholder {
   color: var(--color-text-subtle);
   font-size: var(--font-size-13);
@@ -386,11 +426,9 @@ function handleTraceRetry() {
   text-align: center;
 }
 .trace-layout {
-  border-top: 1px solid var(--color-border);
   display: grid;
   gap: clamp(var(--space-5), 3vw, var(--space-7));
-  grid-template-columns: minmax(0, 1fr) 18rem;
-  padding-top: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) 16rem;
 }
 .trace-events {
   display: grid;
@@ -419,7 +457,7 @@ function handleTraceRetry() {
   overflow-y: auto;
   padding-left: var(--space-5);
   position: sticky;
-  top: calc(var(--top-bar-height) + var(--space-5));
+  top: var(--space-4);
 }
 .trace-context h2 {
   font-size: var(--font-size-16);
@@ -484,20 +522,5 @@ function handleTraceRetry() {
 .trace-detail-alert p {
   color: var(--color-text-muted);
   margin: 0;
-}
-@media (max-width: 1100px) {
-  .evidence-detail,
-  .evidence-detail--evidence {
-    grid-template-columns: 1fr;
-  }
-  .trace-layout {
-    grid-template-columns: 1fr;
-  }
-  .trace-context {
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-    padding: var(--space-5) 0 0;
-    position: static;
-  }
 }
 </style>

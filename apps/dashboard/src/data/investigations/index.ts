@@ -23,11 +23,20 @@ export interface TraceConclusion {
   ruleHits: string[];
 }
 
-type TraceSummaryEvent = Pick<AuditEventRow, "approvalId" | "caseId" | "decision" | "occurredAt" | "reason">;
+type TraceSummaryEvent = Pick<
+  AuditEventRow,
+  "approvalId" | "caseId" | "decision" | "occurredAt" | "reason"
+>;
 
-type TraceConclusionEvent = Pick<AuditEventRow, "blocked" | "decision" | "reason" | "riskScore" | "ruleHits">;
+type TraceConclusionEvent = Pick<
+  AuditEventRow,
+  "blocked" | "decision" | "reason" | "riskScore" | "ruleHits"
+>;
 
-export function buildTraceSummary(id: string, events: TraceSummaryEvent[]): TraceSummary | undefined {
+export function buildTraceSummary(
+  id: string,
+  events: TraceSummaryEvent[],
+): TraceSummary | undefined {
   if (!events.length) return undefined;
   const last = events.at(-1)!;
   const isDenied = events.some((e) => e.decision === "deny");
@@ -54,14 +63,16 @@ export function buildTraceConclusion(events: TraceConclusionEvent[]): TraceConcl
     result: hasDeny
       ? "风险动作已被阻断，目标资源未继续执行"
       : hasAsk
-        ? "动作暂停，等待人工审批后继续或拒绝"
+        ? "动作暂停，等待人工审批后单次放行或拒绝并阻断"
         : "动作已放行，未触发阻断或审批",
     ruleHits: highestRisk.ruleHits,
   };
 }
 
 export function buildInvestigationIndex(events: AuditEventRow[]): InvestigationIndex {
-  const latestEvents = [...events].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt));
+  const latestEvents = [...events].sort(
+    (left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
+  );
   const byId = new Map<string, AuditEventRow>();
   const byTrace = new Map<string, AuditEventRow[]>();
 
@@ -79,7 +90,10 @@ export function buildInvestigationIndex(events: AuditEventRow[]): InvestigationI
   return { byId, byTrace, latestEvents };
 }
 
-export function filterInvestigationEvents(index: InvestigationIndex, query: InvestigationQueryState): AuditEventRow[] {
+export function filterInvestigationEvents(
+  index: InvestigationIndex,
+  query: InvestigationQueryState,
+): AuditEventRow[] {
   const searchValue = query.search.toLocaleLowerCase("zh-CN");
 
   return index.latestEvents.filter((event) => {

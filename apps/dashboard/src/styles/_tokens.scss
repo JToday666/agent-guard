@@ -1,38 +1,102 @@
 :root {
-  --color-page: #f4f7fb;
-  --color-page-strong: #edf2f8;
+  /* Mineral canvas and graphite type */
+  --color-page: #f3f5f2;
+  --color-page-strong: #e7ece8;
   --color-surface: #ffffff;
-  --color-surface-muted: #f1f5f9;
-  --color-nav: #ffffff;
-  --color-text: #101828;
-  --color-text-muted: #405168;
-  --color-text-subtle: #718096;
-  --color-border: #dce4ee;
-  --color-border-strong: #b9c7d8;
-  --color-link: #0f766e;
-  --color-active: #0f766e;
+  --color-surface-muted: #edf1ee;
+  --color-surface-inset: #e3e9e5;
+  --color-nav: #f8faf8;
+  --color-shell: #102724;
+  --color-shell-strong: #091b19;
+  --color-shell-text: #f3f8f5;
+  --color-shell-muted: #a9bbb5;
+  --color-text: #152521;
+  --color-text-muted: #465b55;
+  --color-text-subtle: #6d817a;
+  --color-text-inverse: #f7faf8;
+  --color-border: #d6dfda;
+  --color-border-strong: #aebdb6;
+
+  /* Petroleum and jade brand */
+  --color-link: #0b675a;
+  --color-active: #0b675a;
+  --color-active-strong: #064a43;
   --color-active-text: #ffffff;
-  --color-active-soft: #e7f7f4;
-  --color-active-border: #8fd6ca;
-  --color-success: #08775b;
-  --color-success-soft: #e6f7f0;
-  --color-success-border: #9edcc8;
-  --color-warning: #8b5e00;
-  --color-warning-soft: #fff6df;
-  --color-warning-border: #e9cc85;
-  --color-danger: #b42318;
-  --color-danger-soft: #fff1ef;
-  --color-danger-border: #efb7b1;
-  --color-focus: #a78bfa;
-  --color-row-hover: #f8fbff;
+  --color-active-soft: #e1f2ec;
+  --color-active-border: #83c8b5;
+  --color-jade: #15956f;
+  --color-jade-bright: #27b382;
 
-  /* 新增：节点图颜色 */
-  --color-node-event: #0f766e;
-  --color-node-decision: #b42318;
-  --color-node-audit: #718096;
-  --color-node-config-audit: #0d9488;
-  --color-node-action-critic: #d97706;
+  /* Product semantics */
+  --color-success: #26745c;
+  --color-success-soft: #e4f1eb;
+  --color-success-border: #9bc9b5;
+  --color-warning: #9a6218;
+  --color-warning-strong: #75450d;
+  --color-warning-soft: #fbf0d8;
+  --color-warning-border: #dfbf79;
+  --color-danger: #b84a3c;
+  --color-danger-strong: #8c3029;
+  --color-danger-soft: #fae9e5;
+  --color-danger-border: #e0a69d;
+  --color-focus: #c9791d;
+  --color-row-hover: #f4f8f5;
+  --color-row-selected: #e5f1ec;
 
+  /* Data visualization */
+  --color-chart-primary: #0b675a;
+  --color-chart-secondary: #28a27a;
+  --color-chart-warning: #c0842d;
+  --color-chart-danger: #c65745;
+  --color-chart-slate: #5f7770;
+  --color-chart-moss: #6e8c58;
+  --color-chart-grid: #dce4df;
+
+  /* Provenance node categories */
+  --color-node-event: #0b675a;
+  --color-node-decision: #b84a3c;
+  --color-node-audit: #657a73;
+  --color-node-config-audit: #2b8571;
+  --color-node-action-critic: #ad711f;
+
+  /* Controlled brand/data effects */
+  --gradient-page: linear-gradient(180deg, rgb(255 255 255 / 0.72), rgb(255 255 255 / 0) 17rem);
+  --gradient-brand: linear-gradient(128deg, #0a4942 5%, #14906f 58%, #28b482 100%);
+  --gradient-brand-text: linear-gradient(118deg, #f6fffb 0%, #8de0c1 100%);
+  --gradient-shell: linear-gradient(102deg, #091b19 0%, #102724 58%, #15332e 100%);
+  --gradient-active-track: linear-gradient(180deg, #0b675a 0%, #2bb283 100%);
+  --gradient-active-row: linear-gradient(90deg, #e0f2eb 0%, rgb(224 242 235 / 0) 92%);
+  --gradient-data-active: linear-gradient(90deg, #74c9af 0%, #0b675a 100%);
+  --gradient-data-warning: linear-gradient(90deg, #e8c981 0%, #9a6218 100%);
+  --gradient-data-danger: linear-gradient(90deg, #e4a097 0%, #b84a3c 100%);
+  --gradient-line-slate: repeating-linear-gradient(
+    90deg,
+    #5f7770 0 0.3rem,
+    transparent 0.3rem 0.48rem
+  );
+  --gradient-line-warning: repeating-linear-gradient(
+    90deg,
+    #c0842d 0 0.12rem,
+    transparent 0.12rem 0.28rem
+  );
+  --gradient-chart-area: linear-gradient(180deg, rgb(21 149 111 / 0.22), rgb(21 149 111 / 0.01));
+  --gradient-chart-surface: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.82),
+    rgb(255 255 255 / 0.36)
+  );
+  --gradient-popover: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(243 247 244 / 0.96));
+  --glow-active: 0 0 0 4px rgb(21 149 111 / 0.12);
+  --glow-live: 0 0 18px rgb(39 179 130 / 0.28);
+  --glow-warning: 0 0 16px rgb(192 132 45 / 0.2);
+  --filter-chart-primary: drop-shadow(0 2px 4px rgb(11 103 90 / 0.2));
+
+  /* Typography */
+  --font-family-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans CJK SC", ui-sans-serif, system-ui, sans-serif;
+  --font-family-mono:
+    "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
   --font-size-11: 0.6875rem;
   --font-size-12: 0.75rem;
   --font-size-13: 0.8125rem;
@@ -43,14 +107,14 @@
   --font-size-24: 1.5rem;
   --font-size-28: 1.75rem;
   --font-size-32: 2rem;
-
   --line-height-tight: 1.15;
   --line-height-body: 1.5;
   --line-height-ui: 1.35;
+  --font-weight-medium: 520;
+  --font-weight-semibold: 620;
+  --font-weight-bold: 700;
 
-  --font-weight-semibold: 640;
-  --font-weight-bold: 720;
-
+  /* Spacing and geometry */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -58,19 +122,31 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-7: 2rem;
-
-  --radius-2: 0.5rem;
+  --space-8: 2.5rem;
+  --space-9: 3rem;
+  --radius-1: 0.25rem;
+  --radius-2: 0.4375rem;
   --radius-3: 0.625rem;
   --radius-pill: 999px;
 
-  --shadow-subtle: 0 1px 2px rgb(15 23 42 / 0.04);
-  --shadow-raised: 0 18px 48px rgb(15 23 42 / 0.12);
-  --shadow-focus: 0 0 0 3px rgb(167 139 250 / 0.28);
+  /* Elevation is reserved for interactive layers */
+  --shadow-subtle: 0 1px 2px rgb(16 39 36 / 0.05);
+  --shadow-raised: 0 22px 60px rgb(16 39 36 / 0.18);
+  --shadow-focus: 0 0 0 3px rgb(201 121 29 / 0.24);
 
-  --transition-fast: 140ms ease;
-  --transition-base: 180ms ease;
+  /* Motion */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasis: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-instant: 90ms var(--ease-standard);
+  --transition-fast: 120ms var(--ease-standard);
+  --transition-base: 150ms var(--ease-standard);
+  --transition-route: 140ms var(--ease-standard);
+  --transition-panel: 180ms var(--ease-emphasis);
+  --transition-data: 240ms var(--ease-emphasis);
+  --transition-emphasis: var(--transition-data);
 
+  /* App shell */
   --top-bar-height: 3.75rem;
-  --sidebar-width: 13.5rem;
-  --sidebar-collapsed-width: 4rem;
+  --sidebar-width: 13.75rem;
+  --sidebar-collapsed-width: 4.25rem;
 }

@@ -10,7 +10,11 @@ import type {
   ProvenanceGraph,
   TraceDetail,
 } from "../../types/dashboard";
-import type { ConfigAuditFindingFilters, DashboardDataSource, EventFilters } from "./dashboard-data-source";
+import type {
+  ConfigAuditFindingFilters,
+  DashboardDataSource,
+  EventFilters,
+} from "./dashboard-data-source";
 import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
 import { deriveMetrics } from "../dashboard/metrics.ts";
 import { maskSensitiveText } from "../../utils/data-redaction.ts";
@@ -93,7 +97,12 @@ const mockOpenClawStatus: AdapterStatus = {
   pluginVersion: "0.1.0",
   runtimeVersion: "OpenClaw 2026.6.6",
   capabilities: {
-    event_types: ["tool_call_proposed", "message_send_proposed", "tool_result_produced", "runtime_observation"],
+    event_types: [
+      "tool_call_proposed",
+      "message_send_proposed",
+      "tool_result_produced",
+      "runtime_observation",
+    ],
   },
   hooks: [
     "before_tool_call",
@@ -179,7 +188,9 @@ export class MockDashboardDataSource implements DashboardDataSource {
 
   async getPendingApprovals() {
     await wait(this.delayMs);
-    return this.approvals.filter((approval) => approval.status === "pending").map((approval) => ({ ...approval }));
+    return this.approvals
+      .filter((approval) => approval.status === "pending")
+      .map((approval) => ({ ...approval }));
   }
 
   async resolveApproval(approval: ApprovalRequest, decision: "allow_once" | "deny") {
@@ -278,7 +289,9 @@ export class MockDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getConfigAuditFindings(filters: ConfigAuditFindingFilters = {}): Promise<ConfigAuditFindingRecord[]> {
+  async getConfigAuditFindings(
+    filters: ConfigAuditFindingFilters = {},
+  ): Promise<ConfigAuditFindingRecord[]> {
     await wait(this.delayMs);
     return mockConfigAuditFindings
       .filter((row) => !filters.traceId || row.traceId === filters.traceId)
@@ -311,7 +324,9 @@ export class MockDashboardDataSource implements DashboardDataSource {
     return {
       id: traceId,
       events,
-      approvals: this.approvals.filter((approval) => approval.traceId === traceId).map((approval) => ({ ...approval })),
+      approvals: this.approvals
+        .filter((approval) => approval.traceId === traceId)
+        .map((approval) => ({ ...approval })),
       metrics: deriveMetrics(
         events.map((event) => ({
           ...event,
@@ -377,8 +392,11 @@ export class MockDashboardDataSource implements DashboardDataSource {
     const approval = firstEvent.approvalId
       ? this.approvals.find((item) => item.id === firstEvent.approvalId)
       : undefined;
-    const ruleSummary = firstEvent.ruleHits.length ? formatRuleListForDisplay(firstEvent.ruleHits) : "未命中阻断规则";
-    const outcomeLabel = firstEvent.decision === "ask" ? "等待人工审批" : firstEvent.blocked ? "已阻断" : "允许执行";
+    const ruleSummary = firstEvent.ruleHits.length
+      ? formatRuleListForDisplay(firstEvent.ruleHits)
+      : "未命中阻断规则";
+    const outcomeLabel =
+      firstEvent.decision === "ask" ? "等待人工审批" : firstEvent.blocked ? "已阻断" : "允许执行";
 
     const nodes = [
       {
@@ -405,7 +423,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
         metadata: {
           lane: "上下文",
           source: "mock",
-          summary: firstEvent.attackType === "benign" ? "未发现异常指令" : "发现跨任务或外部输入风险",
+          summary:
+            firstEvent.attackType === "benign" ? "未发现异常指令" : "发现跨任务或外部输入风险",
           type: "context_check",
         },
       },
@@ -518,7 +537,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     const eventEdges = events.map((event, index) => ({
       edgeId: `${traceId}:edge:event:${event.id}`,
       traceId,
-      sourceNodeId: index === 0 ? `${traceId}:resource` : `${traceId}:event:${events[index - 1]!.id}`,
+      sourceNodeId:
+        index === 0 ? `${traceId}:resource` : `${traceId}:event:${events[index - 1]!.id}`,
       targetNodeId: `${traceId}:event:${event.id}`,
       relation: index === 0 ? "生成审计" : "下一事件",
       timestamp: event.occurredAt,

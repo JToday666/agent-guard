@@ -1,13 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-async function openResponsiveNavigationIfNeeded(page: import("@playwright/test").Page) {
-  const menuButton = page.getByRole("button", { name: "菜单" });
-  if (await menuButton.isVisible()) await menuButton.click();
-}
-
-test("evidence context does not trap desktop wheel scrolling", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop");
-
+test("evidence context does not trap desktop wheel scrolling", async ({ page }) => {
   await page.goto("/evidence/trace_007?event_id=evt_20260607_007");
 
   const main = page.locator(".evidence-detail__main");
@@ -17,6 +10,8 @@ test("evidence context does not trap desktop wheel scrolling", async ({ page }, 
   await expect(context).toBeVisible();
   await expect(drawerBody).toHaveCSS("overscroll-behavior-y", "contain");
   await expect(context).toHaveCSS("overscroll-behavior-y", "auto");
+  await page.getByRole("button", { name: "关闭详情" }).click();
+  await expect(page.locator(".detail-drawer")).toBeHidden();
 
   await main.evaluate((element) => {
     element.scrollTop = 0;
@@ -38,25 +33,114 @@ test("dashboard routes use the shell transition layer", async ({ page }) => {
   await expect(routeView).toBeVisible();
   await expect(routeView).toHaveCSS("animation-name", "none");
 
-  const hasRouteTransitionRules = await page.evaluate(() =>
-    [...document.styleSheets].some((sheet) => {
-      try {
-        return [...sheet.cssRules].some((rule) => {
-          if (!("selectorText" in rule)) return false;
-          return String(rule.selectorText).includes("dashboard-route-enter-active");
-        });
-      } catch {
-        return false;
+  const routeTransitionRule = await page.evaluate(() => {
+    const visitRules = (rules: CSSRuleList): string => {
+      for (const rule of rules) {
+        if (
+          rule instanceof CSSStyleRule &&
+          rule.selectorText.includes("dashboard-route-enter-active")
+        ) {
+          return rule.cssText;
+        }
+        const nestedRules = (rule as CSSRule & { cssRules?: CSSRuleList }).cssRules;
+        if (nestedRules) {
+          const match = visitRules(nestedRules);
+          if (match) return match;
+        }
       }
-    }),
+      return "";
+    };
+    for (const sheet of document.styleSheets) {
+      try {
+        const match = visitRules(sheet.cssRules);
+        if (match) return match;
+      } catch {
+        continue;
+      }
+    }
+    return "";
+  });
+  expect(routeTransitionRule).toContain("opacity");
+  expect(routeTransitionRule).not.toContain("transform");
+  const routeDuration = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue("--transition-route").trim(),
   );
-  expect(hasRouteTransitionRules).toBe(true);
+  expect(routeDuration).toMatch(/^1[2345]0ms /);
 
-  await openResponsiveNavigationIfNeeded(page);
   await page.getByRole("link", { name: /^事件调查/ }).click();
   await expect(page).toHaveURL(/\/investigations$/);
+  await expect(page.getByRole("heading", { name: "事件调查" })).toBeVisible();
   await expect(page.locator(".dashboard-route-view")).toHaveCount(1);
   await expect(page.locator(".dashboard-route-view").first()).toBeVisible();
+
+  await page.getByRole("link", { name: "系统状态" }).click();
+  await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
+  await expect(page.locator(".system-page .is-spinning")).toHaveCount(0);
+});
+
+test("detail drawer overlays the workspace without changing table width", async ({ page }) => {
+  await page.goto("/investigations");
+
+  const main = page.locator(".investigations-page__main");
+  const row = page.getByRole("row").filter({ hasText: "send_email" }).first();
+  const beforeWidth = (await main.boundingBox())?.width ?? 0;
+  await row.focus();
+  await page.keyboard.press("Enter");
+
+  const drawer = page.locator(".detail-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveCSS("position", "fixed");
+  const drawerTransitionRule = await page.evaluate(() => {
+    for (const sheet of document.styleSheets) {
+      try {
+        for (const rule of sheet.cssRules) {
+          if (
+            rule instanceof CSSStyleRule &&
+            rule.selectorText.includes("detail-drawer-enter-active")
+          ) {
+            return rule.cssText;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+    return "";
+  });
+  expect(drawerTransitionRule).toContain("opacity");
+  expect(drawerTransitionRule).toContain("transform");
+
+  const afterWidth = (await main.boundingBox())?.width ?? 0;
+  expect(Math.abs(afterWidth - beforeWidth)).toBeLessThanOrEqual(1);
+
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(row).toBeFocused();
+});
+
+test("reduced motion removes panel and dialog animations", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/investigations");
+
+  const row = page.getByRole("row").filter({ hasText: "send_email" }).first();
+  await row.focus();
+  await page.keyboard.press("Enter");
+  const drawer = page.locator(".detail-drawer");
+  await expect(drawer).toBeVisible();
+  const reducedDuration = await drawer.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).transitionDuration),
+  );
+  expect(reducedDuration).toBeLessThanOrEqual(0.00001);
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+
+  await page.goto("/approvals");
+  await page.getByRole("button", { name: "仅本次放行" }).click();
+  const dialogSurface = page.locator(".confirm-dialog__surface");
+  await expect(dialogSurface).toBeVisible();
+  await expect(dialogSurface).toHaveCSS("animation-name", "none");
+  await page.keyboard.press("Escape");
+  await expect(dialogSurface).toBeHidden();
 });
 
 test("provenance graph keeps node text readable without label overlap", async ({ page }) => {
@@ -81,12 +165,12 @@ test("provenance graph keeps node text readable without label overlap", async ({
 
     const nodes = boxes(".vue-flow__node");
     const edgeLabels = boxes(".vue-flow__edge-text");
-    const overflowingText = Array.from(root.querySelectorAll(".prov-node__label, .prov-node__summary")).filter(
-      (element) => {
-        const html = element as HTMLElement;
-        return html.scrollWidth > html.clientWidth + 1;
-      },
-    ).length;
+    const overflowingText = Array.from(
+      root.querySelectorAll(".prov-node__label, .prov-node__summary"),
+    ).filter((element) => {
+      const html = element as HTMLElement;
+      return html.scrollWidth > html.clientWidth + 1;
+    }).length;
 
     function intersects(
       left: { x: number; y: number; width: number; height: number },
@@ -129,4 +213,11 @@ test("provenance graph keeps node text readable without label overlap", async ({
   expect(layout.nodeOverlaps).toBe(0);
   expect(layout.edgeLabelOverlaps).toBe(0);
   expect(layout.overflowingText).toBe(0);
+
+  const contextNode = graph.locator(".prov-node").nth(3);
+  await contextNode.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/prov_node=/);
+  await expect(contextNode).toHaveAttribute("aria-pressed", "true");
+  await expect(graph.locator(".prov-flow-node--dimmed").first()).toBeVisible();
 });

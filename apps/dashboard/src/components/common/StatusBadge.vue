@@ -12,7 +12,7 @@ defineOptions({
 
 defineProps<{
   label: string;
-  tone: "neutral" | "success" | "warning" | "danger";
+  tone: "neutral" | "protective" | "success" | "warning" | "danger";
 }>();
 </script>
 
@@ -60,6 +60,16 @@ defineProps<{
 
   .status-badge__dot {
     background: var(--color-success);
+  }
+}
+
+.status-badge--protective {
+  background: var(--color-active-soft);
+  border-color: var(--color-active-border);
+  color: var(--color-active);
+
+  .status-badge__dot {
+    background: var(--color-active);
   }
 }
 

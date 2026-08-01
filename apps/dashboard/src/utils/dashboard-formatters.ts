@@ -1,6 +1,6 @@
 import type { DecisionStatus, RiskSeverity, TraceSummary } from "../types/dashboard";
 
-export type StatusBadgeTone = "neutral" | "success" | "warning" | "danger";
+export type StatusBadgeTone = "neutral" | "protective" | "success" | "warning" | "danger";
 
 const dashboardDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit",
@@ -11,15 +11,15 @@ const dashboardDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 export function getDecisionLabel(decision: DecisionStatus): string {
-  if (decision === "deny") return "拒绝";
-  if (decision === "ask") return "审批";
-  return "放行";
+  if (decision === "deny") return "已阻断";
+  if (decision === "ask") return "待审批";
+  return "已放行";
 }
 
 export function getDecisionTone(decision: DecisionStatus): StatusBadgeTone {
-  if (decision === "deny") return "danger";
+  if (decision === "deny") return "protective";
   if (decision === "ask") return "warning";
-  return "success";
+  return "neutral";
 }
 
 export function getRiskSeverityLabel(severity: RiskSeverity): string {
@@ -42,9 +42,9 @@ export function getTraceStatusLabel(status: TraceSummary["status"]): string {
 }
 
 export function getTraceStatusTone(status: TraceSummary["status"]): StatusBadgeTone {
-  if (status === "blocked") return "danger";
+  if (status === "blocked") return "protective";
   if (status === "paused") return "warning";
-  return "success";
+  return "neutral";
 }
 
 export function formatDashboardDateTime(value: string): string {

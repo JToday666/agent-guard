@@ -16,7 +16,9 @@ function titleCaseWords(value: string): string {
     .split("_")
     .filter(Boolean);
   if (!words.length) return "安全规则";
-  return words.map((word, index) => (index === 0 ? word[0]?.toUpperCase() + word.slice(1) : word)).join(" ");
+  return words
+    .map((word, index) => (index === 0 ? word[0]?.toUpperCase() + word.slice(1) : word))
+    .join(" ");
 }
 
 export function isRuleId(value: string): boolean {
@@ -61,7 +63,8 @@ export function prepareEvidenceDataForDisplay(value: unknown, fieldName = ""): u
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-        const displayKey = shouldMapRuleObjectKeys(fieldName) && isRuleId(key) ? ruleLabel(key) : key;
+        const displayKey =
+          shouldMapRuleObjectKeys(fieldName) && isRuleId(key) ? ruleLabel(key) : key;
         return [displayKey, prepareEvidenceDataForDisplay(item, key)];
       }),
     );

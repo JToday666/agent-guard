@@ -12,7 +12,9 @@ test("approval exposes separate trace and event evidence destinations", async ({
   const evidenceNavigation = page.locator('.sidebar__link[href="/evidence"]');
   await expect(evidenceNavigation).toHaveClass(/sidebar__link--active/);
   await expect(evidenceNavigation).toHaveAttribute("aria-current", "page");
-  const evidenceLink = page.locator('[data-event-id="evt_20260607_002"]').getByRole("link", { name: "查看证据" });
+  const evidenceLink = page
+    .locator('[data-event-id="evt_20260607_002"]')
+    .getByRole("link", { name: "查看证据" });
   await expect(evidenceLink).toBeVisible();
   await evidenceLink.click();
   await expect(page.getByRole("dialog")).toContainText("风险分数");
@@ -26,7 +28,10 @@ test("approval exposes separate trace and event evidence destinations", async ({
   await expect(page).toHaveURL(/\/evidence\/trace_002\?event_id=evt_20260607_002$/);
   await expect(evidenceNavigation).toHaveClass(/sidebar__link--active/);
   await expect(evidenceNavigation).toHaveAttribute("aria-current", "page");
-  await expect(page.locator('[data-event-id="evt_20260607_002"]')).toHaveAttribute("aria-current", "true");
+  await expect(page.locator('[data-event-id="evt_20260607_002"]')).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
   await expect(page.getByRole("dialog")).toContainText("风险分数");
 });
 
@@ -43,6 +48,22 @@ test("approval detail exposes explicit control-flow evidence fields", async ({ p
   await expect(detail).toContainText("动作");
   await expect(detail).toContainText("send_email / action_send_email_001");
   await expect(detail).not.toContainText("approvalNonce");
+});
+
+test("one-time approval requires confirmation and restores trigger focus", async ({ page }) => {
+  await page.goto("/approvals");
+
+  const trigger = page.getByRole("button", { name: "仅本次放行" });
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("该动作将绕过当前 Guard 决策并继续执行一次");
+  await expect(page.getByRole("button", { name: "取消" })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 });
 
 test("evidence detail keeps related approval and evaluation destinations", async ({ page }) => {
@@ -67,4 +88,22 @@ test("evidence detail surfaces the final security conclusion", async ({ page }) 
   await expect(conclusion).toContainText("外部发送需确认");
   await expect(conclusion).toContainText("任务与行为不一致");
   await expect(conclusion).not.toContainText(/P\d{3}/);
+});
+
+test("evidence list keeps search and final status in the URL", async ({ page }) => {
+  await page.goto("/evidence");
+
+  await page.getByRole("searchbox", { name: "搜索证据链", exact: true }).fill("PI-002");
+  await expect(page).toHaveURL(/search=PI-002/);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(1);
+
+  const statusSelect = page.getByRole("combobox", { name: /^最终状态/ });
+  await statusSelect.click();
+  await page.getByRole("option", { name: "待审批" }).click();
+  await expect(page).toHaveURL(/status=paused/);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "清除筛选" }).click();
+  await expect(page).toHaveURL(/\/evidence$/);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(8);
 });

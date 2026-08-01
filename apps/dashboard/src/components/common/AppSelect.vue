@@ -1,5 +1,9 @@
 <template>
-  <div ref="rootElement" class="app-select" :class="{ 'app-select--disabled': disabled, 'app-select--open': isOpen }">
+  <div
+    ref="rootElement"
+    class="app-select"
+    :class="{ 'app-select--disabled': disabled, 'app-select--open': isOpen }"
+  >
     <label :id="labelId" class="app-select__label" :for="triggerId">{{ label }}</label>
     <button
       :id="triggerId"
@@ -16,14 +20,24 @@
       @click="handleTriggerClick"
       @keydown="handleKeydown"
     >
-      <span :id="valueId" class="app-select__value" :class="{ 'app-select__value--placeholder': !selectedOption }">
+      <span
+        :id="valueId"
+        class="app-select__value"
+        :class="{ 'app-select__value--placeholder': !selectedOption }"
+      >
         {{ selectedOption?.label ?? placeholder }}
       </span>
       <ChevronDown class="app-select__icon" aria-hidden="true" :size="16" />
     </button>
 
     <Transition name="app-select-menu">
-      <ul v-if="isOpen" :id="listboxId" class="app-select__menu" role="listbox" :aria-labelledby="labelId">
+      <ul
+        v-if="isOpen"
+        :id="listboxId"
+        class="app-select__menu"
+        role="listbox"
+        :aria-labelledby="labelId"
+      >
         <li
           v-for="(option, index) in options"
           :id="getOptionId(index)"
@@ -90,7 +104,9 @@ const labelId = computed(() => `${baseId.value}-label`);
 const valueId = computed(() => `${baseId.value}-value`);
 const listboxId = computed(() => `${baseId.value}-listbox`);
 const activeOptionId = computed(() => getOptionId(activeIndex.value));
-const selectedOption = computed(() => props.options.find((option) => option.value === props.modelValue));
+const selectedOption = computed(() =>
+  props.options.find((option) => option.value === props.modelValue),
+);
 let typeaheadBuffer = "";
 let typeaheadTimer: number | undefined;
 
@@ -186,7 +202,8 @@ function handleTypeahead(key: string): void {
   window.clearTimeout(typeaheadTimer);
   const normalizedKey = key.toLocaleLowerCase("zh-CN");
   const isRepeatedKey =
-    typeaheadBuffer.length > 0 && [...typeaheadBuffer].every((character) => character === normalizedKey);
+    typeaheadBuffer.length > 0 &&
+    [...typeaheadBuffer].every((character) => character === normalizedKey);
   typeaheadBuffer = isRepeatedKey ? normalizedKey : `${typeaheadBuffer}${normalizedKey}`;
 
   for (let offset = 1; offset <= props.options.length; offset += 1) {
@@ -235,7 +252,7 @@ function getOptionId(index: number): string {
 
 .app-select__trigger {
   align-items: center;
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
+  background: var(--gradient-popover);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-subtle);
@@ -252,7 +269,7 @@ function getOptionId(index: number): string {
 
   &:hover {
     border-color: var(--color-active-border);
-    box-shadow: 0 8px 18px rgb(37 99 235 / 0.08);
+    box-shadow: var(--shadow-subtle);
   }
 }
 

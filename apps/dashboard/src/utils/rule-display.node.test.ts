@@ -27,7 +27,10 @@ test("falls back to a readable rule name without the numeric prefix", () => {
 test("formats embedded rule ids in user-facing text", () => {
   const text = "Matched P005_external_send and P999_custom_policy_rule during review";
 
-  assert.equal(formatRuleIdsInTextForDisplay(text), "Matched 外部发送需确认 and Custom policy rule during review");
+  assert.equal(
+    formatRuleIdsInTextForDisplay(text),
+    "Matched 外部发送需确认 and Custom policy rule during review",
+  );
   assert.doesNotMatch(formatRuleIdsInTextForDisplay(text), /P\d{3}/);
 });
 

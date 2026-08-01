@@ -169,7 +169,7 @@ test("builds a concise conclusion from the highest-risk trace event", () => {
 
   assert.deepEqual(conclusion, {
     reason: "发送目标不在当前任务允许范围内，需要人工确认",
-    result: "动作暂停，等待人工审批后继续或拒绝",
+    result: "动作暂停，等待人工审批后单次放行或拒绝并阻断",
     ruleHits: ["P005_external_send", "P004_task_mismatch"],
     title: "等待人工审批",
   });

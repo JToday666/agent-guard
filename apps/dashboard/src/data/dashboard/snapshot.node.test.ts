@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ApprovalRequest, AuditEventRow, EvalMetrics, EvaluationSummary } from "../../types/dashboard.ts";
-import { hasSameEventWindow, hasSameEvaluation, hasSameMetrics, reconcileApprovals } from "./snapshot.ts";
+import type {
+  ApprovalRequest,
+  AuditEventRow,
+  EvalMetrics,
+  EvaluationSummary,
+} from "../../types/dashboard.ts";
+import {
+  hasSameEventWindow,
+  hasSameEvaluation,
+  hasSameMetrics,
+  reconcileApprovals,
+} from "./snapshot.ts";
 
 function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {

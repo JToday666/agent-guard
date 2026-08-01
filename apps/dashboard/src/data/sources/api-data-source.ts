@@ -37,7 +37,11 @@ import type {
   EvaluationSummary,
   ProvenanceGraph,
 } from "../../types/dashboard";
-import type { ConfigAuditFindingFilters, DashboardDataSource, EventFilters } from "./dashboard-data-source";
+import type {
+  ConfigAuditFindingFilters,
+  DashboardDataSource,
+  EventFilters,
+} from "./dashboard-data-source";
 
 function buildQueryString(filters: EventFilters = {}, includeLimit = false): string {
   const params = new URLSearchParams();
@@ -62,12 +66,20 @@ function buildConfigFindingQueryString(filters: ConfigAuditFindingFilters = {}):
 
 export class ApiDashboardDataSource implements DashboardDataSource {
   async getEvents(filters?: EventFilters, signal?: AbortSignal) {
-    const rows = await requestJson<GuardAuditEventDto[]>(`/audit/events${buildQueryString(filters, true)}`, {}, signal);
+    const rows = await requestJson<GuardAuditEventDto[]>(
+      `/audit/events${buildQueryString(filters, true)}`,
+      {},
+      signal,
+    );
     return rows.map(mapAuditEvent);
   }
 
   async getMetrics(filters?: EventFilters, signal?: AbortSignal) {
-    const rows = await requestJson<GuardEvalMetricsDto>(`/metrics/eval${buildQueryString(filters)}`, {}, signal);
+    const rows = await requestJson<GuardEvalMetricsDto>(
+      `/metrics/eval${buildQueryString(filters)}`,
+      {},
+      signal,
+    );
     return mapMetrics(rows);
   }
 
@@ -82,14 +94,17 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     csrfToken: string,
   ): Promise<ApprovalResolution> {
     if (!approval.approvalNonce) throw new Error("审批凭证缺失，请刷新审批队列");
-    const result = await requestJson<GuardApprovalResolutionDto>(`/approvals/${approval.id}/resolve`, {
-      method: "POST",
-      headers: { "X-AgentGuard-CSRF": csrfToken },
-      body: JSON.stringify({
-        decision,
-        approval_nonce: approval.approvalNonce,
-      }),
-    });
+    const result = await requestJson<GuardApprovalResolutionDto>(
+      `/approvals/${approval.id}/resolve`,
+      {
+        method: "POST",
+        headers: { "X-AgentGuard-CSRF": csrfToken },
+        body: JSON.stringify({
+          decision,
+          approval_nonce: approval.approvalNonce,
+        }),
+      },
+    );
     return {
       approvalId: result.approval_id,
       status: result.status,
@@ -108,7 +123,10 @@ export class ApiDashboardDataSource implements DashboardDataSource {
 
   async getEvaluation(metrics: EvalMetrics, signal?: AbortSignal): Promise<EvaluationSummary> {
     try {
-      return mapEvaluationRun(await requestJson<GuardEvaluationRunDto>("/evaluations/latest", {}, signal), metrics);
+      return mapEvaluationRun(
+        await requestJson<GuardEvaluationRunDto>("/evaluations/latest", {}, signal),
+        metrics,
+      );
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === "EVALUATION_NOT_FOUND") {
         return emptyEvaluationSummary(metrics);
@@ -131,7 +149,11 @@ export class ApiDashboardDataSource implements DashboardDataSource {
 
   async getAdapterStatus(adapterId: string, signal?: AbortSignal) {
     return mapAdapterStatus(
-      await requestJson<GuardAdapterStatusDto>(`/adapters/${encodeURIComponent(adapterId)}/status`, {}, signal),
+      await requestJson<GuardAdapterStatusDto>(
+        `/adapters/${encodeURIComponent(adapterId)}/status`,
+        {},
+        signal,
+      ),
     );
   }
 
@@ -146,20 +168,30 @@ export class ApiDashboardDataSource implements DashboardDataSource {
   }
 
   async getCurrentPolicy(signal?: AbortSignal) {
-    return mapPolicySummary(await requestJson<GuardPolicyBundleDto>("/policies/current", {}, signal));
+    return mapPolicySummary(
+      await requestJson<GuardPolicyBundleDto>("/policies/current", {}, signal),
+    );
   }
 
   async getPolicyHistory(signal?: AbortSignal) {
-    return mapPolicyHistory(await requestJson<GuardPolicyHistoryDto[]>("/policies/history?limit=10", {}, signal));
+    return mapPolicyHistory(
+      await requestJson<GuardPolicyHistoryDto[]>("/policies/history?limit=10", {}, signal),
+    );
   }
 
   async getAuditIntegrity(signal?: AbortSignal): Promise<AuditIntegrity> {
-    return mapAuditIntegrity(await requestJson<GuardAuditIntegrityDto>("/audit/integrity", {}, signal));
+    return mapAuditIntegrity(
+      await requestJson<GuardAuditIntegrityDto>("/audit/integrity", {}, signal),
+    );
   }
 
   async getTraceProvenance(traceId: string, signal?: AbortSignal): Promise<ProvenanceGraph> {
     return mapProvenance(
-      await requestJson<GuardProvenanceDto>(`/traces/${encodeURIComponent(traceId)}/provenance`, {}, signal),
+      await requestJson<GuardProvenanceDto>(
+        `/traces/${encodeURIComponent(traceId)}/provenance`,
+        {},
+        signal,
+      ),
     );
   }
 }

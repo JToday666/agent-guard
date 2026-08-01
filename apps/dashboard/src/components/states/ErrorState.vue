@@ -4,7 +4,9 @@
       <strong>{{ title }}</strong>
       <p>{{ message }}</p>
     </div>
-    <button type="button" :aria-busy="isRetrying" :disabled="isRetrying" @click="emit('retry')">重新加载</button>
+    <button type="button" :aria-busy="isRetrying" :disabled="isRetrying" @click="emit('retry')">
+      重新加载
+    </button>
   </section>
 </template>
 

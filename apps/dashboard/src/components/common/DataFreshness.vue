@@ -44,6 +44,7 @@ const label = computed(() => {
 
 .freshness--ready .freshness__dot {
   background: var(--color-success);
+  box-shadow: var(--glow-live);
 }
 .freshness--loading .freshness__dot {
   background: var(--color-active);

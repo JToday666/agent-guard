@@ -1,10 +1,12 @@
 <template>
   <figure class="asr-chart" :aria-label="summary">
     <figcaption><strong>攻击成功率变化</strong><span>同一尺度比较防护效果</span></figcaption>
-    <div class="asr-chart__scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>
+    <div class="asr-chart__scale" aria-hidden="true">
+      <span>0%</span><span>50%</span><span>100%</span>
+    </div>
     <div class="asr-chart__track">
-      <span class="asr-chart__before" :style="{ width: percent(before) }"></span>
-      <span class="asr-chart__after" :style="{ width: percent(after) }"></span>
+      <span class="asr-chart__before" :style="{ transform: `scaleX(${ratio(before)})` }"></span>
+      <span class="asr-chart__after" :style="{ transform: `scaleX(${ratio(after)})` }"></span>
     </div>
     <div class="asr-chart__labels">
       <div>
@@ -26,11 +28,17 @@ const props = defineProps<{ after: number | null; before: number | null }>();
 function percent(value: number | null) {
   return value === null ? "--" : `${(value * 100).toFixed(1)}%`;
 }
+function ratio(value: number | null) {
+  return value === null ? 0 : Math.min(1, Math.max(0, value));
+}
 const reduction = computed(() =>
-  props.before === null || props.after === null ? "--" : `${((props.before - props.after) * 100).toFixed(1)}pp`,
+  props.before === null || props.after === null
+    ? "--"
+    : `${((props.before - props.after) * 100).toFixed(1)}pp`,
 );
 const summary = computed(
-  () => `防护前攻击成功率 ${percent(props.before)}，防护后 ${percent(props.after)}，降幅 ${reduction.value}`,
+  () =>
+    `防护前攻击成功率 ${percent(props.before)}，防护后 ${percent(props.after)}，降幅 ${reduction.value}`,
 );
 </script>
 
@@ -64,15 +72,19 @@ const summary = computed(
   bottom: 0;
   left: 0;
   position: absolute;
-  transition: width var(--transition-base);
+  transform-origin: left center;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .asr-chart__before {
-  background: var(--color-danger-soft);
+  background: var(--gradient-data-danger);
   border-right: 2px solid var(--color-danger);
   height: 100%;
+  opacity: 0.5;
 }
 .asr-chart__after {
-  background: var(--color-success);
+  background: var(--gradient-data-active);
+  box-shadow: var(--glow-active);
   height: 0.6rem;
 }
 .asr-chart__labels {

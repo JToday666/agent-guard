@@ -50,7 +50,8 @@ docs/
 1. [部署、安装与使用说明](06_delivery/deployment_install_usage.md)
 2. [接口契约与事件模型](02_core/interface_contract.md)
 3. [Dashboard 与审批流](04_apps/dashboard_design.md)
-4. [实施路线与验收标准](06_delivery/implementation_plan.md)
+4. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
+5. [实施路线与验收标准](06_delivery/implementation_plan.md)
 
 ### Redteam 开发
 
@@ -83,6 +84,7 @@ docs/
 | [openclaw_plugin_deployment.md](03_adapters/openclaw_plugin_deployment.md)               | OpenClaw 插件部署、安装、配置、验证和卸载                                      |
 | [runtime_hooks_inventory.md](03_adapters/runtime_hooks_inventory.md)                     | OpenClaw 与 LangChain/LangGraph Hook、中间件、扩展面和数据结构统计             |
 | [dashboard_design.md](04_apps/dashboard_design.md)                                       | Dashboard 页面、数据来源、审批和指标展示                                       |
+| [dashboard_ui_spec.md](04_apps/dashboard_ui_spec.md)                                     | Dashboard 信息架构、视觉层级、交互模式和前端实现规范                           |
 | [attackbench.md](05_redteam/attackbench.md)                                              | 攻击样本格式、runner、成功条件和评测指标                                       |
 | [openclaw_attackbench.md](05_redteam/openclaw_attackbench.md)                            | OpenClaw 自动轮转 AttackBench、bench shim、bench tools、检测启用和验证流程     |
 | [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                   | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |

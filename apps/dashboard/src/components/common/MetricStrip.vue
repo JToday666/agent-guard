@@ -3,7 +3,11 @@
     <div
       v-for="item in items"
       :key="item.label"
-      :class="`metric-strip__item metric-strip__item--${item.tone ?? 'neutral'}`"
+      :class="[
+        `metric-strip__item--${item.tone ?? 'neutral'}`,
+        { 'metric-strip__item--interactive': item.route },
+      ]"
+      class="metric-strip__item"
     >
       <dt>{{ item.label }}</dt>
       <dd>
@@ -23,7 +27,7 @@ defineProps<{
     detail: string;
     label: string;
     route?: string;
-    tone?: "neutral" | "success" | "warning" | "danger";
+    tone?: "neutral" | "protective" | "success" | "warning" | "danger";
     value: string;
   }>;
 }>();
@@ -31,7 +35,7 @@ defineProps<{
 
 <style scoped lang="scss">
 .metric-strip {
-  background: rgb(255 255 255 / 0.62);
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
   border-block: 1px solid var(--color-border);
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
@@ -52,19 +56,18 @@ defineProps<{
     width: 1px;
   }
 
-  &:hover {
+  &--interactive:hover {
     background: var(--color-row-hover);
   }
 }
 
 .metric-strip__bar {
+  background: var(--color-border);
   bottom: 0;
   height: 3px;
   left: 0;
   position: absolute;
   right: 0;
-  border-radius: 0 0 var(--radius-2) var(--radius-2);
-  background: var(--color-border);
   transition: opacity var(--transition-fast);
 }
 
@@ -97,8 +100,17 @@ dd a:hover {
     color: var(--color-success);
   }
   .metric-strip__bar {
-    background: var(--color-success);
+    background: var(--gradient-data-active);
     opacity: 0.6;
+  }
+}
+.metric-strip__item--protective {
+  dd {
+    color: var(--color-active);
+  }
+  .metric-strip__bar {
+    background: var(--gradient-data-active);
+    opacity: 0.7;
   }
 }
 .metric-strip__item--warning {
@@ -106,7 +118,7 @@ dd a:hover {
     color: var(--color-warning);
   }
   .metric-strip__bar {
-    background: var(--color-warning);
+    background: var(--gradient-data-warning);
     opacity: 0.7;
   }
 }
@@ -115,23 +127,11 @@ dd a:hover {
     color: var(--color-danger);
   }
   .metric-strip__bar {
-    background: var(--color-danger);
+    background: var(--gradient-data-danger);
     opacity: 0.7;
   }
 }
 .metric-strip__item--neutral .metric-strip__bar {
   opacity: 0;
-}
-
-@media (max-width: 640px) {
-  .metric-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .metric-strip__item:nth-child(2n)::after {
-    display: none;
-  }
-  .metric-strip__item {
-    border-bottom: 1px solid var(--color-border);
-  }
 }
 </style>

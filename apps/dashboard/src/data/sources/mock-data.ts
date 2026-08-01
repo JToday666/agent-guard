@@ -267,7 +267,7 @@ export const approvals: ApprovalRequest[] = [
     traceId: "trace_002",
     userTask: "整理客户反馈摘要",
     agentAction: "发送摘要到外部收件地址",
-    consequence: "拒绝后，当前暂停动作不会继续执行",
+    consequence: "拒绝并阻断后，当前暂停动作不会继续执行",
     ruleHits: ["P005_external_send"],
   },
 ];

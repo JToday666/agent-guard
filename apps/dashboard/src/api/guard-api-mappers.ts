@@ -46,11 +46,15 @@ function readString(value: unknown): string | null {
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function readStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function readArray(value: unknown): unknown[] {
@@ -74,7 +78,9 @@ function readDecision(value: unknown): AuditEventRow["decision"] {
 }
 
 function readSeverity(value: unknown): AuditEventRow["severity"] {
-  return value === "critical" || value === "high" || value === "medium" || value === "low" ? value : "low";
+  return value === "critical" || value === "high" || value === "medium" || value === "low"
+    ? value
+    : "low";
 }
 
 function fallbackResourceTargets(metadata: Record<string, unknown>): string[] {
@@ -203,7 +209,7 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
 
 function approvalConsequence(status: ApprovalRequest["status"]): string {
   if (status === "allowed") return "该动作已获得一次性放行。";
-  if (status === "denied") return "该动作已被拒绝，不会继续执行。";
+  if (status === "denied") return "该动作已被拒绝并阻断，不会继续执行。";
   if (status === "expired") return "该审批已过期，当前动作不会继续执行。";
   return "允许一次后，当前暂停的工具动作将继续执行。";
 }
@@ -228,8 +234,13 @@ function evaluationDatasetLabel(datasetId: string | null, datasetVersion: string
   return datasetId ?? datasetVersion ?? "未提供";
 }
 
-function metricReduction(before: number | null | undefined, after: number | null | undefined): number | null {
-  return before === null || before === undefined || after === null || after === undefined ? null : before - after;
+function metricReduction(
+  before: number | null | undefined,
+  after: number | null | undefined,
+): number | null {
+  return before === null || before === undefined || after === null || after === undefined
+    ? null
+    : before - after;
 }
 
 export function emptyEvaluationSummary(metrics: EvalMetrics): EvaluationSummary {
@@ -250,7 +261,10 @@ export function emptyEvaluationSummary(metrics: EvalMetrics): EvaluationSummary 
   };
 }
 
-export function mapEvaluationRun(dto: GuardEvaluationRunDto, metrics: EvalMetrics): EvaluationSummary {
+export function mapEvaluationRun(
+  dto: GuardEvaluationRunDto,
+  metrics: EvalMetrics,
+): EvaluationSummary {
   const datasetId = readString(dto.dataset_id);
   const datasetVersion = readString(dto.dataset_version);
   const perAttack: EvaluationAttackMetric[] = Object.entries(readRecord(dto.per_attack))
@@ -326,7 +340,10 @@ export function mapPolicyHistory(rows: GuardPolicyHistoryDto[]): PolicyHistoryEn
   });
 }
 
-export function mapPolicySummary(dto: GuardPolicyBundleDto, history: PolicyHistoryEntry[] = []): PolicySummary {
+export function mapPolicySummary(
+  dto: GuardPolicyBundleDto,
+  history: PolicyHistoryEntry[] = [],
+): PolicySummary {
   const latest = history[0] ?? null;
   return {
     bundleId: dto.bundle_id ?? latest?.bundleId ?? "未提供",
@@ -336,9 +353,13 @@ export function mapPolicySummary(dto: GuardPolicyBundleDto, history: PolicyHisto
     updatedBy: latest?.updatedBy ?? null,
     disabledRuleCount: Array.isArray(dto.disabled_rules) ? dto.disabled_rules.length : 0,
     ruleOverrideCount:
-      dto.rule_overrides && typeof dto.rule_overrides === "object" ? Object.keys(dto.rule_overrides).length : 0,
+      dto.rule_overrides && typeof dto.rule_overrides === "object"
+        ? Object.keys(dto.rule_overrides).length
+        : 0,
     toolProfileCount:
-      dto.tool_profiles && typeof dto.tool_profiles === "object" ? Object.keys(dto.tool_profiles).length : 0,
+      dto.tool_profiles && typeof dto.tool_profiles === "object"
+        ? Object.keys(dto.tool_profiles).length
+        : 0,
   };
 }
 
@@ -352,7 +373,9 @@ export function mapAuditIntegrity(dto: GuardAuditIntegrityDto): AuditIntegrity {
   };
 }
 
-export function mapConfigAuditFindingRecord(dto: GuardConfigAuditFindingRecordDto): ConfigAuditFindingRecord {
+export function mapConfigAuditFindingRecord(
+  dto: GuardConfigAuditFindingRecordDto,
+): ConfigAuditFindingRecord {
   const finding = readRecord(dto.finding);
   return {
     runtime: readString(dto.runtime) ?? "未提供",
@@ -379,13 +402,17 @@ export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
   const hookCount = readNullableNumber(dto.hook_count);
   return {
     status:
-      dto.status === "loaded" || dto.status === "not_loaded" || dto.status === "error" || dto.status === "unknown"
+      dto.status === "loaded" ||
+      dto.status === "not_loaded" ||
+      dto.status === "error" ||
+      dto.status === "unknown"
         ? dto.status
         : "unknown",
     loaded: readBoolean(dto.loaded),
     hookCount,
     expectedHookCount,
-    hookCoverage: hookCount === null || expectedHookCount <= 0 ? null : hookCount / expectedHookCount,
+    hookCoverage:
+      hookCount === null || expectedHookCount <= 0 ? null : hookCount / expectedHookCount,
     lastVerifiedAt: readString(dto.last_verified_at),
     lastHeartbeatAt: readString(dto.last_heartbeat_at),
     error: readString(dto.error),

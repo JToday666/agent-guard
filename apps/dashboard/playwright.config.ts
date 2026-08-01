@@ -7,9 +7,31 @@ export default defineConfig({
   fullyParallel: false,
   outputDir: "test-results",
   projects: [
-    { name: "desktop", use: { viewport: { height: 768, width: 1366 } } },
-    { name: "tablet", use: { viewport: { height: 1024, width: 768 } } },
-    { name: "mobile", use: { viewport: { height: 844, width: 390 } } },
+    {
+      name: "desktop-functional",
+      testIgnore: /(api-mode|desktop-matrix)\.spec\.ts/,
+      use: { viewport: { height: 768, width: 1366 } },
+    },
+    {
+      name: "desktop-1280",
+      testMatch: /desktop-matrix\.spec\.ts/,
+      use: { viewport: { height: 720, width: 1280 } },
+    },
+    {
+      name: "desktop-1366",
+      testMatch: /desktop-matrix\.spec\.ts/,
+      use: { viewport: { height: 768, width: 1366 } },
+    },
+    {
+      name: "desktop-1440",
+      testMatch: /desktop-matrix\.spec\.ts/,
+      use: { viewport: { height: 900, width: 1440 } },
+    },
+    {
+      name: "desktop-1920",
+      testMatch: /desktop-matrix\.spec\.ts/,
+      use: { viewport: { height: 1080, width: 1920 } },
+    },
   ],
   reporter: "list",
   testDir: "e2e",

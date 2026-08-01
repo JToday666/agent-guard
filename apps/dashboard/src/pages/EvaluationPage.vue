@@ -7,192 +7,260 @@
 
     <ErrorState
       v-if="store.status === 'error' && store.error"
-      :is-retrying="store.isRefreshing"
+      :is-retrying="store.isManualRefreshing"
       :message="store.error"
       @retry="store.refresh"
     />
     <LoadingState v-else-if="store.status === 'loading' && !store.events.length" />
     <template v-else>
-      <section v-if="store.evaluationError" class="evaluation-alert" role="status">
-        <strong>评测结果暂未更新</strong>
-        <span>{{ store.evaluationError }}</span>
-      </section>
+      <InlineNotice v-if="store.evaluationError" title="评测结果暂未更新" tone="warning">
+        <p>{{ store.evaluationError }}</p>
+      </InlineNotice>
 
-      <section v-if="hasRunData" class="evaluation-run" aria-labelledby="run-title">
-        <header>
+      <section v-if="hasRunData" class="benchmark-section" aria-labelledby="benchmark-title">
+        <header class="section-header">
           <div>
-            <h2 id="run-title">最新评估</h2>
-            <p>{{ store.evaluation.datasetLabel }}</p>
+            <h2 id="benchmark-title">完整评测结果</h2>
+            <p>{{ store.evaluation.datasetLabel }} · 独立评测运行</p>
           </div>
-          <dl>
-            <div>
-              <dt>运行 ID</dt>
-              <dd>
-                <code>{{ store.evaluation.runId }}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>运行时间</dt>
-              <dd>{{ formatMaybeTime(store.evaluation.runAt) }}</dd>
-            </div>
-            <div>
-              <dt>展示样本</dt>
-              <dd>{{ store.evaluation.cases.length }}</dd>
-            </div>
-          </dl>
+          <span>{{ formatMaybeTime(store.evaluation.runAt) }}</span>
         </header>
 
-        <div class="asr-stage">
-          <div class="asr-score asr-score--before">
-            <span>防护前 ASR</span>
-            <strong>{{ percent(store.evaluation.asrBefore) }}</strong>
-          </div>
-          <div class="asr-change">
-            <span>ASR 降幅</span>
-            <strong>{{ pointDelta(store.evaluation.asrBefore, store.evaluation.asrAfter) }}</strong>
-          </div>
-          <div class="asr-score asr-score--after">
-            <span>防护后 ASR</span>
-            <strong>{{ percent(store.evaluation.asrAfter) }}</strong>
-          </div>
-        </div>
+        <div class="benchmark-layout">
+          <div class="benchmark-result">
+            <dl class="asr-headline" aria-label="防护前后攻击成功率">
+              <div>
+                <dt>防护前 ASR</dt>
+                <dd class="asr-headline__before">{{ percent(store.evaluation.asrBefore) }}</dd>
+              </div>
+              <div class="asr-headline__change">
+                <dt>ASR 降幅</dt>
+                <dd>{{ pointDelta(store.evaluation.asrBefore, store.evaluation.asrAfter) }}</dd>
+              </div>
+              <div>
+                <dt>防护后 ASR</dt>
+                <dd class="asr-headline__after">{{ percent(store.evaluation.asrAfter) }}</dd>
+              </div>
+            </dl>
 
-        <AsrComparisonChart :before="store.evaluation.asrBefore" :after="store.evaluation.asrAfter" />
+            <AsrComparisonChart
+              :before="store.evaluation.asrBefore"
+              :after="store.evaluation.asrAfter"
+            />
+
+            <dl class="benchmark-facts">
+              <div>
+                <dt>运行 ID</dt>
+                <dd>
+                  <code>{{ store.evaluation.runId }}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>数据集版本</dt>
+                <dd>{{ store.evaluation.datasetVersion ?? "未提供" }}</dd>
+              </div>
+              <div>
+                <dt>样本量</dt>
+                <dd>{{ store.evaluation.cases.length }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <section
+            v-if="store.evaluation.perAttack.length"
+            class="attack-asr"
+            aria-labelledby="attack-asr-title"
+          >
+            <header class="section-header">
+              <div>
+                <h3 id="attack-asr-title">攻击类型 ASR</h3>
+                <p>按防护前攻击成功率对比防护效果</p>
+              </div>
+              <div class="attack-asr__legend" aria-label="图例">
+                <span><i class="before"></i>防护前</span>
+                <span><i class="after"></i>防护后</span>
+              </div>
+            </header>
+            <div class="attack-asr__rows" role="list">
+              <div v-for="row in store.evaluation.perAttack" :key="row.attackType" role="listitem">
+                <div class="attack-asr__label">
+                  <strong>{{ row.attackType }}</strong>
+                  <span>下降 {{ pointDelta(row.asrBefore, row.asrAfter) }}</span>
+                </div>
+                <div class="attack-asr__bars" aria-hidden="true">
+                  <i
+                    class="before"
+                    :style="{ transform: `scaleX(${barScale(row.asrBefore)})` }"
+                  ></i>
+                  <i class="after" :style="{ transform: `scaleX(${barScale(row.asrAfter)})` }"></i>
+                </div>
+                <div class="attack-asr__values">
+                  <span>{{ percent(row.asrBefore) }}</span>
+                  <span>{{ percent(row.asrAfter) }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </section>
       <EmptyState
         v-else
         title="暂无评测结果"
-        message="评测结果写入后将在这里展示最新攻击成功率、防护效果和样本结果。"
+        message="评测结果写入后将在这里展示攻击成功率、防护效果和样本结果。"
       />
 
-      <MetricStrip :items="metricItems" />
-
-      <section
-        v-if="store.evaluation.perAttack.length"
-        class="attack-asr section-divider"
-        aria-labelledby="attack-asr-title"
-      >
-        <header>
+      <section class="window-section section-divider" aria-labelledby="window-title">
+        <header class="section-header">
           <div>
-            <h2 id="attack-asr-title">攻击类型 ASR</h2>
-            <p>按防护前攻击成功率排序，对比防护前后变化</p>
+            <h2 id="window-title">当前审计窗口</h2>
+            <p>由当前加载的审计事件实时派生，不与完整评测结果混算</p>
           </div>
+          <span>{{ store.events.length }} 条事件 · {{ labeledEventCount }} 条已标注</span>
         </header>
-        <div class="attack-asr__rows" role="list">
-          <article v-for="row in store.evaluation.perAttack" :key="row.attackType" role="listitem">
-            <div class="attack-asr__label">
-              <strong>{{ row.attackType }}</strong>
-              <span>{{ pointDelta(row.asrBefore, row.asrAfter) }}</span>
+        <MetricStrip :items="metricItems" />
+
+        <div class="window-analysis">
+          <ChartFrame
+            description="按有延迟记录的审计事件计算运行时均值"
+            :summary="runtimeLatencySummary"
+            title="运行时判定延迟"
+          >
+            <div v-if="hasRuntimeData" class="runtime-bars">
+              <div v-for="row in runtimeLatency" :key="row.runtime" class="runtime-bar-row">
+                <span class="runtime-bar-label">
+                  <strong>{{ row.runtime }}</strong>
+                  <small>{{ row.count }} 条记录</small>
+                </span>
+                <span class="runtime-bar-track" aria-hidden="true"
+                  ><i :style="{ transform: `scaleX(${row.pct / 100})` }"></i
+                ></span>
+                <span class="runtime-bar-val">{{
+                  row.avg === null ? "—" : `${row.avg.toFixed(1)} ms`
+                }}</span>
+              </div>
             </div>
-            <div class="attack-asr__bars" aria-hidden="true">
-              <i class="before" :style="{ width: barWidth(row.asrBefore) }"></i>
-              <i class="after" :style="{ width: barWidth(row.asrAfter) }"></i>
-            </div>
-            <div class="attack-asr__values">
-              <span>{{ percent(row.asrBefore) }}</span>
-              <span>{{ percent(row.asrAfter) }}</span>
-            </div>
-          </article>
+            <p v-else class="chart-empty">当前窗口暂无延迟记录</p>
+          </ChartFrame>
+
+          <ChartFrame
+            description="由恶意标注与实际阻断结果派生"
+            :summary="matrixSummary"
+            title="混淆矩阵"
+          >
+            <ConfusionMatrix
+              v-if="hasMatrixData"
+              :tp="matrix.tp"
+              :fp="matrix.fp"
+              :tn="matrix.tn"
+              :fn="matrix.fn"
+            />
+            <p v-else class="chart-empty">当前窗口暂无足够的恶意标注数据</p>
+          </ChartFrame>
         </div>
-      </section>
-
-      <section v-if="hasRuntimeComparison" class="eval-runtime section-divider" aria-labelledby="runtime-perf-title">
-        <header>
-          <div>
-            <h2 id="runtime-perf-title">运行时延迟对比</h2>
-            <p>比较多个运行时的平均判定耗时</p>
-          </div>
-        </header>
-        <div class="runtime-bars">
-          <div v-for="row in runtimeLatency" :key="row.runtime" class="runtime-bar-row">
-            <span class="runtime-bar-label">{{ row.runtime }}</span>
-            <span class="runtime-bar-track"><i :style="{ width: `${row.pct}%` }"></i></span>
-            <span class="runtime-bar-val">{{ row.avg === null ? "—" : `${row.avg.toFixed(1)} ms` }}</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="eval-matrix section-divider" aria-labelledby="matrix-title">
-        <header>
-          <div>
-            <h2 id="matrix-title">混淆矩阵</h2>
-            <p>由当前审计窗口的恶意标注与阻断结果派生</p>
-          </div>
-        </header>
-        <ConfusionMatrix v-if="hasMatrixData" :tp="matrix.tp" :fp="matrix.fp" :tn="matrix.tn" :fn="matrix.fn" />
-        <p v-else class="eval-matrix__empty">暂无足够标注数据（需要样本恶意标注）</p>
       </section>
 
       <section class="evaluation-cases section-divider" aria-labelledby="case-title">
-        <header>
+        <header class="section-header">
           <div>
-            <h2 id="case-title">展示样本</h2>
-            <p>最新评测中的展示样本可追溯到对应证据链</p>
+            <h2 id="case-title">评测样本</h2>
+            <p>完整评测中的样本可追溯到对应证据链</p>
           </div>
-          <span>{{ store.evaluation.cases.length }} 个展示样本</span>
+          <span>
+            {{ store.evaluation.cases.length }} 个样本
+            <template v-if="totalCasePages > 1">
+              · 第 {{ currentCasePage }} / {{ totalCasePages }} 页
+            </template>
+          </span>
         </header>
-        <div v-if="selectedCaseId" class="case-locator" :class="{ 'case-locator--missing': !selectedCaseExists }">
+        <div
+          v-if="selectedCaseId"
+          class="case-locator"
+          :class="{ 'case-locator--missing': !selectedCaseExists }"
+        >
           <span>{{
-            selectedCaseExists ? `当前定位样本：${selectedCaseId}` : `未找到定位样本：${selectedCaseId}`
+            selectedCaseExists
+              ? `当前定位样本：${selectedCaseId}`
+              : `未找到定位样本：${selectedCaseId}`
           }}</span>
           <button type="button" @click="handleClearCaseLocator">清除定位</button>
         </div>
-        <div v-if="store.evaluation.cases.length" class="case-table-wrap">
-          <table class="case-table">
-            <caption>
-              展示样本结果
-            </caption>
-            <thead>
-              <tr>
-                <th>样本</th>
-                <th>攻击类型</th>
-                <th>运行时</th>
-                <th>期望</th>
-                <th>实际</th>
-                <th>结果</th>
-                <th>证据链</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in store.evaluation.cases"
-                :key="row.caseId"
-                :class="{ 'case-table__selected': selectedCaseId === row.caseId }"
-                :data-case-id="row.caseId"
+        <template v-if="store.evaluation.cases.length">
+          <div class="case-table-wrap">
+            <table class="case-table">
+              <caption>
+                评测样本结果
+              </caption>
+              <thead>
+                <tr>
+                  <th>样本</th>
+                  <th>攻击类型</th>
+                  <th>运行时</th>
+                  <th>期望</th>
+                  <th>实际</th>
+                  <th>结果</th>
+                  <th>证据链</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in paginatedCases"
+                  :key="row.caseId"
+                  :class="{ 'case-table__selected': selectedCaseId === row.caseId }"
+                  :data-case-id="row.caseId"
+                >
+                  <td>
+                    <RouterLink :to="`/evidence/${row.traceId}`"
+                      ><code>{{ row.caseId }}</code></RouterLink
+                    >
+                  </td>
+                  <td>{{ row.attackType }}</td>
+                  <td>{{ row.runtime }}</td>
+                  <td>
+                    <StatusBadge
+                      :label="getDecisionLabel(row.expectedDecision)"
+                      :tone="getDecisionTone(row.expectedDecision)"
+                    />
+                  </td>
+                  <td>
+                    <StatusBadge
+                      :label="getDecisionLabel(row.actualDecision)"
+                      :tone="getDecisionTone(row.actualDecision)"
+                    />
+                  </td>
+                  <td>
+                    <StatusBadge
+                      :label="row.attackSuccess ? '攻击成功' : row.blocked ? '已拦截' : '未成功'"
+                      :tone="row.attackSuccess ? 'danger' : 'success'"
+                    />
+                  </td>
+                  <td>
+                    <RouterLink :to="`/evidence/${row.traceId}`">{{ row.traceId }}</RouterLink>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <footer v-if="totalCasePages > 1" class="case-pagination" aria-label="评测样本分页">
+            <span>第 {{ currentCasePage }} / {{ totalCasePages }} 页</span>
+            <div>
+              <button
+                type="button"
+                :disabled="currentCasePage === 1"
+                @click="handleCasePage(currentCasePage - 1)"
               >
-                <td>
-                  <RouterLink :to="`/evidence/${row.traceId}`"
-                    ><code>{{ row.caseId }}</code></RouterLink
-                  >
-                </td>
-                <td>{{ row.attackType }}</td>
-                <td>{{ row.runtime }}</td>
-                <td>
-                  <StatusBadge
-                    :label="getDecisionLabel(row.expectedDecision)"
-                    :tone="getDecisionTone(row.expectedDecision)"
-                  />
-                </td>
-                <td>
-                  <StatusBadge
-                    :label="getDecisionLabel(row.actualDecision)"
-                    :tone="getDecisionTone(row.actualDecision)"
-                  />
-                </td>
-                <td>
-                  <StatusBadge
-                    :label="row.attackSuccess ? '攻击成功' : row.blocked ? '已拦截' : '未成功'"
-                    :tone="row.attackSuccess ? 'danger' : 'success'"
-                  />
-                </td>
-                <td>
-                  <RouterLink :to="`/evidence/${row.traceId}`">{{ row.traceId }}</RouterLink>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <EmptyState v-else title="暂无展示样本" message="最新评测包含样本明细后将在此展示。" />
+                上一页
+              </button>
+              <button
+                type="button"
+                :disabled="currentCasePage === totalCasePages"
+                @click="handleCasePage(currentCasePage + 1)"
+              >
+                下一页
+              </button>
+            </div>
+          </footer>
+        </template>
+        <EmptyState v-else title="暂无评测样本" message="完整评测包含样本明细后将在此展示。" />
       </section>
     </template>
   </section>
@@ -203,23 +271,60 @@ import { computed, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AsrComparisonChart from "../components/charts/AsrComparisonChart.vue";
 import ConfusionMatrix from "../components/charts/ConfusionMatrix.vue";
+import ChartFrame from "../components/common/ChartFrame.vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
 import EmptyState from "../components/common/EmptyState.vue";
+import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
-import { formatDashboardDateTime, getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
+import {
+  formatDashboardDateTime,
+  getDecisionLabel,
+  getDecisionTone,
+} from "../utils/dashboard-formatters";
 
 defineOptions({ name: "EvaluationPage" });
 
 const store = useDashboardStore();
 const route = useRoute();
 const router = useRouter();
-const selectedCaseId = computed(() => (typeof route.query.case_id === "string" ? route.query.case_id : ""));
+const CASE_PAGE_SIZE = 25;
+const countFormatter = new Intl.NumberFormat("zh-CN");
+const selectedCaseId = computed(() =>
+  typeof route.query.case_id === "string" ? route.query.case_id : "",
+);
 const selectedCaseExists = computed(() =>
-  Boolean(selectedCaseId.value && store.evaluation.cases.some((row) => row.caseId === selectedCaseId.value)),
+  Boolean(
+    selectedCaseId.value &&
+    store.evaluation.cases.some((row) => row.caseId === selectedCaseId.value),
+  ),
+);
+const requestedCasePage = computed(() => {
+  const page = Number.parseInt(
+    typeof route.query.case_page === "string" ? route.query.case_page : "1",
+    10,
+  );
+  return Number.isFinite(page) && page > 0 ? page : 1;
+});
+const totalCasePages = computed(() =>
+  Math.max(1, Math.ceil(store.evaluation.cases.length / CASE_PAGE_SIZE)),
+);
+const selectedCasePage = computed(() => {
+  if (!selectedCaseId.value) return null;
+  const index = store.evaluation.cases.findIndex((row) => row.caseId === selectedCaseId.value);
+  return index < 0 ? null : Math.floor(index / CASE_PAGE_SIZE) + 1;
+});
+const currentCasePage = computed(() =>
+  Math.min(selectedCasePage.value ?? requestedCasePage.value, totalCasePages.value),
+);
+const paginatedCases = computed(() =>
+  store.evaluation.cases.slice(
+    (currentCasePage.value - 1) * CASE_PAGE_SIZE,
+    currentCasePage.value * CASE_PAGE_SIZE,
+  ),
 );
 const hasRunData = computed(() => store.evaluation.runId !== null);
 const matrix = computed(() => {
@@ -237,29 +342,56 @@ const matrix = computed(() => {
   }
   return { tp, fp, tn, fn };
 });
-const hasMatrixData = computed(() => matrix.value.tp + matrix.value.fp + matrix.value.tn + matrix.value.fn > 0);
+const hasMatrixData = computed(
+  () => matrix.value.tp + matrix.value.fp + matrix.value.tn + matrix.value.fn > 0,
+);
+const labeledEventCount = computed(
+  () =>
+    store.events.filter((event) => event.isMalicious !== null && event.isMalicious !== undefined)
+      .length,
+);
 const metricItems = computed(() => [
   {
-    detail: "当前审计窗口",
+    detail: "当前加载数据",
+    label: "审计事件",
+    route: "/investigations",
+    value: countFormatter.format(store.metrics.eventCount),
+  },
+  {
+    detail: "含恶意性标注",
+    label: "已标注样本",
+    route: "/investigations",
+    value: countFormatter.format(labeledEventCount.value),
+  },
+  {
+    detail: "实际执行阻断",
     label: "阻断率",
     route: "/investigations?blocked=true",
-    tone: "success" as const,
-    value: percent(store.evaluation.blockRate),
+    tone: "protective" as const,
+    value: percent(store.metrics.blockRate),
   },
-  { detail: "当前审计窗口", label: "误报率 FPR", route: "/investigations", value: percent(store.evaluation.fpr) },
   {
-    detail: "当前审计窗口",
+    detail: "正常样本被阻断",
+    label: "误报率 FPR",
+    route: "/investigations",
+    value: percent(store.metrics.fpr),
+  },
+  {
+    detail: "恶意样本未阻断",
     label: "漏报率 FNR",
     route: "/investigations?decision=allow",
-    value: percent(store.evaluation.fnr),
+    tone: "danger" as const,
+    value: percent(store.metrics.fnr),
   },
   {
-    detail: "当前审计窗口",
+    detail: "有耗时记录的事件",
     label: "平均判定延迟",
     route: "/system",
-    value: store.evaluation.averageLatencyMs === null ? "--" : `${store.evaluation.averageLatencyMs.toFixed(1)} ms`,
+    value:
+      store.metrics.averageLatencyMs === null
+        ? "--"
+        : `${store.metrics.averageLatencyMs.toFixed(1)} ms`,
   },
-  { detail: "最新评测", label: "展示样本数", route: "/evaluation", value: String(store.evaluation.cases.length) },
 ]);
 const runtimeLatency = computed(() => {
   const runtimes = ["langgraph", "openclaw"] as const;
@@ -267,13 +399,26 @@ const runtimeLatency = computed(() => {
     const values = store.events
       .filter((event) => event.runtime === runtime && event.latencyMs != null)
       .map((event) => event.latencyMs as number);
-    const avg = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-    return { runtime, avg };
+    const avg = values.length
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : null;
+    return { runtime, avg, count: values.length };
   });
   const max = Math.max(1, ...rows.map((row) => row.avg ?? 0));
   return rows.map((row) => ({ ...row, pct: row.avg ? (row.avg / max) * 100 : 0 }));
 });
-const hasRuntimeComparison = computed(() => runtimeLatency.value.filter((row) => row.avg !== null).length > 1);
+const hasRuntimeData = computed(() => runtimeLatency.value.some((row) => row.avg !== null));
+const runtimeLatencySummary = computed(() => {
+  const rows = runtimeLatency.value.filter((row) => row.avg !== null);
+  return rows.length
+    ? rows.map((row) => `${row.runtime} 平均 ${row.avg!.toFixed(1)} 毫秒`).join("，")
+    : "当前窗口暂无延迟记录";
+});
+const matrixSummary = computed(() =>
+  hasMatrixData.value
+    ? `共 ${labeledEventCount.value} 条已标注事件，正确阻断 ${matrix.value.tp}，误报 ${matrix.value.fp}，正确放行 ${matrix.value.tn}，漏报 ${matrix.value.fn}`
+    : "当前窗口暂无足够的恶意标注数据",
+);
 
 function percent(value: number | null): string {
   return value === null ? "--" : `${(value * 100).toFixed(1)}%`;
@@ -284,8 +429,8 @@ function pointDelta(before: number | null, after: number | null): string {
   return `${((before - after) * 100).toFixed(1)}pp`;
 }
 
-function barWidth(value: number | null): string {
-  return value === null ? "0%" : `${Math.max(2, Math.min(100, value * 100))}%`;
+function barScale(value: number | null): number {
+  return value === null ? 0 : Math.max(0.02, Math.min(1, value));
 }
 
 function formatMaybeTime(value: string | null): string {
@@ -293,7 +438,17 @@ function formatMaybeTime(value: string | null): string {
 }
 
 function handleClearCaseLocator() {
-  void router.replace({ path: "/evaluation" });
+  void router.replace({
+    path: "/evaluation",
+    query: currentCasePage.value > 1 ? { case_page: currentCasePage.value } : {},
+  });
+}
+
+function handleCasePage(page: number) {
+  void router.replace({
+    path: "/evaluation",
+    query: page > 1 ? { case_page: page } : {},
+  });
 }
 
 watch(
@@ -301,9 +456,10 @@ watch(
   async ([caseId]) => {
     if (!caseId) return;
     await nextTick();
-    document
-      .querySelector(`[data-case-id="${CSS.escape(caseId)}"]`)
-      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    document.querySelector(`[data-case-id="${CSS.escape(caseId)}"]`)?.scrollIntoView({
+      block: "center",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
   },
   { immediate: true },
 );
@@ -314,153 +470,167 @@ watch(
   display: grid;
   gap: var(--space-6);
 }
-.evaluation-alert {
-  align-items: center;
-  background: var(--color-warning-soft);
-  border-left: 3px solid var(--color-warning);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-}
-.evaluation-alert span {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-13);
-}
-.evaluation-run {
-  border-block: 1px solid var(--color-border);
-  display: grid;
-  gap: var(--space-5);
-  padding: var(--space-5) 0;
-}
-.evaluation-run > header {
-  align-items: start;
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: minmax(0, 1fr) minmax(min(100%, 34rem), 1.15fr);
-}
-.evaluation-run h2,
-.evaluation-run p {
-  margin: 0;
-}
-.evaluation-run h2 {
-  font-size: var(--font-size-20);
-}
-.evaluation-run p {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-13);
-  margin-top: var(--space-1);
-}
-.evaluation-run dl {
-  display: grid;
-  gap: 1px;
-  grid-template-columns: 1.2fr 1fr 0.55fr;
-  margin: 0;
-  overflow: hidden;
-}
-.evaluation-run dl > div {
-  background: var(--color-surface-muted);
-  min-width: 0;
-  padding: var(--space-3);
-}
-.evaluation-run dt {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-11);
-}
-.evaluation-run dd {
-  font-size: var(--font-size-13);
-  margin: var(--space-1) 0 0;
-  overflow-wrap: anywhere;
-}
-.asr-stage {
-  align-items: stretch;
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-}
-.asr-score,
-.asr-change {
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-  padding: var(--space-4);
-}
-.asr-score span,
-.asr-change span {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-12);
-}
-.asr-score strong {
-  font-size: clamp(2rem, 5vw, 4rem);
-  line-height: 0.95;
-  overflow-wrap: anywhere;
-}
-.asr-score--before strong {
-  color: var(--color-danger);
-}
-.asr-score--after strong {
-  color: var(--color-success);
-}
-.asr-change {
-  align-content: center;
-  min-width: 8rem;
-  text-align: center;
-}
-.asr-change strong {
-  color: var(--color-active);
-  font-size: var(--font-size-24);
-}
-.attack-asr,
-.eval-runtime,
-.eval-matrix,
+.benchmark-section,
+.window-section,
 .evaluation-cases {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
-.attack-asr > header,
-.eval-runtime > header,
-.eval-matrix > header,
-.evaluation-cases > header {
-  align-items: start;
-  display: flex;
-  gap: var(--space-4);
-  justify-content: space-between;
+.benchmark-section {
+  border-block: 1px solid var(--color-border);
+  padding: var(--space-5) 0;
 }
-.attack-asr h2,
-.attack-asr p,
-.eval-runtime h2,
-.eval-runtime p,
-.eval-matrix h2,
-.eval-matrix p,
-.evaluation-cases h2,
-.evaluation-cases p {
-  margin: 0;
-}
-.attack-asr p,
-.eval-runtime p,
-.eval-matrix p,
-.evaluation-cases p,
+.benchmark-section > header > span,
+.window-section > header > span,
 .evaluation-cases > header > span {
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
-  margin-top: var(--space-1);
 }
-.attack-asr__rows {
+.benchmark-layout {
   display: grid;
-  gap: var(--space-2);
+  gap: clamp(var(--space-6), 3vw, var(--space-8));
+  grid-template-columns: minmax(0, 1.08fr) minmax(24rem, 0.92fr);
 }
-.attack-asr__rows article {
-  align-items: center;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
+.benchmark-result {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.asr-headline {
+  align-items: end;
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: minmax(9rem, 1fr) minmax(10rem, 2fr) 6rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  margin: 0;
+}
+.asr-headline > div {
+  min-width: 0;
+}
+.asr-headline dt {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+  font-weight: var(--font-weight-semibold);
+}
+.asr-headline dd {
+  font-size: clamp(2.2rem, 4vw, 3.4rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+  margin: var(--space-1) 0 0;
+}
+.asr-headline__before {
+  color: var(--color-danger);
+}
+.asr-headline__after {
+  color: var(--color-success);
+  text-align: right;
+}
+.asr-headline > div:last-child dt {
+  text-align: right;
+}
+.asr-headline__change {
+  border-inline: 1px solid var(--color-border);
+  min-width: 7rem !important;
+  padding-inline: var(--space-4);
+  text-align: center;
+}
+.asr-headline__change dd {
+  color: var(--color-active);
+  font-size: var(--font-size-24);
+  letter-spacing: -0.025em;
+}
+.benchmark-facts {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: 1.2fr 0.8fr 0.55fr;
+  margin: 0;
+  overflow: hidden;
+}
+.benchmark-facts > div {
+  background: var(--color-surface-muted);
+  min-width: 0;
   padding: var(--space-3);
+}
+.benchmark-facts dt {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+}
+.benchmark-facts dd {
+  font-size: var(--font-size-12);
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.window-section {
+  padding-top: var(--space-6);
+}
+.window-analysis {
+  display: grid;
+  gap: clamp(var(--space-6), 3vw, var(--space-8));
+  grid-template-columns: minmax(0, 1fr) minmax(25rem, 0.8fr);
+}
+.chart-empty {
+  color: var(--color-text-subtle);
+  display: grid;
+  font-size: var(--font-size-13);
+  min-height: 10rem;
+  margin: 0;
+  place-items: center;
+}
+.attack-asr {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.attack-asr h3,
+.attack-asr p,
+.evaluation-cases p {
+  margin: 0;
+}
+.attack-asr h3 {
+  font-size: var(--font-size-16);
+}
+.attack-asr p,
+.evaluation-cases p {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-12);
+  margin-top: var(--space-1);
+}
+.attack-asr__legend {
+  align-items: center;
+  color: var(--color-text-subtle);
+  display: flex;
+  font-size: var(--font-size-11);
+  gap: var(--space-3);
+}
+.attack-asr__legend span {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-1);
+}
+.attack-asr__legend i {
+  display: inline-block;
+  height: 0.45rem;
+  width: 0.9rem;
+}
+.attack-asr__legend .before {
+  background: var(--color-danger);
+}
+.attack-asr__legend .after {
+  background: var(--color-success);
+}
+.attack-asr__rows {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+}
+.attack-asr__rows > div {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(8rem, 0.9fr) minmax(9rem, 1.5fr) 5.5rem;
+  min-height: 3.7rem;
+  padding: var(--space-2);
 }
 .attack-asr__label {
   display: grid;
@@ -480,17 +650,18 @@ watch(
   gap: 0.35rem;
 }
 .attack-asr__bars i {
-  border-radius: var(--radius-pill);
   display: block;
-  height: 0.55rem;
+  height: 0.45rem;
   min-width: 2px;
+  transform-origin: left;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .attack-asr__bars .before {
-  background: var(--color-danger);
-  opacity: 0.72;
+  background: var(--gradient-data-danger);
 }
 .attack-asr__bars .after {
-  background: var(--color-success);
+  background: var(--gradient-data-active);
 }
 .attack-asr__values {
   color: var(--color-text-muted);
@@ -507,11 +678,19 @@ watch(
   align-items: center;
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: 6rem 1fr 5rem;
+  grid-template-columns: 7rem 1fr 5rem;
+  min-height: 3.5rem;
 }
 .runtime-bar-label {
+  display: grid;
+  gap: 0.1rem;
+}
+.runtime-bar-label strong {
   font-size: var(--font-size-13);
-  font-weight: var(--font-weight-semibold);
+}
+.runtime-bar-label small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
 }
 .runtime-bar-track {
   background: var(--color-surface-muted);
@@ -520,22 +699,20 @@ watch(
   overflow: hidden;
 }
 .runtime-bar-track i {
-  background: linear-gradient(90deg, var(--color-active), #7aa7ff);
+  background: var(--gradient-data-warning);
   border-radius: inherit;
   display: block;
   height: 100%;
   min-width: 3px;
+  transform-origin: left;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .runtime-bar-val {
   color: var(--color-text-muted);
   font-size: var(--font-size-13);
   font-variant-numeric: tabular-nums;
   text-align: right;
-}
-.eval-matrix__empty {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-13);
-  margin: 0;
 }
 .case-locator {
   align-items: center;
@@ -594,28 +771,39 @@ watch(
   vertical-align: middle;
 }
 .case-table th {
+  background: var(--color-surface);
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
   letter-spacing: 0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .case-table__selected {
   background: var(--color-active-soft);
   box-shadow: inset 2px 0 var(--color-active);
 }
-@media (max-width: 760px) {
-  .evaluation-run > header,
-  .asr-stage,
-  .attack-asr__rows article {
-    grid-template-columns: 1fr;
-  }
-  .evaluation-run dl {
-    grid-template-columns: 1fr;
-  }
-  .asr-change {
-    text-align: left;
-  }
-  .case-table {
-    min-width: 42rem;
-  }
+.case-pagination {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-12);
+  justify-content: space-between;
+}
+.case-pagination div {
+  display: flex;
+  gap: var(--space-2);
+}
+.case-pagination button {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+}
+.case-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 </style>

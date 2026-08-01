@@ -1,38 +1,37 @@
 <template>
-  <aside
-    v-if="isOpen"
-    ref="drawerElement"
-    aria-labelledby="detail-drawer-title"
-    :aria-modal="isMobile"
-    class="detail-drawer"
-    role="dialog"
-    tabindex="-1"
-    @keydown.esc.prevent="emit('close')"
-    @keydown.tab="handleTabKey"
-  >
-    <header class="detail-drawer__header">
-      <div>
-        <p>{{ eyebrow }}</p>
-        <h2 id="detail-drawer-title">{{ title }}</h2>
+  <Transition name="detail-drawer" @after-leave="handleAfterLeave">
+    <aside
+      v-if="isOpen"
+      aria-labelledby="detail-drawer-title"
+      class="detail-drawer"
+      role="dialog"
+      tabindex="-1"
+      @keydown.esc.prevent="emit('close')"
+    >
+      <header class="detail-drawer__header">
+        <div>
+          <p>{{ eyebrow }}</p>
+          <h2 id="detail-drawer-title">{{ title }}</h2>
+        </div>
+        <button
+          ref="closeButtonElement"
+          class="detail-drawer__close"
+          type="button"
+          aria-label="关闭详情"
+          @click="emit('close')"
+        >
+          <X aria-hidden="true" :size="18" />
+        </button>
+      </header>
+      <div class="detail-drawer__body">
+        <slot />
       </div>
-      <button
-        ref="closeButtonElement"
-        class="detail-drawer__close"
-        type="button"
-        aria-label="关闭详情"
-        @click="emit('close')"
-      >
-        <X aria-hidden="true" :size="18" />
-      </button>
-    </header>
-    <div class="detail-drawer__body">
-      <slot />
-    </div>
-  </aside>
+    </aside>
+  </Transition>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { X } from "@lucide/vue";
 
 defineOptions({
@@ -50,59 +49,23 @@ const props = defineProps<{
 }>();
 
 const closeButtonElement = ref<HTMLButtonElement | null>(null);
-const drawerElement = ref<HTMLElement | null>(null);
-const isMobile = ref(false);
 let restoreFocusElement: HTMLElement | null = null;
-let mobileQuery: MediaQueryList | null = null;
-
-function syncMobileState(event: MediaQueryList | MediaQueryListEvent): void {
-  isMobile.value = event.matches;
-}
-
-function handleTabKey(event: KeyboardEvent): void {
-  if (!isMobile.value || !drawerElement.value) return;
-  const focusableElements = [
-    ...drawerElement.value.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  ];
-  const firstElement = focusableElements[0];
-  const lastElement = focusableElements.at(-1);
-  if (!firstElement || !lastElement) return;
-  if (event.shiftKey && document.activeElement === firstElement) {
-    event.preventDefault();
-    lastElement.focus();
-  } else if (!event.shiftKey && document.activeElement === lastElement) {
-    event.preventDefault();
-    firstElement.focus();
-  }
-}
-
-onMounted(() => {
-  mobileQuery = window.matchMedia("(max-width: 900px)");
-  syncMobileState(mobileQuery);
-  mobileQuery.addEventListener("change", syncMobileState);
-});
-
-onUnmounted(() => mobileQuery?.removeEventListener("change", syncMobileState));
 
 watch(
   () => props.isOpen,
-  async (isOpen, wasOpen) => {
-    if (isOpen) {
-      restoreFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      await nextTick();
-      closeButtonElement.value?.focus();
-      return;
-    }
-
-    if (wasOpen) {
-      await nextTick();
-      restoreFocusElement?.focus();
-      restoreFocusElement = null;
-    }
+  async (isOpen) => {
+    if (!isOpen) return;
+    restoreFocusElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await nextTick();
+    closeButtonElement.value?.focus();
   },
 );
+
+function handleAfterLeave(): void {
+  restoreFocusElement?.focus();
+  restoreFocusElement = null;
+}
 </script>
 
 <style scoped lang="scss">
@@ -112,9 +75,13 @@ watch(
   box-shadow: var(--shadow-raised);
   display: grid;
   grid-template-rows: auto 1fr;
-  min-height: calc(100vh - var(--top-bar-height));
+  inset: var(--top-bar-height) 0 0 auto;
   min-width: 0;
   overscroll-behavior: contain;
+  position: fixed;
+  transform-origin: right center;
+  width: clamp(22rem, 30vw, 27rem);
+  z-index: 45;
 }
 
 .detail-drawer__header {
@@ -176,16 +143,29 @@ watch(
   padding: var(--space-5) var(--space-5) var(--space-7);
 }
 
-@media (max-width: 900px) {
-  .detail-drawer {
-    border-left: 0;
-    bottom: 0;
-    left: 0;
-    min-height: 0;
-    position: fixed;
-    right: 0;
-    top: 0;
-    z-index: 50;
+.detail-drawer-enter-active,
+.detail-drawer-leave-active {
+  transition:
+    opacity var(--transition-panel),
+    transform var(--transition-panel);
+}
+
+.detail-drawer-enter-from,
+.detail-drawer-leave-to {
+  opacity: 0;
+  transform: translateX(1rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-drawer-enter-active,
+  .detail-drawer-leave-active {
+    transition: none;
+  }
+
+  .detail-drawer-enter-from,
+  .detail-drawer-leave-to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

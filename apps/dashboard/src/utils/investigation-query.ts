@@ -57,7 +57,11 @@ export function mergeInvestigationQuery(
 
   for (const [key, value] of Object.entries(patch)) {
     const normalizedValue = typeof value === "string" ? value.trim() : value;
-    if (normalizedValue === undefined || normalizedValue === "" || (key === "page" && normalizedValue === 1)) {
+    if (
+      normalizedValue === undefined ||
+      normalizedValue === "" ||
+      (key === "page" && normalizedValue === 1)
+    ) {
       delete nextQuery[key];
     } else {
       nextQuery[key] = String(normalizedValue);

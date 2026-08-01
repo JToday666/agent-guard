@@ -20,7 +20,10 @@
         <code>{{ event.resource }}</code>
         <p>{{ event.reason }}</p>
         <footer>
-          <StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" />
+          <StatusBadge
+            :label="getDecisionLabel(event.decision)"
+            :tone="getDecisionTone(event.decision)"
+          />
           <span>风险 {{ event.riskScore }}</span>
           <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">
             定位溯源节点
@@ -38,7 +41,11 @@ import { getDecisionLabel, getDecisionTone } from "../../utils/dashboard-formatt
 import StatusBadge from "../common/StatusBadge.vue";
 
 defineOptions({ name: "TraceTimeline" });
-const props = defineProps<{ events: AuditEventRow[]; selectedEventId?: string; traceId?: string }>();
+const props = defineProps<{
+  events: AuditEventRow[];
+  selectedEventId?: string;
+  traceId?: string;
+}>();
 const emit = defineEmits<{ "select-event": [eventId: string] }>();
 function eventLink(eventId: string) {
   return props.traceId
@@ -141,9 +148,6 @@ function eventLink(eventId: string) {
   font-size: var(--font-size-11);
   min-height: 1.75rem;
   padding: 0 var(--space-2);
-  transition:
-    border-color var(--transition-fast),
-    color var(--transition-fast);
 }
 .timeline-select-btn:hover {
   border-color: var(--color-active);

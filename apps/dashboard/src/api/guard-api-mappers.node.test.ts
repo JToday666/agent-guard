@@ -108,7 +108,10 @@ test("maps P1 audit metadata into readable action and resource fields", () => {
 
   assert.equal(event.tool, "memory_write_proposed");
   assert.equal(event.resource, "user_preferences/report_delivery_rule 等 2 项");
-  assert.deepEqual(event.resourceTargets, ["user_preferences/report_delivery_rule", "context:email_001"]);
+  assert.deepEqual(event.resourceTargets, [
+    "user_preferences/report_delivery_rule",
+    "context:email_001",
+  ]);
 });
 
 test("prefers canonical action metadata over legacy tool metadata", () => {

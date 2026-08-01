@@ -39,7 +39,9 @@ test("mock evaluation cases stay consistent with linked audit events", async () 
   const evaluation = await source.getEvaluation(metrics);
 
   for (const row of evaluation.cases) {
-    const event = events.find((candidate) => candidate.traceId === row.traceId && candidate.caseId === row.caseId);
+    const event = events.find(
+      (candidate) => candidate.traceId === row.traceId && candidate.caseId === row.caseId,
+    );
     assert.ok(event, `${row.caseId} should link to a matching audit event`);
     assert.equal(event.runtime, row.runtime, `${row.caseId} runtime`);
     assert.equal(event.attackType, row.attackType, `${row.caseId} attack type`);

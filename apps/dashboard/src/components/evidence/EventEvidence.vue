@@ -8,7 +8,12 @@
       <dl>
         <div>
           <dt>决策</dt>
-          <dd><StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" /></dd>
+          <dd>
+            <StatusBadge
+              :label="getDecisionLabel(event.decision)"
+              :tone="getDecisionTone(event.decision)"
+            />
+          </dd>
         </div>
         <div>
           <dt>严重性</dt>
@@ -71,10 +76,14 @@
       <div class="evidence-links">
         <RouterLink :to="`/evidence/${event.traceId}`">完整证据链</RouterLink>
         <button type="button" @click="copy(event.traceId, '证据链 ID')">复制证据链 ID</button>
-        <RouterLink v-if="event.caseId" :to="{ path: '/evaluation', query: { case_id: event.caseId } }"
+        <RouterLink
+          v-if="event.caseId"
+          :to="{ path: '/evaluation', query: { case_id: event.caseId } }"
           >评测样本</RouterLink
         >
-        <RouterLink v-if="event.approvalId" :to="`/approvals/${event.approvalId}`">关联审批</RouterLink>
+        <RouterLink v-if="event.approvalId" :to="`/approvals/${event.approvalId}`"
+          >关联审批</RouterLink
+        >
       </div>
       <span v-if="copyStatus" class="copy-status" role="status">{{ copyStatus }}</span>
     </section>
@@ -89,7 +98,11 @@ import { computed, ref } from "vue";
 
 import type { AuditEventRow } from "../../types/dashboard";
 import { redactSensitiveData } from "../../utils/data-redaction";
-import { getDecisionLabel, getDecisionTone, getRiskSeverityLabel } from "../../utils/dashboard-formatters";
+import {
+  getDecisionLabel,
+  getDecisionTone,
+  getRiskSeverityLabel,
+} from "../../utils/dashboard-formatters";
 import StatusBadge from "../common/StatusBadge.vue";
 import StructuredDataView from "../common/StructuredDataView.vue";
 import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
@@ -97,7 +110,9 @@ import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-displ
 defineOptions({ name: "EventEvidence" });
 const props = defineProps<{ event: AuditEventRow }>();
 const copyStatus = ref("");
-const safeRawEvent = computed(() => prepareEvidenceDataForDisplay(redactSensitiveData(props.event.raw ?? props.event)));
+const safeRawEvent = computed(() =>
+  prepareEvidenceDataForDisplay(redactSensitiveData(props.event.raw ?? props.event)),
+);
 
 async function copy(value: string, label: string): Promise<void> {
   try {
@@ -106,6 +121,9 @@ async function copy(value: string, label: string): Promise<void> {
   } catch {
     copyStatus.value = `${label} 复制失败`;
   }
+  window.setTimeout(() => {
+    copyStatus.value = "";
+  }, 1600);
 }
 </script>
 
@@ -115,7 +133,6 @@ async function copy(value: string, label: string): Promise<void> {
   gap: var(--space-6);
 }
 
-/* 风险摘要区：左侧卡片 + 右侧 dl */
 .event-evidence__risk {
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
@@ -161,7 +178,6 @@ async function copy(value: string, label: string): Promise<void> {
   justify-content: space-between;
 }
 
-/* dt/dd 通用：dt 明显标签风格，dd 高可读性 */
 .event-evidence dt {
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
@@ -174,7 +190,6 @@ async function copy(value: string, label: string): Promise<void> {
   overflow-wrap: anywhere;
 }
 
-/* 各内容区 */
 .event-evidence__section {
   border-top: 1px solid var(--color-border);
   display: grid;
@@ -188,7 +203,6 @@ async function copy(value: string, label: string): Promise<void> {
   margin: 0;
 }
 
-/* 任务与行为：dt/dd 纵向，带底部分隔线 */
 .evidence-copy {
   display: grid;
   gap: 0;
@@ -208,25 +222,21 @@ async function copy(value: string, label: string): Promise<void> {
   line-height: 1.65;
 }
 
-/* 资源列表 */
 .resource-list {
+  border-top: 1px solid var(--color-border);
   display: grid;
-  gap: var(--space-2);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 .resource-list li {
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
-  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) 0;
 }
 .resource-list code {
   overflow-wrap: anywhere;
 }
 
-/* 命中规则 pills */
 .rule-list {
   display: flex;
   flex-wrap: wrap;
@@ -235,12 +245,11 @@ async function copy(value: string, label: string): Promise<void> {
 .rule-list span {
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-1);
   font-size: var(--font-size-11);
   padding: var(--space-1) var(--space-2);
 }
 
-/* 关联证据：pill 按钮风格 */
 .evidence-links {
   display: flex;
   flex-wrap: wrap;
@@ -250,15 +259,12 @@ async function copy(value: string, label: string): Promise<void> {
 .evidence-links button {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
   font-size: var(--font-size-12);
   padding: var(--space-1) var(--space-3);
   text-decoration: none;
-  transition:
-    border-color var(--transition-fast),
-    background var(--transition-fast);
   &:hover {
     background: var(--color-surface-muted);
     border-color: var(--color-active);
@@ -267,11 +273,5 @@ async function copy(value: string, label: string): Promise<void> {
 .copy-status {
   color: var(--color-success);
   font-size: var(--font-size-12);
-}
-
-@media (max-width: 420px) {
-  .event-evidence__risk {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

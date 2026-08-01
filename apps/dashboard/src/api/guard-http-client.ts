@@ -24,7 +24,8 @@ async function readErrorBody(response: Response): Promise<{ code: string; messag
     const error = payload?.error;
     return {
       code: typeof error?.code === "string" && error.code ? error.code : fallback.code,
-      message: typeof error?.message === "string" && error.message ? error.message : fallback.message,
+      message:
+        typeof error?.message === "string" && error.message ? error.message : fallback.message,
     };
   }
 
@@ -35,7 +36,11 @@ async function readErrorBody(response: Response): Promise<{ code: string; messag
   };
 }
 
-export async function requestJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+export async function requestJson<T>(
+  path: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`${dashboardEnv.apiBaseUrl}${path}`, {
     ...init,
     credentials: "include",
@@ -54,7 +59,9 @@ export async function requestJson<T>(path: string, init: RequestInit = {}, signa
   return response.json() as Promise<T>;
 }
 
-export async function requestHealth(signal?: AbortSignal): Promise<{ status: string; database?: string }> {
+export async function requestHealth(
+  signal?: AbortSignal,
+): Promise<{ status: string; database?: string }> {
   const response = await fetch("/api/health?check_db=true", {
     credentials: "include",
     signal,

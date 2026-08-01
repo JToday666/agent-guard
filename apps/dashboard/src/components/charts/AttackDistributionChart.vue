@@ -5,7 +5,9 @@
         <span>{{ getAttackTypeLabel(item.label) }}</span
         ><strong>{{ item.value }} · {{ getPercent(item.value) }}</strong>
       </div>
-      <span class="distribution__track"><i :style="{ width: `${(item.value / maxValue) * 100}%` }"></i></span>
+      <span class="distribution__track"
+        ><i :style="{ transform: `scaleX(${item.value / maxValue})` }"></i
+      ></span>
     </div>
   </div>
   <p v-else class="chart-empty">暂无攻击类型数据</p>
@@ -56,16 +58,19 @@ function getAttackTypeLabel(value: string) {
 }
 .distribution__track {
   background: var(--color-surface-muted);
-  border-radius: 3px;
+  border-radius: var(--radius-pill);
   height: 0.5rem;
   overflow: hidden;
 }
 .distribution__track i {
-  background: linear-gradient(90deg, var(--color-active), #5b8def);
+  background: var(--gradient-data-active);
   border-radius: inherit;
   display: block;
   height: 100%;
   min-width: 3px;
+  transform-origin: left;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .chart-empty {
   color: var(--color-text-subtle);
