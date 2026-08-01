@@ -6,22 +6,42 @@
     </div>
     <div class="conf-matrix__row">
       <span class="axis-label">实际：恶意</span>
-      <div class="conf-cell conf-cell--fn" :style="{ '--heat': heat(fn) }">
+      <div
+        class="conf-cell conf-cell--fn"
+        :aria-label="`漏报 FN，${fn}`"
+        :style="{ '--heat': heat(fn) }"
+        tabindex="0"
+      >
         <strong>{{ fn }}</strong
         ><small>漏报 FN</small>
       </div>
-      <div class="conf-cell conf-cell--tp" :style="{ '--heat': heat(tp) }">
+      <div
+        class="conf-cell conf-cell--tp"
+        :aria-label="`正确阻断 TP，${tp}`"
+        :style="{ '--heat': heat(tp) }"
+        tabindex="0"
+      >
         <strong>{{ tp }}</strong
         ><small>正确阻断 TP</small>
       </div>
     </div>
     <div class="conf-matrix__row">
       <span class="axis-label">实际：正常</span>
-      <div class="conf-cell conf-cell--tn" :style="{ '--heat': heat(tn) }">
+      <div
+        class="conf-cell conf-cell--tn"
+        :aria-label="`正确放行 TN，${tn}`"
+        :style="{ '--heat': heat(tn) }"
+        tabindex="0"
+      >
         <strong>{{ tn }}</strong
         ><small>正确放行 TN</small>
       </div>
-      <div class="conf-cell conf-cell--fp" :style="{ '--heat': heat(fp) }">
+      <div
+        class="conf-cell conf-cell--fp"
+        :aria-label="`误报 FP，${fp}`"
+        :style="{ '--heat': heat(fp) }"
+        tabindex="0"
+      >
         <strong>{{ fp }}</strong
         ><small>误报 FP</small>
       </div>
@@ -81,6 +101,10 @@ function heat(value: number): string {
   font-size: var(--font-size-24);
   font-weight: var(--font-weight-bold);
   line-height: 1;
+}
+.conf-cell:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -3px;
 }
 .conf-cell small {
   color: var(--color-text-subtle);

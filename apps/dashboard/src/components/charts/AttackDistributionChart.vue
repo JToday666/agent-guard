@@ -6,7 +6,7 @@
         ><strong>{{ item.value }} · {{ getPercent(item.value) }}</strong>
       </div>
       <span class="distribution__track"
-        ><i :style="{ width: `${(item.value / maxValue) * 100}%` }"></i
+        ><i :style="{ transform: `scaleX(${item.value / maxValue})` }"></i
       ></span>
     </div>
   </div>
@@ -68,6 +68,9 @@ function getAttackTypeLabel(value: string) {
   display: block;
   height: 100%;
   min-width: 3px;
+  transform-origin: left;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .chart-empty {
   color: var(--color-text-subtle);

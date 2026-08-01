@@ -5,8 +5,8 @@
       <span>0%</span><span>50%</span><span>100%</span>
     </div>
     <div class="asr-chart__track">
-      <span class="asr-chart__before" :style="{ width: percent(before) }"></span>
-      <span class="asr-chart__after" :style="{ width: percent(after) }"></span>
+      <span class="asr-chart__before" :style="{ transform: `scaleX(${ratio(before)})` }"></span>
+      <span class="asr-chart__after" :style="{ transform: `scaleX(${ratio(after)})` }"></span>
     </div>
     <div class="asr-chart__labels">
       <div>
@@ -27,6 +27,9 @@ import { computed } from "vue";
 const props = defineProps<{ after: number | null; before: number | null }>();
 function percent(value: number | null) {
   return value === null ? "--" : `${(value * 100).toFixed(1)}%`;
+}
+function ratio(value: number | null) {
+  return value === null ? 0 : Math.min(1, Math.max(0, value));
 }
 const reduction = computed(() =>
   props.before === null || props.after === null
@@ -69,7 +72,9 @@ const summary = computed(
   bottom: 0;
   left: 0;
   position: absolute;
-  transition: width var(--transition-emphasis);
+  transform-origin: left center;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .asr-chart__before {
   background: var(--gradient-data-danger);

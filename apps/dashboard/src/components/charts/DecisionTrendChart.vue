@@ -7,11 +7,17 @@
     </div>
     <svg
       v-if="points.length"
+      ref="chartSvg"
       viewBox="0 0 720 240"
       role="img"
-      :aria-label="summary"
+      :aria-label="activeSummary"
       preserveAspectRatio="xMidYMid meet"
+      tabindex="0"
+      @focus="ensureActivePoint"
+      @keydown="handleKeydown"
+      @pointerleave="activeIndex = null"
     >
+      <title>{{ activeSummary }}</title>
       <g class="grid-lines" aria-hidden="true">
         <g v-for="tick in yTicks" :key="tick.y">
           <text x="25" :y="tick.y + 4" text-anchor="end">{{ tick.value }}</text>
@@ -38,6 +44,33 @@
         />
         <text x="665" :y="series.labelY + 4">{{ series.lastValue }}</text>
       </g>
+      <rect
+        class="trend-hit-area"
+        x="24"
+        y="20"
+        width="626"
+        height="200"
+        aria-hidden="true"
+        @pointermove="handlePointerMove"
+      />
+      <g v-if="activePoint" class="trend-inspector" aria-hidden="true">
+        <line class="trend-inspector__guide" :x1="activeX" y1="24" :x2="activeX" y2="216" />
+        <circle
+          v-for="series in activeSeries"
+          :key="`active-${series.key}`"
+          :class="series.className"
+          :cx="activeX"
+          :cy="series.y"
+          r="5"
+        />
+        <g :transform="`translate(${tooltipPosition.x} ${tooltipPosition.y})`">
+          <rect class="trend-inspector__surface" width="140" height="76" rx="4" />
+          <text class="trend-inspector__title" x="10" y="17">{{ activePoint.label }}</text>
+          <text class="series-allow" x="10" y="35">已放行 {{ activePoint.allow }}</text>
+          <text class="series-ask" x="10" y="52">待审批 {{ activePoint.ask }}</text>
+          <text class="series-deny" x="10" y="69">已阻断 {{ activePoint.deny }}</text>
+        </g>
+      </g>
       <g class="x-labels">
         <text v-for="label in xLabels" :key="label.index" :x="label.x" y="236" text-anchor="middle">
           {{ label.text }}
@@ -52,9 +85,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import type { DecisionTrendPoint } from "../../types/dashboard";
 const props = defineProps<{ points: DecisionTrendPoint[] }>();
+const chartSvg = ref<SVGSVGElement>();
+const activeIndex = ref<number | null>(null);
 const latest = computed(() => props.points.at(-1) ?? { allow: 0, ask: 0, deny: 0, label: "" });
 const maxValue = computed(() =>
   Math.max(1, ...props.points.flatMap((point) => [point.allow, point.ask, point.deny])),
@@ -101,6 +136,7 @@ const chartSeries = computed(() => {
     const last = coordinates.at(-1) ?? { x: 24, y: 216 };
     return {
       ...series,
+      coordinates,
       labelY: last.y,
       lastValue: latest.value[series.key],
       lastX: last.x,
@@ -118,10 +154,74 @@ const chartSeries = computed(() => {
   for (const item of sortedItems) item.labelY -= overflow;
   return seriesItems;
 });
+const activePoint = computed(() =>
+  activeIndex.value === null ? null : (props.points[activeIndex.value] ?? null),
+);
+const activeX = computed(() => (activeIndex.value === null ? 24 : xPosition(activeIndex.value)));
+const activeSeries = computed(() =>
+  chartSeries.value.map((series) => ({
+    className: series.className,
+    key: series.key,
+    y: activeIndex.value === null ? 216 : (series.coordinates[activeIndex.value]?.y ?? 216),
+  })),
+);
+const tooltipPosition = computed(() => ({
+  x: activeX.value > 500 ? activeX.value - 150 : activeX.value + 10,
+  y: 30,
+}));
 const summary = computed(
   () =>
     `决策趋势，共 ${props.points.length} 个时间段。最新：已放行 ${latest.value.allow}，待审批 ${latest.value.ask}，已阻断 ${latest.value.deny}`,
 );
+const activeSummary = computed(() =>
+  activePoint.value
+    ? `决策趋势，${activePoint.value.label}：已放行 ${activePoint.value.allow}，待审批 ${activePoint.value.ask}，已阻断 ${activePoint.value.deny}。使用左右方向键查看相邻时间段`
+    : `${summary.value}。聚焦图表后可使用左右方向键查看各时间段`,
+);
+watch(
+  () => props.points.length,
+  (length) => {
+    if (activeIndex.value === null || activeIndex.value < length) return;
+    activeIndex.value = length ? length - 1 : null;
+  },
+);
+
+function ensureActivePoint() {
+  if (activeIndex.value === null) activeIndex.value = Math.max(0, props.points.length - 1);
+}
+
+function handlePointerMove(event: PointerEvent) {
+  const bounds = chartSvg.value?.getBoundingClientRect();
+  if (!bounds || !props.points.length) return;
+  const chartX = ((event.clientX - bounds.left) / bounds.width) * 720;
+  const index =
+    props.points.length === 1
+      ? 0
+      : Math.round((Math.min(650, Math.max(24, chartX)) - 24) / xStep.value);
+  activeIndex.value = Math.min(props.points.length - 1, Math.max(0, index));
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (!props.points.length) return;
+  if (event.key === "Escape") {
+    activeIndex.value = null;
+    return;
+  }
+  const current = activeIndex.value ?? props.points.length - 1;
+  const target =
+    event.key === "ArrowLeft"
+      ? Math.max(0, current - 1)
+      : event.key === "ArrowRight"
+        ? Math.min(props.points.length - 1, current + 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? props.points.length - 1
+            : null;
+  if (target === null) return;
+  event.preventDefault();
+  activeIndex.value = target;
+}
 </script>
 
 <style scoped lang="scss">
@@ -164,6 +264,10 @@ const summary = computed(
   overflow: visible;
   width: 100%;
 }
+.trend-chart svg:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+}
 .grid-lines line {
   stroke: var(--color-chart-grid);
   stroke-width: 1;
@@ -186,6 +290,33 @@ const summary = computed(
 .trend-chart circle {
   fill: var(--color-surface);
   stroke-width: 2;
+}
+.trend-hit-area {
+  cursor: crosshair;
+  fill: transparent;
+  pointer-events: all;
+}
+.trend-inspector {
+  pointer-events: none;
+}
+.trend-inspector__guide {
+  opacity: 0.7;
+  stroke: var(--color-border-strong);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+.trend-inspector__surface {
+  fill: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  filter: var(--filter-chart-primary);
+  stroke: var(--color-border-strong);
+}
+.trend-inspector text {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  stroke: none;
+}
+.trend-inspector__title {
+  fill: var(--color-text);
 }
 .series-allow {
   fill: var(--color-chart-slate);

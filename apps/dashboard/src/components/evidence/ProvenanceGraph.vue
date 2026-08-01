@@ -17,7 +17,7 @@
         :nodes-connectable="false"
         :nodes-draggable="false"
         :elements-selectable="true"
-        :fit-view-options="{ padding: 0.18 }"
+        :fit-view-options="{ padding: 0.1 }"
         :zoom-on-scroll="true"
         class="provenance-flow"
         @node-click="handleNodeClick"
@@ -31,7 +31,12 @@
               `prov-node--${data.kind}`,
               { 'prov-node--selected': data.nodeId === selectedNodeId },
             ]"
+            :aria-pressed="data.nodeId === selectedNodeId"
+            role="button"
+            tabindex="0"
             :title="displayText(data.label)"
+            @keydown.enter.stop.prevent="emit('select-node', data.nodeId)"
+            @keydown.space.stop.prevent="emit('select-node', data.nodeId)"
           >
             <span class="prov-node__kind">{{ nodeLane(data.metadata, data.kind) }}</span>
             <span class="prov-node__label">{{ displayText(data.label) }}</span>
@@ -132,33 +137,18 @@ function nodeMetaBadge(metadata: Record<string, unknown>): string {
 
 const NODE_W = 260;
 const NODE_H = 120;
-const ENHANCED_STEP_X = 328;
-const ENHANCED_TOP_Y = 96;
-const ENHANCED_BOTTOM_Y = 296;
+const ENHANCED_GRID_COLUMNS = 4;
+const ENHANCED_STEP_X = 290;
+const ENHANCED_STEP_Y = 150;
 
-function enhancedMockPosition(nodeId: string, index: number): { x: number; y: number } {
-  const suffix = nodeId.split(":").at(-1) ?? "";
-  const positions: Record<string, { column: number; row: "top" | "bottom" | "middle" }> = {
-    task: { column: 0, row: "middle" },
-    context: { column: 1, row: "top" },
-    action: { column: 2, row: "top" },
-    resource: { column: 3, row: "top" },
-    policy: { column: 4, row: "top" },
-    critic: { column: 4, row: "bottom" },
-    approval: { column: 5, row: "bottom" },
-    outcome: { column: 6, row: "bottom" },
+function enhancedMockPosition(index: number): { x: number; y: number } {
+  const row = Math.floor(index / ENHANCED_GRID_COLUMNS);
+  const offset = index % ENHANCED_GRID_COLUMNS;
+  const column = row % 2 === 0 ? offset : ENHANCED_GRID_COLUMNS - 1 - offset;
+  return {
+    x: 24 + column * ENHANCED_STEP_X,
+    y: 72 + row * ENHANCED_STEP_Y,
   };
-  const known = positions[suffix];
-  if (known) {
-    return {
-      x: 28 + known.column * ENHANCED_STEP_X,
-      y: known.row === "top" ? ENHANCED_TOP_Y : known.row === "bottom" ? ENHANCED_BOTTOM_Y : 196,
-    };
-  }
-  if (nodeId.includes(":event:")) {
-    return { x: 28 + 3 * ENHANCED_STEP_X, y: ENHANCED_BOTTOM_Y + Math.max(0, index - 4) * 72 };
-  }
-  return { x: 28 + index * ENHANCED_STEP_X, y: ENHANCED_BOTTOM_Y };
 }
 
 const isEnhancedMockGraph = computed(
@@ -167,12 +157,32 @@ const isEnhancedMockGraph = computed(
     props.graph.nodes.every((node) => node.metadata.source === "mock"),
 );
 
+const contextNodeIds = computed<ReadonlySet<string> | null>(() => {
+  const selectedNodeId = props.selectedNodeId;
+  if (!selectedNodeId || !props.graph.nodes.some((node) => node.nodeId === selectedNodeId)) {
+    return null;
+  }
+
+  const context = new Set([selectedNodeId]);
+  for (const edge of props.graph.edges) {
+    if (edge.sourceNodeId === selectedNodeId) context.add(edge.targetNodeId);
+    if (edge.targetNodeId === selectedNodeId) context.add(edge.sourceNodeId);
+  }
+  return context;
+});
+
+function flowNodeClass(nodeId: string): string {
+  if (!contextNodeIds.value) return "";
+  return contextNodeIds.value.has(nodeId) ? "prov-flow-node--context" : "prov-flow-node--dimmed";
+}
+
 const flowNodes = computed<Node[]>(() => {
   if (isEnhancedMockGraph.value) {
     return props.graph.nodes.map((n, index) => ({
+      class: flowNodeClass(n.nodeId),
       id: n.nodeId,
       type: "provenance",
-      position: enhancedMockPosition(n.nodeId, index),
+      position: enhancedMockPosition(index),
       data: { ...n },
     }));
   }
@@ -186,6 +196,7 @@ const flowNodes = computed<Node[]>(() => {
   return props.graph.nodes.map((n) => {
     const pos = g.node(n.nodeId);
     return {
+      class: flowNodeClass(n.nodeId),
       id: n.nodeId,
       type: "provenance",
       position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
@@ -209,17 +220,34 @@ function edgeLabel(relation: string): string {
 }
 
 const flowEdges = computed<Edge[]>(() =>
-  props.graph.edges.map((e) => ({
-    id: e.edgeId,
-    source: e.sourceNodeId,
-    target: e.targetNodeId,
-    label: edgeLabel(e.relation),
-    style: { stroke: "var(--color-border-strong)", strokeWidth: 1.5 },
-    labelBgBorderRadius: 4,
-    labelBgPadding: [2, 4],
-    labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.96 },
-    labelStyle: { fontSize: "10px", fill: "var(--color-text-muted)", fontWeight: 640 },
-  })),
+  props.graph.edges.map((e) => {
+    const isContextEdge =
+      !contextNodeIds.value ||
+      (contextNodeIds.value.has(e.sourceNodeId) && contextNodeIds.value.has(e.targetNodeId));
+    return {
+      id: e.edgeId,
+      source: e.sourceNodeId,
+      target: e.targetNodeId,
+      label: edgeLabel(e.relation),
+      style: {
+        opacity: isContextEdge ? 1 : 0.18,
+        stroke: isContextEdge ? "var(--color-active-border)" : "var(--color-border-strong)",
+        strokeWidth: isContextEdge && contextNodeIds.value ? 2 : 1.5,
+      },
+      labelBgBorderRadius: 4,
+      labelBgPadding: [2, 4],
+      labelBgStyle: {
+        fill: "var(--color-surface)",
+        fillOpacity: isContextEdge ? 0.96 : 0.2,
+      },
+      labelStyle: {
+        fill: "var(--color-text-muted)",
+        fontSize: "10px",
+        fontWeight: 640,
+        opacity: isContextEdge ? 1 : 0.18,
+      },
+    };
+  }),
 );
 
 function handleNodeClick(event: { node: { id: string } }) {
@@ -297,6 +325,19 @@ function handleNodeClick(event: { node: { id: string } }) {
   width: 100%;
 }
 
+.provenance-flow :deep(.vue-flow__node) {
+  transition: opacity var(--transition-fast);
+}
+
+.provenance-flow :deep(.vue-flow__node.prov-flow-node--dimmed) {
+  opacity: 0.36;
+}
+
+.provenance-flow :deep(.vue-flow__edge-path),
+.provenance-flow :deep(.vue-flow__edge-text) {
+  transition: opacity var(--transition-fast);
+}
+
 .prov-node {
   background: var(--color-surface);
   border: 1.5px solid var(--color-border);
@@ -308,13 +349,16 @@ function handleNodeClick(event: { node: { id: string } }) {
   height: 7.5rem;
   width: 16.25rem;
   padding: 0.65rem 0.78rem 0.72rem;
-  transition:
-    box-shadow var(--transition-fast),
-    border-color var(--transition-fast);
 
   &:hover {
     border-color: var(--color-active);
     box-shadow: 0 0 0 2px var(--color-active-soft);
+  }
+  &:focus-visible {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-active-soft);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
   &--selected {
     border-color: var(--color-active);

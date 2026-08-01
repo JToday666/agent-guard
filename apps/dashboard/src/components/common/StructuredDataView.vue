@@ -78,9 +78,6 @@ async function handleCopy(): Promise<void> {
   cursor: pointer;
   font-size: var(--font-size-12);
   padding: var(--space-1) var(--space-3);
-  transition:
-    border-color var(--transition-fast),
-    background var(--transition-fast);
   &:hover {
     background: var(--color-surface-muted);
     border-color: var(--color-active);
@@ -126,9 +123,6 @@ async function handleCopy(): Promise<void> {
   font-weight: var(--font-weight-semibold);
   list-style: none;
   padding: var(--space-1) var(--space-3);
-  transition:
-    border-color var(--transition-fast),
-    background var(--transition-fast);
   &:hover {
     background: var(--color-surface-muted);
     border-color: var(--color-active);

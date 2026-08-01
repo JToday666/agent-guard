@@ -148,9 +148,6 @@ function eventLink(eventId: string) {
   font-size: var(--font-size-11);
   min-height: 1.75rem;
   padding: 0 var(--space-2);
-  transition:
-    border-color var(--transition-fast),
-    color var(--transition-fast);
 }
 .timeline-select-btn:hover {
   border-color: var(--color-active);

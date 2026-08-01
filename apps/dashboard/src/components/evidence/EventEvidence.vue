@@ -265,9 +265,6 @@ async function copy(value: string, label: string): Promise<void> {
   font-size: var(--font-size-12);
   padding: var(--space-1) var(--space-3);
   text-decoration: none;
-  transition:
-    border-color var(--transition-fast),
-    background var(--transition-fast);
   &:hover {
     background: var(--color-surface-muted);
     border-color: var(--color-active);
