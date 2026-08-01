@@ -50,10 +50,10 @@
             <template #action>
               <button
                 type="button"
-                :disabled="dashboardStore.isRefreshing"
+                :disabled="dashboardStore.isManualRefreshing"
                 @click="handleRefreshDashboard"
               >
-                {{ dashboardStore.isRefreshing ? "重试中…" : "重试" }}
+                {{ dashboardStore.isManualRefreshing ? "重试中…" : "重试" }}
               </button>
             </template>
           </InlineNotice>
@@ -96,6 +96,7 @@ import { useRoute } from "vue-router";
 import InlineNotice from "../components/common/InlineNotice.vue";
 import AppSidebar from "../components/layout/AppSidebar.vue";
 import AppTopBar from "../components/layout/AppTopBar.vue";
+import { schedulePrimaryRoutePreload } from "../router/dashboard-page-loaders";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useAuthStore } from "../stores/authStore";
@@ -111,18 +112,24 @@ const routeRenderFailed = ref(false);
 const authStore = useAuthStore();
 const dashboardStore = useDashboardStore();
 const route = useRoute();
+let cancelRoutePreload: (() => void) | null = null;
 
 async function handleInitializeDashboard(): Promise<void> {
   dashboardStore.setActiveScope(getDashboardRefreshScope(route.name));
   await authStore.bootstrap();
   if (authStore.isAuthenticated) {
-    await dashboardStore.refresh();
+    await dashboardStore.refresh(undefined, "initial");
     dashboardStore.startPolling();
+    cancelRoutePreload?.();
+    cancelRoutePreload = schedulePrimaryRoutePreload();
   }
 }
 
 onMounted(handleInitializeDashboard);
-onUnmounted(() => dashboardStore.stopPolling());
+onUnmounted(() => {
+  cancelRoutePreload?.();
+  dashboardStore.stopPolling();
+});
 
 function handleToggleSidebar(): void {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
@@ -134,7 +141,7 @@ function handleSkipToMain(event: MouseEvent): void {
 }
 
 function handleRefreshDashboard(): void {
-  void dashboardStore.refresh();
+  void dashboardStore.refresh(undefined, "manual");
 }
 
 function handleReloadDashboard(): void {
@@ -148,7 +155,7 @@ watch(
     const scopeChanged = dashboardStore.activeScope !== nextScope;
     dashboardStore.setActiveScope(nextScope);
     if (scopeChanged && authStore.isAuthenticated) {
-      void dashboardStore.refresh(nextScope);
+      void dashboardStore.refresh(nextScope, "navigation");
     }
   },
   { immediate: true },
@@ -197,20 +204,16 @@ onErrorCaptured(() => {
 }
 
 .dashboard-route-view {
-  animation: workspace-reveal var(--transition-emphasis) both;
   display: block;
 }
 
-.dashboard-route-enter-active,
-.dashboard-route-leave-active {
-  transition:
-    opacity var(--transition-base),
-    transform var(--transition-base);
-  will-change: opacity, transform;
+.dashboard-route-enter-active {
+  transition: opacity var(--transition-route);
 }
 
 .dashboard-route-leave-active {
   inset: 0;
+  opacity: 0;
   pointer-events: none;
   position: absolute;
   width: 100%;
@@ -218,12 +221,6 @@ onErrorCaptured(() => {
 
 .dashboard-route-enter-from {
   opacity: 0;
-  transform: translateY(4px);
-}
-
-.dashboard-route-leave-to {
-  opacity: 0;
-  transform: translateY(-3px);
 }
 
 .skip-link {
@@ -264,10 +261,8 @@ onErrorCaptured(() => {
     transition: none;
   }
 
-  .dashboard-route-enter-from,
-  .dashboard-route-leave-to {
+  .dashboard-route-enter-from {
     opacity: 1;
-    transform: none;
   }
 }
 </style>

@@ -26,6 +26,8 @@
           :aria-current="isNavigationItemActive(item.to) ? 'page' : undefined"
           :aria-label="item.count ? `${item.label}，${item.count} 项待处理` : item.label"
           :title="isCollapsed ? item.label : undefined"
+          @focus="preloadDashboardRoute(item.to)"
+          @pointerenter="preloadDashboardRoute(item.to)"
         >
           <span class="sidebar__icon" aria-hidden="true">
             <component :is="item.icon" :size="18" :stroke-width="1.8" />
@@ -51,6 +53,7 @@ import {
 } from "@lucide/vue";
 import { computed } from "vue";
 import { useRoute } from "vue-router";
+import { preloadDashboardRoute } from "../../router/dashboard-page-loaders";
 
 defineOptions({
   name: "AppSidebar",

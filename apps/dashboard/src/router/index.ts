@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
+import { getDashboardPageLoader } from "./dashboard-page-loaders";
+
 declare module "vue-router" {
   interface RouteMeta {
     keepAlive?: boolean;
@@ -15,7 +17,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/overview",
     name: "overview",
-    component: () => import("../pages/OverviewPage.vue"),
+    component: getDashboardPageLoader("overview"),
     meta: {
       keepAlive: true,
       title: "安全总览",
@@ -24,7 +26,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/approvals/:approval_id?",
     name: "approvals",
-    component: () => import("../pages/ApprovalsPage.vue"),
+    component: getDashboardPageLoader("approvals"),
     meta: {
       keepAlive: true,
       title: "人工审批",
@@ -33,7 +35,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/investigations",
     name: "investigations",
-    component: () => import("../pages/InvestigationsPage.vue"),
+    component: getDashboardPageLoader("investigations"),
     meta: {
       keepAlive: true,
       title: "事件调查",
@@ -42,7 +44,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/evidence",
     name: "evidence",
-    component: () => import("../pages/EvidencePage.vue"),
+    component: getDashboardPageLoader("evidence"),
     meta: {
       keepAlive: true,
       title: "证据链",
@@ -51,7 +53,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/evidence/:trace_id",
     name: "evidence-detail",
-    component: () => import("../pages/EvidenceDetailPage.vue"),
+    component: getDashboardPageLoader("evidenceDetail"),
     meta: {
       keepAlive: true,
       title: "证据链详情",
@@ -60,7 +62,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/evaluation",
     name: "evaluation",
-    component: () => import("../pages/EvaluationPage.vue"),
+    component: getDashboardPageLoader("evaluation"),
     meta: {
       keepAlive: true,
       title: "安全评测",
@@ -69,7 +71,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/system",
     name: "system",
-    component: () => import("../pages/SystemPage.vue"),
+    component: getDashboardPageLoader("system"),
     meta: {
       keepAlive: true,
       title: "系统状态",
@@ -82,7 +84,10 @@ export const router = createRouter({
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) return savedPosition;
-    if (to.hash) return { behavior: "smooth", el: to.hash, top: 76 };
+    if (to.hash) {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      return { behavior: reduceMotion ? "auto" : "smooth", el: to.hash, top: 76 };
+    }
     if (to.path !== from.path) return { top: 0 };
     return false;
   },

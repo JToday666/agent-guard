@@ -40,6 +40,7 @@ import {
 } from "../utils/bounded-cache";
 import {
   getDashboardRefreshResources,
+  type DashboardRefreshResource,
   type DashboardRefreshScope,
 } from "../utils/dashboard-refresh-scope";
 import { useAuthStore } from "./authStore";
@@ -108,7 +109,10 @@ interface RefreshTask {
   critical: boolean;
   label: string;
   promise: Promise<void>;
+  resource: DashboardRefreshResource;
 }
+
+export type DashboardRefreshIntent = "initial" | "manual" | "navigation" | "poll" | "visibility";
 
 function createScopeRefreshState(): ScopeRefreshState {
   return {
@@ -177,6 +181,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const activeScope = ref<DashboardRefreshScope>("overview");
   const scopeStates = ref(createScopeRefreshStates());
   const activeRefreshScope = ref<DashboardRefreshScope | null>(null);
+  const activeRefreshIntent = ref<DashboardRefreshIntent | null>(null);
   const submittingApprovalId = ref<string | null>(null);
   const approvalResolutionError = ref<string | null>(null);
   const approvalResolutionState = ref<"idle" | "submitting" | "succeeded" | "conflict" | "failed">(
@@ -185,9 +190,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
   let pollTimer: number | null = null;
   let activeRefresh: {
     controller: AbortController;
+    intent: DashboardRefreshIntent;
     promise: Promise<void>;
     scope: DashboardRefreshScope;
   } | null = null;
+  const resourceUpdatedAt = new Map<DashboardRefreshResource, number>();
   let pollingActive = false;
   let visibilityHandler: (() => void) | null = null;
 
@@ -195,6 +202,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const error = computed(() => scopeStates.value[activeScope.value].error);
   const lastUpdatedAt = computed(() => scopeStates.value[activeScope.value].updatedAt);
   const isRefreshing = computed(() => activeRefreshScope.value === activeScope.value);
+  const isManualRefreshing = computed(
+    () => isRefreshing.value && activeRefreshIntent.value === "manual",
+  );
   const traceDetails = computed(() => unwrapTimedCache(traceDetailCache.value));
   const provenanceByTrace = computed(() => unwrapTimedCache(provenanceCache.value));
   const pendingCount = computed(
@@ -219,6 +229,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     const pendingApprovals = await dashboardDataSource.getPendingApprovals();
     const enrichedApprovals = mergeApprovalsWithAuditEvidence(pendingApprovals, events.value);
     approvals.value = reconcileApprovals(approvals.value, enrichedApprovals);
+    resourceUpdatedAt.set("approvals", Date.now());
   }
 
   const attackDistribution = computed(() => {
@@ -247,8 +258,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
   async function performRefresh(
     scope: DashboardRefreshScope,
     controller: AbortController,
+    intent: DashboardRefreshIntent,
   ): Promise<void> {
-    const resources = getDashboardRefreshResources(scope);
+    const requestedResources = getDashboardRefreshResources(scope);
+    const forceRefresh = intent === "initial" || intent === "manual" || intent === "visibility";
+    const resources = new Set(
+      [...requestedResources].filter((resource) => {
+        if (forceRefresh) return true;
+        const updatedAt = resourceUpdatedAt.get(resource);
+        return updatedAt === undefined || Date.now() - updatedAt >= POLL_INTERVAL_MS;
+      }),
+    );
     const previousState = scopeStates.value[scope];
     if (previousState.status === "idle") {
       scopeStates.value = {
@@ -272,6 +292,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: scope === "overview" || scope === "investigations" || scope === "evidence",
         label: "审计事件",
+        resource: "events",
         promise: eventsRequest.then((nextEvents) => {
           if (!hasSameEventWindow(events.value, nextEvents)) {
             events.value = nextEvents;
@@ -284,6 +305,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: false,
         label: "审计指标",
+        resource: "metrics",
         promise: metricsRequest
           .then((nextMetrics) => {
             if (!hasSameMetrics(metrics.value, nextMetrics)) {
@@ -309,6 +331,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: scope === "approvals",
         label: "审批队列",
+        resource: "approvals",
         promise: dashboardDataSource
           .getPendingApprovals(controller.signal)
           .then(async (pendingApprovals) => {
@@ -328,6 +351,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: scope === "system",
         label: "服务健康",
+        resource: "health",
         promise: dashboardDataSource.getHealth(controller.signal).then((nextHealth) => {
           health.value = nextHealth;
         }),
@@ -338,6 +362,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: false,
         label: "策略历史",
+        resource: "policyHistory",
         promise: policyHistoryRequest.then((history) => {
           policyHistory.value = history;
         }),
@@ -348,6 +373,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: false,
         label: "策略摘要",
+        resource: "policy",
         promise: dashboardDataSource
           .getCurrentPolicy(controller.signal)
           .then(async (summary) => {
@@ -370,6 +396,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: false,
         label: "审计完整性",
+        resource: "auditIntegrity",
         promise: dashboardDataSource
           .getAuditIntegrity(controller.signal)
           .then((integrity) => {
@@ -392,6 +419,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: scope === "evaluation",
         label: "安全评测",
+        resource: "evaluation",
         promise: evaluationMetrics
           .then((currentMetrics) =>
             dashboardDataSource.getEvaluation(currentMetrics, controller.signal),
@@ -415,6 +443,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: false,
         label: "配置审计",
+        resource: "configAudit",
         promise: dashboardDataSource
           .getConfigAuditFindings({ limit: 20 }, controller.signal)
           .then((findings) => {
@@ -434,6 +463,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       tasks.push({
         critical: false,
         label: "OpenClaw 适配器",
+        resource: "adapter",
         promise: dashboardDataSource
           .getAdapterStatus("openclaw", controller.signal)
           .then((adapterStatus) => {
@@ -451,6 +481,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
     const results = await Promise.allSettled(tasks.map((task) => task.promise));
     if (controller.signal.aborted) return;
+
+    const refreshedAt = Date.now();
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        resourceUpdatedAt.set(tasks[index]!.resource, refreshedAt);
+      }
+    });
 
     const failures = results.flatMap((result, index) =>
       result.status === "rejected" ? [{ ...tasks[index]!, reason: result.reason }] : [],
@@ -473,6 +510,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
           previousState.hasLoaded ? "，当前保留上次成功数据" : ""
         }`
       : null;
+    const resourceTimestamps = [...requestedResources].flatMap((resource) => {
+      const timestamp = resourceUpdatedAt.get(resource);
+      return timestamp === undefined ? [] : [timestamp];
+    });
+    const scopeUpdatedAt = resourceTimestamps.length
+      ? new Date(Math.min(...resourceTimestamps)).toISOString()
+      : previousState.updatedAt;
 
     scopeStates.value = {
       ...scopeStates.value,
@@ -480,7 +524,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         error,
         hasLoaded,
         status,
-        updatedAt: hasFreshPageData ? new Date().toISOString() : previousState.updatedAt,
+        updatedAt: hasFreshPageData ? scopeUpdatedAt : previousState.updatedAt,
       },
     };
   }
@@ -495,7 +539,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (!pollingActive || document.visibilityState !== "visible") return;
     pollTimer = window.setTimeout(() => {
       pollTimer = null;
-      void refresh();
+      void refresh(undefined, "poll");
     }, POLL_INTERVAL_MS);
   }
 
@@ -507,22 +551,30 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
-  function refresh(scope = activeScope.value): Promise<void> {
+  function refresh(
+    scope = activeScope.value,
+    intent: DashboardRefreshIntent = "manual",
+  ): Promise<void> {
     setActiveScope(scope);
-    if (activeRefresh?.scope === scope) return activeRefresh.promise;
+    if (activeRefresh?.scope === scope) {
+      if (intent !== "manual" || activeRefresh.intent === "manual") return activeRefresh.promise;
+    }
     if (activeRefresh) activeRefresh.controller.abort();
     if (pollingActive) clearPollTimer();
     const controller = new AbortController();
     activeRefreshScope.value = scope;
     const refreshRecord = {
       controller,
+      intent,
       scope,
       promise: Promise.resolve(),
     };
-    const promise = performRefresh(scope, controller).finally(() => {
+    activeRefreshIntent.value = intent;
+    const promise = performRefresh(scope, controller, intent).finally(() => {
       if (activeRefresh === refreshRecord) {
         activeRefresh = null;
         activeRefreshScope.value = null;
+        activeRefreshIntent.value = null;
         scheduleNextPoll();
       }
     });
@@ -595,7 +647,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     pollingActive = true;
     visibilityHandler = () => {
       clearPollTimer();
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void refresh(undefined, "visibility");
     };
     document.addEventListener("visibilitychange", visibilityHandler);
     scheduleNextPoll();
@@ -661,6 +713,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     error,
     lastUpdatedAt,
     isRefreshing,
+    isManualRefreshing,
     submittingApprovalId,
     approvalResolutionError,
     approvalResolutionState,
