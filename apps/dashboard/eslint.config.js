@@ -9,9 +9,11 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "node_modules/**",
+      ".vite/**",
       "playwright-report/**",
       "test-results/**",
       "test-results-*/**",
+      "coverage/**",
       "*.tsbuildinfo",
     ],
   },
@@ -33,6 +35,14 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+        },
+      ],
       "vue/attributes-order": "warn",
       "vue/html-self-closing": [
         "warn",

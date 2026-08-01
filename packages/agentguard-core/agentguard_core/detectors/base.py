@@ -11,7 +11,9 @@ from ..policies import PolicyBundle
 
 
 class Detector:
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         raise NotImplementedError
 
 
@@ -19,7 +21,9 @@ def is_rule_disabled(rule_id: str, policies: PolicyBundle) -> bool:
     return rule_id in set(policies.disabled_rules)
 
 
-def apply_rule_override(result: DetectionResult, policies: PolicyBundle) -> DetectionResult | None:
+def apply_rule_override(
+    result: DetectionResult, policies: PolicyBundle
+) -> DetectionResult | None:
     if is_rule_disabled(result.rule_hit.rule_id, policies):
         return None
     override = policies.rule_overrides.get(result.rule_hit.rule_id)
@@ -32,5 +36,7 @@ def apply_rule_override(result: DetectionResult, policies: PolicyBundle) -> Dete
         updates["risk_score"] = override.risk_score
     if override.severity is not None:
         updates["severity"] = override.severity
-        updates["rule_hit"] = result.rule_hit.model_copy(update={"severity": override.severity})
+        updates["rule_hit"] = result.rule_hit.model_copy(
+            update={"severity": override.severity}
+        )
     return replace(result, **updates) if updates else result

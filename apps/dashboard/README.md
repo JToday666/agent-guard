@@ -46,6 +46,11 @@ Mock 模式不需要 PostgreSQL、Guard API、launch code 或 browser session，
 ```bash
 pnpm dashboard:dev
 pnpm dashboard:dev:mock
+pnpm dashboard:format
+pnpm dashboard:format:check
+pnpm dashboard:lint
+pnpm dashboard:check:changed
+pnpm dashboard:check
 pnpm dashboard:test:e2e
 pnpm dashboard:test:e2e:api
 pnpm dashboard:typecheck

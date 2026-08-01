@@ -1,7 +1,12 @@
 """Configuration audit domain models and evaluator."""
 
 from .evaluator import evaluate_config_audit
-from .models import ConfigAuditEvent, ConfigAuditFinding, ConfigAuditResult, FindingSeverity
+from .models import (
+    ConfigAuditEvent,
+    ConfigAuditFinding,
+    ConfigAuditResult,
+    FindingSeverity,
+)
 
 __all__ = [
     "ConfigAuditEvent",

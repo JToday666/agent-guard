@@ -14,7 +14,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "black>=25.1.0",
   "jsonschema>=4.26",
+  "pyright>=1.1.390",
   "pytest>=9",
   "ruff>=0.15.20",
 ]
@@ -28,6 +30,10 @@ agentguard-core = { path = "packages/agentguard-core", editable = true }
 agentguard-guard-api = { path = "apps/guard-api", editable = true }
 agentguard-langgraph-bench = { path = "agentguard_langgraph_bench/bench", editable = true }
 agentguard-langgraph-adapter = { path = "packages/agentguard-langgraph-adapter", editable = true }
+
+[tool.black]
+target-version = ["py312"]
+extend-exclude = "(^|/)(agentguard_langgraph_bench|migrations|node_modules)/"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

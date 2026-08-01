@@ -12,14 +12,18 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 class JailbreakDetector(Detector):
     rule_id = "P102_jailbreak"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
         if not isinstance(event.payload, ModelCallPayload):
             return []
         text = event.payload.content_preview
-        if event.payload.phase == "input" and not event.payload.sanitized and has_jailbreak_text(
-            text, policies
+        if (
+            event.payload.phase == "input"
+            and not event.payload.sanitized
+            and has_jailbreak_text(text, policies)
         ):
             return self._result(
                 policies,
@@ -28,7 +32,9 @@ class JailbreakDetector(Detector):
                 evidence=["phase=input", "jailbreak_pattern=true"],
                 reason="The model input contains jailbreak instructions.",
             )
-        if event.payload.phase == "output" and looks_like_sensitive_model_leak(event.payload, policies):
+        if event.payload.phase == "output" and looks_like_sensitive_model_leak(
+            event.payload, policies
+        ):
             return self._result(
                 policies,
                 risk_score=90,

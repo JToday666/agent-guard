@@ -45,7 +45,9 @@ class GuardEngine:
             EnvironmentPoisoningDetector(),
         ]
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle | None = None) -> GuardDecision:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle | None = None
+    ) -> GuardDecision:
         policy_bundle = policies or PolicyBundle()
         started_at = perf_counter()
         detections = []

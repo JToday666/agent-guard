@@ -10,8 +10,11 @@ from typing import Any
 
 from .event_models import ToolExecutionResult, new_id
 from .langgraph_adapter import LangGraphAdapter
-from .tool_compat import BROWSER_TOOLS, ToolCompatibilityLayer, blocked_runtime_policy_result
-
+from .tool_compat import (
+    BROWSER_TOOLS,
+    ToolCompatibilityLayer,
+    blocked_runtime_policy_result,
+)
 
 BROWSER_SESSION_TOOLS = {
     "browser_navigate",
@@ -36,12 +39,18 @@ class SecureToolNode:
     ) -> None:
         if gateway is None:
             if adapter is None or tool_registry is None:
-                raise TypeError("SecureToolNode requires either gateway or adapter + tool_registry")
+                raise TypeError(
+                    "SecureToolNode requires either gateway or adapter + tool_registry"
+                )
             from .tool_gateway import GuardedToolGateway
 
-            gateway = GuardedToolGateway(guard_adapter=adapter, tool_runtime=tool_registry)
+            gateway = GuardedToolGateway(
+                guard_adapter=adapter, tool_runtime=tool_registry
+            )
         self.gateway = gateway
-        self._compatibility_layer = ToolCompatibilityLayer(getattr(getattr(gateway, "tool_runtime", None), "sandbox_dir", None))
+        self._compatibility_layer = ToolCompatibilityLayer(
+            getattr(getattr(gateway, "tool_runtime", None), "sandbox_dir", None)
+        )
 
     def invoke_tool(
         self,
@@ -62,7 +71,9 @@ class SecureToolNode:
             call_id=call_id or "",
             config=(case_context or {}).get("config"),
         )
-        if tool_name in BROWSER_TOOLS and not compat.case_tool_policy.get("browser_available"):
+        if tool_name in BROWSER_TOOLS and not compat.case_tool_policy.get(
+            "browser_available"
+        ):
             result_payload = blocked_runtime_policy_result(
                 tool_name=tool_name,
                 call_id=call_id or new_id("call"),
@@ -101,13 +112,21 @@ class SecureToolNode:
         for call in calls:
             tool_name = call["name"]
             arguments = dict(call.get("args") or {})
-            arguments = _bind_runtime_arguments(state, runtime_context, tool_name, arguments)
+            arguments = _bind_runtime_arguments(
+                state, runtime_context, tool_name, arguments
+            )
             if tool_name == "rag_answer":
                 key = _rag_key(arguments)
                 if key in blocked_rag_retrievals:
-                    results.append(_skipped_rag_answer(tool_name, call.get("id") or new_id("call")).model_dump())
+                    results.append(
+                        _skipped_rag_answer(
+                            tool_name, call.get("id") or new_id("call")
+                        ).model_dump()
+                    )
                     continue
-                arguments = _enrich_rag_answer_arguments(arguments, latest_rag_retrievals.get(key), latest_memory_lookup)
+                arguments = _enrich_rag_answer_arguments(
+                    arguments, latest_rag_retrievals.get(key), latest_memory_lookup
+                )
             result = self.invoke_tool(
                 tool_name=tool_name,
                 arguments=arguments,
@@ -118,7 +137,9 @@ class SecureToolNode:
             )
             results.append(result.model_dump())
             event_state = {**state, "behavior_events": state_events}
-            state_events = _append_tool_lifecycle_events(event_state, result.model_dump(), len(previous_results) + len(results))
+            state_events = _append_tool_lifecycle_events(
+                event_state, result.model_dump(), len(previous_results) + len(results)
+            )
             _update_runtime_context(runtime_context, tool_name, result)
             if tool_name == "rag_retrieve":
                 key = _rag_key(arguments)
@@ -126,10 +147,17 @@ class SecureToolNode:
                     blocked_rag_retrievals.add(key)
                 elif isinstance(result.result, dict):
                     latest_rag_retrievals[key] = result.result
-            if tool_name in {"memory_read", "memory_search"} and result.status == "executed" and isinstance(result.result, dict):
+            if (
+                tool_name in {"memory_read", "memory_search"}
+                and result.status == "executed"
+                and isinstance(result.result, dict)
+            ):
                 latest_memory_lookup = result.result
         stop_reason = state.get("stop_reason") or ""
-        if any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in results):
+        if any(
+            item.get("blocked") and not item.get("runtime_policy_blocked")
+            for item in results
+        ):
             stop_reason = "blocked"
         return {
             **state,
@@ -162,7 +190,9 @@ def _bind_runtime_arguments(
     return enriched
 
 
-def _current_case_browser_session(state: dict[str, Any], runtime_context: dict[str, Any]) -> str:
+def _current_case_browser_session(
+    state: dict[str, Any], runtime_context: dict[str, Any]
+) -> str:
     candidate = str(runtime_context.get("browser_session_id") or "").strip()
     if candidate and candidate != "default":
         return candidate
@@ -178,7 +208,9 @@ def _current_case_browser_session(state: dict[str, Any], runtime_context: dict[s
     return ""
 
 
-def _update_runtime_context(runtime_context: dict[str, Any], tool_name: str, result: ToolExecutionResult) -> None:
+def _update_runtime_context(
+    runtime_context: dict[str, Any], tool_name: str, result: ToolExecutionResult
+) -> None:
     if result.status != "executed" or not isinstance(result.result, dict):
         return
     payload = result.result
@@ -192,7 +224,9 @@ def _update_runtime_context(runtime_context: dict[str, Any], tool_name: str, res
         runtime_context["browser_url"] = payload["url"]
 
 
-def _append_tool_lifecycle_events(state: dict[str, Any], item: dict[str, Any], sequence_index: int) -> list[dict[str, Any]]:
+def _append_tool_lifecycle_events(
+    state: dict[str, Any], item: dict[str, Any], sequence_index: int
+) -> list[dict[str, Any]]:
     events = list(state.get("behavior_events") or [])
     event = item.get("event") or {}
     audit_event = item.get("audit_event") or {}
@@ -214,7 +248,11 @@ def _append_tool_lifecycle_events(state: dict[str, Any], item: dict[str, Any], s
             "tool_call_proposed",
             "before_tool_call",
             f"Tool call proposed: {tool_name}.",
-            {**base_metadata, "arguments": event.get("arguments"), "derived_resources": event.get("derived_resources", [])},
+            {
+                **base_metadata,
+                "arguments": event.get("arguments"),
+                "derived_resources": event.get("derived_resources", []),
+            },
         )
     )
     events.append(
@@ -263,7 +301,10 @@ def _append_tool_lifecycle_events(state: dict[str, Any], item: dict[str, Any], s
                 "memory_write",
                 "after_tool_call",
                 "Memory write behavior observed.",
-                {**base_metadata, "result_summary": _summarize_result(item.get("result"))},
+                {
+                    **base_metadata,
+                    "result_summary": _summarize_result(item.get("result")),
+                },
             )
         )
     return events
@@ -281,7 +322,9 @@ def _lifecycle_event(
         "schema_version": "0.3",
         "event_id": new_id("evt_lifecycle"),
         "event_type": event_type,
-        "trace_id": state.get("trace_id") or security.get("trace_id") or new_id("trace"),
+        "trace_id": state.get("trace_id")
+        or security.get("trace_id")
+        or new_id("trace"),
         "runtime": security.get("runtime") or "langgraph",
         "case_id": security.get("case_id"),
         "attack_type": security.get("attack_type"),
@@ -305,7 +348,10 @@ def _summarize_result(result: Any) -> str:
 
 
 def _rag_key(arguments: dict[str, Any]) -> tuple[str, str]:
-    return (str(arguments.get("dataset") or ""), str(arguments.get("question_id") or ""))
+    return (
+        str(arguments.get("dataset") or ""),
+        str(arguments.get("question_id") or ""),
+    )
 
 
 def _enrich_rag_answer_arguments(
@@ -321,10 +367,20 @@ def _enrich_rag_answer_arguments(
         enriched["contexts"] = contexts
     memory_answer, memory_refs = _answer_from_memory_lookup(memory_lookup)
     if not str(enriched.get("answer") or "").strip():
-        answer = memory_answer or _answer_from_contexts(contexts, str(enriched.get("question") or (retrieval or {}).get("question") or ""))
+        answer = memory_answer or _answer_from_contexts(
+            contexts,
+            str(enriched.get("question") or (retrieval or {}).get("question") or ""),
+        )
         if answer:
             enriched["answer"] = answer
-            enriched.setdefault("answer_source", "memory_terminal_fallback" if memory_answer else "rag_context_terminal_fallback")
+            enriched.setdefault(
+                "answer_source",
+                (
+                    "memory_terminal_fallback"
+                    if memory_answer
+                    else "rag_context_terminal_fallback"
+                ),
+            )
     if memory_refs and not enriched.get("memory_refs"):
         enriched["memory_refs"] = memory_refs
     if memory_answer and "used_memory" not in enriched:
@@ -333,7 +389,8 @@ def _enrich_rag_answer_arguments(
         return enriched
     if not enriched.get("contexts"):
         enriched["contexts"] = list(retrieval.get("contexts") or [])
-    meta = retrieval.get("meta") if isinstance(retrieval.get("meta"), dict) else {}
+    raw_meta = retrieval.get("meta")
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
     if "mode" not in enriched and meta.get("mode"):
         enriched["mode"] = meta["mode"]
     return enriched
@@ -342,23 +399,38 @@ def _enrich_rag_answer_arguments(
 def _rag_contexts(retrieval: dict[str, Any] | None) -> list[str]:
     if not retrieval:
         return []
-    contexts = [str(item) for item in retrieval.get("contexts") or [] if str(item or "").strip()]
+    contexts = [
+        str(item) for item in retrieval.get("contexts") or [] if str(item or "").strip()
+    ]
     if contexts:
         return contexts
-    docs = retrieval.get("context_docs") if isinstance(retrieval.get("context_docs"), list) else []
-    return [str(item.get("text") or "") for item in docs if isinstance(item, dict) and str(item.get("text") or "").strip()]
+    raw_docs = retrieval.get("context_docs")
+    docs = raw_docs if isinstance(raw_docs, list) else []
+    return [
+        str(item.get("text") or "")
+        for item in docs
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
 
 
-def _answer_from_memory_lookup(memory_lookup: dict[str, Any] | None) -> tuple[str, list[str]]:
+def _answer_from_memory_lookup(
+    memory_lookup: dict[str, Any] | None,
+) -> tuple[str, list[str]]:
     if not memory_lookup:
         return "", []
     records: list[dict[str, Any]] = []
     if memory_lookup.get("found"):
         records.append(memory_lookup)
-    matches = memory_lookup.get("matches") if isinstance(memory_lookup.get("matches"), list) else []
+    raw_matches = memory_lookup.get("matches")
+    matches = raw_matches if isinstance(raw_matches, list) else []
     records.extend(item for item in matches if isinstance(item, dict))
     for record in reversed(records):
-        answer = _string_from_memory_value(record.get("value") or record.get("note") or record.get("content") or record.get("answer"))
+        answer = _string_from_memory_value(
+            record.get("value")
+            or record.get("note")
+            or record.get("content")
+            or record.get("answer")
+        )
         if answer:
             return answer, _memory_refs_from_records([record])
     return "", []
@@ -433,7 +505,22 @@ def _best_context_sentence(question: str, contexts: list[str]) -> str:
     terms = {
         token
         for token in re.findall(r"[a-z0-9]+", question.lower())
-        if len(token) > 2 and token not in {"the", "and", "for", "with", "what", "where", "when", "which", "who", "how", "are", "was"}
+        if len(token) > 2
+        and token
+        not in {
+            "the",
+            "and",
+            "for",
+            "with",
+            "what",
+            "where",
+            "when",
+            "which",
+            "who",
+            "how",
+            "are",
+            "was",
+        }
     }
     best = ""
     best_score = -1
@@ -457,9 +544,14 @@ def _extract_episode_count_answer(question: str, contexts: list[str]) -> str:
 
 
 def _extract_date_answer(question: str, contexts: list[str]) -> str:
-    if not any(marker in question.lower() for marker in ("what day", "what date", "when")):
+    if not any(
+        marker in question.lower() for marker in ("what day", "what date", "when")
+    ):
         return ""
-    pattern = re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?\b", re.IGNORECASE)
+    pattern = re.compile(
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?\b",
+        re.IGNORECASE,
+    )
     for sentence in _context_sentences(contexts):
         match = pattern.search(sentence)
         if match:
@@ -479,12 +571,21 @@ def _extract_county_answer(question: str, contexts: list[str]) -> str:
 
 def _extract_boolean_answer(question: str, contexts: list[str]) -> str:
     lowered = question.lower()
-    if not (lowered.startswith(("are ", "is ", "do ", "does ", "did ", "was ", "were ")) or "true or false" in lowered):
+    if not (
+        lowered.startswith(("are ", "is ", "do ", "does ", "did ", "was ", "were "))
+        or "true or false" in lowered
+    ):
         return ""
     joined = " ".join(_context_sentences(contexts)).lower()
-    if any(marker in joined for marker in ("not ", "neither", "false", "do not", "does not")):
+    if any(
+        marker in joined
+        for marker in ("not ", "neither", "false", "do not", "does not")
+    ):
         return "false" if "true or false" in lowered else "no"
-    if any(marker in joined for marker in ("yes", "true", "both", "same neighborhood", "share a location")):
+    if any(
+        marker in joined
+        for marker in ("yes", "true", "both", "same neighborhood", "share a location")
+    ):
         return "true" if "true or false" in lowered else "yes"
     return ""
 
@@ -493,10 +594,15 @@ def _extract_song_recorder_answer(question: str, contexts: list[str]) -> str:
     if "who" not in question.lower() or "record" not in question.lower():
         return ""
     for sentence in _context_sentences(contexts):
-        match = re.search(r"\b(?:singer|crooner)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})\b", sentence)
+        match = re.search(
+            r"\b(?:singer|crooner)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})\b",
+            sentence,
+        )
         if match:
             return match.group(1)
-        match = re.search(r"\brecorded by\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})\b", sentence)
+        match = re.search(
+            r"\brecorded by\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})\b", sentence
+        )
         if match:
             return match.group(1)
     return ""
@@ -506,7 +612,9 @@ def _extract_named_bomb_answer(question: str, contexts: list[str]) -> str:
     if "bomb" not in question.lower() or "hiroshima" not in question.lower():
         return ""
     for sentence in _context_sentences(contexts):
-        match = re.search(r"\bnamed\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\b", sentence)
+        match = re.search(
+            r"\bnamed\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\b", sentence
+        )
         if match:
             return match.group(1)
     return ""

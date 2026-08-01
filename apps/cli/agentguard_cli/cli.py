@@ -14,9 +14,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-
 Env = Mapping[str, str]
-RunCommand = Callable[[list[str]], subprocess.CompletedProcess[str]]
+RunCommand = Callable[[list[str]], subprocess.CompletedProcess[bytes]]
 BenchMain = Callable[[list[str] | None], int]
 
 
@@ -56,7 +55,9 @@ def run(
             if handler is _cmd_eval_run:
                 args.bench_args = unknown_args
             else:
-                raise CliError(f"Unrecognized arguments: {' '.join(unknown_args)}", exit_code=2)
+                raise CliError(
+                    f"Unrecognized arguments: {' '.join(unknown_args)}", exit_code=2
+                )
         return int(
             handler(
                 args,
@@ -73,16 +74,22 @@ def run(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agentguardctl", description="AgentGuard headless control CLI")
+    parser = argparse.ArgumentParser(
+        prog="agentguardctl", description="AgentGuard headless control CLI"
+    )
     subcommands = parser.add_subparsers(dest="command")
 
     health = subcommands.add_parser("health", help="Check Guard API health")
-    health.add_argument("--check-db", action="store_true", help="Include database health")
+    health.add_argument(
+        "--check-db", action="store_true", help="Include database health"
+    )
     health.add_argument("--json", action="store_true", help="Print JSON response")
     health.set_defaults(handler=_cmd_health)
 
     launch = subcommands.add_parser("launch", help="Create a Dashboard launch URL")
-    launch.add_argument("--dashboard-url", default="http://localhost:5173/", help="Dashboard URL prefix")
+    launch.add_argument(
+        "--dashboard-url", default="http://localhost:5173/", help="Dashboard URL prefix"
+    )
     launch.set_defaults(handler=_cmd_launch)
 
     audit = subcommands.add_parser("audit", help="Audit event commands")
@@ -108,31 +115,57 @@ def build_parser() -> argparse.ArgumentParser:
     trace_subcommands = trace.add_subparsers(dest="trace_command", required=True)
     trace_get = trace_subcommands.add_parser("get", help="Read a trace")
     trace_get.add_argument("trace_id")
-    trace_get.add_argument("--provenance", action="store_true", help="Read trace provenance graph")
+    trace_get.add_argument(
+        "--provenance", action="store_true", help="Read trace provenance graph"
+    )
     trace_get.add_argument("--output", help="Write JSON to this file instead of stdout")
     trace_get.set_defaults(handler=_cmd_trace_get)
 
     openclaw = subcommands.add_parser("openclaw", help="OpenClaw helper commands")
-    openclaw_subcommands = openclaw.add_subparsers(dest="openclaw_command", required=True)
-    openclaw_verify = openclaw_subcommands.add_parser("verify", help="Verify installed OpenClaw plugin")
-    openclaw_verify.add_argument("--record", action="store_true", help="Record verify status in Guard API")
+    openclaw_subcommands = openclaw.add_subparsers(
+        dest="openclaw_command", required=True
+    )
+    openclaw_verify = openclaw_subcommands.add_parser(
+        "verify", help="Verify installed OpenClaw plugin"
+    )
+    openclaw_verify.add_argument(
+        "--record", action="store_true", help="Record verify status in Guard API"
+    )
     openclaw_verify.set_defaults(handler=_cmd_openclaw_verify)
 
     eval_parser = subcommands.add_parser("eval", help="AttackBench helper commands")
     eval_subcommands = eval_parser.add_subparsers(dest="eval_command", required=True)
-    eval_import = eval_subcommands.add_parser("import", help="Import evaluation results into Guard API")
+    eval_import = eval_subcommands.add_parser(
+        "import", help="Import evaluation results into Guard API"
+    )
     eval_import.add_argument("path", help="Evaluation result JSON file")
     eval_import.set_defaults(handler=_cmd_eval_import)
-    eval_run = eval_subcommands.add_parser("run", help="Run AttackBench", add_help=False)
+    eval_run = eval_subcommands.add_parser(
+        "run", help="Run AttackBench", add_help=False
+    )
     eval_run.set_defaults(bench_args=[])
     eval_run.set_defaults(handler=_cmd_eval_run)
 
     return parser
 
 
-def _cmd_health(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport: httpx.BaseTransport | None, **_: Any) -> int:
+def _cmd_health(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
     params = {"check_db": True} if args.check_db else None
-    payload = _request_json("GET", "/health", env=env, transport=transport, params=params, token_required=False)
+    payload = _request_json(
+        "GET",
+        "/health",
+        env=env,
+        transport=transport,
+        params=params,
+        token_required=False,
+    )
     if args.json:
         _write_json(stdout, payload)
         return 0
@@ -145,8 +178,17 @@ def _cmd_health(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport
     return 0
 
 
-def _cmd_launch(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport: httpx.BaseTransport | None, **_: Any) -> int:
-    payload = _request_json("POST", "/v1/auth/browser/launch", env=env, transport=transport)
+def _cmd_launch(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    payload = _request_json(
+        "POST", "/v1/auth/browser/launch", env=env, transport=transport
+    )
     launch_code = payload.get("launch_code")
     if not isinstance(launch_code, str) or not launch_code:
         raise CliError("Guard API response did not include launch_code")
@@ -154,7 +196,14 @@ def _cmd_launch(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport
     return 0
 
 
-def _cmd_audit_export(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport: httpx.BaseTransport | None, **_: Any) -> int:
+def _cmd_audit_export(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
     params = _filter_params(
         {
             "trace_id": args.trace_id,
@@ -164,10 +213,14 @@ def _cmd_audit_export(args: argparse.Namespace, *, env: Env, stdout: TextIO, tra
             "limit": args.limit,
         }
     )
-    payload = _request_json("GET", "/v1/audit/events", env=env, transport=transport, params=params)
+    payload = _request_json(
+        "GET", "/v1/audit/events", env=env, transport=transport, params=params
+    )
     if not isinstance(payload, list):
         raise CliError("Guard API response for audit export was not a list")
-    lines = "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in payload)
+    lines = "".join(
+        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in payload
+    )
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +231,14 @@ def _cmd_audit_export(args: argparse.Namespace, *, env: Env, stdout: TextIO, tra
     return 0
 
 
-def _cmd_metrics(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport: httpx.BaseTransport | None, **_: Any) -> int:
+def _cmd_metrics(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
     params = _filter_params(
         {
             "trace_id": args.trace_id,
@@ -187,7 +247,9 @@ def _cmd_metrics(args: argparse.Namespace, *, env: Env, stdout: TextIO, transpor
             "decision": args.decision,
         }
     )
-    payload = _request_json("GET", "/v1/metrics/eval", env=env, transport=transport, params=params)
+    payload = _request_json(
+        "GET", "/v1/metrics/eval", env=env, transport=transport, params=params
+    )
     if args.json:
         _write_json(stdout, payload)
     else:
@@ -195,9 +257,18 @@ def _cmd_metrics(args: argparse.Namespace, *, env: Env, stdout: TextIO, transpor
     return 0
 
 
-def _cmd_trace_get(args: argparse.Namespace, *, env: Env, stdout: TextIO, transport: httpx.BaseTransport | None, **_: Any) -> int:
+def _cmd_trace_get(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
     suffix = "/provenance" if args.provenance else ""
-    payload = _request_json("GET", f"/v1/traces/{args.trace_id}{suffix}", env=env, transport=transport)
+    payload = _request_json(
+        "GET", f"/v1/traces/{args.trace_id}{suffix}", env=env, transport=transport
+    )
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,13 +308,17 @@ def _cmd_eval_import(
         raise CliError(f"Failed to read evaluation file: {exc}") from exc
     except ValueError as exc:
         raise CliError("Evaluation file was not valid JSON") from exc
-    response = _request_json("POST", "/v1/evaluations", env=env, transport=transport, json_body=payload)
+    response = _request_json(
+        "POST", "/v1/evaluations", env=env, transport=transport, json_body=payload
+    )
     run_id = response.get("run_id") if isinstance(response, dict) else None
     stdout.write(f"Imported evaluation run {run_id or '<unknown>'}\n")
     return 0
 
 
-def _cmd_eval_run(args: argparse.Namespace, *, bench_main: BenchMain | None, **_: Any) -> int:
+def _cmd_eval_run(
+    args: argparse.Namespace, *, bench_main: BenchMain | None, **_: Any
+) -> int:
     runner = bench_main or _load_bench_main()
     return int(runner(args.bench_args))
 
@@ -262,7 +337,9 @@ def _request_json(
     if token_required:
         token = env.get("AGENTGUARD_CONTROL_TOKEN")
         if not token:
-            raise CliError("AGENTGUARD_CONTROL_TOKEN is required for this command", exit_code=2)
+            raise CliError(
+                "AGENTGUARD_CONTROL_TOKEN is required for this command", exit_code=2
+            )
         headers["Authorization"] = f"Bearer {token}"
     try:
         with httpx.Client(timeout=10.0, transport=transport) as client:
@@ -311,9 +388,23 @@ def _json_text(payload: Any) -> str:
 def _format_metrics(payload: Any) -> str:
     if not isinstance(payload, dict):
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
-    keys = ["event_count", "allow_count", "deny_count", "ask_count", "blocked_count", "block_rate", "fpr", "fnr", "average_latency_ms"]
+    keys = [
+        "event_count",
+        "allow_count",
+        "deny_count",
+        "ask_count",
+        "blocked_count",
+        "block_rate",
+        "fpr",
+        "fnr",
+        "average_latency_ms",
+    ]
     parts = [f"{key}={payload[key]}" for key in keys if key in payload]
-    return " ".join(parts) if parts else json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return (
+        " ".join(parts)
+        if parts
+        else json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    )
 
 
 def _with_launch_code(dashboard_url: str, launch_code: str) -> str:
@@ -321,7 +412,13 @@ def _with_launch_code(dashboard_url: str, launch_code: str) -> str:
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query["launch_code"] = launch_code
     return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path or "/", urlencode(query), parts.fragment)
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path or "/",
+            urlencode(query),
+            parts.fragment,
+        )
     )
 
 
@@ -338,7 +435,7 @@ def _http_error_message(response: httpx.Response) -> str:
     return f"HTTP {response.status_code} from Guard API{code}"
 
 
-def _default_run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+def _default_run_command(command: list[str]) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(command, check=False)
 
 
@@ -351,7 +448,9 @@ def _load_bench_main() -> BenchMain:
             sys.path.insert(0, str(repo_root))
             from agentguard_langgraph_bench.bench.runner import main as bench_main
         else:
-            raise CliError("AttackBench runner is not importable from this environment") from exc
+            raise CliError(
+                "AttackBench runner is not importable from this environment"
+            ) from exc
 
     return bench_main
 

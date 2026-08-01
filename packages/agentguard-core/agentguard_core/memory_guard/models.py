@@ -19,7 +19,9 @@ class MemoryGuardChange(BaseModel):
     value_preview: str = ""
     operation: str = "write"
     source_trust: str = "trusted"
-    status: Literal["proposed", "quarantined", "committed", "rejected", "rolled_back"] = "proposed"
+    status: Literal[
+        "proposed", "quarantined", "committed", "rejected", "rolled_back"
+    ] = "proposed"
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)

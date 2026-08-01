@@ -22,7 +22,6 @@ from .payloads import (
     ToolResultPayload,
 )
 
-
 _EVENT_PAYLOAD_CONTRACT: dict[GuardEventType, type[BaseModel]] = {
     "tool_call_proposed": ToolCallPayload,
     "context_assembled": ContextBuildPayload,
@@ -102,7 +101,15 @@ _RAW_PAYLOAD_CONTRACTS: Mapping[str, RawPayloadContract] = MappingProxyType(
         "memory_write_proposed": RawPayloadContract(
             payload_required_fields=("memory", "will_persist", "requires_approval"),
             nested_required_fields=MappingProxyType(
-                {"memory": ("namespace", "key", "value_preview", "source_trust", "operation")}
+                {
+                    "memory": (
+                        "namespace",
+                        "key",
+                        "value_preview",
+                        "source_trust",
+                        "operation",
+                    )
+                }
             ),
         ),
         "message_send_proposed": RawPayloadContract(
@@ -116,14 +123,20 @@ def guard_event_raw_payload_contracts() -> Mapping[str, RawPayloadContract]:
     return _RAW_PAYLOAD_CONTRACTS
 
 
-def _missing_required_fields(data: dict[str, Any], required_fields: tuple[str, ...]) -> list[str]:
+def _missing_required_fields(
+    data: dict[str, Any], required_fields: tuple[str, ...]
+) -> list[str]:
     return [field for field in required_fields if field not in data]
 
 
-def _raise_missing_raw_payload_fields(event_type: str, path: str, missing: list[str]) -> None:
+def _raise_missing_raw_payload_fields(
+    event_type: str, path: str, missing: list[str]
+) -> None:
     fields = ", ".join(missing)
     location = f"payload.{path}" if path else "payload"
-    raise ValueError(f"event_type={event_type} {location} missing required field(s): {fields}")
+    raise ValueError(
+        f"event_type={event_type} {location} missing required field(s): {fields}"
+    )
 
 
 def _validate_nested_raw_payload_contract(
@@ -142,7 +155,9 @@ def _validate_nested_raw_payload_contract(
                     continue
                 missing = _missing_required_fields(item, required_fields)
                 if missing:
-                    _raise_missing_raw_payload_fields(event_type, f"{key}[{index}]", missing)
+                    _raise_missing_raw_payload_fields(
+                        event_type, f"{key}[{index}]", missing
+                    )
             continue
 
         value = payload.get(path)
@@ -202,7 +217,10 @@ class GuardEvent(BaseModel):
         expected_phase = _MODEL_EVENT_PHASE_CONTRACT.get(self.event_type)
         if expected_phase is not None:
             payload = self.payload
-            if not isinstance(payload, ModelCallPayload) or payload.phase != expected_phase:
+            if (
+                not isinstance(payload, ModelCallPayload)
+                or payload.phase != expected_phase
+            ):
                 raise ValueError(
                     f"event_type={self.event_type} requires ModelCallPayload phase={expected_phase}"
                 )

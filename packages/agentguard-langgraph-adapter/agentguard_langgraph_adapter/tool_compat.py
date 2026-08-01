@@ -21,7 +21,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 BROWSER_TOOLS = {
     "browser_start",
     "browser_navigate",
@@ -97,13 +96,19 @@ class ToolCompatibilityLayer:
         security: dict[str, Any] | None = None,
         config: Any | None = None,
     ) -> list[dict[str, Any]]:
-        policy = self.case_tool_policy(case_context=case_context, security=security, config=config)
+        policy = self.case_tool_policy(
+            case_context=case_context, security=security, config=config
+        )
         visible: list[dict[str, Any]] = []
         for tool in tools:
             name = str(tool.get("name") or "")
             if name in BROWSER_TOOLS and not policy["browser_available"]:
                 continue
-            visible.append(self._manifest_overlay(dict(tool), policy=policy, case_context=case_context))
+            visible.append(
+                self._manifest_overlay(
+                    dict(tool), policy=policy, case_context=case_context
+                )
+            )
         return visible
 
     def case_tool_policy(
@@ -116,13 +121,19 @@ class ToolCompatibilityLayer:
         case_context = dict(case_context or {})
         security = dict(security or {})
         metadata = _metadata_from_context(case_context, security)
-        browser_expected = _is_browser_case(case_context=case_context, security=security)
+        browser_expected = _is_browser_case(
+            case_context=case_context, security=security
+        )
         return {
             "browser_available": browser_expected,
             "browser_expected": browser_expected,
             "case_id": _case_id(case_context, security),
             "allowed_browser_tools": sorted(BROWSER_TOOLS) if browser_expected else [],
-            "runtime": getattr(config, "runtime", None) if config is not None else security.get("runtime"),
+            "runtime": (
+                getattr(config, "runtime", None)
+                if config is not None
+                else security.get("runtime")
+            ),
             "metadata": metadata,
         }
 
@@ -138,14 +149,18 @@ class ToolCompatibilityLayer:
         config: Any | None = None,
     ) -> ToolCompatibilityResult:
         raw = dict(arguments or {})
-        policy = self.case_tool_policy(case_context=case_context, security=security, config=config)
+        policy = self.case_tool_policy(
+            case_context=case_context, security=security, config=config
+        )
         normalized = dict(raw)
         warnings: list[str] = []
         repairs: list[str] = []
         dropped: dict[str, Any] = {}
         added: dict[str, Any] = {}
 
-        def alias(source: str, target: str, repair: str | None = None, *, drop: bool = True) -> None:
+        def alias(
+            source: str, target: str, repair: str | None = None, *, drop: bool = True
+        ) -> None:
             if source not in normalized:
                 return
             if target not in normalized or normalized.get(target) in (None, ""):
@@ -173,7 +188,9 @@ class ToolCompatibilityLayer:
                     added["url"] = url
                     repairs.append("browser_start.url.inferred_from_case")
             if normalized.get("run_id") and policy.get("case_id"):
-                self._last_browser_session_by_case[str(policy["case_id"])] = str(normalized["run_id"])
+                self._last_browser_session_by_case[str(policy["case_id"])] = str(
+                    normalized["run_id"]
+                )
 
         elif tool_name in BROWSER_TOOLS:
             alias("run_id", "session_id", f"{tool_name}.run_id_to_session_id")
@@ -194,7 +211,11 @@ class ToolCompatibilityLayer:
                 alias("content", "value", "browser_input.content_to_value")
                 alias("body", "value", "browser_input.body_to_value")
             elif tool_name == "browser_click":
-                if "target" in normalized and "selector" not in normalized and "text" not in normalized:
+                if (
+                    "target" in normalized
+                    and "selector" not in normalized
+                    and "text" not in normalized
+                ):
                     target = str(normalized.pop("target") or "")
                     if _looks_like_selector(target):
                         normalized["selector"] = target
@@ -209,10 +230,19 @@ class ToolCompatibilityLayer:
                 alias("target", "selector", f"{tool_name}.target_to_selector")
 
         elif tool_name in {"read_file", "write_file"}:
-            for source in ("file_path", "filepath", "filename", "file", "relative_path", "pathname"):
+            for source in (
+                "file_path",
+                "filepath",
+                "filename",
+                "file",
+                "relative_path",
+                "pathname",
+            ):
                 alias(source, "path", f"{tool_name}.{source}_to_path")
             if "path" in normalized:
-                cleaned_path, warning = _normalize_sandbox_file_path(normalized["path"], self.sandbox_dir)
+                cleaned_path, warning = _normalize_sandbox_file_path(
+                    normalized["path"], self.sandbox_dir
+                )
                 if warning:
                     warnings.append(warning)
                 if cleaned_path != normalized["path"]:
@@ -248,7 +278,10 @@ class ToolCompatibilityLayer:
                 if key not in MCP_CALL_ENVELOPE_KEYS and not key.startswith("_")
             }
             if extra_arguments:
-                normalized["arguments"] = {**normalized.get("arguments", {}), **extra_arguments}
+                normalized["arguments"] = {
+                    **normalized.get("arguments", {}),
+                    **extra_arguments,
+                }
                 dropped.update(extra_arguments)
                 repairs.append("mcp_call.top_level_fields_to_arguments")
             _normalize_mcp_call_against_catalog(
@@ -278,7 +311,9 @@ class ToolCompatibilityLayer:
             for source in ("qid", "id"):
                 alias(source, "question_id", f"rag_answer.{source}_to_question_id")
             for key, value in _poisonedrag_defaults(case_context, security).items():
-                if key in {"dataset", "question_id", "mode"} and (key not in normalized or normalized.get(key) in (None, "")):
+                if key in {"dataset", "question_id", "mode"} and (
+                    key not in normalized or normalized.get(key) in (None, "")
+                ):
                     normalized[key] = value
                     added[key] = value
                     repairs.append(f"rag_answer.{key}.inferred_from_case")
@@ -323,11 +358,20 @@ class ToolCompatibilityLayer:
             attachment_values = _extract_attachment_values(normalized)
             if attachment_values:
                 body = str(normalized.get("body") or "")
-                attachment_note = "Attachments referenced: " + ", ".join(attachment_values)
+                attachment_note = "Attachments referenced: " + ", ".join(
+                    attachment_values
+                )
                 normalized["body"] = f"{body}\n\n{attachment_note}".strip()
                 added["body_attachment_note"] = attachment_note
                 repairs.append("send_email.attachments_converted_to_body_note")
-                for key in ("attachment_path", "attachment", "attachments", "files", "file_path", "filepath"):
+                for key in (
+                    "attachment_path",
+                    "attachment",
+                    "attachments",
+                    "files",
+                    "file_path",
+                    "filepath",
+                ):
                     if key in normalized:
                         dropped[key] = normalized.pop(key)
 
@@ -398,7 +442,8 @@ class ToolCompatibilityLayer:
                 },
             )
         tool["runtime_policy"] = {
-            "available_for_case": name not in BROWSER_TOOLS or policy["browser_available"],
+            "available_for_case": name not in BROWSER_TOOLS
+            or policy["browser_available"],
             "browser_expected": policy["browser_expected"],
         }
         return tool
@@ -428,7 +473,10 @@ def blocked_runtime_policy_result(
             "case_id": case_id,
             "tool": {"name": tool_name, "call_id": call_id},
             "arguments": compatibility.normalized_arguments,
-            "metadata": {"compatibility": compatibility.model_dump(), "runtime_policy_blocked": True},
+            "metadata": {
+                "compatibility": compatibility.model_dump(),
+                "runtime_policy_blocked": True,
+            },
         },
         "audit_event": None,
         "error": reason,
@@ -464,38 +512,61 @@ def tool_result_with_compatibility(
     return payload
 
 
-def _compatibility_dump(compatibility: ToolCompatibilityResult | dict[str, Any]) -> dict[str, Any]:
+def _compatibility_dump(
+    compatibility: ToolCompatibilityResult | dict[str, Any],
+) -> dict[str, Any]:
     if isinstance(compatibility, ToolCompatibilityResult):
         return compatibility.model_dump()
     return dict(compatibility or {})
 
 
-def _case_id(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> str:
+def _case_id(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> str:
     case_context = case_context or {}
     security = security or {}
     candidate = case_context.get("case_id") or security.get("case_id")
     return str(candidate or "")
 
 
-def _metadata_from_context(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> dict[str, Any]:
+def _metadata_from_context(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> dict[str, Any]:
     case_context = case_context or {}
     security = security or {}
-    metadata = case_context.get("metadata") if isinstance(case_context.get("metadata"), dict) else {}
+    metadata = (
+        case_context.get("metadata")
+        if isinstance(case_context.get("metadata"), dict)
+        else {}
+    )
     if metadata:
         return dict(metadata)
-    security_metadata = security.get("metadata") if isinstance(security.get("metadata"), dict) else {}
-    return dict(security_metadata)
+    security_metadata = security.get("metadata")
+    return dict(security_metadata) if isinstance(security_metadata, dict) else {}
 
 
-def _is_browser_case(*, case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> bool:
+def _is_browser_case(
+    *, case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> bool:
+    security = security or {}
     metadata = _metadata_from_context(case_context, security)
     runtime_policy = (case_context or {}).get("runtime_policy")
-    if isinstance(runtime_policy, dict) and runtime_policy.get("browser_available") is not None:
+    if (
+        isinstance(runtime_policy, dict)
+        and runtime_policy.get("browser_available") is not None
+    ):
         return bool(runtime_policy.get("browser_available"))
-    if any(step.get("tool") in BROWSER_TOOLS for step in _tool_plan_summary(case_context)):
+    if any(
+        step.get("tool") in BROWSER_TOOLS for step in _tool_plan_summary(case_context)
+    ):
         return True
-    source_dataset = str(metadata.get("source_dataset") or metadata.get("dataset_source") or "").lower()
-    if any(marker in source_dataset for marker in ("instrumentation", "browserart", "browser-art", "vpi-bench")):
+    source_dataset = str(
+        metadata.get("source_dataset") or metadata.get("dataset_source") or ""
+    ).lower()
+    if any(
+        marker in source_dataset
+        for marker in ("instrumentation", "browserart", "browser-art", "vpi-bench")
+    ):
         return True
     memory_reference_case = _is_memory_reference_case(case_context, metadata)
     for key in (
@@ -511,19 +582,39 @@ def _is_browser_case(*, case_context: dict[str, Any] | None, security: dict[str,
         agent_files = metadata.get("agent_files")
         if isinstance(agent_files, dict) and agent_files.get("page"):
             return True
-    user_task = str((case_context or {}).get("task") or (case_context or {}).get("user_task") or security.get("user_task") or "")
-    return bool(re.search(r"https?://127\.0\.0\.1:18\d{3}/(?:local-)?instrumentation/", user_task))
+    user_task = str(
+        (case_context or {}).get("task")
+        or (case_context or {}).get("user_task")
+        or security.get("user_task")
+        or ""
+    )
+    return bool(
+        re.search(
+            r"https?://127\.0\.0\.1:18\d{3}/(?:local-)?instrumentation/", user_task
+        )
+    )
 
 
-def _is_memory_reference_case(case_context: dict[str, Any] | None, metadata: dict[str, Any]) -> bool:
+def _is_memory_reference_case(
+    case_context: dict[str, Any] | None, metadata: dict[str, Any]
+) -> bool:
     case_context = case_context or {}
-    attack_type = str(case_context.get("attack_type") or metadata.get("attack_type") or "").lower()
+    attack_type = str(
+        case_context.get("attack_type") or metadata.get("attack_type") or ""
+    ).lower()
     source_group = str(metadata.get("source_group") or "").lower()
     phase = str(metadata.get("phase") or "").lower()
     return (
         attack_type == "memory_poisoning"
         or source_group.startswith("memory_poisoning")
-        or phase in {"poison_seed", "trigger_query", "conflict_probe", "clean_control", "benign_seed"}
+        or phase
+        in {
+            "poison_seed",
+            "trigger_query",
+            "conflict_probe",
+            "clean_control",
+            "benign_seed",
+        }
     )
 
 
@@ -535,9 +626,15 @@ def _tool_plan_summary(case_context: dict[str, Any] | None) -> list[dict[str, An
     return []
 
 
-def _browser_source_path(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> str:
+def _browser_source_path(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> str:
     metadata = _metadata_from_context(case_context, security)
-    for key in ("web_entry_source_path", "source_path", "original_web_entry_source_path"):
+    for key in (
+        "web_entry_source_path",
+        "source_path",
+        "original_web_entry_source_path",
+    ):
         value = metadata.get(key)
         if value:
             return str(value)
@@ -545,12 +642,18 @@ def _browser_source_path(case_context: dict[str, Any] | None, security: dict[str
     if isinstance(agent_files, dict) and agent_files.get("page"):
         return str(agent_files["page"])
     for step in _tool_plan_summary(case_context):
-        if step.get("tool") == "browser_start" and step.get("arguments", {}).get("source_path"):
+        if step.get("tool") == "browser_start" and step.get("arguments", {}).get(
+            "source_path"
+        ):
             return str(step["arguments"]["source_path"])
     return ""
 
 
-def _browser_entry_url(case_context: dict[str, Any] | None, security: dict[str, Any] | None, source_path: str = "") -> str:
+def _browser_entry_url(
+    case_context: dict[str, Any] | None,
+    security: dict[str, Any] | None,
+    source_path: str = "",
+) -> str:
     metadata = _metadata_from_context(case_context, security)
     for key in ("entry_url", "local_service_page_url", "web_entry_url"):
         value = metadata.get(key)
@@ -564,7 +667,9 @@ def _browser_entry_url(case_context: dict[str, Any] | None, security: dict[str, 
     return ""
 
 
-def _normalize_sandbox_file_path(value: Any, sandbox_dir: Path | None) -> tuple[str, str | None]:
+def _normalize_sandbox_file_path(
+    value: Any, sandbox_dir: Path | None
+) -> tuple[str, str | None]:
     raw = str(value or "")
     if not raw:
         return "", None
@@ -591,10 +696,21 @@ def _infer_mcp_target(
     payload: dict[str, Any],
 ) -> dict[str, str]:
     metadata = _metadata_from_context(case_context, security)
-    hijacking = metadata.get("hijacking") if isinstance(metadata.get("hijacking"), dict) else {}
+    raw_hijacking = metadata.get("hijacking")
+    hijacking = raw_hijacking if isinstance(raw_hijacking, dict) else {}
     inferred = {
-        "server": str(metadata.get("target_server") or hijacking.get("target_server") or metadata.get("hijacked_server") or ""),
-        "tool": str(metadata.get("target_tool") or hijacking.get("target_tool") or metadata.get("hijacked_tool") or ""),
+        "server": str(
+            metadata.get("target_server")
+            or hijacking.get("target_server")
+            or metadata.get("hijacked_server")
+            or ""
+        ),
+        "tool": str(
+            metadata.get("target_tool")
+            or hijacking.get("target_tool")
+            or metadata.get("hijacked_tool")
+            or ""
+        ),
     }
     if inferred["server"] and inferred["tool"]:
         return inferred
@@ -633,8 +749,10 @@ def _normalize_mcp_call_against_catalog(
     if not isinstance(arguments, dict):
         arguments = {}
         payload["arguments"] = arguments
-    schema = descriptor.get("input_schema") if isinstance(descriptor.get("input_schema"), dict) else {}
-    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    raw_schema = descriptor.get("input_schema")
+    schema = raw_schema if isinstance(raw_schema, dict) else {}
+    raw_properties = schema.get("properties")
+    properties = raw_properties if isinstance(raw_properties, dict) else {}
     _apply_mcp_argument_aliases(arguments, properties, repairs)
     for key, spec in properties.items():
         if arguments.get(key) not in (None, ""):
@@ -645,7 +763,9 @@ def _normalize_mcp_call_against_catalog(
             repairs.append(f"mcp_call.arguments.{key}.defaulted_from_catalog")
 
 
-def _mcp_catalog_from_context(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _mcp_catalog_from_context(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> list[dict[str, Any]]:
     case_context = case_context or {}
     security = security or {}
     for container in (
@@ -653,31 +773,50 @@ def _mcp_catalog_from_context(case_context: dict[str, Any] | None, security: dic
         security,
         _metadata_from_context(case_context, security),
     ):
-        for key in ("mcp_tool_catalog", "public_mcp_tool_catalog", "tool_catalog", "selected_tool_catalog"):
+        for key in (
+            "mcp_tool_catalog",
+            "public_mcp_tool_catalog",
+            "tool_catalog",
+            "selected_tool_catalog",
+        ):
             value = container.get(key) if isinstance(container, dict) else None
             if isinstance(value, list):
                 return [dict(item) for item in value if isinstance(item, dict)]
     return []
 
 
-def _select_mcp_descriptor(catalog: list[dict[str, Any]], payload: dict[str, Any], repairs: list[str]) -> dict[str, Any] | None:
-    descriptors = [dict(item) for item in catalog if _descriptor_server(item) and _descriptor_tool(item)]
+def _select_mcp_descriptor(
+    catalog: list[dict[str, Any]], payload: dict[str, Any], repairs: list[str]
+) -> dict[str, Any] | None:
+    descriptors = [
+        dict(item)
+        for item in catalog
+        if _descriptor_server(item) and _descriptor_tool(item)
+    ]
     if not descriptors:
         return None
     requested_server = str(payload.get("server") or "").strip()
     requested_tool = str(payload.get("tool") or "").strip()
     server = _canonical_mcp_server(requested_server, descriptors)
-    candidates = [item for item in descriptors if not server or _descriptor_server(item) == server]
+    candidates = [
+        item for item in descriptors if not server or _descriptor_server(item) == server
+    ]
     if requested_server and server and requested_server != server:
         repairs.append("mcp_call.server.alias_matched_catalog")
     descriptor = _canonical_mcp_tool(requested_tool, candidates or descriptors)
-    if descriptor is not None and requested_tool and requested_tool != _descriptor_tool(descriptor):
+    if (
+        descriptor is not None
+        and requested_tool
+        and requested_tool != _descriptor_tool(descriptor)
+    ):
         repairs.append("mcp_call.tool.alias_matched_catalog")
     return descriptor
 
 
 def _canonical_mcp_server(requested: str, catalog: list[dict[str, Any]]) -> str:
-    servers = sorted({_descriptor_server(item) for item in catalog if _descriptor_server(item)})
+    servers = sorted(
+        {_descriptor_server(item) for item in catalog if _descriptor_server(item)}
+    )
     if not requested:
         return servers[0] if len(servers) == 1 else ""
     for server in servers:
@@ -686,7 +825,9 @@ def _canonical_mcp_server(requested: str, catalog: list[dict[str, Any]]) -> str:
     return servers[0] if len(servers) == 1 else ""
 
 
-def _canonical_mcp_tool(requested: str, catalog: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _canonical_mcp_tool(
+    requested: str, catalog: list[dict[str, Any]]
+) -> dict[str, Any] | None:
     if not catalog:
         return None
     if not requested:
@@ -698,13 +839,19 @@ def _canonical_mcp_tool(requested: str, catalog: list[dict[str, Any]]) -> dict[s
         tool = _descriptor_tool(item)
         if requested == tool or _compact_name(requested) == _compact_name(tool):
             return item
-    scored = sorted(((_tool_similarity(requested, item), item) for item in catalog), key=lambda pair: pair[0], reverse=True)
+    scored = sorted(
+        ((_tool_similarity(requested, item), item) for item in catalog),
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
     if scored and scored[0][0] >= 0.5:
         return scored[0][1]
     return None
 
 
-def _apply_mcp_argument_aliases(arguments: dict[str, Any], properties: dict[str, Any], repairs: list[str]) -> None:
+def _apply_mcp_argument_aliases(
+    arguments: dict[str, Any], properties: dict[str, Any], repairs: list[str]
+) -> None:
     aliases = {
         "ticker": ("symbol", "stock", "stock_symbol"),
         "query": ("q", "search_query"),
@@ -729,7 +876,9 @@ def _descriptor_server(item: dict[str, Any]) -> str:
 
 
 def _descriptor_tool(item: dict[str, Any]) -> str:
-    return str(item.get("tool") or item.get("tool_name") or item.get("name") or "").strip()
+    return str(
+        item.get("tool") or item.get("tool_name") or item.get("name") or ""
+    ).strip()
 
 
 def _compact_name(value: Any) -> str:
@@ -751,14 +900,38 @@ def _tool_similarity(requested: str, descriptor: dict[str, Any]) -> float:
 
 
 def _tool_tokens(value: str) -> set[str]:
-    stopwords = {"get", "set", "create", "update", "delete", "list", "tool", "tools", "call", "mcp"}
-    return {token for token in re.split(r"[^a-z0-9]+", str(value or "").lower()) if token and token not in stopwords}
+    stopwords = {
+        "get",
+        "set",
+        "create",
+        "update",
+        "delete",
+        "list",
+        "tool",
+        "tools",
+        "call",
+        "mcp",
+    }
+    return {
+        token
+        for token in re.split(r"[^a-z0-9]+", str(value or "").lower())
+        if token and token not in stopwords
+    }
 
 
-def _poisonedrag_defaults(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> dict[str, Any]:
+def _poisonedrag_defaults(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> dict[str, Any]:
     metadata = _metadata_from_context(case_context, security)
     defaults: dict[str, Any] = {}
-    for key in ("dataset", "question_id", "mode", "top_k", "adv_per_query", "poison_prefix"):
+    for key in (
+        "dataset",
+        "question_id",
+        "mode",
+        "top_k",
+        "adv_per_query",
+        "poison_prefix",
+    ):
         if metadata.get(key) is not None:
             defaults[key] = metadata[key]
     if "dataset" not in defaults and metadata.get("source_subset") is not None:
@@ -767,29 +940,47 @@ def _poisonedrag_defaults(case_context: dict[str, Any] | None, security: dict[st
         defaults["question_id"] = metadata["original_id"]
     poisonedrag = metadata.get("poisonedrag")
     if isinstance(poisonedrag, dict):
-        for key in ("dataset", "question_id", "mode", "top_k", "adv_per_query", "poison_prefix"):
+        for key in (
+            "dataset",
+            "question_id",
+            "mode",
+            "top_k",
+            "adv_per_query",
+            "poison_prefix",
+        ):
             if poisonedrag.get(key) is not None:
                 defaults.setdefault(key, poisonedrag[key])
     return defaults
 
 
-def _memory_key_default(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> str:
+def _memory_key_default(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> str:
     value = _metadata_from_context(case_context, security).get("memory_key")
     return str(value).strip() if value is not None else ""
 
 
-def _case_question(case_context: dict[str, Any] | None, security: dict[str, Any] | None) -> str:
+def _case_question(
+    case_context: dict[str, Any] | None, security: dict[str, Any] | None
+) -> str:
     metadata = _metadata_from_context(case_context, security)
     for key in ("question", "query"):
         value = metadata.get(key)
         if value:
             return str(value)
-    task = str((case_context or {}).get("task") or (case_context or {}).get("user_task") or (security or {}).get("user_task") or "")
+    task = str(
+        (case_context or {}).get("task")
+        or (case_context or {}).get("user_task")
+        or (security or {}).get("user_task")
+        or ""
+    )
     match = re.search(r"(?im)^\s*Question\s*:\s*(.+?)\s*$", task)
     return match.group(1).strip() if match else ""
 
 
-def _schema_overlay(name: str, *, case_context: dict[str, Any] | None) -> dict[str, Any]:
+def _schema_overlay(
+    name: str, *, case_context: dict[str, Any] | None
+) -> dict[str, Any]:
     if name == "browser_start":
         return {
             "description": "Start a local benchmark browser session. Use run_id as the session identifier. Do not pass session_id.",
@@ -840,17 +1031,29 @@ def _schema_overlay(name: str, *, case_context: dict[str, Any] | None) -> dict[s
                 "required": ["path"],
                 "additionalProperties": False,
             },
-            "accepted_aliases": {"file_path": "path", "filepath": "path", "filename": "path"},
+            "accepted_aliases": {
+                "file_path": "path",
+                "filepath": "path",
+                "filename": "path",
+            },
         }
     if name == "write_file":
         return {
             "input_schema": {
                 "type": "object",
-                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
                 "required": ["path", "content"],
                 "additionalProperties": False,
             },
-            "accepted_aliases": {"file_path": "path", "filepath": "path", "body": "content", "text": "content"},
+            "accepted_aliases": {
+                "file_path": "path",
+                "filepath": "path",
+                "body": "content",
+                "text": "content",
+            },
         }
     if name == "browser_navigate":
         return {

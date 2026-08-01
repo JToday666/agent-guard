@@ -53,7 +53,9 @@ def error_response(
             details=[] if details is None else details,
         )
     )
-    return JSONResponse(status_code=status_code, content=envelope.model_dump(mode="json"))
+    return JSONResponse(
+        status_code=status_code, content=envelope.model_dump(mode="json")
+    )
 
 
 def validation_error_details(errors: list[dict[str, Any]]) -> list[dict[str, Any]]:

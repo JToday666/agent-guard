@@ -36,7 +36,11 @@ from guard_api.storage.base import (
     StoredBrowserSession,
     StoredLaunchCode,
 )
-from guard_api.storage.integrity import attach_audit_integrity, read_audit_integrity, verify_audit_chain
+from guard_api.storage.integrity import (
+    attach_audit_integrity,
+    read_audit_integrity,
+    verify_audit_chain,
+)
 
 
 @dataclass(slots=True)
@@ -67,7 +71,11 @@ class MemoryControlPlaneStore:
 
     def add_audit_event(self, event: AuditEvent) -> None:
         with self.audit_integrity_lock:
-            prev = read_audit_integrity(self.audit_events[-1]) if self.audit_events else None
+            prev = (
+                read_audit_integrity(self.audit_events[-1])
+                if self.audit_events
+                else None
+            )
             event_with_integrity = attach_audit_integrity(
                 event,
                 sequence=len(self.audit_events) + 1,
@@ -75,7 +83,9 @@ class MemoryControlPlaneStore:
             )
             self.audit_events.append(event_with_integrity)
 
-    def list_audit_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
+    def list_audit_events(
+        self, filters: AuditEventFilters | None = None
+    ) -> list[AuditEvent]:
         filters = filters or AuditEventFilters()
         events = _filter_audit_events(list(reversed(self.audit_events)), filters)
         return events[: _bounded_limit(filters.limit)]
@@ -85,7 +95,9 @@ class MemoryControlPlaneStore:
             return verify_audit_chain(list(self.audit_events))
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        events = _filter_audit_events(list(reversed(self.audit_events)), filters or EvalMetricFilters())
+        events = _filter_audit_events(
+            list(reversed(self.audit_events)), filters or EvalMetricFilters()
+        )
         return _aggregate_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
@@ -96,9 +108,15 @@ class MemoryControlPlaneStore:
         self.provenance_edges[edge.edge_id] = edge
         return edge
 
-    def list_provenance(self, trace_id: str) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
-        nodes = [node for node in self.provenance_nodes.values() if node.trace_id == trace_id]
-        edges = [edge for edge in self.provenance_edges.values() if edge.trace_id == trace_id]
+    def list_provenance(
+        self, trace_id: str
+    ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
+        nodes = [
+            node for node in self.provenance_nodes.values() if node.trace_id == trace_id
+        ]
+        edges = [
+            edge for edge in self.provenance_edges.values() if edge.trace_id == trace_id
+        ]
         nodes.sort(key=lambda node: (node.timestamp, node.node_id))
         edges.sort(key=lambda edge: (edge.timestamp, edge.edge_id))
         return nodes, edges
@@ -137,7 +155,9 @@ class MemoryControlPlaneStore:
         rows.sort(key=lambda row: (row.timestamp, row.finding.finding_id), reverse=True)
         return rows[: _bounded_limit(limit)]
 
-    def save_evaluation_run(self, run: EvaluationRun | dict[str, Any]) -> dict[str, Any]:
+    def save_evaluation_run(
+        self, run: EvaluationRun | dict[str, Any]
+    ) -> dict[str, Any]:
         payload = EvaluationRun.model_validate(run).model_dump(mode="json")
         self.evaluation_runs[payload["run_id"]] = payload
         return payload
@@ -145,7 +165,10 @@ class MemoryControlPlaneStore:
     def get_latest_evaluation_run(self) -> dict[str, Any] | None:
         if not self.evaluation_runs:
             return None
-        return max(self.evaluation_runs.values(), key=lambda run: (str(run["run_at"]), str(run["run_id"])))
+        return max(
+            self.evaluation_runs.values(),
+            key=lambda run: (str(run["run_at"]), str(run["run_id"])),
+        )
 
     def get_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
         return self.evaluation_runs.get(run_id)
@@ -161,11 +184,17 @@ class MemoryControlPlaneStore:
         if dataset_id is not None:
             rows = [run for run in rows if run.get("dataset_id") == dataset_id]
         if dataset_version is not None:
-            rows = [run for run in rows if run.get("dataset_version") == dataset_version]
-        rows.sort(key=lambda run: (str(run["run_at"]), str(run["run_id"])), reverse=True)
+            rows = [
+                run for run in rows if run.get("dataset_version") == dataset_version
+            ]
+        rows.sort(
+            key=lambda run: (str(run["run_at"]), str(run["run_id"])), reverse=True
+        )
         return rows[: _bounded_limit(limit)]
 
-    def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]) -> dict[str, Any]:
+    def save_adapter_status(
+        self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]
+    ) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
         self.adapter_statuses[adapter_id] = payload
         return payload
@@ -176,7 +205,9 @@ class MemoryControlPlaneStore:
     def list_adapter_statuses(self) -> dict[str, dict[str, Any]]:
         return dict(self.adapter_statuses)
 
-    def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
+    def create_credential(
+        self, credential: CredentialRecord | dict[str, Any]
+    ) -> CredentialRecord:
         record = CredentialRecord.model_validate(credential)
         self.credentials[record.credential_id] = record
         return record
@@ -188,20 +219,30 @@ class MemoryControlPlaneStore:
         return None
 
     def list_credentials(self) -> list[CredentialRecord]:
-        return sorted(self.credentials.values(), key=lambda credential: credential.created_at)
+        return sorted(
+            self.credentials.values(), key=lambda credential: credential.created_at
+        )
 
-    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
+    def revoke_credential(
+        self, credential_id: str, revoked_at: str
+    ) -> CredentialRecord:
         credential = self.credentials[credential_id]
         revoked = credential.model_copy(update={"revoked_at": revoked_at})
         self.credentials[credential_id] = revoked
         return revoked
 
-    def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
+    def add_action_critic_review(
+        self, review: ActionCriticReview
+    ) -> ActionCriticReview:
         self.action_critic_reviews[review.review_id] = review
         return review
 
     def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]:
-        reviews = [review for review in self.action_critic_reviews.values() if review.trace_id == trace_id]
+        reviews = [
+            review
+            for review in self.action_critic_reviews.values()
+            if review.trace_id == trace_id
+        ]
         return sorted(reviews, key=lambda review: (review.created_at, review.review_id))
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
@@ -211,9 +252,13 @@ class MemoryControlPlaneStore:
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
         return self.memory_changes.get(change_id)
 
-    def update_memory_change_status(self, change_id: str, status: str) -> MemoryGuardChange:
+    def update_memory_change_status(
+        self, change_id: str, status: str
+    ) -> MemoryGuardChange:
         current = self.memory_changes[change_id]
-        updated = current.model_copy(update={"status": status, "updated_at": utc_now_iso()})
+        updated = current.model_copy(
+            update={"status": status, "updated_at": utc_now_iso()}
+        )
         self.memory_changes[change_id] = updated
         return updated
 
@@ -229,7 +274,11 @@ class MemoryControlPlaneStore:
         updated_by: str = "system",
     ) -> PolicySnapshotRecord:
         with self.policy_snapshot_lock:
-            revision = (self.policy_snapshot.revision + 1) if self.policy_snapshot is not None else 1
+            revision = (
+                (self.policy_snapshot.revision + 1)
+                if self.policy_snapshot is not None
+                else 1
+            )
             record = PolicySnapshotRecord(
                 revision=revision,
                 policy_bundle=policy_bundle,
@@ -240,7 +289,9 @@ class MemoryControlPlaneStore:
             self.policy_snapshot_history.append(record)
             return record
 
-    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
+    def list_policy_snapshot_history(
+        self, limit: int = 100
+    ) -> list[PolicySnapshotRecord]:
         return list(reversed(self.policy_snapshot_history))[: _bounded_limit(limit)]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
@@ -296,11 +347,15 @@ class MemoryControlPlaneStore:
         self.launch_codes[code_hash] = launch_code
         return launch_code
 
-    def consume_launch_code(self, code_hash: str, used_at: str) -> StoredLaunchCode | None:
+    def consume_launch_code(
+        self, code_hash: str, used_at: str
+    ) -> StoredLaunchCode | None:
         launch_code = self.launch_codes.get(code_hash)
         if launch_code is None or launch_code.used_at is not None:
             return None
-        consumed = StoredLaunchCode(code_hash=code_hash, expires_at=launch_code.expires_at, used_at=used_at)
+        consumed = StoredLaunchCode(
+            code_hash=code_hash, expires_at=launch_code.expires_at, used_at=used_at
+        )
         self.launch_codes[code_hash] = consumed
         return consumed
 
@@ -311,7 +366,9 @@ class MemoryControlPlaneStore:
         csrf_token: str,
         expires_at: str,
     ) -> StoredBrowserSession:
-        session = StoredBrowserSession(session_hash=session_hash, csrf_token=csrf_token, expires_at=expires_at)
+        session = StoredBrowserSession(
+            session_hash=session_hash, csrf_token=csrf_token, expires_at=expires_at
+        )
         self.browser_sessions[session_hash] = session
         return session
 
@@ -339,7 +396,9 @@ class MemoryControlPlaneStore:
         tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
-        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
+        approval_subject_id = _approval_subject_id(
+            subject_id=subject_id, tool_call_id=tool_call_id
+        )
         nonce = StoredApprovalNonce(
             nonce_hash=nonce_hash,
             approval_id=approval_id,
@@ -361,7 +420,9 @@ class MemoryControlPlaneStore:
         tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
-        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
+        approval_subject_id = _approval_subject_id(
+            subject_id=subject_id, tool_call_id=tool_call_id
+        )
         nonce = self.approval_nonces.get(nonce_hash)
         if (
             nonce is None
@@ -400,12 +461,24 @@ def _filter_audit_events(
 
 
 def _aggregate_metrics(events: list[AuditEvent]) -> EvalMetrics:
-    blocked = [event for event in events if event.decision in {"deny", "ask"} or event.blocked]
+    blocked = [
+        event for event in events if event.decision in {"deny", "ask"} or event.blocked
+    ]
     labeled_benign = [event for event in events if event.is_malicious is False]
     labeled_malicious = [event for event in events if event.is_malicious is True]
-    false_positives = [event for event in labeled_benign if event.decision in {"deny", "ask"} or event.blocked]
-    false_negatives = [event for event in labeled_malicious if event.decision == "allow" and not event.blocked]
-    latency_values = [event.latency_ms for event in events if event.latency_ms is not None]
+    false_positives = [
+        event
+        for event in labeled_benign
+        if event.decision in {"deny", "ask"} or event.blocked
+    ]
+    false_negatives = [
+        event
+        for event in labeled_malicious
+        if event.decision == "allow" and not event.blocked
+    ]
+    latency_values = [
+        event.latency_ms for event in events if event.latency_ms is not None
+    ]
     return {
         "event_count": len(events),
         "allow_count": sum(1 for event in events if event.decision == "allow"),
@@ -414,8 +487,14 @@ def _aggregate_metrics(events: list[AuditEvent]) -> EvalMetrics:
         "blocked_count": len(blocked),
         "block_rate": (len(blocked) / len(events)) if events else None,
         "fpr": (len(false_positives) / len(labeled_benign)) if labeled_benign else None,
-        "fnr": (len(false_negatives) / len(labeled_malicious)) if labeled_malicious else None,
-        "average_latency_ms": (sum(latency_values) / len(latency_values)) if latency_values else None,
+        "fnr": (
+            (len(false_negatives) / len(labeled_malicious))
+            if labeled_malicious
+            else None
+        ),
+        "average_latency_ms": (
+            (sum(latency_values) / len(latency_values)) if latency_values else None
+        ),
     }
 
 

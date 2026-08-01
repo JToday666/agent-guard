@@ -10,7 +10,6 @@ from agentguard_core import AuditEvent, AuditIntegrityMetadata
 
 from guard_api.storage.base import AuditIntegrityStatus
 
-
 CANONICALIZATION = "json:v1"
 
 
@@ -23,7 +22,9 @@ def attach_audit_integrity(
     metadata = AuditIntegrityMetadata(
         sequence=sequence,
         prev_hash=prev_hash,
-        event_hash=compute_audit_event_hash(event, sequence=sequence, prev_hash=prev_hash),
+        event_hash=compute_audit_event_hash(
+            event, sequence=sequence, prev_hash=prev_hash
+        ),
         canonicalization=CANONICALIZATION,
     )
     return event.model_copy(update={"integrity": metadata})
@@ -40,7 +41,9 @@ def compute_audit_event_hash(
         "prev_hash": prev_hash,
         "event": event.model_dump(mode="json", exclude={"integrity"}),
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -71,8 +74,14 @@ def verify_audit_chain(events: Iterable[AuditEvent]) -> AuditIntegrityStatus:
                 head_hash=head_hash,
                 first_broken_audit_id=event.audit_id,
             )
-        expected_hash = compute_audit_event_hash(event, sequence=metadata.sequence, prev_hash=prev_hash)
-        if metadata.sequence != count or metadata.prev_hash != prev_hash or metadata.event_hash != expected_hash:
+        expected_hash = compute_audit_event_hash(
+            event, sequence=metadata.sequence, prev_hash=prev_hash
+        )
+        if (
+            metadata.sequence != count
+            or metadata.prev_hash != prev_hash
+            or metadata.event_hash != expected_hash
+        ):
             return AuditIntegrityStatus(
                 valid=False,
                 event_count=total_count,

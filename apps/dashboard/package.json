@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "vue-tsc --build --force",
+    "check:changed": "bash ../../scripts/dashboard-check-changed.sh",
     "test:unit": "node --test",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test --config=playwright.api.config.ts",

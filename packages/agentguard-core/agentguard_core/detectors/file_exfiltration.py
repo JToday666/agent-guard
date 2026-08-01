@@ -6,7 +6,13 @@ import json
 from typing import Any
 
 from ..decisions import DetectionResult, RuleHit
-from ..events import DerivedResource, GuardEvent, MessageSendPayload, ToolCallPayload, derive_resources
+from ..events import (
+    DerivedResource,
+    GuardEvent,
+    MessageSendPayload,
+    ToolCallPayload,
+    derive_resources,
+)
 from ..matchers import contains_any, has_credential_exposure_text, has_sensitive_text
 from ..policies import PolicyBundle
 from .base import Detector, apply_rule_override, is_rule_disabled
@@ -16,7 +22,9 @@ from .outbound import is_allowed_api_target, is_allowed_recipient
 class FileExfiltrationDetector(Detector):
     rule_id = "P107_file_exfiltration"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
         if isinstance(event.payload, MessageSendPayload):
@@ -25,14 +33,19 @@ class FileExfiltrationDetector(Detector):
             return self._evaluate_tool(event, policies)
         return []
 
-    def _evaluate_message(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def _evaluate_message(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         payload = event.payload
         if not isinstance(payload, MessageSendPayload):
             return []
         if is_allowed_recipient(payload.recipient, policies):
             return []
         sensitive = (
-            any(_resource_is_sensitive(resource) for resource in payload.derived_resources)
+            any(
+                _resource_is_sensitive(resource)
+                for resource in payload.derived_resources
+            )
             or payload.contains_sensitive_data
             or _text_contains_exfiltrated_data(payload.content_preview, policies)
         )
@@ -47,7 +60,9 @@ class FileExfiltrationDetector(Detector):
             ],
         )
 
-    def _evaluate_tool(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def _evaluate_tool(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         payload = event.payload
         if not isinstance(payload, ToolCallPayload):
             return []
@@ -55,8 +70,12 @@ class FileExfiltrationDetector(Detector):
         tool_name = payload.tool.name
 
         if tool_name == "write_file":
-            target = str(payload.arguments.get("path") or _first_resource_target(resources) or "")
-            content = _argument_text(payload.arguments, "content", "body", "text", "data")
+            target = str(
+                payload.arguments.get("path") or _first_resource_target(resources) or ""
+            )
+            content = _argument_text(
+                payload.arguments, "content", "body", "text", "data"
+            )
             sink_target = _sink_target_indicates_exfiltration(target, policies)
             sensitive = _text_contains_exfiltrated_data(content, policies)
             return self._deny_if_sensitive_outbound(
@@ -73,10 +92,21 @@ class FileExfiltrationDetector(Detector):
             )
 
         if tool_name == "browser_input":
-            if event.security_context.source_trust.lower() in {"trusted", "verified", "sanitized", "clean"}:
+            if event.security_context.source_trust.lower() in {
+                "trusted",
+                "verified",
+                "sanitized",
+                "clean",
+            }:
                 return []
-            value = _argument_text(payload.arguments, "value", "text", "content", "body")
-            target = str(payload.arguments.get("selector") or _first_resource_target(resources) or "browser")
+            value = _argument_text(
+                payload.arguments, "value", "text", "content", "body"
+            )
+            target = str(
+                payload.arguments.get("selector")
+                or _first_resource_target(resources)
+                or "browser"
+            )
             return self._deny_if_sensitive_outbound(
                 policies,
                 sensitive=_text_contains_exfiltrated_data(value, policies),
@@ -98,14 +128,17 @@ class FileExfiltrationDetector(Detector):
         if not outbound:
             return []
         target = outbound[0].target
-        if tool_name == "send_email" and is_allowed_recipient(str(payload.arguments.get("to") or ""), policies):
+        if tool_name == "send_email" and is_allowed_recipient(
+            str(payload.arguments.get("to") or ""), policies
+        ):
             return []
         if tool_name == "call_api" and is_allowed_api_target(target, policies):
             return []
         argument_text = _payload_text(payload.arguments)
-        sensitive = any(_resource_is_sensitive(resource) for resource in [*outbound, *payload.derived_resources]) or (
-            _text_contains_exfiltrated_data(argument_text, policies)
-        )
+        sensitive = any(
+            _resource_is_sensitive(resource)
+            for resource in [*outbound, *payload.derived_resources]
+        ) or (_text_contains_exfiltrated_data(argument_text, policies))
         return self._deny_if_sensitive_outbound(
             policies,
             sensitive=sensitive,
@@ -172,14 +205,19 @@ def _text_contains_exfiltrated_data(text: str, policies: PolicyBundle) -> bool:
 
 
 def _text_mentions_sensitive_resource(text: str, policies: PolicyBundle) -> bool:
-    markers = [marker for marker in policies.sensitive_resource_markers if marker.lower() != "private"]
+    markers = [
+        marker
+        for marker in policies.sensitive_resource_markers
+        if marker.lower() != "private"
+    ]
     return contains_any(text, markers)
 
 
 def _sink_target_indicates_exfiltration(target: str, policies: PolicyBundle) -> bool:
     lowered = target.lower()
     return contains_any(lowered, policies.file_exfiltration_sink_markers) or any(
-        marker in lowered for marker in ("leaked", "exfil", "incident evidence", "raw_credentials")
+        marker in lowered
+        for marker in ("leaked", "exfil", "incident evidence", "raw_credentials")
     )
 
 
