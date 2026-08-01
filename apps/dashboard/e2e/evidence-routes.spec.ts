@@ -89,3 +89,21 @@ test("evidence detail surfaces the final security conclusion", async ({ page }) 
   await expect(conclusion).toContainText("任务与行为不一致");
   await expect(conclusion).not.toContainText(/P\d{3}/);
 });
+
+test("evidence list keeps search and final status in the URL", async ({ page }) => {
+  await page.goto("/evidence");
+
+  await page.getByRole("searchbox", { name: "搜索证据链", exact: true }).fill("PI-002");
+  await expect(page).toHaveURL(/search=PI-002/);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(1);
+
+  const statusSelect = page.getByRole("combobox", { name: /^最终状态/ });
+  await statusSelect.click();
+  await page.getByRole("option", { name: "待审批" }).click();
+  await expect(page).toHaveURL(/status=paused/);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "清除筛选" }).click();
+  await expect(page).toHaveURL(/\/evidence$/);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(8);
+});

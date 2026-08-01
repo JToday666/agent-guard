@@ -3,13 +3,16 @@
     <header class="page-header overview-header">
       <div><h1 id="overview-title">安全总览</h1></div>
       <div class="overview-header__actions">
-        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" /><button
+        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+        <button
+          class="page-action"
           type="button"
           :aria-busy="store.isRefreshing"
           :disabled="store.isRefreshing"
           @click="handleRefresh"
         >
-          {{ store.isRefreshing ? "刷新中" : "刷新数据" }}
+          <RefreshCw aria-hidden="true" :class="{ 'is-spinning': store.isRefreshing }" :size="15" />
+          {{ store.isRefreshing ? "刷新中…" : "刷新数据" }}
         </button>
       </div>
     </header>
@@ -24,48 +27,76 @@
     <template v-else>
       <MetricStrip :items="metricItems" />
 
-      <div class="analysis-grid section-divider">
-        <section class="analysis-panel analysis-panel--trend" aria-labelledby="trend-title">
-          <header>
-            <div>
-              <h2 id="trend-title">决策趋势</h2>
-              <p>查看最近审计事件中已放行、待审批与已阻断的变化</p>
-            </div>
-            <RouterLink class="page-action" to="/investigations">进入调查</RouterLink>
-          </header>
+      <div class="overview-primary section-divider">
+        <ChartFrame
+          class="overview-trend"
+          description="Guard 决策随当前审计窗口变化"
+          range-label="当前审计窗口"
+          :summary="trendSummary"
+          title="决策趋势"
+        >
+          <template #controls>
+            <RouterLink class="chart-link" to="/investigations">进入调查</RouterLink>
+          </template>
           <DecisionTrendChart :points="store.decisionTrend" />
-        </section>
-        <section class="analysis-panel" aria-labelledby="distribution-title">
-          <header>
+        </ChartFrame>
+
+        <section class="triage-queue" aria-labelledby="triage-title">
+          <header class="section-header">
             <div>
-              <h2 id="distribution-title">攻击类型</h2>
-              <p>按审计事件数量排序</p>
+              <h2 id="triage-title">待分诊</h2>
+              <p>优先处理待审批与高风险事件</p>
             </div>
+            <RouterLink class="chart-link" to="/investigations?severity=high">查看全部</RouterLink>
           </header>
-          <AttackDistributionChart :items="store.attackDistribution" />
+          <div v-if="triageItems.length" class="triage-queue__rows">
+            <RouterLink v-for="item in triageItems" :key="item.id" :to="item.to">
+              <span class="triage-queue__signal" :class="`triage-queue__signal--${item.tone}`">
+                {{ item.kind }}
+              </span>
+              <strong>{{ item.tool }}</strong>
+              <span class="triage-queue__resource" :title="item.resource">{{ item.resource }}</span>
+              <span class="triage-queue__risk">
+                <i :style="{ width: `${item.riskScore}%` }"></i>
+              </span>
+              <b>{{ item.riskScore }}</b>
+            </RouterLink>
+          </div>
+          <EmptyState
+            v-else
+            title="当前无需分诊"
+            message="当前审计窗口内没有待审批或高风险事件。"
+          />
         </section>
       </div>
 
-      <div class="analysis-grid section-divider">
-        <section class="analysis-panel" aria-labelledby="rule-title">
-          <header>
-            <div>
-              <h2 id="rule-title">规则命中 Top 6</h2>
-              <p>最常触发的风险判断</p>
-            </div>
-            <RouterLink class="page-action" to="/investigations">进入调查</RouterLink>
-          </header>
+      <div class="overview-secondary section-divider">
+        <ChartFrame
+          description="识别当前窗口中的主要攻击面"
+          :summary="`攻击类型分布，共 ${store.attackDistribution.length} 类`"
+          title="攻击类型"
+        >
+          <AttackDistributionChart :items="store.attackDistribution" />
+        </ChartFrame>
+        <ChartFrame
+          description="定位最常触发的风险判断"
+          :summary="`规则命中排行，共 ${store.ruleDistribution.length} 项`"
+          title="规则命中 Top 6"
+        >
+          <template #controls>
+            <RouterLink class="chart-link" to="/investigations">查看事件</RouterLink>
+          </template>
           <RuleTopNChart :items="store.ruleDistribution" />
-        </section>
-        <section class="analysis-panel" aria-labelledby="asr-summary-title">
-          <header>
+        </ChartFrame>
+        <section class="defense-ledger" aria-labelledby="defense-ledger-title">
+          <header class="section-header">
             <div>
-              <h2 id="asr-summary-title">防御效果摘要</h2>
-              <p>查看阻断、误报和延迟表现</p>
+              <h2 id="defense-ledger-title">防御效果</h2>
+              <p>当前审计窗口与最近评测指标</p>
             </div>
-            <RouterLink class="page-action" to="/evaluation">查看评测</RouterLink>
+            <RouterLink class="chart-link" to="/evaluation">查看评测</RouterLink>
           </header>
-          <dl class="asr-summary">
+          <dl>
             <div>
               <dt>阻断率</dt>
               <dd>{{ formatPercent(store.metrics.blockRate) }}</dd>
@@ -80,87 +111,104 @@
             </div>
             <div>
               <dt>平均延迟</dt>
-              <dd>
-                {{
-                  store.metrics.averageLatencyMs === null
-                    ? "--"
-                    : `${store.metrics.averageLatencyMs.toFixed(1)} ms`
-                }}
-              </dd>
+              <dd>{{ formatLatency(store.metrics.averageLatencyMs) }}</dd>
             </div>
           </dl>
         </section>
       </div>
 
       <section class="integrity-bar section-divider" aria-labelledby="integrity-bar-title">
-        <header>
-          <h2 id="integrity-bar-title">审计链完整性</h2>
-          <RouterLink class="page-action" to="/system#audit-integrity">查看详情</RouterLink>
-        </header>
-        <template v-if="store.auditIntegrity">
-          <div class="integrity-bar__status">
-            <StatusBadge
-              :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'"
-              :tone="store.auditIntegrity.valid ? 'success' : 'danger'"
-            />
-            <span>{{ store.auditIntegrity.eventCount }} 条审计事件</span>
-          </div>
-        </template>
-        <p v-else class="integrity-bar__empty">暂无完整性数据</p>
-      </section>
-
-      <section class="risk-feed section-divider" aria-labelledby="risk-feed-title">
-        <header>
+        <header class="section-header">
           <div>
-            <h2 id="risk-feed-title">高风险事件</h2>
-            <p>严重与高风险事件按最新时间排列</p>
+            <h2 id="integrity-bar-title">审计链完整性</h2>
+            <p>确认当前证据链是否连续且可验证</p>
           </div>
-          <RouterLink class="page-action" to="/investigations?severity=high">查看全部</RouterLink>
+          <RouterLink class="chart-link" to="/system#audit-integrity">查看详情</RouterLink>
         </header>
-        <div v-if="highRiskEvents.length" class="risk-feed__rows">
-          <RouterLink
-            v-for="event in highRiskEvents"
-            :key="event.id"
-            :to="`/evidence/${event.traceId}`"
-          >
-            <time>{{ event.time }}</time
-            ><StatusBadge
-              :label="getDecisionLabel(event.decision)"
-              :tone="getDecisionTone(event.decision)"
-            /><code>{{ event.tool }}</code
-            ><span>{{ event.resource }}</span
-            ><span class="risk-rail"><i :style="{ width: `${event.riskScore}%` }"></i></span
-            ><strong>{{ event.riskScore }}</strong>
-          </RouterLink>
+        <div v-if="store.auditIntegrity" class="integrity-bar__status">
+          <StatusBadge
+            :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'"
+            :tone="store.auditIntegrity.valid ? 'success' : 'danger'"
+          />
+          <span>{{ store.auditIntegrity.eventCount }} 条审计事件</span>
+          <code>{{ formatAuditHeadHash(store.auditIntegrity.headHash) }}</code>
         </div>
-        <EmptyState v-else title="暂无高风险事件" message="当前数据窗口内没有严重或高风险事件。" />
+        <InlineNotice
+          v-else-if="store.auditIntegrityError"
+          title="完整性状态暂不可用"
+          tone="warning"
+        >
+          <p>{{ store.auditIntegrityError }}</p>
+        </InlineNotice>
+        <p v-else class="integrity-bar__empty">正在读取审计完整性状态…</p>
       </section>
     </template>
   </section>
 </template>
 
 <script setup lang="ts">
+import { RefreshCw } from "@lucide/vue";
 import { computed } from "vue";
+
 import AttackDistributionChart from "../components/charts/AttackDistributionChart.vue";
-import RuleTopNChart from "../components/charts/RuleTopNChart.vue";
 import DecisionTrendChart from "../components/charts/DecisionTrendChart.vue";
+import RuleTopNChart from "../components/charts/RuleTopNChart.vue";
+import ChartFrame from "../components/common/ChartFrame.vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
 import EmptyState from "../components/common/EmptyState.vue";
+import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
-import { getDecisionLabel, getDecisionTone } from "../utils/dashboard-formatters";
+import { formatAuditHeadHash } from "../utils/dashboard-formatters";
 
 defineOptions({ name: "OverviewPage" });
+
 const store = useDashboardStore();
 const countFormatter = new Intl.NumberFormat("zh-CN");
-const highRiskEvents = computed(() =>
-  store.investigationIndex.latestEvents
-    .filter((event) => event.severity === "critical" || event.severity === "high")
-    .slice(0, 6),
-);
+
+const triageItems = computed(() => {
+  const approvalItems = [...store.approvals]
+    .sort((left, right) => right.riskScore - left.riskScore)
+    .slice(0, 2)
+    .map((approval) => ({
+      id: `approval-${approval.id}`,
+      kind: "待审批",
+      resource: approval.resource,
+      riskScore: approval.riskScore,
+      tone: "warning" as const,
+      tool: approval.tool,
+      to: `/approvals/${approval.id}`,
+    }));
+  const approvalEventIds = new Set(store.approvals.map((approval) => approval.eventId));
+  const eventItems = store.investigationIndex.latestEvents
+    .filter(
+      (event) =>
+        !approvalEventIds.has(event.id) &&
+        (event.severity === "critical" || event.severity === "high"),
+    )
+    .slice(0, Math.max(0, 5 - approvalItems.length))
+    .map((event) => ({
+      id: `event-${event.id}`,
+      kind: "高风险",
+      resource: event.resource,
+      riskScore: event.riskScore,
+      tone: "danger" as const,
+      tool: event.tool,
+      to: `/evidence/${event.traceId}?event_id=${event.id}`,
+    }));
+  return [...approvalItems, ...eventItems];
+});
+
+const trendSummary = computed(() => {
+  const latest = store.decisionTrend.at(-1);
+  return latest
+    ? `最新时间段已放行 ${latest.allow}，待审批 ${latest.ask}，已阻断 ${latest.deny}`
+    : "当前没有可绘制的决策趋势";
+});
+
 const metricItems = computed(() => [
   {
     detail: "当前数据窗口",
@@ -198,15 +246,18 @@ const metricItems = computed(() => [
     detail: "安全判定",
     label: "平均延迟",
     route: "/evaluation",
-    value:
-      store.metrics.averageLatencyMs === null
-        ? "--"
-        : `${store.metrics.averageLatencyMs.toFixed(1)} ms`,
+    value: formatLatency(store.metrics.averageLatencyMs),
   },
 ]);
+
 function formatPercent(value: number | null) {
   return value === null ? "--" : `${(value * 100).toFixed(1)}%`;
 }
+
+function formatLatency(value: number | null) {
+  return value === null ? "--" : `${value.toFixed(1)} ms`;
+}
+
 function handleRefresh() {
   void store.refresh();
 }
@@ -217,164 +268,198 @@ function handleRefresh() {
   display: grid;
   gap: var(--space-6);
 }
+
 .overview-header {
   margin-bottom: 0;
 }
+
 .overview-header__actions {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
 }
-.overview-header__actions button {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
-  cursor: pointer;
-  min-height: 2.25rem;
-  padding: 0 var(--space-3);
+
+.overview-header__actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
-.analysis-grid {
-  display: grid;
-  gap: clamp(var(--space-6), 4vw, 3rem);
-  grid-template-columns: minmax(0, 1.55fr) minmax(min(100%, 18rem), 0.75fr);
+
+.is-spinning {
+  animation: overview-spin 0.8s linear infinite;
 }
-.analysis-panel {
+
+@keyframes overview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.overview-primary {
   display: grid;
-  gap: var(--space-5);
+  gap: clamp(var(--space-6), 3vw, var(--space-8));
+  grid-template-columns: minmax(0, 1.6fr) minmax(19rem, 0.8fr);
+}
+
+.overview-trend {
   min-width: 0;
 }
-.analysis-panel > header,
-.risk-feed > header {
-  align-items: start;
-  display: flex;
-  gap: var(--space-4);
-  justify-content: space-between;
-}
-.analysis-panel h2,
-.analysis-panel p,
-.risk-feed h2,
-.risk-feed p {
-  margin: 0;
-}
-.analysis-panel p,
-.risk-feed p {
-  color: var(--color-text-subtle);
+
+.chart-link {
+  color: var(--color-link);
   font-size: var(--font-size-12);
-  margin-top: var(--space-1);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
-.analysis-panel > header .page-action,
-.risk-feed > header .page-action {
-  font-size: var(--font-size-13);
-}
-.risk-feed {
+
+.triage-queue {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
 }
-.risk-feed__rows {
+
+.triage-queue__rows {
+  border-top: 1px solid var(--color-border);
   display: grid;
 }
-.risk-feed__rows > a {
+
+.triage-queue__rows > a {
   align-items: center;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text);
   display: grid;
-  font-size: var(--font-size-13);
-  gap: var(--space-3);
-  grid-template-columns: 5rem 5rem 8rem minmax(10rem, 1fr) minmax(4rem, 8rem) 2.5rem;
-  min-height: 3.5rem;
-  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  gap: var(--space-2);
+  grid-template-columns: auto minmax(5rem, 0.7fr) minmax(6rem, 1fr) minmax(3rem, 0.55fr) 2rem;
+  min-height: 3.25rem;
+  padding: var(--space-2);
   text-decoration: none;
+
+  &:hover {
+    background: var(--color-row-hover);
+    padding-left: var(--space-3);
+  }
 }
-.risk-feed__rows > a:hover {
-  background: var(--color-row-hover);
+
+.triage-queue__signal {
+  border-left: 2px solid currentColor;
+  font-size: var(--font-size-11);
+  font-weight: var(--font-weight-semibold);
+  padding-left: var(--space-2);
+  white-space: nowrap;
+
+  &--warning {
+    color: var(--color-warning);
+  }
+
+  &--danger {
+    color: var(--color-danger);
+  }
 }
-.risk-feed time {
-  color: var(--color-text-subtle);
-}
-.risk-feed__rows span:not(.risk-rail) {
+
+.triage-queue__rows strong,
+.triage-queue__resource {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.risk-rail {
-  background: var(--color-surface-muted);
+
+.triage-queue__risk {
+  background: var(--color-surface-inset);
+  border-radius: var(--radius-pill);
   height: 0.3rem;
   overflow: hidden;
+
+  i {
+    background: var(--gradient-data-danger);
+    display: block;
+    height: 100%;
+  }
 }
-.risk-rail i {
-  background: var(--color-danger);
-  display: block;
-  height: 100%;
-}
-.risk-feed__rows strong {
+
+.triage-queue__rows b {
   color: var(--color-danger);
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.integrity-bar header {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: var(--space-3);
+
+.overview-secondary {
+  display: grid;
+  gap: clamp(var(--space-6), 3vw, var(--space-8));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.integrity-bar h2 {
-  font-size: var(--font-size-16);
+
+.defense-ledger {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.defense-ledger dl {
+  border-top: 1px solid var(--color-border);
+  display: grid;
   margin: 0;
 }
-.integrity-bar__status {
-  align-items: center;
+
+.defense-ledger dl > div {
+  align-items: baseline;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   gap: var(--space-3);
+  justify-content: space-between;
+  min-height: 3.1rem;
+  padding: var(--space-2);
 }
-.integrity-bar__status span {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-13);
-}
-.integrity-bar__empty {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-13);
-  margin: 0;
-}
-.asr-summary {
-  display: grid;
-  gap: 1px;
-  grid-template-columns: 1fr 1fr;
-  margin: 0;
-  overflow: hidden;
-}
-.asr-summary > div {
-  background: var(--color-surface-muted);
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3);
-}
-.asr-summary dt {
-  color: var(--color-text-subtle);
+
+.defense-ledger dt {
+  color: var(--color-text-muted);
   font-size: var(--font-size-12);
 }
-.asr-summary dd {
-  font-size: var(--font-size-18);
+
+.defense-ledger dd {
+  font-size: var(--font-size-20);
+  font-variant-numeric: tabular-nums;
   font-weight: var(--font-weight-bold);
   margin: 0;
 }
-@media (max-width: 640px) {
-  .risk-feed__rows > a {
-    align-items: start;
-    grid-template-columns: auto 1fr auto;
-    padding: var(--space-3) 0;
-  }
-  .risk-feed__rows code,
-  .risk-feed__rows span:not(.risk-rail) {
-    grid-column: 1 / -1;
-  }
-  .risk-rail {
-    grid-column: 1 / 3;
-    width: 100%;
-  }
+
+.integrity-bar {
+  display: grid;
+  gap: var(--space-4);
 }
-@media (max-width: 980px) {
-  .analysis-grid {
-    grid-template-columns: 1fr;
+
+.integrity-bar__status {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.integrity-bar__status > span,
+.integrity-bar__empty {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-13);
+}
+
+.integrity-bar__status code {
+  color: var(--color-text-muted);
+}
+
+.integrity-bar__empty {
+  margin: 0;
+}
+
+@media (max-width: 82rem) {
+  .overview-primary {
+    grid-template-columns: minmax(0, 1.45fr) minmax(17rem, 0.75fr);
+  }
+
+  .overview-secondary {
+    gap: var(--space-6);
   }
 }
 </style>

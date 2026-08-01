@@ -1,9 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
-
-async function openResponsiveNavigation(page: Page) {
-  const menuButton = page.getByRole("button", { name: "菜单" });
-  if (await menuButton.isVisible()) await menuButton.click();
-}
+import { expect, test } from "@playwright/test";
 
 test("clicking a non-time event cell opens its evidence", async ({ page }) => {
   await page.goto("/investigations");
@@ -55,8 +50,7 @@ test("a missing event keeps the query and shows explicit feedback", async ({ pag
 
 test("approval route synchronization does not cancel navigation", async ({ page }) => {
   await page.goto("/approvals");
-  await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "系统" }).click();
+  await page.getByRole("link", { name: "系统状态" }).click();
 
   await expect(page).toHaveURL(/\/system$/);
   await page.waitForTimeout(400);
@@ -67,8 +61,7 @@ test("investigation search synchronization does not reopen a deactivated page", 
   page,
 }) => {
   await page.goto("/investigations?search=send");
-  await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "总览" }).click();
+  await page.getByRole("link", { name: "安全总览" }).click();
 
   await expect(page).toHaveURL(/\/overview$/);
   await page.waitForTimeout(400);
@@ -169,10 +162,8 @@ test("investigation select closes when its KeepAlive page is deactivated", async
   const decisionSelect = page.getByRole("combobox", { name: /^决策/ });
   await decisionSelect.click();
 
-  await openResponsiveNavigation(page);
-  await page.getByRole("link", { name: "总览" }).click();
+  await page.getByRole("link", { name: "安全总览" }).click();
   await expect(page).toHaveURL(/\/overview$/);
-  await openResponsiveNavigation(page);
   await page.getByRole("link", { name: "事件调查", exact: true }).click();
   await expect(page).toHaveURL(/\/investigations$/);
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "false");

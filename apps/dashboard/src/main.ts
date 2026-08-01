@@ -1,5 +1,6 @@
-// @ts-expect-error — 字体包仅提供构建期副作用入口，不提供类型声明
-import "@fontsource-variable/inter";
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
+import "@fontsource/ibm-plex-mono/latin-600.css";
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 

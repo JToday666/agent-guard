@@ -5,10 +5,10 @@
         <p>审批请求</p>
         <h2>{{ approval.tool }}</h2>
       </div>
-      <div class="risk-score-card">
+      <div class="risk-score">
         <strong>{{ approval.riskScore }}</strong
         ><small>/ 100</small>
-        <span class="risk-score-card__label">{{ getRiskSeverityLabel(approval.severity) }}</span>
+        <span class="risk-score__label">{{ getRiskSeverityLabel(approval.severity) }}</span>
       </div>
     </header>
 
@@ -181,6 +181,8 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
 
 <style scoped lang="scss">
 .approval-detail {
+  container-name: approval-detail;
+  container-type: inline-size;
   display: grid;
   gap: var(--space-4);
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -204,14 +206,13 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
   letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 .approval-detail__header h2 {
   font-size: var(--font-size-24);
   margin-top: var(--space-1);
   overflow-wrap: anywhere;
 }
-.risk-score-card {
+.risk-score {
   align-items: flex-end;
   background: var(--color-danger-soft);
   border-left: 3px solid var(--color-danger);
@@ -223,21 +224,20 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   padding: var(--space-3) var(--space-4);
   text-align: right;
 }
-.risk-score-card strong {
+.risk-score strong {
   color: var(--color-danger);
   font-size: clamp(1.5rem, 4vw, 2rem);
   line-height: 1;
 }
-.risk-score-card small {
+.risk-score small {
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
 }
-.risk-score-card__label {
+.risk-score__label {
   color: var(--color-danger);
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 .approval-detail__body {
   align-content: start;
@@ -324,7 +324,7 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
 }
 .approval-actions {
   align-items: center;
-  background: var(--color-page);
+  background: color-mix(in srgb, var(--color-page) 88%, transparent);
   border-top: 1px solid var(--color-border);
   display: flex;
   flex-wrap: wrap;
@@ -363,6 +363,10 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   color: var(--color-active-text);
   font-weight: var(--font-weight-bold);
 }
+.button-warning:hover:not(:disabled),
+.button-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
 .confirm-impact {
   display: grid;
   gap: var(--space-3);
@@ -383,7 +387,7 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
 .confirm-impact code {
   color: var(--color-text);
 }
-@media (max-width: 1180px) {
+@container approval-detail (max-width: 44rem) {
   .evidence-grid {
     grid-template-columns: 1fr;
   }

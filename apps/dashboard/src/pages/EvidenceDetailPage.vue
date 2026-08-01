@@ -1,20 +1,23 @@
 <template>
   <div class="evidence-detail" :class="{ 'evidence-detail--evidence': Boolean(selectedEvent) }">
-    <main class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
+    <section class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
       <header class="page-header">
         <div>
           <h1 id="trace-title">证据链</h1>
         </div>
-        <RouterLink class="page-action" to="/investigations">返回事件调查</RouterLink>
+        <div class="trace-header-actions">
+          <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+          <RouterLink class="page-action" to="/investigations">返回事件调查</RouterLink>
+        </div>
       </header>
-      <section
+      <InlineNotice
         v-if="traceDetailError && traceEvents.length"
         class="trace-detail-alert"
-        role="status"
+        title="证据刷新未完成"
+        tone="warning"
       >
-        <strong>证据链加载失败</strong>
-        <p>{{ traceDetailError }}，当前显示已加载事件窗口中的证据。</p>
-      </section>
+        <p>{{ traceDetailError }}</p>
+      </InlineNotice>
       <ErrorState
         v-if="traceDetailError && !traceEvents.length"
         :is-retrying="isTraceLoading"
@@ -69,24 +72,6 @@
           </dl>
         </section>
         <div class="trace-body section-divider">
-          <section class="trace-provenance" aria-labelledby="provenance-title">
-            <header>
-              <div>
-                <h2 id="provenance-title">溯源图</h2>
-                <p>点击节点可定位对应事件证据</p>
-              </div>
-            </header>
-            <ProvenanceGraph
-              v-if="provenance"
-              :graph="provenance"
-              :selected-node-id="selectedProvenanceNodeId"
-              @select-node="handleSelectProvenanceNode"
-            />
-            <p v-else-if="provenanceError" class="provenance-error">
-              溯源图加载失败：{{ provenanceError }}
-            </p>
-            <p v-else class="provenance-placeholder">溯源图加载中…</p>
-          </section>
           <div class="trace-layout">
             <section class="trace-events" aria-labelledby="trace-events-title">
               <header>
@@ -163,12 +148,31 @@
               >
             </aside>
           </div>
+
+          <section class="trace-provenance section-divider" aria-labelledby="provenance-title">
+            <header>
+              <div>
+                <h2 id="provenance-title">溯源关系</h2>
+                <p>以关系图补充时间线，点击节点可定位对应事件证据</p>
+              </div>
+            </header>
+            <InlineNotice v-if="provenanceError" title="溯源关系刷新未完成" tone="warning">
+              <p>{{ provenanceError }}</p>
+            </InlineNotice>
+            <ProvenanceGraph
+              v-if="provenance"
+              :graph="provenance"
+              :selected-node-id="selectedProvenanceNodeId"
+              @select-node="handleSelectProvenanceNode"
+            />
+            <p v-else-if="!provenanceError" class="provenance-placeholder">溯源关系加载中…</p>
+          </section>
         </div>
       </template>
       <EmptyState v-else title="未找到证据链" message="该证据链不存在，或已经离开当前数据窗口。"
         ><RouterLink to="/investigations">返回事件调查</RouterLink></EmptyState
       >
-    </main>
+    </section>
     <DetailDrawer
       :is-open="Boolean(selectedEventId)"
       eyebrow="节点证据"
@@ -188,9 +192,11 @@
 <script setup lang="ts">
 import { computed, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import DataFreshness from "../components/common/DataFreshness.vue";
 import DetailDrawer from "../components/common/DetailDrawer.vue";
 import EmptyState from "../components/common/EmptyState.vue";
 import EventEvidence from "../components/evidence/EventEvidence.vue";
+import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
 import ProvenanceGraph from "../components/evidence/ProvenanceGraph.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
@@ -323,7 +329,7 @@ function handleTraceRetry() {
   grid-template-columns: minmax(0, 1fr);
 }
 .evidence-detail--evidence {
-  grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem);
+  grid-template-columns: minmax(0, 1fr) clamp(20rem, 26vw, 24rem);
   height: calc(100vh - var(--top-bar-height));
   overflow: hidden;
 }
@@ -386,6 +392,13 @@ function handleTraceRetry() {
   display: grid;
   gap: var(--space-7);
 }
+.trace-header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
 .trace-provenance {
   display: grid;
   gap: var(--space-4);
@@ -406,12 +419,6 @@ function handleTraceRetry() {
   font-size: var(--font-size-12);
   margin-top: var(--space-1);
 }
-.provenance-error {
-  color: var(--color-danger);
-  font-size: var(--font-size-13);
-  margin: 0;
-  padding: var(--space-3) 0;
-}
 .provenance-placeholder {
   color: var(--color-text-subtle);
   font-size: var(--font-size-13);
@@ -420,11 +427,9 @@ function handleTraceRetry() {
   text-align: center;
 }
 .trace-layout {
-  border-top: 1px solid var(--color-border);
   display: grid;
   gap: clamp(var(--space-5), 3vw, var(--space-7));
-  grid-template-columns: minmax(0, 1fr) 18rem;
-  padding-top: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) 16rem;
 }
 .trace-events {
   display: grid;
@@ -453,7 +458,7 @@ function handleTraceRetry() {
   overflow-y: auto;
   padding-left: var(--space-5);
   position: sticky;
-  top: calc(var(--top-bar-height) + var(--space-5));
+  top: var(--space-4);
 }
 .trace-context h2 {
   font-size: var(--font-size-16);
@@ -518,20 +523,5 @@ function handleTraceRetry() {
 .trace-detail-alert p {
   color: var(--color-text-muted);
   margin: 0;
-}
-@media (max-width: 1100px) {
-  .evidence-detail,
-  .evidence-detail--evidence {
-    grid-template-columns: 1fr;
-  }
-  .trace-layout {
-    grid-template-columns: 1fr;
-  }
-  .trace-context {
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-    padding: var(--space-5) 0 0;
-    position: static;
-  }
 }
 </style>

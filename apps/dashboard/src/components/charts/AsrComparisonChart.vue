@@ -69,15 +69,17 @@ const summary = computed(
   bottom: 0;
   left: 0;
   position: absolute;
-  transition: width var(--transition-base);
+  transition: width var(--transition-emphasis);
 }
 .asr-chart__before {
-  background: var(--color-danger-soft);
+  background: var(--gradient-data-danger);
   border-right: 2px solid var(--color-danger);
   height: 100%;
+  opacity: 0.5;
 }
 .asr-chart__after {
-  background: var(--color-success);
+  background: var(--gradient-data-active);
+  box-shadow: var(--glow-active);
   height: 0.6rem;
 }
 .asr-chart__labels {

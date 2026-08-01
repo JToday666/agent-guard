@@ -248,6 +248,15 @@ test("API polling requests only common data and the active page domain", async (
   expect(overviewPaths).not.toContain("/api/v1/adapters/openclaw/status");
 
   requestedPaths.length = 0;
+  await page.goto("/evaluation");
+  await expect(page.getByRole("heading", { name: "安全评测" })).toBeVisible();
+  await expect.poll(() => requestedPaths.includes("/api/v1/evaluations/latest")).toBe(true);
+
+  expect(requestedPaths).toContain("/api/v1/audit/events");
+  expect(requestedPaths).toContain("/api/v1/metrics/eval");
+  expect(requestedPaths).not.toContain("/api/v1/policies/current");
+
+  requestedPaths.length = 0;
   await page.goto("/system");
   await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
   await expect.poll(() => requestedPaths.includes("/api/v1/policies/current")).toBe(true);

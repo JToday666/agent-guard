@@ -2,15 +2,19 @@
   <section class="system-page workspace-panel" aria-labelledby="system-title">
     <header class="page-header">
       <div><h1 id="system-title">系统状态</h1></div>
-      <button
-        class="page-action"
-        type="button"
-        :aria-busy="store.isRefreshing"
-        :disabled="store.isRefreshing"
-        @click="handleRefresh"
-      >
-        {{ store.isRefreshing ? "检查中" : "立即检查" }}
-      </button>
+      <div class="system-header__actions">
+        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+        <button
+          class="page-action"
+          type="button"
+          :aria-busy="store.isRefreshing"
+          :disabled="store.isRefreshing"
+          @click="handleRefresh"
+        >
+          <RefreshCw aria-hidden="true" :class="{ 'is-spinning': store.isRefreshing }" :size="15" />
+          {{ store.isRefreshing ? "检查中…" : "立即检查" }}
+        </button>
+      </div>
     </header>
 
     <section class="status-ledger" aria-labelledby="status-ledger-title">
@@ -19,7 +23,7 @@
           <h2 id="status-ledger-title">服务与会话</h2>
           <p>当前监督端依赖及数据同步状态</p>
         </div>
-        <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
+        <span>{{ statusItems.length }} 项状态</span>
       </header>
       <div class="status-ledger__rows">
         <article v-for="item in statusItems" :key="item.label">
@@ -33,11 +37,14 @@
       </div>
     </section>
 
-    <section v-if="store.status === 'error' && store.error" class="system-alert" role="alert">
-      <strong>最近一次检查失败</strong>
+    <InlineNotice
+      v-if="store.status === 'error' && store.error"
+      title="最近一次检查失败"
+      tone="danger"
+    >
       <p>{{ store.error }}</p>
-      <button type="button" @click="handleRefresh">重新检查</button>
-    </section>
+      <template #action><button type="button" @click="handleRefresh">重新检查</button></template>
+    </InlineNotice>
 
     <section class="policy-ledger" aria-labelledby="policy-ledger-title">
       <header>
@@ -46,11 +53,10 @@
           <p>查看当前生效的风险判断配置</p>
         </div>
       </header>
-      <section v-if="store.policyError" class="system-alert" role="alert">
-        <strong>策略数据加载失败</strong>
+      <InlineNotice v-if="store.policyError" title="策略数据加载失败" tone="warning">
         <p>{{ store.policyError }}</p>
-        <button type="button" @click="handleRefresh">重新检查</button>
-      </section>
+        <template #action><button type="button" @click="handleRefresh">重新检查</button></template>
+      </InlineNotice>
       <template v-else-if="store.policySummary">
         <dl class="policy-summary">
           <div>
@@ -124,7 +130,11 @@
           </div>
         </dl>
       </template>
-      <EmptyState v-else title="暂无完整性数据" message="审计完整性信息加载中或不可用。" />
+      <InlineNotice v-else-if="store.auditIntegrityError" title="完整性状态暂不可用" tone="warning">
+        <p>{{ store.auditIntegrityError }}</p>
+        <template #action><button type="button" @click="handleRefresh">重新检查</button></template>
+      </InlineNotice>
+      <EmptyState v-else title="暂无完整性数据" message="审计完整性信息正在读取。" />
     </section>
 
     <section class="system-ledger" aria-labelledby="openclaw-verify-title">
@@ -135,11 +145,10 @@
         </div>
         <StatusBadge :label="adapterStatusLabel" :tone="adapterStatusTone" />
       </header>
-      <section v-if="store.openclawStatusError" class="system-alert" role="alert">
-        <strong>OpenClaw 状态加载失败</strong>
+      <InlineNotice v-if="store.openclawStatusError" title="OpenClaw 状态加载失败" tone="warning">
         <p>{{ store.openclawStatusError }}</p>
-        <button type="button" @click="handleRefresh">重新检查</button>
-      </section>
+        <template #action><button type="button" @click="handleRefresh">重新检查</button></template>
+      </InlineNotice>
       <div class="adapter-verify">
         <div class="adapter-verify__headline">
           <span
@@ -152,6 +161,10 @@
             <span>{{ store.openclawStatus.runtimeVersion ?? "运行时版本未记录" }}</span>
           </div>
           <b>{{ hookCoverageText }}</b>
+        </div>
+        <div class="hook-coverage">
+          <span><i :style="{ width: hookCoveragePercent }"></i></span>
+          <small>已上报 Hook 覆盖 {{ hookCoverageText }}</small>
         </div>
         <dl class="adapter-verify__facts">
           <div>
@@ -179,71 +192,12 @@
             <dd>{{ store.openclawStatus.failClosedStages.length }} 阶段</dd>
           </div>
         </dl>
-        <p v-if="store.openclawStatus.error" class="adapter-verify__error">
-          {{ store.openclawStatus.error }}
-        </p>
+        <InlineNotice v-if="store.openclawStatus.error" title="适配器报告异常" tone="danger">
+          <p>{{ store.openclawStatus.error }}</p>
+        </InlineNotice>
         <div v-if="store.openclawStatus.hooks.length" class="hook-list" aria-label="OpenClaw hooks">
           <span v-for="hook in store.openclawStatus.hooks" :key="hook">{{ hook }}</span>
         </div>
-      </div>
-    </section>
-
-    <section class="system-ledger" aria-labelledby="adapters-title">
-      <header>
-        <div>
-          <h2 id="adapters-title">运行时审计活动</h2>
-          <p>按已加载审计事件统计运行时写入情况</p>
-        </div>
-      </header>
-      <div class="adapter-grid">
-        <article class="adapter-card">
-          <h3>LangGraph</h3>
-          <dl>
-            <div>
-              <dt>审计事件</dt>
-              <dd>{{ langgraphStats.count }}</dd>
-            </div>
-            <div>
-              <dt>阻断数</dt>
-              <dd>{{ langgraphStats.blocked }}</dd>
-            </div>
-            <div>
-              <dt>最近活动</dt>
-              <dd>{{ langgraphStats.lastSeen ?? "暂无记录" }}</dd>
-            </div>
-          </dl>
-          <RouterLink
-            v-if="langgraphStats.count > 0"
-            class="page-action adapter-card__link"
-            to="/investigations?runtime=langgraph"
-          >
-            查看事件
-          </RouterLink>
-        </article>
-        <article class="adapter-card">
-          <h3>OpenClaw</h3>
-          <dl>
-            <div>
-              <dt>审计事件</dt>
-              <dd>{{ openclawStats.count }}</dd>
-            </div>
-            <div>
-              <dt>阻断数</dt>
-              <dd>{{ openclawStats.blocked }}</dd>
-            </div>
-            <div>
-              <dt>最近活动</dt>
-              <dd>{{ openclawStats.lastSeen ?? "暂无记录" }}</dd>
-            </div>
-          </dl>
-          <RouterLink
-            v-if="openclawStats.count > 0"
-            class="page-action adapter-card__link"
-            to="/investigations?runtime=openclaw"
-          >
-            查看事件
-          </RouterLink>
-        </article>
       </div>
     </section>
 
@@ -259,11 +213,10 @@
           >
         </div>
       </header>
-      <section v-if="store.configAuditError" class="system-alert" role="alert">
-        <strong>发现项加载失败</strong>
+      <InlineNotice v-if="store.configAuditError" title="发现项加载失败" tone="warning">
         <p>{{ store.configAuditError }}</p>
-        <button type="button" @click="handleRefresh">重新检查</button>
-      </section>
+        <template #action><button type="button" @click="handleRefresh">重新检查</button></template>
+      </InlineNotice>
       <div v-if="store.configAuditFindings.length" class="finding-list">
         <article v-for="row in store.configAuditFindings" :key="row.finding.findingId">
           <header>
@@ -319,9 +272,11 @@
 </template>
 
 <script setup lang="ts">
+import { RefreshCw } from "@lucide/vue";
 import { computed } from "vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
 import EmptyState from "../components/common/EmptyState.vue";
+import InlineNotice from "../components/common/InlineNotice.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
@@ -419,6 +374,12 @@ const hookCoverageText = computed(() =>
     ? `-- / ${store.openclawStatus.expectedHookCount}`
     : `${store.openclawStatus.hookCount} / ${store.openclawStatus.expectedHookCount}`,
 );
+const hookCoveragePercent = computed(() => {
+  const count = store.openclawStatus.hookCount;
+  const expected = store.openclawStatus.expectedHookCount;
+  if (count === null || expected <= 0) return "0%";
+  return `${Math.min(100, Math.max(0, (count / expected) * 100))}%`;
+});
 const findingSummary = computed(() => {
   const labels = [
     ["严重", "critical"],
@@ -431,22 +392,6 @@ const findingSummary = computed(() => {
     value: store.configAuditFindings.filter((row) => row.finding.severity === severity).length,
   }));
 });
-
-function runtimeStats(runtime: string) {
-  const events = store.events.filter((event) => event.runtime === runtime);
-  const last = events.reduce<string | null>(
-    (value, event) => (!value || event.occurredAt > value ? event.occurredAt : value),
-    null,
-  );
-  return {
-    count: events.length,
-    blocked: events.filter((event) => event.blocked).length,
-    lastSeen: last ? systemDateTimeFormatter.format(new Date(last)) : null,
-  };
-}
-
-const langgraphStats = computed(() => runtimeStats("langgraph"));
-const openclawStats = computed(() => runtimeStats("openclaw"));
 
 function stateLabel(value: "online" | "offline" | "unknown") {
   return value === "online" ? "正常" : value === "offline" ? "异常" : "未知";
@@ -472,6 +417,24 @@ function handleRefresh() {
   display: grid;
   gap: var(--space-6);
 }
+.system-header__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.system-header__actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.is-spinning {
+  animation: system-spin 0.8s linear infinite;
+}
+@keyframes system-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .status-ledger {
   border-block: 1px solid var(--color-border);
   display: grid;
@@ -488,6 +451,10 @@ function handleRefresh() {
   margin: 0;
 }
 .status-ledger p {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-12);
+}
+.status-ledger > header > span {
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
 }
@@ -533,31 +500,9 @@ function handleRefresh() {
   background: var(--color-danger);
   box-shadow: 0 0 0 4px var(--color-danger-soft);
 }
-.system-alert {
-  align-items: center;
-  background: var(--color-danger-soft);
-  border-left: 3px solid var(--color-danger);
-  display: grid;
-  gap: var(--space-2);
-  grid-template-columns: 1fr auto;
-  padding: var(--space-4);
-}
-.system-alert p {
-  color: var(--color-text-muted);
-  margin: 0;
-}
-.system-alert button {
-  background: var(--color-surface);
-  border: 1px solid var(--color-danger-border);
-  border-radius: var(--radius-2);
-  grid-column: 2;
-  grid-row: 1 / 3;
-  min-height: 2.25rem;
-  padding: 0 var(--space-3);
-}
 .policy-ledger,
 .system-ledger {
-  border-block: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-4);
   padding: var(--space-5) 0;
@@ -629,7 +574,7 @@ function handleRefresh() {
 }
 .adapter-verify__headline {
   align-items: center;
-  background: linear-gradient(90deg, var(--color-active-soft), var(--color-surface-muted));
+  background: var(--gradient-active-row), var(--color-surface-muted);
   border: 1px solid var(--color-active-border);
   border-radius: var(--radius-2);
   display: grid;
@@ -652,11 +597,28 @@ function handleRefresh() {
   font-size: var(--font-size-24);
   font-variant-numeric: tabular-nums;
 }
-.adapter-verify__error {
-  background: var(--color-danger-soft);
-  border-left: 3px solid var(--color-danger);
-  color: var(--color-danger);
-  padding: var(--space-3);
+.hook-coverage {
+  align-items: center;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(12rem, 1fr) auto;
+}
+.hook-coverage > span {
+  background: var(--color-surface-inset);
+  height: 0.45rem;
+  overflow: hidden;
+}
+.hook-coverage i {
+  background: var(--gradient-data-active);
+  box-shadow: var(--glow-live);
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  transition: width var(--transition-emphasis);
+}
+.hook-coverage small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
 }
 .hook-list {
   display: flex;
@@ -671,45 +633,6 @@ function handleRefresh() {
   font-size: var(--font-size-12);
   padding: 0.2rem 0.45rem;
 }
-.adapter-grid {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-}
-.adapter-card {
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-4);
-}
-.adapter-card h3 {
-  font-size: var(--font-size-14);
-  margin: 0;
-}
-.adapter-card dl {
-  display: grid;
-  gap: var(--space-2);
-  grid-template-columns: 1fr 1fr 1fr;
-  margin: 0;
-}
-.adapter-card dl > div {
-  display: grid;
-  gap: var(--space-1);
-}
-.adapter-card dt {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-11);
-}
-.adapter-card dd {
-  font-size: var(--font-size-16);
-  font-weight: var(--font-weight-semibold);
-  margin: 0;
-}
-.adapter-card__link {
-  justify-self: start;
-}
 .finding-summary {
   display: flex;
   flex-wrap: wrap;
@@ -723,15 +646,14 @@ function handleRefresh() {
   padding: 0.25rem 0.5rem;
 }
 .finding-list {
+  border-top: 1px solid var(--color-border);
   display: grid;
-  gap: var(--space-3);
 }
 .finding-list article {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-2);
+  border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-4);
+  padding: var(--space-5) var(--space-2);
 }
 .finding-list article > header {
   align-items: center;
@@ -789,27 +711,5 @@ function handleRefresh() {
   color: var(--color-text-muted);
   font-size: var(--font-size-12);
   overflow-wrap: anywhere;
-}
-@media (max-width: 640px) {
-  .status-ledger > header {
-    align-items: start;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-  .status-ledger__rows article {
-    grid-template-columns: 0.75rem minmax(0, 1fr) auto;
-  }
-  .status-ledger time {
-    grid-column: 2 / -1;
-  }
-  .adapter-verify__headline {
-    grid-template-columns: 0.75rem minmax(0, 1fr);
-  }
-  .adapter-verify__headline b {
-    grid-column: 2;
-  }
-  .adapter-card dl {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

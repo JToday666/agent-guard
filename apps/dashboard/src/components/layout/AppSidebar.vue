@@ -1,7 +1,7 @@
 <template>
   <nav class="sidebar" :class="{ 'sidebar--collapsed': isCollapsed }" aria-label="主导航">
     <div class="sidebar__header">
-      <span v-if="!isCollapsed" class="sidebar__title">导航</span>
+      <span v-if="!isCollapsed" class="sidebar__title">工作台</span>
       <button
         class="sidebar__collapse"
         type="button"
@@ -14,17 +14,7 @@
       </button>
     </div>
 
-    <button
-      class="sidebar__toggle"
-      type="button"
-      :aria-expanded="isOpen"
-      aria-controls="sidebar-links"
-      @click="isOpen = !isOpen"
-    >
-      菜单
-    </button>
-
-    <div id="sidebar-links" class="sidebar__links" :class="{ 'sidebar__links--open': isOpen }">
+    <div class="sidebar__links">
       <section v-for="group in navigationGroups" :key="group.label" class="sidebar__group">
         <h2>{{ group.label }}</h2>
         <RouterLink
@@ -34,15 +24,13 @@
           :class="{ 'sidebar__link--active': isNavigationItemActive(item.to) }"
           :to="item.to"
           :aria-current="isNavigationItemActive(item.to) ? 'page' : undefined"
+          :aria-label="item.count ? `${item.label}，${item.count} 项待处理` : item.label"
           :title="isCollapsed ? item.label : undefined"
-          :aria-label="item.meta ? `${item.label}，${item.meta}` : item.label"
-          @click="isOpen = false"
         >
           <span class="sidebar__icon" aria-hidden="true">
-            <component :is="item.icon" :size="19" />
+            <component :is="item.icon" :size="18" :stroke-width="1.8" />
           </span>
           <span class="sidebar__label">{{ item.label }}</span>
-          <small v-if="item.meta" class="sidebar__meta">{{ item.meta }}</small>
           <small v-if="item.count" class="sidebar__badge">{{ item.count }}</small>
         </RouterLink>
       </section>
@@ -55,13 +43,13 @@ import {
   ChartNoAxesColumn,
   CircleCheckBig,
   GitBranch,
-  ScanSearch,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
+  ScanSearch,
   Server,
 } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { useRoute } from "vue-router";
 
 defineOptions({
@@ -73,7 +61,6 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
-const isOpen = ref(false);
 const props = defineProps<{
   isCollapsed: boolean;
   pendingCount: number;
@@ -81,27 +68,25 @@ const props = defineProps<{
 
 const navigationGroups = computed(() => [
   {
-    label: "监控",
+    label: "观察与处置",
     items: [
       { icon: LayoutDashboard, label: "安全总览", to: "/overview" },
       { icon: ScanSearch, label: "事件调查", to: "/investigations" },
-      { icon: GitBranch, label: "证据链", to: "/evidence" },
       {
         count: props.pendingCount,
         icon: CircleCheckBig,
         label: "人工审批",
-        meta: `${props.pendingCount} 待处理`,
         to: "/approvals",
       },
+      { icon: GitBranch, label: "证据链", to: "/evidence" },
     ],
   },
   {
-    label: "评测",
-    items: [{ icon: ChartNoAxesColumn, label: "安全评测", to: "/evaluation" }],
-  },
-  {
-    label: "运维",
-    items: [{ icon: Server, label: "系统状态", to: "/system" }],
+    label: "验证与运行",
+    items: [
+      { icon: ChartNoAxesColumn, label: "安全评测", to: "/evaluation" },
+      { icon: Server, label: "系统状态", to: "/system" },
+    ],
   },
 ]);
 
@@ -113,11 +98,11 @@ function isNavigationItemActive(path: string): boolean {
 <style scoped lang="scss">
 .sidebar {
   align-self: start;
-  background: rgb(255 255 255 / 0.72);
+  background: color-mix(in srgb, var(--color-nav) 90%, transparent);
   border-right: 1px solid var(--color-border);
   height: calc(100vh - var(--top-bar-height));
   overflow-y: auto;
-  padding: var(--space-5) var(--space-3);
+  padding: var(--space-4) var(--space-3);
   position: sticky;
   top: var(--top-bar-height);
 }
@@ -127,87 +112,90 @@ function isNavigationItemActive(path: string): boolean {
   display: flex;
   gap: var(--space-2);
   justify-content: space-between;
-  margin-bottom: var(--space-4);
-  min-height: 2.375rem;
+  margin-bottom: var(--space-5);
+  min-height: 2.25rem;
+  padding: 0 var(--space-2);
 }
 
 .sidebar__title {
   color: var(--color-text-subtle);
-  font-size: var(--font-size-12);
+  font-size: var(--font-size-11);
   font-weight: var(--font-weight-bold);
+  letter-spacing: 0.08em;
 }
 
 .sidebar__collapse {
   align-items: center;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-3);
-  color: var(--color-text-muted);
-  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+  color: var(--color-text-subtle);
   display: inline-flex;
-  height: 2.375rem;
+  height: 2.25rem;
   justify-content: center;
-  width: 2.375rem;
+  width: 2.25rem;
 
   &:hover {
     background: var(--color-active-soft);
     border-color: var(--color-active-border);
-    color: var(--color-active);
+    color: var(--color-active-strong);
   }
-}
-
-.sidebar__toggle {
-  display: none;
 }
 
 .sidebar__links {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 
 .sidebar__group {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-1);
 
   h2 {
     color: var(--color-text-subtle);
-    font-size: var(--font-size-12);
+    font-size: var(--font-size-11);
     font-weight: var(--font-weight-bold);
-    letter-spacing: 0;
-    margin: 0;
-    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    margin: 0 0 var(--space-2);
+    padding: 0 var(--space-3);
   }
 }
 
 .sidebar__link {
   align-items: center;
-  border-radius: var(--radius-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
   color: var(--color-text-muted);
   display: grid;
+  font-size: var(--font-size-13);
   gap: var(--space-2);
   grid-template-columns: 1.5rem minmax(0, 1fr) auto;
-  min-height: 2.375rem;
+  min-height: 2.5rem;
   min-width: 0;
   padding: 0 var(--space-3);
+  position: relative;
   text-decoration: none;
+
+  &::before {
+    background: transparent;
+    border-radius: var(--radius-pill);
+    content: "";
+    height: 1.25rem;
+    left: -1px;
+    position: absolute;
+    width: 0.1875rem;
+  }
 
   &:hover {
     background: var(--color-active-soft);
     color: var(--color-text);
   }
+}
 
-  .sidebar__label,
-  .sidebar__meta,
-  small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  small {
-    color: var(--color-text-subtle);
-    font-size: var(--font-size-11);
-  }
+.sidebar__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar__icon {
@@ -218,49 +206,46 @@ function isNavigationItemActive(path: string): boolean {
 
 .sidebar__badge {
   align-items: center;
-  background: #9f1239;
-  border: 2px solid var(--color-nav);
+  background: var(--color-warning);
   border-radius: var(--radius-pill);
-  box-shadow: 0 4px 10px rgb(159 18 57 / 0.28);
-  color: #ffffff !important;
-  display: none;
+  color: var(--color-text-inverse);
+  display: inline-flex;
   font-size: var(--font-size-11);
+  font-variant-numeric: tabular-nums;
   font-weight: var(--font-weight-bold);
   height: 1.25rem;
   justify-content: center;
   min-width: 1.25rem;
-  padding: 0 0.3125rem;
-  position: absolute;
-  right: 0.125rem;
-  top: 0.125rem;
+  padding: 0 0.35rem;
 }
 
 .sidebar__link.router-link-active,
 .sidebar__link--active {
-  background: linear-gradient(90deg, var(--color-active-soft), transparent 88%);
-  box-shadow: inset 3px 0 var(--color-active);
-  color: var(--color-active);
-  font-weight: var(--font-weight-bold);
+  background: var(--gradient-active-row);
+  border-color: color-mix(in srgb, var(--color-active-border) 52%, transparent);
+  color: var(--color-active-strong);
+  font-weight: var(--font-weight-semibold);
 
-  small {
-    color: var(--color-active);
+  &::before {
+    background: var(--gradient-active-track);
+    box-shadow: var(--glow-active);
   }
 
-  .sidebar__badge {
-    border-color: var(--color-active-soft);
-    color: #ffffff !important;
+  .sidebar__icon {
+    color: var(--color-active);
   }
 }
 
 .sidebar--collapsed {
-  padding: var(--space-3);
+  padding: var(--space-4) var(--space-2);
 
   .sidebar__header {
     justify-content: center;
+    padding: 0;
   }
 
   .sidebar__links {
-    gap: var(--space-3);
+    gap: var(--space-4);
   }
 
   .sidebar__group {
@@ -280,80 +265,18 @@ function isNavigationItemActive(path: string): boolean {
     grid-template-columns: 1fr;
     justify-items: center;
     padding: 0;
-    position: relative;
   }
 
-  .sidebar__label,
-  .sidebar__meta {
+  .sidebar__label {
     display: none;
   }
 
   .sidebar__badge {
-    display: inline-flex;
-  }
-}
-
-@media (max-width: 768px) {
-  .sidebar {
-    align-self: auto;
-    border-bottom: 1px solid var(--color-border);
-    border-right: 0;
-    height: auto;
-    overflow: visible;
-    padding: var(--space-3);
-    position: static;
-  }
-
-  .sidebar__header {
-    display: none;
-  }
-
-  .sidebar__toggle {
-    align-items: center;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-2);
-    color: var(--color-text);
-    cursor: pointer;
-    display: inline-flex;
-    font-weight: var(--font-weight-semibold);
-    min-height: 2.25rem;
-    padding: 0 var(--space-3);
-  }
-
-  .sidebar__links {
-    display: none;
-    margin-top: var(--space-3);
-  }
-
-  .sidebar__links--open {
-    display: grid;
-  }
-
-  .sidebar--collapsed {
-    .sidebar__group h2 {
-      height: auto;
-      margin: 0;
-      overflow: visible;
-      position: static;
-      white-space: normal;
-      width: auto;
-    }
-
-    .sidebar__link {
-      grid-template-columns: 1.5rem minmax(0, 1fr) auto;
-      justify-items: start;
-      padding: 0 var(--space-3);
-    }
-
-    .sidebar__label,
-    .sidebar__meta {
-      display: inline;
-    }
-
-    .sidebar__badge {
-      display: none;
-    }
+    border: 2px solid var(--color-nav);
+    box-shadow: var(--shadow-subtle);
+    position: absolute;
+    right: -0.1rem;
+    top: -0.15rem;
   }
 }
 </style>

@@ -3,11 +3,11 @@ import { expect, test } from "@playwright/test";
 test("evaluation page shows latest run, attack ASR and sample cases", async ({ page }) => {
   await page.goto("/evaluation");
 
-  const latestRun = page.locator(".evaluation-run");
+  const latestRun = page.locator(".benchmark-section");
   await expect(page.getByText("eval_mock_20260628")).toBeVisible();
   await expect(page.getByText("AttackBench / v1")).toBeVisible();
-  await expect(latestRun.locator(".asr-stage").getByText("73.2%")).toBeVisible();
-  await expect(latestRun.locator(".asr-stage").getByText("4.8%")).toBeVisible();
+  await expect(latestRun.locator(".asr-headline").getByText("73.2%")).toBeVisible();
+  await expect(latestRun.locator(".asr-headline").getByText("4.8%")).toBeVisible();
   await expect(page.locator(".attack-asr").getByText("prompt_injection")).toBeVisible();
   await expect(page.getByRole("link", { name: /PI-002/ })).toBeVisible();
 });

@@ -58,12 +58,12 @@ function getAttackTypeLabel(value: string) {
 }
 .distribution__track {
   background: var(--color-surface-muted);
-  border-radius: 3px;
+  border-radius: var(--radius-pill);
   height: 0.5rem;
   overflow: hidden;
 }
 .distribution__track i {
-  background: linear-gradient(90deg, var(--color-active), #5b8def);
+  background: var(--gradient-data-active);
   border-radius: inherit;
   display: block;
   height: 100%;

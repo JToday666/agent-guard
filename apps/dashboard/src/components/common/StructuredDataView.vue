@@ -73,7 +73,7 @@ async function handleCopy(): Promise<void> {
 .structured-data button {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
   font-size: var(--font-size-12);
@@ -118,7 +118,7 @@ async function handleCopy(): Promise<void> {
 .structured-data summary {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
   display: inline-block;
@@ -139,10 +139,11 @@ async function handleCopy(): Promise<void> {
   }
 }
 .structured-data pre {
-  background: #0d1117;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
-  color: #e6edf3;
-  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+  color: var(--color-text);
+  font-family: var(--font-family-mono);
   font-size: var(--font-size-12);
   line-height: 1.65;
   margin: var(--space-3) 0 0;

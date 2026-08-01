@@ -17,7 +17,7 @@ const commonResources: DashboardRefreshResource[] = ["health", "approvals"];
 
 const resourcesByScope: Record<DashboardRefreshScope, DashboardRefreshResource[]> = {
   approvals: [...commonResources, "events"],
-  evaluation: [...commonResources, "metrics", "evaluation"],
+  evaluation: [...commonResources, "events", "metrics", "evaluation"],
   evidence: [...commonResources, "events", "auditIntegrity"],
   investigations: [...commonResources, "events"],
   overview: [...commonResources, "events", "metrics", "auditIntegrity"],

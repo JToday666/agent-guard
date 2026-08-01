@@ -41,7 +41,8 @@ const maxValue = computed(() => Math.max(1, ...props.items.map((i) => i.value)))
 }
 .rule-topn__id {
   background: var(--color-surface-muted);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-1);
+  font-family: var(--font-family-mono);
   font-size: var(--font-size-11);
   max-width: 12rem;
   overflow: hidden;
@@ -51,13 +52,13 @@ const maxValue = computed(() => Math.max(1, ...props.items.map((i) => i.value)))
 }
 .rule-topn__track {
   background: var(--color-surface-muted);
-  border-radius: 3px;
+  border-radius: var(--radius-pill);
   display: block;
   height: 0.5rem;
   overflow: hidden;
 }
 .rule-topn__track i {
-  background: linear-gradient(90deg, var(--color-active), #7aa7ff);
+  background: var(--gradient-data-active);
   border-radius: inherit;
   display: block;
   height: 100%;

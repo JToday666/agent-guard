@@ -1,14 +1,11 @@
 <template>
   <aside
     v-if="isOpen"
-    ref="drawerElement"
     aria-labelledby="detail-drawer-title"
-    :aria-modal="isMobile"
     class="detail-drawer"
     role="dialog"
     tabindex="-1"
     @keydown.esc.prevent="emit('close')"
-    @keydown.tab="handleTabKey"
   >
     <header class="detail-drawer__header">
       <div>
@@ -32,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { X } from "@lucide/vue";
 
 defineOptions({
@@ -50,41 +47,7 @@ const props = defineProps<{
 }>();
 
 const closeButtonElement = ref<HTMLButtonElement | null>(null);
-const drawerElement = ref<HTMLElement | null>(null);
-const isMobile = ref(false);
 let restoreFocusElement: HTMLElement | null = null;
-let mobileQuery: MediaQueryList | null = null;
-
-function syncMobileState(event: MediaQueryList | MediaQueryListEvent): void {
-  isMobile.value = event.matches;
-}
-
-function handleTabKey(event: KeyboardEvent): void {
-  if (!isMobile.value || !drawerElement.value) return;
-  const focusableElements = [
-    ...drawerElement.value.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  ];
-  const firstElement = focusableElements[0];
-  const lastElement = focusableElements.at(-1);
-  if (!firstElement || !lastElement) return;
-  if (event.shiftKey && document.activeElement === firstElement) {
-    event.preventDefault();
-    lastElement.focus();
-  } else if (!event.shiftKey && document.activeElement === lastElement) {
-    event.preventDefault();
-    firstElement.focus();
-  }
-}
-
-onMounted(() => {
-  mobileQuery = window.matchMedia("(max-width: 900px)");
-  syncMobileState(mobileQuery);
-  mobileQuery.addEventListener("change", syncMobileState);
-});
-
-onUnmounted(() => mobileQuery?.removeEventListener("change", syncMobileState));
 
 watch(
   () => props.isOpen,
@@ -175,18 +138,5 @@ watch(
   overflow: auto;
   overscroll-behavior: contain;
   padding: var(--space-5) var(--space-5) var(--space-7);
-}
-
-@media (max-width: 900px) {
-  .detail-drawer {
-    border-left: 0;
-    bottom: 0;
-    left: 0;
-    min-height: 0;
-    position: fixed;
-    right: 0;
-    top: 0;
-    z-index: 50;
-  }
 }
 </style>

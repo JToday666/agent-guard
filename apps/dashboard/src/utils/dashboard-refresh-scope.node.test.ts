@@ -16,6 +16,10 @@ test("refresh resources include common shell data and only page-specific domains
   const investigationResources = getDashboardRefreshResources("investigations");
   assert.deepEqual([...investigationResources], ["health", "approvals", "events"]);
 
+  const evaluationResources = getDashboardRefreshResources("evaluation");
+  assert.equal(evaluationResources.has("events"), true);
+  assert.equal(evaluationResources.has("evaluation"), true);
+
   const systemResources = getDashboardRefreshResources("system");
   assert.equal(systemResources.has("events"), false);
   assert.equal(systemResources.has("policy"), true);

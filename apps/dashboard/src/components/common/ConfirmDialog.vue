@@ -129,7 +129,7 @@ function handleBackdropClick(): void {
   width: 100%;
 
   &::backdrop {
-    background: rgb(12 24 22 / 0.48);
+    background: color-mix(in srgb, var(--color-shell-strong) 48%, transparent);
     backdrop-filter: blur(3px);
   }
 }

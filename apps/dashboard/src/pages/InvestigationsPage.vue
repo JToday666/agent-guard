@@ -3,7 +3,10 @@
     class="investigations-page"
     :class="{ 'investigations-page--detail': Boolean(selectedEvent) }"
   >
-    <main class="workspace-panel investigations-page__main" aria-labelledby="investigations-title">
+    <section
+      class="workspace-panel investigations-page__main"
+      aria-labelledby="investigations-title"
+    >
       <header class="page-header">
         <div><h1 id="investigations-title">事件调查</h1></div>
         <div class="page-header-actions">
@@ -14,6 +17,7 @@
             :disabled="!filteredEvents.length"
             @click="handleExport"
           >
+            <Download aria-hidden="true" :size="15" />
             导出当前筛选结果
           </button>
         </div>
@@ -22,11 +26,14 @@
       <form class="investigation-tools" role="search" @submit.prevent>
         <label class="investigation-search">
           <span>搜索事件</span>
-          <input
-            v-model.trim="searchDraft"
-            type="search"
-            placeholder="资源、规则名称、原因、证据链或 Case"
-          />
+          <span class="investigation-search__input">
+            <Search aria-hidden="true" :size="15" />
+            <input
+              v-model.trim="searchDraft"
+              type="search"
+              placeholder="资源、规则名称、原因、证据链或 Case"
+            />
+          </span>
         </label>
         <AppSelect
           id="investigation-decision"
@@ -102,7 +109,8 @@
       <template v-else-if="filteredEvents.length">
         <div class="result-summary">
           <strong>{{ filteredEvents.length }}</strong
-          ><span>条匹配事件</span><span>按最新时间排序</span>
+          ><span>条匹配事件</span
+          ><span>第 {{ currentPage }} / {{ totalPages }} 页 · 按最新时间排序</span>
         </div>
         <div class="event-table-wrap">
           <table class="event-table">
@@ -182,7 +190,7 @@
       >
         <button type="button" @click="handleClearFilters">清除筛选</button>
       </EmptyState>
-    </main>
+    </section>
 
     <DetailDrawer
       :is-open="Boolean(query.eventId)"
@@ -208,6 +216,7 @@
 </template>
 
 <script setup lang="ts">
+import { Download, Search } from "@lucide/vue";
 import { computed, defineAsyncComponent, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -410,33 +419,25 @@ function handleExport() {
 }
 .investigations-page__main {
   min-width: 0;
-  overflow-y: auto;
   min-height: 0;
+  overflow-y: auto;
 }
 .investigation-tools {
   align-items: end;
   border-block: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: minmax(16rem, 1fr) repeat(5, minmax(7rem, 0.4fr)) auto;
+  grid-template-columns: minmax(14rem, 1.4fr) repeat(5, minmax(6.25rem, 0.5fr)) auto;
   padding: var(--space-4) 0;
 }
-@media (max-width: 1280px) {
-  .investigation-tools {
-    grid-template-columns: 1fr repeat(3, minmax(7rem, 0.4fr)) auto;
-  }
-  .investigation-tools > :nth-child(5),
-  .investigation-tools > :nth-child(6) {
-    grid-column: auto;
-  }
+.investigations-page--detail .investigation-tools {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-@media (max-width: 1180px) {
-  .investigation-tools {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  .investigation-search {
-    grid-column: 1 / -1;
-  }
+.investigations-page--detail .investigation-search {
+  grid-column: 1 / -1;
+}
+.investigations-page--detail .clear-filters {
+  justify-self: start;
 }
 .page-header-actions {
   align-items: center;
@@ -450,12 +451,29 @@ function handleExport() {
   font-weight: var(--font-weight-semibold);
   gap: var(--space-1);
 }
-.investigation-search input {
+.investigation-search__input {
+  align-items: center;
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-2);
+  color: var(--color-text-subtle);
+  display: flex;
+  gap: var(--space-2);
   min-height: 2.5rem;
   padding: 0 var(--space-3);
+  width: 100%;
+}
+.investigation-search__input:focus-within {
+  border-color: var(--color-active-border);
+  box-shadow: var(--glow-active);
+}
+.investigation-search input {
+  background: transparent;
+  border: 0;
+  color: var(--color-text);
+  min-width: 0;
+  outline: 0;
+  padding: 0;
   width: 100%;
 }
 .clear-filters {
@@ -474,7 +492,7 @@ function handleExport() {
 .quick-filters button {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-2);
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: var(--font-size-12);
@@ -488,7 +506,8 @@ function handleExport() {
 .quick-filters button[aria-pressed="true"] {
   background: var(--color-active-soft);
   border-color: var(--color-active-border);
-  color: var(--color-active);
+  color: var(--color-active-strong);
+  font-weight: var(--font-weight-semibold);
 }
 .result-summary {
   align-items: baseline;
@@ -504,6 +523,7 @@ function handleExport() {
   margin-left: auto;
 }
 .event-table-wrap {
+  border-top: 1px solid var(--color-border-strong);
   overflow: auto;
 }
 .event-table {
@@ -527,10 +547,14 @@ function handleExport() {
   vertical-align: middle;
 }
 .event-table th {
+  background: color-mix(in srgb, var(--color-page) 92%, var(--color-surface));
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
   letter-spacing: 0.03em;
+  position: sticky;
+  top: 0;
   text-transform: uppercase;
+  z-index: 2;
 }
 .event-table tbody tr {
   cursor: pointer;
@@ -538,7 +562,7 @@ function handleExport() {
 .event-table tbody tr:hover,
 .event-table tbody tr:focus-visible,
 .event-table__selected {
-  background: var(--color-row-hover);
+  background: var(--color-row-selected);
 }
 .event-table tbody tr:focus-visible {
   box-shadow: inset 0 0 0 2px var(--color-focus);
@@ -569,7 +593,7 @@ function handleExport() {
   height: 0.25rem;
 }
 .event-risk i {
-  background: var(--color-active);
+  background: var(--gradient-data-active);
   grid-column: 1;
   grid-row: 1;
   height: 0.25rem;
@@ -577,10 +601,10 @@ function handleExport() {
 }
 .event-risk--critical i,
 .event-risk--high i {
-  background: var(--color-danger);
+  background: var(--gradient-data-danger);
 }
 .event-risk--medium i {
-  background: var(--color-warning);
+  background: var(--gradient-data-warning);
 }
 .pagination {
   align-items: center;
@@ -621,52 +645,5 @@ function handleExport() {
 .trace-preview header span {
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
-}
-@media (max-width: 900px) {
-  .investigations-page,
-  .investigations-page--detail {
-    grid-template-columns: 1fr;
-  }
-}
-@media (max-width: 640px) {
-  .investigation-tools {
-    grid-template-columns: 1fr;
-  }
-  .investigation-search {
-    grid-column: auto;
-  }
-  .event-table {
-    min-width: 0;
-    table-layout: fixed;
-    width: 100%;
-  }
-  .event-table th,
-  .event-table td {
-    padding: var(--space-3) var(--space-2);
-  }
-  .event-table th:nth-child(1) {
-    width: 4.25rem;
-  }
-  .event-table th:nth-child(2) {
-    width: 4.75rem;
-  }
-  .event-table th:nth-child(3) {
-    width: 4rem;
-  }
-  .event-table th:nth-child(4),
-  .event-table td:nth-child(4),
-  .event-table th:nth-child(6),
-  .event-table td:nth-child(6) {
-    display: none;
-  }
-  .event-table td:nth-child(5) code {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .event-risk {
-    gap: var(--space-1);
-    grid-template-columns: minmax(1rem, 1fr) auto;
-  }
 }
 </style>

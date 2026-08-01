@@ -39,3 +39,31 @@ test("top page headers use primary titles without category subtitles", async ({ 
     }
   }
 });
+
+test("skip link moves keyboard focus to the single main workspace", async ({ page }) => {
+  await page.goto("/overview");
+
+  const skipLink = page.getByRole("link", { name: "跳到主要内容" });
+  await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(skipLink).toBeFocused();
+  await skipLink.click();
+
+  await expect(page.locator("main#main-content")).toBeFocused();
+  await expect(page.locator("main")).toHaveCount(1);
+});
+
+test("global search shortcut opens event investigation with URL state", async ({ page }) => {
+  await page.goto("/overview");
+
+  await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
+  await page.keyboard.press("/");
+  const search = page.getByRole("searchbox", {
+    name: "搜索证据链、Case、资源或规则",
+  });
+  await expect(search).toBeFocused();
+  await search.fill("trace_002");
+  await search.press("Enter");
+
+  await expect(page).toHaveURL(/\/investigations\?search=trace_002$/);
+});

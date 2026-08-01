@@ -12,9 +12,14 @@
     </header>
 
     <div class="approvals-page__content">
-      <p v-if="pageMessage" class="approval-page-message" role="status">
-        {{ pageMessage }}
-      </p>
+      <InlineNotice
+        v-if="pageMessage"
+        class="approval-page-message"
+        title="审批队列已更新"
+        tone="warning"
+      >
+        <p>{{ pageMessage }}</p>
+      </InlineNotice>
       <div class="approvals-page__main">
         <ErrorState
           v-if="store.status === 'error' && store.error"
@@ -73,6 +78,7 @@ import { useRoute, useRouter } from "vue-router";
 import ApprovalDetail from "../components/approvals/ApprovalDetail.vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
 import EmptyState from "../components/common/EmptyState.vue";
+import InlineNotice from "../components/common/InlineNotice.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
@@ -217,13 +223,6 @@ function formatRelativeExpiry(value?: string | null) {
   height: 100%;
   min-height: 0;
 }
-.approval-page-message {
-  background: var(--color-warning-soft);
-  border-left: 3px solid var(--color-warning);
-  color: var(--color-warning);
-  margin: 0;
-  padding: var(--space-3);
-}
 .approvals-layout {
   display: grid;
   gap: var(--space-4);
@@ -263,13 +262,17 @@ function formatRelativeExpiry(value?: string | null) {
   min-width: 0;
   padding: var(--space-4) var(--space-3);
   text-align: left;
+  transition:
+    background-color var(--transition-fast),
+    padding-left var(--transition-fast);
 }
 .approval-queue > button:hover {
   background: var(--color-row-hover);
 }
 .approval-queue > button.approval-queue__item--active {
-  background: var(--color-danger-soft);
-  box-shadow: inset 3px 0 var(--color-danger);
+  background: var(--gradient-active-row);
+  box-shadow: inset 3px 0 var(--color-active);
+  padding-left: var(--space-4);
 }
 .approval-queue__top {
   align-items: center;
@@ -290,33 +293,5 @@ function formatRelativeExpiry(value?: string | null) {
   color: var(--color-danger);
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-bold);
-}
-@media (max-width: 768px) {
-  .approvals-page {
-    height: auto;
-    overflow: visible;
-  }
-  .approvals-layout {
-    grid-template-columns: 1fr;
-    height: auto;
-    overflow: visible;
-  }
-  .approval-queue {
-    border-bottom: 1px solid var(--color-border);
-    border-right: 0;
-    height: auto;
-    max-height: 38vh;
-    overflow-y: auto;
-    padding: 0 0 var(--space-4);
-  }
-}
-@media (max-width: 640px) {
-  .approvals-page {
-    height: auto;
-    overflow: visible;
-  }
-  .approval-queue {
-    max-height: 14rem;
-  }
 }
 </style>

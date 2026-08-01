@@ -1,6 +1,7 @@
 <template>
-  <div class="loading-state" aria-live="polite" aria-busy="true">
-    <span v-for="index in rows" :key="index"></span>
+  <div class="loading-state" aria-live="polite" aria-busy="true" role="status">
+    <span class="sr-only">正在加载数据</span>
+    <span v-for="index in rows" :key="index" aria-hidden="true" class="loading-state__row"></span>
   </div>
 </template>
 
@@ -13,7 +14,7 @@ withDefaults(defineProps<{ rows?: number }>(), { rows: 5 });
   display: grid;
   gap: var(--space-3);
 }
-.loading-state span {
+.loading-state__row {
   animation: loading-pulse 1.2s ease-in-out infinite;
   background: var(--color-surface-muted);
   border-radius: var(--radius-2);
@@ -25,7 +26,7 @@ withDefaults(defineProps<{ rows?: number }>(), { rows: 5 });
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .loading-state span {
+  .loading-state__row {
     animation: none;
   }
 }

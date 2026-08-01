@@ -36,7 +36,7 @@ test("derives count, block rate and average latency from audit events", () => {
   assert.equal(metrics.averageLatencyMs, 20);
 });
 
-test("groups decisions into chronological hourly buckets", () => {
+test("groups decisions into chronological buckets suited to the event span", () => {
   const firstHour = `${String(new Date("2026-06-22T06:05:00Z").getHours()).padStart(2, "0")}:00`;
   const secondHour = `${String(new Date("2026-06-22T07:10:00Z").getHours()).padStart(2, "0")}:00`;
   assert.deepEqual(groupDecisionTrend(events), [

@@ -252,7 +252,7 @@ function getOptionId(index: number): string {
 
 .app-select__trigger {
   align-items: center;
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
+  background: var(--gradient-popover);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-subtle);
@@ -269,7 +269,7 @@ function getOptionId(index: number): string {
 
   &:hover {
     border-color: var(--color-active-border);
-    box-shadow: 0 8px 18px rgb(37 99 235 / 0.08);
+    box-shadow: var(--shadow-subtle);
   }
 }
 

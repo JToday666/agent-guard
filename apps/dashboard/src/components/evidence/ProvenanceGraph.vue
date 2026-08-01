@@ -22,7 +22,7 @@
         class="provenance-flow"
         @node-click="handleNodeClick"
       >
-        <Background pattern-color="#dce4ee" :gap="20" :size="1" />
+        <Background pattern-color="var(--color-chart-grid)" :gap="20" :size="1" />
         <Controls :show-interactive="false" />
         <template #node-provenance="{ data }">
           <div
@@ -237,14 +237,14 @@ function handleNodeClick(event: { node: { id: string } }) {
 .provenance-wrap {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
-  height: 40rem;
+  height: clamp(28rem, 52vh, 32rem);
   overflow: hidden;
   position: relative;
 }
 
 .provenance-legend {
   align-items: center;
-  background: rgb(255 255 255 / 0.92);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-subtle);
@@ -392,16 +392,5 @@ function handleNodeClick(event: { node: { id: string } }) {
   height: 100%;
   justify-content: center;
   margin: 0;
-}
-
-@media (max-width: 640px) {
-  .provenance-wrap {
-    height: 30rem;
-  }
-  .provenance-legend {
-    left: var(--space-2);
-    max-width: calc(100% - 4rem);
-    top: var(--space-2);
-  }
 }
 </style>

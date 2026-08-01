@@ -28,14 +28,34 @@ export function deriveMetrics(events: readonly MetricEvent[]): EvalMetrics {
 }
 
 export function groupDecisionTrend(events: readonly MetricEvent[]): DecisionTrendPoint[] {
-  const buckets = new Map<string, DecisionTrendPoint>();
+  const validDates = events
+    .map((event) => new Date(event.occurredAt))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => left.getTime() - right.getTime());
+  if (!validDates.length) return [];
+
+  const spanMs = validDates.at(-1)!.getTime() - validDates[0]!.getTime();
+  const bucketMinutes = spanMs <= 45 * 60_000 ? 5 : spanMs <= 6 * 60 * 60_000 ? 30 : 60;
+  const includeDate = spanMs > 24 * 60 * 60_000;
+  const buckets = new Map<number, DecisionTrendPoint>();
+
   for (const event of events) {
     const date = new Date(event.occurredAt);
     if (Number.isNaN(date.getTime())) continue;
-    const label = `${String(date.getHours()).padStart(2, "0")}:00`;
-    const point = buckets.get(label) ?? { label, allow: 0, ask: 0, deny: 0 };
+    date.setMinutes(Math.floor(date.getMinutes() / bucketMinutes) * bucketMinutes, 0, 0);
+    const bucketTime = date.getTime();
+    const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(
+      date.getMinutes(),
+    ).padStart(2, "0")}`;
+    const label = includeDate
+      ? `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(
+          2,
+          "0",
+        )} ${timeLabel}`
+      : timeLabel;
+    const point = buckets.get(bucketTime) ?? { label, allow: 0, ask: 0, deny: 0 };
     point[event.decision] += 1;
-    buckets.set(label, point);
+    buckets.set(bucketTime, point);
   }
-  return [...buckets.values()].sort((left, right) => left.label.localeCompare(right.label));
+  return [...buckets.entries()].sort(([left], [right]) => left - right).map(([, point]) => point);
 }

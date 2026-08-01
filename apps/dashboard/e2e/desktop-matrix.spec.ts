@@ -19,7 +19,8 @@ test("primary routes remain usable across supported desktop workspaces", async (
 
   for (const path of primaryRoutes) {
     await page.goto(path);
-    await expect(page.locator("main").first()).toBeVisible();
+    await expect(page.locator("main")).toHaveCount(1);
+    await expect(page.locator("main")).toBeVisible();
     const dimensions = await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,
       mainWidth: document.querySelector<HTMLElement>("main")?.getBoundingClientRect().width ?? 0,
@@ -30,4 +31,17 @@ test("primary routes remain usable across supported desktop workspaces", async (
   }
 
   expect(runtimeErrors).toEqual([]);
+});
+
+test("desktop shell keeps the required navigation order", async ({ page }) => {
+  await page.goto("/overview");
+
+  await expect(page.locator(".sidebar__link")).toHaveText([
+    "安全总览",
+    "事件调查",
+    "人工审批2",
+    "证据链",
+    "安全评测",
+    "系统状态",
+  ]);
 });

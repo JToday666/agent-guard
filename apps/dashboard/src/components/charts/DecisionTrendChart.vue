@@ -13,7 +13,10 @@
       preserveAspectRatio="xMidYMid meet"
     >
       <g class="grid-lines" aria-hidden="true">
-        <line v-for="y in [24, 72, 120, 168, 216]" :key="y" x1="24" :y1="y" x2="650" :y2="y" />
+        <g v-for="tick in yTicks" :key="tick.y">
+          <text x="25" :y="tick.y + 4" text-anchor="end">{{ tick.value }}</text>
+          <line x1="36" :y1="tick.y" x2="650" :y2="tick.y" />
+        </g>
       </g>
       <polyline
         v-for="series in chartSeries"
@@ -36,7 +39,7 @@
         <text x="665" :y="series.labelY + 4">{{ series.lastValue }}</text>
       </g>
       <g class="x-labels">
-        <text v-for="label in xLabels" :key="label.text" :x="label.x" y="236" text-anchor="middle">
+        <text v-for="label in xLabels" :key="label.index" :x="label.x" y="236" text-anchor="middle">
           {{ label.text }}
         </text>
       </g>
@@ -56,10 +59,33 @@ const latest = computed(() => props.points.at(-1) ?? { allow: 0, ask: 0, deny: 0
 const maxValue = computed(() =>
   Math.max(1, ...props.points.flatMap((point) => [point.allow, point.ask, point.deny])),
 );
+const yAxisStep = computed(() => (maxValue.value <= 4 ? 1 : Math.ceil(maxValue.value / 4)));
+const yAxisMax = computed(() => Math.ceil(maxValue.value / yAxisStep.value) * yAxisStep.value);
 const xStep = computed(() => (props.points.length > 1 ? 626 / (props.points.length - 1) : 0));
-const xLabels = computed(() =>
-  props.points.map((point, index) => ({ text: point.label, x: 24 + index * xStep.value })),
-);
+function xPosition(index: number): number {
+  return props.points.length > 1 ? 24 + index * xStep.value : 337;
+}
+const yTicks = computed(() => {
+  const values: number[] = [];
+  for (let value = yAxisMax.value; value > 0; value -= yAxisStep.value) {
+    values.push(value);
+  }
+  values.push(0);
+  return values.map((value) => ({
+    value,
+    y: 24 + (1 - value / yAxisMax.value) * 192,
+  }));
+});
+const xLabels = computed(() => {
+  const maxLabels = 6;
+  const labelStep =
+    props.points.length > maxLabels ? Math.ceil((props.points.length - 1) / (maxLabels - 1)) : 1;
+  return props.points.flatMap((point, index) =>
+    index % labelStep === 0 || index === props.points.length - 1
+      ? [{ index, text: point.label, x: xPosition(index) }]
+      : [],
+  );
+});
 const chartSeries = computed(() => {
   const seriesItems = (
     [
@@ -69,8 +95,8 @@ const chartSeries = computed(() => {
     ] as const
   ).map((series) => {
     const coordinates = props.points.map((point, index) => ({
-      x: 24 + index * xStep.value,
-      y: 216 - (point[series.key] / maxValue.value) * 192,
+      x: xPosition(index),
+      y: 216 - (point[series.key] / yAxisMax.value) * 192,
     }));
     const last = coordinates.at(-1) ?? { x: 24, y: 216 };
     return {
@@ -119,19 +145,19 @@ const summary = computed(
   gap: var(--space-1);
 }
 .trend-legend i {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   display: inline-block;
-  height: 0.625rem;
-  width: 0.625rem;
+  height: 0.1875rem;
+  width: 1.25rem;
 }
 .trend-legend .series-allow i {
-  background: var(--color-active);
+  background: var(--gradient-line-slate);
 }
 .trend-legend .series-ask i {
-  background: var(--color-warning);
+  background: var(--gradient-line-warning);
 }
 .trend-legend .series-deny i {
-  background: var(--color-danger);
+  background: var(--color-chart-primary);
 }
 .trend-chart svg {
   height: 15rem;
@@ -139,8 +165,14 @@ const summary = computed(
   width: 100%;
 }
 .grid-lines line {
-  stroke: var(--color-border);
+  stroke: var(--color-chart-grid);
   stroke-width: 1;
+}
+.grid-lines text {
+  fill: var(--color-text-subtle);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  stroke: none;
 }
 .trend-chart polyline {
   stroke-linecap: round;
@@ -156,16 +188,19 @@ const summary = computed(
   stroke-width: 2;
 }
 .series-allow {
-  fill: var(--color-active);
-  stroke: var(--color-active);
+  fill: var(--color-chart-slate);
+  stroke: var(--color-chart-slate);
+  stroke-dasharray: 6 4;
 }
 .series-ask {
-  fill: var(--color-warning);
-  stroke: var(--color-warning);
+  fill: var(--color-chart-warning);
+  stroke: var(--color-chart-warning);
+  stroke-dasharray: 2 4;
 }
 .series-deny {
-  fill: var(--color-danger);
-  stroke: var(--color-danger);
+  fill: var(--color-chart-primary);
+  filter: var(--filter-chart-primary);
+  stroke: var(--color-chart-primary);
 }
 .trend-chart text {
   font-size: 12px;
