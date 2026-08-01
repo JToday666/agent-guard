@@ -7,19 +7,23 @@
         <button
           class="page-action"
           type="button"
-          :aria-busy="store.isRefreshing"
-          :disabled="store.isRefreshing"
+          :aria-busy="store.isManualRefreshing"
+          :disabled="store.isManualRefreshing"
           @click="handleRefresh"
         >
-          <RefreshCw aria-hidden="true" :class="{ 'is-spinning': store.isRefreshing }" :size="15" />
-          {{ store.isRefreshing ? "刷新中…" : "刷新数据" }}
+          <RefreshCw
+            aria-hidden="true"
+            :class="{ 'is-spinning': store.isManualRefreshing }"
+            :size="15"
+          />
+          {{ store.isManualRefreshing ? "刷新中…" : "刷新数据" }}
         </button>
       </div>
     </header>
 
     <ErrorState
       v-if="store.status === 'error' && store.error"
-      :is-retrying="store.isRefreshing"
+      :is-retrying="store.isManualRefreshing"
       :message="store.error"
       @retry="handleRefresh"
     />
@@ -57,7 +61,11 @@
               <strong>{{ item.tool }}</strong>
               <span class="triage-queue__resource" :title="item.resource">{{ item.resource }}</span>
               <span class="triage-queue__risk">
-                <i :style="{ width: `${item.riskScore}%` }"></i>
+                <i
+                  :style="{
+                    transform: `scaleX(${Math.min(1, Math.max(0, item.riskScore / 100))})`,
+                  }"
+                ></i>
               </span>
               <b>{{ item.riskScore }}</b>
             </RouterLink>
@@ -342,7 +350,6 @@ function handleRefresh() {
 
   &:hover {
     background: var(--color-row-hover);
-    padding-left: var(--space-3);
   }
 }
 
@@ -379,6 +386,9 @@ function handleRefresh() {
     background: var(--gradient-data-danger);
     display: block;
     height: 100%;
+    transform-origin: left;
+    transition: transform var(--transition-data);
+    width: 100%;
   }
 }
 

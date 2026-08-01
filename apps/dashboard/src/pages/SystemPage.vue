@@ -7,12 +7,16 @@
         <button
           class="page-action"
           type="button"
-          :aria-busy="store.isRefreshing"
-          :disabled="store.isRefreshing"
+          :aria-busy="store.isManualRefreshing"
+          :disabled="store.isManualRefreshing"
           @click="handleRefresh"
         >
-          <RefreshCw aria-hidden="true" :class="{ 'is-spinning': store.isRefreshing }" :size="15" />
-          {{ store.isRefreshing ? "检查中…" : "立即检查" }}
+          <RefreshCw
+            aria-hidden="true"
+            :class="{ 'is-spinning': store.isManualRefreshing }"
+            :size="15"
+          />
+          {{ store.isManualRefreshing ? "检查中…" : "立即检查" }}
         </button>
       </div>
     </header>
@@ -163,7 +167,7 @@
           <b>{{ hookCoverageText }}</b>
         </div>
         <div class="hook-coverage">
-          <span><i :style="{ width: hookCoveragePercent }"></i></span>
+          <span><i :style="{ transform: `scaleX(${hookCoverageRatio})` }"></i></span>
           <small>已上报 Hook 覆盖 {{ hookCoverageText }}</small>
         </div>
         <dl class="adapter-verify__facts">
@@ -374,11 +378,11 @@ const hookCoverageText = computed(() =>
     ? `-- / ${store.openclawStatus.expectedHookCount}`
     : `${store.openclawStatus.hookCount} / ${store.openclawStatus.expectedHookCount}`,
 );
-const hookCoveragePercent = computed(() => {
+const hookCoverageRatio = computed(() => {
   const count = store.openclawStatus.hookCount;
   const expected = store.openclawStatus.expectedHookCount;
-  if (count === null || expected <= 0) return "0%";
-  return `${Math.min(100, Math.max(0, (count / expected) * 100))}%`;
+  if (count === null || expected <= 0) return 0;
+  return Math.min(1, Math.max(0, count / expected));
 });
 const findingSummary = computed(() => {
   const labels = [
@@ -613,8 +617,9 @@ function handleRefresh() {
   box-shadow: var(--glow-live);
   display: block;
   height: 100%;
-  min-width: 2px;
-  transition: width var(--transition-emphasis);
+  transform-origin: left center;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .hook-coverage small {
   color: var(--color-text-subtle);

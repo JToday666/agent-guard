@@ -2,13 +2,14 @@
   <dialog
     ref="dialogElement"
     class="confirm-dialog"
+    :class="{ 'confirm-dialog--closing': isClosing }"
     :aria-busy="isSubmitting"
     :aria-describedby="descriptionId"
     :aria-labelledby="titleId"
     @cancel="handleCancel"
     @click.self="handleBackdropClick"
   >
-    <div class="confirm-dialog__surface">
+    <div class="confirm-dialog__surface" @animationend="handleSurfaceAnimationEnd">
       <header>
         <span class="confirm-dialog__signal" aria-hidden="true"></span>
         <div>
@@ -49,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useId } from "vue";
+import { nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, useId } from "vue";
 
 defineOptions({ name: "ConfirmDialog" });
 
@@ -83,10 +84,12 @@ const emit = defineEmits<{
 
 const cancelButtonElement = ref<HTMLButtonElement | null>(null);
 const dialogElement = ref<HTMLDialogElement | null>(null);
+const isClosing = ref(false);
 const id = useId();
 const descriptionId = `confirm-dialog-description-${id}`;
 const titleId = `confirm-dialog-title-${id}`;
 let restoreFocusElement: HTMLElement | null = null;
+let closeFallbackTimer: number | null = null;
 
 onMounted(async () => {
   restoreFocusElement =
@@ -97,14 +100,43 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  clearCloseFallback();
   if (dialogElement.value?.open) dialogElement.value.close();
   restoreFocusElement?.focus();
 });
 
+onDeactivated(() => {
+  if (!dialogElement.value?.open) return;
+  clearCloseFallback();
+  dialogElement.value.close();
+  emit("close");
+});
+
 function requestClose(): void {
-  if (props.isSubmitting) return;
+  if (props.isSubmitting || isClosing.value) return;
+  isClosing.value = true;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    finalizeClose();
+    return;
+  }
+  closeFallbackTimer = window.setTimeout(finalizeClose, 180);
+}
+
+function finalizeClose(): void {
+  if (!isClosing.value) return;
+  clearCloseFallback();
+  isClosing.value = false;
   dialogElement.value?.close();
   emit("close");
+}
+
+function clearCloseFallback(): void {
+  if (closeFallbackTimer !== null) window.clearTimeout(closeFallbackTimer);
+  closeFallbackTimer = null;
+}
+
+function handleSurfaceAnimationEnd(): void {
+  if (isClosing.value) finalizeClose();
 }
 
 function handleCancel(event: Event): void {
@@ -135,6 +167,7 @@ function handleBackdropClick(): void {
 }
 
 .confirm-dialog__surface {
+  animation: confirm-dialog-enter var(--transition-panel) both;
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-3);
@@ -145,6 +178,18 @@ function handleBackdropClick(): void {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-6);
+}
+
+.confirm-dialog[open]::backdrop {
+  animation: confirm-dialog-backdrop-enter var(--transition-panel) both;
+}
+
+.confirm-dialog--closing .confirm-dialog__surface {
+  animation: confirm-dialog-leave var(--transition-instant) both;
+}
+
+.confirm-dialog--closing::backdrop {
+  animation: confirm-dialog-backdrop-leave var(--transition-instant) both;
 }
 
 .confirm-dialog header {
@@ -238,5 +283,58 @@ function handleBackdropClick(): void {
 .confirm-dialog__confirm--danger {
   background: var(--color-danger) !important;
   border-color: var(--color-danger) !important;
+}
+
+@keyframes confirm-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes confirm-dialog-leave {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(0.25rem) scale(0.99);
+  }
+}
+
+@keyframes confirm-dialog-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes confirm-dialog-backdrop-leave {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-dialog__surface,
+  .confirm-dialog[open]::backdrop,
+  .confirm-dialog--closing .confirm-dialog__surface,
+  .confirm-dialog--closing::backdrop {
+    animation: none;
+  }
 }
 </style>

@@ -10,7 +10,13 @@
         <span>搜索证据链</span>
         <span class="evidence-search">
           <Search aria-hidden="true" :size="15" />
-          <input v-model.trim="searchText" placeholder="Trace ID、Case 或结论" type="search" />
+          <input
+            v-model.trim="searchText"
+            autocomplete="off"
+            name="trace-search"
+            placeholder="Trace ID、Case 或结论…"
+            type="search"
+          />
         </span>
       </label>
       <AppSelect
@@ -26,7 +32,7 @@
 
     <ErrorState
       v-if="store.status === 'error' && store.error"
-      :is-retrying="store.isRefreshing"
+      :is-retrying="store.isManualRefreshing"
       :message="store.error"
       @retry="store.refresh"
     />
@@ -53,7 +59,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="trace in filteredTraces" :key="trace.id">
+            <tr v-for="trace in paginatedTraces" :key="trace.id">
               <td>
                 <code>{{ trace.caseId }}</code>
               </td>
@@ -81,6 +87,21 @@
           </tbody>
         </table>
       </div>
+      <footer v-if="totalPages > 1" class="evidence-pagination" aria-label="证据链分页">
+        <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+        <div>
+          <button type="button" :disabled="currentPage === 1" @click="handlePage(currentPage - 1)">
+            上一页
+          </button>
+          <button
+            type="button"
+            :disabled="currentPage === totalPages"
+            @click="handlePage(currentPage + 1)"
+          >
+            下一页
+          </button>
+        </div>
+      </footer>
     </template>
     <EmptyState
       v-else
@@ -117,13 +138,14 @@ defineOptions({ name: "EvidencePage" });
 const store = useDashboardStore();
 const route = useRoute();
 const router = useRouter();
+const PAGE_SIZE = 20;
 const searchText = computed({
   get: () => (typeof route.query.search === "string" ? route.query.search : ""),
-  set: (value: string) => updateQuery({ search: value || undefined }),
+  set: (value: string) => updateQuery({ search: value || undefined, page: undefined }),
 });
 const statusFilter = computed({
   get: () => (typeof route.query.status === "string" ? route.query.status : ""),
-  set: (value: string) => updateQuery({ status: value || undefined }),
+  set: (value: string) => updateQuery({ status: value || undefined, page: undefined }),
 });
 const statusOptions = [
   { label: "全部", value: "" },
@@ -141,16 +163,33 @@ const filteredTraces = computed(() => {
         `${trace.id} ${trace.caseId} ${trace.title}`.toLocaleLowerCase().includes(search)),
   );
 });
+const requestedPage = computed(() => {
+  const page = Number.parseInt(typeof route.query.page === "string" ? route.query.page : "1", 10);
+  return Number.isFinite(page) && page > 0 ? page : 1;
+});
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredTraces.value.length / PAGE_SIZE)));
+const currentPage = computed(() => Math.min(requestedPage.value, totalPages.value));
+const paginatedTraces = computed(() =>
+  filteredTraces.value.slice((currentPage.value - 1) * PAGE_SIZE, currentPage.value * PAGE_SIZE),
+);
 
 function traceEventCount(traceId: string): number {
   return store.investigationIndex.byTrace.get(traceId)?.length ?? 0;
 }
 
-function updateQuery(patch: Record<string, string | undefined>): void {
+function updateQuery(patch: Record<string, string | number | undefined>): void {
+  const query = { ...route.query, ...patch };
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === "") delete query[key];
+  }
   void router.replace({
     path: "/evidence",
-    query: { ...route.query, ...patch },
+    query,
   });
+}
+
+function handlePage(page: number): void {
+  updateQuery({ page: page > 1 ? page : undefined });
 }
 
 function handleClearFilters(): void {
@@ -318,5 +357,32 @@ function handleClearFilters(): void {
   font-weight: var(--font-weight-semibold);
   gap: var(--space-1);
   text-decoration: none;
+}
+
+.evidence-pagination {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-12);
+  justify-content: space-between;
+}
+
+.evidence-pagination div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.evidence-pagination button {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+}
+
+.evidence-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 </style>

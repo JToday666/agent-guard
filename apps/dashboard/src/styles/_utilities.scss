@@ -67,6 +67,9 @@
   min-height: 2.375rem;
   padding: 0 var(--space-3);
   text-decoration: none;
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-instant);
 
   &:hover {
     background: var(--color-active-soft);

@@ -1,5 +1,5 @@
 <template>
-  <div class="evidence-detail" :class="{ 'evidence-detail--evidence': Boolean(selectedEvent) }">
+  <div class="evidence-detail">
     <section class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
       <header class="page-header">
         <div>
@@ -26,7 +26,7 @@
       />
       <ErrorState
         v-else-if="store.status === 'error' && store.error"
-        :is-retrying="store.isRefreshing"
+        :is-retrying="store.isManualRefreshing"
         :message="store.error"
         @retry="store.refresh"
       />
@@ -190,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import DataFreshness from "../components/common/DataFreshness.vue";
 import DetailDrawer from "../components/common/DetailDrawer.vue";
@@ -198,7 +198,6 @@ import EmptyState from "../components/common/EmptyState.vue";
 import EventEvidence from "../components/evidence/EventEvidence.vue";
 import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
-import ProvenanceGraph from "../components/evidence/ProvenanceGraph.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
@@ -220,6 +219,9 @@ import { mergeInvestigationQuery } from "../utils/investigation-query";
 import { formatRuleIdsInTextForDisplay, ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EvidenceDetailPage" });
+const ProvenanceGraph = defineAsyncComponent(
+  () => import("../components/evidence/ProvenanceGraph.vue"),
+);
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
@@ -327,9 +329,6 @@ function handleTraceRetry() {
 .evidence-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-}
-.evidence-detail--evidence {
-  grid-template-columns: minmax(0, 1fr) clamp(20rem, 26vw, 24rem);
   height: calc(100vh - var(--top-bar-height));
   overflow: hidden;
 }

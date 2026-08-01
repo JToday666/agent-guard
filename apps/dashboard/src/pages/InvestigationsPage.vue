@@ -1,8 +1,5 @@
 <template>
-  <div
-    class="investigations-page"
-    :class="{ 'investigations-page--detail': Boolean(selectedEvent) }"
-  >
+  <div class="investigations-page">
     <section
       class="workspace-panel investigations-page__main"
       aria-labelledby="investigations-title"
@@ -30,8 +27,10 @@
             <Search aria-hidden="true" :size="15" />
             <input
               v-model.trim="searchDraft"
+              autocomplete="off"
+              name="event-search"
               type="search"
-              placeholder="资源、规则名称、原因、证据链或 Case"
+              placeholder="资源、规则名称、原因、证据链或 Case…"
             />
           </span>
         </label>
@@ -101,7 +100,7 @@
 
       <ErrorState
         v-if="store.status === 'error' && store.error"
-        :is-retrying="store.isRefreshing"
+        :is-retrying="store.isManualRefreshing"
         :message="store.error"
         @retry="store.refresh"
       />
@@ -132,7 +131,10 @@
                 v-for="event in paginatedEvents"
                 :key="event.id"
                 :aria-selected="selectedEvent?.id === event.id"
-                :class="{ 'event-table__selected': selectedEvent?.id === event.id }"
+                :class="{
+                  'event-table__new': newEventIds.has(event.id),
+                  'event-table__selected': selectedEvent?.id === event.id,
+                }"
                 tabindex="0"
                 @click="handleSelectEvent(event.id)"
                 @keydown.enter.prevent="handleSelectEvent(event.id)"
@@ -149,7 +151,11 @@
                 </td>
                 <td>
                   <span class="event-risk" :class="`event-risk--${event.severity}`"
-                    ><i :style="{ width: `${event.riskScore}%` }"></i
+                    ><i
+                      :style="{
+                        transform: `scaleX(${Math.min(1, Math.max(0, event.riskScore / 100))})`,
+                      }"
+                    ></i
                     ><strong>{{ event.riskScore }}</strong></span
                   >
                 </td>
@@ -254,7 +260,11 @@ const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
 const searchDraft = ref("");
+const newEventIds = ref<ReadonlySet<string>>(new Set());
+let hasEventSnapshot = false;
+let knownEventIds = new Set<string>();
 let searchTimer: number | undefined;
+let newEventTimer: number | undefined;
 const query = computed(() => normalizeInvestigationQuery(route.query));
 const index = computed(() => store.investigationIndex);
 const filteredEvents = computed(() => filterInvestigationEvents(index.value, query.value));
@@ -343,8 +353,32 @@ watch(searchDraft, (value) => {
     if (route.name === "investigations") updateQuery({ search: value, page: 1 });
   }, 250);
 });
-onDeactivated(() => window.clearTimeout(searchTimer));
-onUnmounted(() => window.clearTimeout(searchTimer));
+watch(
+  () => index.value.latestEvents.map((event) => event.id),
+  (eventIds) => {
+    if (!hasEventSnapshot) {
+      knownEventIds = new Set(eventIds);
+      hasEventSnapshot = true;
+      return;
+    }
+    const incomingIds = eventIds.filter((eventId) => !knownEventIds.has(eventId));
+    knownEventIds = new Set(eventIds);
+    if (!incomingIds.length) return;
+    window.clearTimeout(newEventTimer);
+    newEventIds.value = new Set(incomingIds);
+    newEventTimer = window.setTimeout(() => {
+      newEventIds.value = new Set();
+    }, 900);
+  },
+  { immediate: true },
+);
+function clearTimers() {
+  window.clearTimeout(searchTimer);
+  window.clearTimeout(newEventTimer);
+  newEventIds.value = new Set();
+}
+onDeactivated(clearTimers);
+onUnmounted(clearTimers);
 
 function updateQuery(patch: Record<string, string | number | undefined>) {
   if (route.name !== "investigations") return;
@@ -410,11 +444,8 @@ function handleExport() {
 <style scoped lang="scss">
 .investigations-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-.investigations-page--detail {
-  grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem);
   height: calc(100vh - var(--top-bar-height));
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
 .investigations-page__main {
@@ -429,15 +460,6 @@ function handleExport() {
   gap: var(--space-3);
   grid-template-columns: minmax(14rem, 1.4fr) repeat(5, minmax(6.25rem, 0.5fr)) auto;
   padding: var(--space-4) 0;
-}
-.investigations-page--detail .investigation-tools {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.investigations-page--detail .investigation-search {
-  grid-column: 1 / -1;
-}
-.investigations-page--detail .clear-filters {
-  justify-self: start;
 }
 .page-header-actions {
   align-items: center;
@@ -559,6 +581,18 @@ function handleExport() {
 .event-table tbody tr {
   cursor: pointer;
 }
+.event-table td:first-child {
+  position: relative;
+}
+.event-table__new td:first-child::before {
+  animation: event-arrival 900ms var(--ease-emphasis) both;
+  background: var(--color-active);
+  content: "";
+  inset: var(--space-2) auto var(--space-2) 0;
+  position: absolute;
+  transform-origin: center;
+  width: 2px;
+}
 .event-table tbody tr:hover,
 .event-table tbody tr:focus-visible,
 .event-table__selected {
@@ -598,6 +632,8 @@ function handleExport() {
   grid-row: 1;
   height: 0.25rem;
   max-width: 100%;
+  transform-origin: left;
+  transition: transform var(--transition-data);
 }
 .event-risk--critical i,
 .event-risk--high i {
@@ -645,5 +681,20 @@ function handleExport() {
 .trace-preview header span {
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
+}
+
+@keyframes event-arrival {
+  0% {
+    opacity: 0;
+    transform: scaleY(0.2);
+  }
+  28% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleY(1);
+  }
 }
 </style>

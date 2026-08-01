@@ -50,13 +50,7 @@ a,
 input,
 select,
 textarea {
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    color var(--transition-fast),
-    opacity var(--transition-fast),
-    transform var(--transition-fast);
+  transition: opacity var(--transition-fast);
 
   &:focus-visible {
     box-shadow: var(--shadow-focus);
@@ -98,30 +92,6 @@ code {
 * {
   scrollbar-color: var(--color-border-strong) transparent;
   scrollbar-width: thin;
-}
-
-@keyframes workspace-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes signal-arrival {
-  0% {
-    background-color: var(--color-active-soft);
-    box-shadow: inset 3px 0 var(--color-jade-bright);
-  }
-
-  100% {
-    background-color: transparent;
-    box-shadow: inset 3px 0 transparent;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

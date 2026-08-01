@@ -7,7 +7,7 @@
 
     <ErrorState
       v-if="store.status === 'error' && store.error"
-      :is-retrying="store.isRefreshing"
+      :is-retrying="store.isManualRefreshing"
       :message="store.error"
       @retry="store.refresh"
     />
@@ -88,8 +88,11 @@
                   <span>下降 {{ pointDelta(row.asrBefore, row.asrAfter) }}</span>
                 </div>
                 <div class="attack-asr__bars" aria-hidden="true">
-                  <i class="before" :style="{ width: barWidth(row.asrBefore) }"></i>
-                  <i class="after" :style="{ width: barWidth(row.asrAfter) }"></i>
+                  <i
+                    class="before"
+                    :style="{ transform: `scaleX(${barScale(row.asrBefore)})` }"
+                  ></i>
+                  <i class="after" :style="{ transform: `scaleX(${barScale(row.asrAfter)})` }"></i>
                 </div>
                 <div class="attack-asr__values">
                   <span>{{ percent(row.asrBefore) }}</span>
@@ -129,7 +132,7 @@
                   <small>{{ row.count }} 条记录</small>
                 </span>
                 <span class="runtime-bar-track" aria-hidden="true"
-                  ><i :style="{ width: `${row.pct}%` }"></i
+                  ><i :style="{ transform: `scaleX(${row.pct / 100})` }"></i
                 ></span>
                 <span class="runtime-bar-val">{{
                   row.avg === null ? "—" : `${row.avg.toFixed(1)} ms`
@@ -162,7 +165,12 @@
             <h2 id="case-title">评测样本</h2>
             <p>完整评测中的样本可追溯到对应证据链</p>
           </div>
-          <span>{{ store.evaluation.cases.length }} 个样本</span>
+          <span>
+            {{ store.evaluation.cases.length }} 个样本
+            <template v-if="totalCasePages > 1">
+              · 第 {{ currentCasePage }} / {{ totalCasePages }} 页
+            </template>
+          </span>
         </header>
         <div
           v-if="selectedCaseId"
@@ -176,61 +184,82 @@
           }}</span>
           <button type="button" @click="handleClearCaseLocator">清除定位</button>
         </div>
-        <div v-if="store.evaluation.cases.length" class="case-table-wrap">
-          <table class="case-table">
-            <caption>
-              评测样本结果
-            </caption>
-            <thead>
-              <tr>
-                <th>样本</th>
-                <th>攻击类型</th>
-                <th>运行时</th>
-                <th>期望</th>
-                <th>实际</th>
-                <th>结果</th>
-                <th>证据链</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in store.evaluation.cases"
-                :key="row.caseId"
-                :class="{ 'case-table__selected': selectedCaseId === row.caseId }"
-                :data-case-id="row.caseId"
+        <template v-if="store.evaluation.cases.length">
+          <div class="case-table-wrap">
+            <table class="case-table">
+              <caption>
+                评测样本结果
+              </caption>
+              <thead>
+                <tr>
+                  <th>样本</th>
+                  <th>攻击类型</th>
+                  <th>运行时</th>
+                  <th>期望</th>
+                  <th>实际</th>
+                  <th>结果</th>
+                  <th>证据链</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in paginatedCases"
+                  :key="row.caseId"
+                  :class="{ 'case-table__selected': selectedCaseId === row.caseId }"
+                  :data-case-id="row.caseId"
+                >
+                  <td>
+                    <RouterLink :to="`/evidence/${row.traceId}`"
+                      ><code>{{ row.caseId }}</code></RouterLink
+                    >
+                  </td>
+                  <td>{{ row.attackType }}</td>
+                  <td>{{ row.runtime }}</td>
+                  <td>
+                    <StatusBadge
+                      :label="getDecisionLabel(row.expectedDecision)"
+                      :tone="getDecisionTone(row.expectedDecision)"
+                    />
+                  </td>
+                  <td>
+                    <StatusBadge
+                      :label="getDecisionLabel(row.actualDecision)"
+                      :tone="getDecisionTone(row.actualDecision)"
+                    />
+                  </td>
+                  <td>
+                    <StatusBadge
+                      :label="row.attackSuccess ? '攻击成功' : row.blocked ? '已拦截' : '未成功'"
+                      :tone="row.attackSuccess ? 'danger' : 'success'"
+                    />
+                  </td>
+                  <td>
+                    <RouterLink :to="`/evidence/${row.traceId}`">{{ row.traceId }}</RouterLink>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <footer v-if="totalCasePages > 1" class="case-pagination" aria-label="评测样本分页">
+            <span>第 {{ currentCasePage }} / {{ totalCasePages }} 页</span>
+            <div>
+              <button
+                type="button"
+                :disabled="currentCasePage === 1"
+                @click="handleCasePage(currentCasePage - 1)"
               >
-                <td>
-                  <RouterLink :to="`/evidence/${row.traceId}`"
-                    ><code>{{ row.caseId }}</code></RouterLink
-                  >
-                </td>
-                <td>{{ row.attackType }}</td>
-                <td>{{ row.runtime }}</td>
-                <td>
-                  <StatusBadge
-                    :label="getDecisionLabel(row.expectedDecision)"
-                    :tone="getDecisionTone(row.expectedDecision)"
-                  />
-                </td>
-                <td>
-                  <StatusBadge
-                    :label="getDecisionLabel(row.actualDecision)"
-                    :tone="getDecisionTone(row.actualDecision)"
-                  />
-                </td>
-                <td>
-                  <StatusBadge
-                    :label="row.attackSuccess ? '攻击成功' : row.blocked ? '已拦截' : '未成功'"
-                    :tone="row.attackSuccess ? 'danger' : 'success'"
-                  />
-                </td>
-                <td>
-                  <RouterLink :to="`/evidence/${row.traceId}`">{{ row.traceId }}</RouterLink>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                上一页
+              </button>
+              <button
+                type="button"
+                :disabled="currentCasePage === totalCasePages"
+                @click="handleCasePage(currentCasePage + 1)"
+              >
+                下一页
+              </button>
+            </div>
+          </footer>
+        </template>
         <EmptyState v-else title="暂无评测样本" message="完整评测包含样本明细后将在此展示。" />
       </section>
     </template>
@@ -262,6 +291,7 @@ defineOptions({ name: "EvaluationPage" });
 const store = useDashboardStore();
 const route = useRoute();
 const router = useRouter();
+const CASE_PAGE_SIZE = 25;
 const countFormatter = new Intl.NumberFormat("zh-CN");
 const selectedCaseId = computed(() =>
   typeof route.query.case_id === "string" ? route.query.case_id : "",
@@ -270,6 +300,30 @@ const selectedCaseExists = computed(() =>
   Boolean(
     selectedCaseId.value &&
     store.evaluation.cases.some((row) => row.caseId === selectedCaseId.value),
+  ),
+);
+const requestedCasePage = computed(() => {
+  const page = Number.parseInt(
+    typeof route.query.case_page === "string" ? route.query.case_page : "1",
+    10,
+  );
+  return Number.isFinite(page) && page > 0 ? page : 1;
+});
+const totalCasePages = computed(() =>
+  Math.max(1, Math.ceil(store.evaluation.cases.length / CASE_PAGE_SIZE)),
+);
+const selectedCasePage = computed(() => {
+  if (!selectedCaseId.value) return null;
+  const index = store.evaluation.cases.findIndex((row) => row.caseId === selectedCaseId.value);
+  return index < 0 ? null : Math.floor(index / CASE_PAGE_SIZE) + 1;
+});
+const currentCasePage = computed(() =>
+  Math.min(selectedCasePage.value ?? requestedCasePage.value, totalCasePages.value),
+);
+const paginatedCases = computed(() =>
+  store.evaluation.cases.slice(
+    (currentCasePage.value - 1) * CASE_PAGE_SIZE,
+    currentCasePage.value * CASE_PAGE_SIZE,
   ),
 );
 const hasRunData = computed(() => store.evaluation.runId !== null);
@@ -375,8 +429,8 @@ function pointDelta(before: number | null, after: number | null): string {
   return `${((before - after) * 100).toFixed(1)}pp`;
 }
 
-function barWidth(value: number | null): string {
-  return value === null ? "0%" : `${Math.max(2, Math.min(100, value * 100))}%`;
+function barScale(value: number | null): number {
+  return value === null ? 0 : Math.max(0.02, Math.min(1, value));
 }
 
 function formatMaybeTime(value: string | null): string {
@@ -384,7 +438,17 @@ function formatMaybeTime(value: string | null): string {
 }
 
 function handleClearCaseLocator() {
-  void router.replace({ path: "/evaluation" });
+  void router.replace({
+    path: "/evaluation",
+    query: currentCasePage.value > 1 ? { case_page: currentCasePage.value } : {},
+  });
+}
+
+function handleCasePage(page: number) {
+  void router.replace({
+    path: "/evaluation",
+    query: page > 1 ? { case_page: page } : {},
+  });
 }
 
 watch(
@@ -392,9 +456,10 @@ watch(
   async ([caseId]) => {
     if (!caseId) return;
     await nextTick();
-    document
-      .querySelector(`[data-case-id="${CSS.escape(caseId)}"]`)
-      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    document.querySelector(`[data-case-id="${CSS.escape(caseId)}"]`)?.scrollIntoView({
+      block: "center",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
   },
   { immediate: true },
 );
@@ -588,6 +653,9 @@ watch(
   display: block;
   height: 0.45rem;
   min-width: 2px;
+  transform-origin: left;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .attack-asr__bars .before {
   background: var(--gradient-data-danger);
@@ -636,6 +704,9 @@ watch(
   display: block;
   height: 100%;
   min-width: 3px;
+  transform-origin: left;
+  transition: transform var(--transition-data);
+  width: 100%;
 }
 .runtime-bar-val {
   color: var(--color-text-muted);
@@ -711,5 +782,28 @@ watch(
 .case-table__selected {
   background: var(--color-active-soft);
   box-shadow: inset 2px 0 var(--color-active);
+}
+.case-pagination {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-12);
+  justify-content: space-between;
+}
+.case-pagination div {
+  display: flex;
+  gap: var(--space-2);
+}
+.case-pagination button {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+}
+.case-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 </style>

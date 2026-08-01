@@ -27,7 +27,7 @@
         aria-keyshortcuts="/"
         autocomplete="off"
         name="search"
-        placeholder="搜索证据链、Case、资源或规则"
+        placeholder="搜索证据链、Case、资源或规则…"
         type="search"
         @keydown.esc="searchText = ''"
       />

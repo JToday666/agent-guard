@@ -23,7 +23,7 @@
       <div class="approvals-page__main">
         <ErrorState
           v-if="store.status === 'error' && store.error"
-          :is-retrying="store.isRefreshing"
+          :is-retrying="store.isManualRefreshing"
           :message="store.error"
           @retry="store.refresh"
         />
@@ -261,18 +261,27 @@ function formatRelativeExpiry(value?: string | null) {
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-4) var(--space-3);
+  position: relative;
   text-align: left;
-  transition:
-    background-color var(--transition-fast),
-    padding-left var(--transition-fast);
+}
+.approval-queue > button::before {
+  background: var(--gradient-active-track);
+  content: "";
+  inset: var(--space-3) auto var(--space-3) 0;
+  position: absolute;
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform var(--transition-fast);
+  width: 3px;
 }
 .approval-queue > button:hover {
   background: var(--color-row-hover);
 }
 .approval-queue > button.approval-queue__item--active {
   background: var(--gradient-active-row);
-  box-shadow: inset 3px 0 var(--color-active);
-  padding-left: var(--space-4);
+}
+.approval-queue > button.approval-queue__item--active::before {
+  transform: scaleY(1);
 }
 .approval-queue__top {
   align-items: center;
