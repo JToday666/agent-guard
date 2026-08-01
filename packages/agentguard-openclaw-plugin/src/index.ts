@@ -51,6 +51,12 @@ const OBSERVATION_HOOKS = [
 
 const PROMPT_MODEL_HOOKS = ["before_prompt_build", "llm_input", "llm_output"] as const;
 const BLOCKING_HOOKS = ["before_tool_call", "message_sending", "before_install"] as const;
+const ENFORCEMENT_HOOKS = [
+  ...BLOCKING_HOOKS,
+  "before_prompt_build",
+  "llm_input",
+  "before_agent_finalize",
+] as const;
 const ALL_REGISTERED_HOOKS = [
   ...BLOCKING_HOOKS,
   ...PROMPT_MODEL_HOOKS,
@@ -921,7 +927,7 @@ function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeCli
             "memory_write_proposed",
             "message_send_proposed",
           ],
-          blocking_hooks: [...BLOCKING_HOOKS, "before_prompt_build", "llm_input", "before_agent_finalize"],
+          blocking_hooks: [...ENFORCEMENT_HOOKS],
           observation_hooks: [...OBSERVATION_HOOKS, "message_received"],
           redaction_hooks: ["tool_result_persist", "before_message_write", "before_agent_finalize"],
           fail_closed_stages: config.failClosedStages,

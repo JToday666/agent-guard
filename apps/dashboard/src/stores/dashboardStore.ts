@@ -91,6 +91,10 @@ const unknownOpenClawStatus: AdapterStatus = {
 
 const POLL_INTERVAL_MS = 10_000;
 
+function errorMessage(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 function applyLatestPolicyHistory(
   summary: PolicySummary,
   history: PolicyHistoryEntry[],
@@ -154,6 +158,12 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return [...counts.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value);
+  }
+
+  function handleSessionError(reason: unknown): void {
+    if (!isSessionAuthError(reason)) return;
+    useAuthStore().invalidateSession(getAuthErrorMessage(reason));
+    stopPolling();
   }
 
   const attackDistribution = computed(() => {
@@ -246,10 +256,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       );
       policyError.value = null;
     } else {
-      policyError.value =
-        policyResult.reason instanceof Error
-          ? policyResult.reason.message
-          : "策略数据加载失败";
+      policyError.value = errorMessage(policyResult.reason, "策略数据加载失败");
     }
 
     const secondaryResults = await Promise.allSettled([
@@ -278,28 +285,28 @@ export const useDashboardStore = defineStore("dashboard", () => {
       }
       evaluationError.value = null;
     } else {
-      evaluationError.value =
-        evaluationResult.reason instanceof Error
-          ? evaluationResult.reason.message
-          : "评测结果加载失败";
+      evaluationError.value = errorMessage(
+        evaluationResult.reason,
+        "评测结果加载失败",
+      );
     }
     if (configFindingsResult.status === "fulfilled") {
       configAuditFindings.value = configFindingsResult.value;
       configAuditError.value = null;
     } else {
-      configAuditError.value =
-        configFindingsResult.reason instanceof Error
-          ? configFindingsResult.reason.message
-          : "配置审计发现项加载失败";
+      configAuditError.value = errorMessage(
+        configFindingsResult.reason,
+        "配置审计发现项加载失败",
+      );
     }
     if (openclawStatusResult.status === "fulfilled") {
       openclawStatus.value = openclawStatusResult.value;
       openclawStatusError.value = null;
     } else {
-      openclawStatusError.value =
-        openclawStatusResult.reason instanceof Error
-          ? openclawStatusResult.reason.message
-          : "OpenClaw 状态加载失败";
+      openclawStatusError.value = errorMessage(
+        openclawStatusResult.reason,
+        "OpenClaw 状态加载失败",
+      );
     }
 
     const secondaryFailures = secondaryResults.filter(
@@ -309,10 +316,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       isSessionAuthError(failure.reason),
     );
     if (secondarySessionFailure) {
-      useAuthStore().invalidateSession(
-        getAuthErrorMessage(secondarySessionFailure.reason),
-      );
-      stopPolling();
+      handleSessionError(secondarySessionFailure.reason);
     }
 
     const failures = [
@@ -328,16 +332,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
         isSessionAuthError(failure.reason),
       );
       if (sessionFailure) {
-        useAuthStore().invalidateSession(
-          getAuthErrorMessage(sessionFailure.reason),
-        );
-        stopPolling();
+        handleSessionError(sessionFailure.reason);
       }
       status.value = getRefreshFailureStatus(hasCompletedInitialLoad);
-      error.value =
-        failures[0].reason instanceof Error
-          ? failures[0].reason.message
-          : "数据加载失败";
+      error.value = errorMessage(failures[0].reason, "数据加载失败");
     } else {
       hasCompletedInitialLoad = true;
       status.value = "ready";
@@ -390,7 +388,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       );
       await refresh();
     } catch (reason) {
-      error.value = reason instanceof Error ? reason.message : "审批提交失败";
+      error.value = errorMessage(reason, "审批提交失败");
       throw reason;
     } finally {
       submittingApprovalId.value = null;
@@ -405,14 +403,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
       const detail = await dashboardDataSource.getTraceDetail(traceId);
       traceDetails.value = { ...traceDetails.value, [traceId]: detail };
     } catch (reason) {
-      if (isSessionAuthError(reason)) {
-        useAuthStore().invalidateSession(getAuthErrorMessage(reason));
-        stopPolling();
-      }
+      handleSessionError(reason);
       traceDetailErrors.value = {
         ...traceDetailErrors.value,
         [traceId]:
-          reason instanceof Error ? reason.message : "证据链数据加载失败",
+          errorMessage(reason, "证据链数据加载失败"),
       };
     } finally {
       if (traceDetailLoadingId.value === traceId)
@@ -455,9 +450,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
         [traceId]: graph,
       };
     } catch (reason) {
+      handleSessionError(reason);
       provenanceErrors.value = {
         ...provenanceErrors.value,
-        [traceId]: reason instanceof Error ? reason.message : "溯源图加载失败",
+        [traceId]: errorMessage(reason, "溯源图加载失败"),
       };
     } finally {
       provenanceLoadingIds.delete(traceId);

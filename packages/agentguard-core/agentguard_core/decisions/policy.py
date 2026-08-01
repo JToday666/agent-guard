@@ -8,6 +8,8 @@ from ..ids import new_id
 from .models import ApprovalIntent, GuardDecision, RuleHit
 from .results import DetectionResult
 
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
 
 def build_guard_decision(results: list[DetectionResult], *, started_at: float) -> GuardDecision:
     latency_ms = int((perf_counter() - started_at) * 1000)
@@ -62,8 +64,7 @@ def _decision_severity(results: list[DetectionResult], risk_score: int) -> str:
     severities = [item.severity for item in results if item.severity is not None]
     if not severities:
         return _severity_for_score(risk_score)
-    severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-    return max(severities, key=lambda item: severity_order.get(item, 0))
+    return max(severities, key=lambda item: _SEVERITY_ORDER.get(item, 0))
 
 
 def _safe_message(decision: str) -> str | None:

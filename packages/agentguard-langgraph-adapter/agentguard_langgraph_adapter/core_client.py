@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 
@@ -75,30 +75,35 @@ class AgentGuardCoreClient:
         return self._get_json(f"/v1/approvals/{approval_id}/wait", timeout=timeout)
 
     def _get_json(self, path: str, timeout: float | None = None) -> dict[str, Any]:
-        url = self.config.core_base_url.rstrip("/") + path
-        try:
-            with httpx.Client(timeout=timeout if timeout is not None else self.config.timeout) as client:
-                response = client.get(url, headers=self._headers())
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPStatusError as exc:
-            detail = _response_error_detail(exc.response)
-            raise CoreClientError(
-                f"Core returned HTTP {exc.response.status_code} for {path}{detail}"
-            ) from exc
-        except httpx.RequestError as exc:
-            raise CoreClientError(f"Core request failed for {path}: {exc}") from exc
-        except ValueError as exc:
-            raise CoreClientError(f"Core returned invalid JSON for {path}") from exc
-        if not isinstance(data, dict):
-            raise CoreClientError(f"Core returned non-object JSON for {path}")
-        return data
+        return self._request_json(
+            "GET",
+            path,
+            timeout=timeout if timeout is not None else self.config.timeout,
+        )
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            path,
+            payload=payload,
+            timeout=self.config.timeout,
+        )
+
+    def _request_json(
+        self,
+        method: Literal["GET", "POST"],
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        timeout: float,
+    ) -> dict[str, Any]:
         url = self.config.core_base_url.rstrip("/") + path
         try:
-            with httpx.Client(timeout=self.config.timeout) as client:
-                response = client.post(url, headers=self._headers(), json=payload)
+            with httpx.Client(timeout=timeout) as client:
+                if method == "GET":
+                    response = client.get(url, headers=self._headers())
+                else:
+                    response = client.post(url, headers=self._headers(), json=payload)
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as exc:

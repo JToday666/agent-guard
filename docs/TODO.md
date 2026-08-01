@@ -1,8 +1,8 @@
-# 已完成后端能力与剩余接入项
+# 后端能力与 Dashboard 接入状态
 
 ## 状态
 
-本文件记录原前端预留能力的后端落地状态。三项后端能力均已完成：
+本文件记录原前端预留能力的后端落地状态，以及 Dashboard 当前的读取入口：
 
 - 安全评测 ASR 数据：已提供导入、latest 查询和 dataset registry 汇总接口。
 - 配置审计 findings：已提供只读查询接口。
@@ -105,8 +105,8 @@ OpenClaw 状态不是每次 Dashboard 刷新实时 shell 探测，而是最近�
 {
   "status": "loaded",
   "loaded": true,
-  "hook_count": 19,
-  "expected_hook_count": 19,
+  "hook_count": 22,
+  "expected_hook_count": 22,
   "last_verified_at": "2026-06-28T00:00:00+00:00",
   "error": null,
   "source": "agentguardctl"
