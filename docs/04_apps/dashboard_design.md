@@ -6,10 +6,13 @@ Dashboard 是 AgentGuard 的监督端。它只通过 Guard API / Control Plane �
 
 Dashboard 前端采用 Vue 3 + TypeScript + Sass + Pinia，使用 pnpm 管理依赖。
 
+本文负责页面职责、数据来源、鉴权边界和交付范围；信息架构、视觉层级、交互模式和前端实现要求由 [Dashboard 前端与 UI 设计规范](dashboard_ui_spec.md) 统一约束。
+
 Dashboard 不做用户登录，不保存长期 token，不生成 launch code，不负责启动浏览器。启动链接由 launcher 通过 Guard API 生成，Vue 只通过 URL query 中的 `launch_code` 换取 browser session。
 
 关联入口：
 
+- [Dashboard 前端与 UI 设计规范](dashboard_ui_spec.md)
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [系统总体架构](../01_overview/architecture.md)
 - [演示脚本](../06_delivery/demo_script.md)
