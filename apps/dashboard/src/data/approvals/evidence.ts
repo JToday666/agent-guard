@@ -34,16 +34,11 @@ function joinEvidenceParts(parts: Array<string | undefined>): string {
   return present.length ? present.join(" / ") : "未提供";
 }
 
-export function formatApprovalEvidenceFields(
-  approval: ApprovalRequest,
-): ApprovalEvidenceFields {
+export function formatApprovalEvidenceFields(approval: ApprovalRequest): ApprovalEvidenceFields {
   return {
     eventId: approval.eventId || "未提供",
     traceId: approval.traceId || "未提供",
     subject: joinEvidenceParts([approval.subjectType, approval.subjectId]),
-    action: joinEvidenceParts([
-      approval.actionName ?? approval.tool,
-      approval.actionId,
-    ]),
+    action: joinEvidenceParts([approval.actionName ?? approval.tool, approval.actionId]),
   };
 }

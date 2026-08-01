@@ -2,35 +2,67 @@
   <div class="event-evidence">
     <section class="event-evidence__risk">
       <div class="risk-score" :class="`risk-score--${event.severity}`">
-        <span>风险分数</span><strong>{{ event.riskScore }}</strong><small>/ 100</small>
+        <span>风险分数</span><strong>{{ event.riskScore }}</strong
+        ><small>/ 100</small>
       </div>
       <dl>
-        <div><dt>决策</dt><dd><StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" /></dd></div>
-        <div><dt>严重性</dt><dd>{{ getRiskSeverityLabel(event.severity) }}</dd></div>
-        <div><dt>阻断</dt><dd>{{ event.blocked ? "已阻断" : "未阻断" }}</dd></div>
-        <div><dt>运行时</dt><dd>{{ event.runtime }}</dd></div>
+        <div>
+          <dt>决策</dt>
+          <dd><StatusBadge :label="getDecisionLabel(event.decision)" :tone="getDecisionTone(event.decision)" /></dd>
+        </div>
+        <div>
+          <dt>严重性</dt>
+          <dd>{{ getRiskSeverityLabel(event.severity) }}</dd>
+        </div>
+        <div>
+          <dt>阻断</dt>
+          <dd>{{ event.blocked ? "已阻断" : "未阻断" }}</dd>
+        </div>
+        <div>
+          <dt>运行时</dt>
+          <dd>{{ event.runtime }}</dd>
+        </div>
       </dl>
     </section>
 
     <section class="event-evidence__section">
       <h3>任务与行为</h3>
       <dl class="evidence-copy">
-        <div><dt>用户任务</dt><dd>{{ event.userTask ?? "未提供" }}</dd></div>
-        <div><dt>Agent 行为</dt><dd>{{ event.agentAction ?? "未提供" }}</dd></div>
-        <div><dt>判定原因</dt><dd>{{ event.reason }}</dd></div><div><dt>目标资源</dt><dd><code>{{ event.resource }}</code></dd></div></dl>
+        <div>
+          <dt>用户任务</dt>
+          <dd>{{ event.userTask ?? "未提供" }}</dd>
+        </div>
+        <div>
+          <dt>Agent 行为</dt>
+          <dd>{{ event.agentAction ?? "未提供" }}</dd>
+        </div>
+        <div>
+          <dt>判定原因</dt>
+          <dd>{{ event.reason }}</dd>
+        </div>
+        <div>
+          <dt>目标资源</dt>
+          <dd>
+            <code>{{ event.resource }}</code>
+          </dd>
+        </div>
+      </dl>
     </section>
 
     <section v-if="event.resourceTargets.length > 1" class="event-evidence__section">
       <h3>资源目标</h3>
       <ul class="resource-list">
-        <li v-for="target in event.resourceTargets" :key="target"><code>{{ target }}</code></li>
+        <li v-for="target in event.resourceTargets" :key="target">
+          <code>{{ target }}</code>
+        </li>
       </ul>
     </section>
 
     <section class="event-evidence__section">
       <h3>命中规则</h3>
       <div class="rule-list">
-        <span v-for="rule in event.ruleHits" :key="rule">{{ ruleLabel(rule) }}</span><span v-if="!event.ruleHits.length">未命中阻断规则</span>
+        <span v-for="rule in event.ruleHits" :key="rule">{{ ruleLabel(rule) }}</span
+        ><span v-if="!event.ruleHits.length">未命中阻断规则</span>
       </div>
     </section>
 
@@ -39,7 +71,9 @@
       <div class="evidence-links">
         <RouterLink :to="`/evidence/${event.traceId}`">完整证据链</RouterLink>
         <button type="button" @click="copy(event.traceId, '证据链 ID')">复制证据链 ID</button>
-        <RouterLink v-if="event.caseId" :to="{ path: '/evaluation', query: { case_id: event.caseId } }">评测样本</RouterLink>
+        <RouterLink v-if="event.caseId" :to="{ path: '/evaluation', query: { case_id: event.caseId } }"
+          >评测样本</RouterLink
+        >
         <RouterLink v-if="event.approvalId" :to="`/approvals/${event.approvalId}`">关联审批</RouterLink>
       </div>
       <span v-if="copyStatus" class="copy-status" role="status">{{ copyStatus }}</span>
@@ -55,11 +89,7 @@ import { computed, ref } from "vue";
 
 import type { AuditEventRow } from "../../types/dashboard";
 import { redactSensitiveData } from "../../utils/data-redaction";
-import {
-  getDecisionLabel,
-  getDecisionTone,
-  getRiskSeverityLabel,
-} from "../../utils/dashboard-formatters";
+import { getDecisionLabel, getDecisionTone, getRiskSeverityLabel } from "../../utils/dashboard-formatters";
 import StatusBadge from "../common/StatusBadge.vue";
 import StructuredDataView from "../common/StructuredDataView.vue";
 import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
@@ -80,7 +110,10 @@ async function copy(value: string, label: string): Promise<void> {
 </script>
 
 <style scoped lang="scss">
-.event-evidence { display: grid; gap: var(--space-6); }
+.event-evidence {
+  display: grid;
+  gap: var(--space-6);
+}
 
 /* 风险摘要区：左侧卡片 + 右侧 dl */
 .event-evidence__risk {
@@ -97,13 +130,36 @@ async function copy(value: string, label: string): Promise<void> {
   display: grid;
   padding-left: var(--space-3);
 }
-.risk-score span, .risk-score small { color: var(--color-text-subtle); font-size: var(--font-size-12); }
-.risk-score strong { font-size: 2rem; line-height: 1.05; }
-.risk-score--critical, .risk-score--high { border-color: var(--color-danger); color: var(--color-danger); }
-.risk-score--medium { border-color: var(--color-warning); color: var(--color-warning); }
+.risk-score span,
+.risk-score small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-12);
+}
+.risk-score strong {
+  font-size: 2rem;
+  line-height: 1.05;
+}
+.risk-score--critical,
+.risk-score--high {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+.risk-score--medium {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
 
-.event-evidence__risk dl { display: grid; gap: var(--space-2); margin: 0; }
-.event-evidence__risk dl > div { align-items: center; display: flex; gap: var(--space-3); justify-content: space-between; }
+.event-evidence__risk dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+.event-evidence__risk dl > div {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
 
 /* dt/dd 通用：dt 明显标签风格，dd 高可读性 */
 .event-evidence dt {
@@ -113,7 +169,10 @@ async function copy(value: string, label: string): Promise<void> {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.event-evidence dd { margin: 0; overflow-wrap: anywhere; }
+.event-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 
 /* 各内容区 */
 .event-evidence__section {
@@ -122,26 +181,57 @@ async function copy(value: string, label: string): Promise<void> {
   gap: var(--space-3);
   padding-top: var(--space-4);
 }
-.event-evidence h3 { color: var(--color-text); font-size: var(--font-size-13); font-weight: var(--font-weight-semibold); margin: 0; }
+.event-evidence h3 {
+  color: var(--color-text);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+}
 
 /* 任务与行为：dt/dd 纵向，带底部分隔线 */
-.evidence-copy { display: grid; gap: 0; margin: 0; }
+.evidence-copy {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
 .evidence-copy > div {
   border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-1);
   padding: var(--space-2) 0;
-  &:last-child { border-bottom: 0; }
+  &:last-child {
+    border-bottom: 0;
+  }
 }
-.evidence-copy dd { color: var(--color-text); line-height: 1.65; }
+.evidence-copy dd {
+  color: var(--color-text);
+  line-height: 1.65;
+}
 
 /* 资源列表 */
-.resource-list { display: grid; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
-.resource-list li { background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-2); padding: var(--space-2); }
-.resource-list code { overflow-wrap: anywhere; }
+.resource-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.resource-list li {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  padding: var(--space-2);
+}
+.resource-list code {
+  overflow-wrap: anywhere;
+}
 
 /* 命中规则 pills */
-.rule-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.rule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
 .rule-list span {
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
@@ -151,8 +241,13 @@ async function copy(value: string, label: string): Promise<void> {
 }
 
 /* 关联证据：pill 按钮风格 */
-.evidence-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.evidence-links a, .evidence-links button {
+.evidence-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.evidence-links a,
+.evidence-links button {
   background: transparent;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
@@ -161,10 +256,22 @@ async function copy(value: string, label: string): Promise<void> {
   font-size: var(--font-size-12);
   padding: var(--space-1) var(--space-3);
   text-decoration: none;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-  &:hover { background: var(--color-surface-muted); border-color: var(--color-active); }
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+  &:hover {
+    background: var(--color-surface-muted);
+    border-color: var(--color-active);
+  }
 }
-.copy-status { color: var(--color-success); font-size: var(--font-size-12); }
+.copy-status {
+  color: var(--color-success);
+  font-size: var(--font-size-12);
+}
 
-@media (max-width: 420px) { .event-evidence__risk { grid-template-columns: 1fr; } }
+@media (max-width: 420px) {
+  .event-evidence__risk {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

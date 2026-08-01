@@ -38,15 +38,10 @@ const metricsDto = {
   average_latency_ms: 4,
 };
 
-async function installApiRoutes(
-  page: Page,
-  options: { authenticated?: boolean; failConfigAudit?: boolean } = {},
-) {
+async function installApiRoutes(page: Page, options: { authenticated?: boolean; failConfigAudit?: boolean } = {}) {
   const authenticated = options.authenticated ?? true;
 
-  await page.route("**/api/health?check_db=true", (route) =>
-    route.fulfill({ json: { status: "ok", database: "ok" } }),
-  );
+  await page.route("**/api/health?check_db=true", (route) => route.fulfill({ json: { status: "ok", database: "ok" } }));
 
   await page.route("**/api/v1/**", (route) => {
     const url = new URL(route.request().url());
@@ -196,9 +191,7 @@ async function installApiRoutes(
   });
 }
 
-test("API mode renders authenticated dashboard and tolerates partial endpoint failure", async ({
-  page,
-}) => {
+test("API mode renders authenticated dashboard and tolerates partial endpoint failure", async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
 
@@ -219,9 +212,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   expect(runtimeErrors).toEqual([]);
 });
 
-test("API mode shows a session error instead of a blank dashboard", async ({
-  page,
-}) => {
+test("API mode shows a session error instead of a blank dashboard", async ({ page }) => {
   await installApiRoutes(page, { authenticated: false });
   await page.goto("/overview");
 

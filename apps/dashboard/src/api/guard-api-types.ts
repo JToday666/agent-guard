@@ -1,8 +1,4 @@
-import type {
-  DecisionStatus,
-  RiskSeverity,
-  RuntimeName,
-} from "../types/dashboard";
+import type { DecisionStatus, RiskSeverity, RuntimeName } from "../types/dashboard";
 
 export interface GuardAuditEventDto {
   audit_id: string;

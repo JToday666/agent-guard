@@ -1,15 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-async function openResponsiveNavigationIfNeeded(
-  page: import("@playwright/test").Page,
-) {
+async function openResponsiveNavigationIfNeeded(page: import("@playwright/test").Page) {
   const menuButton = page.getByRole("button", { name: "菜单" });
   if (await menuButton.isVisible()) await menuButton.click();
 }
 
-test("evidence context does not trap desktop wheel scrolling", async ({
-  page,
-}, testInfo) => {
+test("evidence context does not trap desktop wheel scrolling", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop");
 
   await page.goto("/evidence/trace_007?event_id=evt_20260607_007");
@@ -28,9 +24,7 @@ test("evidence context does not trap desktop wheel scrolling", async ({
   await context.hover();
   await page.mouse.wheel(0, 700);
 
-  await expect
-    .poll(() => main.evaluate((element) => element.scrollTop))
-    .toBeGreaterThan(0);
+  await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 });
 
 test("dashboard routes use the shell transition layer", async ({ page }) => {
@@ -49,9 +43,7 @@ test("dashboard routes use the shell transition layer", async ({ page }) => {
       try {
         return [...sheet.cssRules].some((rule) => {
           if (!("selectorText" in rule)) return false;
-          return String(rule.selectorText).includes(
-            "dashboard-route-enter-active",
-          );
+          return String(rule.selectorText).includes("dashboard-route-enter-active");
         });
       } catch {
         return false;
@@ -67,9 +59,7 @@ test("dashboard routes use the shell transition layer", async ({ page }) => {
   await expect(page.locator(".dashboard-route-view").first()).toBeVisible();
 });
 
-test("provenance graph keeps node text readable without label overlap", async ({
-  page,
-}) => {
+test("provenance graph keeps node text readable without label overlap", async ({ page }) => {
   await page.goto("/evidence/trace_002");
 
   const graph = page.locator(".provenance-wrap");
@@ -91,12 +81,12 @@ test("provenance graph keeps node text readable without label overlap", async ({
 
     const nodes = boxes(".vue-flow__node");
     const edgeLabels = boxes(".vue-flow__edge-text");
-    const overflowingText = Array.from(
-      root.querySelectorAll(".prov-node__label, .prov-node__summary"),
-    ).filter((element) => {
-      const html = element as HTMLElement;
-      return html.scrollWidth > html.clientWidth + 1;
-    }).length;
+    const overflowingText = Array.from(root.querySelectorAll(".prov-node__label, .prov-node__summary")).filter(
+      (element) => {
+        const html = element as HTMLElement;
+        return html.scrollWidth > html.clientWidth + 1;
+      },
+    ).length;
 
     function intersects(
       left: { x: number; y: number; width: number; height: number },

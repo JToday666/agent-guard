@@ -32,9 +32,12 @@ const entries = computed(() => {
     .slice(0, 8)
     .map(([key, value]) => ({
       key,
-      value: typeof value === "object" && value !== null
-        ? Array.isArray(value) ? `${value.length} 项` : `${Object.keys(value).length} 个字段`
-        : String(value ?? "null"),
+      value:
+        typeof value === "object" && value !== null
+          ? Array.isArray(value)
+            ? `${value.length} 项`
+            : `${Object.keys(value).length} 个字段`
+          : String(value ?? "null"),
     }));
 });
 
@@ -45,14 +48,28 @@ async function handleCopy(): Promise<void> {
   } catch {
     copyLabel.value = "复制失败";
   }
-  window.setTimeout(() => { copyLabel.value = "复制 JSON"; }, 1600);
+  window.setTimeout(() => {
+    copyLabel.value = "复制 JSON";
+  }, 1600);
 }
 </script>
 
 <style scoped lang="scss">
-.structured-data { border-top: 1px solid var(--color-border); display: grid; gap: var(--space-3); padding-top: var(--space-4); }
-.structured-data header { align-items: center; display: flex; justify-content: space-between; }
-.structured-data h3 { font-size: var(--font-size-14); margin: 0; }
+.structured-data {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+}
+.structured-data header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.structured-data h3 {
+  font-size: var(--font-size-14);
+  margin: 0;
+}
 .structured-data button {
   background: transparent;
   border: 1px solid var(--color-border);
@@ -61,11 +78,29 @@ async function handleCopy(): Promise<void> {
   cursor: pointer;
   font-size: var(--font-size-12);
   padding: var(--space-1) var(--space-3);
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-  &:hover { background: var(--color-surface-muted); border-color: var(--color-active); }
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+  &:hover {
+    background: var(--color-surface-muted);
+    border-color: var(--color-active);
+  }
 }
-.structured-data__summary { border: 1px solid var(--color-border); border-radius: var(--radius-2); display: grid; gap: 1px; margin: 0; overflow: hidden; }
-.structured-data__summary > div { background: var(--color-surface-muted); display: grid; gap: var(--space-3); grid-template-columns: minmax(6rem, .45fr) minmax(0, 1fr); padding: var(--space-2) var(--space-3); }
+.structured-data__summary {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+}
+.structured-data__summary > div {
+  background: var(--color-surface-muted);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(6rem, 0.45fr) minmax(0, 1fr);
+  padding: var(--space-2) var(--space-3);
+}
 .structured-data dt {
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
@@ -74,7 +109,12 @@ async function handleCopy(): Promise<void> {
   overflow-wrap: anywhere;
   text-transform: uppercase;
 }
-.structured-data dd { color: var(--color-text); font-size: var(--font-size-12); margin: 0; overflow-wrap: anywhere; }
+.structured-data dd {
+  color: var(--color-text);
+  font-size: var(--font-size-12);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .structured-data summary {
   background: transparent;
   border: 1px solid var(--color-border);
@@ -86,15 +126,23 @@ async function handleCopy(): Promise<void> {
   font-weight: var(--font-weight-semibold);
   list-style: none;
   padding: var(--space-1) var(--space-3);
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-  &:hover { background: var(--color-surface-muted); border-color: var(--color-active); }
-  &::marker, &::-webkit-details-marker { display: none; }
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+  &:hover {
+    background: var(--color-surface-muted);
+    border-color: var(--color-active);
+  }
+  &::marker,
+  &::-webkit-details-marker {
+    display: none;
+  }
 }
 .structured-data pre {
   background: #0d1117;
   border-radius: var(--radius-2);
   color: #e6edf3;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
   font-size: var(--font-size-12);
   line-height: 1.65;
   margin: var(--space-3) 0 0;

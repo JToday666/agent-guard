@@ -101,9 +101,7 @@ const navigationGroups = computed(() => [
   },
   {
     label: "运维",
-    items: [
-      { icon: Server, label: "系统状态", to: "/system" },
-    ],
+    items: [{ icon: Server, label: "系统状态", to: "/system" }],
   },
 ]);
 

@@ -6,9 +6,7 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: false,
   outputDir: "test-results-api",
-  projects: [
-    { name: "api-desktop", use: { viewport: { height: 768, width: 1366 } } },
-  ],
+  projects: [{ name: "api-desktop", use: { viewport: { height: 768, width: 1366 } } }],
   reporter: "list",
   testDir: "e2e",
   testMatch: /api-mode\.spec\.ts/,

@@ -42,8 +42,16 @@ const label = computed(() => {
   width: 0.45rem;
 }
 
-.freshness--ready .freshness__dot { background: var(--color-success); }
-.freshness--loading .freshness__dot { background: var(--color-active); }
-.freshness--stale .freshness__dot { background: var(--color-warning); }
-.freshness--error .freshness__dot { background: var(--color-danger); }
+.freshness--ready .freshness__dot {
+  background: var(--color-success);
+}
+.freshness--loading .freshness__dot {
+  background: var(--color-active);
+}
+.freshness--stale .freshness__dot {
+  background: var(--color-warning);
+}
+.freshness--error .freshness__dot {
+  background: var(--color-danger);
+}
 </style>

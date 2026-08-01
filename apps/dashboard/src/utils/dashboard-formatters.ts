@@ -1,8 +1,4 @@
-import type {
-  DecisionStatus,
-  RiskSeverity,
-  TraceSummary,
-} from "../types/dashboard";
+import type { DecisionStatus, RiskSeverity, TraceSummary } from "../types/dashboard";
 
 export type StatusBadgeTone = "neutral" | "success" | "warning" | "danger";
 
@@ -45,9 +41,7 @@ export function getTraceStatusLabel(status: TraceSummary["status"]): string {
   return "已放行";
 }
 
-export function getTraceStatusTone(
-  status: TraceSummary["status"],
-): StatusBadgeTone {
+export function getTraceStatusTone(status: TraceSummary["status"]): StatusBadgeTone {
   if (status === "blocked") return "danger";
   if (status === "paused") return "warning";
   return "success";

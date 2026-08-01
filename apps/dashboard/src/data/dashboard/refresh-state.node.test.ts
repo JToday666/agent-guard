@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  getRefreshFailureStatus,
-  shouldEnterInitialLoading,
-} from "./refresh-state.ts";
+import { getRefreshFailureStatus, shouldEnterInitialLoading } from "./refresh-state.ts";
 
 test("only enters blocking loading from the idle state", () => {
   assert.equal(shouldEnterInitialLoading("idle"), true);

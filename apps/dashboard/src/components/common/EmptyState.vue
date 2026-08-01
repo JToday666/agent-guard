@@ -45,5 +45,4 @@ defineProps<{
     max-width: 36rem;
   }
 }
-
 </style>

@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ApprovalRequest, AuditEventRow } from "../../types/dashboard.ts";
-import {
-  formatApprovalEvidenceFields,
-  mergeApprovalsWithAuditEvidence,
-} from "./evidence.ts";
+import { formatApprovalEvidenceFields, mergeApprovalsWithAuditEvidence } from "./evidence.ts";
 
 function event(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {
@@ -66,10 +63,7 @@ test("fills approval evidence from matching audit event", () => {
   assert.equal(result?.eventId, "audit_1");
   assert.equal(result?.userTask, "整理客户反馈摘要");
   assert.equal(result?.agentAction, "Agent attempted to call send_email");
-  assert.deepEqual(result?.ruleHits, [
-    "P005_external_send",
-    "P004_task_mismatch",
-  ]);
+  assert.deepEqual(result?.ruleHits, ["P005_external_send", "P004_task_mismatch"]);
 });
 
 test("keeps approval fields when no matching audit event is loaded", () => {

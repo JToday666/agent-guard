@@ -30,14 +30,8 @@ export interface ConfigAuditFindingFilters {
 }
 
 export interface DashboardDataSource {
-  getEvents(
-    filters?: EventFilters,
-    signal?: AbortSignal,
-  ): Promise<AuditEventRow[]>;
-  getMetrics(
-    filters?: EventFilters,
-    signal?: AbortSignal,
-  ): Promise<EvalMetrics>;
+  getEvents(filters?: EventFilters, signal?: AbortSignal): Promise<AuditEventRow[]>;
+  getMetrics(filters?: EventFilters, signal?: AbortSignal): Promise<EvalMetrics>;
   getPendingApprovals(signal?: AbortSignal): Promise<ApprovalRequest[]>;
   resolveApproval(
     approval: ApprovalRequest,
@@ -45,24 +39,15 @@ export interface DashboardDataSource {
     csrfToken: string,
   ): Promise<ApprovalResolution>;
   getHealth(signal?: AbortSignal): Promise<HealthStatus>;
-  getEvaluation(
-    metrics: EvalMetrics,
-    signal?: AbortSignal,
-  ): Promise<EvaluationSummary>;
+  getEvaluation(metrics: EvalMetrics, signal?: AbortSignal): Promise<EvaluationSummary>;
   getConfigAuditFindings(
     filters?: ConfigAuditFindingFilters,
     signal?: AbortSignal,
   ): Promise<ConfigAuditFindingRecord[]>;
-  getAdapterStatus(
-    adapterId: string,
-    signal?: AbortSignal,
-  ): Promise<AdapterStatus>;
+  getAdapterStatus(adapterId: string, signal?: AbortSignal): Promise<AdapterStatus>;
   getTraceDetail(traceId: string, signal?: AbortSignal): Promise<TraceDetail>;
   getCurrentPolicy(signal?: AbortSignal): Promise<PolicySummary>;
   getPolicyHistory(signal?: AbortSignal): Promise<PolicyHistoryEntry[]>;
   getAuditIntegrity(signal?: AbortSignal): Promise<AuditIntegrity>;
-  getTraceProvenance(
-    traceId: string,
-    signal?: AbortSignal,
-  ): Promise<ProvenanceGraph>;
+  getTraceProvenance(traceId: string, signal?: AbortSignal): Promise<ProvenanceGraph>;
 }

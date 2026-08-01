@@ -45,11 +45,7 @@ export const useAuthStore = defineStore("auth", () => {
       status.value = "authenticated";
       if (launchCode) {
         url.searchParams.delete("launch_code");
-        window.history.replaceState(
-          {},
-          "",
-          `${url.pathname}${url.search}${url.hash}`,
-        );
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
       }
     } catch (reason) {
       invalidateSession(getAuthErrorMessage(reason));

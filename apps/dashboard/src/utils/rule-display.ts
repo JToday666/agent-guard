@@ -11,13 +11,12 @@ const RULE_ID_PATTERN = /^P\d{3}(?:_|$)/;
 const RULE_ID_TOKEN_PATTERN = /\bP\d{3}(?:_[A-Za-z0-9]+)*\b/g;
 
 function titleCaseWords(value: string): string {
-  const words = value.replace(/^P\d{3}_?/, "").split("_").filter(Boolean);
+  const words = value
+    .replace(/^P\d{3}_?/, "")
+    .split("_")
+    .filter(Boolean);
   if (!words.length) return "安全规则";
-  return words
-    .map((word, index) =>
-      index === 0 ? word[0]?.toUpperCase() + word.slice(1) : word,
-    )
-    .join(" ");
+  return words.map((word, index) => (index === 0 ? word[0]?.toUpperCase() + word.slice(1) : word)).join(" ");
 }
 
 export function isRuleId(value: string): boolean {
@@ -49,10 +48,7 @@ function shouldMapRuleObjectKeys(fieldName: string): boolean {
   return /rule_overrides/i.test(fieldName);
 }
 
-export function prepareEvidenceDataForDisplay(
-  value: unknown,
-  fieldName = "",
-): unknown {
+export function prepareEvidenceDataForDisplay(value: unknown, fieldName = ""): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => {
       if (shouldMapRuleArray(fieldName) && typeof item === "string") {
@@ -65,19 +61,14 @@ export function prepareEvidenceDataForDisplay(
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-        const displayKey =
-          shouldMapRuleObjectKeys(fieldName) && isRuleId(key)
-            ? ruleLabel(key)
-            : key;
+        const displayKey = shouldMapRuleObjectKeys(fieldName) && isRuleId(key) ? ruleLabel(key) : key;
         return [displayKey, prepareEvidenceDataForDisplay(item, key)];
       }),
     );
   }
 
   if (typeof value === "string") {
-    return shouldMapRuleArray(fieldName)
-      ? ruleLabel(value)
-      : formatRuleIdsInTextForDisplay(value);
+    return shouldMapRuleArray(fieldName) ? ruleLabel(value) : formatRuleIdsInTextForDisplay(value);
   }
 
   return value;
