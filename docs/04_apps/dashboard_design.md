@@ -49,6 +49,8 @@ POST /v1/approvals/{id}/resolve
 
 Dashboard 不直接读取 LangGraph、OpenClaw、本地工具或 AttackBench runner 的内部状态。证据链页优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载的 `GET /v1/audit/events` 事件窗口按 `trace_id` 做局部回退，不补造链路事实。溯源图读取 `GET /v1/traces/{trace_id}/provenance`，失败时不影响审计时间线显示。
 
+Dashboard 只轮询当前页面所需的数据域。页面切换时复用最近 10 秒内已成功加载的健康、审批、事件和指标等共享资源，仅请求目标页面缺失或过期的数据；用户主动刷新和页面恢复可见时强制检查当前页面所需资源。该复用只减少重复请求，不改变接口数据含义、轮询周期和局部失败边界。
+
 ## 4. 鉴权边界
 
 Dashboard 使用 HttpOnly browser session 访问 Guard API。状态改变请求必须带 CSRF token，审批 resolve 必须额外提交 approval nonce。
