@@ -98,4 +98,5 @@ docs/
 - 接口字段变更必须先更新 [interface_contract.md](02_core/interface_contract.md)，再同步 schemas 和实现。
 - Core 不依赖 Adapter，不暴露 HTTP API，不读写数据库；Adapter 不写核心规则；Dashboard 不直连运行时。
 - 攻击样本真值由 Redteam 提供，评测指标由 AttackBench runner 汇总。
+- `agentguard_langgraph_bench/` 下的 runner、样本和演示适配器属于评测边界，产品主链路文档只引用其稳定入口，不复制其内部实现说明。
 - 命题要求变化或答辩口径变化时，优先更新追踪矩阵。

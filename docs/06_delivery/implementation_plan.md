@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环和 P1 核心路径均已有可运行实现；P2 部分后端与插件能力已完成，余下开发项以本文为准。
+本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环、P1 核心路径和部分 P2 能力已经实现；下文明确区分当前能力、剩余能力和仅供路线参考的历史阶段。
 
 关联入口：
 
@@ -83,7 +83,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - LangGraph demo graph 已在 planner 前接入 `context_assembled` / `model_input_prepared` 阻断，并在 tool calls 落地前接入 `model_output_produced` 阻断。
 - Dashboard 运行时延迟对比（LangGraph / OpenClaw）由 `latency_ms` 字段前端派生。
 
-## 5. P1 待完成项
+## 5. P1 剩余能力
 
 - 长期记忆真实 runtime/store wrapper 写入前拦截与回滚链路。
 - 更完整的上下文隔离执行策略，包括 sanitize、降权、工具最小权限和下游审计联动。
@@ -100,14 +100,14 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - OpenClaw verify / E2E / reliability 最近状态摘要写入与读取接口已实现：`PUT /v1/adapters/openclaw/status`、`GET /v1/adapters/openclaw/status`。
 - 安全评测 ASR before/after 后端导入、latest 查询和 dataset registry 汇总已实现，统一走 `/v1/evaluations` 系列接口；独立 dataset 资源表、样本版本锁文件和跨 run regression gate 发布门禁仍需后续补齐。
 
-## 7. P2 待完成项
+## 7. P2 剩余能力
 
 - Memory Guard 策略深化、真实 runtime memory 接入和审批/回滚语义完善。
 - Action Critic 从确定性 review 扩展到可评测、可消融的 LLM-as-Judge / rule hybrid 方案。
 - 多渠道审批。
 - 消融实验。
 - OpenClaw verify / E2E / reliability 报告已能写入 adapter status；后续需接入 CI 或发布脚本作为强制门禁。
-- Dashboard 展示新增后端能力属于前端改动，需要单独确认范围，见 `docs/TODO.md`。
+- Dashboard 新增后端能力的接入状态统一记录在 [`docs/TODO.md`](../TODO.md)；本文件只保留阶段路线和验收口径。
 
 ## 8. 分工建议
 

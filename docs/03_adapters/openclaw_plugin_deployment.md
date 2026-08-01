@@ -116,7 +116,7 @@ pnpm openclaw:plugin:verify
 该命令会执行 `openclaw plugins inspect agentguard-security --runtime --json` 并校验：
 
 - `plugin.status=loaded`
-- `plugin.hookCount=19`
+- `plugin.hookCount=22`
 - `plugin.source` 或 `plugin.rootDir` 指向 `.openclaw-dev/agentguard-security`
 - runtime diagnostics 不包含 `allowConversationAccess=true` 缺失导致的 hook block
 - Gateway `Runtime: running`
@@ -198,8 +198,8 @@ pnpm openclaw:plugin:reliability
 ```
 
 该命令会构建插件、重置测试库控制平面表、启动指向测试库的 Guard
-API、复核 OpenClaw runtime 插件加载状态，并触发 19 个 hook 各 50 次，
-共 950 条预期审计事件。若 `127.0.0.1:8088` 已有 Guard API 监听，runner
+API、复核 OpenClaw runtime 插件加载状态，并触发 22 个 hook 各 50 次，
+共 1,100 条预期审计事件。若 `127.0.0.1:8088` 已有 Guard API 监听，runner
 会直接停止，避免误写开发库。
 
 输出文件：
@@ -217,8 +217,8 @@ API、复核 OpenClaw runtime 插件加载状态，并触发 19 个 hook 各 50 
   `model_input_prepared=50`、`model_output_produced=50`、
   `message_send_proposed=50`、`config_audit=50`、
   `tool_result_produced=50`、`runtime_observation=600`
-- adapter status 显示 `loaded=true`、`hook_count=19`、
-  `expected_hook_count=19`
+- adapter status 显示 `loaded=true`、`hook_count=22`、
+  `expected_hook_count=22`
 - audit integrity `valid=true`
 - 阻断型 hook：`before_tool_call` 返回 `block=true`，
   `message_sending` 返回 `cancel=true`，`before_install` 返回 `block=true`

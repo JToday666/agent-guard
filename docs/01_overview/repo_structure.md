@@ -10,39 +10,31 @@
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [实施路线与验收标准](../06_delivery/implementation_plan.md)
 
-## 2. 目标结构
+## 2. 当前结构
 
-本节是 P1/P2 目标结构，包含当前尚未创建的独立 SDK、Adapter、OpenClaw Plugin、`redteam/` 和 `policies/` 目录。当前实现中，LangGraph demo、适配器、AttackBench 数据集与 runner 集中在 `agentguard_langgraph_bench/`，策略引擎在 `packages/agentguard-core/`。
+以下结构以仓库当前实现为准。`agentguard_langgraph_bench/` 同时包含评测 runner、样本和演示适配器；产品主链路的 SDK、API 和 Dashboard 位于 `packages/` 与 `apps/`。
 
 ```text
 agent-guard/
 ├── README.md
+├── DEPLOYMENT_LOCAL.md
 ├── apps/
+│   ├── cli/
 │   ├── guard-api/
-│   ├── dashboard/
-│   └── demo-agent/
+│   └── dashboard/
 ├── packages/
 │   ├── agentguard-core/
-│   ├── agentguard-sdk/
-│   ├── agentguard-adapters/
+│   ├── agentguard-langgraph-adapter/
+│   ├── agentguard-openclaw-bench-tools/
 │   └── agentguard-openclaw-plugin/
-├── redteam/
-│   ├── datasets/
-│   ├── scripts/
-│   ├── runners/
-│   ├── checkers/
-│   └── reports/
-├── policies/
-│   ├── default.yaml
-│   ├── strict.yaml
-│   ├── demo.yaml
-│   └── rules/
+├── agentguard_langgraph_bench/
+│   ├── bench/          # AttackBench runner、样本、沙箱和评测逻辑
+│   ├── adapter/        # 旧导入路径兼容层
+│   ├── adapters/       # 外部 Agent 适配器
+│   └── demo_agent/     # LangGraph 演示 Agent
 ├── schemas/
 ├── tests/
 ├── scripts/
-├── deploy/
-├── data/
-├── artifacts/
 └── docs/
 ```
 
@@ -56,27 +48,28 @@ docs/
 ├── 03_adapters/
 ├── 04_apps/
 ├── 05_redteam/
-└── 06_delivery/
+├── 06_delivery/
+└── 07_auth/
 ```
 
 文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。
 
-## 4. 目标目录职责
+## 4. 目录职责
 
 | 目录                                  | 职责                                                                        |
 | ------------------------------------- | --------------------------------------------------------------------------- |
 | `apps/guard-api`                      | Guard API / Control Plane 后端，负责 HTTP、鉴权、审计、审批、指标和状态服务 |
 | `apps/dashboard`                      | Vue 3 监督端页面，只通过 Guard API 获取数据和提交审批                       |
-| `apps/demo-agent`                     | 被保护的 LangGraph 示例 Agent 和 Mock Tools                                 |
+| `apps/cli`                            | `agentguardctl` 无头控制与验收命令                                          |
 | `packages/agentguard-core`            | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出        |
-| `packages/agentguard-sdk`             | Guard API 客户端、事件构造、运行时接入辅助                                  |
-| `packages/agentguard-adapters`        | LangGraph 等运行时适配层                                                    |
-| `packages/agentguard-openclaw-plugin` | OpenClaw 插件包                                                             |
-| `redteam/`                            | 攻击样本、正常样本、runner、成功条件、报告                                  |
-| `policies/`                           | 策略、规则、权限配置                                                        |
+| `packages/agentguard-langgraph-adapter` | LangGraph 风格工具执行的事件映射和执行前控制                              |
+| `packages/agentguard-openclaw-plugin` | OpenClaw runtime hook 插件                                                 |
+| `packages/agentguard-openclaw-bench-tools` | OpenClaw AttackBench 本地工具桥接                                       |
+| `agentguard_langgraph_bench/`         | AttackBench runner、样本、沙箱、演示 Agent 和外部 Agent 适配器               |
 | `schemas/`                            | JSON Schema 与 OpenAPI                                                      |
 | `tests/`                              | 单元测试、契约测试、集成测试                                                |
-| `artifacts/`                          | 截图、trace、视频、大结果，默认不入库                                       |
+| `scripts/`                            | 本地开发、插件安装验证和辅助命令                                            |
+| `docs/`                               | 架构、接口、适配器、部署、鉴权和评测文档                                    |
 
 ## 5. 边界规则
 
@@ -85,7 +78,7 @@ docs/
 - Dashboard 不直连运行时，不直接判断攻击成功。
 - Guard API / Control Plane API 采用统一 Capability Auth；Adapter 使用 adapter token，Dashboard 使用 browser session。
 - Redteam 提供 ground truth，runner 负责统计指标。
-- Policies 不硬编码进 Adapter。
+- 策略模型位于 `packages/agentguard-core/agentguard_core/policies/`，不硬编码进 Adapter。
 - Schemas 是 API 和事件字段的唯一结构来源。
 
 ## 6. 验收证据

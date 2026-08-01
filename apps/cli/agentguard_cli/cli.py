@@ -320,7 +320,9 @@ def _with_launch_code(dashboard_url: str, launch_code: str) -> str:
     parts = urlsplit(dashboard_url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query["launch_code"] = launch_code
-    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", parts.query and urlencode(query) or urlencode(query), parts.fragment))
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path or "/", urlencode(query), parts.fragment)
+    )
 
 
 def _http_error_message(response: httpx.Response) -> str:
