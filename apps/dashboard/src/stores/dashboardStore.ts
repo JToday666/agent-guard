@@ -7,10 +7,6 @@ import { dashboardDataSource } from "../data/sources/index";
 import { deriveMetrics, groupDecisionTrend } from "../data/dashboard/metrics";
 import { buildInvestigationIndex, buildTraceSummary } from "../data/investigations";
 import {
-  getRefreshFailureStatus,
-  shouldEnterInitialLoading,
-} from "../data/dashboard/refresh-state";
-import {
   hasSameEventWindow,
   hasSameEvaluation,
   hasSameMetrics,
@@ -34,6 +30,18 @@ import type {
 } from "../types/dashboard";
 import { getAuthErrorMessage, isSessionAuthError } from "../utils/auth-error-messages";
 import { getApprovalResolutionFailure } from "../utils/approval-resolution";
+import {
+  getCachedValue,
+  getFreshCacheValue,
+  removeCacheValue,
+  setBoundedCacheValue,
+  type TimedCache,
+  unwrapTimedCache,
+} from "../utils/bounded-cache";
+import {
+  getDashboardRefreshResources,
+  type DashboardRefreshScope,
+} from "../utils/dashboard-refresh-scope";
 import { useAuthStore } from "./authStore";
 
 const emptyMetrics: EvalMetrics = {
@@ -85,6 +93,42 @@ const unknownOpenClawStatus: AdapterStatus = {
 };
 
 const POLL_INTERVAL_MS = 10_000;
+const TRACE_CACHE_MAX_ENTRIES = 8;
+const TRACE_DETAIL_TTL_MS = 60_000;
+const TRACE_PROVENANCE_TTL_MS = 120_000;
+
+interface ScopeRefreshState {
+  error: string | null;
+  hasLoaded: boolean;
+  status: DataStatus;
+  updatedAt: string | null;
+}
+
+interface RefreshTask {
+  critical: boolean;
+  label: string;
+  promise: Promise<void>;
+}
+
+function createScopeRefreshState(): ScopeRefreshState {
+  return {
+    error: null,
+    hasLoaded: false,
+    status: "idle",
+    updatedAt: null,
+  };
+}
+
+function createScopeRefreshStates(): Record<DashboardRefreshScope, ScopeRefreshState> {
+  return {
+    approvals: createScopeRefreshState(),
+    evaluation: createScopeRefreshState(),
+    evidence: createScopeRefreshState(),
+    investigations: createScopeRefreshState(),
+    overview: createScopeRefreshState(),
+    system: createScopeRefreshState(),
+  };
+}
 
 function errorMessage(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback;
@@ -114,14 +158,15 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const configAuditError = ref<string | null>(null);
   const openclawStatus = ref<AdapterStatus>({ ...unknownOpenClawStatus });
   const openclawStatusError = ref<string | null>(null);
-  const traceDetails = ref<Record<string, TraceDetail>>({});
+  const traceDetailCache = ref<TimedCache<TraceDetail>>({});
   const traceDetailErrors = ref<Record<string, string>>({});
   const traceDetailLoadingId = ref<string | null>(null);
   const policySummary = ref<PolicySummary | null>(null);
   const policyHistory = ref<PolicyHistoryEntry[]>([]);
   const policyError = ref<string | null>(null);
   const auditIntegrity = ref<AuditIntegrity | null>(null);
-  const provenanceByTrace = ref<Record<string, ProvenanceGraph>>({});
+  const auditIntegrityError = ref<string | null>(null);
+  const provenanceCache = ref<TimedCache<ProvenanceGraph>>({});
   const provenanceErrors = ref<Record<string, string>>({});
   const provenanceLoadingIds = new Set<string>();
   const health = ref<HealthStatus>({
@@ -129,22 +174,29 @@ export const useDashboardStore = defineStore("dashboard", () => {
     database: "unknown",
     checkedAt: null,
   });
-  const status = ref<DataStatus>("idle");
-  const error = ref<string | null>(null);
-  const lastUpdatedAt = ref<string | null>(null);
-  const isRefreshing = ref(false);
+  const activeScope = ref<DashboardRefreshScope>("overview");
+  const scopeStates = ref(createScopeRefreshStates());
+  const activeRefreshScope = ref<DashboardRefreshScope | null>(null);
   const submittingApprovalId = ref<string | null>(null);
   const approvalResolutionError = ref<string | null>(null);
   const approvalResolutionState = ref<"idle" | "submitting" | "succeeded" | "conflict" | "failed">(
     "idle",
   );
   let pollTimer: number | null = null;
-  let activeController: AbortController | null = null;
-  let activeRefresh: Promise<void> | null = null;
-  let hasCompletedInitialLoad = false;
+  let activeRefresh: {
+    controller: AbortController;
+    promise: Promise<void>;
+    scope: DashboardRefreshScope;
+  } | null = null;
   let pollingActive = false;
   let visibilityHandler: (() => void) | null = null;
 
+  const status = computed(() => scopeStates.value[activeScope.value].status);
+  const error = computed(() => scopeStates.value[activeScope.value].error);
+  const lastUpdatedAt = computed(() => scopeStates.value[activeScope.value].updatedAt);
+  const isRefreshing = computed(() => activeRefreshScope.value === activeScope.value);
+  const traceDetails = computed(() => unwrapTimedCache(traceDetailCache.value));
+  const provenanceByTrace = computed(() => unwrapTimedCache(provenanceCache.value));
   const pendingCount = computed(
     () => approvals.value.filter((item) => item.status === "pending").length,
   );
@@ -192,132 +244,245 @@ export const useDashboardStore = defineStore("dashboard", () => {
       .sort((left, right) => Date.parse(right.lastEventAt) - Date.parse(left.lastEventAt)),
   );
 
-  async function performRefresh(): Promise<void> {
-    const controller = new AbortController();
-    activeController = controller;
-    if (shouldEnterInitialLoading(status.value)) status.value = "loading";
-
-    const results = await Promise.allSettled([
-      dashboardDataSource.getEvents({}, controller.signal),
-      dashboardDataSource.getMetrics({}, controller.signal),
-      dashboardDataSource.getPendingApprovals(controller.signal),
-      dashboardDataSource.getHealth(controller.signal),
-      dashboardDataSource.getCurrentPolicy(controller.signal),
-      dashboardDataSource.getPolicyHistory(controller.signal),
-    ] as const);
-
-    const [
-      eventsResult,
-      metricsResult,
-      approvalsResult,
-      healthResult,
-      policyResult,
-      policyHistoryResult,
-    ] = results;
-    let visibleEvents = events.value;
-    if (
-      eventsResult.status === "fulfilled" &&
-      !hasSameEventWindow(events.value, eventsResult.value)
-    ) {
-      events.value = eventsResult.value;
-    }
-    if (eventsResult.status === "fulfilled") visibleEvents = eventsResult.value;
-    if (metricsResult.status === "fulfilled") {
-      if (!hasSameMetrics(metrics.value, metricsResult.value)) {
-        metrics.value = metricsResult.value;
-      }
-    } else if (eventsResult.status === "fulfilled") {
-      const derivedMetrics = deriveMetrics(events.value);
-      if (!hasSameMetrics(metrics.value, derivedMetrics)) {
-        metrics.value = derivedMetrics;
-      }
-    }
-    if (approvalsResult.status === "fulfilled") {
-      const enrichedApprovals = mergeApprovalsWithAuditEvidence(
-        approvalsResult.value,
-        visibleEvents,
-      );
-      approvals.value = reconcileApprovals(approvals.value, enrichedApprovals);
-    }
-    if (healthResult.status === "fulfilled") health.value = healthResult.value;
-    if (policyHistoryResult.status === "fulfilled") {
-      policyHistory.value = policyHistoryResult.value;
-    }
-    if (policyResult.status === "fulfilled") {
-      const history =
-        policyHistoryResult.status === "fulfilled"
-          ? policyHistoryResult.value
-          : policyHistory.value;
-      policySummary.value = applyLatestPolicyHistory(policyResult.value, history);
-      policyError.value = null;
-    } else {
-      policyError.value = errorMessage(policyResult.reason, "策略数据加载失败");
+  async function performRefresh(
+    scope: DashboardRefreshScope,
+    controller: AbortController,
+  ): Promise<void> {
+    const resources = getDashboardRefreshResources(scope);
+    const previousState = scopeStates.value[scope];
+    if (previousState.status === "idle") {
+      scopeStates.value = {
+        ...scopeStates.value,
+        [scope]: { ...previousState, status: "loading" },
+      };
     }
 
-    const secondaryResults = await Promise.allSettled([
-      dashboardDataSource.getAuditIntegrity(controller.signal),
-      dashboardDataSource.getEvaluation(metrics.value, controller.signal),
-      dashboardDataSource.getConfigAuditFindings({ limit: 20 }, controller.signal),
-      dashboardDataSource.getAdapterStatus("openclaw", controller.signal),
-    ] as const);
+    const eventsRequest = resources.has("events")
+      ? dashboardDataSource.getEvents({}, controller.signal)
+      : null;
+    const metricsRequest = resources.has("metrics")
+      ? dashboardDataSource.getMetrics({}, controller.signal)
+      : null;
+    const policyHistoryRequest = resources.has("policyHistory")
+      ? dashboardDataSource.getPolicyHistory(controller.signal)
+      : null;
+    const tasks: RefreshTask[] = [];
 
-    const [auditIntegrityResult, evaluationResult, configFindingsResult, openclawStatusResult] =
-      secondaryResults;
-
-    if (auditIntegrityResult.status === "fulfilled") {
-      auditIntegrity.value = auditIntegrityResult.value;
-    }
-    if (evaluationResult.status === "fulfilled") {
-      if (!hasSameEvaluation(evaluation.value, evaluationResult.value)) {
-        evaluation.value = evaluationResult.value;
-      }
-      evaluationError.value = null;
-    } else {
-      evaluationError.value = errorMessage(evaluationResult.reason, "评测结果加载失败");
-    }
-    if (configFindingsResult.status === "fulfilled") {
-      configAuditFindings.value = configFindingsResult.value;
-      configAuditError.value = null;
-    } else {
-      configAuditError.value = errorMessage(configFindingsResult.reason, "配置审计发现项加载失败");
-    }
-    if (openclawStatusResult.status === "fulfilled") {
-      openclawStatus.value = openclawStatusResult.value;
-      openclawStatusError.value = null;
-    } else {
-      openclawStatusError.value = errorMessage(
-        openclawStatusResult.reason,
-        "OpenClaw 状态加载失败",
-      );
+    if (eventsRequest) {
+      tasks.push({
+        critical: scope === "overview" || scope === "investigations" || scope === "evidence",
+        label: "审计事件",
+        promise: eventsRequest.then((nextEvents) => {
+          if (!hasSameEventWindow(events.value, nextEvents)) {
+            events.value = nextEvents;
+          }
+        }),
+      });
     }
 
-    const secondaryFailures = secondaryResults.filter(
-      (result) => result.status === "rejected",
-    ) as PromiseRejectedResult[];
-    const secondarySessionFailure = secondaryFailures.find((failure) =>
-      isSessionAuthError(failure.reason),
+    if (metricsRequest) {
+      tasks.push({
+        critical: false,
+        label: "审计指标",
+        promise: metricsRequest
+          .then((nextMetrics) => {
+            if (!hasSameMetrics(metrics.value, nextMetrics)) {
+              metrics.value = nextMetrics;
+            }
+          })
+          .catch((reason: unknown) => {
+            if (eventsRequest) {
+              return eventsRequest.then((nextEvents) => {
+                const derivedMetrics = deriveMetrics(nextEvents);
+                if (!hasSameMetrics(metrics.value, derivedMetrics)) {
+                  metrics.value = derivedMetrics;
+                }
+                throw reason;
+              });
+            }
+            throw reason;
+          }),
+      });
+    }
+
+    if (resources.has("approvals")) {
+      tasks.push({
+        critical: scope === "approvals",
+        label: "审批队列",
+        promise: dashboardDataSource
+          .getPendingApprovals(controller.signal)
+          .then(async (pendingApprovals) => {
+            const visibleEvents = eventsRequest
+              ? await eventsRequest.catch(() => events.value)
+              : events.value;
+            const enrichedApprovals = mergeApprovalsWithAuditEvidence(
+              pendingApprovals,
+              visibleEvents,
+            );
+            approvals.value = reconcileApprovals(approvals.value, enrichedApprovals);
+          }),
+      });
+    }
+
+    if (resources.has("health")) {
+      tasks.push({
+        critical: scope === "system",
+        label: "服务健康",
+        promise: dashboardDataSource.getHealth(controller.signal).then((nextHealth) => {
+          health.value = nextHealth;
+        }),
+      });
+    }
+
+    if (policyHistoryRequest) {
+      tasks.push({
+        critical: false,
+        label: "策略历史",
+        promise: policyHistoryRequest.then((history) => {
+          policyHistory.value = history;
+        }),
+      });
+    }
+
+    if (resources.has("policy")) {
+      tasks.push({
+        critical: false,
+        label: "策略摘要",
+        promise: dashboardDataSource
+          .getCurrentPolicy(controller.signal)
+          .then(async (summary) => {
+            const history = policyHistoryRequest
+              ? await policyHistoryRequest.catch(() => policyHistory.value)
+              : policyHistory.value;
+            policySummary.value = applyLatestPolicyHistory(summary, history);
+            policyError.value = null;
+          })
+          .catch((reason: unknown) => {
+            if (!controller.signal.aborted) {
+              policyError.value = errorMessage(reason, "策略数据加载失败");
+            }
+            throw reason;
+          }),
+      });
+    }
+
+    if (resources.has("auditIntegrity")) {
+      tasks.push({
+        critical: false,
+        label: "审计完整性",
+        promise: dashboardDataSource
+          .getAuditIntegrity(controller.signal)
+          .then((integrity) => {
+            auditIntegrity.value = integrity;
+            auditIntegrityError.value = null;
+          })
+          .catch((reason: unknown) => {
+            if (!controller.signal.aborted) {
+              auditIntegrityError.value = errorMessage(reason, "审计完整性加载失败");
+            }
+            throw reason;
+          }),
+      });
+    }
+
+    if (resources.has("evaluation")) {
+      const evaluationMetrics = metricsRequest
+        ? metricsRequest.catch(() => metrics.value)
+        : Promise.resolve(metrics.value);
+      tasks.push({
+        critical: scope === "evaluation",
+        label: "安全评测",
+        promise: evaluationMetrics
+          .then((currentMetrics) =>
+            dashboardDataSource.getEvaluation(currentMetrics, controller.signal),
+          )
+          .then((nextEvaluation) => {
+            if (!hasSameEvaluation(evaluation.value, nextEvaluation)) {
+              evaluation.value = nextEvaluation;
+            }
+            evaluationError.value = null;
+          })
+          .catch((reason: unknown) => {
+            if (!controller.signal.aborted) {
+              evaluationError.value = errorMessage(reason, "评测结果加载失败");
+            }
+            throw reason;
+          }),
+      });
+    }
+
+    if (resources.has("configAudit")) {
+      tasks.push({
+        critical: false,
+        label: "配置审计",
+        promise: dashboardDataSource
+          .getConfigAuditFindings({ limit: 20 }, controller.signal)
+          .then((findings) => {
+            configAuditFindings.value = findings;
+            configAuditError.value = null;
+          })
+          .catch((reason: unknown) => {
+            if (!controller.signal.aborted) {
+              configAuditError.value = errorMessage(reason, "配置审计发现项加载失败");
+            }
+            throw reason;
+          }),
+      });
+    }
+
+    if (resources.has("adapter")) {
+      tasks.push({
+        critical: false,
+        label: "OpenClaw 适配器",
+        promise: dashboardDataSource
+          .getAdapterStatus("openclaw", controller.signal)
+          .then((adapterStatus) => {
+            openclawStatus.value = adapterStatus;
+            openclawStatusError.value = null;
+          })
+          .catch((reason: unknown) => {
+            if (!controller.signal.aborted) {
+              openclawStatusError.value = errorMessage(reason, "OpenClaw 状态加载失败");
+            }
+            throw reason;
+          }),
+      });
+    }
+
+    const results = await Promise.allSettled(tasks.map((task) => task.promise));
+    if (controller.signal.aborted) return;
+
+    const failures = results.flatMap((result, index) =>
+      result.status === "rejected" ? [{ ...tasks[index]!, reason: result.reason }] : [],
     );
-    if (secondarySessionFailure) {
-      handleSessionError(secondarySessionFailure.reason);
-    }
+    const sessionFailure = failures.find((failure) => isSessionAuthError(failure.reason));
+    if (sessionFailure) handleSessionError(sessionFailure.reason);
 
-    const failures = [eventsResult, metricsResult, approvalsResult, healthResult].filter(
-      (result) => result.status === "rejected",
-    ) as PromiseRejectedResult[];
-    if (failures.length) {
-      const sessionFailure = failures.find((failure) => isSessionAuthError(failure.reason));
-      if (sessionFailure) {
-        handleSessionError(sessionFailure.reason);
-      }
-      status.value = getRefreshFailureStatus(hasCompletedInitialLoad);
-      error.value = errorMessage(failures[0].reason, "数据加载失败");
-    } else {
-      hasCompletedInitialLoad = true;
-      status.value = "ready";
-      error.value = null;
-      lastUpdatedAt.value = new Date().toISOString();
-    }
-    if (activeController === controller) activeController = null;
+    const criticalFailures = failures.filter((failure) => failure.critical);
+    const hasFreshPageData = criticalFailures.length === 0;
+    const hasLoaded = previousState.hasLoaded || hasFreshPageData;
+    const status: DataStatus =
+      criticalFailures.length && !previousState.hasLoaded
+        ? "error"
+        : failures.length
+          ? "stale"
+          : "ready";
+    const failedLabels = [...new Set(failures.map((failure) => failure.label))];
+    const error = failedLabels.length
+      ? `${failedLabels.join("、")}暂未更新${
+          previousState.hasLoaded ? "，当前保留上次成功数据" : ""
+        }`
+      : null;
+
+    scopeStates.value = {
+      ...scopeStates.value,
+      [scope]: {
+        error,
+        hasLoaded,
+        status,
+        updatedAt: hasFreshPageData ? new Date().toISOString() : previousState.updatedAt,
+      },
+    };
   }
 
   function clearPollTimer(): void {
@@ -334,17 +499,36 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }, POLL_INTERVAL_MS);
   }
 
-  function refresh(): Promise<void> {
-    if (activeRefresh) return activeRefresh;
+  function setActiveScope(scope: DashboardRefreshScope): void {
+    if (activeScope.value === scope) return;
+    activeScope.value = scope;
+    if (activeRefresh && activeRefresh.scope !== scope) {
+      activeRefresh.controller.abort();
+    }
+  }
+
+  function refresh(scope = activeScope.value): Promise<void> {
+    setActiveScope(scope);
+    if (activeRefresh?.scope === scope) return activeRefresh.promise;
+    if (activeRefresh) activeRefresh.controller.abort();
     if (pollingActive) clearPollTimer();
-    isRefreshing.value = true;
-    const refreshTask = performRefresh().finally(() => {
-      if (activeRefresh === refreshTask) activeRefresh = null;
-      isRefreshing.value = false;
-      scheduleNextPoll();
+    const controller = new AbortController();
+    activeRefreshScope.value = scope;
+    const refreshRecord = {
+      controller,
+      scope,
+      promise: Promise.resolve(),
+    };
+    const promise = performRefresh(scope, controller).finally(() => {
+      if (activeRefresh === refreshRecord) {
+        activeRefresh = null;
+        activeRefreshScope.value = null;
+        scheduleNextPoll();
+      }
     });
-    activeRefresh = refreshTask;
-    return refreshTask;
+    refreshRecord.promise = promise;
+    activeRefresh = refreshRecord;
+    return promise;
   }
 
   async function resolveApproval(approval: ApprovalRequest, decision: "allow_once" | "deny") {
@@ -361,12 +545,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
       );
       approvalResolutionState.value = "succeeded";
       approvals.value = approvals.value.filter((item) => item.id !== approval.id);
-      const traceDetailsCopy = { ...traceDetails.value };
-      const provenanceCopy = { ...provenanceByTrace.value };
-      delete traceDetailsCopy[approval.traceId];
-      delete provenanceCopy[approval.traceId];
-      traceDetails.value = traceDetailsCopy;
-      provenanceByTrace.value = provenanceCopy;
+      traceDetailCache.value = removeCacheValue(traceDetailCache.value, approval.traceId);
+      provenanceCache.value = removeCacheValue(provenanceCache.value, approval.traceId);
       void refreshApprovals().catch(handleSessionError);
       return resolution;
     } catch (reason) {
@@ -385,16 +565,25 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   async function loadTraceDetail(traceId: string): Promise<void> {
     if (!traceId || traceDetailLoadingId.value === traceId) return;
+    if (getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) return;
+    const cachedDetail = getCachedValue(traceDetailCache.value, traceId);
     traceDetailLoadingId.value = traceId;
     traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
     try {
       const detail = await dashboardDataSource.getTraceDetail(traceId);
-      traceDetails.value = { ...traceDetails.value, [traceId]: detail };
+      traceDetailCache.value = setBoundedCacheValue(
+        traceDetailCache.value,
+        traceId,
+        detail,
+        TRACE_CACHE_MAX_ENTRIES,
+      );
     } catch (reason) {
       handleSessionError(reason);
       traceDetailErrors.value = {
         ...traceDetailErrors.value,
-        [traceId]: errorMessage(reason, "证据链数据加载失败"),
+        [traceId]: cachedDetail
+          ? "证据链刷新失败，当前显示上次成功加载的数据"
+          : errorMessage(reason, "证据链数据加载失败"),
       };
     } finally {
       if (traceDetailLoadingId.value === traceId) traceDetailLoadingId.value = null;
@@ -417,23 +606,30 @@ export const useDashboardStore = defineStore("dashboard", () => {
     clearPollTimer();
     if (visibilityHandler) document.removeEventListener("visibilitychange", visibilityHandler);
     visibilityHandler = null;
-    activeController?.abort();
+    activeRefresh?.controller.abort();
   }
 
   async function loadTraceProvenance(traceId: string): Promise<void> {
-    if (!traceId || provenanceByTrace.value[traceId] || provenanceLoadingIds.has(traceId)) return;
+    if (!traceId || provenanceLoadingIds.has(traceId)) return;
+    if (getFreshCacheValue(provenanceCache.value, traceId, TRACE_PROVENANCE_TTL_MS)) return;
+    const cachedProvenance = getCachedValue(provenanceCache.value, traceId);
     provenanceLoadingIds.add(traceId);
+    provenanceErrors.value = { ...provenanceErrors.value, [traceId]: "" };
     try {
       const graph = await dashboardDataSource.getTraceProvenance(traceId);
-      provenanceByTrace.value = {
-        ...provenanceByTrace.value,
-        [traceId]: graph,
-      };
+      provenanceCache.value = setBoundedCacheValue(
+        provenanceCache.value,
+        traceId,
+        graph,
+        TRACE_CACHE_MAX_ENTRIES,
+      );
     } catch (reason) {
       handleSessionError(reason);
       provenanceErrors.value = {
         ...provenanceErrors.value,
-        [traceId]: errorMessage(reason, "溯源图加载失败"),
+        [traceId]: cachedProvenance
+          ? "溯源关系刷新失败，当前显示上次成功加载的数据"
+          : errorMessage(reason, "溯源图加载失败"),
       };
     } finally {
       provenanceLoadingIds.delete(traceId);
@@ -457,6 +653,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     policyHistory,
     policyError,
     auditIntegrity,
+    auditIntegrityError,
     provenanceByTrace,
     provenanceErrors,
     health,
@@ -473,8 +670,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
     attackDistribution,
     traces,
     ruleDistribution,
+    activeScope,
     dataSourceMode: dashboardEnv.dataSource,
     refresh,
+    setActiveScope,
     loadTraceDetail,
     loadTraceProvenance,
     resolveApproval,

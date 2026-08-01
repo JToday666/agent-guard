@@ -85,6 +85,7 @@ import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
+import { getDashboardRefreshScope } from "../utils/dashboard-refresh-scope";
 
 defineOptions({
   name: "DashboardShell",
@@ -97,6 +98,7 @@ const dashboardStore = useDashboardStore();
 const route = useRoute();
 
 async function handleInitializeDashboard(): Promise<void> {
+  dashboardStore.setActiveScope(getDashboardRefreshScope(route.name));
   await authStore.bootstrap();
   if (authStore.isAuthenticated) {
     await dashboardStore.refresh();
@@ -119,6 +121,19 @@ function handleRefreshDashboard(): void {
 function handleReloadDashboard(): void {
   window.location.reload();
 }
+
+watch(
+  () => route.name,
+  (routeName) => {
+    const nextScope = getDashboardRefreshScope(routeName);
+    const scopeChanged = dashboardStore.activeScope !== nextScope;
+    dashboardStore.setActiveScope(nextScope);
+    if (scopeChanged && authStore.isAuthenticated) {
+      void dashboardStore.refresh(nextScope);
+    }
+  },
+  { immediate: true },
+);
 
 watch(
   () => route.fullPath,

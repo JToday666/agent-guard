@@ -226,3 +226,34 @@ test("API mode shows a session error instead of a blank dashboard", async ({ pag
   await expect(page.getByRole("alert")).toContainText("无法建立监督端会话");
   await expect(page.getByRole("alert")).toContainText("监督端会话已过期");
 });
+
+test("API polling requests only common data and the active page domain", async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) requestedPaths.push(url.pathname);
+  });
+  await installApiRoutes(page);
+
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
+  await expect(page.locator(".metric-strip")).toContainText("审计事件");
+  await expect(page.locator(".freshness--ready").first()).toBeVisible();
+
+  const overviewPaths = [...requestedPaths];
+  expect(overviewPaths).toContain("/api/v1/audit/events");
+  expect(overviewPaths).toContain("/api/v1/metrics/eval");
+  expect(overviewPaths).not.toContain("/api/v1/policies/current");
+  expect(overviewPaths).not.toContain("/api/v1/config-audit/findings");
+  expect(overviewPaths).not.toContain("/api/v1/adapters/openclaw/status");
+
+  requestedPaths.length = 0;
+  await page.goto("/system");
+  await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
+  await expect.poll(() => requestedPaths.includes("/api/v1/policies/current")).toBe(true);
+
+  expect(requestedPaths).toContain("/api/v1/policies/history");
+  expect(requestedPaths).toContain("/api/v1/config-audit/findings");
+  expect(requestedPaths).toContain("/api/v1/adapters/openclaw/status");
+  expect(requestedPaths).not.toContain("/api/v1/audit/events");
+});
