@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  mergeInvestigationQuery,
-  normalizeInvestigationQuery,
-} from "./investigation-query.ts";
+import { mergeInvestigationQuery, normalizeInvestigationQuery } from "./investigation-query.ts";
 
 test("normalizes supported investigation query values", () => {
   assert.deepEqual(

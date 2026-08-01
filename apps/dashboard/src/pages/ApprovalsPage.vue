@@ -8,11 +8,18 @@
       </div>
     </header>
 
-    <ErrorState v-if="store.status === 'error' && store.error" :is-retrying="store.isRefreshing" :message="store.error" @retry="store.refresh" />
+    <ErrorState
+      v-if="store.status === 'error' && store.error"
+      :is-retrying="store.isRefreshing"
+      :message="store.error"
+      @retry="store.refresh"
+    />
     <LoadingState v-else-if="store.status === 'loading' && !store.approvals.length" />
     <div v-else-if="sortedApprovals.length" class="approvals-layout">
       <aside class="approval-queue" aria-label="待审批队列">
-        <header><div><strong>风险队列</strong><small>优先处理风险高或即将过期的请求</small></div></header>
+        <header>
+          <div><strong>风险队列</strong><small>优先处理风险高或即将过期的请求</small></div>
+        </header>
         <button
           v-for="approval in sortedApprovals"
           :key="approval.id"
@@ -21,7 +28,10 @@
           @click="handleSelectApproval(approval)"
         >
           <span class="approval-queue__top">
-            <StatusBadge :label="getRiskSeverityLabel(approval.severity)" :tone="getRiskSeverityTone(approval.severity)" />
+            <StatusBadge
+              :label="getRiskSeverityLabel(approval.severity)"
+              :tone="getRiskSeverityTone(approval.severity)"
+            />
             <time>{{ formatRelativeExpiry(approval.expiresAt) }}</time>
           </span>
           <strong>{{ approval.tool }}</strong>
@@ -68,17 +78,21 @@ const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const actionMessage = ref("");
-const sortedApprovals = computed(() => [...store.approvals].sort((left, right) => {
-  if (left.riskScore !== right.riskScore) return right.riskScore - left.riskScore;
-  return Date.parse(left.expiresAt ?? left.createdAt) - Date.parse(right.expiresAt ?? right.createdAt);
-}));
-const requestedId = computed(() => typeof route.params.approval_id === "string" ? route.params.approval_id : "");
-const selectedApproval = computed(() => requestedId.value
-  ? sortedApprovals.value.find((approval) => approval.id === requestedId.value) ?? sortedApprovals.value[0]
-  : sortedApprovals.value[0]);
-const selectedApprovalRoutes = computed(() => selectedApproval.value
-  ? getApprovalEvidenceRoutes(selectedApproval.value)
-  : null);
+const sortedApprovals = computed(() =>
+  [...store.approvals].sort((left, right) => {
+    if (left.riskScore !== right.riskScore) return right.riskScore - left.riskScore;
+    return Date.parse(left.expiresAt ?? left.createdAt) - Date.parse(right.expiresAt ?? right.createdAt);
+  }),
+);
+const requestedId = computed(() => (typeof route.params.approval_id === "string" ? route.params.approval_id : ""));
+const selectedApproval = computed(() =>
+  requestedId.value
+    ? (sortedApprovals.value.find((approval) => approval.id === requestedId.value) ?? sortedApprovals.value[0])
+    : sortedApprovals.value[0],
+);
+const selectedApprovalRoutes = computed(() =>
+  selectedApproval.value ? getApprovalEvidenceRoutes(selectedApproval.value) : null,
+);
 const isSubmitting = computed(() => store.submittingApprovalId === selectedApproval.value?.id);
 const isExpired = computed(() => {
   const expiresAt = selectedApproval.value?.expiresAt;
@@ -93,21 +107,32 @@ const resolutionDisabledReason = computed(() => {
 });
 const canResolveApproval = computed(() => Boolean(selectedApproval.value) && !resolutionDisabledReason.value);
 const approvalIds = computed(() => sortedApprovals.value.map((approval) => approval.id).join("\u0000"));
-watch([requestedId, approvalIds, () => store.status], () => {
-  if (route.name !== "approvals") return;
-  if (store.status === "idle" || store.status === "loading") return;
-  const firstApprovalId = sortedApprovals.value[0]?.id;
-  if (!firstApprovalId) {
-    if (requestedId.value) void router.replace("/approvals");
-    return;
-  }
-  if (requestedId.value && !store.approvals.some((approval) => approval.id === requestedId.value)) {
-    void router.replace(`/approvals/${firstApprovalId}`);
-  }
-}, { immediate: true });
-watch(() => selectedApproval.value?.id, () => { actionMessage.value = ""; });
+watch(
+  [requestedId, approvalIds, () => store.status],
+  () => {
+    if (route.name !== "approvals") return;
+    if (store.status === "idle" || store.status === "loading") return;
+    const firstApprovalId = sortedApprovals.value[0]?.id;
+    if (!firstApprovalId) {
+      if (requestedId.value) void router.replace("/approvals");
+      return;
+    }
+    if (requestedId.value && !store.approvals.some((approval) => approval.id === requestedId.value)) {
+      void router.replace(`/approvals/${firstApprovalId}`);
+    }
+  },
+  { immediate: true },
+);
+watch(
+  () => selectedApproval.value?.id,
+  () => {
+    actionMessage.value = "";
+  },
+);
 
-function handleSelectApproval(approval: ApprovalRequest) { void router.push(`/approvals/${approval.id}`); }
+function handleSelectApproval(approval: ApprovalRequest) {
+  void router.push(`/approvals/${approval.id}`);
+}
 async function handleResolveApproval(decision: "allow_once" | "deny") {
   if (!selectedApproval.value || !canResolveApproval.value) return;
   const id = selectedApproval.value.id;
@@ -115,7 +140,10 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
   try {
     await store.resolveApproval(selectedApproval.value, decision);
     actionMessage.value = decision === "deny" ? "已拒绝该动作" : "已允许该动作执行一次";
-    if (traceRoute) { void router.push(traceRoute); return; }
+    if (traceRoute) {
+      void router.push(traceRoute);
+      return;
+    }
     if (!store.approvals.some((approval) => approval.id === id)) void router.replace("/approvals");
   } catch {
     actionMessage.value = store.error ?? "审批提交失败";
@@ -126,7 +154,6 @@ function formatRelativeExpiry(value?: string | null) {
   const minutes = Math.ceil((Date.parse(value) - Date.now()) / 60_000);
   return minutes <= 0 ? "已过期" : `${minutes} 分钟后过期`;
 }
-
 </script>
 
 <style scoped lang="scss">
@@ -137,7 +164,12 @@ function formatRelativeExpiry(value?: string | null) {
   height: calc(100vh - var(--top-bar-height));
   overflow: hidden;
 }
-.approval-header-status { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.approval-header-status {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
 .approvals-layout {
   display: grid;
   gap: var(--space-4);
@@ -157,21 +189,79 @@ function formatRelativeExpiry(value?: string | null) {
   overscroll-behavior: contain;
   padding-right: var(--space-4);
 }
-.approval-queue > header { padding: var(--space-2); }
-.approval-queue > header small { color: var(--color-text-subtle); display: block; margin-top: var(--space-1); }
-.approval-queue > button { background: transparent; border: 0; border-bottom: 1px solid var(--color-border); color: var(--color-text); cursor: pointer; display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-4) var(--space-3); text-align: left; }
-.approval-queue > button:hover { background: var(--color-row-hover); }
-.approval-queue > button.approval-queue__item--active { background: var(--color-danger-soft); box-shadow: inset 3px 0 var(--color-danger); }
-.approval-queue__top { align-items: center; display: flex; gap: var(--space-2); justify-content: space-between; min-width: 0; }
-.approval-queue__top time, .approval-queue > button small { color: var(--color-text-subtle); font-size: var(--font-size-11); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.approval-queue__score { color: var(--color-danger); font-size: var(--font-size-12); font-weight: var(--font-weight-bold); }
+.approval-queue > header {
+  padding: var(--space-2);
+}
+.approval-queue > header small {
+  color: var(--color-text-subtle);
+  display: block;
+  margin-top: var(--space-1);
+}
+.approval-queue > button {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-3);
+  text-align: left;
+}
+.approval-queue > button:hover {
+  background: var(--color-row-hover);
+}
+.approval-queue > button.approval-queue__item--active {
+  background: var(--color-danger-soft);
+  box-shadow: inset 3px 0 var(--color-danger);
+}
+.approval-queue__top {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+  min-width: 0;
+}
+.approval-queue__top time,
+.approval-queue > button small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-queue__score {
+  color: var(--color-danger);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-bold);
+}
 @media (max-width: 768px) {
-  .approvals-page { height: auto; overflow: visible; }
-  .approvals-layout { grid-template-columns: 1fr; height: auto; overflow: visible; }
-  .approval-queue { border-bottom: 1px solid var(--color-border); border-right: 0; height: auto; max-height: 38vh; overflow-y: auto; padding: 0 0 var(--space-4); }
+  .approvals-page {
+    height: auto;
+    overflow: visible;
+  }
+  .approvals-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  .approval-queue {
+    border-bottom: 1px solid var(--color-border);
+    border-right: 0;
+    height: auto;
+    max-height: 38vh;
+    overflow-y: auto;
+    padding: 0 0 var(--space-4);
+  }
 }
 @media (max-width: 640px) {
-  .approvals-page { height: auto; overflow: visible; }
-  .approval-queue { max-height: 14rem; }
+  .approvals-page {
+    height: auto;
+    overflow: visible;
+  }
+  .approval-queue {
+    max-height: 14rem;
+  }
 }
 </style>

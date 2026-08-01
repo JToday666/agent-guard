@@ -61,9 +61,11 @@ function syncMobileState(event: MediaQueryList | MediaQueryListEvent): void {
 
 function handleTabKey(event: KeyboardEvent): void {
   if (!isMobile.value || !drawerElement.value) return;
-  const focusableElements = [...drawerElement.value.querySelectorAll<HTMLElement>(
-    'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )];
+  const focusableElements = [
+    ...drawerElement.value.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ];
   const firstElement = focusableElements[0];
   const lastElement = focusableElements.at(-1);
   if (!firstElement || !lastElement) return;
@@ -88,8 +90,7 @@ watch(
   () => props.isOpen,
   async (isOpen, wasOpen) => {
     if (isOpen) {
-      restoreFocusElement =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      restoreFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       await nextTick();
       closeButtonElement.value?.focus();
       return;

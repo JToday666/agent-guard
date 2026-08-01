@@ -1,15 +1,7 @@
-import type {
-  ApprovalRequest,
-  AuditEventRow,
-  EvalMetrics,
-  EvaluationSummary,
-} from "../../types/dashboard";
+import type { ApprovalRequest, AuditEventRow, EvalMetrics, EvaluationSummary } from "../../types/dashboard";
 
 function hasSameStringList(left: readonly string[], right: readonly string[]) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
@@ -38,14 +30,8 @@ function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
   );
 }
 
-export function hasSameEventWindow(
-  left: readonly AuditEventRow[],
-  right: readonly AuditEventRow[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((event, index) => hasSameEvent(event, right[index]!))
-  );
+export function hasSameEventWindow(left: readonly AuditEventRow[], right: readonly AuditEventRow[]): boolean {
+  return left.length === right.length && left.every((event, index) => hasSameEvent(event, right[index]!));
 }
 
 export function hasSameMetrics(left: EvalMetrics, right: EvalMetrics): boolean {
@@ -62,10 +48,7 @@ export function hasSameMetrics(left: EvalMetrics, right: EvalMetrics): boolean {
   );
 }
 
-export function hasSameEvaluation(
-  left: EvaluationSummary,
-  right: EvaluationSummary,
-): boolean {
+export function hasSameEvaluation(left: EvaluationSummary, right: EvaluationSummary): boolean {
   return (
     left.runId === right.runId &&
     left.runAt === right.runAt &&
@@ -107,10 +90,7 @@ export function hasSameEvaluation(
   );
 }
 
-function hasSameApproval(
-  left: ApprovalRequest,
-  right: ApprovalRequest,
-): boolean {
+function hasSameApproval(left: ApprovalRequest, right: ApprovalRequest): boolean {
   return (
     left.id === right.id &&
     left.createdAt === right.createdAt &&
@@ -135,15 +115,10 @@ function hasSameApproval(
   );
 }
 
-export function reconcileApprovals(
-  current: ApprovalRequest[],
-  incoming: ApprovalRequest[],
-): ApprovalRequest[] {
+export function reconcileApprovals(current: ApprovalRequest[], incoming: ApprovalRequest[]): ApprovalRequest[] {
   const hasSameVisibleData =
     current.length === incoming.length &&
-    current.every((approval, index) =>
-      hasSameApproval(approval, incoming[index]!),
-    );
+    current.every((approval, index) => hasSameApproval(approval, incoming[index]!));
   if (!hasSameVisibleData) return incoming;
 
   current.forEach((approval, index) => {

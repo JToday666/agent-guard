@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("approval desktop layout keeps queue and detail in separate scroll regions", async ({
-  page,
-}, testInfo) => {
+test("approval desktop layout keeps queue and detail in separate scroll regions", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop");
   await page.goto("/approvals");
 
@@ -25,9 +23,7 @@ test("approval desktop layout keeps queue and detail in separate scroll regions"
   expect(state.detailOverflow).toBe("auto");
 });
 
-test("primary dashboard routes do not overflow the viewport", async ({
-  page,
-}) => {
+test("primary dashboard routes do not overflow the viewport", async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") runtimeErrors.push(message.text());
@@ -54,46 +50,30 @@ test("primary dashboard routes do not overflow the viewport", async ({
   expect(runtimeErrors).toEqual([]);
 });
 
-test("mobile investigation core columns fit without horizontal scrolling", async ({
-  page,
-}, testInfo) => {
+test("mobile investigation core columns fit without horizontal scrolling", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile");
   await page.goto("/investigations");
 
-  const dimensions = await page
-    .locator(".event-table-wrap")
-    .evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-    }));
+  const dimensions = await page.locator(".event-table-wrap").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 });
 
-test("top bar remains visible while the workspace scrolls", async ({
-  page,
-}) => {
+test("top bar remains visible while the workspace scrolls", async ({ page }) => {
   await page.goto("/overview");
-  await page.evaluate(() =>
-    window.scrollTo(0, document.documentElement.scrollHeight),
-  );
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
 
-  await expect
-    .poll(async () => (await page.locator(".top-bar").boundingBox())?.y)
-    .toBe(0);
+  await expect.poll(async () => (await page.locator(".top-bar").boundingBox())?.y).toBe(0);
 });
 
-test("desktop sidebar remains below the top bar while the workspace scrolls", async ({
-  page,
-}, testInfo) => {
+test("desktop sidebar remains below the top bar while the workspace scrolls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop");
   await page.goto("/overview");
-  await page.evaluate(() =>
-    window.scrollTo(0, document.documentElement.scrollHeight),
-  );
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
 
   const topBarBox = await page.locator(".top-bar").boundingBox();
   const sidebarBox = await page.locator(".sidebar").boundingBox();
-  expect(
-    Math.abs((sidebarBox?.y ?? 0) - (topBarBox?.height ?? 0)),
-  ).toBeLessThanOrEqual(1);
+  expect(Math.abs((sidebarBox?.y ?? 0) - (topBarBox?.height ?? 0))).toBeLessThanOrEqual(1);
 });

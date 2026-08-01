@@ -50,8 +50,16 @@ const props = defineProps<{
   pendingCount: number;
   updatedAt: string | null;
 }>();
-const healthLabel = computed(() => props.apiStatus === "online" ? "Guard API 正常" : props.apiStatus === "offline" ? "Guard API 异常" : "Guard API 未知");
-const healthTone = computed(() => props.apiStatus === "online" ? "success" as const : props.apiStatus === "offline" ? "danger" as const : "neutral" as const);
+const healthLabel = computed(() =>
+  props.apiStatus === "online" ? "Guard API 正常" : props.apiStatus === "offline" ? "Guard API 异常" : "Guard API 未知",
+);
+const healthTone = computed(() =>
+  props.apiStatus === "online"
+    ? ("success" as const)
+    : props.apiStatus === "offline"
+      ? ("danger" as const)
+      : ("neutral" as const),
+);
 
 function handleSearch(): void {
   void router.push({ path: "/investigations", query: searchText.value ? { search: searchText.value } : {} });

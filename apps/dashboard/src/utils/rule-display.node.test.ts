@@ -13,10 +13,7 @@ test("formats known rule ids as user-facing labels without exposing ids", () => 
   assert.equal(ruleLabel("P004_task_mismatch"), "任务与行为不一致");
   assert.equal(ruleOptionLabel("P005_external_send", 3), "外部发送需确认 3");
   assert.equal(
-    formatRuleListForDisplay([
-      "P001_sensitive_file_access",
-      "P004_task_mismatch",
-    ]),
+    formatRuleListForDisplay(["P001_sensitive_file_access", "P004_task_mismatch"]),
     "敏感文件访问、任务与行为不一致",
   );
 });
@@ -24,20 +21,13 @@ test("formats known rule ids as user-facing labels without exposing ids", () => 
 test("falls back to a readable rule name without the numeric prefix", () => {
   assert.equal(ruleLabel("P999_custom_policy_rule"), "Custom policy rule");
   assert.doesNotMatch(ruleLabel("P999_custom_policy_rule"), /P\d{3}/);
-  assert.doesNotMatch(
-    formatRuleListForDisplay(["P999_custom_policy_rule"]),
-    /P\d{3}/,
-  );
+  assert.doesNotMatch(formatRuleListForDisplay(["P999_custom_policy_rule"]), /P\d{3}/);
 });
 
 test("formats embedded rule ids in user-facing text", () => {
-  const text =
-    "Matched P005_external_send and P999_custom_policy_rule during review";
+  const text = "Matched P005_external_send and P999_custom_policy_rule during review";
 
-  assert.equal(
-    formatRuleIdsInTextForDisplay(text),
-    "Matched 外部发送需确认 and Custom policy rule during review",
-  );
+  assert.equal(formatRuleIdsInTextForDisplay(text), "Matched 外部发送需确认 and Custom policy rule during review");
   assert.doesNotMatch(formatRuleIdsInTextForDisplay(text), /P\d{3}/);
 });
 

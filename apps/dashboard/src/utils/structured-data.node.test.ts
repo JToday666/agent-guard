@@ -14,8 +14,5 @@ test("serializes circular references without throwing", () => {
   const value: Record<string, unknown> = { id: "event-1" };
   value.self = value;
 
-  assert.equal(
-    serializeStructuredData(value),
-    '{\n  "id": "event-1",\n  "self": "[Circular]"\n}',
-  );
+  assert.equal(serializeStructuredData(value), '{\n  "id": "event-1",\n  "self": "[Circular]"\n}');
 });

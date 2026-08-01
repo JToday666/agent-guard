@@ -1,13 +1,9 @@
 <template>
-  <div
-    ref="rootElement"
-    class="app-select"
-    :class="{ 'app-select--disabled': disabled, 'app-select--open': isOpen }"
-  >
-    <label class="app-select__label" :id="labelId" :for="triggerId">{{ label }}</label>
+  <div ref="rootElement" class="app-select" :class="{ 'app-select--disabled': disabled, 'app-select--open': isOpen }">
+    <label :id="labelId" class="app-select__label" :for="triggerId">{{ label }}</label>
     <button
-      ref="triggerElement"
       :id="triggerId"
+      ref="triggerElement"
       class="app-select__trigger"
       type="button"
       :aria-activedescendant="isOpen ? activeOptionId : undefined"
@@ -27,13 +23,7 @@
     </button>
 
     <Transition name="app-select-menu">
-      <ul
-        v-if="isOpen"
-        :id="listboxId"
-        class="app-select__menu"
-        role="listbox"
-        :aria-labelledby="labelId"
-      >
+      <ul v-if="isOpen" :id="listboxId" class="app-select__menu" role="listbox" :aria-labelledby="labelId">
         <li
           v-for="(option, index) in options"
           :id="getOptionId(index)"
@@ -58,15 +48,7 @@
 
 <script setup lang="ts">
 import { Check, ChevronDown } from "@lucide/vue";
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onDeactivated,
-  ref,
-  useId,
-  watch,
-} from "vue";
+import { computed, nextTick, onBeforeUnmount, onDeactivated, ref, useId, watch } from "vue";
 
 defineOptions({
   name: "AppSelect",
@@ -81,18 +63,21 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
 }>();
 
-const props = withDefaults(defineProps<{
-  disabled?: boolean;
-  id?: string;
-  label: string;
-  modelValue: string;
-  options: SelectOption[];
-  placeholder?: string;
-}>(), {
-  disabled: false,
-  id: undefined,
-  placeholder: "请选择",
-});
+const props = withDefaults(
+  defineProps<{
+    disabled?: boolean;
+    id?: string;
+    label: string;
+    modelValue: string;
+    options: SelectOption[];
+    placeholder?: string;
+  }>(),
+  {
+    disabled: false,
+    id: undefined,
+    placeholder: "请选择",
+  },
+);
 
 const rootElement = ref<HTMLElement | null>(null);
 const triggerElement = ref<HTMLButtonElement | null>(null);
@@ -191,13 +176,7 @@ function handleKeydown(event: KeyboardEvent): void {
     activeIndex.value = event.key === "Home" ? 0 : props.options.length - 1;
     return;
   }
-  if (
-    isOpen.value &&
-    event.key.length === 1 &&
-    !event.altKey &&
-    !event.ctrlKey &&
-    !event.metaKey
-  ) {
+  if (isOpen.value && event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
     event.preventDefault();
     handleTypeahead(event.key);
   }
@@ -207,11 +186,8 @@ function handleTypeahead(key: string): void {
   window.clearTimeout(typeaheadTimer);
   const normalizedKey = key.toLocaleLowerCase("zh-CN");
   const isRepeatedKey =
-    typeaheadBuffer.length > 0 &&
-    [...typeaheadBuffer].every((character) => character === normalizedKey);
-  typeaheadBuffer = isRepeatedKey
-    ? normalizedKey
-    : `${typeaheadBuffer}${normalizedKey}`;
+    typeaheadBuffer.length > 0 && [...typeaheadBuffer].every((character) => character === normalizedKey);
+  typeaheadBuffer = isRepeatedKey ? normalizedKey : `${typeaheadBuffer}${normalizedKey}`;
 
   for (let offset = 1; offset <= props.options.length; offset += 1) {
     const index = (activeIndex.value + offset) % props.options.length;
@@ -259,8 +235,7 @@ function getOptionId(index: number): string {
 
 .app-select__trigger {
   align-items: center;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-subtle);

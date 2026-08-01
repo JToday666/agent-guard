@@ -137,9 +137,7 @@ test("distinguishes an absent event request from a missing event", () => {
 });
 
 test("rejects an event that does not belong to the requested trace", () => {
-  const index = buildInvestigationIndex([
-    event({ id: "event-1", traceId: "trace-1" }),
-  ]);
+  const index = buildInvestigationIndex([event({ id: "event-1", traceId: "trace-1" })]);
 
   assert.deepEqual(resolveInvestigationEvent(index, "event-1", "trace-2"), {
     status: "not-found",

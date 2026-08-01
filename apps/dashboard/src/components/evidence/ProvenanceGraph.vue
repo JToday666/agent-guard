@@ -67,20 +67,22 @@ const legendItems = [
 ] as const;
 
 function kindLabel(kind: string): string {
-  return ({
-    event: "事件",
-    decision: "决策",
-    audit: "审计",
-    config_audit: "配置审计",
-    action_critic: "二次审查",
-  } as Record<string, string>)[kind] ?? kind;
+  return (
+    (
+      {
+        event: "事件",
+        decision: "决策",
+        audit: "审计",
+        config_audit: "配置审计",
+        action_critic: "二次审查",
+      } as Record<string, string>
+    )[kind] ?? kind
+  );
 }
 
 function metadataValue(metadata: Record<string, unknown>, key: string): string {
   const value = metadata[key];
-  return typeof value === "string" || typeof value === "number"
-    ? String(value)
-    : "";
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
 function displayText(value: string): string {
@@ -104,7 +106,8 @@ function nodeMetaBadge(metadata: Record<string, unknown>): string {
     return ({ allow: "放行", ask: "审批", deny: "拒绝" } as Record<string, string>)[decision] ?? decision;
   }
   const status = metadataValue(metadata, "status");
-  if (status) return ({ pending: "待处理", allowed: "已允许", denied: "已拒绝" } as Record<string, string>)[status] ?? status;
+  if (status)
+    return ({ pending: "待处理", allowed: "已允许", denied: "已拒绝" } as Record<string, string>)[status] ?? status;
   return "";
 }
 
@@ -139,9 +142,8 @@ function enhancedMockPosition(nodeId: string, index: number): { x: number; y: nu
   return { x: 28 + index * ENHANCED_STEP_X, y: ENHANCED_BOTTOM_Y };
 }
 
-const isEnhancedMockGraph = computed(() =>
-  props.graph.nodes.length >= 8 &&
-  props.graph.nodes.every((node) => node.metadata.source === "mock"),
+const isEnhancedMockGraph = computed(
+  () => props.graph.nodes.length >= 8 && props.graph.nodes.every((node) => node.metadata.source === "mock"),
 );
 
 const flowNodes = computed<Node[]>(() => {
@@ -172,13 +174,17 @@ const flowNodes = computed<Node[]>(() => {
 });
 
 function edgeLabel(relation: string): string {
-  return ({
-    "生成审计": "审计",
-    "规则判断": "判断",
-    "风险复核": "复核",
-    "请求审批": "审批",
-    "形成结果": "结果",
-  } as Record<string, string>)[relation] ?? "";
+  return (
+    (
+      {
+        生成审计: "审计",
+        规则判断: "判断",
+        风险复核: "复核",
+        请求审批: "审批",
+        形成结果: "结果",
+      } as Record<string, string>
+    )[relation] ?? ""
+  );
 }
 
 const flowEdges = computed<Edge[]>(() =>
@@ -217,7 +223,7 @@ function handleNodeClick(event: { node: { id: string } }) {
 
 .provenance-legend {
   align-items: center;
-  background: rgb(255 255 255 / .92);
+  background: rgb(255 255 255 / 0.92);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-subtle);
@@ -244,15 +250,25 @@ function handleNodeClick(event: { node: { id: string } }) {
 .provenance-legend i {
   border-radius: 999px;
   display: inline-block;
-  height: .55rem;
-  width: .55rem;
+  height: 0.55rem;
+  width: 0.55rem;
 }
 
-.provenance-legend__item--event i { background: var(--color-node-event); }
-.provenance-legend__item--decision i { background: var(--color-node-decision); }
-.provenance-legend__item--audit i { background: var(--color-node-audit); }
-.provenance-legend__item--config_audit i { background: var(--color-node-config-audit); }
-.provenance-legend__item--action_critic i { background: var(--color-node-action-critic); }
+.provenance-legend__item--event i {
+  background: var(--color-node-event);
+}
+.provenance-legend__item--decision i {
+  background: var(--color-node-decision);
+}
+.provenance-legend__item--audit i {
+  background: var(--color-node-audit);
+}
+.provenance-legend__item--config_audit i {
+  background: var(--color-node-config-audit);
+}
+.provenance-legend__item--action_critic i {
+  background: var(--color-node-action-critic);
+}
 
 .provenance-flow {
   background: var(--color-surface-muted);
@@ -271,15 +287,33 @@ function handleNodeClick(event: { node: { id: string } }) {
   height: 7.5rem;
   width: 16.25rem;
   padding: 0.65rem 0.78rem 0.72rem;
-  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
 
-  &:hover { border-color: var(--color-active); box-shadow: 0 0 0 2px var(--color-active-soft); }
-  &--selected { border-color: var(--color-active); box-shadow: 0 0 0 3px var(--color-active-soft); }
-  &--event { border-left: 3px solid var(--color-node-event); }
-  &--decision { border-left: 3px solid var(--color-node-decision); }
-  &--audit { border-left: 3px solid var(--color-node-audit); }
-  &--config_audit { border-left: 3px solid var(--color-node-config-audit); }
-  &--action_critic { border-left: 3px solid var(--color-node-action-critic); }
+  &:hover {
+    border-color: var(--color-active);
+    box-shadow: 0 0 0 2px var(--color-active-soft);
+  }
+  &--selected {
+    border-color: var(--color-active);
+    box-shadow: 0 0 0 3px var(--color-active-soft);
+  }
+  &--event {
+    border-left: 3px solid var(--color-node-event);
+  }
+  &--decision {
+    border-left: 3px solid var(--color-node-decision);
+  }
+  &--audit {
+    border-left: 3px solid var(--color-node-audit);
+  }
+  &--config_audit {
+    border-left: 3px solid var(--color-node-config-audit);
+  }
+  &--action_critic {
+    border-left: 3px solid var(--color-node-action-critic);
+  }
 }
 
 .prov-node__kind {
@@ -340,7 +374,9 @@ function handleNodeClick(event: { node: { id: string } }) {
 }
 
 @media (max-width: 640px) {
-  .provenance-wrap { height: 30rem; }
+  .provenance-wrap {
+    height: 30rem;
+  }
   .provenance-legend {
     left: var(--space-2);
     max-width: calc(100% - 4rem);

@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  getAuthErrorMessage,
-  isSessionAuthError,
-} from "./auth-error-messages.ts";
+import { getAuthErrorMessage, isSessionAuthError } from "./auth-error-messages.ts";
 
 function apiError(
   code: string,
@@ -19,10 +16,7 @@ function apiError(
 test("maps consumed launch codes to an actionable message", () => {
   const error = apiError("LAUNCH_CODE_INVALID");
 
-  assert.equal(
-    getAuthErrorMessage(error),
-    "启动链接无效或已使用，请通过本机启动器重新打开 Dashboard。",
-  );
+  assert.equal(getAuthErrorMessage(error), "启动链接无效或已使用，请通过本机启动器重新打开 Dashboard。");
 });
 
 test("recognizes expired and invalid browser sessions", () => {

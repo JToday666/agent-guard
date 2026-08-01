@@ -26,19 +26,9 @@
           <button type="button" @click="handleInitializeDashboard">重新检查</button>
         </section>
         <template v-else>
-          <section
-            v-if="dashboardStore.status === 'stale' && dashboardStore.error"
-            class="data-warning"
-            role="status"
-          >
+          <section v-if="dashboardStore.status === 'stale' && dashboardStore.error" class="data-warning" role="status">
             <span>部分数据暂未更新：{{ dashboardStore.error }}</span>
-            <button
-              type="button"
-              :disabled="dashboardStore.isRefreshing"
-              @click="handleRefreshDashboard"
-            >
-              重试
-            </button>
+            <button type="button" :disabled="dashboardStore.isRefreshing" @click="handleRefreshDashboard">重试</button>
           </section>
           <ErrorState
             v-if="routeRenderFailed"
@@ -47,22 +37,17 @@
             message="当前页面暂时无法渲染，请重新加载 Dashboard。"
             @retry="handleReloadDashboard"
           />
-          <RouterView v-else v-slot="{ Component, route }">
+          <RouterView v-else v-slot="{ Component, route: routeRecord }">
             <div class="dashboard-route-stage">
               <Transition name="dashboard-route">
-                <KeepAlive v-if="route.meta.keepAlive">
+                <KeepAlive v-if="routeRecord.meta.keepAlive">
                   <component
                     :is="Component"
-                    :key="String(route.name ?? route.path)"
+                    :key="String(routeRecord.name ?? routeRecord.path)"
                     class="dashboard-route-view"
                   />
                 </KeepAlive>
-                <component
-                  :is="Component"
-                  v-else
-                  :key="route.fullPath"
-                  class="dashboard-route-view"
-                />
+                <component :is="Component" v-else :key="routeRecord.fullPath" class="dashboard-route-view" />
               </Transition>
             </div>
           </RouterView>
@@ -108,7 +93,6 @@ onUnmounted(() => dashboardStore.stopPolling());
 function handleToggleSidebar(): void {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
 }
-
 
 function handleRefreshDashboard(): void {
   void dashboardStore.refresh();
@@ -208,7 +192,10 @@ onErrorCaptured(() => {
   margin: var(--space-6);
 }
 
-.session-error p { color: var(--color-text-muted); margin: var(--space-1) 0 0; }
+.session-error p {
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0 0;
+}
 .session-error button {
   background: var(--color-surface);
   border: 1px solid var(--color-danger-border);
