@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  getAuthErrorMessage,
-  isSessionAuthError,
-} from "./auth-error-messages.ts";
+import { getAuthErrorMessage, isSessionAuthError } from "./auth-error-messages.ts";
 
 function apiError(
   code: string,

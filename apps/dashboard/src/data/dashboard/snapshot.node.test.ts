@@ -54,9 +54,7 @@ const metrics: EvalMetrics = {
   averageLatencyMs: 3,
 };
 
-function makeApproval(
-  overrides: Partial<ApprovalRequest> = {},
-): ApprovalRequest {
+function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
     id: "approval_1",
     createdAt: "2026-06-22T06:30:00Z",
@@ -88,13 +86,7 @@ test("treats equivalent audit event windows as unchanged", () => {
 });
 
 test("detects a visible audit event change", () => {
-  assert.equal(
-    hasSameEventWindow(
-      [makeEvent()],
-      [makeEvent({ reason: "Updated reason" })],
-    ),
-    false,
-  );
+  assert.equal(hasSameEventWindow([makeEvent()], [makeEvent({ reason: "Updated reason" })]), false);
 });
 
 test("compares evaluation metrics by value", () => {
@@ -137,14 +129,8 @@ test("compares evaluation summaries by value", () => {
     averageLatencyMs: 3,
   };
   assert.equal(hasSameEvaluation(evaluation, { ...evaluation }), true);
-  assert.equal(
-    hasSameEvaluation(evaluation, { ...evaluation, blockRate: 0.5 }),
-    false,
-  );
-  assert.equal(
-    hasSameEvaluation(evaluation, { ...evaluation, fnr: null }),
-    false,
-  );
+  assert.equal(hasSameEvaluation(evaluation, { ...evaluation, blockRate: 0.5 }), false);
+  assert.equal(hasSameEvaluation(evaluation, { ...evaluation, fnr: null }), false);
   assert.equal(
     hasSameEvaluation(evaluation, {
       ...evaluation,

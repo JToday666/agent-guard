@@ -74,16 +74,11 @@ function readBoolean(value: unknown, fallback = false): boolean {
 }
 
 function readDecision(value: unknown): AuditEventRow["decision"] {
-  return value === "allow" || value === "ask" || value === "deny"
-    ? value
-    : "allow";
+  return value === "allow" || value === "ask" || value === "deny" ? value : "allow";
 }
 
 function readSeverity(value: unknown): AuditEventRow["severity"] {
-  return value === "critical" ||
-    value === "high" ||
-    value === "medium" ||
-    value === "low"
+  return value === "critical" || value === "high" || value === "medium" || value === "low"
     ? value
     : "low";
 }
@@ -108,14 +103,9 @@ function fallbackResourceTargets(metadata: Record<string, unknown>): string[] {
   return [];
 }
 
-function mapResourceTargets(
-  dto: GuardAuditEventDto,
-  metadata: Record<string, unknown>,
-): string[] {
+function mapResourceTargets(dto: GuardAuditEventDto, metadata: Record<string, unknown>): string[] {
   const explicitTargets = readStringArray(dto.resource_targets);
-  const targets = explicitTargets.length
-    ? explicitTargets
-    : fallbackResourceTargets(metadata);
+  const targets = explicitTargets.length ? explicitTargets : fallbackResourceTargets(metadata);
   return targets.map((target) => maskSensitiveText(target));
 }
 
@@ -125,10 +115,7 @@ function summarizeTargets(targets: string[]): string {
   return `${targets[0]} 等 ${targets.length} 项`;
 }
 
-function actionName(
-  dto: GuardAuditEventDto,
-  metadata: Record<string, unknown>,
-): string {
+function actionName(dto: GuardAuditEventDto, metadata: Record<string, unknown>): string {
   return (
     readString(metadata.action_name) ??
     readString(metadata.tool) ??
@@ -141,10 +128,7 @@ function actionName(
 function stageName(dto: GuardAuditEventDto): string {
   const stage = readString(dto.stage) ?? "未提供";
   const eventType = readString(dto.event_type) ?? stage;
-  if (
-    stage === "before_tool_call" &&
-    eventType !== "tool_call_proposed"
-  ) {
+  if (stage === "before_tool_call" && eventType !== "tool_call_proposed") {
     return eventType;
   }
   return stage;
@@ -179,8 +163,7 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
     userTask: readString(metadata.user_task),
     agentAction: summary ? maskSensitiveText(summary) : action,
     attackType: readString(dto.attack_type),
-    isMalicious:
-      typeof dto.is_malicious === "boolean" ? dto.is_malicious : null,
+    isMalicious: typeof dto.is_malicious === "boolean" ? dto.is_malicious : null,
     latencyMs: readNullableNumber(dto.latency_ms),
     raw: dto,
   };
@@ -226,7 +209,7 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
 
 function approvalConsequence(status: ApprovalRequest["status"]): string {
   if (status === "allowed") return "该动作已获得一次性放行。";
-  if (status === "denied") return "该动作已被拒绝，不会继续执行。";
+  if (status === "denied") return "该动作已被拒绝并阻断，不会继续执行。";
   if (status === "expired") return "该审批已过期，当前动作不会继续执行。";
   return "允许一次后，当前暂停的工具动作将继续执行。";
 }
@@ -246,10 +229,7 @@ export function mapMetrics(dto: GuardEvalMetricsDto): EvalMetrics {
   };
 }
 
-function evaluationDatasetLabel(
-  datasetId: string | null,
-  datasetVersion: string | null,
-): string {
+function evaluationDatasetLabel(datasetId: string | null, datasetVersion: string | null): string {
   if (datasetId && datasetVersion) return `${datasetId} / ${datasetVersion}`;
   return datasetId ?? datasetVersion ?? "未提供";
 }
@@ -258,17 +238,12 @@ function metricReduction(
   before: number | null | undefined,
   after: number | null | undefined,
 ): number | null {
-  return before === null ||
-    before === undefined ||
-    after === null ||
-    after === undefined
+  return before === null || before === undefined || after === null || after === undefined
     ? null
     : before - after;
 }
 
-export function emptyEvaluationSummary(
-  metrics: EvalMetrics,
-): EvaluationSummary {
+export function emptyEvaluationSummary(metrics: EvalMetrics): EvaluationSummary {
   return {
     runId: null,
     runAt: null,
@@ -292,9 +267,7 @@ export function mapEvaluationRun(
 ): EvaluationSummary {
   const datasetId = readString(dto.dataset_id);
   const datasetVersion = readString(dto.dataset_version);
-  const perAttack: EvaluationAttackMetric[] = Object.entries(
-    readRecord(dto.per_attack),
-  )
+  const perAttack: EvaluationAttackMetric[] = Object.entries(readRecord(dto.per_attack))
     .map(([attackType, summary]) => {
       const values = readRecord(summary);
       const asrBefore = readNullableNumber(values.asr_before);
@@ -309,10 +282,7 @@ export function mapEvaluationRun(
     .sort((left, right) => {
       const leftValue = left.asrBefore ?? -1;
       const rightValue = right.asrBefore ?? -1;
-      return (
-        rightValue - leftValue ||
-        left.attackType.localeCompare(right.attackType)
-      );
+      return rightValue - leftValue || left.attackType.localeCompare(right.attackType);
     });
   const cases: EvaluationCase[] = readArray(dto.cases).map((item) => {
     const row = readRecord(item);
@@ -347,24 +317,17 @@ export function mapEvaluationRun(
 export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
   const events = readArray(dto.audit_events)
     .map((row) => mapAuditEvent(row as GuardAuditEventDto))
-    .sort(
-      (left, right) =>
-        Date.parse(left.occurredAt) - Date.parse(right.occurredAt),
-    );
+    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   return {
     id: readString(dto.trace_id) ?? "",
     events,
-    approvals: readArray(dto.approvals).map((row) =>
-      mapApproval(row as GuardApprovalDto),
-    ),
+    approvals: readArray(dto.approvals).map((row) => mapApproval(row as GuardApprovalDto)),
     metrics: mapMetrics(dto.metrics),
     loadedAt: new Date().toISOString(),
   };
 }
 
-export function mapPolicyHistory(
-  rows: GuardPolicyHistoryDto[],
-): PolicyHistoryEntry[] {
+export function mapPolicyHistory(rows: GuardPolicyHistoryDto[]): PolicyHistoryEntry[] {
   return readArray(rows).map((item) => {
     const row = readRecord(item);
     return {
@@ -388,9 +351,7 @@ export function mapPolicySummary(
     revision: latest?.revision ?? null,
     updatedAt: latest?.updatedAt ?? null,
     updatedBy: latest?.updatedBy ?? null,
-    disabledRuleCount: Array.isArray(dto.disabled_rules)
-      ? dto.disabled_rules.length
-      : 0,
+    disabledRuleCount: Array.isArray(dto.disabled_rules) ? dto.disabled_rules.length : 0,
     ruleOverrideCount:
       dto.rule_overrides && typeof dto.rule_overrides === "object"
         ? Object.keys(dto.rule_overrides).length
@@ -451,9 +412,7 @@ export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
     hookCount,
     expectedHookCount,
     hookCoverage:
-      hookCount === null || expectedHookCount <= 0
-        ? null
-        : hookCount / expectedHookCount,
+      hookCount === null || expectedHookCount <= 0 ? null : hookCount / expectedHookCount,
     lastVerifiedAt: readString(dto.last_verified_at),
     lastHeartbeatAt: readString(dto.last_heartbeat_at),
     error: readString(dto.error),

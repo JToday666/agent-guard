@@ -14,9 +14,7 @@ export interface RuleFilterOption {
 }
 
 export type InvestigationEventResolution =
-  | { status: "idle" }
-  | { event: AuditEventRow; status: "found" }
-  | { status: "not-found" };
+  { status: "idle" } | { event: AuditEventRow; status: "found" } | { status: "not-found" };
 
 export interface TraceConclusion {
   title: string;
@@ -53,13 +51,9 @@ export function buildTraceSummary(
   };
 }
 
-export function buildTraceConclusion(
-  events: TraceConclusionEvent[],
-): TraceConclusion | undefined {
+export function buildTraceConclusion(events: TraceConclusionEvent[]): TraceConclusion | undefined {
   if (!events.length) return undefined;
-  const highestRisk = [...events].sort(
-    (left, right) => right.riskScore - left.riskScore,
-  )[0]!;
+  const highestRisk = [...events].sort((left, right) => right.riskScore - left.riskScore)[0]!;
   const hasDeny = events.some((event) => event.decision === "deny");
   const hasAsk = !hasDeny && events.some((event) => event.decision === "ask");
 
@@ -69,15 +63,13 @@ export function buildTraceConclusion(
     result: hasDeny
       ? "风险动作已被阻断，目标资源未继续执行"
       : hasAsk
-        ? "动作暂停，等待人工审批后继续或拒绝"
+        ? "动作暂停，等待人工审批后单次放行或拒绝并阻断"
         : "动作已放行，未触发阻断或审批",
     ruleHits: highestRisk.ruleHits,
   };
 }
 
-export function buildInvestigationIndex(
-  events: AuditEventRow[],
-): InvestigationIndex {
+export function buildInvestigationIndex(events: AuditEventRow[]): InvestigationIndex {
   const latestEvents = [...events].sort(
     (left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
   );
@@ -92,10 +84,7 @@ export function buildInvestigationIndex(
   }
 
   for (const traceEvents of byTrace.values()) {
-    traceEvents.sort(
-      (left, right) =>
-        Date.parse(left.occurredAt) - Date.parse(right.occurredAt),
-    );
+    traceEvents.sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   }
 
   return { byId, byTrace, latestEvents };
@@ -112,8 +101,7 @@ export function filterInvestigationEvents(
     if (query.runtime && event.runtime !== query.runtime) return false;
     if (query.severity && event.severity !== query.severity) return false;
     if (query.rule && !event.ruleHits.includes(query.rule)) return false;
-    if (query.blocked && event.blocked !== (query.blocked === "true"))
-      return false;
+    if (query.blocked && event.blocked !== (query.blocked === "true")) return false;
     if (query.eventType && event.eventType !== query.eventType) return false;
     if (query.stage && event.stage !== query.stage) return false;
     if (query.attackType && event.attackType !== query.attackType) return false;
@@ -148,9 +136,7 @@ export function resolveInvestigationEvent(
   return { event, status: "found" };
 }
 
-export function getRuleFilterOptions(
-  events: readonly AuditEventRow[],
-): RuleFilterOption[] {
+export function getRuleFilterOptions(events: readonly AuditEventRow[]): RuleFilterOption[] {
   const counts = new Map<string, number>();
   for (const event of events) {
     for (const rule of event.ruleHits) {

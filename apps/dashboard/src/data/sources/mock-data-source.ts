@@ -15,10 +15,7 @@ import type {
   DashboardDataSource,
   EventFilters,
 } from "./dashboard-data-source";
-import {
-  approvals as fixtureApprovals,
-  auditEvents as fixtureEvents,
-} from "./mock-data.ts";
+import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
 import { deriveMetrics } from "../dashboard/metrics.ts";
 import { maskSensitiveText } from "../../utils/data-redaction.ts";
 import { formatRuleListForDisplay } from "../../utils/rule-display.ts";
@@ -43,8 +40,7 @@ const mockConfigAuditFindings: ConfigAuditFindingRecord[] = [
       subject: "permissions.exec",
       description: "插件请求执行环境能力，可能绕过工具前置审批边界。",
       evidence: ["resolve_exec_env=true", "exec.shell=/bin/bash"],
-      recommendation:
-        "仅允许受控 profile 启用 exec env，并保持 before_install fail-closed。",
+      recommendation: "仅允许受控 profile 启用 exec env，并保持 before_install fail-closed。",
     },
   },
   {
@@ -60,11 +56,9 @@ const mockConfigAuditFindings: ConfigAuditFindingRecord[] = [
       category: "openclaw.plugin",
       title: "Raw conversation access enabled",
       subject: "hooks.allowConversationAccess",
-      description:
-        "插件可以读取原始会话内容，需确认其只用于安全判定并完成脱敏。",
+      description: "插件可以读取原始会话内容，需确认其只用于安全判定并完成脱敏。",
       evidence: ["allowConversationAccess=true"],
-      recommendation:
-        "除安全审计插件外禁用原始会话读取；审计展示默认只显示脱敏摘要。",
+      recommendation: "除安全审计插件外禁用原始会话读取；审计展示默认只显示脱敏摘要。",
     },
   },
   {
@@ -80,11 +74,9 @@ const mockConfigAuditFindings: ConfigAuditFindingRecord[] = [
       category: "openclaw.gateway",
       title: "Prompt injection compatibility flag is enabled",
       subject: "gateway.allowPromptInjection",
-      description:
-        "当前 profile 允许测试注入样本进入运行时，适合评测但不适合普通工作区。",
+      description: "当前 profile 允许测试注入样本进入运行时，适合评测但不适合普通工作区。",
       evidence: ["allowPromptInjection=true", "profile=attackbench-local"],
-      recommendation:
-        "生产 profile 禁用该配置；评测 profile 在 Dashboard 标记为测试数据窗口。",
+      recommendation: "生产 profile 禁用该配置；评测 profile 在 Dashboard 标记为测试数据窗口。",
     },
   },
 ];
@@ -160,8 +152,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
     resource: maskSensitiveText(approval.resource),
     agentAction: maskSensitiveText(approval.agentAction),
     approvalNonce: `mock_${approval.id}`,
-    expiresAt:
-      approval.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
+    expiresAt: approval.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
   }));
 
   constructor(delayMs: number) {
@@ -174,16 +165,12 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .filter((event) => !filters.traceId || event.traceId === filters.traceId)
       .filter((event) => !filters.caseId || event.caseId === filters.caseId)
       .filter((event) => !filters.runtime || event.runtime === filters.runtime)
-      .filter(
-        (event) => !filters.decision || event.decision === filters.decision,
-      )
+      .filter((event) => !filters.decision || event.decision === filters.decision)
       .map((event) => ({
         ...event,
         resource: maskSensitiveText(event.resource),
         resourceTargets: event.resourceTargets.map(maskSensitiveText),
-        agentAction: event.agentAction
-          ? maskSensitiveText(event.agentAction)
-          : null,
+        agentAction: event.agentAction ? maskSensitiveText(event.agentAction) : null,
         raw: event,
       }));
   }
@@ -206,14 +193,10 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .map((approval) => ({ ...approval }));
   }
 
-  async resolveApproval(
-    approval: ApprovalRequest,
-    decision: "allow_once" | "deny",
-  ) {
+  async resolveApproval(approval: ApprovalRequest, decision: "allow_once" | "deny") {
     await wait(this.delayMs);
     const target = this.approvals.find((item) => item.id === approval.id);
-    if (!target || target.status !== "pending")
-      throw new Error("审批已处理或不存在");
+    if (!target || target.status !== "pending") throw new Error("审批已处理或不存在");
     target.status = decision === "allow_once" ? "allowed" : "denied";
     target.resolvedAt = new Date().toISOString();
     return { approvalId: target.id, status: "resolved", decision } as const;
@@ -313,12 +296,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     return mockConfigAuditFindings
       .filter((row) => !filters.traceId || row.traceId === filters.traceId)
       .filter((row) => !filters.targetId || row.targetId === filters.targetId)
-      .filter(
-        (row) => !filters.targetType || row.targetType === filters.targetType,
-      )
-      .filter(
-        (row) => !filters.severity || row.finding.severity === filters.severity,
-      )
+      .filter((row) => !filters.targetType || row.targetType === filters.targetType)
+      .filter((row) => !filters.severity || row.finding.severity === filters.severity)
       .slice(0, filters.limit ?? 20)
       .map((row) => ({
         ...row,
@@ -328,8 +307,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
 
   async getAdapterStatus(adapterId: string): Promise<AdapterStatus> {
     await wait(this.delayMs);
-    const status =
-      adapterId === "openclaw" ? mockOpenClawStatus : unknownAdapterStatus;
+    const status = adapterId === "openclaw" ? mockOpenClawStatus : unknownAdapterStatus;
     return {
       ...status,
       capabilities: { ...status.capabilities },
@@ -407,10 +385,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
     await wait(this.delayMs);
     const events = fixtureEvents
       .filter((event) => event.traceId === traceId)
-      .sort(
-        (left, right) =>
-          Date.parse(left.occurredAt) - Date.parse(right.occurredAt),
-      );
+      .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
     const firstEvent = events[0];
     if (!firstEvent) return { traceId, nodes: [], edges: [] };
     const lastEvent = events.at(-1)!;
@@ -421,11 +396,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       ? formatRuleListForDisplay(firstEvent.ruleHits)
       : "未命中阻断规则";
     const outcomeLabel =
-      firstEvent.decision === "ask"
-        ? "等待人工审批"
-        : firstEvent.blocked
-          ? "已阻断"
-          : "允许执行";
+      firstEvent.decision === "ask" ? "等待人工审批" : firstEvent.blocked ? "已阻断" : "允许执行";
 
     const nodes = [
       {
@@ -447,18 +418,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
         traceId,
         kind: "config_audit",
         refId: `context:${firstEvent.id}`,
-        label:
-          firstEvent.attackType === "benign"
-            ? "任务上下文校验"
-            : "外部上下文进入任务",
+        label: firstEvent.attackType === "benign" ? "任务上下文校验" : "外部上下文进入任务",
         timestamp: firstEvent.occurredAt,
         metadata: {
           lane: "上下文",
           source: "mock",
           summary:
-            firstEvent.attackType === "benign"
-              ? "未发现异常指令"
-              : "发现跨任务或外部输入风险",
+            firstEvent.attackType === "benign" ? "未发现异常指令" : "发现跨任务或外部输入风险",
           type: "context_check",
         },
       },
@@ -572,9 +538,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       edgeId: `${traceId}:edge:event:${event.id}`,
       traceId,
       sourceNodeId:
-        index === 0
-          ? `${traceId}:resource`
-          : `${traceId}:event:${events[index - 1]!.id}`,
+        index === 0 ? `${traceId}:resource` : `${traceId}:event:${events[index - 1]!.id}`,
       targetNodeId: `${traceId}:event:${event.id}`,
       relation: index === 0 ? "生成审计" : "下一事件",
       timestamp: event.occurredAt,

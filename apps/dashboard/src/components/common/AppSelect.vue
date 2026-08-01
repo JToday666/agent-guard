@@ -4,10 +4,10 @@
     class="app-select"
     :class="{ 'app-select--disabled': disabled, 'app-select--open': isOpen }"
   >
-    <label class="app-select__label" :id="labelId" :for="triggerId">{{ label }}</label>
+    <label :id="labelId" class="app-select__label" :for="triggerId">{{ label }}</label>
     <button
-      ref="triggerElement"
       :id="triggerId"
+      ref="triggerElement"
       class="app-select__trigger"
       type="button"
       :aria-activedescendant="isOpen ? activeOptionId : undefined"
@@ -20,7 +20,11 @@
       @click="handleTriggerClick"
       @keydown="handleKeydown"
     >
-      <span :id="valueId" class="app-select__value" :class="{ 'app-select__value--placeholder': !selectedOption }">
+      <span
+        :id="valueId"
+        class="app-select__value"
+        :class="{ 'app-select__value--placeholder': !selectedOption }"
+      >
         {{ selectedOption?.label ?? placeholder }}
       </span>
       <ChevronDown class="app-select__icon" aria-hidden="true" :size="16" />
@@ -58,15 +62,7 @@
 
 <script setup lang="ts">
 import { Check, ChevronDown } from "@lucide/vue";
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onDeactivated,
-  ref,
-  useId,
-  watch,
-} from "vue";
+import { computed, nextTick, onBeforeUnmount, onDeactivated, ref, useId, watch } from "vue";
 
 defineOptions({
   name: "AppSelect",
@@ -81,18 +77,21 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
 }>();
 
-const props = withDefaults(defineProps<{
-  disabled?: boolean;
-  id?: string;
-  label: string;
-  modelValue: string;
-  options: SelectOption[];
-  placeholder?: string;
-}>(), {
-  disabled: false,
-  id: undefined,
-  placeholder: "请选择",
-});
+const props = withDefaults(
+  defineProps<{
+    disabled?: boolean;
+    id?: string;
+    label: string;
+    modelValue: string;
+    options: SelectOption[];
+    placeholder?: string;
+  }>(),
+  {
+    disabled: false,
+    id: undefined,
+    placeholder: "请选择",
+  },
+);
 
 const rootElement = ref<HTMLElement | null>(null);
 const triggerElement = ref<HTMLButtonElement | null>(null);
@@ -105,7 +104,9 @@ const labelId = computed(() => `${baseId.value}-label`);
 const valueId = computed(() => `${baseId.value}-value`);
 const listboxId = computed(() => `${baseId.value}-listbox`);
 const activeOptionId = computed(() => getOptionId(activeIndex.value));
-const selectedOption = computed(() => props.options.find((option) => option.value === props.modelValue));
+const selectedOption = computed(() =>
+  props.options.find((option) => option.value === props.modelValue),
+);
 let typeaheadBuffer = "";
 let typeaheadTimer: number | undefined;
 
@@ -191,13 +192,7 @@ function handleKeydown(event: KeyboardEvent): void {
     activeIndex.value = event.key === "Home" ? 0 : props.options.length - 1;
     return;
   }
-  if (
-    isOpen.value &&
-    event.key.length === 1 &&
-    !event.altKey &&
-    !event.ctrlKey &&
-    !event.metaKey
-  ) {
+  if (isOpen.value && event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
     event.preventDefault();
     handleTypeahead(event.key);
   }
@@ -209,9 +204,7 @@ function handleTypeahead(key: string): void {
   const isRepeatedKey =
     typeaheadBuffer.length > 0 &&
     [...typeaheadBuffer].every((character) => character === normalizedKey);
-  typeaheadBuffer = isRepeatedKey
-    ? normalizedKey
-    : `${typeaheadBuffer}${normalizedKey}`;
+  typeaheadBuffer = isRepeatedKey ? normalizedKey : `${typeaheadBuffer}${normalizedKey}`;
 
   for (let offset = 1; offset <= props.options.length; offset += 1) {
     const index = (activeIndex.value + offset) % props.options.length;
@@ -259,8 +252,7 @@ function getOptionId(index: number): string {
 
 .app-select__trigger {
   align-items: center;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(246 249 253 / 0.96));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-subtle);

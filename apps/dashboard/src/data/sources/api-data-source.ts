@@ -12,11 +12,7 @@ import type {
   GuardProvenanceDto,
   GuardTraceDetailDto,
 } from "../../api/guard-api-types";
-import {
-  ApiError,
-  requestHealth,
-  requestJson,
-} from "../../api/guard-http-client";
+import { ApiError, requestHealth, requestJson } from "../../api/guard-http-client";
 import {
   emptyEvaluationSummary,
   mapAdapterStatus,
@@ -47,10 +43,7 @@ import type {
   EventFilters,
 } from "./dashboard-data-source";
 
-function buildQueryString(
-  filters: EventFilters = {},
-  includeLimit = false,
-): string {
+function buildQueryString(filters: EventFilters = {}, includeLimit = false): string {
   const params = new URLSearchParams();
   if (includeLimit) params.set("limit", "500");
   if (filters.traceId) params.set("trace_id", filters.traceId);
@@ -61,9 +54,7 @@ function buildQueryString(
   return query ? `?${query}` : "";
 }
 
-function buildConfigFindingQueryString(
-  filters: ConfigAuditFindingFilters = {},
-): string {
+function buildConfigFindingQueryString(filters: ConfigAuditFindingFilters = {}): string {
   const params = new URLSearchParams();
   params.set("limit", String(filters.limit ?? 20));
   if (filters.traceId) params.set("trace_id", filters.traceId);
@@ -93,11 +84,7 @@ export class ApiDashboardDataSource implements DashboardDataSource {
   }
 
   async getPendingApprovals(signal?: AbortSignal) {
-    const rows = await requestJson<GuardApprovalDto[]>(
-      "/approvals/pending",
-      {},
-      signal,
-    );
+    const rows = await requestJson<GuardApprovalDto[]>("/approvals/pending", {}, signal);
     return rows.map(mapApproval);
   }
 
@@ -106,8 +93,7 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     decision: "allow_once" | "deny",
     csrfToken: string,
   ): Promise<ApprovalResolution> {
-    if (!approval.approvalNonce)
-      throw new Error("审批凭证缺失，请刷新审批队列");
+    if (!approval.approvalNonce) throw new Error("审批凭证缺失，请刷新审批队列");
     const result = await requestJson<GuardApprovalResolutionDto>(
       `/approvals/${approval.id}/resolve`,
       {
@@ -130,30 +116,19 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     const result = await requestHealth(signal);
     return {
       api: result.status === "ok" ? ("online" as const) : ("offline" as const),
-      database:
-        result.database === "ok" ? ("online" as const) : ("offline" as const),
+      database: result.database === "ok" ? ("online" as const) : ("offline" as const),
       checkedAt: new Date().toISOString(),
     };
   }
 
-  async getEvaluation(
-    metrics: EvalMetrics,
-    signal?: AbortSignal,
-  ): Promise<EvaluationSummary> {
+  async getEvaluation(metrics: EvalMetrics, signal?: AbortSignal): Promise<EvaluationSummary> {
     try {
       return mapEvaluationRun(
-        await requestJson<GuardEvaluationRunDto>(
-          "/evaluations/latest",
-          {},
-          signal,
-        ),
+        await requestJson<GuardEvaluationRunDto>("/evaluations/latest", {}, signal),
         metrics,
       );
     } catch (reason) {
-      if (
-        reason instanceof ApiError &&
-        reason.code === "EVALUATION_NOT_FOUND"
-      ) {
+      if (reason instanceof ApiError && reason.code === "EVALUATION_NOT_FOUND") {
         return emptyEvaluationSummary(metrics);
       }
       throw reason;
@@ -184,18 +159,11 @@ export class ApiDashboardDataSource implements DashboardDataSource {
 
   async getTraceDetail(traceId: string, signal?: AbortSignal) {
     const detail = mapTraceDetail(
-      await requestJson<GuardTraceDetailDto>(
-        `/traces/${encodeURIComponent(traceId)}`,
-        {},
-        signal,
-      ),
+      await requestJson<GuardTraceDetailDto>(`/traces/${encodeURIComponent(traceId)}`, {}, signal),
     );
     return {
       ...detail,
-      approvals: mergeApprovalsWithAuditEvidence(
-        detail.approvals,
-        detail.events,
-      ),
+      approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
     };
   }
 
@@ -207,11 +175,7 @@ export class ApiDashboardDataSource implements DashboardDataSource {
 
   async getPolicyHistory(signal?: AbortSignal) {
     return mapPolicyHistory(
-      await requestJson<GuardPolicyHistoryDto[]>(
-        "/policies/history?limit=10",
-        {},
-        signal,
-      ),
+      await requestJson<GuardPolicyHistoryDto[]>("/policies/history?limit=10", {}, signal),
     );
   }
 
@@ -221,10 +185,7 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     );
   }
 
-  async getTraceProvenance(
-    traceId: string,
-    signal?: AbortSignal,
-  ): Promise<ProvenanceGraph> {
+  async getTraceProvenance(traceId: string, signal?: AbortSignal): Promise<ProvenanceGraph> {
     return mapProvenance(
       await requestJson<GuardProvenanceDto>(
         `/traces/${encodeURIComponent(traceId)}/provenance`,

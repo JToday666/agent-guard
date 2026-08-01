@@ -219,9 +219,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   expect(runtimeErrors).toEqual([]);
 });
 
-test("API mode shows a session error instead of a blank dashboard", async ({
-  page,
-}) => {
+test("API mode shows a session error instead of a blank dashboard", async ({ page }) => {
   await installApiRoutes(page, { authenticated: false });
   await page.goto("/overview");
 

@@ -12,9 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-async function readErrorBody(
-  response: Response,
-): Promise<{ code: string; message: string }> {
+async function readErrorBody(response: Response): Promise<{ code: string; message: string }> {
   const fallback = {
     code: "REQUEST_FAILED",
     message: `请求失败 (${response.status})`,
@@ -25,14 +23,9 @@ async function readErrorBody(
     const payload = await response.json().catch(() => null);
     const error = payload?.error;
     return {
-      code:
-        typeof error?.code === "string" && error.code
-          ? error.code
-          : fallback.code,
+      code: typeof error?.code === "string" && error.code ? error.code : fallback.code,
       message:
-        typeof error?.message === "string" && error.message
-          ? error.message
-          : fallback.message,
+        typeof error?.message === "string" && error.message ? error.message : fallback.message,
     };
   }
 
@@ -73,7 +66,6 @@ export async function requestHealth(
     credentials: "include",
     signal,
   });
-  if (!response.ok)
-    throw new ApiError(response.status, "HEALTH_CHECK_FAILED", "健康检查失败");
+  if (!response.ok) throw new ApiError(response.status, "HEALTH_CHECK_FAILED", "健康检查失败");
   return response.json() as Promise<{ status: string; database?: string }>;
 }

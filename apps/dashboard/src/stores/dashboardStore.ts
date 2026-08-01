@@ -5,10 +5,7 @@ import { dashboardEnv } from "../config/dashboard-env";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
 import { dashboardDataSource } from "../data/sources/index";
 import { deriveMetrics, groupDecisionTrend } from "../data/dashboard/metrics";
-import {
-  buildInvestigationIndex,
-  buildTraceSummary,
-} from "../data/investigations";
+import { buildInvestigationIndex, buildTraceSummary } from "../data/investigations";
 import {
   getRefreshFailureStatus,
   shouldEnterInitialLoading,
@@ -35,10 +32,8 @@ import type {
   TraceDetail,
   TraceSummary,
 } from "../types/dashboard";
-import {
-  getAuthErrorMessage,
-  isSessionAuthError,
-} from "../utils/auth-error-messages";
+import { getAuthErrorMessage, isSessionAuthError } from "../utils/auth-error-messages";
+import { getApprovalResolutionFailure } from "../utils/approval-resolution";
 import { useAuthStore } from "./authStore";
 
 const emptyMetrics: EvalMetrics = {
@@ -139,6 +134,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const lastUpdatedAt = ref<string | null>(null);
   const isRefreshing = ref(false);
   const submittingApprovalId = ref<string | null>(null);
+  const approvalResolutionError = ref<string | null>(null);
+  const approvalResolutionState = ref<"idle" | "submitting" | "succeeded" | "conflict" | "failed">(
+    "idle",
+  );
   let pollTimer: number | null = null;
   let activeController: AbortController | null = null;
   let activeRefresh: Promise<void> | null = null;
@@ -150,9 +149,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     () => approvals.value.filter((item) => item.status === "pending").length,
   );
   const decisionTrend = computed(() => groupDecisionTrend(events.value));
-  const investigationIndex = computed(() =>
-    buildInvestigationIndex(events.value),
-  );
+  const investigationIndex = computed(() => buildInvestigationIndex(events.value));
 
   function mapCounts(counts: Map<string, number>) {
     return [...counts.entries()]
@@ -166,12 +163,16 @@ export const useDashboardStore = defineStore("dashboard", () => {
     stopPolling();
   }
 
+  async function refreshApprovals(): Promise<void> {
+    const pendingApprovals = await dashboardDataSource.getPendingApprovals();
+    const enrichedApprovals = mergeApprovalsWithAuditEvidence(pendingApprovals, events.value);
+    approvals.value = reconcileApprovals(approvals.value, enrichedApprovals);
+  }
+
   const attackDistribution = computed(() => {
     const counts = new Map<string, number>();
     for (const event of investigationIndex.value.latestEvents) {
-      const key =
-        event.attackType ||
-        (event.caseId?.startsWith("BENIGN") ? "benign" : "unknown");
+      const key = event.attackType || (event.caseId?.startsWith("BENIGN") ? "benign" : "unknown");
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return mapCounts(counts);
@@ -188,10 +189,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const traces = computed<TraceSummary[]>(() =>
     [...investigationIndex.value.byTrace.entries()]
       .map(([id, rows]) => buildTraceSummary(id, rows)!)
-      .sort(
-        (left, right) =>
-          Date.parse(right.lastEventAt) - Date.parse(left.lastEventAt),
-      ),
+      .sort((left, right) => Date.parse(right.lastEventAt) - Date.parse(left.lastEventAt)),
   );
 
   async function performRefresh(): Promise<void> {
@@ -250,10 +248,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         policyHistoryResult.status === "fulfilled"
           ? policyHistoryResult.value
           : policyHistory.value;
-      policySummary.value = applyLatestPolicyHistory(
-        policyResult.value,
-        history,
-      );
+      policySummary.value = applyLatestPolicyHistory(policyResult.value, history);
       policyError.value = null;
     } else {
       policyError.value = errorMessage(policyResult.reason, "策略数据加载失败");
@@ -262,19 +257,12 @@ export const useDashboardStore = defineStore("dashboard", () => {
     const secondaryResults = await Promise.allSettled([
       dashboardDataSource.getAuditIntegrity(controller.signal),
       dashboardDataSource.getEvaluation(metrics.value, controller.signal),
-      dashboardDataSource.getConfigAuditFindings(
-        { limit: 20 },
-        controller.signal,
-      ),
+      dashboardDataSource.getConfigAuditFindings({ limit: 20 }, controller.signal),
       dashboardDataSource.getAdapterStatus("openclaw", controller.signal),
     ] as const);
 
-    const [
-      auditIntegrityResult,
-      evaluationResult,
-      configFindingsResult,
-      openclawStatusResult,
-    ] = secondaryResults;
+    const [auditIntegrityResult, evaluationResult, configFindingsResult, openclawStatusResult] =
+      secondaryResults;
 
     if (auditIntegrityResult.status === "fulfilled") {
       auditIntegrity.value = auditIntegrityResult.value;
@@ -285,19 +273,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
       }
       evaluationError.value = null;
     } else {
-      evaluationError.value = errorMessage(
-        evaluationResult.reason,
-        "评测结果加载失败",
-      );
+      evaluationError.value = errorMessage(evaluationResult.reason, "评测结果加载失败");
     }
     if (configFindingsResult.status === "fulfilled") {
       configAuditFindings.value = configFindingsResult.value;
       configAuditError.value = null;
     } else {
-      configAuditError.value = errorMessage(
-        configFindingsResult.reason,
-        "配置审计发现项加载失败",
-      );
+      configAuditError.value = errorMessage(configFindingsResult.reason, "配置审计发现项加载失败");
     }
     if (openclawStatusResult.status === "fulfilled") {
       openclawStatus.value = openclawStatusResult.value;
@@ -319,18 +301,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
       handleSessionError(secondarySessionFailure.reason);
     }
 
-    const failures = [
-      eventsResult,
-      metricsResult,
-      approvalsResult,
-      healthResult,
-    ].filter(
+    const failures = [eventsResult, metricsResult, approvalsResult, healthResult].filter(
       (result) => result.status === "rejected",
     ) as PromiseRejectedResult[];
     if (failures.length) {
-      const sessionFailure = failures.find((failure) =>
-        isSessionAuthError(failure.reason),
-      );
+      const sessionFailure = failures.find((failure) => isSessionAuthError(failure.reason));
       if (sessionFailure) {
         handleSessionError(sessionFailure.reason);
       }
@@ -372,23 +347,36 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return refreshTask;
   }
 
-  async function resolveApproval(
-    approval: ApprovalRequest,
-    decision: "allow_once" | "deny",
-  ) {
+  async function resolveApproval(approval: ApprovalRequest, decision: "allow_once" | "deny") {
     if (submittingApprovalId.value) return;
     const auth = useAuthStore();
     submittingApprovalId.value = approval.id;
-    error.value = null;
+    approvalResolutionError.value = null;
+    approvalResolutionState.value = "submitting";
     try {
-      await dashboardDataSource.resolveApproval(
+      const resolution = await dashboardDataSource.resolveApproval(
         approval,
         decision,
         auth.csrfToken,
       );
-      await refresh();
+      approvalResolutionState.value = "succeeded";
+      approvals.value = approvals.value.filter((item) => item.id !== approval.id);
+      const traceDetailsCopy = { ...traceDetails.value };
+      const provenanceCopy = { ...provenanceByTrace.value };
+      delete traceDetailsCopy[approval.traceId];
+      delete provenanceCopy[approval.traceId];
+      traceDetails.value = traceDetailsCopy;
+      provenanceByTrace.value = provenanceCopy;
+      void refreshApprovals().catch(handleSessionError);
+      return resolution;
     } catch (reason) {
-      error.value = errorMessage(reason, "审批提交失败");
+      handleSessionError(reason);
+      const failure = getApprovalResolutionFailure(reason);
+      approvalResolutionError.value = failure.message;
+      approvalResolutionState.value = failure.kind === "conflict" ? "conflict" : "failed";
+      if (failure.shouldRefreshQueue) {
+        await refreshApprovals().catch(handleSessionError);
+      }
       throw reason;
     } finally {
       submittingApprovalId.value = null;
@@ -406,12 +394,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
       handleSessionError(reason);
       traceDetailErrors.value = {
         ...traceDetailErrors.value,
-        [traceId]:
-          errorMessage(reason, "证据链数据加载失败"),
+        [traceId]: errorMessage(reason, "证据链数据加载失败"),
       };
     } finally {
-      if (traceDetailLoadingId.value === traceId)
-        traceDetailLoadingId.value = null;
+      if (traceDetailLoadingId.value === traceId) traceDetailLoadingId.value = null;
     }
   }
 
@@ -429,19 +415,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function stopPolling(): void {
     pollingActive = false;
     clearPollTimer();
-    if (visibilityHandler)
-      document.removeEventListener("visibilitychange", visibilityHandler);
+    if (visibilityHandler) document.removeEventListener("visibilitychange", visibilityHandler);
     visibilityHandler = null;
     activeController?.abort();
   }
 
   async function loadTraceProvenance(traceId: string): Promise<void> {
-    if (
-      !traceId ||
-      provenanceByTrace.value[traceId] ||
-      provenanceLoadingIds.has(traceId)
-    )
-      return;
+    if (!traceId || provenanceByTrace.value[traceId] || provenanceLoadingIds.has(traceId)) return;
     provenanceLoadingIds.add(traceId);
     try {
       const graph = await dashboardDataSource.getTraceProvenance(traceId);
@@ -485,6 +465,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
     lastUpdatedAt,
     isRefreshing,
     submittingApprovalId,
+    approvalResolutionError,
+    approvalResolutionState,
     pendingCount,
     decisionTrend,
     investigationIndex,

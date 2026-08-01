@@ -1,6 +1,10 @@
 <template>
   <dl class="metric-strip">
-    <div v-for="item in items" :key="item.label" :class="`metric-strip__item metric-strip__item--${item.tone ?? 'neutral'}`">
+    <div
+      v-for="item in items"
+      :key="item.label"
+      :class="`metric-strip__item metric-strip__item--${item.tone ?? 'neutral'}`"
+    >
       <dt>{{ item.label }}</dt>
       <dd>
         <RouterLink v-if="item.route" :to="item.route">{{ item.value }}</RouterLink>
@@ -19,7 +23,7 @@ defineProps<{
     detail: string;
     label: string;
     route?: string;
-    tone?: "neutral" | "success" | "warning" | "danger";
+    tone?: "neutral" | "protective" | "success" | "warning" | "danger";
     value: string;
   }>;
 }>();
@@ -48,7 +52,9 @@ defineProps<{
     width: 1px;
   }
 
-  &:hover { background: var(--color-row-hover); }
+  &:hover {
+    background: var(--color-row-hover);
+  }
 }
 
 .metric-strip__bar {
@@ -62,7 +68,8 @@ defineProps<{
   transition: opacity var(--transition-fast);
 }
 
-dt, small {
+dt,
+small {
   color: var(--color-text-subtle);
   display: block;
   font-size: var(--font-size-12);
@@ -76,28 +83,64 @@ dd {
   margin: var(--space-2) 0 var(--space-1);
 }
 
-dd a, dd span { color: inherit; text-decoration: none; }
-dd a:hover { color: var(--color-active); }
+dd a,
+dd span {
+  color: inherit;
+  text-decoration: none;
+}
+dd a:hover {
+  color: var(--color-active);
+}
 
 .metric-strip__item--success {
-  dd { color: var(--color-success); }
-  .metric-strip__bar { background: var(--color-success); opacity: 0.6; }
+  dd {
+    color: var(--color-success);
+  }
+  .metric-strip__bar {
+    background: var(--color-success);
+    opacity: 0.6;
+  }
+}
+.metric-strip__item--protective {
+  dd {
+    color: var(--color-active);
+  }
+  .metric-strip__bar {
+    background: var(--color-active);
+    opacity: 0.7;
+  }
 }
 .metric-strip__item--warning {
-  dd { color: var(--color-warning); }
-  .metric-strip__bar { background: var(--color-warning); opacity: 0.7; }
+  dd {
+    color: var(--color-warning);
+  }
+  .metric-strip__bar {
+    background: var(--color-warning);
+    opacity: 0.7;
+  }
 }
 .metric-strip__item--danger {
-  dd { color: var(--color-danger); }
-  .metric-strip__bar { background: var(--color-danger); opacity: 0.7; }
+  dd {
+    color: var(--color-danger);
+  }
+  .metric-strip__bar {
+    background: var(--color-danger);
+    opacity: 0.7;
+  }
 }
-.metric-strip__item--neutral .metric-strip__bar { opacity: 0; }
+.metric-strip__item--neutral .metric-strip__bar {
+  opacity: 0;
+}
 
 @media (max-width: 640px) {
-  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .metric-strip__item:nth-child(2n)::after { display: none; }
-  .metric-strip__item { border-bottom: 1px solid var(--color-border); }
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric-strip__item:nth-child(2n)::after {
+    display: none;
+  }
+  .metric-strip__item {
+    border-bottom: 1px solid var(--color-border);
+  }
 }
 </style>
-
-

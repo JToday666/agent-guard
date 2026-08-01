@@ -1,8 +1,4 @@
-import type {
-  DecisionStatus,
-  DecisionTrendPoint,
-  EvalMetrics,
-} from "../../types/dashboard";
+import type { DecisionStatus, DecisionTrendPoint, EvalMetrics } from "../../types/dashboard";
 
 interface MetricEvent {
   decision: DecisionStatus;
@@ -15,9 +11,7 @@ export function deriveMetrics(events: readonly MetricEvent[]): EvalMetrics {
   const latencyValues = events
     .map((event) => event.latencyMs)
     .filter((value): value is number => value != null);
-  const blockedCount = events.filter(
-    (event) => event.blocked || event.decision !== "allow",
-  ).length;
+  const blockedCount = events.filter((event) => event.blocked || event.decision !== "allow").length;
   return {
     eventCount: events.length,
     allowCount: events.filter((event) => event.decision === "allow").length,
@@ -28,15 +22,12 @@ export function deriveMetrics(events: readonly MetricEvent[]): EvalMetrics {
     fpr: null,
     fnr: null,
     averageLatencyMs: latencyValues.length
-      ? latencyValues.reduce((sum, value) => sum + value, 0) /
-        latencyValues.length
+      ? latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length
       : null,
   };
 }
 
-export function groupDecisionTrend(
-  events: readonly MetricEvent[],
-): DecisionTrendPoint[] {
+export function groupDecisionTrend(events: readonly MetricEvent[]): DecisionTrendPoint[] {
   const buckets = new Map<string, DecisionTrendPoint>();
   for (const event of events) {
     const date = new Date(event.occurredAt);
@@ -46,7 +37,5 @@ export function groupDecisionTrend(
     point[event.decision] += 1;
     buckets.set(label, point);
   }
-  return [...buckets.values()].sort((left, right) =>
-    left.label.localeCompare(right.label),
-  );
+  return [...buckets.values()].sort((left, right) => left.label.localeCompare(right.label));
 }

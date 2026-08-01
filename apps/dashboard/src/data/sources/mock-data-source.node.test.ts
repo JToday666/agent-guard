@@ -10,9 +10,7 @@ test("mock provenance graph contains evidence nodes and event references", async
   assert.equal(graph.traceId, "trace_002");
   assert.ok(graph.nodes.length >= 8);
   assert.ok(graph.edges.length >= 7);
-  assert.ok(
-    graph.nodes.some((node) => node.refId === "event:evt_20260607_002"),
-  );
+  assert.ok(graph.nodes.some((node) => node.refId === "event:evt_20260607_002"));
   assert.ok(graph.nodes.some((node) => node.refId.startsWith("context:")));
   assert.ok(graph.nodes.some((node) => node.refId.startsWith("resource:")));
   assert.ok(graph.nodes.some((node) => node.refId === "approval:ask_001"));
@@ -42,17 +40,12 @@ test("mock evaluation cases stay consistent with linked audit events", async () 
 
   for (const row of evaluation.cases) {
     const event = events.find(
-      (candidate) =>
-        candidate.traceId === row.traceId && candidate.caseId === row.caseId,
+      (candidate) => candidate.traceId === row.traceId && candidate.caseId === row.caseId,
     );
     assert.ok(event, `${row.caseId} should link to a matching audit event`);
     assert.equal(event.runtime, row.runtime, `${row.caseId} runtime`);
     assert.equal(event.attackType, row.attackType, `${row.caseId} attack type`);
-    assert.equal(
-      event.decision,
-      row.actualDecision,
-      `${row.caseId} actual decision`,
-    );
+    assert.equal(event.decision, row.actualDecision, `${row.caseId} actual decision`);
     assert.equal(event.blocked, row.blocked, `${row.caseId} blocked`);
   }
 });

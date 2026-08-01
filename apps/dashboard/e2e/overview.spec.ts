@@ -1,23 +1,17 @@
 import { expect, test } from "@playwright/test";
 
-test("decision trend keeps decision words in the legend only", async ({
-  page,
-}) => {
+test("decision trend keeps decision words in the legend only", async ({ page }) => {
   await page.goto("/overview");
 
-  await expect(page.locator(".trend-legend")).toContainText("放行");
-  await expect(page.locator(".trend-legend")).toContainText("审批");
-  await expect(page.locator(".trend-legend")).toContainText("拒绝");
+  await expect(page.locator(".trend-legend")).toContainText("已放行");
+  await expect(page.locator(".trend-legend")).toContainText("待审批");
+  await expect(page.locator(".trend-legend")).toContainText("已阻断");
 
-  const svgLabels = await page
-    .locator(".trend-chart svg text")
-    .allTextContents();
-  expect(svgLabels.join(" ")).not.toMatch(/放行|审批|拒绝/);
+  const svgLabels = await page.locator(".trend-chart svg text").allTextContents();
+  expect(svgLabels.join(" ")).not.toMatch(/已放行|待审批|已阻断/);
 });
 
-test("top page headers use primary titles without category subtitles", async ({
-  page,
-}) => {
+test("top page headers use primary titles without category subtitles", async ({ page }) => {
   const removedSubtitles = [
     "安全态势",
     "监控与取证",

@@ -24,10 +24,7 @@ export function redactSensitiveData(value: unknown, fieldName = ""): unknown {
 
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        redactSensitiveData(item, key),
-      ]),
+      Object.entries(value).map(([key, item]) => [key, redactSensitiveData(item, key)]),
     );
   }
 

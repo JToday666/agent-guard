@@ -94,10 +94,7 @@ test("maps P1 audit metadata into readable action and resource fields", () => {
     risk_score: 66,
     severity: "medium",
     blocked: true,
-    resource_targets: [
-      "user_preferences/report_delivery_rule",
-      "context:email_001",
-    ],
+    resource_targets: ["user_preferences/report_delivery_rule", "context:email_001"],
     rule_hits: ["P104_memory_poisoning"],
     reason: "Memory write requires review",
     links: {},
