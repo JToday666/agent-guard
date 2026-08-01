@@ -248,16 +248,16 @@ test("API polling requests only common data and the active page domain", async (
   expect(overviewPaths).not.toContain("/api/v1/adapters/openclaw/status");
 
   requestedPaths.length = 0;
-  await page.goto("/evaluation");
+  await page.getByRole("link", { name: "安全评测" }).click();
   await expect(page.getByRole("heading", { name: "安全评测" })).toBeVisible();
   await expect.poll(() => requestedPaths.includes("/api/v1/evaluations/latest")).toBe(true);
 
-  expect(requestedPaths).toContain("/api/v1/audit/events");
-  expect(requestedPaths).toContain("/api/v1/metrics/eval");
+  expect(requestedPaths).not.toContain("/api/v1/audit/events");
+  expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
   expect(requestedPaths).not.toContain("/api/v1/policies/current");
 
   requestedPaths.length = 0;
-  await page.goto("/system");
+  await page.getByRole("link", { name: "系统状态" }).click();
   await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
   await expect.poll(() => requestedPaths.includes("/api/v1/policies/current")).toBe(true);
 
@@ -265,4 +265,20 @@ test("API polling requests only common data and the active page domain", async (
   expect(requestedPaths).toContain("/api/v1/config-audit/findings");
   expect(requestedPaths).toContain("/api/v1/adapters/openclaw/status");
   expect(requestedPaths).not.toContain("/api/v1/audit/events");
+});
+
+test("manual refresh bypasses the shared-resource freshness window", async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) requestedPaths.push(url.pathname);
+  });
+  await installApiRoutes(page);
+  await page.goto("/overview");
+  await expect(page.locator(".freshness--ready").first()).toBeVisible();
+
+  requestedPaths.length = 0;
+  await page.getByRole("button", { name: "刷新数据" }).click();
+  await expect.poll(() => requestedPaths.includes("/api/v1/audit/events")).toBe(true);
+  expect(requestedPaths).toContain("/api/v1/metrics/eval");
 });

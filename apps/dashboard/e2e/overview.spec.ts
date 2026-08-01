@@ -11,6 +11,22 @@ test("decision trend keeps decision words in the legend only", async ({ page }) 
   expect(svgLabels.join(" ")).not.toMatch(/已放行|待审批|已阻断/);
 });
 
+test("decision trend supports one-stop keyboard inspection", async ({ page }) => {
+  await page.goto("/overview");
+
+  const chart = page.locator(".trend-chart svg");
+  await chart.focus();
+  await expect(page.locator(".trend-inspector")).toBeVisible();
+  const latestSummary = await chart.getAttribute("aria-label");
+  expect(latestSummary).toContain("使用左右方向键");
+
+  await page.keyboard.press("ArrowLeft");
+  const previousSummary = await chart.getAttribute("aria-label");
+  expect(previousSummary).not.toBe(latestSummary);
+  await page.keyboard.press("End");
+  await expect(chart).toHaveAttribute("aria-label", latestSummary ?? "");
+});
+
 test("top page headers use primary titles without category subtitles", async ({ page }) => {
   const removedSubtitles = [
     "安全态势",
