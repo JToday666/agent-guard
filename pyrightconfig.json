@@ -1,5 +1,10 @@
 {
-  "include": ["apps/guard-api", "apps/demo-agent", "packages", "redteam", "scripts", "tests"],
+  "include": [
+    "apps/cli/agentguard_cli",
+    "apps/guard-api/guard_api",
+    "packages/agentguard-core/agentguard_core",
+    "packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter"
+  ],
   "exclude": [
     "**/.*",
     "**/__pycache__",
@@ -20,7 +25,7 @@
   "executionEnvironments": [
     {
       "root": ".",
-      "extraPaths": [".", "packages/agentguard-core", "apps/guard-api", "agentguard_langgraph_bench/src"]
+      "extraPaths": [".", "apps/cli", "apps/guard-api", "packages/agentguard-core", "packages/agentguard-langgraph-adapter"]
     }
   ]
 }

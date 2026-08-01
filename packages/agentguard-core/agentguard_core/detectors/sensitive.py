@@ -11,7 +11,9 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 class SensitiveResourceDetector(Detector):
     rule_id = "P001_sensitive_file_access"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
         results: list[DetectionResult] = []

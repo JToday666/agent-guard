@@ -6,7 +6,11 @@ from .models import ConfigAuditEvent, ConfigAuditResult
 
 
 def evaluate_config_audit(event: ConfigAuditEvent) -> ConfigAuditResult:
-    blocking = [finding for finding in event.findings if finding.severity in {"high", "critical"}]
+    blocking = [
+        finding
+        for finding in event.findings
+        if finding.severity in {"high", "critical"}
+    ]
     if blocking:
         return ConfigAuditResult(
             decision="block",

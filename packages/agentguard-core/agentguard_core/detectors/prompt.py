@@ -16,7 +16,9 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 class PromptInjectionDetector(Detector):
     rule_id = "P101_prompt_injection"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
         if isinstance(event.payload, ModelCallPayload):
@@ -28,8 +30,9 @@ class PromptInjectionDetector(Detector):
         for source in event.payload.sources:
             if source.source_trust.lower() != "untrusted":
                 continue
-            instruction_like = source.contains_instruction_like_text or has_instruction_like_text(
-                source.summary, policies
+            instruction_like = (
+                source.contains_instruction_like_text
+                or has_instruction_like_text(source.summary, policies)
             )
             if instruction_like:
                 intents = prompt_injection_intents(source.summary, policies)
@@ -57,7 +60,9 @@ class PromptInjectionDetector(Detector):
                             ],
                         ),
                         reason="Untrusted instruction-like content is about to enter the model context.",
-                        approval_resource=None if high_confidence else f"context:{source.source_id}",
+                        approval_resource=(
+                            None if high_confidence else f"context:{source.source_id}"
+                        ),
                         severity="high" if high_confidence else "medium",
                     ),
                     policies,
@@ -79,8 +84,9 @@ class PromptInjectionDetector(Detector):
             return []
         if has_jailbreak_text(payload.content_preview, policies):
             return []
-        instruction_like = payload.contains_instruction_like_text or has_instruction_like_text(
-            payload.content_preview, policies
+        instruction_like = (
+            payload.contains_instruction_like_text
+            or has_instruction_like_text(payload.content_preview, policies)
         )
         if not instruction_like:
             return []
@@ -102,10 +108,7 @@ class PromptInjectionDetector(Detector):
                         f"contains_instruction_like_text={payload.contains_instruction_like_text}",
                         "sanitized=false",
                         f"high_confidence={high_confidence}",
-                        *[
-                            f"prompt_injection_intent={intent}"
-                            for intent in intents
-                        ],
+                        *[f"prompt_injection_intent={intent}" for intent in intents],
                     ],
                 ),
                 reason=(
@@ -113,7 +116,9 @@ class PromptInjectionDetector(Detector):
                     if high_confidence
                     else "Untrusted instruction-like model input requires review."
                 ),
-                approval_resource=None if high_confidence else f"model_input:{event.trace_id}",
+                approval_resource=(
+                    None if high_confidence else f"model_input:{event.trace_id}"
+                ),
                 severity="high" if high_confidence else "medium",
             ),
             policies,

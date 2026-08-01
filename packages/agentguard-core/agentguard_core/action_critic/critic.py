@@ -15,7 +15,9 @@ class ActionCritic:
     def __init__(
         self,
         *,
-        llm_provider: Callable[[GuardEvent, GuardDecision], ActionCriticReview] | None = None,
+        llm_provider: (
+            Callable[[GuardEvent, GuardDecision], ActionCriticReview] | None
+        ) = None,
     ) -> None:
         self.llm_provider = llm_provider
 
@@ -33,7 +35,9 @@ class ActionCritic:
                 )
         return self._deterministic_review(event, decision)
 
-    def _deterministic_review(self, event: GuardEvent, decision: GuardDecision) -> ActionCriticReview:
+    def _deterministic_review(
+        self, event: GuardEvent, decision: GuardDecision
+    ) -> ActionCriticReview:
         resources = derive_resources(event)
         reasons: list[str] = []
         evidence: list[str] = []
@@ -43,11 +47,16 @@ class ActionCritic:
         for resource in resources:
             target = resource.target.lower()
             evidence.append(f"target={resource.target}")
-            if any(marker in target for marker in ("private", "secret", "token", ".env", "key")):
+            if any(
+                marker in target
+                for marker in ("private", "secret", "token", ".env", "key")
+            ):
                 reasons.append("sensitive_target=true")
         if decision.decision == "allow" and decision.risk_score >= 70:
             reasons.append("allow_high_risk=true")
-        verdict: Literal["pass", "warn", "fail"] = "warn" if len(reasons) >= 2 else "pass"
+        verdict: Literal["pass", "warn", "fail"] = (
+            "warn" if len(reasons) >= 2 else "pass"
+        )
         return ActionCriticReview(
             trace_id=event.trace_id,
             event_id=event.event_id,

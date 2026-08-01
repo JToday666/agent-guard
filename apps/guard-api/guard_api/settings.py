@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-
 DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
 DEFAULT_ADAPTER_TOKEN = "demo-token"
 DEFAULT_CONTROL_TOKEN = "demo-control-token"
@@ -21,28 +20,56 @@ class GuardApiConfigurationError(RuntimeError):
 
 @dataclass(slots=True)
 class GuardApiSettings:
-    database_url: str = field(default_factory=lambda: os.getenv("AGENTGUARD_DATABASE_URL", DEFAULT_DATABASE_URL))
-    storage_backend: str = field(
-        default_factory=lambda: os.getenv("AGENTGUARD_STORAGE_BACKEND", DEFAULT_STORAGE_BACKEND).strip().lower()
+    database_url: str = field(
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_DATABASE_URL", DEFAULT_DATABASE_URL
+        )
     )
-    adapter_token: str = field(default_factory=lambda: os.getenv("AGENTGUARD_ADAPTER_TOKEN", DEFAULT_ADAPTER_TOKEN))
-    control_token: str = field(default_factory=lambda: os.getenv("AGENTGUARD_CONTROL_TOKEN", DEFAULT_CONTROL_TOKEN))
+    storage_backend: str = field(
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_STORAGE_BACKEND", DEFAULT_STORAGE_BACKEND
+        )
+        .strip()
+        .lower()
+    )
+    adapter_token: str = field(
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_ADAPTER_TOKEN", DEFAULT_ADAPTER_TOKEN
+        )
+    )
+    control_token: str = field(
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_CONTROL_TOKEN", DEFAULT_CONTROL_TOKEN
+        )
+    )
     host: str = field(default_factory=lambda: os.getenv("AGENTGUARD_HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: int(os.getenv("AGENTGUARD_PORT", "8088")))
-    environment: str = field(default_factory=lambda: os.getenv("AGENTGUARD_ENV", DEFAULT_ENVIRONMENT))
+    environment: str = field(
+        default_factory=lambda: os.getenv("AGENTGUARD_ENV", DEFAULT_ENVIRONMENT)
+    )
     browser_session_ttl_seconds: int = 3600
     launch_code_ttl_seconds: int = 300
     approval_nonce_ttl_seconds: int = 900
     llm_approval_enabled: bool = field(
-        default_factory=lambda: _env_bool("AGENTGUARD_LLM_APPROVAL_ENABLED", default=False)
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_LLM_APPROVAL_ENABLED", default=False
+        )
     )
     llm_approval_base_url: str = field(
-        default_factory=lambda: os.getenv("AGENTGUARD_LLM_APPROVAL_BASE_URL", DEFAULT_LLM_APPROVAL_BASE_URL)
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_LLM_APPROVAL_BASE_URL", DEFAULT_LLM_APPROVAL_BASE_URL
+        )
     )
-    llm_approval_api_key: str | None = field(default_factory=lambda: _optional_env("AGENTGUARD_LLM_APPROVAL_API_KEY"))
-    llm_approval_model: str | None = field(default_factory=lambda: _optional_env("AGENTGUARD_LLM_APPROVAL_MODEL"))
+    llm_approval_api_key: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_LLM_APPROVAL_API_KEY")
+    )
+    llm_approval_model: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_LLM_APPROVAL_MODEL")
+    )
     llm_approval_timeout_seconds: float = field(
-        default_factory=lambda: _env_float("AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0)
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0
+        )
     )
 
     def llm_approval_configured(self) -> bool:
@@ -57,7 +84,9 @@ class GuardApiSettings:
         if self.environment.lower() != "production":
             return
         if self.storage_backend == "memory":
-            raise GuardApiConfigurationError("Production startup requires persistent storage backend: postgres")
+            raise GuardApiConfigurationError(
+                "Production startup requires persistent storage backend: postgres"
+            )
         default_variables = []
         if self.database_url == DEFAULT_DATABASE_URL:
             default_variables.append("AGENTGUARD_DATABASE_URL")
@@ -67,7 +96,9 @@ class GuardApiSettings:
             default_variables.append("AGENTGUARD_CONTROL_TOKEN")
         if default_variables:
             names = ", ".join(default_variables)
-            raise GuardApiConfigurationError(f"Production startup requires explicit configuration for: {names}")
+            raise GuardApiConfigurationError(
+                f"Production startup requires explicit configuration for: {names}"
+            )
 
 
 def _optional_env(name: str) -> str | None:

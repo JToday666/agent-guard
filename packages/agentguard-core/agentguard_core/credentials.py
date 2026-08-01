@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import re
 
-SENSITIVE_NAME_PATTERN = r"[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*"
+SENSITIVE_NAME_PATTERN = (
+    r"[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*"
+)
 SENSITIVE_WORD_PATTERN = r"(?:api[_-]?key|token|secret|password|credential)"
 
 SENSITIVE_ENV_NAME_RE = re.compile(rf"\b{SENSITIVE_NAME_PATTERN}\b", re.IGNORECASE)
-SENSITIVE_ENV_EXPANSION_RE = re.compile(rf"\$(?:\{{)?({SENSITIVE_NAME_PATTERN})(?:\}})?", re.IGNORECASE)
+SENSITIVE_ENV_EXPANSION_RE = re.compile(
+    rf"\$(?:\{{)?({SENSITIVE_NAME_PATTERN})(?:\}})?", re.IGNORECASE
+)
 SENSITIVE_ENV_READ_RE = re.compile(
     rf"(?:\b(?:printenv|env|set|export)\b.*{SENSITIVE_WORD_PATTERN})|"
     rf"(?:{SENSITIVE_WORD_PATTERN}.*\b(?:printenv|env|set|export)\b)|"
@@ -46,7 +50,9 @@ def redact_credential_text(text: str, *, limit: int = 240) -> str:
     """Redact credential values while preserving useful operator context."""
 
     redacted = PROVIDER_KEY_RE.sub("sk-[redacted]", text)
-    redacted = CREDENTIAL_ASSIGNMENT_RE.sub(lambda match: f"{match.group('key')}{match.group('sep')}[redacted]", redacted)
+    redacted = CREDENTIAL_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group('key')}{match.group('sep')}[redacted]", redacted
+    )
     redacted = SENSITIVE_ENV_EXPANSION_RE.sub("$[redacted]", redacted)
     if len(redacted) > limit:
         return f"{redacted[:limit]}..."

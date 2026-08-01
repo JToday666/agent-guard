@@ -50,7 +50,9 @@ class GuardedToolGateway:
             audit_event.metadata["compatibility"] = dict(compatibility)
         self.guard_adapter.submit_audit_event(audit_event)
 
-        if decision.decision == "deny" or _ask_was_not_approved(self.guard_adapter, decision):
+        if decision.decision == "deny" or _ask_was_not_approved(
+            self.guard_adapter, decision
+        ):
             result = blocked_result(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -59,7 +61,10 @@ class GuardedToolGateway:
                 audit_event=audit_event,
             )
             return ToolExecutionResult.model_validate(
-                tool_result_with_compatibility(result.model_dump(), compatibility or _compatibility_from_event(event))
+                tool_result_with_compatibility(
+                    result.model_dump(),
+                    compatibility or _compatibility_from_event(event),
+                )
             )
 
         memory_gate = _evaluate_memory_write_gate(
@@ -74,10 +79,18 @@ class GuardedToolGateway:
         if memory_gate is not None:
             return memory_gate
 
-        before = self.tool_runtime.snapshot() if hasattr(self.tool_runtime, "snapshot") else None
+        before = (
+            self.tool_runtime.snapshot()
+            if hasattr(self.tool_runtime, "snapshot")
+            else None
+        )
         try:
             result = self.tool_runtime.invoke(tool_name, arguments)
-            side_effects = self.tool_runtime.diff(before) if before is not None and hasattr(self.tool_runtime, "diff") else []
+            side_effects = (
+                self.tool_runtime.diff(before)
+                if before is not None and hasattr(self.tool_runtime, "diff")
+                else []
+            )
             payload = ToolExecutionResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -103,10 +116,17 @@ class GuardedToolGateway:
                 call_id=call_id,
             )
             return ToolExecutionResult.model_validate(
-                tool_result_with_compatibility(payload.model_dump(), compatibility or _compatibility_from_event(event))
+                tool_result_with_compatibility(
+                    payload.model_dump(),
+                    compatibility or _compatibility_from_event(event),
+                )
             )
         except Exception as exc:
-            side_effects = self.tool_runtime.diff(before) if before is not None and hasattr(self.tool_runtime, "diff") else []
+            side_effects = (
+                self.tool_runtime.diff(before)
+                if before is not None and hasattr(self.tool_runtime, "diff")
+                else []
+            )
             payload = ToolExecutionResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -122,7 +142,10 @@ class GuardedToolGateway:
                 error=str(exc),
             )
             return ToolExecutionResult.model_validate(
-                tool_result_with_compatibility(payload.model_dump(), compatibility or _compatibility_from_event(event))
+                tool_result_with_compatibility(
+                    payload.model_dump(),
+                    compatibility or _compatibility_from_event(event),
+                )
             )
 
 
@@ -133,7 +156,9 @@ def _compatibility_from_event(event: Any) -> dict[str, Any]:
     if hasattr(event, "model_dump"):
         dumped = event.model_dump()
         metadata = dumped.get("metadata") if isinstance(dumped, dict) else {}
-        if isinstance(metadata, dict) and isinstance(metadata.get("compatibility"), dict):
+        if isinstance(metadata, dict) and isinstance(
+            metadata.get("compatibility"), dict
+        ):
             return dict(metadata["compatibility"])
         if isinstance(dumped, dict) and isinstance(dumped.get("compatibility"), dict):
             return dict(dumped["compatibility"])
@@ -150,7 +175,9 @@ def _evaluate_memory_write_gate(
     call_id: str,
     compatibility: dict[str, Any],
 ) -> ToolExecutionResult | None:
-    if tool_name != "memory_write" or not hasattr(guard_adapter, "evaluate_memory_write"):
+    if tool_name != "memory_write" or not hasattr(
+        guard_adapter, "evaluate_memory_write"
+    ):
         return None
     event, decision = guard_adapter.evaluate_memory_write(
         arguments=arguments,
@@ -159,7 +186,9 @@ def _evaluate_memory_write_gate(
     )
     audit_event = guard_adapter.build_audit_event(event, decision)
     guard_adapter.submit_audit_event(audit_event)
-    if decision.decision != "deny" and not _ask_was_not_approved(guard_adapter, decision):
+    if decision.decision != "deny" and not _ask_was_not_approved(
+        guard_adapter, decision
+    ):
         return None
     payload = ToolExecutionResult(
         tool_name=tool_name,
@@ -169,14 +198,17 @@ def _evaluate_memory_write_gate(
         decision=decision.decision,
         status="blocked",
         result=None,
-        safe_message=decision.safe_message or "The memory write was blocked by AgentGuard.",
+        safe_message=decision.safe_message
+        or "The memory write was blocked by AgentGuard.",
         side_effects=[],
         event=_dump_event(event),
         audit_event=audit_event.model_dump(),
         block_semantics=_block_semantics(decision),
         counts_as_effective_block=decision.decision == "deny",
     )
-    return ToolExecutionResult.model_validate(tool_result_with_compatibility(payload.model_dump(), compatibility))
+    return ToolExecutionResult.model_validate(
+        tool_result_with_compatibility(payload.model_dump(), compatibility)
+    )
 
 
 def _apply_tool_result_guard(
@@ -205,13 +237,18 @@ def _apply_tool_result_guard(
     )
     audit_event = guard_adapter.build_audit_event(event, decision)
     guard_adapter.submit_audit_event(audit_event)
-    if decision.decision != "deny" and not _ask_was_not_approved(guard_adapter, decision):
+    if decision.decision != "deny" and not _ask_was_not_approved(
+        guard_adapter, decision
+    ):
         return payload
     payload.blocked = True
     payload.decision = decision.decision
     payload.status = "quarantined"
     payload.result = None
-    payload.safe_message = decision.safe_message or "The tool result was quarantined by AgentGuard before entering context."
+    payload.safe_message = (
+        decision.safe_message
+        or "The tool result was quarantined by AgentGuard before entering context."
+    )
     payload.event = _dump_event(event)
     payload.audit_event = audit_event.model_dump()
     payload.quarantine_applied = True
@@ -220,7 +257,9 @@ def _apply_tool_result_guard(
     return payload
 
 
-def _tool_result_will_persist(tool_name: str, side_effects: list[dict[str, Any]]) -> bool:
+def _tool_result_will_persist(
+    tool_name: str, side_effects: list[dict[str, Any]]
+) -> bool:
     if tool_name in {"memory_write", "rag_answer"}:
         return True
     for effect in side_effects:
@@ -240,7 +279,11 @@ def _dump_event(event: Any) -> dict[str, Any]:
 
 
 def _block_semantics(decision: Any) -> str:
-    return "policy_deny" if getattr(decision, "decision", None) == "deny" else "approval_block"
+    return (
+        "policy_deny"
+        if getattr(decision, "decision", None) == "deny"
+        else "approval_block"
+    )
 
 
 def _ask_was_not_approved(guard_adapter: Any, decision: Any) -> bool:
@@ -252,7 +295,11 @@ def _ask_was_not_approved(guard_adapter: Any, decision: Any) -> bool:
     resolution = guard_adapter.wait_for_approval(approval_id)
     if not isinstance(resolution, dict) or resolution.get("status") != "resolved":
         return True
-    return str(resolution.get("decision") or "").lower() not in {"allow", "allow_once", "allow_session"}
+    return str(resolution.get("decision") or "").lower() not in {
+        "allow",
+        "allow_once",
+        "allow_session",
+    }
 
 
 def _approval_id(approval: Any) -> str | None:

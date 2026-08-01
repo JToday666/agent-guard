@@ -330,8 +330,12 @@ class PolicyBundle(BaseModel):
         ]
     )
     default_enforcement_mode: str = "enforce"
-    allowed_email_domains: list[str] = Field(default_factory=lambda: ["agentguard.local"])
-    allowed_api_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
+    allowed_email_domains: list[str] = Field(
+        default_factory=lambda: ["agentguard.local"]
+    )
+    allowed_api_hosts: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1", "localhost"]
+    )
     allowed_api_paths: list[str] = Field(default_factory=lambda: ["/status"])
     collection_path_markers: list[str] = Field(
         default_factory=lambda: ["/collect/", "upload", "exfil", "webhook"]
@@ -340,7 +344,16 @@ class PolicyBundle(BaseModel):
     tool_action_aliases: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "read_file": ["read"],
-            "write_file": ["write", "create", "add", "copy", "save", "edit", "update", "modify"],
+            "write_file": [
+                "write",
+                "create",
+                "add",
+                "copy",
+                "save",
+                "edit",
+                "update",
+                "modify",
+            ],
             "send_email": ["email", "send"],
             "call_api": ["api", "call"],
             "memory_write": ["memory", "write"],

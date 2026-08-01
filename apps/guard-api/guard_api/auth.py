@@ -44,7 +44,9 @@ class CapabilityAuthService:
     settings: GuardApiSettings
     store: ControlPlaneStore
 
-    def verify_bearer(self, authorization: str | None, required_scope: str) -> AuthContext:
+    def verify_bearer(
+        self, authorization: str | None, required_scope: str
+    ) -> AuthContext:
         if not authorization:
             raise ApiAuthError("AUTH_MISSING")
         prefix = "Bearer "
@@ -87,7 +89,10 @@ class CapabilityAuthService:
             credential = self.store.get_credential_by_token_hash(_token_hash(token))
             if credential is None:
                 raise ApiAuthError("TOKEN_INVALID")
-            if credential.expires_at is not None and _parse_datetime(credential.expires_at) < _now():
+            if (
+                credential.expires_at is not None
+                and _parse_datetime(credential.expires_at) < _now()
+            ):
                 raise ApiAuthError("TOKEN_INVALID")
             context = AuthContext(
                 principal_type=credential.principal_type,
@@ -102,7 +107,9 @@ class CapabilityAuthService:
             raise ApiAuthError("SCOPE_DENIED", status_code=403)
         return context
 
-    def create_credential(self, request: CredentialCreateRequest) -> tuple[str, CredentialRecord]:
+    def create_credential(
+        self, request: CredentialCreateRequest
+    ) -> tuple[str, CredentialRecord]:
         token = f"agt_{new_id('tok')}"
         credential = CredentialRecord(
             token_hash=_token_hash(token),
@@ -129,15 +136,21 @@ class CapabilityAuthService:
         return code
 
     def exchange_launch_code(self, code: str) -> BrowserSession:
-        launch_code = self.store.consume_launch_code(_token_hash(code), _now().isoformat())
+        launch_code = self.store.consume_launch_code(
+            _token_hash(code), _now().isoformat()
+        )
         if launch_code is None:
             raise ApiAuthError("LAUNCH_CODE_INVALID")
         if _parse_datetime(launch_code.expires_at) < _now():
             raise ApiAuthError("LAUNCH_CODE_EXPIRED")
         session_id = new_id("sess")
         csrf_token = new_id("csrf")
-        expires_at = _now() + timedelta(seconds=self.settings.browser_session_ttl_seconds)
-        session = BrowserSession(session_id=session_id, csrf_token=csrf_token, expires_at=expires_at)
+        expires_at = _now() + timedelta(
+            seconds=self.settings.browser_session_ttl_seconds
+        )
+        session = BrowserSession(
+            session_id=session_id, csrf_token=csrf_token, expires_at=expires_at
+        )
         self.store.create_browser_session(
             _token_hash(session.session_id),
             csrf_token=session.csrf_token,
@@ -154,7 +167,9 @@ class CapabilityAuthService:
         expires_at = _parse_datetime(stored.expires_at)
         if expires_at < _now():
             raise ApiAuthError("SESSION_EXPIRED")
-        return BrowserSession(session_id=session_id, csrf_token=stored.csrf_token, expires_at=expires_at)
+        return BrowserSession(
+            session_id=session_id, csrf_token=stored.csrf_token, expires_at=expires_at
+        )
 
     def logout_browser_session(self, session_id: str) -> None:
         self.store.revoke_browser_session(_token_hash(session_id), _now().isoformat())
@@ -171,9 +186,13 @@ class CapabilityAuthService:
         subject_id: str | None = None,
         tool_call_id: str | None = None,
     ) -> str:
-        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
+        approval_subject_id = _approval_subject_id(
+            subject_id=subject_id, tool_call_id=tool_call_id
+        )
         nonce = new_id("nonce")
-        expires_at = _now() + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
+        expires_at = _now() + timedelta(
+            seconds=self.settings.approval_nonce_ttl_seconds
+        )
         self.store.create_approval_nonce(
             _token_hash(nonce),
             approval_id=approval_id,
@@ -193,7 +212,9 @@ class CapabilityAuthService:
         subject_id: str | None = None,
         tool_call_id: str | None = None,
     ) -> None:
-        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
+        approval_subject_id = _approval_subject_id(
+            subject_id=subject_id, tool_call_id=tool_call_id
+        )
         approval_nonce = self.store.consume_approval_nonce(
             _token_hash(nonce),
             approval_id=approval_id,

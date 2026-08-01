@@ -14,7 +14,9 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 
 
 class OutboundDetector(Detector):
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if isinstance(event.payload, MessageSendPayload):
             return self._evaluate_message_send(event.payload, policies)
         if not isinstance(event.payload, ToolCallPayload):
@@ -33,7 +35,9 @@ class OutboundDetector(Detector):
                     for resource in event.payload.derived_resources
                 ):
                     return []
-                has_sensitive_content = tool_email_has_sensitive_text(event.payload.arguments, policies)
+                has_sensitive_content = tool_email_has_sensitive_text(
+                    event.payload.arguments, policies
+                )
                 result = apply_rule_override(
                     DetectionResult(
                         decision="deny" if has_sensitive_content else "ask",
@@ -65,7 +69,9 @@ class OutboundDetector(Detector):
             if is_rule_disabled(rule_id, policies):
                 return []
             target = str(event.payload.arguments.get("url") or "")
-            has_sensitive_content = tool_api_has_sensitive_text(event.payload.arguments, policies)
+            has_sensitive_content = tool_api_has_sensitive_text(
+                event.payload.arguments, policies
+            )
             if not is_allowed_api_target(target, policies) and has_sensitive_content:
                 result = apply_rule_override(
                     DetectionResult(
@@ -185,14 +191,18 @@ def _is_allowed_api_url(parsed: Any, policies: PolicyBundle) -> bool:
     return parsed.hostname in allowed_hosts and parsed.path.lower() in allowed_paths
 
 
-def tool_email_has_sensitive_text(arguments: dict[str, Any], policies: PolicyBundle) -> bool:
+def tool_email_has_sensitive_text(
+    arguments: dict[str, Any], policies: PolicyBundle
+) -> bool:
     return any(
         has_sensitive_text(str(arguments.get(key) or ""), policies)
         for key in ("subject", "body", "content", "text")
     )
 
 
-def tool_api_has_sensitive_text(arguments: dict[str, Any], policies: PolicyBundle) -> bool:
+def tool_api_has_sensitive_text(
+    arguments: dict[str, Any], policies: PolicyBundle
+) -> bool:
     candidates = [
         arguments.get("body"),
         arguments.get("data"),

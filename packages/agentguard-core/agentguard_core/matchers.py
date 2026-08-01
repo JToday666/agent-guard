@@ -9,7 +9,6 @@ from .credentials import has_credential_command_text as _has_credential_command_
 from .credentials import has_credential_value_text
 from .policies import PolicyBundle
 
-
 _PROMPT_INJECTION_INTENT_MARKERS: dict[str, list[str]] = {
     "override_instruction": [
         "ignore developer instructions",
@@ -205,10 +204,10 @@ _PAYLOAD_DELIVERY_ACTION_MARKERS = [
     "execute",
     "chmod+x",
     "chmod +x",
-    "method\":\"get",
-    "method\":\"post",
-    "method\": \"get",
-    "method\": \"post",
+    'method":"get',
+    'method":"post',
+    'method": "get',
+    'method": "post',
     "browser_input",
     "write_file",
     "call_api",
@@ -245,7 +244,10 @@ def _marker_matches(normalized_text: str, marker: str) -> bool:
         return False
     prefix = r"(?<![a-z0-9_])" if normalized_marker[0].isalnum() else ""
     suffix = r"(?![a-z0-9_])" if normalized_marker[-1].isalnum() else ""
-    return re.search(f"{prefix}{re.escape(normalized_marker)}{suffix}", normalized_text) is not None
+    return (
+        re.search(f"{prefix}{re.escape(normalized_marker)}{suffix}", normalized_text)
+        is not None
+    )
 
 
 def has_sensitive_text(text: str, policies: PolicyBundle) -> bool:
@@ -262,7 +264,9 @@ def prompt_injection_intents(text: str, policies: PolicyBundle) -> list[str]:
         for intent, markers in _PROMPT_INJECTION_INTENT_MARKERS.items()
         if contains_any(text, markers)
     ]
-    if not intents and contains_any(text, policies.high_confidence_prompt_injection_markers):
+    if not intents and contains_any(
+        text, policies.high_confidence_prompt_injection_markers
+    ):
         intents.append("unsafe_external_action")
     return intents
 
@@ -294,25 +298,29 @@ def has_high_confidence_environment_poisoning_text(
 ) -> bool:
     return (
         contains_instruction_like_text or has_instruction_like_text(text, policies)
-    ) and bool(
-        environment_poisoning_intents(text, policies)
-    )
+    ) and bool(environment_poisoning_intents(text, policies))
 
 
 def has_jailbreak_text(text: str, policies: PolicyBundle) -> bool:
     return contains_any(text, policies.jailbreak_markers)
 
 
-def looks_like_sensitive_model_leak(payload: ModelCallPayload, policies: PolicyBundle) -> bool:
+def looks_like_sensitive_model_leak(
+    payload: ModelCallPayload, policies: PolicyBundle
+) -> bool:
     return contains_any(payload.content_preview, policies.model_leak_markers)
 
 
 def has_credential_exposure_text(text: str, policies: PolicyBundle) -> bool:
-    return has_credential_value_text(text) or contains_any(text, policies.credential_exposure_markers)
+    return has_credential_value_text(text) or contains_any(
+        text, policies.credential_exposure_markers
+    )
 
 
 def has_credential_command_text(command: str, policies: PolicyBundle) -> bool:
-    return _has_credential_command_text(command) or contains_any(command, policies.credential_exposure_markers)
+    return _has_credential_command_text(command) or contains_any(
+        command, policies.credential_exposure_markers
+    )
 
 
 def has_dangerous_command_text(command: str, policies: PolicyBundle) -> bool:
@@ -349,9 +357,15 @@ def _looks_like_malicious_payload_delivery(text: str) -> bool:
     has_executable_payload = _EXECUTABLE_PAYLOAD_RE.search(text) is not None
     has_archive_payload = _ARCHIVE_PAYLOAD_RE.search(text) is not None
     has_network_or_staging_target = bool(
-        re.search(r"https?://|/(?:tmp|var/tmp|opt|usr/local/bin|payloads?|downloads?|artifacts?|staging|scripts?)/", text, flags=re.IGNORECASE)
+        re.search(
+            r"https?://|/(?:tmp|var/tmp|opt|usr/local/bin|payloads?|downloads?|artifacts?|staging|scripts?)/",
+            text,
+            flags=re.IGNORECASE,
+        )
     )
-    if has_payload_path and (has_executable_payload or has_archive_payload or "payload" in normalized):
+    if has_payload_path and (
+        has_executable_payload or has_archive_payload or "payload" in normalized
+    ):
         return True
     return has_executable_payload and has_network_or_staging_target
 
@@ -418,11 +432,14 @@ def memory_poisoning_intents(text: str, policies: PolicyBundle) -> list[str]:
 def has_memory_poisoning_text(text: str, policies: PolicyBundle) -> bool:
     intents = set(memory_poisoning_intents(text, policies))
     return contains_any(text, policies.memory_poisoning_markers) or bool(
-        intents & {"persistent_rule_injection", "delayed_trigger", "poisoned_reference_answer"}
+        intents
+        & {"persistent_rule_injection", "delayed_trigger", "poisoned_reference_answer"}
     )
 
 
-def has_high_confidence_memory_poisoning_text(text: str, policies: PolicyBundle) -> bool:
+def has_high_confidence_memory_poisoning_text(
+    text: str, policies: PolicyBundle
+) -> bool:
     if contains_any(text, policies.high_confidence_memory_poisoning_markers):
         return True
     intents = set(memory_poisoning_intents(text, policies))

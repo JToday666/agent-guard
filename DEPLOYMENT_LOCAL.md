@@ -151,6 +151,7 @@ uv run python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langg
 ## 常用验证命令
 
 ```bash
+pnpm python:check
 uv run pytest tests/test_core_engine.py tests/test_schemas.py -q
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 uv run pytest agentguard_langgraph_bench/bench/tests/test_langgraph_adapter.py agentguard_langgraph_bench/bench/tests/test_core_client.py -q
