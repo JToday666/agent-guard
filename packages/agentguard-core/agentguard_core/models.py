@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from .action_critic import ActionCritic, ActionCriticReview
 from .audit_integrity import AuditIntegrityMetadata
-from .config_audit import ConfigAuditEvent, ConfigAuditFinding, ConfigAuditResult, evaluate_config_audit
+from .config_audit import (
+    ConfigAuditEvent,
+    ConfigAuditFinding,
+    ConfigAuditResult,
+    evaluate_config_audit,
+)
 from .decisions import (
     ApprovalIntent,
     ApprovalResolution,

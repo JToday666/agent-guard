@@ -12,8 +12,9 @@ from guard_api.settings import GuardApiSettings
 
 
 class LlmApprovalReviewer(Protocol):
-    def review(self, request: LlmApprovalReviewInput) -> LlmApprovalReview | dict[str, Any]:
-        ...
+    def review(
+        self, request: LlmApprovalReviewInput
+    ) -> LlmApprovalReview | dict[str, Any]: ...
 
 
 class HttpLlmApprovalReviewer:
@@ -35,7 +36,9 @@ class HttpLlmApprovalReviewer:
         self.client = client
 
     @classmethod
-    def from_settings(cls, settings: GuardApiSettings) -> "HttpLlmApprovalReviewer | None":
+    def from_settings(
+        cls, settings: GuardApiSettings
+    ) -> "HttpLlmApprovalReviewer | None":
         if not settings.llm_approval_enabled or not settings.llm_approval_configured():
             return None
         return cls(
@@ -62,7 +65,11 @@ class HttpLlmApprovalReviewer:
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(request.model_dump(mode="json"), ensure_ascii=False, sort_keys=True),
+                    "content": json.dumps(
+                        request.model_dump(mode="json"),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
                 },
             ],
         }
@@ -70,7 +77,9 @@ class HttpLlmApprovalReviewer:
         content = _chat_completion_content(response_payload)
         parsed = json.loads(content)
         review = LlmApprovalReview.model_validate(parsed)
-        return review.model_copy(update={"provider": self.provider, "model": self.model})
+        return review.model_copy(
+            update={"provider": self.provider, "model": self.model}
+        )
 
     def _post_chat_completions(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = {
@@ -79,7 +88,9 @@ class HttpLlmApprovalReviewer:
         }
         url = f"{self.base_url}/chat/completions"
         if self.client is not None:
-            response = self.client.post(url, headers=headers, json=payload, timeout=self.timeout_seconds)
+            response = self.client.post(
+                url, headers=headers, json=payload, timeout=self.timeout_seconds
+            )
             response.raise_for_status()
             return response.json()
         with httpx.Client(timeout=self.timeout_seconds) as client:

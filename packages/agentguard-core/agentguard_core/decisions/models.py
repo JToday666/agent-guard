@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..ids import new_id, utc_now_iso
 
-
 Decision = Literal["allow", "deny", "ask"]
 ApprovalResolution = Literal["allow_once", "deny"]
 RuleOverrideDecision = Literal["ask", "deny"]
@@ -24,7 +23,9 @@ class RuleHit(BaseModel):
 
 
 class ApprovalIntent(BaseModel):
-    options: list[ApprovalResolution] = Field(default_factory=lambda: ["allow_once", "deny"])
+    options: list[ApprovalResolution] = Field(
+        default_factory=lambda: ["allow_once", "deny"]
+    )
     resource: str
 
 

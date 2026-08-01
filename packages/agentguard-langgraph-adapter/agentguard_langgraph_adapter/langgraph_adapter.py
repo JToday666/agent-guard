@@ -6,19 +6,24 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import AgentGuardLangGraphConfig
-from .core_client import AgentGuardCoreClient, CoreClientError, CoreClientProtocol, FakeDenyCoreClient
+from .core_client import (
+    AgentGuardCoreClient,
+    CoreClientError,
+    CoreClientProtocol,
+    FakeDenyCoreClient,
+)
 from .event_models import (
     AuditEvent,
     DerivedResource,
     PolicyDecision,
     RuntimeGuardEvent,
+    RuleHit,
     SecurityContext,
     ToolCallEvent,
     ToolDescriptor,
     ToolExecutionResult,
     new_id,
 )
-
 
 TOOL_METADATA = {
     "read_file": ("file", "file_read", "read"),
@@ -53,7 +58,10 @@ class LangGraphAdapter:
 
     @classmethod
     def with_fake_deny_core(cls, config: Any | None = None) -> "LangGraphAdapter":
-        return cls(config=config or AgentGuardLangGraphConfig(defense_enabled=True), core_client=FakeDenyCoreClient())
+        return cls(
+            config=config or AgentGuardLangGraphConfig(defense_enabled=True),
+            core_client=FakeDenyCoreClient(),
+        )
 
     def evaluate_before_tool(
         self,
@@ -95,12 +103,12 @@ class LangGraphAdapter:
                     risk_score=100,
                     severity="high",
                     rule_hits=[
-                        {
-                            "rule_id": "AGENTGUARD_FAIL_CLOSED",
-                            "rule_name": "AgentGuard Fail Closed",
-                            "severity": "high",
-                            "evidence": [str(exc)],
-                        }
+                        RuleHit(
+                            rule_id="AGENTGUARD_FAIL_CLOSED",
+                            rule_name="AgentGuard Fail Closed",
+                            severity="high",
+                            evidence=[str(exc)],
+                        )
                     ],
                     reason=f"Core unavailable or invalid; fail_closed blocked the tool call: {exc}",
                     safe_message="The tool call was blocked because AgentGuard Core was unavailable.",
@@ -119,13 +127,17 @@ class LangGraphAdapter:
                 )
         return event, decision
 
-    def evaluate_guard_event(self, event: RuntimeGuardEvent | dict[str, Any]) -> PolicyDecision:
+    def evaluate_guard_event(
+        self, event: RuntimeGuardEvent | dict[str, Any]
+    ) -> PolicyDecision:
         if not self.config.defense_enabled:
             return _allow_decision("Defense is disabled for this benchmark run.")
         try:
             assert self.core_client is not None
             if not hasattr(self.core_client, "evaluate_guard_event"):
-                return _allow_decision("Core client does not implement runtime guard events; allowed for compatibility.")
+                return _allow_decision(
+                    "Core client does not implement runtime guard events; allowed for compatibility."
+                )
             raw_decision = self.core_client.evaluate_guard_event(_event_dump(event))
             return PolicyDecision.model_validate(raw_decision)
         except Exception as exc:
@@ -226,7 +238,9 @@ class LangGraphAdapter:
         security: dict[str, Any],
         trace_id: str,
     ) -> tuple[RuntimeGuardEvent, PolicyDecision]:
-        event = self.build_memory_write_event(arguments=arguments, security=security, trace_id=trace_id)
+        event = self.build_memory_write_event(
+            arguments=arguments, security=security, trace_id=trace_id
+        )
         return event, self.evaluate_guard_event(event)
 
     def build_tool_call_event(
@@ -240,19 +254,33 @@ class LangGraphAdapter:
     ) -> ToolCallEvent:
         category, kind, _ = TOOL_METADATA.get(tool_name, ("tool", tool_name, "execute"))
         resources = derive_resources(tool_name, arguments)
-        security_metadata = security.get("metadata", {}) if isinstance(security.get("metadata"), dict) else {}
-        event_metadata = {"adapter": "agentguard_langgraph_bench", **mcp_hijacking_metadata(arguments, security_metadata)}
+        security_metadata = (
+            security.get("metadata", {})
+            if isinstance(security.get("metadata"), dict)
+            else {}
+        )
+        event_metadata = {
+            "adapter": "agentguard_langgraph_bench",
+            **mcp_hijacking_metadata(arguments, security_metadata),
+        }
         if "compatibility" in security_metadata:
             event_metadata["compatibility"] = security_metadata["compatibility"]
-        context = SecurityContext.model_validate({
-            "user_task": security.get("user_task") or security.get("payload") or "",
-            "source_type": security.get("source_type", "dataset"),
-            "source_trust": security.get("source_trust", "untrusted"),
-            "current_step": "before_tool",
-            "model_intent": security.get("model_intent"),
-            "derived_paths": [item.target for item in resources if item.resource_type == "file"],
-            "metadata": {**security_metadata, **mcp_hijacking_metadata(arguments, security_metadata)},
-        })
+        context = SecurityContext.model_validate(
+            {
+                "user_task": security.get("user_task") or security.get("payload") or "",
+                "source_type": security.get("source_type", "dataset"),
+                "source_trust": security.get("source_trust", "untrusted"),
+                "current_step": "before_tool",
+                "model_intent": security.get("model_intent"),
+                "derived_paths": [
+                    item.target for item in resources if item.resource_type == "file"
+                ],
+                "metadata": {
+                    **security_metadata,
+                    **mcp_hijacking_metadata(arguments, security_metadata),
+                },
+            }
+        )
         return ToolCallEvent(
             runtime=self.config.runtime,
             trace_id=trace_id,
@@ -260,7 +288,12 @@ class LangGraphAdapter:
             attack_type=security.get("attack_type"),
             is_malicious=security.get("is_malicious"),
             security_context=context,
-            tool=ToolDescriptor(name=tool_name, category=category, kind=kind, call_id=call_id or new_id("call")),
+            tool=ToolDescriptor(
+                name=tool_name,
+                category=category,
+                kind=kind,
+                call_id=call_id or new_id("call"),
+            ),
             arguments=arguments,
             derived_resources=resources,
             metadata=event_metadata,
@@ -291,11 +324,17 @@ class LangGraphAdapter:
             pre_execution=True,
             security_context=context,
             payload={
-                "sources": [_context_source_payload(source, index, context) for index, source in enumerate(sources)],
+                "sources": [
+                    _context_source_payload(source, index, context)
+                    for index, source in enumerate(sources)
+                ],
                 "will_enter_context": will_enter_context,
                 "sanitized": sanitized,
             },
-            metadata={"adapter": "agentguard_langgraph_adapter", "hook": "context_assembled"},
+            metadata={
+                "adapter": "agentguard_langgraph_adapter",
+                "hook": "context_assembled",
+            },
         )
 
     def build_model_event(
@@ -311,7 +350,11 @@ class LangGraphAdapter:
         tool_plan: list[dict[str, Any]] | None = None,
     ) -> RuntimeGuardEvent:
         normalized_phase = "output" if phase == "output" else "input"
-        current_step = "model_output_produced" if normalized_phase == "output" else "model_input_prepared"
+        current_step = (
+            "model_output_produced"
+            if normalized_phase == "output"
+            else "model_input_prepared"
+        )
         context = _security_context(
             security,
             current_step=current_step,
@@ -333,7 +376,9 @@ class LangGraphAdapter:
                 "content_preview": preview,
                 "provider": provider,
                 "model": model,
-                "contains_instruction_like_text": _contains_instruction_like_text(preview),
+                "contains_instruction_like_text": _contains_instruction_like_text(
+                    preview
+                ),
                 "contains_sensitive_data": _contains_sensitive_text(preview),
                 "sanitized": sanitized,
                 "tool_plan": tool_plan or [],
@@ -374,8 +419,12 @@ class LangGraphAdapter:
             payload={
                 "tool": {
                     "name": tool_name,
-                    "category": TOOL_METADATA.get(tool_name, ("tool", tool_name, "execute"))[0],
-                    "kind": TOOL_METADATA.get(tool_name, ("tool", tool_name, "execute"))[1],
+                    "category": TOOL_METADATA.get(
+                        tool_name, ("tool", tool_name, "execute")
+                    )[0],
+                    "kind": TOOL_METADATA.get(
+                        tool_name, ("tool", tool_name, "execute")
+                    )[1],
                     "call_id": call_id or new_id("call"),
                 },
                 "result": {
@@ -387,10 +436,18 @@ class LangGraphAdapter:
                 "will_persist": will_persist,
                 "sanitized": sanitized,
                 "contains_sensitive_data": _contains_sensitive_text(preview),
-                "contains_instruction_like_text": _contains_instruction_like_text(preview),
-                "derived_resources": [resource.model_dump() for resource in derive_resources(tool_name, arguments)],
+                "contains_instruction_like_text": _contains_instruction_like_text(
+                    preview
+                ),
+                "derived_resources": [
+                    resource.model_dump()
+                    for resource in derive_resources(tool_name, arguments)
+                ],
             },
-            metadata={"adapter": "agentguard_langgraph_adapter", "hook": "tool_result_produced"},
+            metadata={
+                "adapter": "agentguard_langgraph_adapter",
+                "hook": "tool_result_produced",
+            },
         )
 
     def build_memory_write_event(
@@ -402,8 +459,15 @@ class LangGraphAdapter:
     ) -> RuntimeGuardEvent:
         namespace = str(arguments.get("namespace") or "memory")
         key = str(arguments.get("key") or arguments.get("id") or "memory")
-        value = _preview(arguments.get("value") or arguments.get("value_preview") or arguments.get("content") or arguments.get("text"))
-        source_trust = str(arguments.get("source_trust") or security.get("source_trust") or "untrusted")
+        value = _preview(
+            arguments.get("value")
+            or arguments.get("value_preview")
+            or arguments.get("content")
+            or arguments.get("text")
+        )
+        source_trust = str(
+            arguments.get("source_trust") or security.get("source_trust") or "untrusted"
+        )
         context = _security_context(
             {**security, "source_trust": source_trust},
             current_step="memory_write_proposed",
@@ -428,28 +492,49 @@ class LangGraphAdapter:
                     "operation": "write",
                 },
                 "will_persist": True,
-                "requires_approval": bool(arguments.get("requires_approval")) or source_trust.lower() not in TRUSTED_SOURCE_TRUST,
+                "requires_approval": bool(arguments.get("requires_approval"))
+                or source_trust.lower() not in TRUSTED_SOURCE_TRUST,
             },
-            metadata={"adapter": "agentguard_langgraph_adapter", "hook": "memory_write_proposed"},
+            metadata={
+                "adapter": "agentguard_langgraph_adapter",
+                "hook": "memory_write_proposed",
+            },
         )
 
-    def build_audit_event(self, event: ToolCallEvent | RuntimeGuardEvent | dict[str, Any], decision: PolicyDecision) -> AuditEvent:
+    def build_audit_event(
+        self,
+        event: ToolCallEvent | RuntimeGuardEvent | dict[str, Any],
+        decision: PolicyDecision,
+    ) -> AuditEvent:
         event_dict = _event_dump(event)
         targets = _resource_targets(event_dict)
         rule_ids = [hit.rule_id for hit in decision.rule_hits]
         summary_target = targets[0] if targets else "no derived resource"
-        security_context = event_dict.get("security_context") if isinstance(event_dict.get("security_context"), dict) else {}
-        payload = event_dict.get("payload") if isinstance(event_dict.get("payload"), dict) else event_dict
+        raw_security_context = event_dict.get("security_context")
+        security_context = (
+            raw_security_context if isinstance(raw_security_context, dict) else {}
+        )
+        raw_payload = event_dict.get("payload")
+        payload = raw_payload if isinstance(raw_payload, dict) else event_dict
         tool_name = _tool_name_from_payload(payload)
         event_type = str(event_dict.get("event_type") or "runtime_event")
-        stage = str(security_context.get("current_step") or ("before_tool_call" if event_type == "tool_call_proposed" else event_type))
+        stage = str(
+            security_context.get("current_step")
+            or (
+                "before_tool_call" if event_type == "tool_call_proposed" else event_type
+            )
+        )
         return AuditEvent(
             trace_id=str(event_dict.get("trace_id") or new_id("trace")),
             case_id=event_dict.get("case_id"),
             runtime=str(event_dict.get("runtime") or self.config.runtime),
             stage=stage,
             event_type=event_type,
-            summary=_audit_summary(event_type=event_type, tool_name=tool_name, summary_target=summary_target),
+            summary=_audit_summary(
+                event_type=event_type,
+                tool_name=tool_name,
+                summary_target=summary_target,
+            ),
             decision=decision.decision,
             risk_score=decision.risk_score,
             severity=decision.severity,
@@ -457,7 +542,10 @@ class LangGraphAdapter:
             resource_targets=targets,
             rule_hits=rule_ids,
             reason=decision.reason,
-            links={"event_id": str(event_dict.get("event_id") or ""), "decision_id": decision.decision_id},
+            links={
+                "event_id": str(event_dict.get("event_id") or ""),
+                "decision_id": decision.decision_id,
+            },
         )
 
     def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
@@ -471,7 +559,9 @@ class LangGraphAdapter:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+    def wait_for_approval(
+        self, approval_id: str, timeout: float | None = None
+    ) -> dict[str, Any]:
         if not self.config.defense_enabled:
             return {"status": "resolved", "decision": "allow_once"}
         try:
@@ -481,9 +571,17 @@ class LangGraphAdapter:
             except TypeError:
                 return self.core_client.wait_for_approval(approval_id)
         except CoreClientError as exc:
-            return {"status": "error", "decision": "deny" if self.config.fail_closed else None, "error": str(exc)}
+            return {
+                "status": "error",
+                "decision": "deny" if self.config.fail_closed else None,
+                "error": str(exc),
+            }
         except Exception as exc:
-            return {"status": "error", "decision": "deny" if self.config.fail_closed else None, "error": str(exc)}
+            return {
+                "status": "error",
+                "decision": "deny" if self.config.fail_closed else None,
+                "error": str(exc),
+            }
 
 
 def _allow_decision(reason: str) -> PolicyDecision:
@@ -507,12 +605,12 @@ def _failure_decision(exc: Exception, *, fail_closed: bool) -> PolicyDecision:
             risk_score=100,
             severity="high",
             rule_hits=[
-                {
-                    "rule_id": "AGENTGUARD_FAIL_CLOSED",
-                    "rule_name": "AgentGuard Fail Closed",
-                    "severity": "high",
-                    "evidence": [str(exc)],
-                }
+                RuleHit(
+                    rule_id="AGENTGUARD_FAIL_CLOSED",
+                    rule_name="AgentGuard Fail Closed",
+                    severity="high",
+                    evidence=[str(exc)],
+                )
             ],
             reason=f"Core unavailable or invalid; fail_closed blocked the runtime event: {exc}",
             safe_message="The runtime event was blocked because AgentGuard Core was unavailable.",
@@ -530,7 +628,9 @@ def _failure_decision(exc: Exception, *, fail_closed: bool) -> PolicyDecision:
     )
 
 
-def _event_dump(event: RuntimeGuardEvent | ToolCallEvent | dict[str, Any]) -> dict[str, Any]:
+def _event_dump(
+    event: RuntimeGuardEvent | ToolCallEvent | dict[str, Any],
+) -> dict[str, Any]:
     if isinstance(event, dict):
         return event
     return event.model_dump()
@@ -548,24 +648,43 @@ def _security_context(
     agent_id: str,
     resources: list[DerivedResource] | None = None,
 ) -> SecurityContext:
-    metadata = security.get("metadata", {}) if isinstance(security.get("metadata"), dict) else {}
-    return SecurityContext.model_validate({
-        "user_task": security.get("user_task") or security.get("payload") or "",
-        "source_type": security.get("source_type", "dataset"),
-        "source_trust": security.get("source_trust", "untrusted"),
-        "current_step": current_step,
-        "model_intent": security.get("model_intent"),
-        "run_id": security.get("run_id"),
-        "agent_id": security.get("agent_id") or agent_id,
-        "derived_paths": [item.target for item in resources or [] if item.resource_type == "file"],
-        "metadata": {"runtime": runtime, **metadata},
-    })
+    metadata = (
+        security.get("metadata", {})
+        if isinstance(security.get("metadata"), dict)
+        else {}
+    )
+    return SecurityContext.model_validate(
+        {
+            "user_task": security.get("user_task") or security.get("payload") or "",
+            "source_type": security.get("source_type", "dataset"),
+            "source_trust": security.get("source_trust", "untrusted"),
+            "current_step": current_step,
+            "model_intent": security.get("model_intent"),
+            "run_id": security.get("run_id"),
+            "agent_id": security.get("agent_id") or agent_id,
+            "derived_paths": [
+                item.target for item in resources or [] if item.resource_type == "file"
+            ],
+            "metadata": {"runtime": runtime, **metadata},
+        }
+    )
 
 
-def _context_source_payload(source: Any, index: int, context: SecurityContext) -> dict[str, Any]:
+def _context_source_payload(
+    source: Any, index: int, context: SecurityContext
+) -> dict[str, Any]:
     if isinstance(source, dict):
-        summary = _preview(source.get("summary") or source.get("content") or source.get("text") or source)
-        source_id = str(source.get("source_id") or source.get("id") or f"langgraph:context:{index + 1}")
+        summary = _preview(
+            source.get("summary")
+            or source.get("content")
+            or source.get("text")
+            or source
+        )
+        source_id = str(
+            source.get("source_id")
+            or source.get("id")
+            or f"langgraph:context:{index + 1}"
+        )
         source_type = str(source.get("source_type") or context.source_type)
         source_trust = str(source.get("source_trust") or context.source_trust)
     else:
@@ -593,7 +712,9 @@ def _resource_targets(event: dict[str, Any]) -> list[str]:
                 targets.append(str(item["target"]))
     memory = payload.get("memory") if isinstance(payload, dict) else None
     if isinstance(memory, dict):
-        targets.append(f"{memory.get('namespace', 'memory')}/{memory.get('key', 'memory')}")
+        targets.append(
+            f"{memory.get('namespace', 'memory')}/{memory.get('key', 'memory')}"
+        )
     recipient = payload.get("recipient") if isinstance(payload, dict) else None
     if recipient:
         targets.append(str(recipient))
@@ -611,7 +732,9 @@ def _tool_name_from_payload(payload: dict[str, Any]) -> str | None:
     return None
 
 
-def _audit_summary(*, event_type: str, tool_name: str | None, summary_target: str) -> str:
+def _audit_summary(
+    *, event_type: str, tool_name: str | None, summary_target: str
+) -> str:
     if event_type == "tool_call_proposed":
         return f"Agent attempted to call {tool_name or 'tool'} on {summary_target}"
     if event_type == "tool_result_produced":
@@ -691,19 +814,34 @@ def _contains_instruction_like_text(value: str) -> bool:
 
 def _contains_sensitive_text(value: str) -> bool:
     lowered = value.lower()
-    return any(marker in lowered for marker in ("token=", "secret", "credential", "api key", "password", "private key"))
+    return any(
+        marker in lowered
+        for marker in (
+            "token=",
+            "secret",
+            "credential",
+            "api key",
+            "password",
+            "private key",
+        )
+    )
 
 
 def classify_resource(target: str) -> str:
     lowered = target.lower()
-    if any(marker in lowered for marker in (".env", "token", "secret", "private", "key", "credential")):
+    if any(
+        marker in lowered
+        for marker in (".env", "token", "secret", "private", "key", "credential")
+    ):
         return "secret"
     if "config" in lowered:
         return "confidential"
     return "public"
 
 
-def derive_resources(tool_name: str, arguments: dict[str, Any]) -> list[DerivedResource]:
+def derive_resources(
+    tool_name: str, arguments: dict[str, Any]
+) -> list[DerivedResource]:
     if tool_name == "read_file":
         target = str(arguments.get("path", ""))
         return [
@@ -762,13 +900,19 @@ def derive_resources(tool_name: str, arguments: dict[str, Any]) -> list[DerivedR
     if tool_name in {"memory_write", "memory_read", "memory_search"}:
         namespace = str(arguments.get("namespace") or "memory")
         key = str(arguments.get("key") or arguments.get("query") or "memory")
-        operation = "write" if tool_name == "memory_write" else ("read" if tool_name == "memory_read" else "search")
+        operation = (
+            "write"
+            if tool_name == "memory_write"
+            else ("read" if tool_name == "memory_read" else "search")
+        )
         return [
             DerivedResource(
                 resource_type="memory",
                 operation=operation,
                 target=f"{namespace}:{key}",
-                data_classification="persistent_memory" if operation == "write" else "memory",
+                data_classification=(
+                    "persistent_memory" if operation == "write" else "memory"
+                ),
                 direction="persistent" if operation == "write" else "local",
             )
         ]
@@ -802,7 +946,12 @@ def derive_resources(tool_name: str, arguments: dict[str, Any]) -> list[DerivedR
             )
         ]
     if tool_name.startswith("rag_"):
-        target = str(arguments.get("question_id") or arguments.get("dataset") or arguments.get("question") or "rag")
+        target = str(
+            arguments.get("question_id")
+            or arguments.get("dataset")
+            or arguments.get("question")
+            or "rag"
+        )
         return [
             DerivedResource(
                 resource_type="rag",
@@ -815,10 +964,14 @@ def derive_resources(tool_name: str, arguments: dict[str, Any]) -> list[DerivedR
     return []
 
 
-def mcp_hijacking_metadata(arguments: dict[str, Any], case_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+def mcp_hijacking_metadata(
+    arguments: dict[str, Any], case_metadata: dict[str, Any] | None = None
+) -> dict[str, Any]:
     if not isinstance(arguments, dict) or "hijacking" not in arguments:
         case_metadata = case_metadata or {}
-        hijacking = case_metadata.get("hijacking") if isinstance(case_metadata, dict) else None
+        hijacking = (
+            case_metadata.get("hijacking") if isinstance(case_metadata, dict) else None
+        )
     else:
         hijacking = arguments.get("hijacking")
     if not isinstance(hijacking, dict):
@@ -855,7 +1008,9 @@ def _normalize_hijacking_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "mode": _string_first(payload, "mode", "hijacking_mode") or "tool_shadowing",
         "target_server": _string_first(payload, "targetServer", "target_server"),
         "target_tool": _string_first(payload, "targetTool", "target_tool"),
-        "hijacked_server": _string_first(payload, "hijackedServer", "hijackToServer", "hijacked_server"),
+        "hijacked_server": _string_first(
+            payload, "hijackedServer", "hijackToServer", "hijacked_server"
+        ),
         "hijacked_tool": _string_first(
             payload,
             "hijackedTool",
@@ -864,7 +1019,13 @@ def _normalize_hijacking_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "malicious_tool",
             "hijacked_tool",
         ),
-        "argument_mutation": _dict_first(payload, "argumentMutation", "argument_mutation", "maliciousArguments", "malicious_arguments"),
+        "argument_mutation": _dict_first(
+            payload,
+            "argumentMutation",
+            "argument_mutation",
+            "maliciousArguments",
+            "malicious_arguments",
+        ),
         "injected_return_markers": _list_first(
             payload,
             "injectedReturnMarkers",
@@ -872,9 +1033,13 @@ def _normalize_hijacking_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "returnMarkers",
             "return_markers",
         ),
-        "required_dependency": _string_first(payload, "requiredDependency", "required_dependency"),
+        "required_dependency": _string_first(
+            payload, "requiredDependency", "required_dependency"
+        ),
         "dependency_type": _string_first(payload, "dependencyType", "dependency_type"),
-        "source_evaluator": _string_first(payload, "source_evaluator", "mcpsafety_evaluator"),
+        "source_evaluator": _string_first(
+            payload, "source_evaluator", "mcpsafety_evaluator"
+        ),
     }
 
 
@@ -904,7 +1069,12 @@ def _list_first(payload: dict[str, Any], *keys: str) -> list[str]:
     return []
 
 
-def create_guarded_tool_node(adapter: LangGraphAdapter, tool_registry: Any | None = None, *, gateway: Any | None = None) -> Any:
+def create_guarded_tool_node(
+    adapter: LangGraphAdapter,
+    tool_registry: Any | None = None,
+    *,
+    gateway: Any | None = None,
+) -> Any:
     from .secure_tool_node import SecureToolNode
 
     return SecureToolNode(gateway=gateway, adapter=adapter, tool_registry=tool_registry)
@@ -926,10 +1096,13 @@ def blocked_result(
         decision=decision.decision,
         status="blocked",
         result=None,
-        safe_message=decision.safe_message or "The tool call was blocked by AgentGuard.",
+        safe_message=decision.safe_message
+        or "The tool call was blocked by AgentGuard.",
         side_effects=[],
         event=event.model_dump(),
         audit_event=audit_event.model_dump(),
-        block_semantics="policy_deny" if decision.decision == "deny" else "approval_block",
+        block_semantics=(
+            "policy_deny" if decision.decision == "deny" else "approval_block"
+        ),
         counts_as_effective_block=decision.decision == "deny",
     )

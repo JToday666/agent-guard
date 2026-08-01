@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from agentguard_core import (
     ActionCritic,
     ActionCriticReview,
     AuditEvent,
     ConfigAuditEvent,
+    ConfigAuditFinding,
     ConfigAuditResult,
     GuardDecision,
     GuardEvent,
@@ -64,7 +66,9 @@ class PolicyService:
         policy_provider: Callable[[], PolicyBundle] | None = None,
     ) -> None:
         if policy_bundle is not None and policy_provider is not None:
-            raise ValueError("PolicyService accepts either policy_bundle or policy_provider, not both")
+            raise ValueError(
+                "PolicyService accepts either policy_bundle or policy_provider, not both"
+            )
         self.store = store
         self.policy_bundle = policy_bundle or PolicyBundle()
         self.policy_provider = policy_provider
@@ -78,9 +82,13 @@ class PolicyService:
             return self.policy_provider()
         return self.policy_bundle
 
-    def save_snapshot(self, policy_bundle: PolicyBundle, *, updated_by: str = "system") -> PolicyBundle:
+    def save_snapshot(
+        self, policy_bundle: PolicyBundle, *, updated_by: str = "system"
+    ) -> PolicyBundle:
         if self.store is not None:
-            return self.store.save_policy_snapshot(policy_bundle, updated_by=updated_by).policy_bundle
+            return self.store.save_policy_snapshot(
+                policy_bundle, updated_by=updated_by
+            ).policy_bundle
         self.policy_bundle = policy_bundle
         return policy_bundle
 
@@ -115,13 +123,17 @@ class AuditService:
             event,
             decision,
             approval_id=approval_id,
-            critic_review_id=critic_review.review_id if critic_review is not None else None,
+            critic_review_id=(
+                critic_review.review_id if critic_review is not None else None
+            ),
             memory_change_id=memory_change_id,
         )
         self.store.add_audit_event(audit_event)
         if critic_review is not None:
             self.store.add_action_critic_review(critic_review)
-        self._record_evaluation_provenance(event, decision, audit_event, critic_review=critic_review)
+        self._record_evaluation_provenance(
+            event, decision, audit_event, critic_review=critic_review
+        )
         return audit_event
 
     def integrity(self) -> dict[str, object]:
@@ -138,7 +150,9 @@ class AuditService:
             metadata={"runtime": event.runtime, "stage": event.stage},
         )
         self.store.add_provenance_node(audit_node)
-        source_id = event.links.get("config_audit_event_id") or event.links.get("event_id")
+        source_id = event.links.get("config_audit_event_id") or event.links.get(
+            "event_id"
+        )
         if source_id is None:
             return
         source_kind = "config_audit" if event.event_type == "config_audit" else "event"
@@ -245,7 +259,9 @@ class AuditService:
 
 
 class ConfigAuditService:
-    def __init__(self, *, store: ControlPlaneStore, audit_service: AuditService | None = None) -> None:
+    def __init__(
+        self, *, store: ControlPlaneStore, audit_service: AuditService | None = None
+    ) -> None:
         self.store = store
         self.audit_service = audit_service or AuditService(store=store)
 
@@ -262,8 +278,12 @@ class MemoryGuardService:
         self.store = store
 
     def propose(self, change: MemoryGuardChange) -> MemoryGuardChange:
-        status = "quarantined" if _should_quarantine_memory_change(change) else "proposed"
-        proposed = change.model_copy(update={"status": status, "updated_at": utc_now_iso()})
+        status = (
+            "quarantined" if _should_quarantine_memory_change(change) else "proposed"
+        )
+        proposed = change.model_copy(
+            update={"status": status, "updated_at": utc_now_iso()}
+        )
         return self.store.create_memory_change(proposed)
 
     def commit(self, change_id: str) -> MemoryGuardChange:
@@ -313,12 +333,15 @@ class ApprovalService:
             evidence=_approval_evidence(event, decision, description),
             decision_options=decision.approval_intent.options,
             expires_at=(
-                datetime.now(timezone.utc) + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
+                datetime.now(timezone.utc)
+                + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
             ).isoformat(),
         )
         return self.store.create_approval(approval)
 
-    def auto_review_with_llm(self, approval: ApprovalRequest | None) -> ApprovalRequest | None:
+    def auto_review_with_llm(
+        self, approval: ApprovalRequest | None
+    ) -> ApprovalRequest | None:
         if approval is None or not self.settings.llm_approval_enabled:
             return approval
         if self.llm_reviewer is None:
@@ -360,7 +383,9 @@ class ApprovalService:
                 resolution_reason=review.reason,
                 llm_review=review.model_copy(update={"status": "resolved"}),
             )
-        return self._record_llm_review(approval, review.model_copy(update={"status": "kept_pending"}))
+        return self._record_llm_review(
+            approval, review.model_copy(update={"status": "kept_pending"})
+        )
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         pending: list[ApprovalRequest] = []
@@ -400,7 +425,9 @@ class ApprovalService:
             llm_review=llm_review,
         )
 
-    def _record_llm_review(self, approval: ApprovalRequest, review: LlmApprovalReview) -> ApprovalRequest:
+    def _record_llm_review(
+        self, approval: ApprovalRequest, review: LlmApprovalReview
+    ) -> ApprovalRequest:
         updated = approval.model_copy(update={"llm_review": review})
         return self.store.create_approval(updated)
 
@@ -441,9 +468,13 @@ class MetricService:
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         return self.store.eval_metrics(filters)
 
-    def runtime_metrics(self, *, runtime: str | None = None, limit: int = 1000) -> dict[str, object]:
-        events = self.store.list_audit_events(AuditEventFilters(runtime=runtime, limit=limit))
-        by_runtime: dict[str, dict[str, object]] = {}
+    def runtime_metrics(
+        self, *, runtime: str | None = None, limit: int = 1000
+    ) -> dict[str, object]:
+        events = self.store.list_audit_events(
+            AuditEventFilters(runtime=runtime, limit=limit)
+        )
+        by_runtime: dict[str, dict[str, Any]] = {}
         hook_activity: dict[str, int] = {}
         for event in events:
             bucket = by_runtime.setdefault(
@@ -460,7 +491,9 @@ class MetricService:
                 },
             )
             bucket["event_count"] = int(bucket["event_count"]) + 1
-            bucket[f"{event.decision}_count"] = int(bucket[f"{event.decision}_count"]) + 1
+            bucket[f"{event.decision}_count"] = (
+                int(bucket[f"{event.decision}_count"]) + 1
+            )
             if event.blocked or event.decision in {"deny", "ask"}:
                 bucket["blocked_count"] = int(bucket["blocked_count"]) + 1
             if event.latency_ms is not None:
@@ -480,11 +513,17 @@ class MetricService:
         statuses = {
             adapter_id: status
             for adapter_id, status in self.store.list_adapter_statuses().items()
-            if runtime is None or status.get("runtime") == runtime or adapter_id == runtime
+            if runtime is None
+            or status.get("runtime") == runtime
+            or adapter_id == runtime
         }
         event_count = len(events)
-        blocked_count = sum(1 for event in events if event.blocked or event.decision in {"deny", "ask"})
-        latency_values = [event.latency_ms for event in events if event.latency_ms is not None]
+        blocked_count = sum(
+            1 for event in events if event.blocked or event.decision in {"deny", "ask"}
+        )
+        latency_values = [
+            event.latency_ms for event in events if event.latency_ms is not None
+        ]
         return {
             "runtime": runtime,
             "event_count": event_count,
@@ -493,11 +532,15 @@ class MetricService:
             "ask_count": sum(1 for event in events if event.decision == "ask"),
             "blocked_count": blocked_count,
             "block_rate": (blocked_count / event_count) if event_count else None,
-            "average_latency_ms": (sum(latency_values) / len(latency_values)) if latency_values else None,
+            "average_latency_ms": (
+                (sum(latency_values) / len(latency_values)) if latency_values else None
+            ),
             "by_runtime": by_runtime,
             "hook_activity": dict(sorted(hook_activity.items())),
             "adapters": statuses,
-            "active_adapter_count": sum(1 for status in statuses.values() if status.get("loaded") is True),
+            "active_adapter_count": sum(
+                1 for status in statuses.values() if status.get("loaded") is True
+            ),
         }
 
 
@@ -510,10 +553,13 @@ class TraceService:
             "trace_id": trace_id,
             "audit_events": [
                 event.model_dump(mode="json")
-                for event in self.store.list_audit_events(AuditEventFilters(trace_id=trace_id, limit=1000))
+                for event in self.store.list_audit_events(
+                    AuditEventFilters(trace_id=trace_id, limit=1000)
+                )
             ],
             "approvals": [
-                approval.model_dump(mode="json") for approval in self.store.list_approvals(trace_id=trace_id)
+                approval.model_dump(mode="json")
+                for approval in self.store.list_approvals(trace_id=trace_id)
             ],
             "metrics": self.store.eval_metrics(EvalMetricFilters(trace_id=trace_id)),
         }
@@ -543,7 +589,9 @@ class EvaluationService:
         self.memory_guard_service = memory_guard_service
         self.action_critic = action_critic or ActionCritic()
 
-    def evaluate(self, event: GuardEvent, *, requesting_principal_id: str) -> GuardEvaluationResponse:
+    def evaluate(
+        self, event: GuardEvent, *, requesting_principal_id: str
+    ) -> GuardEvaluationResponse:
         decision = core_evaluate(event, self.policy_service.current_snapshot())
         critic_review = self.action_critic.review(event, decision)
         approval = self.approval_service.create_for_decision(
@@ -558,7 +606,9 @@ class EvaluationService:
             decision,
             approval_id=approval.approval_id if approval is not None else None,
             critic_review=critic_review,
-            memory_change_id=memory_change.change_id if memory_change is not None else None,
+            memory_change_id=(
+                memory_change.change_id if memory_change is not None else None
+            ),
         )
         return GuardEvaluationResponse(
             decision=decision,
@@ -578,8 +628,12 @@ class EvaluationService:
             ),
         )
 
-    def _record_memory_change(self, event: GuardEvent, decision: GuardDecision) -> MemoryGuardChange | None:
-        if self.memory_guard_service is None or not isinstance(event.payload, MemoryEventPayload):
+    def _record_memory_change(
+        self, event: GuardEvent, decision: GuardDecision
+    ) -> MemoryGuardChange | None:
+        if self.memory_guard_service is None or not isinstance(
+            event.payload, MemoryEventPayload
+        ):
             return None
         memory = event.payload.memory
         if memory.operation.lower() != "write" or not event.payload.will_persist:
@@ -677,7 +731,10 @@ def _approval_payload_preview(value: object) -> object:
     if hasattr(value, "model_dump"):
         return _approval_payload_preview(value.model_dump(mode="json"))  # type: ignore[attr-defined]
     if isinstance(value, dict):
-        return {str(key): _approval_field_preview(str(key), nested) for key, nested in value.items()}
+        return {
+            str(key): _approval_field_preview(str(key), nested)
+            for key, nested in value.items()
+        }
     if isinstance(value, list):
         return [_approval_payload_preview(item) for item in value[:20]]
     if isinstance(value, str):
@@ -693,10 +750,15 @@ def _approval_field_preview(key: str, value: object) -> object:
 
 def _looks_sensitive_key(key: str) -> bool:
     normalized = key.lower()
-    return any(marker in normalized for marker in ("token", "secret", "password", "authorization", "credential"))
+    return any(
+        marker in normalized
+        for marker in ("token", "secret", "password", "authorization", "credential")
+    )
 
 
-def _config_audit_event(event: ConfigAuditEvent, result: ConfigAuditResult) -> AuditEvent:
+def _config_audit_event(
+    event: ConfigAuditEvent, result: ConfigAuditResult
+) -> AuditEvent:
     worst = _worst_finding_severity(result.findings)
     risk_score = {"low": 15, "medium": 45, "high": 80, "critical": 95}[worst]
     return AuditEvent(
@@ -724,7 +786,7 @@ def _config_audit_event(event: ConfigAuditEvent, result: ConfigAuditResult) -> A
     )
 
 
-def _worst_finding_severity(findings: list[object]) -> str:
+def _worst_finding_severity(findings: list[ConfigAuditFinding]) -> str:
     rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
     worst = "low"
     for finding in findings:
@@ -738,7 +800,9 @@ def _should_quarantine_memory_change(change: MemoryGuardChange) -> bool:
     preview = change.value_preview.lower()
     if change.source_trust != "trusted":
         return True
-    return any(marker in preview for marker in ("secret", "token", "password", "always send"))
+    return any(
+        marker in preview for marker in ("secret", "token", "password", "always send")
+    )
 
 
 def _event_hook_name(event: AuditEvent) -> str | None:
@@ -812,7 +876,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
 
     action_id = event.event_id
     action_name = event.event_type
-    metadata = {
+    metadata: dict[str, object] = {
         "event_type": event.event_type,
         "subject_id": action_id,
         "subject_type": event.event_type,

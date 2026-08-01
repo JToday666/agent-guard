@@ -20,7 +20,9 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 class MemoryPoisoningDetector(Detector):
     rule_id = "P104_memory_poisoning"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
         if isinstance(event.payload, ToolCallPayload):
@@ -36,7 +38,9 @@ class MemoryPoisoningDetector(Detector):
         if source_trust in {"sanitized", "clean"}:
             return []
         intents = memory_poisoning_intents(memory.value_preview, policies)
-        high_confidence = has_high_confidence_memory_poisoning_text(memory.value_preview, policies)
+        high_confidence = has_high_confidence_memory_poisoning_text(
+            memory.value_preview, policies
+        )
         has_poisoning_text = has_memory_poisoning_text(memory.value_preview, policies)
         should_review = (
             high_confidence
@@ -60,7 +64,10 @@ class MemoryPoisoningDetector(Detector):
                             f"source_trust={memory.source_trust}",
                             f"requires_approval={event.payload.requires_approval}",
                             f"high_confidence={high_confidence}",
-                            *[f"memory_poisoning_intent={intent}" for intent in intents],
+                            *[
+                                f"memory_poisoning_intent={intent}"
+                                for intent in intents
+                            ],
                         ],
                     ),
                     reason=(
@@ -86,7 +93,9 @@ class MemoryPoisoningDetector(Detector):
             return []
         if payload.tool.name not in {"rag_answer", "rag_retrieve"}:
             return []
-        evidence = _poisoned_rag_evidence(payload.arguments, event.security_context.metadata, event.metadata, policies)
+        evidence = _poisoned_rag_evidence(
+            payload.arguments, event.security_context.metadata, event.metadata, policies
+        )
         if not evidence and payload.tool.name == "rag_answer":
             evidence = _unverified_rag_answer_evidence(payload, event, policies)
             if not evidence:
@@ -145,7 +154,9 @@ class MemoryPoisoningDetector(Detector):
         payload = event.payload
         if not isinstance(payload, ToolResultPayload):
             return []
-        if payload.sanitized or not (payload.will_enter_context or payload.will_persist):
+        if payload.sanitized or not (
+            payload.will_enter_context or payload.will_persist
+        ):
             return []
         text = payload.result.content_preview
         high_confidence = has_high_confidence_memory_poisoning_text(text, policies)
@@ -222,7 +233,9 @@ def _poisoned_rag_evidence(
     policies: PolicyBundle,
 ) -> list[str]:
     evidence: list[str] = []
-    for label, text in _rag_text_fragments(arguments, security_metadata, event_metadata):
+    for label, text in _rag_text_fragments(
+        arguments, security_metadata, event_metadata
+    ):
         if has_high_confidence_memory_poisoning_text(text, policies):
             evidence.append(f"{label}=high_confidence_instruction")
     return evidence
@@ -246,12 +259,18 @@ def _unverified_rag_answer_evidence(
     )
     poisoning_evidence = [
         f"{label}=memory_poisoning_marker"
-        for label, text in _rag_text_fragments(payload.arguments, event.security_context.metadata, event.metadata)
+        for label, text in _rag_text_fragments(
+            payload.arguments, event.security_context.metadata, event.metadata
+        )
         if has_memory_poisoning_text(text, policies)
     ]
-    if not explicit_review and _is_low_risk_mcp_metadata_answer(payload, event, policies):
+    if not explicit_review and _is_low_risk_mcp_metadata_answer(
+        payload, event, policies
+    ):
         return []
-    provenance_evidence = _unverified_rag_submission_evidence(payload.arguments, event, payload.derived_resources)
+    provenance_evidence = _unverified_rag_submission_evidence(
+        payload.arguments, event, payload.derived_resources
+    )
     if not explicit_review and not poisoning_evidence and not provenance_evidence:
         return []
     evidence = [
@@ -266,14 +285,18 @@ def _unverified_rag_answer_evidence(
     return evidence
 
 
-def _unverified_rag_tool_result_evidence(payload: ToolResultPayload, event: GuardEvent) -> list[str]:
+def _unverified_rag_tool_result_evidence(
+    payload: ToolResultPayload, event: GuardEvent
+) -> list[str]:
     source_trust = event.security_context.source_trust.lower()
     if source_trust in {"trusted", "verified", "sanitized", "clean"}:
         return []
     if not _is_rag_answer_result(payload):
         return []
     result_object = _json_object_from_preview(payload.result.content_preview)
-    return _unverified_rag_submission_evidence(result_object, event, payload.derived_resources)
+    return _unverified_rag_submission_evidence(
+        result_object, event, payload.derived_resources
+    )
 
 
 def _unverified_rag_submission_evidence(
@@ -302,13 +325,20 @@ def _has_unverified_rag_answer_source(
 ) -> bool:
     source_type = event.security_context.source_type.lower()
     answer_source = (_rag_answer_source(arguments, event.metadata) or "").lower()
-    if any(marker in source_type for marker in ("support", "knowledge", "rag", "retriev", "local_reference")):
+    if any(
+        marker in source_type
+        for marker in ("support", "knowledge", "rag", "retriev", "local_reference")
+    ):
         return True
-    if any(marker in answer_source for marker in ("support", "knowledge", "rag", "retriev", "local")):
+    if any(
+        marker in answer_source
+        for marker in ("support", "knowledge", "rag", "retriev", "local")
+    ):
         return True
     return any(
         getattr(resource, "resource_type", "").lower() == "rag"
-        and getattr(resource, "operation", "").lower() in {"answer", "submit", "persist"}
+        and getattr(resource, "operation", "").lower()
+        in {"answer", "submit", "persist"}
         for resource in derived_resources
     )
 
@@ -317,13 +347,20 @@ def _is_rag_answer_result(payload: ToolResultPayload) -> bool:
     if payload.tool.name == "rag_answer" or (payload.tool.kind or "") == "rag_answer":
         return True
     return any(
-        resource.resource_type.lower() == "rag" and resource.operation.lower() in {"answer", "submit", "persist"}
+        resource.resource_type.lower() == "rag"
+        and resource.operation.lower() in {"answer", "submit", "persist"}
         for resource in payload.derived_resources
     )
 
 
-def _rag_answer_source(arguments: dict[str, Any], event_metadata: dict[str, Any]) -> str | None:
-    direct = _string_value(arguments.get("answer_source") or arguments.get("answerSource") or arguments.get("source"))
+def _rag_answer_source(
+    arguments: dict[str, Any], event_metadata: dict[str, Any]
+) -> str | None:
+    direct = _string_value(
+        arguments.get("answer_source")
+        or arguments.get("answerSource")
+        or arguments.get("source")
+    )
     if direct:
         return direct
     provenance = event_metadata.get("rag_answer_provenance")
@@ -336,14 +373,28 @@ def _rag_answer_source(arguments: dict[str, Any], event_metadata: dict[str, Any]
     return None
 
 
-def _has_context_evidence(arguments: dict[str, Any], event_metadata: dict[str, Any]) -> bool:
+def _has_context_evidence(
+    arguments: dict[str, Any], event_metadata: dict[str, Any]
+) -> bool:
     count = _context_evidence_count(arguments, event_metadata)
     if count is not None and count > 0:
         return True
-    return any(key in arguments for key in ("context", "evidence", "citation", "citations", "sources", "memory_refs"))
+    return any(
+        key in arguments
+        for key in (
+            "context",
+            "evidence",
+            "citation",
+            "citations",
+            "sources",
+            "memory_refs",
+        )
+    )
 
 
-def _context_evidence_count(arguments: dict[str, Any], event_metadata: dict[str, Any]) -> int | None:
+def _context_evidence_count(
+    arguments: dict[str, Any], event_metadata: dict[str, Any]
+) -> int | None:
     for key in ("contexts", "context_docs", "documents", "memory_refs", "references"):
         value = arguments.get(key)
         if isinstance(value, list):
@@ -396,7 +447,8 @@ def _is_rag_answer_submission(payload: ToolCallPayload) -> bool:
     if payload.tool.name == "rag_answer":
         return True
     return any(
-        resource.resource_type.lower() == "rag" and resource.operation.lower() in {"answer", "submit", "persist"}
+        resource.resource_type.lower() == "rag"
+        and resource.operation.lower() in {"answer", "submit", "persist"}
         for resource in payload.derived_resources
     )
 
@@ -410,10 +462,17 @@ def _is_low_risk_mcp_metadata_answer(
     if source_type not in {"mcp_tool_metadata", "mcp_metadata", "tool_metadata"}:
         return False
     for resource in payload.derived_resources:
-        if resource.resource_type.lower() == "rag" and resource.operation.lower() == "persist":
+        if (
+            resource.resource_type.lower() == "rag"
+            and resource.operation.lower() == "persist"
+        ):
             return False
-    for _label, text in _rag_text_fragments(payload.arguments, event.security_context.metadata):
-        if has_high_confidence_memory_poisoning_text(text, policies) or has_memory_poisoning_text(text, policies):
+    for _label, text in _rag_text_fragments(
+        payload.arguments, event.security_context.metadata
+    ):
+        if has_high_confidence_memory_poisoning_text(
+            text, policies
+        ) or has_memory_poisoning_text(text, policies):
             return False
     return True
 
@@ -421,7 +480,12 @@ def _is_low_risk_mcp_metadata_answer(
 def _rag_answer_target(payload: ToolCallPayload) -> str:
     dataset = payload.arguments.get("dataset")
     question_id = payload.arguments.get("question_id")
-    if isinstance(dataset, str) and dataset.strip() and isinstance(question_id, str) and question_id.strip():
+    if (
+        isinstance(dataset, str)
+        and dataset.strip()
+        and isinstance(question_id, str)
+        and question_id.strip()
+    ):
         return f"{dataset.strip()}:{question_id.strip()}"
     for key in ("question_id", "memory_key", "target", "id"):
         value = payload.arguments.get(key)
@@ -440,7 +504,9 @@ def _rag_text_fragments(*values: Any) -> list[tuple[str, str]]:
     return fragments
 
 
-def _collect_rag_text_fragments(value: Any, fragments: list[tuple[str, str]], path: str = "rag") -> None:
+def _collect_rag_text_fragments(
+    value: Any, fragments: list[tuple[str, str]], path: str = "rag"
+) -> None:
     if isinstance(value, str):
         text = value.strip()
         if text:

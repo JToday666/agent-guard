@@ -11,7 +11,9 @@ from .results import DetectionResult
 _SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 
-def build_guard_decision(results: list[DetectionResult], *, started_at: float) -> GuardDecision:
+def build_guard_decision(
+    results: list[DetectionResult], *, started_at: float
+) -> GuardDecision:
     latency_ms = int((perf_counter() - started_at) * 1000)
     if not results:
         return GuardDecision(
@@ -75,7 +77,9 @@ def _safe_message(decision: str) -> str | None:
     return None
 
 
-def _approval_intent(decision: str, results: list[DetectionResult]) -> ApprovalIntent | None:
+def _approval_intent(
+    decision: str, results: list[DetectionResult]
+) -> ApprovalIntent | None:
     if decision != "ask":
         return None
     for result in results:

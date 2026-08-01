@@ -16,24 +16,33 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 class EnvironmentPoisoningDetector(Detector):
     rule_id = "P105_environment_poisoning"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
         if not isinstance(event.payload, ToolResultPayload):
             return []
-        if event.payload.sanitized or not (event.payload.will_enter_context or event.payload.will_persist):
+        if event.payload.sanitized or not (
+            event.payload.will_enter_context or event.payload.will_persist
+        ):
             return []
-        instruction_like = event.payload.contains_instruction_like_text or has_instruction_like_text(
-            event.payload.result.content_preview, policies
+        instruction_like = (
+            event.payload.contains_instruction_like_text
+            or has_instruction_like_text(event.payload.result.content_preview, policies)
         )
         if not instruction_like:
             return []
-        if (event.payload.will_enter_context or event.payload.will_persist) and has_high_confidence_memory_poisoning_text(
+        if (
+            event.payload.will_enter_context or event.payload.will_persist
+        ) and has_high_confidence_memory_poisoning_text(
             event.payload.result.content_preview, policies
         ):
             return []
         call_id = event.payload.tool.call_id
-        intents = environment_poisoning_intents(event.payload.result.content_preview, policies)
+        intents = environment_poisoning_intents(
+            event.payload.result.content_preview, policies
+        )
         high_confidence = bool(intents)
         result = apply_rule_override(
             DetectionResult(

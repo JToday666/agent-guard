@@ -12,7 +12,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent, MemoryGuardChange, PolicyBundle, utc_now_iso
+from agentguard_core import (
+    AuditEvent,
+    ConfigAuditEvent,
+    GuardEvent,
+    MemoryGuardChange,
+    PolicyBundle,
+    utc_now_iso,
+)
 
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.errors import error_response, http_error_code, validation_error_details
@@ -29,7 +36,12 @@ from guard_api.services import (
     TraceService,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import AuditEventFilters, ControlPlaneStore, EvalMetricFilters, PolicySnapshotRecord
+from guard_api.storage.base import (
+    AuditEventFilters,
+    ControlPlaneStore,
+    EvalMetricFilters,
+    PolicySnapshotRecord,
+)
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
@@ -97,9 +109,13 @@ def _evaluation_dataset_registry(runs: list[dict[str, Any]]) -> list[dict[str, A
         )
         version["run_count"] += 1
         version["case_count"] += len(run.get("cases") or [])
-        version["case_provenance_count"] += sum(1 for case in run.get("cases") or [] if case.get("provenance"))
+        version["case_provenance_count"] += sum(
+            1 for case in run.get("cases") or [] if case.get("provenance")
+        )
         version["locked"] = bool(version["locked"] or run.get("dataset_locked"))
-        version["dataset_digest"] = run.get("dataset_digest") or version["dataset_digest"]
+        version["dataset_digest"] = (
+            run.get("dataset_digest") or version["dataset_digest"]
+        )
         if run.get("regression_gate") is not None:
             version["regression_gate"] = run["regression_gate"]
         _refresh_latest_run(version, run)
@@ -144,7 +160,9 @@ def _verify_browser_or_bearer_read(
     auth.verify_browser_session(agentguard_session)
 
 
-def _verify_adapter_heartbeat_write(auth: CapabilityAuthService, authorization: str | None) -> None:
+def _verify_adapter_heartbeat_write(
+    auth: CapabilityAuthService, authorization: str | None
+) -> None:
     try:
         auth.verify_bearer(authorization, "adapter:status:write")
     except ApiAuthError as error:
@@ -186,7 +204,8 @@ def create_app(
     approval_service = ApprovalService(
         store=store,
         settings=settings,
-        llm_reviewer=llm_approval_reviewer or HttpLlmApprovalReviewer.from_settings(settings),
+        llm_reviewer=llm_approval_reviewer
+        or HttpLlmApprovalReviewer.from_settings(settings),
     )
     metric_service = MetricService(store=store)
     trace_service = TraceService(store=store)
@@ -215,15 +234,19 @@ def create_app(
         return error_response(exc.code, status_code=exc.status_code)
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+    async def validation_exception_handler(
+        _: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         return error_response(
             "VALIDATION_ERROR",
             status_code=422,
-            details=validation_error_details(exc.errors()),
+            details=validation_error_details(list(exc.errors())),
         )
 
     @app.exception_handler(StarletteHTTPException)
-    async def http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+    async def http_exception_handler(
+        _: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
         return error_response(
             http_error_code(exc.status_code),
             status_code=exc.status_code,
@@ -236,13 +259,18 @@ def create_app(
         if check_db:
             if store.health_check():
                 return {"status": "ok", "database": "ok"}
-            return JSONResponse(status_code=503, content={"status": "degraded", "database": "error"})
+            return JSONResponse(
+                status_code=503, content={"status": "degraded", "database": "error"}
+            )
         return {"status": "ok"}
 
     @app.post("/v1/auth/browser/launch")
     def launch(authorization: str | None = Header(default=None)) -> dict[str, Any]:
         auth.verify_bearer(authorization, "auth:launch")
-        return {"launch_code": auth.create_launch_code(), "expires_in": settings.launch_code_ttl_seconds}
+        return {
+            "launch_code": auth.create_launch_code(),
+            "expires_in": settings.launch_code_ttl_seconds,
+        }
 
     @app.post("/v1/auth/browser/exchange")
     def exchange(payload: LaunchExchangeRequest) -> JSONResponse:
@@ -282,9 +310,13 @@ def create_app(
         return response
 
     @app.post("/v1/guard/evaluate")
-    def evaluate_guard_event(payload: GuardEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def evaluate_guard_event(
+        payload: GuardEvent, authorization: str | None = Header(default=None)
+    ) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "event:evaluate")
-        response = evaluation_service.evaluate(payload, requesting_principal_id=context.principal_id)
+        response = evaluation_service.evaluate(
+            payload, requesting_principal_id=context.principal_id
+        )
         return response.model_dump(mode="json")
 
     @app.get("/v1/policies/current")
@@ -308,7 +340,9 @@ def create_app(
     ) -> dict[str, Any]:
         session = auth.verify_browser_session(agentguard_session)
         auth.verify_csrf(session, x_agentguard_csrf)
-        return policy_service.save_snapshot(payload, updated_by="dashboard").model_dump(mode="json")
+        return policy_service.save_snapshot(payload, updated_by="dashboard").model_dump(
+            mode="json"
+        )
 
     @app.get("/v1/policies/history")
     def policy_history(
@@ -339,7 +373,11 @@ def create_app(
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        return {"valid": True, "bundle_id": payload.bundle_id, "version": payload.version}
+        return {
+            "valid": True,
+            "bundle_id": payload.bundle_id,
+            "version": payload.version,
+        }
 
     @app.post("/v1/policies/diff")
     def diff_policy(
@@ -370,11 +408,15 @@ def create_app(
         auth.verify_csrf(session, x_agentguard_csrf)
         for record in policy_service.list_history(limit=1000):
             if record.revision == revision:
-                return policy_service.save_snapshot(record.policy_bundle, updated_by="rollback").model_dump(mode="json")
+                return policy_service.save_snapshot(
+                    record.policy_bundle, updated_by="rollback"
+                ).model_dump(mode="json")
         raise ApiAuthError("POLICY_REVISION_NOT_FOUND", status_code=404)
 
     @app.post("/v1/audit/events")
-    def audit_event(payload: AuditEvent, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def audit_event(
+        payload: AuditEvent, authorization: str | None = Header(default=None)
+    ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:audit:write")
         return audit_service.submit(payload)
 
@@ -401,7 +443,10 @@ def create_app(
             decision=decision,
             limit=_bounded_limit(limit),
         )
-        return [event.model_dump(mode="json") for event in audit_service.list_events(filters)]
+        return [
+            event.model_dump(mode="json")
+            for event in audit_service.list_events(filters)
+        ]
 
     @app.get("/v1/audit/integrity")
     def audit_integrity(
@@ -431,7 +476,9 @@ def create_app(
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        filters = EvalMetricFilters(trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision)
+        filters = EvalMetricFilters(
+            trace_id=trace_id, case_id=case_id, runtime=runtime, decision=decision
+        )
         return metric_service.eval_metrics(filters)
 
     @app.get("/v1/metrics/runtime")
@@ -447,7 +494,9 @@ def create_app(
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        return metric_service.runtime_metrics(runtime=runtime, limit=_bounded_limit(limit))
+        return metric_service.runtime_metrics(
+            runtime=runtime, limit=_bounded_limit(limit)
+        )
 
     @app.post("/v1/evaluations")
     def save_evaluation_run(
@@ -638,12 +687,16 @@ def create_app(
         return {"token": token, "credential": credential.public_dump()}
 
     @app.get("/v1/credentials")
-    def list_credentials(authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    def list_credentials(
+        authorization: str | None = Header(default=None),
+    ) -> list[dict[str, Any]]:
         auth.verify_bearer(authorization, "credential:read")
         return [credential.public_dump() for credential in auth.list_credentials()]
 
     @app.post("/v1/credentials/{credential_id}/revoke")
-    def revoke_credential(credential_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def revoke_credential(
+        credential_id: str, authorization: str | None = Header(default=None)
+    ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "credential:revoke")
         try:
             return auth.revoke_credential(credential_id).public_dump()
@@ -659,7 +712,9 @@ def create_app(
         return memory_guard_service.propose(payload).model_dump(mode="json")
 
     @app.post("/v1/memory/changes/{change_id}/commit")
-    def commit_memory_change(change_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def commit_memory_change(
+        change_id: str, authorization: str | None = Header(default=None)
+    ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:evaluate")
         try:
             return memory_guard_service.commit(change_id).model_dump(mode="json")
@@ -667,7 +722,9 @@ def create_app(
             raise ApiAuthError("MEMORY_CHANGE_NOT_FOUND", status_code=404)
 
     @app.post("/v1/memory/changes/{change_id}/rollback")
-    def rollback_memory_change(change_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def rollback_memory_change(
+        change_id: str, authorization: str | None = Header(default=None)
+    ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:evaluate")
         try:
             return memory_guard_service.rollback(change_id).model_dump(mode="json")
@@ -675,7 +732,9 @@ def create_app(
             raise ApiAuthError("MEMORY_CHANGE_NOT_FOUND", status_code=404)
 
     @app.get("/v1/approvals/pending")
-    def pending_approvals(agentguard_session: str | None = Cookie(default=None)) -> list[dict[str, Any]]:
+    def pending_approvals(
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> list[dict[str, Any]]:
         session = auth.verify_browser_session(agentguard_session)
         rows: list[dict[str, Any]] = []
         for approval in approval_service.list_pending_approvals():
@@ -716,7 +775,9 @@ def create_app(
         }
 
     @app.get("/v1/approvals/{approval_id}/wait")
-    def wait_approval(approval_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def wait_approval(
+        approval_id: str, authorization: str | None = Header(default=None)
+    ) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "approval:wait")
         approval = approval_service.get_approval(approval_id)
         if approval is None:
@@ -738,7 +799,11 @@ def _approval_wait_payload(approval: Any) -> dict[str, Any]:
         "resolution_source": approval.resolution_source,
         "resolved_by": approval.resolved_by,
         "resolution_reason": approval.resolution_reason,
-        "llm_review": approval.llm_review.model_dump() if approval.llm_review is not None else None,
+        "llm_review": (
+            approval.llm_review.model_dump()
+            if approval.llm_review is not None
+            else None
+        ),
     }
 
 

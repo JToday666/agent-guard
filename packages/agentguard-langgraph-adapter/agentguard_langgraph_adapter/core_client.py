@@ -7,21 +7,19 @@ from typing import Any, Literal, Protocol
 
 import httpx
 
-from .event_models import PolicyDecision
+from .event_models import PolicyDecision, RuleHit
 
 
 class CoreClientProtocol(Protocol):
-    def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
-        ...
+    def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]: ...
 
-    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
-        ...
+    def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]: ...
 
-    def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
-        ...
+    def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]: ...
 
-    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
-        ...
+    def wait_for_approval(
+        self, approval_id: str, timeout: float | None = None
+    ) -> dict[str, Any]: ...
 
 
 class CoreClientError(RuntimeError):
@@ -69,7 +67,9 @@ class AgentGuardCoreClient:
             return self._post_json("/v1/audit/events", event)
         return self._post_json("/v1/audit/event", event)
 
-    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+    def wait_for_approval(
+        self, approval_id: str, timeout: float | None = None
+    ) -> dict[str, Any]:
         if _api_mode(self.config) != "guard-api-v0.3":
             return {"status": "pending", "decision": None}
         return self._get_json(f"/v1/approvals/{approval_id}/wait", timeout=timeout)
@@ -137,7 +137,9 @@ def _guard_api_v03_event(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _decision_with_top_level_approval(decision: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+def _decision_with_top_level_approval(
+    decision: dict[str, Any], response: dict[str, Any]
+) -> dict[str, Any]:
     approval = response.get("approval")
     if isinstance(approval, dict) and "approval" not in decision:
         return {**decision, "approval": approval}
@@ -169,12 +171,12 @@ class FakeDenyCoreClient:
             risk_score=100,
             severity="high",
             rule_hits=[
-                {
-                    "rule_id": "FAKE_CORE_ALWAYS_DENY",
-                    "rule_name": "Fake Core Always Deny",
-                    "severity": "high",
-                    "evidence": resource_targets or ["local smoke test fake core"],
-                }
+                RuleHit(
+                    rule_id="FAKE_CORE_ALWAYS_DENY",
+                    rule_name="Fake Core Always Deny",
+                    severity="high",
+                    evidence=resource_targets or ["local smoke test fake core"],
+                )
             ],
             reason=self.reason,
             safe_message="The tool call was blocked by the fake Agent Security Core.",
@@ -189,7 +191,9 @@ class FakeDenyCoreClient:
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
-    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+    def wait_for_approval(
+        self, approval_id: str, timeout: float | None = None
+    ) -> dict[str, Any]:
         return {"status": "resolved", "decision": "deny"}
 
 
@@ -197,7 +201,9 @@ class FakeDenyCoreClient:
 class FakeAskCoreClient:
     """Local test double that asks for approval for every tool call."""
 
-    reason: str = "Fake Agent Security Core is configured to require approval for every tool call."
+    reason: str = (
+        "Fake Agent Security Core is configured to require approval for every tool call."
+    )
 
     def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
         resource_targets = [
@@ -211,12 +217,12 @@ class FakeAskCoreClient:
             risk_score=70,
             severity="medium",
             rule_hits=[
-                {
-                    "rule_id": "FAKE_CORE_ALWAYS_ASK",
-                    "rule_name": "Fake Core Always Ask",
-                    "severity": "medium",
-                    "evidence": resource_targets or ["local smoke test fake core"],
-                }
+                RuleHit(
+                    rule_id="FAKE_CORE_ALWAYS_ASK",
+                    rule_name="Fake Core Always Ask",
+                    severity="medium",
+                    evidence=resource_targets or ["local smoke test fake core"],
+                )
             ],
             reason=self.reason,
             safe_message="The tool call requires approval from the fake Agent Security Core.",
@@ -231,7 +237,9 @@ class FakeAskCoreClient:
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
-    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+    def wait_for_approval(
+        self, approval_id: str, timeout: float | None = None
+    ) -> dict[str, Any]:
         return {"status": "pending", "decision": None}
 
 
@@ -261,5 +269,7 @@ class FakeAllowCoreClient:
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "audit_id": event.get("audit_id")}
 
-    def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
+    def wait_for_approval(
+        self, approval_id: str, timeout: float | None = None
+    ) -> dict[str, Any]:
         return {"status": "resolved", "decision": "allow_once"}

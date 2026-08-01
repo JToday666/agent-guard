@@ -62,7 +62,9 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
                 resource_type="message",
                 operation="send",
                 target=event.payload.recipient,
-                data_classification="sensitive" if event.payload.contains_sensitive_data else None,
+                data_classification=(
+                    "sensitive" if event.payload.contains_sensitive_data else None
+                ),
                 direction="outbound",
             )
         ]
@@ -82,7 +84,9 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
                 resource_type="tool_result",
                 operation="persist" if event.payload.will_persist else "context",
                 target=event.payload.tool.call_id,
-                data_classification="sensitive" if event.payload.contains_sensitive_data else None,
+                data_classification=(
+                    "sensitive" if event.payload.contains_sensitive_data else None
+                ),
                 direction="inbound",
             )
         ]
@@ -103,7 +107,9 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
                 resource_type="context_source",
                 operation="assemble",
                 target=source.source_id,
-                data_classification="sensitive" if source.contains_sensitive_data else None,
+                data_classification=(
+                    "sensitive" if source.contains_sensitive_data else None
+                ),
                 direction="inbound",
             )
             for source in event.payload.sources
@@ -114,7 +120,9 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
                 resource_type="model",
                 operation=event.payload.phase,
                 target=event.payload.model or event.payload.provider or "model",
-                data_classification="sensitive" if event.payload.contains_sensitive_data else None,
+                data_classification=(
+                    "sensitive" if event.payload.contains_sensitive_data else None
+                ),
                 direction="model",
             )
         ]
@@ -168,7 +176,9 @@ def _canonical_resources(event: GuardEvent) -> list[DerivedResource]:
             DerivedResource(
                 resource_type="process",
                 operation="execute",
-                target=redact_credential_text(tool_argument_text(args, "command", "cmd", "code")),
+                target=redact_credential_text(
+                    tool_argument_text(args, "command", "cmd", "code")
+                ),
                 data_classification=None,
                 direction="local",
             )
@@ -192,7 +202,12 @@ def _dedupe_resources(resources: list[DerivedResource]) -> list[DerivedResource]
     deduped: list[DerivedResource] = []
     seen: set[tuple[str, str, str, str]] = set()
     for resource in resources:
-        key = (resource.resource_type, resource.operation, resource.target, resource.direction)
+        key = (
+            resource.resource_type,
+            resource.operation,
+            resource.target,
+            resource.direction,
+        )
         if key in seen:
             continue
         seen.add(key)

@@ -40,7 +40,9 @@ class FakeCoreHandler(BaseHTTPRequestHandler):
         return data if isinstance(data, dict) else {}
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
-        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
+        )
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
@@ -49,7 +51,9 @@ class FakeCoreHandler(BaseHTTPRequestHandler):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a fake AgentGuard Core that always denies")
+    parser = argparse.ArgumentParser(
+        description="Run a fake AgentGuard Core that always denies"
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     return parser

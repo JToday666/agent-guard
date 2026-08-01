@@ -23,7 +23,9 @@ from .base import Detector, apply_rule_override, is_rule_disabled
 class CredentialExposureDetector(Detector):
     rule_id = "P106_credential_exposure"
 
-    def evaluate(self, event: GuardEvent, policies: PolicyBundle) -> list[DetectionResult]:
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
         if is_rule_disabled(self.rule_id, policies):
             return []
 
@@ -54,11 +56,17 @@ class CredentialExposureDetector(Detector):
         if isinstance(payload, ToolCallPayload) and is_exec_like_tool(payload.tool):
             command = tool_argument_text(payload.arguments, "command", "cmd", "code")
             if has_credential_command_text(command, policies):
-                return ["surface=tool_call", f"tool={payload.tool.name}", "credential_command=true"]
+                return [
+                    "surface=tool_call",
+                    f"tool={payload.tool.name}",
+                    "credential_command=true",
+                ]
             return []
 
         if isinstance(payload, ToolResultPayload):
-            if payload.sanitized or not (payload.will_enter_context or payload.will_persist):
+            if payload.sanitized or not (
+                payload.will_enter_context or payload.will_persist
+            ):
                 return []
             if has_credential_exposure_text(payload.result.content_preview, policies):
                 return [

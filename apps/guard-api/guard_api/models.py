@@ -37,7 +37,9 @@ class ApprovalRequest(BaseModel):
     runtime: str = "langgraph"
     agent_id: str = "main"
     status: Literal["pending", "resolved", "expired"] = "pending"
-    decision_options: list[ApprovalResolution] = Field(default_factory=lambda: ["allow_once", "deny"])
+    decision_options: list[ApprovalResolution] = Field(
+        default_factory=lambda: ["allow_once", "deny"]
+    )
     decision: ApprovalResolution | None = None
     tool: str
     resource: str
@@ -65,7 +67,9 @@ class ApprovalRequest(BaseModel):
             values["tool_call_id"] = values.get("tool_call_id") or subject_id
             values["action_id"] = values.get("action_id") or subject_id
         values["subject_type"] = values.get("subject_type") or "tool_call"
-        values["action_name"] = values.get("action_name") or values.get("tool") or values["subject_type"]
+        values["action_name"] = (
+            values.get("action_name") or values.get("tool") or values["subject_type"]
+        )
         return values
 
 

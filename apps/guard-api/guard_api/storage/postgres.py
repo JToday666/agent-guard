@@ -42,7 +42,11 @@ from guard_api.storage.base import (
     StoredBrowserSession,
     StoredLaunchCode,
 )
-from guard_api.storage.integrity import attach_audit_integrity, read_audit_integrity, verify_audit_chain
+from guard_api.storage.integrity import (
+    attach_audit_integrity,
+    read_audit_integrity,
+    verify_audit_chain,
+)
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
     adapter_statuses,
@@ -61,7 +65,6 @@ from guard_api.storage.sqlalchemy_models import (
     provenance_edges,
     provenance_nodes,
 )
-
 
 _POLICY_SNAPSHOT_ADVISORY_LOCK_ID = 427001030001
 _AUDIT_INTEGRITY_ADVISORY_LOCK_ID = 427001030002
@@ -98,17 +101,30 @@ class PostgresControlPlaneStore:
                     {"lock_id": _AUDIT_INTEGRITY_ADVISORY_LOCK_ID},
                 )
                 existing = session.execute(
-                    select(audit_events.c.audit_id).where(audit_events.c.audit_id == event.audit_id)
+                    select(audit_events.c.audit_id).where(
+                        audit_events.c.audit_id == event.audit_id
+                    )
                 ).scalar_one_or_none()
                 if existing is not None:
                     return
-                head = session.execute(
-                    select(audit_integrity_heads.c.sequence, audit_integrity_heads.c.event_hash)
-                    .where(audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID)
-                    .with_for_update()
-                ).mappings().one_or_none()
+                head = (
+                    session.execute(
+                        select(
+                            audit_integrity_heads.c.sequence,
+                            audit_integrity_heads.c.event_hash,
+                        )
+                        .where(audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID)
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
                 sequence = int(head["sequence"]) + 1 if head is not None else 1
-                prev_hash = str(head["event_hash"]) if head is not None and head["event_hash"] is not None else None
+                prev_hash = (
+                    str(head["event_hash"])
+                    if head is not None and head["event_hash"] is not None
+                    else None
+                )
                 event_with_integrity = attach_audit_integrity(
                     event,
                     sequence=sequence,
@@ -145,7 +161,9 @@ class PostgresControlPlaneStore:
                 )
                 session.execute(head_stmt)
 
-    def list_audit_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
+    def list_audit_events(
+        self, filters: AuditEventFilters | None = None
+    ) -> list[AuditEvent]:
         filters = filters or AuditEventFilters()
         stmt = (
             select(audit_events.c.payload_json)
@@ -170,8 +188,7 @@ class PostgresControlPlaneStore:
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         filters = filters or EvalMetricFilters()
         where_sql, params = _metric_where_clause(filters)
-        stmt = text(
-            f"""
+        stmt = text(f"""
             SELECT
                 COUNT(*) AS event_count,
                 COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'allow') AS allow_count,
@@ -195,8 +212,7 @@ class PostgresControlPlaneStore:
                 AVG(NULLIF(payload_json ->> 'latency_ms', '')::numeric) AS average_latency_ms
             FROM audit_events
             {where_sql}
-            """
-        )
+            """)
         with self._session_factory() as session:
             row = session.execute(stmt, params).mappings().one()
         event_count = int(row["event_count"])
@@ -214,8 +230,12 @@ class PostgresControlPlaneStore:
             "blocked_count": blocked_count,
             "block_rate": (blocked_count / event_count) if event_count else None,
             "fpr": (false_positive_count / benign_count) if benign_count else None,
-            "fnr": (false_negative_count / malicious_count) if malicious_count else None,
-            "average_latency_ms": float(average_latency) if average_latency is not None else None,
+            "fnr": (
+                (false_negative_count / malicious_count) if malicious_count else None
+            ),
+            "average_latency_ms": (
+                float(average_latency) if average_latency is not None else None
+            ),
         }
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
@@ -270,16 +290,22 @@ class PostgresControlPlaneStore:
             session.commit()
         return edge
 
-    def list_provenance(self, trace_id: str) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
+    def list_provenance(
+        self, trace_id: str
+    ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
         node_stmt = (
             select(provenance_nodes.c.payload_json)
             .where(provenance_nodes.c.trace_id == trace_id)
-            .order_by(provenance_nodes.c.created_at.asc(), provenance_nodes.c.node_id.asc())
+            .order_by(
+                provenance_nodes.c.created_at.asc(), provenance_nodes.c.node_id.asc()
+            )
         )
         edge_stmt = (
             select(provenance_edges.c.payload_json)
             .where(provenance_edges.c.trace_id == trace_id)
-            .order_by(provenance_edges.c.created_at.asc(), provenance_edges.c.edge_id.asc())
+            .order_by(
+                provenance_edges.c.created_at.asc(), provenance_edges.c.edge_id.asc()
+            )
         )
         with self._session_factory() as session:
             node_rows = session.execute(node_stmt).scalars().all()
@@ -348,7 +374,9 @@ class PostgresControlPlaneStore:
         records = [_config_finding_record(row) for row in rows]
         return records[: _bounded_limit(limit)]
 
-    def save_evaluation_run(self, run: EvaluationRun | dict[str, Any]) -> dict[str, Any]:
+    def save_evaluation_run(
+        self, run: EvaluationRun | dict[str, Any]
+    ) -> dict[str, Any]:
         payload = EvaluationRun.model_validate(run).model_dump(mode="json")
         stmt = pg_insert(evaluation_runs).values(
             run_id=payload["run_id"],
@@ -382,7 +410,9 @@ class PostgresControlPlaneStore:
         return EvaluationRun.model_validate(row).model_dump(mode="json")
 
     def get_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
-        stmt = select(evaluation_runs.c.payload_json).where(evaluation_runs.c.run_id == run_id)
+        stmt = select(evaluation_runs.c.payload_json).where(
+            evaluation_runs.c.run_id == run_id
+        )
         with self._session_factory() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
@@ -401,15 +431,24 @@ class PostgresControlPlaneStore:
             desc(evaluation_runs.c.run_id),
         )
         if dataset_id is not None:
-            stmt = stmt.where(evaluation_runs.c.payload_json.op("->>")("dataset_id") == dataset_id)
+            stmt = stmt.where(
+                evaluation_runs.c.payload_json.op("->>")("dataset_id") == dataset_id
+            )
         if dataset_version is not None:
-            stmt = stmt.where(evaluation_runs.c.payload_json.op("->>")("dataset_version") == dataset_version)
+            stmt = stmt.where(
+                evaluation_runs.c.payload_json.op("->>")("dataset_version")
+                == dataset_version
+            )
         stmt = stmt.limit(_bounded_limit(limit))
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
-        return [EvaluationRun.model_validate(row).model_dump(mode="json") for row in rows]
+        return [
+            EvaluationRun.model_validate(row).model_dump(mode="json") for row in rows
+        ]
 
-    def save_adapter_status(self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]) -> dict[str, Any]:
+    def save_adapter_status(
+        self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]
+    ) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
         stmt = pg_insert(adapter_statuses).values(
             adapter_id=adapter_id,
@@ -429,7 +468,9 @@ class PostgresControlPlaneStore:
         return payload
 
     def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
-        stmt = select(adapter_statuses.c.payload_json).where(adapter_statuses.c.adapter_id == adapter_id)
+        stmt = select(adapter_statuses.c.payload_json).where(
+            adapter_statuses.c.adapter_id == adapter_id
+        )
         with self._session_factory() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
@@ -441,11 +482,15 @@ class PostgresControlPlaneStore:
         with self._session_factory() as session:
             rows = session.execute(stmt).mappings().all()
         return {
-            str(row["adapter_id"]): AdapterStatusRecord.model_validate(row["payload_json"]).model_dump(mode="json")
+            str(row["adapter_id"]): AdapterStatusRecord.model_validate(
+                row["payload_json"]
+            ).model_dump(mode="json")
             for row in rows
         }
 
-    def create_credential(self, credential: CredentialRecord | dict[str, Any]) -> CredentialRecord:
+    def create_credential(
+        self, credential: CredentialRecord | dict[str, Any]
+    ) -> CredentialRecord:
         record = CredentialRecord.model_validate(credential)
         payload = record.model_dump(mode="json")
         stmt = pg_insert(credentials).values(
@@ -493,18 +538,26 @@ class PostgresControlPlaneStore:
         return CredentialRecord.model_validate(row)
 
     def list_credentials(self) -> list[CredentialRecord]:
-        stmt = select(credentials.c.payload_json).order_by(credentials.c.created_at.asc())
+        stmt = select(credentials.c.payload_json).order_by(
+            credentials.c.created_at.asc()
+        )
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
         return [CredentialRecord.model_validate(row) for row in rows]
 
-    def revoke_credential(self, credential_id: str, revoked_at: str) -> CredentialRecord:
-        current_stmt = select(credentials.c.payload_json).where(credentials.c.credential_id == credential_id)
+    def revoke_credential(
+        self, credential_id: str, revoked_at: str
+    ) -> CredentialRecord:
+        current_stmt = select(credentials.c.payload_json).where(
+            credentials.c.credential_id == credential_id
+        )
         with self._session_factory() as session:
             current = session.execute(current_stmt).scalar_one_or_none()
             if current is None:
                 raise KeyError(credential_id)
-            record = CredentialRecord.model_validate(current).model_copy(update={"revoked_at": revoked_at})
+            record = CredentialRecord.model_validate(current).model_copy(
+                update={"revoked_at": revoked_at}
+            )
             session.execute(
                 update(credentials)
                 .where(credentials.c.credential_id == credential_id)
@@ -516,7 +569,9 @@ class PostgresControlPlaneStore:
             session.commit()
         return record
 
-    def add_action_critic_review(self, review: ActionCriticReview) -> ActionCriticReview:
+    def add_action_critic_review(
+        self, review: ActionCriticReview
+    ) -> ActionCriticReview:
         payload = review.model_dump(mode="json")
         stmt = pg_insert(action_critic_reviews).values(
             review_id=review.review_id,
@@ -545,7 +600,10 @@ class PostgresControlPlaneStore:
         stmt = (
             select(action_critic_reviews.c.payload_json)
             .where(action_critic_reviews.c.trace_id == trace_id)
-            .order_by(action_critic_reviews.c.created_at.asc(), action_critic_reviews.c.review_id.asc())
+            .order_by(
+                action_critic_reviews.c.created_at.asc(),
+                action_critic_reviews.c.review_id.asc(),
+            )
         )
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
@@ -577,18 +635,24 @@ class PostgresControlPlaneStore:
         return change
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
-        stmt = select(memory_guard_changes.c.payload_json).where(memory_guard_changes.c.change_id == change_id)
+        stmt = select(memory_guard_changes.c.payload_json).where(
+            memory_guard_changes.c.change_id == change_id
+        )
         with self._session_factory() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
             return None
         return MemoryGuardChange.model_validate(row)
 
-    def update_memory_change_status(self, change_id: str, status: str) -> MemoryGuardChange:
+    def update_memory_change_status(
+        self, change_id: str, status: str
+    ) -> MemoryGuardChange:
         current = self.get_memory_change(change_id)
         if current is None:
             raise KeyError(change_id)
-        updated = current.model_copy(update={"status": status, "updated_at": utc_now_iso()})
+        updated = current.model_copy(
+            update={"status": status, "updated_at": utc_now_iso()}
+        )
         stmt = (
             update(memory_guard_changes)
             .where(memory_guard_changes.c.change_id == change_id)
@@ -610,15 +674,12 @@ class PostgresControlPlaneStore:
         return record.policy_bundle
 
     def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None:
-        stmt = (
-            select(
-                policy_snapshots.c.revision,
-                policy_snapshots.c.payload_json,
-                policy_snapshots.c.updated_at,
-                policy_snapshots.c.updated_by,
-            )
-            .where(policy_snapshots.c.policy_id == "current")
-        )
+        stmt = select(
+            policy_snapshots.c.revision,
+            policy_snapshots.c.payload_json,
+            policy_snapshots.c.updated_at,
+            policy_snapshots.c.updated_by,
+        ).where(policy_snapshots.c.policy_id == "current")
         with self._session_factory() as session:
             row = session.execute(stmt).mappings().one_or_none()
         if row is None:
@@ -645,9 +706,13 @@ class PostgresControlPlaneStore:
                     {"lock_id": _POLICY_SNAPSHOT_ADVISORY_LOCK_ID},
                 )
                 current_revision = session.execute(
-                    select(policy_snapshots.c.revision).where(policy_snapshots.c.policy_id == "current")
+                    select(policy_snapshots.c.revision).where(
+                        policy_snapshots.c.policy_id == "current"
+                    )
                 ).scalar_one_or_none()
-                revision = int(current_revision) + 1 if current_revision is not None else 1
+                revision = (
+                    int(current_revision) + 1 if current_revision is not None else 1
+                )
                 stmt = pg_insert(policy_snapshots).values(
                     policy_id="current",
                     payload_json=payload,
@@ -680,7 +745,9 @@ class PostgresControlPlaneStore:
             updated_by=updated_by,
         )
 
-    def list_policy_snapshot_history(self, limit: int = 100) -> list[PolicySnapshotRecord]:
+    def list_policy_snapshot_history(
+        self, limit: int = 100
+    ) -> list[PolicySnapshotRecord]:
         stmt = (
             select(
                 policy_snapshot_history.c.revision,
@@ -713,7 +780,10 @@ class PostgresControlPlaneStore:
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[approval_requests.c.approval_id],
-            set_={"payload_json": stmt.excluded.payload_json, "status": stmt.excluded.status},
+            set_={
+                "payload_json": stmt.excluded.payload_json,
+                "status": stmt.excluded.status,
+            },
         )
         with self._session_factory() as session:
             session.execute(stmt)
@@ -731,15 +801,21 @@ class PostgresControlPlaneStore:
         return [ApprovalRequest.model_validate(row) for row in rows]
 
     def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
-        stmt = select(approval_requests.c.payload_json).order_by(approval_requests.c.created_at.asc())
+        stmt = select(approval_requests.c.payload_json).order_by(
+            approval_requests.c.created_at.asc()
+        )
         if trace_id is not None:
-            stmt = stmt.where(approval_requests.c.payload_json.op("->>")("trace_id") == trace_id)
+            stmt = stmt.where(
+                approval_requests.c.payload_json.op("->>")("trace_id") == trace_id
+            )
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
         return [ApprovalRequest.model_validate(row) for row in rows]
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        stmt = select(approval_requests.c.payload_json).where(approval_requests.c.approval_id == approval_id)
+        stmt = select(approval_requests.c.payload_json).where(
+            approval_requests.c.approval_id == approval_id
+        )
         with self._session_factory() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
@@ -783,7 +859,9 @@ class PostgresControlPlaneStore:
         return approval
 
     def create_launch_code(self, code_hash: str, expires_at: str) -> StoredLaunchCode:
-        stmt = pg_insert(launch_codes).values(code_hash=code_hash, expires_at=expires_at, used_at=None)
+        stmt = pg_insert(launch_codes).values(
+            code_hash=code_hash, expires_at=expires_at, used_at=None
+        )
         stmt = stmt.on_conflict_do_update(
             index_elements=[launch_codes.c.code_hash],
             set_={"expires_at": stmt.excluded.expires_at, "used_at": None},
@@ -793,19 +871,31 @@ class PostgresControlPlaneStore:
             session.commit()
         return StoredLaunchCode(code_hash=code_hash, expires_at=expires_at)
 
-    def consume_launch_code(self, code_hash: str, used_at: str) -> StoredLaunchCode | None:
+    def consume_launch_code(
+        self, code_hash: str, used_at: str
+    ) -> StoredLaunchCode | None:
         stmt = (
             update(launch_codes)
-            .where(launch_codes.c.code_hash == code_hash, launch_codes.c.used_at.is_(None))
+            .where(
+                launch_codes.c.code_hash == code_hash, launch_codes.c.used_at.is_(None)
+            )
             .values(used_at=used_at)
-            .returning(launch_codes.c.code_hash, launch_codes.c.expires_at, launch_codes.c.used_at)
+            .returning(
+                launch_codes.c.code_hash,
+                launch_codes.c.expires_at,
+                launch_codes.c.used_at,
+            )
         )
         with self._session_factory() as session:
             row = session.execute(stmt).mappings().one_or_none()
             session.commit()
         if row is None:
             return None
-        return StoredLaunchCode(code_hash=row["code_hash"], expires_at=row["expires_at"], used_at=row["used_at"])
+        return StoredLaunchCode(
+            code_hash=row["code_hash"],
+            expires_at=row["expires_at"],
+            used_at=row["used_at"],
+        )
 
     def create_browser_session(
         self,
@@ -831,7 +921,9 @@ class PostgresControlPlaneStore:
         with self._session_factory() as session:
             session.execute(stmt)
             session.commit()
-        return StoredBrowserSession(session_hash=session_hash, csrf_token=csrf_token, expires_at=expires_at)
+        return StoredBrowserSession(
+            session_hash=session_hash, csrf_token=csrf_token, expires_at=expires_at
+        )
 
     def get_browser_session(self, session_hash: str) -> StoredBrowserSession | None:
         stmt = select(
@@ -871,7 +963,9 @@ class PostgresControlPlaneStore:
         tool_call_id: str | None = None,
         expires_at: str,
     ) -> StoredApprovalNonce:
-        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
+        approval_subject_id = _approval_subject_id(
+            subject_id=subject_id, tool_call_id=tool_call_id
+        )
         stmt = pg_insert(approval_nonces).values(
             nonce_hash=nonce_hash,
             approval_id=approval_id,
@@ -914,7 +1008,9 @@ class PostgresControlPlaneStore:
         tool_call_id: str | None = None,
         used_at: str,
     ) -> StoredApprovalNonce | None:
-        approval_subject_id = _approval_subject_id(subject_id=subject_id, tool_call_id=tool_call_id)
+        approval_subject_id = _approval_subject_id(
+            subject_id=subject_id, tool_call_id=tool_call_id
+        )
         stmt = (
             update(approval_nonces)
             .where(
@@ -954,7 +1050,9 @@ class PostgresControlPlaneStore:
         stmt = (
             update(approval_requests)
             .where(approval_requests.c.approval_id == approval.approval_id)
-            .values(payload_json=approval.model_dump(mode="json"), status=approval.status)
+            .values(
+                payload_json=approval.model_dump(mode="json"), status=approval.status
+            )
         )
         with self._session_factory() as session:
             session.execute(stmt)
