@@ -20,7 +20,7 @@ from agentguard_core import (
 )
 
 
-def test_p2_domain_modules_are_direct_public_import_paths() -> None:
+def test_domain_modules_are_direct_public_import_paths() -> None:
     from agentguard_core.action_critic import ActionCritic as DirectActionCritic
     from agentguard_core.audit_integrity import AuditIntegrityMetadata as DirectAuditIntegrityMetadata
     from agentguard_core.config_audit import ConfigAuditEvent as DirectConfigAuditEvent
@@ -61,7 +61,7 @@ def test_p2_domain_modules_are_direct_public_import_paths() -> None:
     ).reviewer == "deterministic"
 
 
-def test_p2_aggregate_module_is_removed() -> None:
+def test_aggregate_module_is_removed() -> None:
     module_name = "agentguard_core." + "p2"
     assert importlib.util.find_spec(module_name) is None
 
@@ -92,7 +92,7 @@ def _tool_event(*, trace_id: str = "trace_p2", source_trust: str = "untrusted") 
     )
 
 
-def test_p2_decision_enforcement_is_additive_and_keeps_legacy_decision() -> None:
+def test_decision_enforcement_is_additive_and_keeps_legacy_decision() -> None:
     decision = GuardDecision(
         decision="allow",
         risk_score=90,
@@ -125,7 +125,7 @@ def test_p2_decision_enforcement_is_additive_and_keeps_legacy_decision() -> None
     assert decision.blocked is False
 
 
-def test_p2_domain_models_roundtrip() -> None:
+def test_domain_models_roundtrip() -> None:
     finding = ConfigAuditFinding(
         severity="high",
         category="openclaw.plugin",
