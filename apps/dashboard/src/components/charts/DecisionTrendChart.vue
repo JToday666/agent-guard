@@ -7,7 +7,6 @@
     </div>
     <svg
       v-if="points.length"
-      ref="chartSvg"
       viewBox="0 0 720 240"
       role="img"
       :aria-label="activeSummary"
@@ -15,7 +14,7 @@
       tabindex="0"
       @focus="ensureActivePoint"
       @keydown="handleKeydown"
-      @pointerleave="activeIndex = null"
+      @pointerleave="handlePointerLeave"
     >
       <title>{{ activeSummary }}</title>
       <g class="grid-lines" aria-hidden="true">
@@ -51,6 +50,7 @@
         width="626"
         height="200"
         aria-hidden="true"
+        @pointerenter="handlePointerEnter"
         @pointermove="handlePointerMove"
       />
       <g v-if="activePoint" class="trend-inspector" aria-hidden="true">
@@ -88,8 +88,8 @@
 import { computed, ref, watch } from "vue";
 import type { DecisionTrendPoint } from "../../types/dashboard";
 const props = defineProps<{ points: DecisionTrendPoint[] }>();
-const chartSvg = ref<SVGSVGElement>();
 const activeIndex = ref<number | null>(null);
+let pointerBounds: DOMRect | null = null;
 const latest = computed(() => props.points.at(-1) ?? { allow: 0, ask: 0, deny: 0, label: "" });
 const maxValue = computed(() =>
   Math.max(1, ...props.points.flatMap((point) => [point.allow, point.ask, point.deny])),
@@ -190,15 +190,25 @@ function ensureActivePoint() {
   if (activeIndex.value === null) activeIndex.value = Math.max(0, props.points.length - 1);
 }
 
+function handlePointerEnter(event: PointerEvent) {
+  pointerBounds = (event.currentTarget as SVGGraphicsElement).getBoundingClientRect();
+}
+
 function handlePointerMove(event: PointerEvent) {
-  const bounds = chartSvg.value?.getBoundingClientRect();
+  const bounds =
+    pointerBounds ?? (event.currentTarget as SVGGraphicsElement).getBoundingClientRect();
   if (!bounds || !props.points.length) return;
-  const chartX = ((event.clientX - bounds.left) / bounds.width) * 720;
+  const chartX = 24 + ((event.clientX - bounds.left) / bounds.width) * 626;
   const index =
     props.points.length === 1
       ? 0
       : Math.round((Math.min(650, Math.max(24, chartX)) - 24) / xStep.value);
   activeIndex.value = Math.min(props.points.length - 1, Math.max(0, index));
+}
+
+function handlePointerLeave() {
+  pointerBounds = null;
+  activeIndex.value = null;
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -274,7 +284,7 @@ function handleKeydown(event: KeyboardEvent) {
 }
 .grid-lines text {
   fill: var(--color-text-subtle);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: var(--font-weight-medium);
   stroke: none;
 }

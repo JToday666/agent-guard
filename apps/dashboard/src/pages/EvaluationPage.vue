@@ -84,7 +84,7 @@
             <div class="attack-asr__rows" role="list">
               <div v-for="row in store.evaluation.perAttack" :key="row.attackType" role="listitem">
                 <div class="attack-asr__label">
-                  <strong>{{ row.attackType }}</strong>
+                  <strong>{{ getAttackTypeLabel(row.attackType) }}</strong>
                   <span>下降 {{ pointDelta(row.asrBefore, row.asrAfter) }}</span>
                 </div>
                 <div class="attack-asr__bars" aria-hidden="true">
@@ -213,7 +213,7 @@
                       ><code>{{ row.caseId }}</code></RouterLink
                     >
                   </td>
-                  <td>{{ row.attackType }}</td>
+                  <td>{{ getAttackTypeLabel(row.attackType) }}</td>
                   <td>{{ row.runtime }}</td>
                   <td>
                     <StatusBadge
@@ -280,6 +280,7 @@ import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
+import { getAttackTypeLabel } from "../utils/attack-type";
 import {
   formatDashboardDateTime,
   getDecisionLabel,

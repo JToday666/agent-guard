@@ -1,5 +1,6 @@
 import type { AuditEventRow, TraceSummary } from "../../types/dashboard";
 import type { InvestigationQueryState } from "../../utils/investigation-query";
+import { ruleLabel } from "../../utils/rule-display.ts";
 
 export interface InvestigationIndex {
   byId: Map<string, AuditEventRow>;
@@ -41,31 +42,35 @@ export function buildTraceSummary(
   const last = events.at(-1)!;
   const isDenied = events.some((e) => e.decision === "deny");
   const isPaused = !isDenied && events.some((e) => e.decision === "ask");
+  const approvalId = [...events].reverse().find((event) => event.approvalId)?.approvalId;
   return {
     id,
     lastEventAt: last.occurredAt,
     caseId: last.caseId ?? "未提供",
     title: last.reason,
     status: isDenied ? "blocked" : isPaused ? "paused" : "allowed",
-    approvalId: last.approvalId,
+    approvalId,
   };
 }
 
 export function buildTraceConclusion(events: TraceConclusionEvent[]): TraceConclusion | undefined {
   if (!events.length) return undefined;
-  const highestRisk = [...events].sort((left, right) => right.riskScore - left.riskScore)[0]!;
   const hasDeny = events.some((event) => event.decision === "deny");
   const hasAsk = !hasDeny && events.some((event) => event.decision === "ask");
+  const outcomeDecision = hasDeny ? "deny" : hasAsk ? "ask" : "allow";
+  const outcomeEvent = events
+    .filter((event) => event.decision === outcomeDecision)
+    .sort((left, right) => right.riskScore - left.riskScore)[0]!;
 
   return {
     title: hasDeny ? "已阻断高风险工具调用" : hasAsk ? "等待人工审批" : "已放行",
-    reason: highestRisk.reason,
+    reason: outcomeEvent.reason,
     result: hasDeny
       ? "风险动作已被阻断，目标资源未继续执行"
       : hasAsk
         ? "动作暂停，等待人工审批后单次放行或拒绝并阻断"
         : "动作已放行，未触发阻断或审批",
-    ruleHits: highestRisk.ruleHits,
+    ruleHits: outcomeEvent.ruleHits,
   };
 }
 
@@ -108,14 +113,20 @@ export function filterInvestigationEvents(
     if (!searchValue) return true;
 
     return [
+      event.id,
       event.resource,
       event.reason,
       event.tool,
       event.caseId,
       event.traceId,
       event.stage,
+      event.eventType,
+      event.attackType,
+      event.userTask,
+      event.agentAction,
       ...event.resourceTargets,
       ...event.ruleHits,
+      ...event.ruleHits.map(ruleLabel),
     ]
       .join(" ")
       .toLocaleLowerCase("zh-CN")
@@ -144,7 +155,7 @@ export function getRuleFilterOptions(events: readonly AuditEventRow[]): RuleFilt
     }
   }
   return [...counts.entries()]
-    .map(([value, count]) => ({ count, label: value, value }))
+    .map(([value, count]) => ({ count, label: ruleLabel(value), value }))
     .sort((left, right) => {
       if (right.count !== left.count) return right.count - left.count;
       return left.value.localeCompare(right.value);

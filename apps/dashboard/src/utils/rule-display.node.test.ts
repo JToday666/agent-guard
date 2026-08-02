@@ -6,12 +6,11 @@ import {
   formatRuleIdsInTextForDisplay,
   prepareEvidenceDataForDisplay,
   ruleLabel,
-  ruleOptionLabel,
 } from "./rule-display.ts";
 
 test("formats known rule ids as user-facing labels without exposing ids", () => {
   assert.equal(ruleLabel("P004_task_mismatch"), "任务与行为不一致");
-  assert.equal(ruleOptionLabel("P005_external_send", 3), "外部发送需确认 3");
+  assert.equal(ruleLabel("P109_mcp_tool_hijacking"), "MCP 工具劫持");
   assert.equal(
     formatRuleListForDisplay(["P001_sensitive_file_access", "P004_task_mismatch"]),
     "敏感文件访问、任务与行为不一致",

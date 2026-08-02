@@ -225,11 +225,13 @@ const metricItems = computed(() => [
     value: countFormatter.format(store.metrics.eventCount),
   },
   {
-    detail: formatPercent(store.metrics.blockRate),
+    detail: formatPercent(
+      store.metrics.eventCount ? store.metrics.denyCount / store.metrics.eventCount : null,
+    ),
     label: "已阻断",
-    route: "/investigations?blocked=true",
+    route: "/investigations?decision=deny",
     tone: "protective" as const,
-    value: countFormatter.format(store.metrics.blockedCount),
+    value: countFormatter.format(store.metrics.denyCount),
   },
   {
     detail: "需要人工处理",

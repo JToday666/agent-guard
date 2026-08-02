@@ -1,5 +1,23 @@
 import { expect, test } from "@playwright/test";
 
+function relativeLuminance(hex: string): number {
+  const channels = hex
+    .replace("#", "")
+    .match(/.{2}/g)!
+    .map((channel) => Number.parseInt(channel, 16) / 255)
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  return (
+    (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+  );
+}
+
 test("decision trend keeps decision words in the legend only", async ({ page }) => {
   await page.goto("/overview");
 
@@ -63,10 +81,33 @@ test("skip link moves keyboard focus to the single main workspace", async ({ pag
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(skipLink).toBeFocused();
-  await skipLink.click();
+  await skipLink.press("Enter");
 
   await expect(page.locator("main#main-content")).toBeFocused();
+  await expect(page.locator("main#main-content")).toHaveCSS("outline-color", "rgb(201, 121, 29)");
   await expect(page.locator("main")).toHaveCount(1);
+});
+
+test("small muted and semantic text tokens keep readable contrast", async ({ page }) => {
+  await page.goto("/overview");
+
+  const tokens = await page.evaluate(() => {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+      danger: styles.getPropertyValue("--color-danger").trim(),
+      dangerSoft: styles.getPropertyValue("--color-danger-soft").trim(),
+      page: styles.getPropertyValue("--color-page").trim(),
+      subtle: styles.getPropertyValue("--color-text-subtle").trim(),
+      surfaceMuted: styles.getPropertyValue("--color-surface-muted").trim(),
+      warning: styles.getPropertyValue("--color-warning").trim(),
+      warningSoft: styles.getPropertyValue("--color-warning-soft").trim(),
+    };
+  });
+
+  expect(contrastRatio(tokens.subtle, tokens.page)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(tokens.subtle, tokens.surfaceMuted)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(tokens.warning, tokens.warningSoft)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(tokens.danger, tokens.dangerSoft)).toBeGreaterThanOrEqual(4.5);
 });
 
 test("global search shortcut opens event investigation with URL state", async ({ page }) => {

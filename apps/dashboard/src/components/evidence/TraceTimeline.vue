@@ -14,7 +14,7 @@
       <article>
         <header>
           <strong>{{ event.stage }}</strong
-          ><time>{{ event.time }}</time>
+          ><time :datetime="event.occurredAt">{{ event.time }}</time>
         </header>
         <h3>{{ event.tool }}</h3>
         <code>{{ event.resource }}</code>
@@ -25,10 +25,15 @@
             :tone="getDecisionTone(event.decision)"
           />
           <span>风险 {{ event.riskScore }}</span>
-          <button type="button" class="timeline-select-btn" @click="emit('select-event', event.id)">
-            定位溯源节点
+          <button
+            v-if="traceId"
+            type="button"
+            class="timeline-select-btn"
+            @click="emit('select-event', event.id)"
+          >
+            定位并查看证据
           </button>
-          <RouterLink class="page-action" :to="eventLink(event.id)">查看证据</RouterLink>
+          <RouterLink v-else class="page-action" :to="eventLink(event.id)">查看证据</RouterLink>
         </footer>
       </article>
     </li>

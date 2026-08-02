@@ -269,7 +269,7 @@ def test_memory_guard_change_lifecycle() -> None:
     assert rolled_back.json()["status"] == "rolled_back"
 
 
-def test_p2_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> None:
+def test_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> None:
     database_url = get_test_database_url()
 
     store = PostgresControlPlaneStore(database_url)

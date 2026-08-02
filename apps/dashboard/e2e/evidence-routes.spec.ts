@@ -12,11 +12,11 @@ test("approval exposes separate trace and event evidence destinations", async ({
   const evidenceNavigation = page.locator('.sidebar__link[href="/evidence"]');
   await expect(evidenceNavigation).toHaveClass(/sidebar__link--active/);
   await expect(evidenceNavigation).toHaveAttribute("aria-current", "page");
-  const evidenceLink = page
+  const evidenceButton = page
     .locator('[data-event-id="evt_20260607_002"]')
-    .getByRole("link", { name: "查看证据" });
-  await expect(evidenceLink).toBeVisible();
-  await evidenceLink.click();
+    .getByRole("button", { name: "定位并查看证据" });
+  await expect(evidenceButton).toBeVisible();
+  await evidenceButton.click();
   await expect(page.getByRole("dialog")).toContainText("风险分数");
 
   await page.goto("/approvals");
@@ -47,7 +47,16 @@ test("approval detail exposes explicit control-flow evidence fields", async ({ p
   await expect(detail).toContainText("tool_call / call_send_email_001");
   await expect(detail).toContainText("动作");
   await expect(detail).toContainText("send_email / action_send_email_001");
+  await expect(detail.locator(".approval-rule-list")).toContainText("外部发送需确认");
+  await expect(detail.locator(".approval-rule-list")).toContainText("任务与行为不一致");
+  await expect(detail).not.toContainText(/P\d{3}/);
   await expect(detail).not.toContainText("approvalNonce");
+
+  const content = await detail.textContent();
+  expect(content?.indexOf("用户任务")).toBeLessThan(content?.indexOf("Agent 请求执行的动作") ?? -1);
+  expect(content?.indexOf("Agent 请求执行的动作")).toBeLessThan(content?.indexOf("命中规则") ?? -1);
+  expect(content?.indexOf("命中规则")).toBeLessThan(content?.indexOf("判定原因") ?? -1);
+  expect(content?.indexOf("判定原因")).toBeLessThan(content?.indexOf("放行影响") ?? -1);
 });
 
 test("one-time approval requires confirmation and restores trigger focus", async ({ page }) => {

@@ -1,6 +1,6 @@
 <template>
-  <div v-if="items.length" class="rule-topn" aria-label="规则命中 TopN" role="img">
-    <div v-for="item in items" :key="item.label" class="rule-topn__row">
+  <ol v-if="items.length" class="rule-topn" aria-label="规则命中 TopN">
+    <li v-for="item in items" :key="item.label" class="rule-topn__row">
       <div class="rule-topn__meta">
         <span class="rule-topn__id" :title="ruleLabel(item.label)">{{
           ruleLabel(item.label)
@@ -10,8 +10,8 @@
       <span class="rule-topn__track"
         ><i :style="{ transform: `scaleX(${item.value / maxValue})` }"></i
       ></span>
-    </div>
-  </div>
+    </li>
+  </ol>
   <p v-else class="chart-empty">暂无规则命中数据</p>
 </template>
 
@@ -27,6 +27,9 @@ const maxValue = computed(() => Math.max(1, ...props.items.map((i) => i.value)))
 .rule-topn {
   display: grid;
   gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 .rule-topn__row {
   display: grid;

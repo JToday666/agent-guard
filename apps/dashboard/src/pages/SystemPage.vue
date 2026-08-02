@@ -36,7 +36,10 @@
             <strong>{{ item.label }}</strong
             ><small>{{ item.detail }}</small>
           </div>
-          <StatusBadge :label="item.value" :tone="item.tone" /><time>{{ item.checkedAt }}</time>
+          <StatusBadge :label="item.value" :tone="item.tone" /><time
+            :datetime="item.checkedAtIso ?? undefined"
+            >{{ item.checkedAt }}</time
+          >
         </article>
       </div>
     </section>
@@ -305,6 +308,7 @@ const systemDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 const statusItems = computed(() => [
   {
     checkedAt: formatTime(store.health.checkedAt),
+    checkedAtIso: store.health.checkedAt,
     detail: "核心审计、指标与审批接口",
     label: "Guard API",
     tone: stateTone(store.health.api),
@@ -312,6 +316,7 @@ const statusItems = computed(() => [
   },
   {
     checkedAt: formatTime(store.health.checkedAt),
+    checkedAtIso: store.health.checkedAt,
     detail: "审计与审批数据持久化",
     label: "PostgreSQL",
     tone: stateTone(store.health.database),
@@ -319,6 +324,7 @@ const statusItems = computed(() => [
   },
   {
     checkedAt: formatTime(auth.expiresAt),
+    checkedAtIso: auth.expiresAt,
     detail: auth.error ?? "HttpOnly Cookie 会话",
     label: "浏览器会话",
     tone: auth.isAuthenticated ? ("success" as const) : ("danger" as const),
@@ -326,6 +332,7 @@ const statusItems = computed(() => [
   },
   {
     checkedAt: formatTime(store.lastUpdatedAt),
+    checkedAtIso: store.lastUpdatedAt,
     detail: "页面可见时每 10 秒同步",
     label: "审计轮询",
     tone:
@@ -347,6 +354,7 @@ const statusItems = computed(() => [
   },
   {
     checkedAt: "当前配置",
+    checkedAtIso: null,
     detail: "当前 Dashboard 数据连接",
     label: "数据源",
     tone: "neutral" as const,
@@ -354,6 +362,7 @@ const statusItems = computed(() => [
   },
   {
     checkedAt: formatTime(store.lastUpdatedAt),
+    checkedAtIso: store.lastUpdatedAt,
     detail: "仅本次放行或拒绝并阻断",
     label: "审批队列",
     tone: store.pendingCount ? ("warning" as const) : ("success" as const),

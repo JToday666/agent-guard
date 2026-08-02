@@ -11,7 +11,7 @@
         <span class="evidence-search">
           <Search aria-hidden="true" :size="15" />
           <input
-            v-model.trim="searchText"
+            v-model.trim="searchDraft"
             autocomplete="off"
             name="trace-search"
             placeholder="Trace ID、Case 或结论…"
@@ -64,7 +64,7 @@
                 <code>{{ trace.caseId }}</code>
               </td>
               <td>
-                <RouterLink :to="`/evidence/${trace.id}`">{{ trace.title }}</RouterLink>
+                <strong class="trace-table__title">{{ trace.title }}</strong>
                 <code>{{ trace.id }}</code>
               </td>
               <td class="trace-table__count">{{ traceEventCount(trace.id) }}</td>
@@ -75,7 +75,9 @@
                 />
               </td>
               <td>
-                <time>{{ formatDashboardDateTime(trace.lastEventAt) }}</time>
+                <time :datetime="trace.lastEventAt">{{
+                  formatDashboardDateTime(trace.lastEventAt)
+                }}</time>
               </td>
               <td>
                 <RouterLink class="trace-table__action" :to="`/evidence/${trace.id}`">
@@ -117,7 +119,7 @@
 
 <script setup lang="ts">
 import { ArrowUpRight, Search } from "@lucide/vue";
-import { computed } from "vue";
+import { computed, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSelect from "../components/common/AppSelect.vue";
@@ -139,10 +141,11 @@ const store = useDashboardStore();
 const route = useRoute();
 const router = useRouter();
 const PAGE_SIZE = 20;
-const searchText = computed({
-  get: () => (typeof route.query.search === "string" ? route.query.search : ""),
-  set: (value: string) => updateQuery({ search: value || undefined, page: undefined }),
-});
+const searchDraft = ref("");
+let searchTimer: number | undefined;
+const searchText = computed(() =>
+  typeof route.query.search === "string" ? route.query.search : "",
+);
 const statusFilter = computed({
   get: () => (typeof route.query.status === "string" ? route.query.status : ""),
   set: (value: string) => updateQuery({ status: value || undefined, page: undefined }),
@@ -173,6 +176,30 @@ const paginatedTraces = computed(() =>
   filteredTraces.value.slice((currentPage.value - 1) * PAGE_SIZE, currentPage.value * PAGE_SIZE),
 );
 
+watch(
+  () => route.query.search,
+  (value) => {
+    if (route.name !== "evidence") return;
+    const search = typeof value === "string" ? value : "";
+    if (search !== searchDraft.value) searchDraft.value = search;
+  },
+  { immediate: true },
+);
+watch(searchDraft, (value) => {
+  window.clearTimeout(searchTimer);
+  if (route.name !== "evidence") return;
+  searchTimer = window.setTimeout(() => {
+    if (route.name === "evidence") {
+      updateQuery({ search: value || undefined, page: undefined });
+    }
+  }, 250);
+});
+function clearSearchTimer() {
+  window.clearTimeout(searchTimer);
+}
+onDeactivated(clearSearchTimer);
+onUnmounted(clearSearchTimer);
+
 function traceEventCount(traceId: string): number {
   return store.investigationIndex.byTrace.get(traceId)?.length ?? 0;
 }
@@ -193,6 +220,7 @@ function handlePage(page: number): void {
 }
 
 function handleClearFilters(): void {
+  searchDraft.value = "";
   void router.replace({ path: "/evidence" });
 }
 </script>
@@ -324,18 +352,12 @@ function handleClearFilters(): void {
   min-width: 17rem;
 }
 
-.trace-table td:nth-child(2) > a {
+.trace-table__title {
   color: var(--color-text);
   font-weight: var(--font-weight-semibold);
   overflow: hidden;
-  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.trace-table td:nth-child(2) > a:hover {
-  color: var(--color-link);
-  text-decoration: underline;
 }
 
 .trace-table td:nth-child(2) code,

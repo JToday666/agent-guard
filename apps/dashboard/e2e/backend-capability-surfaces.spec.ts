@@ -8,7 +8,7 @@ test("evaluation page shows latest run, attack ASR and sample cases", async ({ p
   await expect(page.getByText("AttackBench / v1")).toBeVisible();
   await expect(latestRun.locator(".asr-headline").getByText("73.2%")).toBeVisible();
   await expect(latestRun.locator(".asr-headline").getByText("4.8%")).toBeVisible();
-  await expect(page.locator(".attack-asr").getByText("prompt_injection")).toBeVisible();
+  await expect(page.locator(".attack-asr").getByText("提示注入")).toBeVisible();
   await expect(page.getByRole("link", { name: /PI-002/ })).toBeVisible();
 });
 

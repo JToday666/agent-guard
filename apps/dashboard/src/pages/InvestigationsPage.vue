@@ -1,6 +1,7 @@
 <template>
   <div class="investigations-page">
     <section
+      ref="mainPanel"
       class="workspace-panel investigations-page__main"
       aria-labelledby="investigations-title"
     >
@@ -30,7 +31,7 @@
               autocomplete="off"
               name="event-search"
               type="search"
-              placeholder="资源、规则名称、原因、证据链或 Case…"
+              placeholder="事件 ID、任务、工具、资源、规则或证据链…"
             />
           </span>
         </label>
@@ -72,31 +73,42 @@
       <nav class="quick-filters" aria-label="快速筛选">
         <button
           type="button"
-          :aria-pressed="!query.blocked && !query.rule"
-          @click="handleQuickFilter({ blocked: '', rule: '' })"
+          :aria-pressed="!query.decision && !query.blocked && !query.rule"
+          @click="handleQuickFilter({ blocked: '', decision: '', rule: '' })"
         >
           全部 {{ index.latestEvents.length }}
         </button>
         <button
           type="button"
-          :aria-pressed="query.blocked === 'true'"
-          @click="handleQuickFilter({ blocked: query.blocked === 'true' ? '' : 'true', rule: '' })"
+          :aria-pressed="query.decision === 'deny'"
+          @click="
+            handleQuickFilter({
+              blocked: '',
+              decision: query.decision === 'deny' ? '' : 'deny',
+              rule: '',
+            })
+          "
         >
-          已阻断 {{ blockedCount }}
+          已阻断 {{ deniedCount }}
         </button>
         <button
           v-for="rule in ruleOptions"
           :key="rule.value"
           type="button"
           :aria-pressed="query.rule === rule.value"
-          :title="ruleLabel(rule.value)"
+          :title="rule.label"
           @click="
             handleQuickFilter({ blocked: '', rule: query.rule === rule.value ? '' : rule.value })
           "
         >
-          {{ ruleOptionLabel(rule.value, rule.count) }}
+          {{ rule.label }} {{ rule.count }}
         </button>
       </nav>
+
+      <div v-if="pendingNewEventIds.size" class="new-event-notice">
+        <span>有 {{ pendingNewEventIds.size }} 条新事件</span>
+        <button type="button" @click="handleShowNewEvents">查看新事件</button>
+      </div>
 
       <ErrorState
         v-if="store.status === 'error' && store.error"
@@ -223,7 +235,15 @@
 
 <script setup lang="ts">
 import { Download, Search } from "@lucide/vue";
-import { computed, defineAsyncComponent, onDeactivated, onUnmounted, ref, watch } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onDeactivated,
+  onUnmounted,
+  ref,
+  watch,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSelect from "../components/common/AppSelect.vue";
@@ -234,11 +254,14 @@ import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import {
+  buildInvestigationIndex,
   filterInvestigationEvents,
   getRuleFilterOptions,
   resolveInvestigationEvent,
 } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
+import type { AuditEventRow } from "../types/dashboard";
+import { getAttackTypeLabel } from "../utils/attack-type";
 import { downloadCsv } from "../utils/csv-export";
 import {
   getDecisionLabel,
@@ -246,7 +269,7 @@ import {
   getRiskSeverityLabel,
 } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery, normalizeInvestigationQuery } from "../utils/investigation-query";
-import { formatRuleListForDisplay, ruleLabel, ruleOptionLabel } from "../utils/rule-display";
+import { formatRuleListForDisplay } from "../utils/rule-display";
 
 defineOptions({ name: "InvestigationsPage" });
 const EventEvidence = defineAsyncComponent(
@@ -259,14 +282,17 @@ const PAGE_SIZE = 20;
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
+const mainPanel = ref<HTMLElement | null>(null);
 const searchDraft = ref("");
+const displayedEvents = ref<AuditEventRow[]>([]);
 const newEventIds = ref<ReadonlySet<string>>(new Set());
+const pendingNewEventIds = ref<ReadonlySet<string>>(new Set());
 let hasEventSnapshot = false;
 let knownEventIds = new Set<string>();
 let searchTimer: number | undefined;
 let newEventTimer: number | undefined;
 const query = computed(() => normalizeInvestigationQuery(route.query));
-const index = computed(() => store.investigationIndex);
+const index = computed(() => buildInvestigationIndex(displayedEvents.value));
 const filteredEvents = computed(() => filterInvestigationEvents(index.value, query.value));
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredEvents.value.length / PAGE_SIZE)));
 const currentPage = computed(() => Math.min(query.value.page, totalPages.value));
@@ -280,8 +306,8 @@ const selectedEvent = computed(() =>
 const selectedTraceEvents = computed(() =>
   selectedEvent.value ? (index.value.byTrace.get(selectedEvent.value.traceId) ?? []) : [],
 );
-const blockedCount = computed(
-  () => index.value.latestEvents.filter((event) => event.blocked).length,
+const deniedCount = computed(
+  () => index.value.latestEvents.filter((event) => event.decision === "deny").length,
 );
 const ruleOptions = computed(() => getRuleFilterOptions(index.value.latestEvents).slice(0, 6));
 const hasFilters = computed(() =>
@@ -293,6 +319,7 @@ const hasFilters = computed(() =>
     query.value.blocked ||
     query.value.rule ||
     query.value.eventType ||
+    query.value.stage ||
     query.value.attackType,
   ),
 );
@@ -318,13 +345,17 @@ const severityOptions = [
 function buildDynamicOptions(
   events: typeof index.value.latestEvents,
   key: "eventType" | "attackType",
+  getLabel: (value: string) => string = (value) => value,
 ) {
   const types = new Set(events.map((e) => e[key]).filter((v): v is string => Boolean(v)));
-  return [{ label: "全部", value: "" }, ...[...types].map((v) => ({ label: v, value: v }))];
+  return [
+    { label: "全部", value: "" },
+    ...[...types].map((value) => ({ label: getLabel(value), value })),
+  ];
 }
 const eventTypeOptions = computed(() => buildDynamicOptions(index.value.latestEvents, "eventType"));
 const attackTypeOptions = computed(() =>
-  buildDynamicOptions(index.value.latestEvents, "attackType"),
+  buildDynamicOptions(index.value.latestEvents, "attackType", getAttackTypeLabel),
 );
 
 function queryModel(key: "decision" | "runtime" | "severity" | "eventType" | "attackType") {
@@ -354,30 +385,81 @@ watch(searchDraft, (value) => {
   }, 250);
 });
 watch(
-  () => index.value.latestEvents.map((event) => event.id),
-  (eventIds) => {
+  [() => store.events, () => store.status],
+  ([events, status]) => {
     if (!hasEventSnapshot) {
-      knownEventIds = new Set(eventIds);
+      if ((status === "idle" || status === "loading") && !events.length) return;
+      displayedEvents.value = events;
+      knownEventIds = new Set(events.map((event) => event.id));
       hasEventSnapshot = true;
       return;
     }
-    const incomingIds = eventIds.filter((eventId) => !knownEventIds.has(eventId));
-    knownEventIds = new Set(eventIds);
-    if (!incomingIds.length) return;
-    window.clearTimeout(newEventTimer);
-    newEventIds.value = new Set(incomingIds);
-    newEventTimer = window.setTimeout(() => {
-      newEventIds.value = new Set();
-    }, 900);
+
+    const incomingIds = events
+      .map((event) => event.id)
+      .filter((eventId) => !knownEventIds.has(eventId));
+    knownEventIds = new Set(events.map((event) => event.id));
+
+    if (!incomingIds.length && !pendingNewEventIds.value.size) {
+      displayedEvents.value = events;
+      return;
+    }
+
+    if (!incomingIds.length) {
+      updateDisplayedEvents(events);
+      return;
+    }
+
+    const isAtTop = (mainPanel.value?.scrollTop ?? 0) <= 40;
+    if (isAtTop && !pendingNewEventIds.value.size) {
+      displayedEvents.value = events;
+      highlightNewEvents(incomingIds);
+      return;
+    }
+
+    updateDisplayedEvents(events);
+    pendingNewEventIds.value = new Set([...pendingNewEventIds.value, ...incomingIds]);
   },
   { immediate: true },
 );
+
+function updateDisplayedEvents(events: AuditEventRow[]) {
+  const incomingById = new Map(events.map((event) => [event.id, event]));
+  displayedEvents.value = displayedEvents.value
+    .map((event) => incomingById.get(event.id))
+    .filter((event): event is AuditEventRow => event !== undefined);
+}
+
+function highlightNewEvents(eventIds: string[]) {
+  window.clearTimeout(newEventTimer);
+  newEventIds.value = new Set(eventIds);
+  newEventTimer = window.setTimeout(() => {
+    newEventIds.value = new Set();
+  }, 900);
+}
+
+async function handleShowNewEvents() {
+  const eventIds = [...pendingNewEventIds.value];
+  pendingNewEventIds.value = new Set();
+  displayedEvents.value = store.events;
+  updateQuery({ page: 1 });
+  highlightNewEvents(eventIds);
+  await nextTick();
+  mainPanel.value?.scrollTo({ top: 0 });
+}
+
 function clearTimers() {
   window.clearTimeout(searchTimer);
   window.clearTimeout(newEventTimer);
   newEventIds.value = new Set();
 }
-onDeactivated(clearTimers);
+onDeactivated(() => {
+  clearTimers();
+  displayedEvents.value = store.events;
+  pendingNewEventIds.value = new Set();
+  knownEventIds = new Set(store.events.map((event) => event.id));
+  hasEventSnapshot = store.status !== "loading" || Boolean(store.events.length);
+});
 onUnmounted(clearTimers);
 
 function updateQuery(patch: Record<string, string | number | undefined>) {
@@ -396,7 +478,7 @@ function handleCloseEvent() {
 function handlePage(page: number) {
   updateQuery({ page });
 }
-function handleQuickFilter(patch: { blocked: string; rule: string }) {
+function handleQuickFilter(patch: Record<string, string>) {
   updateQuery({ ...patch, page: 1 });
 }
 function handleClearFilters() {
@@ -530,6 +612,28 @@ function handleExport() {
   border-color: var(--color-active-border);
   color: var(--color-active-strong);
   font-weight: var(--font-weight-semibold);
+}
+.new-event-notice {
+  align-items: center;
+  background: var(--color-active-soft);
+  border-left: 3px solid var(--color-active);
+  color: var(--color-active-strong);
+  display: flex;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-semibold);
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+}
+.new-event-notice button {
+  background: transparent;
+  border: 0;
+  color: var(--color-link);
+  cursor: pointer;
+  font-weight: var(--font-weight-bold);
+  min-height: 2rem;
+  padding: 0;
 }
 .result-summary {
   align-items: baseline;

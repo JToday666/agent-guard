@@ -5,6 +5,7 @@ import type { AuditEventRow } from "../../types/dashboard.ts";
 import {
   buildInvestigationIndex,
   buildTraceConclusion,
+  buildTraceSummary,
   filterInvestigationEvents,
   getRuleFilterOptions,
   resolveInvestigationEvent,
@@ -77,20 +78,59 @@ test("builds dynamic rule filter options from real audit data", () => {
   assert.deepEqual(getRuleFilterOptions(index.latestEvents), [
     {
       count: 2,
-      label: "P101_prompt_injection",
+      label: "提示词注入",
       value: "P101_prompt_injection",
     },
     {
       count: 1,
-      label: "P001_sensitive_file_access",
+      label: "敏感文件访问",
       value: "P001_sensitive_file_access",
     },
     {
       count: 1,
-      label: "P105_environment_poisoning",
+      label: "环境内容污染",
       value: "P105_environment_poisoning",
     },
   ]);
+});
+
+test("searches event ids, tasks, actions, event types and readable rule names", () => {
+  const index = buildInvestigationIndex([
+    event({
+      agentAction: "向外部收件人发送摘要",
+      eventType: "message_send_proposed",
+      id: "audit-search-001",
+      ruleHits: ["P005_external_send"],
+      userTask: "整理客户反馈摘要",
+    }),
+  ]);
+  const baseQuery = {
+    attackType: "",
+    blocked: "" as const,
+    decision: "" as const,
+    eventId: "",
+    eventType: "",
+    page: 1,
+    rule: "",
+    runtime: "" as const,
+    search: "",
+    severity: "" as const,
+    stage: "",
+  };
+
+  for (const search of [
+    "audit-search-001",
+    "整理客户反馈",
+    "外部收件人",
+    "message_send_proposed",
+    "外部发送需确认",
+  ]) {
+    assert.deepEqual(
+      filterInvestigationEvents(index, { ...baseQuery, search }).map((item) => item.id),
+      ["audit-search-001"],
+      search,
+    );
+  }
 });
 
 test("filters indexed events by combined URL-backed criteria", () => {
@@ -172,5 +212,41 @@ test("builds a concise conclusion from the highest-risk trace event", () => {
     result: "动作暂停，等待人工审批后单次放行或拒绝并阻断",
     ruleHits: ["P005_external_send", "P004_task_mismatch"],
     title: "等待人工审批",
+  });
+});
+
+test("keeps approval linkage and conclusion evidence aligned with the trace outcome", () => {
+  const approvalEvent = event({
+    approvalId: "approval-1",
+    decision: "ask",
+    id: "approval",
+    occurredAt: "2026-01-01T10:00:00.000Z",
+  });
+  const deniedEvent = event({
+    blocked: true,
+    decision: "deny",
+    id: "denied",
+    occurredAt: "2026-01-01T10:01:00.000Z",
+    reason: "危险动作已阻断",
+    riskScore: 70,
+    ruleHits: ["P103_code_execution_abuse"],
+  });
+  const laterAllow = event({
+    decision: "allow",
+    id: "later-allow",
+    occurredAt: "2026-01-01T10:02:00.000Z",
+    reason: "后续低风险读取已放行",
+    riskScore: 95,
+  });
+
+  assert.equal(
+    buildTraceSummary("trace-1", [approvalEvent, deniedEvent, laterAllow])?.approvalId,
+    "approval-1",
+  );
+  assert.deepEqual(buildTraceConclusion([approvalEvent, deniedEvent, laterAllow]), {
+    reason: "危险动作已阻断",
+    result: "风险动作已被阻断，目标资源未继续执行",
+    ruleHits: ["P103_code_execution_abuse"],
+    title: "已阻断高风险工具调用",
   });
 });

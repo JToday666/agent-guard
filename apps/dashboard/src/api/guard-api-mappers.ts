@@ -30,15 +30,17 @@ import type {
 } from "../types/dashboard";
 import { maskSensitiveText } from "../utils/data-redaction.ts";
 
+const eventTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
 function formatEventTime(timestamp: string): string {
   const value = new Date(timestamp);
   if (Number.isNaN(value.getTime())) return timestamp;
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(value);
+  return eventTimeFormatter.format(value);
 }
 
 function readString(value: unknown): string | null {

@@ -16,7 +16,8 @@
         title="证据刷新未完成"
         tone="warning"
       >
-        <p>{{ traceDetailError }}</p>
+        <p>{{ traceDetailError }}。当前只展示已加载审计窗口内的匹配事件，链路可能不完整。</p>
+        <button class="inline-retry" type="button" @click="handleTraceRetry">重新加载证据链</button>
       </InlineNotice>
       <ErrorState
         v-if="traceDetailError && !traceEvents.length"
@@ -158,6 +159,9 @@
             </header>
             <InlineNotice v-if="provenanceError" title="溯源关系刷新未完成" tone="warning">
               <p>{{ provenanceError }}</p>
+              <button class="inline-retry" type="button" @click="handleProvenanceRetry">
+                重新加载溯源关系
+              </button>
             </InlineNotice>
             <ProvenanceGraph
               v-if="provenance"
@@ -216,6 +220,7 @@ import {
   getTraceStatusTone,
 } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
+import { findProvenanceNodeForEvent, resolveProvenanceEventId } from "../utils/provenance";
 import { formatRuleIdsInTextForDisplay, ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EvidenceDetailPage" });
@@ -260,7 +265,7 @@ const selectedProvenanceNode = computed<ProvenanceNode | undefined>(() =>
 );
 function handleSelectProvenanceNode(nodeId: string) {
   const node = provenance.value?.nodes.find((item) => item.nodeId === nodeId);
-  const eventId = node?.refId.startsWith("event:") ? node.refId.slice("event:".length) : undefined;
+  const eventId = resolveProvenanceEventId(node, traceEvents.value);
   void router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, { prov_node: nodeId, event_id: eventId }),
@@ -303,9 +308,7 @@ watch(
   { immediate: true },
 );
 function handleTimelineSelectEvent(eventId: string) {
-  const matchNode = provenance.value?.nodes.find(
-    (n) => n.refId === `event:${eventId}` || n.refId === eventId,
-  );
+  const matchNode = findProvenanceNodeForEvent(provenance.value?.nodes ?? [], eventId);
   void router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, {
@@ -321,7 +324,10 @@ function handleCloseEvidence() {
   });
 }
 function handleTraceRetry() {
-  void store.loadTraceDetail(traceId.value);
+  void store.loadTraceDetail(traceId.value, true);
+}
+function handleProvenanceRetry() {
+  void store.loadTraceProvenance(traceId.value, true);
 }
 </script>
 
@@ -522,5 +528,15 @@ function handleTraceRetry() {
 .trace-detail-alert p {
   color: var(--color-text-muted);
   margin: 0;
+}
+.inline-retry {
+  background: transparent;
+  border: 0;
+  color: var(--color-link);
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold);
+  justify-self: start;
+  min-height: 2rem;
+  padding: 0;
 }
 </style>

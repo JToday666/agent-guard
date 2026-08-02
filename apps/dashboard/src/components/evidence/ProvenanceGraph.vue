@@ -34,12 +34,12 @@
             :aria-pressed="data.nodeId === selectedNodeId"
             role="button"
             tabindex="0"
-            :title="displayText(data.label)"
+            :title="nodeLabel(data.label, data.kind)"
             @keydown.enter.stop.prevent="emit('select-node', data.nodeId)"
             @keydown.space.stop.prevent="emit('select-node', data.nodeId)"
           >
             <span class="prov-node__kind">{{ nodeLane(data.metadata, data.kind) }}</span>
-            <span class="prov-node__label">{{ displayText(data.label) }}</span>
+            <span class="prov-node__label">{{ nodeLabel(data.label, data.kind) }}</span>
             <span v-if="nodeSummary(data.metadata)" class="prov-node__summary">{{
               nodeSummary(data.metadata)
             }}</span>
@@ -62,6 +62,7 @@ import { Controls } from "@vue-flow/controls";
 import dagre from "@dagrejs/dagre";
 import type { ProvenanceGraph } from "../../types/dashboard";
 import { getDecisionLabel } from "../../utils/dashboard-formatters";
+import { getProvenanceRelationLabel, getProvenanceRiskScore } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 
 defineOptions({ name: "ProvenanceGraph" });
@@ -76,11 +77,11 @@ const emit = defineEmits<{
 }>();
 
 const legendItems = [
-  { kind: "audit", label: "任务与资源" },
-  { kind: "event", label: "Agent 行为" },
-  { kind: "decision", label: "规则与结果" },
-  { kind: "action_critic", label: "复核与审批" },
-  { kind: "config_audit", label: "上下文" },
+  { kind: "event", label: "运行时事件" },
+  { kind: "decision", label: "安全决策" },
+  { kind: "audit", label: "审计记录" },
+  { kind: "action_critic", label: "二次审查" },
+  { kind: "config_audit", label: "配置审计" },
 ] as const;
 
 function kindLabel(kind: string): string {
@@ -106,6 +107,13 @@ function displayText(value: string): string {
   return formatRuleIdsInTextForDisplay(value);
 }
 
+function nodeLabel(value: string, kind: string): string {
+  if (kind === "decision" && (value === "allow" || value === "ask" || value === "deny")) {
+    return getDecisionLabel(value);
+  }
+  return displayText(value);
+}
+
 function nodeLane(metadata: Record<string, unknown>, kind: string): string {
   return metadataValue(metadata, "lane") || kindLabel(kind);
 }
@@ -116,7 +124,7 @@ function nodeSummary(metadata: Record<string, unknown>): string {
 }
 
 function nodeMetaBadge(metadata: Record<string, unknown>): string {
-  const riskScore = metadataValue(metadata, "riskScore");
+  const riskScore = getProvenanceRiskScore(metadata);
   if (riskScore) return `风险 ${riskScore}`;
   const decision = metadataValue(metadata, "decision");
   if (decision === "allow" || decision === "ask" || decision === "deny")
@@ -138,8 +146,8 @@ function nodeMetaBadge(metadata: Record<string, unknown>): string {
 const NODE_W = 260;
 const NODE_H = 120;
 const ENHANCED_GRID_COLUMNS = 4;
-const ENHANCED_STEP_X = 290;
-const ENHANCED_STEP_Y = 150;
+const ENHANCED_STEP_X = 340;
+const ENHANCED_STEP_Y = 190;
 
 function enhancedMockPosition(index: number): { x: number; y: number } {
   const row = Math.floor(index / ENHANCED_GRID_COLUMNS);
@@ -176,10 +184,9 @@ function flowNodeClass(nodeId: string): string {
   return contextNodeIds.value.has(nodeId) ? "prov-flow-node--context" : "prov-flow-node--dimmed";
 }
 
-const flowNodes = computed<Node[]>(() => {
+const positionedNodes = computed<Node[]>(() => {
   if (isEnhancedMockGraph.value) {
     return props.graph.nodes.map((n, index) => ({
-      class: flowNodeClass(n.nodeId),
       id: n.nodeId,
       type: "provenance",
       position: enhancedMockPosition(index),
@@ -196,7 +203,6 @@ const flowNodes = computed<Node[]>(() => {
   return props.graph.nodes.map((n) => {
     const pos = g.node(n.nodeId);
     return {
-      class: flowNodeClass(n.nodeId),
       id: n.nodeId,
       type: "provenance",
       position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
@@ -205,19 +211,12 @@ const flowNodes = computed<Node[]>(() => {
   });
 });
 
-function edgeLabel(relation: string): string {
-  return (
-    (
-      {
-        生成审计: "审计",
-        规则判断: "判断",
-        风险复核: "复核",
-        请求审批: "审批",
-        形成结果: "结果",
-      } as Record<string, string>
-    )[relation] ?? ""
-  );
-}
+const flowNodes = computed<Node[]>(() =>
+  positionedNodes.value.map((node) => ({
+    ...node,
+    class: flowNodeClass(node.id),
+  })),
+);
 
 const flowEdges = computed<Edge[]>(() =>
   props.graph.edges.map((e) => {
@@ -228,7 +227,7 @@ const flowEdges = computed<Edge[]>(() =>
       id: e.edgeId,
       source: e.sourceNodeId,
       target: e.targetNodeId,
-      label: edgeLabel(e.relation),
+      label: getProvenanceRelationLabel(e.relation),
       style: {
         opacity: isContextEdge ? 1 : 0.18,
         stroke: isContextEdge ? "var(--color-active-border)" : "var(--color-border-strong)",
@@ -242,7 +241,7 @@ const flowEdges = computed<Edge[]>(() =>
       },
       labelStyle: {
         fill: "var(--color-text-muted)",
-        fontSize: "10px",
+        fontSize: "11px",
         fontWeight: 640,
         opacity: isContextEdge ? 1 : 0.18,
       },
