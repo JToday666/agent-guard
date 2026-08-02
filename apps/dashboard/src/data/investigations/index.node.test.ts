@@ -209,9 +209,9 @@ test("builds a concise conclusion from the highest-risk trace event", () => {
 
   assert.deepEqual(conclusion, {
     reason: "发送目标不在当前任务允许范围内，需要人工确认",
-    result: "动作暂停，等待人工审批后单次放行或拒绝并阻断",
+    result: "已记录需审批决定；审批结果与实际执行状态需分别确认",
     ruleHits: ["P005_external_send", "P004_task_mismatch"],
-    title: "等待人工审批",
+    title: "需要人工审批",
   });
 });
 
@@ -227,7 +227,7 @@ test("keeps approval linkage and conclusion evidence aligned with the trace outc
     decision: "deny",
     id: "denied",
     occurredAt: "2026-01-01T10:01:00.000Z",
-    reason: "危险动作已阻断",
+    reason: "危险动作被策略拒绝",
     riskScore: 70,
     ruleHits: ["P103_code_execution_abuse"],
   });
@@ -235,7 +235,7 @@ test("keeps approval linkage and conclusion evidence aligned with the trace outc
     decision: "allow",
     id: "later-allow",
     occurredAt: "2026-01-01T10:02:00.000Z",
-    reason: "后续低风险读取已放行",
+    reason: "后续低风险读取被策略允许",
     riskScore: 95,
   });
 
@@ -244,9 +244,37 @@ test("keeps approval linkage and conclusion evidence aligned with the trace outc
     "approval-1",
   );
   assert.deepEqual(buildTraceConclusion([approvalEvent, deniedEvent, laterAllow]), {
-    reason: "危险动作已阻断",
-    result: "风险动作已被阻断，目标资源未继续执行",
+    reason: "危险动作被策略拒绝",
+    result: "已记录拒绝决定；是否实际执行及副作用数量仍需运行时回执确认",
     ruleHits: ["P103_code_execution_abuse"],
-    title: "已阻断高风险工具调用",
+    title: "策略拒绝",
   });
+});
+
+test("uses an explicitly recorded approval result for the trace list status", () => {
+  const approved = event({
+    approvalId: "approval-1",
+    decision: "ask",
+    raw: {
+      evidence: {
+        approval: {
+          status: "allowed",
+        },
+      },
+    },
+  });
+  const pending = event({
+    approvalId: "approval-2",
+    decision: "ask",
+    raw: {
+      evidence: {
+        approval: {
+          status: "pending",
+        },
+      },
+    },
+  });
+
+  assert.equal(buildTraceSummary("trace-approved", [approved])?.status, "allowed");
+  assert.equal(buildTraceSummary("trace-pending", [pending])?.status, "paused");
 });

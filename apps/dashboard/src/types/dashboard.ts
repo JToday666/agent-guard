@@ -1,10 +1,12 @@
-export type DecisionStatus = "allow" | "deny" | "ask";
+export type PolicyDecision = "allow" | "deny" | "ask";
 
-export type RiskSeverity = "critical" | "high" | "medium" | "low";
+export type DecisionStatus = PolicyDecision | "unknown";
+
+export type RiskSeverity = "critical" | "high" | "medium" | "low" | "unknown";
 
 export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired";
 
-export type RuntimeName = "langgraph" | "openclaw";
+export type RuntimeName = "langgraph" | "openclaw" | "unknown";
 
 export type DataStatus = "idle" | "loading" | "ready" | "stale" | "error";
 
@@ -13,9 +15,9 @@ export interface AuditEventRow {
   occurredAt: string;
   time: string;
   decision: DecisionStatus;
-  riskScore: number;
+  riskScore: number | null;
   severity: RiskSeverity;
-  blocked: boolean;
+  blocked: boolean | null;
   runtime: RuntimeName;
   stage: string;
   eventType: string;
@@ -64,8 +66,198 @@ export interface TraceSummary {
   lastEventAt: string;
   caseId: string;
   title: string;
-  status: "blocked" | "paused" | "allowed";
+  status: "denied" | "paused" | "allowed" | "unknown";
   approvalId?: string;
+}
+
+export type AuditRecordType =
+  "policy_evaluation" | "runtime_outcome" | "runtime_observation" | "config_audit" | "unknown";
+
+export type InterventionType =
+  | "pre_execution_deny"
+  | "tool_result_quarantine"
+  | "model_output_revision"
+  | "audit_observation"
+  | "approval_release"
+  | "none"
+  | "unknown";
+
+export type ExecutionStatus = "not_invoked" | "executed" | "failed" | "unknown";
+
+export type ResultDisposition =
+  "passed_through" | "quarantined" | "modified" | "discarded" | "not_applicable" | "unknown";
+
+export type EvidenceAvailability = "recorded" | "not_recorded" | "not_applicable";
+
+export type SideEffectMeasurementStatus =
+  "measured" | "not_measured" | "not_applicable" | "unknown";
+
+export interface SideEffectEvidence {
+  measurementStatus: SideEffectMeasurementStatus;
+  count: number | null;
+  summary: string | null;
+}
+
+export interface EvidenceSource {
+  type: string | null;
+  label: string | null;
+  trustLevel: string | null;
+}
+
+export interface NormalizedResourceEvidence {
+  id: string;
+  type: string | null;
+  operation: string | null;
+  sensitivity: string | null;
+  value: string;
+}
+
+export interface RuleHitEvidence {
+  ruleId: string;
+  name: string | null;
+  severity: RiskSeverity;
+  decision: DecisionStatus;
+  reason: string | null;
+  evidence: string[];
+}
+
+export interface RiskFactorEvidence {
+  id: string;
+  category: string | null;
+  label: string;
+  score: number | null;
+  severity: RiskSeverity;
+  decision: DecisionStatus;
+  reason: string | null;
+}
+
+export interface RiskBreakdownEvidence {
+  aggregationMethod: string | null;
+  finalScore: number | null;
+  finalDecision: DecisionStatus;
+  factors: RiskFactorEvidence[];
+}
+
+export interface PolicyReferenceEvidence {
+  bundleId: string | null;
+  version: string | null;
+  revision: number | null;
+  digest: string | null;
+}
+
+export interface ExecutionEvidence {
+  status: ExecutionStatus;
+  receiptRecorded: boolean;
+  invokedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  toolResultEnteredContext: boolean | null;
+  persisted: boolean | null;
+}
+
+export interface ApprovalEvidence {
+  approvalId: string | null;
+  status: ApprovalStatus | "not_required" | "unknown";
+  resolvedAt: string | null;
+}
+
+export interface AuditChainEvidence {
+  globalStatus: "valid" | "invalid" | "unknown";
+  traceMetadataStatus: "complete" | "partial" | "unknown";
+  chainIndex: number | null;
+  entryHash: string | null;
+  previousHash: string | null;
+  returnedEventCount: number;
+  mayBeTruncated: boolean;
+}
+
+export interface NormalizedAuditEvidence {
+  auditId: string;
+  eventId: string | null;
+  decisionId: string | null;
+  actionId: string | null;
+  recordType: AuditRecordType;
+  occurredAt: string;
+  originalTask: string | null;
+  source: EvidenceSource;
+  contextSources: string[];
+  modelIntent: string | null;
+  toolName: string | null;
+  toolArguments: Record<string, unknown> | null;
+  resources: NormalizedResourceEvidence[];
+  ruleHits: RuleHitEvidence[];
+  risk: RiskBreakdownEvidence;
+  policy: PolicyReferenceEvidence;
+  decision: DecisionStatus;
+  decisionReason: string | null;
+  intervention: InterventionType;
+  execution: ExecutionEvidence;
+  sideEffects: SideEffectEvidence;
+  resultDisposition: ResultDisposition;
+  approval: ApprovalEvidence;
+  resultSummary: string | null;
+  chainIndex: number | null;
+  entryHash: string | null;
+  previousHash: string | null;
+  raw: unknown;
+}
+
+export interface EvidenceFact {
+  id:
+    | "decision"
+    | "intervention"
+    | "execution"
+    | "side_effects"
+    | "result_disposition"
+    | "audit_integrity";
+  label: string;
+  value: string;
+  detail: string;
+  availability: EvidenceAvailability;
+  tone: "neutral" | "protective" | "success" | "warning" | "danger";
+}
+
+export type EvidenceStageId = "input_trust" | "context_intent" | "tool_policy" | "outcome_audit";
+
+export interface EvidenceStageItem {
+  id: string;
+  eventId: string | null;
+  label: string;
+  value: string;
+  detail: string | null;
+  availability: EvidenceAvailability;
+}
+
+export interface EvidenceStage {
+  id: EvidenceStageId;
+  index: number;
+  eyebrow: string;
+  title: string;
+  items: EvidenceStageItem[];
+}
+
+export interface TraceEvidenceConclusion {
+  title: string;
+  reason: string;
+  outcome: string;
+  confidence: "confirmed" | "partial" | "unknown";
+}
+
+export interface TraceEvidenceViewModel {
+  traceId: string;
+  caseId: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  originalAuditCount: number;
+  logicalAuditCount: number;
+  duplicatePolicyAuditCount: number;
+  primaryEventId: string | null;
+  conclusion: TraceEvidenceConclusion;
+  facts: EvidenceFact[];
+  stages: EvidenceStage[];
+  events: NormalizedAuditEvidence[];
+  primary: NormalizedAuditEvidence | null;
+  integrity: AuditChainEvidence;
 }
 
 export interface EvalMetrics {

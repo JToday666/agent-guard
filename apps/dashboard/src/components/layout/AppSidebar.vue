@@ -1,7 +1,7 @@
 <template>
   <nav class="sidebar" :class="{ 'sidebar--collapsed': isCollapsed }" aria-label="主导航">
     <div class="sidebar__header">
-      <span v-if="!isCollapsed" class="sidebar__title">工作台</span>
+      <span v-if="!isCollapsed" class="sidebar__title">证据工作台</span>
       <button
         class="sidebar__collapse"
         type="button"

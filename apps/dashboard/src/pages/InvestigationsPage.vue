@@ -89,7 +89,7 @@
             })
           "
         >
-          已阻断 {{ deniedCount }}
+          拒绝 {{ deniedCount }}
         </button>
         <button
           v-for="rule in ruleOptions"
@@ -165,10 +165,10 @@
                   <span class="event-risk" :class="`event-risk--${event.severity}`"
                     ><i
                       :style="{
-                        transform: `scaleX(${Math.min(1, Math.max(0, event.riskScore / 100))})`,
+                        transform: `scaleX(${Math.min(1, Math.max(0, (event.riskScore ?? 0) / 100))})`,
                       }"
                     ></i
-                    ><strong>{{ event.riskScore }}</strong></span
+                    ><strong>{{ event.riskScore ?? "--" }}</strong></span
                   >
                 </td>
                 <td>{{ event.runtime }}</td>
@@ -326,9 +326,9 @@ const hasFilters = computed(() =>
 
 const decisionOptions = [
   { label: "全部", value: "" },
-  { label: "已阻断", value: "deny" },
-  { label: "待审批", value: "ask" },
-  { label: "已放行", value: "allow" },
+  { label: "拒绝", value: "deny" },
+  { label: "需审批", value: "ask" },
+  { label: "允许", value: "allow" },
 ];
 const runtimeOptions = [
   { label: "全部", value: "" },

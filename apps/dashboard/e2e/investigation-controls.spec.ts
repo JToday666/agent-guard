@@ -117,7 +117,7 @@ test("investigation select supports mouse selection and outside dismissal", asyn
   const runtimeSelect = page.getByRole("combobox", { name: /^运行时/ });
 
   await decisionSelect.click();
-  await page.getByRole("option", { name: "已阻断" }).click();
+  await page.getByRole("option", { name: "拒绝" }).click();
   await expect(page).toHaveURL(/decision=deny/);
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "false");
 
@@ -134,11 +134,11 @@ test("investigation select supports standard keyboard navigation", async ({ page
   await page.keyboard.press("ArrowDown");
   await expect(decisionSelect).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("End");
-  await expect(page.locator(".app-select__option--active")).toHaveText("已放行");
+  await expect(page.locator(".app-select__option--active")).toHaveText("允许");
   await page.keyboard.press("Home");
   await expect(page.locator(".app-select__option--active")).toHaveText("全部");
   await page.keyboard.press("ArrowUp");
-  await expect(page.locator(".app-select__option--active")).toHaveText("已放行");
+  await expect(page.locator(".app-select__option--active")).toHaveText("允许");
   await page.keyboard.press("Enter");
 
   await expect(page).toHaveURL(/decision=allow/);

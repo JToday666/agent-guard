@@ -39,7 +39,7 @@ test("desktop shell keeps the required navigation order", async ({ page }) => {
   await expect(page.locator(".sidebar__link")).toHaveText([
     "安全总览",
     "事件调查",
-    "人工审批2",
+    "人工审批1",
     "证据链",
     "安全评测",
     "系统状态",

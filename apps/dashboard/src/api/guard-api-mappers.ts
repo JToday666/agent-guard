@@ -71,18 +71,26 @@ function readNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function readNullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
 function readBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
 function readDecision(value: unknown): AuditEventRow["decision"] {
-  return value === "allow" || value === "ask" || value === "deny" ? value : "allow";
+  return value === "allow" || value === "ask" || value === "deny" ? value : "unknown";
 }
 
 function readSeverity(value: unknown): AuditEventRow["severity"] {
   return value === "critical" || value === "high" || value === "medium" || value === "low"
     ? value
-    : "low";
+    : "unknown";
+}
+
+function readRuntime(value: unknown): AuditEventRow["runtime"] {
+  return value === "langgraph" || value === "openclaw" ? value : "unknown";
 }
 
 function fallbackResourceTargets(metadata: Record<string, unknown>): string[] {
@@ -148,10 +156,10 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
     occurredAt: timestamp,
     time: formatEventTime(timestamp),
     decision: readDecision(dto.decision),
-    riskScore: readNumber(dto.risk_score),
+    riskScore: readNullableNumber(dto.risk_score),
     severity: readSeverity(dto.severity),
-    blocked: readBoolean(dto.blocked),
-    runtime: dto.runtime ?? "langgraph",
+    blocked: readNullableBoolean(dto.blocked),
+    runtime: readRuntime(dto.runtime),
     stage: stageName(dto),
     eventType: readString(dto.event_type) ?? "未提供",
     tool: action,

@@ -8,14 +8,21 @@ test("mock provenance graph contains evidence nodes and event references", async
   const graph = await source.getTraceProvenance("trace_002");
 
   assert.equal(graph.traceId, "trace_002");
-  assert.ok(graph.nodes.length >= 8);
-  assert.ok(graph.edges.length >= 7);
-  assert.ok(graph.nodes.some((node) => node.refId === "event:evt_20260607_002"));
-  assert.ok(graph.nodes.some((node) => node.refId.startsWith("context:")));
-  assert.ok(graph.nodes.some((node) => node.refId.startsWith("resource:")));
+  assert.ok(graph.nodes.length >= 10);
+  assert.ok(graph.edges.length >= 9);
+  assert.ok(graph.nodes.some((node) => node.refId === "audit:evt_20260607_002"));
+  assert.ok(graph.nodes.some((node) => node.kind === "task"));
+  assert.ok(graph.nodes.some((node) => node.kind === "source"));
+  assert.ok(graph.nodes.some((node) => node.kind === "context"));
+  assert.ok(graph.nodes.some((node) => node.kind === "model_intent"));
+  assert.ok(graph.nodes.some((node) => node.kind === "resource"));
+  assert.ok(graph.nodes.some((node) => node.kind === "rule"));
+  assert.ok(graph.nodes.some((node) => node.kind === "policy"));
+  assert.ok(graph.nodes.some((node) => node.kind === "runtime_result"));
   assert.ok(graph.nodes.some((node) => node.refId === "approval:ask_001"));
-  assert.ok(graph.nodes.some((node) => node.kind === "action_critic"));
-  assert.ok(graph.nodes.some((node) => node.refId.startsWith("outcome:")));
+  assert.ok(
+    graph.nodes.every((node) => node.metadata.source !== "mock" && node.metadata.source !== "api"),
+  );
 });
 
 test("mock source exposes rich evaluation data for populated pages", async () => {

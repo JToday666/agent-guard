@@ -77,6 +77,21 @@ test("maps sparse audit DTOs without throwing on missing arrays or records", () 
   assert.equal(event.agentAction, "tool_call_proposed");
 });
 
+test("maps missing security fields to unknown instead of safe defaults", () => {
+  const event = mapAuditEvent({
+    audit_id: "audit_missing_security_fields",
+    trace_id: "trace_missing_security_fields",
+    timestamp: "2026-06-22T06:30:00Z",
+    event_type: "runtime_outcome",
+  } as unknown as Parameters<typeof mapAuditEvent>[0]);
+
+  assert.equal(event.decision, "unknown");
+  assert.equal(event.riskScore, null);
+  assert.equal(event.severity, "unknown");
+  assert.equal(event.blocked, null);
+  assert.equal(event.runtime, "unknown");
+});
+
 test("maps P1 audit metadata into readable action and resource fields", () => {
   const event = mapAuditEvent({
     audit_id: "audit_p1",

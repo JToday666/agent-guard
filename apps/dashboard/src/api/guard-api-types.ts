@@ -1,20 +1,25 @@
-import type { DecisionStatus, RiskSeverity, RuntimeName } from "../types/dashboard";
+import type {
+  AuditRecordType,
+  PolicyDecision,
+  RiskSeverity,
+  RuntimeName,
+} from "../types/dashboard";
 
 export interface GuardAuditEventDto {
   audit_id: string;
   schema_version: string;
   trace_id: string;
   case_id: string | null;
-  runtime: RuntimeName;
+  runtime: Exclude<RuntimeName, "unknown">;
   timestamp: string;
   stage: string;
   event_type: string;
   attack_type: string | null;
   is_malicious: boolean | null;
   summary: string;
-  decision: DecisionStatus;
+  decision: PolicyDecision;
   risk_score: number;
-  severity: RiskSeverity;
+  severity: Exclude<RiskSeverity, "unknown">;
   blocked: boolean;
   resource_targets: string[];
   rule_hits: string[];
@@ -22,6 +27,17 @@ export interface GuardAuditEventDto {
   links: Record<string, string>;
   latency_ms: number | null;
   metadata: Record<string, unknown>;
+  integrity?: GuardAuditIntegrityMetadataDto;
+  record_type?: AuditRecordType;
+  evidence?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface GuardAuditIntegrityMetadataDto {
+  sequence: number;
+  prev_hash: string | null;
+  event_hash: string;
+  canonicalization: string;
 }
 
 export interface GuardApprovalDto {
@@ -33,7 +49,7 @@ export interface GuardApprovalDto {
   action_name?: string;
   tool_call_id: string;
   requesting_principal_id: string;
-  runtime: RuntimeName;
+  runtime: Exclude<RuntimeName, "unknown">;
   agent_id: string;
   status: "pending" | "resolved" | "expired";
   decision_options: Array<"allow_once" | "deny">;
@@ -42,7 +58,7 @@ export interface GuardApprovalDto {
   resource: string;
   reason: string;
   risk_score: number;
-  severity: RiskSeverity;
+  severity: Exclude<RiskSeverity, "unknown">;
   created_at: string;
   expires_at: string | null;
   resolved_at: string | null;
@@ -70,8 +86,8 @@ export interface GuardEvaluationCaseDto {
   case_id: string;
   attack_type: string;
   runtime: string;
-  expected_decision: DecisionStatus;
-  actual_decision: DecisionStatus;
+  expected_decision: PolicyDecision;
+  actual_decision: PolicyDecision;
   blocked: boolean;
   attack_success: boolean;
   trace_id: string;
@@ -136,7 +152,7 @@ export interface GuardAuditIntegrityDto {
 
 export interface GuardConfigAuditFindingDto {
   finding_id: string;
-  severity: RiskSeverity;
+  severity: Exclude<RiskSeverity, "unknown">;
   category: string;
   title: string;
   subject: string;

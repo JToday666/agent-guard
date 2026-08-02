@@ -353,14 +353,6 @@ const statusItems = computed(() => [
             : "同步中",
   },
   {
-    checkedAt: "当前配置",
-    checkedAtIso: null,
-    detail: "当前 Dashboard 数据连接",
-    label: "数据源",
-    tone: "neutral" as const,
-    value: store.dataSourceMode === "api" ? "Guard API" : "本地场景",
-  },
-  {
     checkedAt: formatTime(store.lastUpdatedAt),
     checkedAtIso: store.lastUpdatedAt,
     detail: "仅本次放行或拒绝并阻断",

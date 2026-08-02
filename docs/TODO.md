@@ -129,3 +129,59 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 - `EvaluationPage` 读取 `/v1/evaluations/latest`，展示 latest run、ASR before/after、per-attack ASR 和 cases 样本追踪。
 - `SystemPage` 读取 `/v1/adapters/openclaw/status`，展示 OpenClaw verify/heartbeat、hook 覆盖、版本、来源和错误状态。
 - `SystemPage` 读取 `/v1/config-audit/findings`，展示配置审计 finding 明细、严重性分布、目标、建议和证据链入口。
+
+## 证据链与溯源展示
+
+状态标记：
+
+- `[x]` 已完成并验证；
+- `[~]` 已形成协作提案，仍需前后端共同确认后冻结；
+- `[ ]` 尚未实现。
+
+详细请求、响应、字段、示例、兼容和验收提案见
+[证据链与溯源 API 协作契约](08_api/evidence_trace_api_contract.md)。该文档当前是协作提案，
+不替代稳定的 [接口契约与事件模型](02_core/interface_contract.md)，也不表示后端已经实现目标字段。
+
+### 已完成
+
+- [x] Dashboard `/evidence/:trace_id` 已升级为攻击证据展示器，包含最终结论、六维事实、四阶段证据流、交互式溯源图、节点检查器、生命周期时间线、证据档案和脱敏原始证据。
+- [x] 前端已区分执行前拒绝、工具结果隔离、模型输出修订、仅审计观察和审批后放行；`deny` 不再自动推断工具未调用或副作用为零。
+- [x] API 与 Mock 共用证据规范化器、页面组件和图布局；API 模式失败时不实例化或回退到 Mock。
+- [x] Mock 已覆盖五类代表 trace，并使用与目标 AuditEvent 一致的证据结构。
+- [x] 溯源图已使用 Vue Flow、ELK Layered 和 Minimap，支持生命周期分区、关键路径、折叠、搜索、筛选、全屏、递归路径高亮及 URL/时间线/检查器同步。
+- [x] Dashboard 已直接读取后端现有的 `AuditEvent.integrity.sequence`、`prev_hash`、`event_hash` 和 `canonicalization`；已删除 `evidence.audit`、`chain_index`、`entry_hash`、`previous_hash` 平行结构的读取和 Mock 生成逻辑。
+- [x] 已建立本轮 API 协作契约文档，明确不新增 Dashboard 专用证据端点或独立 execution receipt 端点。
+
+### 待协商并冻结
+
+- [~] `GuardEvent` 继续使用 `schema_version="0.3"`；是否将目标 AuditEvent 升级为 `"0.4"`，需在兼容策略评审后确认。
+- [~] `runtime_observation` 等非策略记录的顶层 `decision`、`risk_score`、`severity`、`blocked` 是允许为空，还是保留兼容投影，需前后端共同确认。
+- [~] `GET /v1/traces/{trace_id}` 的查询完整性字段名暂建议为 `audit_window.returned_count`、`limit` 和 `has_more`。
+- [~] `POST /v1/guard/evaluate` 是否以 `GuardEvent.event_id` 提供请求级幂等，需确认；`POST /v1/audit/events` 的 `audit_id` 幂等与冲突规则为 P0 必需项。
+- [~] 证据投影的最大体积、字符串上限和数组上限需与现有审批脱敏逻辑统一后冻结。
+
+### 后端待完成
+
+| 状态 | 优先级 | 待办                                                                                                        | 影响组件                                                     | 验收条件                                                                                                          |
+| ---- | ------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| [ ]  | P0     | 冻结 AuditEvent 目标版本、`record_type`、`evidence`、`links` 和字段可空性，并同步稳定接口契约与 JSON Schema | Core schema、Guard API、Adapters、Dashboard contract tests   | 四类记录均通过契约测试；旧记录有明确读取规则；缺失字段保持未知                                                    |
+| [ ]  | P0     | `POST /v1/guard/evaluate` 使用同一次策略快照完成判定和审计，只写一条 `policy_evaluation`                    | Policy store、Guard API、Audit service                       | 同一逻辑评估只有一条策略审计；审计中的 bundle、version、revision 和 digest 与实际判定一致                         |
+| [ ]  | P0     | 移除 LangGraph Guard API 模式下的重复策略审计                                                               | LangGraph Adapter                                            | Adapter 不再为 Guard API 已写入的 `event_id + decision_id` 重复提交策略审计                                       |
+| [ ]  | P0     | 通过现有 `POST /v1/audit/events` 回写结构化运行时结果                                                       | LangGraph Adapter、OpenClaw Plugin                           | 成功、失败、未调用、隔离、修订、审批释放和观察路径均产生对应回执；未测量副作用不按零处理                          |
+| [ ]  | P0     | 统一 `audit_id` 幂等行为                                                                                    | Guard API、Memory store、PostgreSQL store、provenance writer | 新写入成功；同 ID 同内容重试成功且不延长哈希链；同 ID 不同内容返回 `409 AUDIT_ID_CONFLICT`                        |
+| [ ]  | P0     | 统一证据脱敏和有界投影                                                                                      | Guard API、Adapters、审批证据工具                            | 敏感键和值不进入浏览器可读字段；字符串、数组、嵌套深度和总大小均受限                                              |
+| [ ]  | P0     | 指标只统计逻辑唯一的 `policy_evaluation`                                                                    | Metrics service、Memory/PostgreSQL queries                   | runtime outcome/observation 不增加 allow/ask/deny；旧重复策略审计不会重复计数；`blocked_count` 明确为策略介入口径 |
+| [ ]  | P1     | 在 GuardDecision 和 AuditEvent 中增加同构的 `risk_breakdown`                                                | Core merge、GuardDecision、Guard API                         | 每个检测因子及 max 聚合过程可追溯；最终分数和决定一致；旧决策不补造分解                                           |
+| [ ]  | P1     | 扩展 provenance 写入的节点和关系                                                                            | Guard API provenance writer/query                            | 返回任务、来源、上下文、意图、动作、资源、规则、策略、决策、审批、结果、审计和复核；ID 稳定且不包含前端坐标       |
+| [ ]  | P1     | 为 trace 查询增加明确的窗口完整性信息                                                                       | Trace service、Memory/PostgreSQL store                       | Dashboard 不再根据“恰好返回 1000 条”猜测截断；旧客户端可忽略新增字段                                              |
+
+### 前端待后端契约冻结后完成
+
+- [ ] 根据冻结后的 `context_sources` 结构决定是否从字符串摘要升级为结构化来源对象。
+- [ ] 使用服务端 `audit_window.has_more` 替换当前基于返回数量的截断提示。
+- [ ] 如果非策略记录最终允许顶层策略字段为空，同步收紧 API DTO，并确保 Dashboard 只从真实策略评估读取策略结论。
+- [ ] 使用真实 Guard API fixtures 增加 AuditEvent 目标版本、四类 `record_type`、五类干预、幂等冲突和 provenance 节点的跨端契约测试。
+
+### 前端后续优化
+
+- [ ] 在不削减 ELK 分层布局、Minimap、折叠、搜索、筛选和路径高亮能力的前提下，继续拆分或按需加载溯源图依赖；当前生产构建的独立溯源图 chunk 约为 1.67 MB（gzip 约 521 KB），需要评估首开延迟和缓存效果。

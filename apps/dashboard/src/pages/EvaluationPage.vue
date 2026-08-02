@@ -335,7 +335,9 @@ const matrix = computed(() => {
   let tn = 0;
   let fn = 0;
   for (const event of events) {
-    if (event.isMalicious === null || event.isMalicious === undefined) continue;
+    if (event.isMalicious === null || event.isMalicious === undefined || event.blocked === null) {
+      continue;
+    }
     if (event.isMalicious && event.blocked) tp++;
     else if (!event.isMalicious && event.blocked) fp++;
     else if (!event.isMalicious && !event.blocked) tn++;
@@ -365,8 +367,8 @@ const metricItems = computed(() => [
     value: countFormatter.format(labeledEventCount.value),
   },
   {
-    detail: "实际执行阻断",
-    label: "阻断率",
+    detail: "兼容口径包含拒绝与需审批",
+    label: "策略介入率",
     route: "/investigations?blocked=true",
     tone: "protective" as const,
     value: percent(store.metrics.blockRate),
