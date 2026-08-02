@@ -11,12 +11,15 @@ import {
 import { maskSensitiveText, redactSensitiveData } from "./data-redaction.ts";
 
 test("uses one Chinese vocabulary for security states", () => {
-  assert.equal(getDecisionLabel("deny"), "已阻断");
-  assert.equal(getDecisionLabel("ask"), "待审批");
+  assert.equal(getDecisionLabel("deny"), "拒绝");
+  assert.equal(getDecisionLabel("ask"), "需审批");
+  assert.equal(getDecisionLabel("allow"), "允许");
+  assert.equal(getDecisionLabel("unknown"), "未记录");
   assert.equal(getDecisionTone("deny"), "protective");
   assert.equal(getDecisionTone("ask"), "warning");
   assert.equal(getRiskSeverityLabel("critical"), "严重");
-  assert.equal(getTraceStatusLabel("paused"), "等待审批");
+  assert.equal(getTraceStatusLabel("paused"), "需审批");
+  assert.equal(getTraceStatusLabel("denied"), "拒绝");
 });
 
 test("formats an empty audit chain head without throwing", () => {

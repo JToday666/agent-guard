@@ -1,9 +1,40 @@
 import { dashboardEnv } from "../../config/dashboard-env";
-import { ApiDashboardDataSource } from "./api-data-source";
 import type { DashboardDataSource } from "./dashboard-data-source";
-import { MockDashboardDataSource } from "./mock-data-source";
 
-export const dashboardDataSource: DashboardDataSource =
-  dashboardEnv.dataSource === "mock"
-    ? new MockDashboardDataSource(dashboardEnv.mockDelayMs)
-    : new ApiDashboardDataSource();
+export function createDashboardDataSource(): DashboardDataSource {
+  let sourcePromise: Promise<DashboardDataSource> | null = null;
+  const loadSource = (): Promise<DashboardDataSource> => {
+    if (sourcePromise) return sourcePromise;
+    sourcePromise =
+      dashboardEnv.dataSource === "mock"
+        ? import("./mock-data-source").then(
+            ({ MockDashboardDataSource }) => new MockDashboardDataSource(dashboardEnv.mockDelayMs),
+          )
+        : import("./api-data-source").then(
+            ({ ApiDashboardDataSource }) => new ApiDashboardDataSource(),
+          );
+    return sourcePromise;
+  };
+
+  return {
+    getAdapterStatus: (...args) => loadSource().then((source) => source.getAdapterStatus(...args)),
+    getAuditIntegrity: (...args) =>
+      loadSource().then((source) => source.getAuditIntegrity(...args)),
+    getConfigAuditFindings: (...args) =>
+      loadSource().then((source) => source.getConfigAuditFindings(...args)),
+    getCurrentPolicy: (...args) => loadSource().then((source) => source.getCurrentPolicy(...args)),
+    getEvaluation: (...args) => loadSource().then((source) => source.getEvaluation(...args)),
+    getEvents: (...args) => loadSource().then((source) => source.getEvents(...args)),
+    getHealth: (...args) => loadSource().then((source) => source.getHealth(...args)),
+    getMetrics: (...args) => loadSource().then((source) => source.getMetrics(...args)),
+    getPendingApprovals: (...args) =>
+      loadSource().then((source) => source.getPendingApprovals(...args)),
+    getPolicyHistory: (...args) => loadSource().then((source) => source.getPolicyHistory(...args)),
+    getTraceDetail: (...args) => loadSource().then((source) => source.getTraceDetail(...args)),
+    getTraceProvenance: (...args) =>
+      loadSource().then((source) => source.getTraceProvenance(...args)),
+    resolveApproval: (...args) => loadSource().then((source) => source.resolveApproval(...args)),
+  };
+}
+
+export const dashboardDataSource = createDashboardDataSource();

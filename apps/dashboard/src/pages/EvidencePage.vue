@@ -152,9 +152,10 @@ const statusFilter = computed({
 });
 const statusOptions = [
   { label: "全部", value: "" },
-  { label: "已阻断", value: "blocked" },
-  { label: "待审批", value: "paused" },
-  { label: "已放行", value: "allowed" },
+  { label: "拒绝", value: "denied" },
+  { label: "需审批", value: "paused" },
+  { label: "允许", value: "allowed" },
+  { label: "未记录", value: "unknown" },
 ];
 const hasFilters = computed(() => Boolean(searchText.value || statusFilter.value));
 const filteredTraces = computed(() => {

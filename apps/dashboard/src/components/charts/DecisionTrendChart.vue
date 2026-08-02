@@ -1,9 +1,9 @@
 <template>
   <figure class="trend-chart">
     <div v-if="points.length" class="trend-legend" aria-hidden="true">
-      <span class="series-allow"><i></i>已放行</span>
-      <span class="series-ask"><i></i>待审批</span>
-      <span class="series-deny"><i></i>已阻断</span>
+      <span class="series-allow"><i></i>允许</span>
+      <span class="series-ask"><i></i>需审批</span>
+      <span class="series-deny"><i></i>拒绝</span>
     </div>
     <svg
       v-if="points.length"
@@ -66,9 +66,9 @@
         <g :transform="`translate(${tooltipPosition.x} ${tooltipPosition.y})`">
           <rect class="trend-inspector__surface" width="140" height="76" rx="4" />
           <text class="trend-inspector__title" x="10" y="17">{{ activePoint.label }}</text>
-          <text class="series-allow" x="10" y="35">已放行 {{ activePoint.allow }}</text>
-          <text class="series-ask" x="10" y="52">待审批 {{ activePoint.ask }}</text>
-          <text class="series-deny" x="10" y="69">已阻断 {{ activePoint.deny }}</text>
+          <text class="series-allow" x="10" y="35">允许 {{ activePoint.allow }}</text>
+          <text class="series-ask" x="10" y="52">需审批 {{ activePoint.ask }}</text>
+          <text class="series-deny" x="10" y="69">拒绝 {{ activePoint.deny }}</text>
         </g>
       </g>
       <g class="x-labels">
@@ -79,7 +79,7 @@
     </svg>
     <p v-else class="chart-empty">暂无可绘制的时间序列</p>
     <figcaption v-if="points.length">
-      最新时间段：已放行 {{ latest.allow }}、待审批 {{ latest.ask }}、已阻断 {{ latest.deny }}
+      最新时间段：允许 {{ latest.allow }}、需审批 {{ latest.ask }}、拒绝 {{ latest.deny }}
     </figcaption>
   </figure>
 </template>
@@ -124,9 +124,9 @@ const xLabels = computed(() => {
 const chartSeries = computed(() => {
   const seriesItems = (
     [
-      { className: "series-allow", key: "allow", label: "已放行" },
-      { className: "series-ask", key: "ask", label: "待审批" },
-      { className: "series-deny", key: "deny", label: "已阻断" },
+      { className: "series-allow", key: "allow", label: "允许" },
+      { className: "series-ask", key: "ask", label: "需审批" },
+      { className: "series-deny", key: "deny", label: "拒绝" },
     ] as const
   ).map((series) => {
     const coordinates = props.points.map((point, index) => ({
@@ -171,11 +171,11 @@ const tooltipPosition = computed(() => ({
 }));
 const summary = computed(
   () =>
-    `决策趋势，共 ${props.points.length} 个时间段。最新：已放行 ${latest.value.allow}，待审批 ${latest.value.ask}，已阻断 ${latest.value.deny}`,
+    `决策趋势，共 ${props.points.length} 个时间段。最新：允许 ${latest.value.allow}，需审批 ${latest.value.ask}，拒绝 ${latest.value.deny}`,
 );
 const activeSummary = computed(() =>
   activePoint.value
-    ? `决策趋势，${activePoint.value.label}：已放行 ${activePoint.value.allow}，待审批 ${activePoint.value.ask}，已阻断 ${activePoint.value.deny}。使用左右方向键查看相邻时间段`
+    ? `决策趋势，${activePoint.value.label}：允许 ${activePoint.value.allow}，需审批 ${activePoint.value.ask}，拒绝 ${activePoint.value.deny}。使用左右方向键查看相邻时间段`
     : `${summary.value}。聚焦图表后可使用左右方向键查看各时间段`,
 );
 watch(

@@ -49,27 +49,28 @@ docs/
 ├── 04_apps/
 ├── 05_redteam/
 ├── 06_delivery/
-└── 07_auth/
+├── 07_auth/
+└── 08_api/
 ```
 
-文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。
+文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。`08_api/` 保存尚待跨端评审的 API 协作提案；提案冻结后必须同步回稳定接口契约和 schemas。
 
 ## 4. 目录职责
 
-| 目录                                  | 职责                                                                        |
-| ------------------------------------- | --------------------------------------------------------------------------- |
-| `apps/guard-api`                      | Guard API / Control Plane 后端，负责 HTTP、鉴权、审计、审批、指标和状态服务 |
-| `apps/dashboard`                      | Vue 3 监督端页面，只通过 Guard API 获取数据和提交审批                       |
-| `apps/cli`                            | `agentguardctl` 无头控制与验收命令                                          |
-| `packages/agentguard-core`            | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出        |
-| `packages/agentguard-langgraph-adapter` | LangGraph 风格工具执行的事件映射和执行前控制                              |
-| `packages/agentguard-openclaw-plugin` | OpenClaw runtime hook 插件                                                 |
-| `packages/agentguard-openclaw-bench-tools` | OpenClaw AttackBench 本地工具桥接                                       |
-| `agentguard_langgraph_bench/`         | AttackBench runner、样本、沙箱、演示 Agent 和外部 Agent 适配器               |
-| `schemas/`                            | JSON Schema 与 OpenAPI                                                      |
-| `tests/`                              | 单元测试、契约测试、集成测试                                                |
-| `scripts/`                            | 本地开发、插件安装验证和辅助命令                                            |
-| `docs/`                               | 架构、接口、适配器、部署、鉴权和评测文档                                    |
+| 目录                                       | 职责                                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------------- |
+| `apps/guard-api`                           | Guard API / Control Plane 后端，负责 HTTP、鉴权、审计、审批、指标和状态服务 |
+| `apps/dashboard`                           | Vue 3 监督端页面，只通过 Guard API 获取数据和提交审批                       |
+| `apps/cli`                                 | `agentguardctl` 无头控制与验收命令                                          |
+| `packages/agentguard-core`                 | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出        |
+| `packages/agentguard-langgraph-adapter`    | LangGraph 风格工具执行的事件映射和执行前控制                                |
+| `packages/agentguard-openclaw-plugin`      | OpenClaw runtime hook 插件                                                  |
+| `packages/agentguard-openclaw-bench-tools` | OpenClaw AttackBench 本地工具桥接                                           |
+| `agentguard_langgraph_bench/`              | AttackBench runner、样本、沙箱、演示 Agent 和外部 Agent 适配器              |
+| `schemas/`                                 | JSON Schema 与 OpenAPI                                                      |
+| `tests/`                                   | 单元测试、契约测试、集成测试                                                |
+| `scripts/`                                 | 本地开发、插件安装验证和辅助命令                                            |
+| `docs/`                                    | 架构、稳定接口、API 协作提案、适配器、部署、鉴权和评测文档                  |
 
 ## 5. 边界规则
 

@@ -21,12 +21,12 @@ function contrastRatio(foreground: string, background: string): number {
 test("decision trend keeps decision words in the legend only", async ({ page }) => {
   await page.goto("/overview");
 
-  await expect(page.locator(".trend-legend")).toContainText("已放行");
-  await expect(page.locator(".trend-legend")).toContainText("待审批");
-  await expect(page.locator(".trend-legend")).toContainText("已阻断");
+  await expect(page.locator(".trend-legend")).toContainText("允许");
+  await expect(page.locator(".trend-legend")).toContainText("需审批");
+  await expect(page.locator(".trend-legend")).toContainText("拒绝");
 
   const svgLabels = await page.locator(".trend-chart svg text").allTextContents();
-  expect(svgLabels.join(" ")).not.toMatch(/已放行|待审批|已阻断/);
+  expect(svgLabels.join(" ")).not.toMatch(/允许|需审批|拒绝/);
 });
 
 test("decision trend supports one-stop keyboard inspection", async ({ page }) => {
@@ -67,7 +67,11 @@ test("top page headers use primary titles without category subtitles", async ({ 
     await page.goto(path);
     const header = page.locator(".page-header").first();
     await expect(header.locator("h1")).toBeVisible();
-    await expect(header.locator("p")).toHaveCount(0);
+    if (path === "/evidence/trace_002") {
+      await expect(header.locator("p")).toContainText("完整证据");
+    } else {
+      await expect(header.locator("p")).toHaveCount(0);
+    }
     for (const subtitle of removedSubtitles) {
       await expect(header.getByText(subtitle, { exact: true })).toHaveCount(0);
     }

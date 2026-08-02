@@ -1,11 +1,11 @@
 <template>
   <header class="top-bar">
     <div class="top-bar__brand">
-      <RouterLink class="top-bar__brand-link" to="/overview" aria-label="AgentGuard 安全监督工作台">
+      <RouterLink class="top-bar__brand-link" to="/overview" aria-label="AgentGuard 攻击证据展示器">
         <span class="top-bar__mark" aria-hidden="true"> <i></i><i></i><i></i> </span>
         <span>
           <strong>AgentGuard</strong>
-          <small>安全监督工作台</small>
+          <small>攻击证据展示器</small>
         </span>
       </RouterLink>
     </div>

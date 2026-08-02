@@ -11,9 +11,10 @@ const dashboardDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 export function getDecisionLabel(decision: DecisionStatus): string {
-  if (decision === "deny") return "已阻断";
-  if (decision === "ask") return "待审批";
-  return "已放行";
+  if (decision === "deny") return "拒绝";
+  if (decision === "ask") return "需审批";
+  if (decision === "allow") return "允许";
+  return "未记录";
 }
 
 export function getDecisionTone(decision: DecisionStatus): StatusBadgeTone {
@@ -26,7 +27,8 @@ export function getRiskSeverityLabel(severity: RiskSeverity): string {
   if (severity === "critical") return "严重";
   if (severity === "high") return "高";
   if (severity === "medium") return "中";
-  return "低";
+  if (severity === "low") return "低";
+  return "未记录";
 }
 
 export function getRiskSeverityTone(severity: RiskSeverity): StatusBadgeTone {
@@ -36,13 +38,14 @@ export function getRiskSeverityTone(severity: RiskSeverity): StatusBadgeTone {
 }
 
 export function getTraceStatusLabel(status: TraceSummary["status"]): string {
-  if (status === "blocked") return "已阻断";
-  if (status === "paused") return "等待审批";
-  return "已放行";
+  if (status === "denied") return "拒绝";
+  if (status === "paused") return "需审批";
+  if (status === "allowed") return "允许";
+  return "未记录";
 }
 
 export function getTraceStatusTone(status: TraceSummary["status"]): StatusBadgeTone {
-  if (status === "blocked") return "protective";
+  if (status === "denied") return "protective";
   if (status === "paused") return "warning";
   return "neutral";
 }

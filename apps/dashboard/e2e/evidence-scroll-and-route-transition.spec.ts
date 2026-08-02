@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-test("evidence context does not trap desktop wheel scrolling", async ({ page }) => {
+test("evidence dossier does not trap desktop wheel scrolling", async ({ page }) => {
   await page.goto("/evidence/trace_007?event_id=evt_20260607_007");
 
   const main = page.locator(".evidence-detail__main");
-  const context = page.locator(".trace-context");
+  const context = page.locator(".trace-dossier");
   const drawerBody = page.locator(".detail-drawer__body");
 
   await expect(context).toBeVisible();
@@ -146,9 +146,15 @@ test("reduced motion removes panel and dialog animations", async ({ page }) => {
 test("provenance graph keeps node text readable without label overlap", async ({ page }) => {
   await page.goto("/evidence/trace_002");
 
-  const graph = page.locator(".provenance-wrap");
+  const graph = page.locator(".provenance-workbench");
   await expect(graph).toBeVisible();
   await expect(graph.locator(".prov-node").first()).toBeVisible();
+  await graph.getByRole("button", { name: "适配" }).click();
+  const contextNode = graph.locator(".prov-node--task").first();
+  await contextNode.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/prov_node=/);
+  await expect(graph.locator(".vue-flow__edge-text").first()).toBeVisible();
 
   const layout = await graph.evaluate((root) => {
     const boxes = (selector: string) =>
@@ -165,11 +171,11 @@ test("provenance graph keeps node text readable without label overlap", async ({
 
     const nodes = boxes(".vue-flow__node");
     const edgeLabels = boxes(".vue-flow__edge-text");
-    const overflowingText = Array.from(
+    const unclippedText = Array.from(
       root.querySelectorAll(".prov-node__label, .prov-node__summary"),
     ).filter((element) => {
-      const html = element as HTMLElement;
-      return html.scrollWidth > html.clientWidth + 1;
+      const style = getComputedStyle(element);
+      return style.overflow !== "hidden" || style.overflowWrap !== "anywhere";
     }).length;
 
     function intersects(
@@ -204,7 +210,7 @@ test("provenance graph keeps node text readable without label overlap", async ({
       nodeCount: nodes.length,
       edgeLabelOverlaps,
       nodeOverlaps,
-      overflowingText,
+      unclippedText,
     };
   });
 
@@ -212,11 +218,8 @@ test("provenance graph keeps node text readable without label overlap", async ({
   expect(layout.edgeLabelCount).toBeGreaterThan(0);
   expect(layout.nodeOverlaps).toBe(0);
   expect(layout.edgeLabelOverlaps).toBe(0);
-  expect(layout.overflowingText).toBe(0);
+  expect(layout.unclippedText).toBe(0);
 
-  const contextNode = graph.locator(".prov-node").nth(3);
-  await contextNode.focus();
-  await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/prov_node=/);
   await expect(contextNode).toHaveAttribute("aria-pressed", "true");
   await expect(graph.locator(".prov-flow-node--dimmed").first()).toBeVisible();

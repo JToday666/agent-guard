@@ -2,7 +2,7 @@ import type { DecisionStatus, DecisionTrendPoint, EvalMetrics } from "../../type
 
 interface MetricEvent {
   decision: DecisionStatus;
-  blocked: boolean;
+  blocked: boolean | null;
   occurredAt: string;
   latencyMs?: number | null;
 }
@@ -11,7 +11,9 @@ export function deriveMetrics(events: readonly MetricEvent[]): EvalMetrics {
   const latencyValues = events
     .map((event) => event.latencyMs)
     .filter((value): value is number => value != null);
-  const blockedCount = events.filter((event) => event.blocked || event.decision !== "allow").length;
+  const blockedCount = events.filter(
+    (event) => event.blocked === true || event.decision === "deny" || event.decision === "ask",
+  ).length;
   return {
     eventCount: events.length,
     allowCount: events.filter((event) => event.decision === "allow").length,
@@ -54,7 +56,7 @@ export function groupDecisionTrend(events: readonly MetricEvent[]): DecisionTren
         )} ${timeLabel}`
       : timeLabel;
     const point = buckets.get(bucketTime) ?? { label, allow: 0, ask: 0, deny: 0 };
-    point[event.decision] += 1;
+    if (event.decision !== "unknown") point[event.decision] += 1;
     buckets.set(bucketTime, point);
   }
   return [...buckets.entries()].sort(([left], [right]) => left - right).map(([, point]) => point);

@@ -26,13 +26,10 @@ export interface TraceConclusion {
 
 type TraceSummaryEvent = Pick<
   AuditEventRow,
-  "approvalId" | "caseId" | "decision" | "occurredAt" | "reason"
+  "approvalId" | "caseId" | "decision" | "occurredAt" | "raw" | "reason"
 >;
 
-type TraceConclusionEvent = Pick<
-  AuditEventRow,
-  "blocked" | "decision" | "reason" | "riskScore" | "ruleHits"
->;
+type TraceConclusionEvent = Pick<AuditEventRow, "decision" | "reason" | "riskScore" | "ruleHits">;
 
 export function buildTraceSummary(
   id: string,
@@ -41,14 +38,42 @@ export function buildTraceSummary(
   if (!events.length) return undefined;
   const last = events.at(-1)!;
   const isDenied = events.some((e) => e.decision === "deny");
-  const isPaused = !isDenied && events.some((e) => e.decision === "ask");
+  const hasAsk = events.some((e) => e.decision === "ask");
+  const approvalStatuses = events.flatMap((event) => {
+    const raw =
+      event.raw && typeof event.raw === "object" ? (event.raw as Record<string, unknown>) : {};
+    const evidence =
+      raw.evidence && typeof raw.evidence === "object"
+        ? (raw.evidence as Record<string, unknown>)
+        : {};
+    const approval =
+      evidence.approval && typeof evidence.approval === "object"
+        ? (evidence.approval as Record<string, unknown>)
+        : {};
+    return typeof approval.status === "string" ? [approval.status] : [];
+  });
+  const approvalDenied = approvalStatuses.includes("denied");
+  const approvalAllowed = approvalStatuses.includes("allowed");
+  const isPaused = !isDenied && !approvalDenied && hasAsk && !approvalAllowed;
+  const isAllowed =
+    !isDenied &&
+    !approvalDenied &&
+    !isPaused &&
+    (approvalAllowed || events.some((e) => e.decision === "allow"));
   const approvalId = [...events].reverse().find((event) => event.approvalId)?.approvalId;
   return {
     id,
     lastEventAt: last.occurredAt,
     caseId: last.caseId ?? "未提供",
     title: last.reason,
-    status: isDenied ? "blocked" : isPaused ? "paused" : "allowed",
+    status:
+      isDenied || approvalDenied
+        ? "denied"
+        : isPaused
+          ? "paused"
+          : isAllowed
+            ? "allowed"
+            : "unknown",
     approvalId,
   };
 }
@@ -57,19 +82,28 @@ export function buildTraceConclusion(events: TraceConclusionEvent[]): TraceConcl
   if (!events.length) return undefined;
   const hasDeny = events.some((event) => event.decision === "deny");
   const hasAsk = !hasDeny && events.some((event) => event.decision === "ask");
-  const outcomeDecision = hasDeny ? "deny" : hasAsk ? "ask" : "allow";
+  const hasAllow = !hasDeny && !hasAsk && events.some((event) => event.decision === "allow");
+  const outcomeDecision = hasDeny ? "deny" : hasAsk ? "ask" : hasAllow ? "allow" : "unknown";
   const outcomeEvent = events
     .filter((event) => event.decision === outcomeDecision)
-    .sort((left, right) => right.riskScore - left.riskScore)[0]!;
+    .sort((left, right) => (right.riskScore ?? -1) - (left.riskScore ?? -1))[0]!;
 
   return {
-    title: hasDeny ? "已阻断高风险工具调用" : hasAsk ? "等待人工审批" : "已放行",
+    title: hasDeny
+      ? "策略拒绝"
+      : hasAsk
+        ? "需要人工审批"
+        : hasAllow
+          ? "策略允许"
+          : "策略决定未记录",
     reason: outcomeEvent.reason,
     result: hasDeny
-      ? "风险动作已被阻断，目标资源未继续执行"
+      ? "已记录拒绝决定；是否实际执行及副作用数量仍需运行时回执确认"
       : hasAsk
-        ? "动作暂停，等待人工审批后单次放行或拒绝并阻断"
-        : "动作已放行，未触发阻断或审批",
+        ? "已记录需审批决定；审批结果与实际执行状态需分别确认"
+        : hasAllow
+          ? "已记录允许决定；实际执行状态需以运行时回执为准"
+          : "关键策略字段缺失，不能推断运行时结果",
     ruleHits: outcomeEvent.ruleHits,
   };
 }

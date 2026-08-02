@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
-import { dashboardEnv } from "../config/dashboard-env";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
 import { dashboardDataSource } from "../data/sources/index";
 import { deriveMetrics, groupDecisionTrend } from "../data/dashboard/metrics";
@@ -723,7 +722,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     traces,
     ruleDistribution,
     activeScope,
-    dataSourceMode: dashboardEnv.dataSource,
     refresh,
     setActiveScope,
     loadTraceDetail,

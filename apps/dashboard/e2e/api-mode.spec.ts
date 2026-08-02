@@ -21,6 +21,12 @@ const eventDto = {
   reason: "发送目标不在当前任务允许范围内，需要人工确认",
   links: { event_id: "evt_api_001" },
   latency_ms: 4,
+  integrity: {
+    sequence: 1,
+    prev_hash: null,
+    event_hash: "hash_api",
+    canonicalization: "json:v1",
+  },
   metadata: {
     action_name: "send_email",
     channel: "email",
@@ -48,7 +54,9 @@ async function installApiRoutes(
     authenticated?: boolean;
     events?: Array<typeof eventDto>;
     failConfigAudit?: boolean;
+    provenance?: Record<string, unknown>;
     provenanceFailuresBeforeSuccess?: number;
+    traceStatus?: number;
   } = {},
 ) {
   const authenticated = options.authenticated ?? true;
@@ -150,10 +158,16 @@ async function installApiRoutes(
       });
     }
     if (path === "/traces/trace_api_001") {
+      if (options.traceStatus) {
+        return route.fulfill({
+          status: options.traceStatus,
+          json: { error: { code: "TRACE_NOT_FOUND" } },
+        });
+      }
       return route.fulfill({
         json: {
           trace_id: "trace_api_001",
-          audit_events: [eventDto],
+          audit_events: options.events ?? [eventDto],
           approvals: [],
           metrics: metricsDto,
         },
@@ -167,6 +181,9 @@ async function installApiRoutes(
           contentType: "text/plain",
           body: "溯源关系接口暂不可用",
         });
+      }
+      if (options.provenance) {
+        return route.fulfill({ json: options.provenance });
       }
       return route.fulfill({
         json: {
@@ -242,7 +259,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
 
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
-  const deniedMetric = page.locator(".metric-strip__item").filter({ hasText: "已阻断" });
+  const deniedMetric = page.locator(".metric-strip__item").filter({ hasText: "拒绝" });
   await expect(deniedMetric.locator("dd")).toHaveText("0");
   await expect(deniedMetric.getByRole("link")).toHaveAttribute(
     "href",
@@ -250,13 +267,16 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   );
 
   await page.goto("/evidence/trace_api_001");
-  await expect(page.locator(".trace-conclusion")).toContainText("等待人工审批");
-  await expect(page.locator(".trace-conclusion")).not.toContainText(/P\d{3}/);
-  await expect(page.locator(".prov-node--decision")).toContainText("待审批");
+  await expect(page.locator(".evidence-hero")).toContainText("策略决定：需审批");
+  await expect(page.locator(".evidence-hero")).not.toContainText(/P\d{3}/);
+  await expect(page.locator(".evidence-facts")).toContainText("当前返回事件均带完整性元数据");
+  await expect(page.locator(".prov-node--decision")).toContainText("需审批");
   await expect(page.locator(".prov-node--decision")).toContainText("风险 64");
+  await page.locator(".prov-node--decision").click();
   await expect(page.locator(".provenance-flow").getByText("判定", { exact: true })).toBeVisible();
   await page.locator(".prov-node--audit").click();
   await expect(page).toHaveURL(/event_id=audit_api_001/);
+  await page.getByRole("button", { name: "查看关联原始审计" }).click();
   await expect(page.getByRole("dialog")).toContainText("send_email");
 
   await page.goto("/system");
@@ -264,6 +284,71 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   await expect(page.locator(".system-page")).toContainText("配置审计接口暂不可用");
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
   expect(runtimeErrors).toEqual([]);
+});
+
+test("API mode never falls back to fixture evidence after a trace failure", async ({ page }) => {
+  await installApiRoutes(page, { events: [], traceStatus: 404 });
+  await page.goto("/evidence/trace_api_001");
+
+  await expect(page.getByRole("alert")).toContainText("请求失败 (404)");
+  await expect(page.locator("body")).not.toContainText("trace_001");
+  await expect(page.locator("body")).not.toContainText("/private/token.txt");
+  await expect(page.locator("body")).not.toContainText("总结邮件内容");
+  await expect(page.locator(".evidence-hero")).toHaveCount(0);
+});
+
+test("provenance workbench controls a graph larger than 24 nodes", async ({ page }) => {
+  const nodes = Array.from({ length: 26 }, (_, index) => ({
+    node_id: `node:${index}`,
+    trace_id: "trace_api_001",
+    kind: ["task", "source", "context", "model_intent", "action", "resource", "rule", "policy"][
+      index % 8
+    ],
+    ref_id: `ref_${index}`,
+    label: `证据节点 ${index}`,
+    timestamp: `2026-06-28T08:${String(index).padStart(2, "0")}:00Z`,
+    metadata: {
+      critical: index < 8,
+      phase: ["input_trust", "context_intent", "tool_policy", "outcome_audit"][index % 4],
+      summary: `第 ${index} 个证据分支`,
+    },
+  }));
+  const edges = Array.from({ length: 25 }, (_, index) => ({
+    edge_id: `edge:${index}`,
+    trace_id: "trace_api_001",
+    source_node_id: `node:${index}`,
+    target_node_id: `node:${index + 1}`,
+    relation: index % 2 ? "derived_from" : "evaluated_to",
+    timestamp: "",
+    metadata: {
+      relation_type: index % 2 ? "causal" : "detection",
+    },
+  }));
+  await installApiRoutes(page, {
+    provenance: {
+      edges,
+      nodes,
+      trace_id: "trace_api_001",
+    },
+  });
+  await page.goto("/evidence/trace_api_001");
+
+  const graph = page.locator(".provenance-workbench");
+  await expect(graph).toContainText("已收拢 18 个旁支或阶段节点");
+  await expect(graph.locator(".vue-flow__minimap")).toBeVisible();
+  await graph.getByRole("button", { name: "展开旁支" }).click();
+  await expect(graph.locator(".vue-flow__node")).toHaveCount(26);
+
+  await graph.getByRole("button", { name: "全屏" }).click();
+  await expect(graph).toHaveClass(/provenance-workbench--fullscreen/);
+  await page.keyboard.press("Escape");
+  await expect(graph).not.toHaveClass(/provenance-workbench--fullscreen/);
+
+  const search = graph.getByRole("searchbox", { name: "搜索溯源节点" });
+  await search.fill("证据节点 25");
+  await search.press("Enter");
+  await expect(page).toHaveURL(/prov_node=node:25/);
+  await expect(graph.locator(".prov-node--selected")).toContainText("证据节点 25");
 });
 
 test("API mode retries provenance independently after a canonical endpoint failure", async ({

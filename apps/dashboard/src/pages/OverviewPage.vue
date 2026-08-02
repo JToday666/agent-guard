@@ -63,11 +63,11 @@
               <span class="triage-queue__risk">
                 <i
                   :style="{
-                    transform: `scaleX(${Math.min(1, Math.max(0, item.riskScore / 100))})`,
+                    transform: `scaleX(${Math.min(1, Math.max(0, (item.riskScore ?? 0) / 100))})`,
                   }"
                 ></i>
               </span>
-              <b>{{ item.riskScore }}</b>
+              <b>{{ item.riskScore ?? "--" }}</b>
             </RouterLink>
           </div>
           <EmptyState
@@ -106,7 +106,7 @@
           </header>
           <dl>
             <div>
-              <dt>阻断率</dt>
+              <dt>策略介入率</dt>
               <dd>{{ formatPercent(store.metrics.blockRate) }}</dd>
             </div>
             <div>
@@ -213,7 +213,7 @@ const triageItems = computed(() => {
 const trendSummary = computed(() => {
   const latest = store.decisionTrend.at(-1);
   return latest
-    ? `最新时间段已放行 ${latest.allow}，待审批 ${latest.ask}，已阻断 ${latest.deny}`
+    ? `最新时间段允许 ${latest.allow}，需审批 ${latest.ask}，拒绝 ${latest.deny}`
     : "当前没有可绘制的决策趋势";
 });
 
@@ -228,7 +228,7 @@ const metricItems = computed(() => [
     detail: formatPercent(
       store.metrics.eventCount ? store.metrics.denyCount / store.metrics.eventCount : null,
     ),
-    label: "已阻断",
+    label: "拒绝",
     route: "/investigations?decision=deny",
     tone: "protective" as const,
     value: countFormatter.format(store.metrics.denyCount),
@@ -242,7 +242,7 @@ const metricItems = computed(() => [
   },
   {
     detail: "策略允许动作继续",
-    label: "已放行",
+    label: "允许",
     route: "/investigations?decision=allow",
     value: countFormatter.format(store.metrics.allowCount),
   },

@@ -2,8 +2,8 @@
   <div class="event-evidence">
     <section class="event-evidence__risk">
       <div class="risk-score" :class="`risk-score--${event.severity}`">
-        <span>风险分数</span><strong>{{ event.riskScore }}</strong
-        ><small>/ 100</small>
+        <span>风险分数</span><strong>{{ event.riskScore ?? "--" }}</strong
+        ><small>{{ event.riskScore === null ? "未记录" : "/ 100" }}</small>
       </div>
       <dl>
         <div>
@@ -20,12 +20,78 @@
           <dd>{{ getRiskSeverityLabel(event.severity) }}</dd>
         </div>
         <div>
-          <dt>阻断</dt>
-          <dd>{{ event.blocked ? "已阻断" : "未阻断" }}</dd>
+          <dt>旧版阻断标记</dt>
+          <dd>
+            {{
+              event.blocked === null
+                ? "未记录"
+                : event.blocked
+                  ? "true（已记录）"
+                  : "false（已记录）"
+            }}
+          </dd>
         </div>
         <div>
           <dt>运行时</dt>
           <dd>{{ event.runtime }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section v-if="normalized" class="event-evidence__section">
+      <h3>运行时证据</h3>
+      <dl class="evidence-copy">
+        <div>
+          <dt>记录类型</dt>
+          <dd>{{ recordTypeLabel }}</dd>
+        </div>
+        <div>
+          <dt>干预方式</dt>
+          <dd>{{ getInterventionLabel(normalized.intervention) }}</dd>
+        </div>
+        <div>
+          <dt>执行状态</dt>
+          <dd>{{ getExecutionStatusLabel(normalized.execution.status) }}</dd>
+        </div>
+        <div>
+          <dt>副作用</dt>
+          <dd>{{ getSideEffectLabel(normalized.sideEffects) }}</dd>
+        </div>
+        <div>
+          <dt>结果处置</dt>
+          <dd>{{ getResultDispositionLabel(normalized.resultDisposition) }}</dd>
+        </div>
+      </dl>
+      <p class="event-evidence__caveat">
+        策略决定、旧版阻断标记、实际执行与副作用证据分别展示，缺失项不作安全推断。
+      </p>
+    </section>
+
+    <section v-if="normalized" class="event-evidence__section">
+      <h3>来源、参数与事件时策略</h3>
+      <dl class="evidence-copy">
+        <div>
+          <dt>来源</dt>
+          <dd>
+            {{ normalized.source.label ?? normalized.source.type ?? "未记录" }}
+            <small>信任等级：{{ normalized.source.trustLevel ?? "未记录" }}</small>
+          </dd>
+        </div>
+        <div>
+          <dt>工具参数</dt>
+          <dd>
+            <code>{{ formattedArguments }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>策略版本</dt>
+          <dd>{{ policyLabel }}</dd>
+        </div>
+        <div>
+          <dt>规范摘要</dt>
+          <dd>
+            <code>{{ normalized.policy.digest ?? "未记录" }}</code>
+          </dd>
         </div>
       </dl>
     </section>
@@ -67,7 +133,7 @@
       <h3>命中规则</h3>
       <div class="rule-list">
         <span v-for="rule in event.ruleHits" :key="rule">{{ ruleLabel(rule) }}</span
-        ><span v-if="!event.ruleHits.length">未命中阻断规则</span>
+        ><span v-if="!event.ruleHits.length">未记录规则命中</span>
       </div>
     </section>
 
@@ -96,7 +162,17 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import type { AuditEventRow } from "../../types/dashboard";
+import type {
+  AuditEventRow,
+  AuditRecordType,
+  NormalizedAuditEvidence,
+} from "../../types/dashboard";
+import {
+  getExecutionStatusLabel,
+  getInterventionLabel,
+  getResultDispositionLabel,
+  getSideEffectLabel,
+} from "../../data/evidence/trace-evidence";
 import { redactSensitiveData } from "../../utils/data-redaction";
 import {
   getDecisionLabel,
@@ -106,13 +182,39 @@ import {
 import StatusBadge from "../common/StatusBadge.vue";
 import StructuredDataView from "../common/StructuredDataView.vue";
 import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
+import { serializeStructuredData } from "../../utils/structured-data";
 
 defineOptions({ name: "EventEvidence" });
-const props = defineProps<{ event: AuditEventRow }>();
+const props = defineProps<{ event: AuditEventRow; normalized?: NormalizedAuditEvidence }>();
 const copyStatus = ref("");
 const safeRawEvent = computed(() =>
   prepareEvidenceDataForDisplay(redactSensitiveData(props.event.raw ?? props.event)),
 );
+const recordTypeLabel = computed(() => {
+  const labels: Record<AuditRecordType, string> = {
+    config_audit: "配置审计",
+    policy_evaluation: "策略判定",
+    runtime_observation: "运行时观察",
+    runtime_outcome: "运行时结果",
+    unknown: "未记录",
+  };
+  return labels[props.normalized?.recordType ?? "unknown"];
+});
+const formattedArguments = computed(() =>
+  props.normalized?.toolArguments
+    ? serializeStructuredData(props.normalized.toolArguments)
+    : "未记录",
+);
+const policyLabel = computed(() => {
+  const policy = props.normalized?.policy;
+  if (!policy) return "未记录";
+  const parts = [
+    policy.bundleId,
+    policy.version,
+    policy.revision === null ? null : `修订 ${policy.revision}`,
+  ].filter((value): value is string => Boolean(value));
+  return parts.join(" / ") || "未记录";
+});
 
 async function copy(value: string, label: string): Promise<void> {
   try {
@@ -219,7 +321,23 @@ async function copy(value: string, label: string): Promise<void> {
 }
 .evidence-copy dd {
   color: var(--color-text);
+  display: grid;
+  gap: var(--space-1);
   line-height: 1.65;
+}
+
+.evidence-copy dd small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+}
+
+.event-evidence__caveat {
+  background: var(--color-warning-soft);
+  border-left: 2px solid var(--color-warning);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-11);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
 }
 
 .resource-list {
