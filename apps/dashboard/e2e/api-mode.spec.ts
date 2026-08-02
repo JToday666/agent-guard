@@ -16,7 +16,10 @@ const eventDto = {
   risk_score: 64,
   severity: "medium",
   blocked: true,
+  resource_targets: ["exfil@example.invalid"],
+  rule_hits: ["P005_external_send", "P004_task_mismatch"],
   reason: "发送目标不在当前任务允许范围内，需要人工确认",
+  links: { event_id: "evt_api_001" },
   latency_ms: 4,
   metadata: {
     action_name: "send_email",
@@ -40,9 +43,16 @@ const metricsDto = {
 
 async function installApiRoutes(
   page: Page,
-  options: { authenticated?: boolean; failConfigAudit?: boolean } = {},
+  options: {
+    approvals?: Record<string, unknown>[];
+    authenticated?: boolean;
+    events?: Array<typeof eventDto>;
+    failConfigAudit?: boolean;
+    provenanceFailuresBeforeSuccess?: number;
+  } = {},
 ) {
   const authenticated = options.authenticated ?? true;
+  let provenanceFailuresRemaining = options.provenanceFailuresBeforeSuccess ?? 0;
 
   await page.route("**/api/health?check_db=true", (route) =>
     route.fulfill({ json: { status: "ok", database: "ok" } }),
@@ -75,9 +85,13 @@ async function installApiRoutes(
       });
     }
 
-    if (path === "/audit/events") return route.fulfill({ json: [eventDto] });
+    if (path === "/audit/events") {
+      return route.fulfill({ json: options.events ?? [eventDto] });
+    }
     if (path === "/metrics/eval") return route.fulfill({ json: metricsDto });
-    if (path === "/approvals/pending") return route.fulfill({ json: [] });
+    if (path === "/approvals/pending") {
+      return route.fulfill({ json: options.approvals ?? [] });
+    }
     if (path === "/policies/current") {
       return route.fulfill({
         json: { bundle_id: "default", version: "api-smoke" },
@@ -146,41 +160,62 @@ async function installApiRoutes(
       });
     }
     if (path === "/traces/trace_api_001/provenance") {
+      if (provenanceFailuresRemaining > 0) {
+        provenanceFailuresRemaining -= 1;
+        return route.fulfill({
+          status: 503,
+          contentType: "text/plain",
+          body: "溯源关系接口暂不可用",
+        });
+      }
       return route.fulfill({
         json: {
           trace_id: "trace_api_001",
           nodes: [
             {
-              node_id: "trace_api_001:task",
-              trace_id: "trace_api_001",
-              kind: "audit",
-              ref_id: "trace_api_001",
-              label: "整理客户反馈摘要",
-              timestamp: "2026-06-28T08:00:00Z",
-              metadata: { lane: "任务与资源", source: "api" },
-            },
-            {
-              node_id: "trace_api_001:event",
+              node_id: "event:evt_api_001",
               trace_id: "trace_api_001",
               kind: "event",
-              ref_id: "audit_api_001",
-              label: "send_email / ex***@example.invalid",
+              ref_id: "evt_api_001",
+              label: "tool_call_proposed",
               timestamp: "2026-06-28T08:00:00Z",
-              metadata: {
-                lane: "Agent 行为",
-                decision: "ask",
-                riskScore: "64",
-                source: "api",
-              },
+              metadata: { runtime: "langgraph" },
+            },
+            {
+              node_id: "decision:decision_api_001",
+              trace_id: "trace_api_001",
+              kind: "decision",
+              ref_id: "decision_api_001",
+              label: "ask",
+              timestamp: "",
+              metadata: { severity: "medium", risk_score: 64 },
+            },
+            {
+              node_id: "audit:audit_api_001",
+              trace_id: "trace_api_001",
+              kind: "audit",
+              ref_id: "audit_api_001",
+              label: "tool_call_proposed",
+              timestamp: "2026-06-28T08:00:00Z",
+              metadata: { runtime: "langgraph", stage: "before_tool_call" },
             },
           ],
           edges: [
             {
-              edge_id: "edge_api_001",
+              edge_id: "edge:evt_api_001:decision_api_001",
               trace_id: "trace_api_001",
-              source_node_id: "trace_api_001:task",
-              target_node_id: "trace_api_001:event",
-              relation: "触发行为",
+              source_node_id: "event:evt_api_001",
+              target_node_id: "decision:decision_api_001",
+              relation: "evaluated_to",
+              timestamp: "",
+              metadata: {},
+            },
+            {
+              edge_id: "edge:decision_api_001:audit_api_001",
+              trace_id: "trace_api_001",
+              source_node_id: "decision:decision_api_001",
+              target_node_id: "audit:audit_api_001",
+              relation: "recorded_as",
               timestamp: "2026-06-28T08:00:00Z",
               metadata: {},
             },
@@ -207,16 +242,118 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
 
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
+  const deniedMetric = page.locator(".metric-strip__item").filter({ hasText: "已阻断" });
+  await expect(deniedMetric.locator("dd")).toHaveText("0");
+  await expect(deniedMetric.getByRole("link")).toHaveAttribute(
+    "href",
+    "/investigations?decision=deny",
+  );
 
   await page.goto("/evidence/trace_api_001");
   await expect(page.locator(".trace-conclusion")).toContainText("等待人工审批");
   await expect(page.locator(".trace-conclusion")).not.toContainText(/P\d{3}/);
+  await expect(page.locator(".prov-node--decision")).toContainText("待审批");
+  await expect(page.locator(".prov-node--decision")).toContainText("风险 64");
+  await expect(page.locator(".provenance-flow").getByText("判定", { exact: true })).toBeVisible();
+  await page.locator(".prov-node--audit").click();
+  await expect(page).toHaveURL(/event_id=audit_api_001/);
+  await expect(page.getByRole("dialog")).toContainText("send_email");
 
   await page.goto("/system");
   await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
   await expect(page.locator(".system-page")).toContainText("配置审计接口暂不可用");
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
   expect(runtimeErrors).toEqual([]);
+});
+
+test("API mode retries provenance independently after a canonical endpoint failure", async ({
+  page,
+}) => {
+  await installApiRoutes(page, { provenanceFailuresBeforeSuccess: 1 });
+  await page.goto("/evidence/trace_api_001");
+
+  await expect(page.getByText("溯源关系接口暂不可用")).toBeVisible();
+  await page.getByRole("button", { name: "重新加载溯源关系" }).click();
+
+  await expect(page.locator(".provenance-flow")).toBeVisible();
+  await expect(page.getByText("溯源关系接口暂不可用")).toHaveCount(0);
+});
+
+test("API mode disables an approval when its expiry passes without another poll", async ({
+  page,
+}) => {
+  const now = new Date("2026-06-28T08:00:00Z");
+  await page.clock.install({ time: now });
+  await installApiRoutes(page, {
+    approvals: [
+      {
+        approval_id: "approval_expiring",
+        trace_id: "trace_api_001",
+        tool_call_id: "call_expiring",
+        requesting_principal_id: "agent_api",
+        runtime: "langgraph",
+        agent_id: "agent_api",
+        status: "pending",
+        decision_options: ["allow_once", "deny"],
+        decision: null,
+        tool: "send_email",
+        resource: "external@example.invalid",
+        reason: "外部发送需要人工确认",
+        risk_score: 64,
+        severity: "medium",
+        created_at: new Date(now.getTime() - 60_000).toISOString(),
+        expires_at: new Date(now.getTime() + 60_000).toISOString(),
+        resolved_at: null,
+        approval_nonce: "nonce_expiring",
+      },
+    ],
+  });
+  await page.goto("/approvals");
+
+  const denyButton = page.getByRole("button", { name: "拒绝并阻断" });
+  await expect(denyButton).toBeEnabled();
+  await expect(page.locator(".approval-queue time")).toContainText("分钟后过期");
+  await page.clock.fastForward(61_000);
+  await expect(page.getByText("审批已过期，不能继续处理")).toBeVisible();
+  await expect(page.locator(".approval-queue time")).toHaveText("已过期");
+  await expect(denyButton).toBeDisabled();
+});
+
+test("API mode queues new events while the investigation list is scrolled", async ({ page }) => {
+  const events = Array.from({ length: 30 }, (_, index) => ({
+    ...eventDto,
+    audit_id: `audit_api_${String(index + 1).padStart(3, "0")}`,
+    timestamp: new Date(Date.parse(eventDto.timestamp) - index * 60_000).toISOString(),
+  }));
+  await installApiRoutes(page, { events });
+  await page.goto("/investigations");
+  await expect(page.locator(".event-table tbody tr")).toHaveCount(20);
+
+  const mainPanel = page.locator(".investigations-page__main");
+  await mainPanel.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => mainPanel.evaluate((element) => element.scrollTop)).toBeGreaterThan(40);
+
+  events.push({
+    ...eventDto,
+    audit_id: "audit_api_new",
+    timestamp: "2026-06-28T09:00:00Z",
+    summary: "Agent requested a newly arrived action",
+    resource_targets: ["new-target.example.invalid"],
+    metadata: {
+      ...eventDto.metadata,
+      action_name: "new_event_tool",
+      recipient: "new-target.example.invalid",
+    },
+  });
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+  await expect(page.getByText("有 1 条新事件")).toBeVisible();
+  await expect(page.locator(".event-table tbody")).not.toContainText("new_event_tool");
+  await page.getByRole("button", { name: "查看新事件" }).click();
+  await expect(page.locator(".event-table tbody tr").first()).toContainText("new_event_tool");
+  await expect.poll(() => mainPanel.evaluate((element) => element.scrollTop)).toBe(0);
 });
 
 test("API mode shows a session error instead of a blank dashboard", async ({ page }) => {

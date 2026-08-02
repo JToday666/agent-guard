@@ -1,52 +1,42 @@
 <template>
-  <div class="conf-matrix" :aria-label="summary" role="img">
-    <div class="conf-matrix__header">
-      <span></span><span class="axis-label">预测：放行</span
-      ><span class="axis-label">预测：阻断</span>
-    </div>
-    <div class="conf-matrix__row">
-      <span class="axis-label">实际：恶意</span>
-      <div
-        class="conf-cell conf-cell--fn"
-        :aria-label="`漏报 FN，${fn}`"
-        :style="{ '--heat': heat(fn) }"
-        tabindex="0"
-      >
-        <strong>{{ fn }}</strong
-        ><small>漏报 FN</small>
-      </div>
-      <div
-        class="conf-cell conf-cell--tp"
-        :aria-label="`正确阻断 TP，${tp}`"
-        :style="{ '--heat': heat(tp) }"
-        tabindex="0"
-      >
-        <strong>{{ tp }}</strong
-        ><small>正确阻断 TP</small>
-      </div>
-    </div>
-    <div class="conf-matrix__row">
-      <span class="axis-label">实际：正常</span>
-      <div
-        class="conf-cell conf-cell--tn"
-        :aria-label="`正确放行 TN，${tn}`"
-        :style="{ '--heat': heat(tn) }"
-        tabindex="0"
-      >
-        <strong>{{ tn }}</strong
-        ><small>正确放行 TN</small>
-      </div>
-      <div
-        class="conf-cell conf-cell--fp"
-        :aria-label="`误报 FP，${fp}`"
-        :style="{ '--heat': heat(fp) }"
-        tabindex="0"
-      >
-        <strong>{{ fp }}</strong
-        ><small>误报 FP</small>
-      </div>
-    </div>
-  </div>
+  <table class="conf-matrix">
+    <caption class="sr-only">
+      {{
+        summary
+      }}
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col"><span class="sr-only">实际情况</span></th>
+        <th class="axis-label" scope="col">预测：放行</th>
+        <th class="axis-label" scope="col">预测：阻断</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th class="axis-label" scope="row">实际：恶意</th>
+        <td class="conf-cell conf-cell--fn" :style="{ '--heat': heat(fn) }">
+          <strong>{{ fn }}</strong
+          ><small>漏报 FN</small>
+        </td>
+        <td class="conf-cell conf-cell--tp" :style="{ '--heat': heat(tp) }">
+          <strong>{{ tp }}</strong
+          ><small>正确阻断 TP</small>
+        </td>
+      </tr>
+      <tr>
+        <th class="axis-label" scope="row">实际：正常</th>
+        <td class="conf-cell conf-cell--tn" :style="{ '--heat': heat(tn) }">
+          <strong>{{ tn }}</strong
+          ><small>正确放行 TN</small>
+        </td>
+        <td class="conf-cell conf-cell--fp" :style="{ '--heat': heat(fp) }">
+          <strong>{{ fp }}</strong
+          ><small>误报 FP</small>
+        </td>
+      </tr>
+    </tbody>
+  </table>
 </template>
 
 <script setup lang="ts">
@@ -65,48 +55,38 @@ function heat(value: number): string {
 
 <style scoped lang="scss">
 .conf-matrix {
-  display: grid;
+  border-collapse: separate;
+  border-spacing: 2px;
   font-size: var(--font-size-13);
-  gap: 2px;
+  table-layout: fixed;
+  width: 100%;
 }
-.conf-matrix__header {
-  display: grid;
-  gap: 2px;
-  grid-template-columns: 6rem 1fr 1fr;
-}
-.conf-matrix__row {
-  display: grid;
-  gap: 2px;
-  grid-template-columns: 6rem 1fr 1fr;
+.conf-matrix th:first-child {
+  width: 6rem;
 }
 .axis-label {
-  align-items: center;
   color: var(--color-text-subtle);
-  display: flex;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
-  justify-content: center;
   padding: var(--space-2);
   text-align: center;
+  vertical-align: middle;
 }
 .conf-cell {
-  display: grid;
-  gap: var(--space-1);
+  height: 4.5rem;
   min-height: 4.5rem;
   padding: var(--space-3);
-  place-items: center;
   text-align: center;
+  vertical-align: middle;
 }
 .conf-cell strong {
+  display: block;
   font-size: var(--font-size-24);
   font-weight: var(--font-weight-bold);
   line-height: 1;
 }
-.conf-cell:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: -3px;
-}
 .conf-cell small {
+  display: block;
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
 }

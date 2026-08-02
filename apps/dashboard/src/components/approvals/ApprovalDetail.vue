@@ -5,7 +5,7 @@
         <p>审批请求</p>
         <h2>{{ approval.tool }}</h2>
       </div>
-      <div class="risk-score">
+      <div class="risk-score" :class="`risk-score--${approval.severity}`">
         <strong>{{ approval.riskScore }}</strong
         ><small>/ 100</small>
         <span class="risk-score__label">{{ getRiskSeverityLabel(approval.severity) }}</span>
@@ -13,28 +13,28 @@
     </header>
 
     <div class="approval-detail__body">
-      <section class="impact-callout">
-        <strong>放行影响</strong>
-        <p>{{ approval.consequence }}</p>
+      <section class="approval-context" aria-label="审批上下文">
+        <div>
+          <h3>用户任务</h3>
+          <p>{{ approval.userTask || "未提供" }}</p>
+        </div>
+        <div>
+          <h3>Agent 请求执行的动作</h3>
+          <p>{{ approval.agentAction || "未提供" }}</p>
+        </div>
       </section>
 
       <dl class="evidence-grid">
         <div>
+          <dt>工具</dt>
+          <dd>
+            <code>{{ approval.tool }}</code>
+          </dd>
+        </div>
+        <div>
           <dt>目标资源</dt>
           <dd>
             <code>{{ approval.resource }}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>关联事件</dt>
-          <dd>
-            <code>{{ evidenceFields.eventId }}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>证据链</dt>
-          <dd>
-            <code>{{ evidenceFields.traceId }}</code>
           </dd>
         </div>
         <div>
@@ -65,17 +65,21 @@
 
       <section class="approval-evidence">
         <div>
+          <h3>命中规则</h3>
+          <div v-if="approval.ruleHits.length" class="approval-rule-list">
+            <span v-for="rule in approval.ruleHits" :key="rule">{{ ruleLabel(rule) }}</span>
+          </div>
+          <p v-else>未命中阻断规则</p>
+        </div>
+        <div>
           <h3>判定原因</h3>
           <p>{{ approval.reason }}</p>
         </div>
-        <div>
-          <h3>用户任务</h3>
-          <p>{{ approval.userTask || "未提供" }}</p>
-        </div>
-        <div>
-          <h3>Agent 行为</h3>
-          <p>{{ approval.agentAction || "未提供" }}</p>
-        </div>
+      </section>
+
+      <section class="impact-callout">
+        <strong>放行影响</strong>
+        <p>{{ approval.consequence }}</p>
       </section>
 
       <nav class="evidence-links" aria-label="关联证据">
@@ -84,6 +88,10 @@
           定位关联事件
         </RouterLink>
         <span v-else class="evidence-links__unavailable">未提供事件定位信息</span>
+        <span class="evidence-links__ids">
+          事件 <code>{{ evidenceFields.eventId }}</code> · 证据链
+          <code>{{ evidenceFields.traceId }}</code>
+        </span>
       </nav>
     </div>
 
@@ -154,6 +162,7 @@ import type { RouteLocationRaw } from "vue-router";
 import { formatApprovalEvidenceFields } from "../../data/approvals/evidence";
 import type { ApprovalRequest } from "../../types/dashboard";
 import { formatDashboardDateTime, getRiskSeverityLabel } from "../../utils/dashboard-formatters";
+import { ruleLabel } from "../../utils/rule-display";
 import ConfirmDialog from "../common/ConfirmDialog.vue";
 
 const props = defineProps<{
@@ -214,8 +223,8 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
 }
 .risk-score {
   align-items: flex-end;
-  background: var(--color-danger-soft);
-  border-left: 3px solid var(--color-danger);
+  background: var(--color-surface-muted);
+  border-left: 3px solid var(--color-border-strong);
   border-radius: var(--radius-2);
   display: flex;
   flex: 0 0 auto;
@@ -225,7 +234,7 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   text-align: right;
 }
 .risk-score strong {
-  color: var(--color-danger);
+  color: var(--color-text-muted);
   font-size: clamp(1.5rem, 4vw, 2rem);
   line-height: 1;
 }
@@ -234,10 +243,29 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   font-size: var(--font-size-12);
 }
 .risk-score__label {
-  color: var(--color-danger);
+  color: var(--color-text-muted);
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
+}
+.risk-score--critical,
+.risk-score--high {
+  background: var(--color-danger-soft);
+  border-left-color: var(--color-danger);
+}
+.risk-score--critical strong,
+.risk-score--critical .risk-score__label,
+.risk-score--high strong,
+.risk-score--high .risk-score__label {
+  color: var(--color-danger);
+}
+.risk-score--medium {
+  background: var(--color-warning-soft);
+  border-left-color: var(--color-warning);
+}
+.risk-score--medium strong,
+.risk-score--medium .risk-score__label {
+  color: var(--color-warning);
 }
 .approval-detail__body {
   align-content: start;
@@ -282,12 +310,14 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   margin: var(--space-1) 0 0;
   overflow-wrap: anywhere;
 }
+.approval-context,
 .approval-evidence {
   border-top: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-4);
   padding-top: var(--space-4);
 }
+.approval-context h3,
 .approval-evidence h3 {
   font-size: var(--font-size-11);
   font-weight: var(--font-weight-semibold);
@@ -295,10 +325,25 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   margin: 0;
   text-transform: uppercase;
 }
+.approval-context p,
 .approval-evidence p {
   color: var(--color-text-muted);
   margin: var(--space-1) 0 0;
   overflow-wrap: anywhere;
+}
+.approval-rule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.approval-rule-list span {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  color: var(--color-text);
+  font-size: var(--font-size-12);
+  padding: var(--space-1) var(--space-2);
 }
 .evidence-links {
   display: flex;
@@ -321,6 +366,12 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   align-self: center;
   color: var(--color-text-subtle);
   font-size: var(--font-size-12);
+}
+.evidence-links__ids {
+  color: var(--color-text-subtle);
+  flex-basis: 100%;
+  font-size: var(--font-size-11);
+  overflow-wrap: anywhere;
 }
 .approval-actions {
   align-items: center;

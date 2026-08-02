@@ -20,6 +20,7 @@ function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
     left.blocked === right.blocked &&
     left.runtime === right.runtime &&
     left.stage === right.stage &&
+    left.eventType === right.eventType &&
     left.tool === right.tool &&
     left.resource === right.resource &&
     hasSameStringList(left.resourceTargets, right.resourceTargets) &&
@@ -30,6 +31,7 @@ function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
     left.userTask === right.userTask &&
     left.agentAction === right.agentAction &&
     left.attackType === right.attackType &&
+    left.isMalicious === right.isMalicious &&
     left.latencyMs === right.latencyMs &&
     hasSameStringList(left.ruleHits, right.ruleHits)
   );

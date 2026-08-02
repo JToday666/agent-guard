@@ -48,6 +48,15 @@ test("a missing event keeps the query and shows explicit feedback", async ({ pag
   await expect(page.getByRole("dialog")).toContainText("未找到事件");
 });
 
+test("a stage-only URL filter exposes the clear-filter action", async ({ page }) => {
+  await page.goto("/investigations?stage=before_tool_call");
+
+  const clearButton = page.getByRole("button", { name: "清除筛选" });
+  await expect(clearButton).toBeVisible();
+  await clearButton.click();
+  await expect(page).toHaveURL(/\/investigations$/);
+});
+
 test("approval route synchronization does not cancel navigation", async ({ page }) => {
   await page.goto("/approvals");
   await page.getByRole("link", { name: "系统状态" }).click();

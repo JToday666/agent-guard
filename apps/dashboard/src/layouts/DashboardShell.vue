@@ -197,6 +197,10 @@ onErrorCaptured(() => {
   overflow-x: hidden;
   overflow-y: visible;
 }
+.dashboard-shell__workspace:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
 
 .dashboard-route-stage {
   min-width: 0;

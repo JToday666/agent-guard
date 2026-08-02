@@ -2,7 +2,7 @@
   <section
     class="inline-notice"
     :class="`inline-notice--${tone}`"
-    :role="tone === 'danger' ? 'alert' : 'status'"
+    :role="tone === 'danger' ? 'alert' : undefined"
   >
     <component :is="noticeIcon" class="inline-notice__icon" aria-hidden="true" :size="18" />
     <div class="inline-notice__content">
@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { CircleAlert, CircleCheck, Info, ShieldAlert, TriangleAlert } from "@lucide/vue";
+import { CircleAlert, CircleCheck, Info, ShieldCheck, TriangleAlert } from "@lucide/vue";
 import { computed } from "vue";
 
 defineOptions({ name: "InlineNotice" });
@@ -34,7 +34,7 @@ const noticeIcon = computed(() => {
   if (props.tone === "success") return CircleCheck;
   if (props.tone === "warning") return TriangleAlert;
   if (props.tone === "danger") return CircleAlert;
-  if (props.tone === "protective") return ShieldAlert;
+  if (props.tone === "protective") return ShieldCheck;
   return Info;
 });
 </script>

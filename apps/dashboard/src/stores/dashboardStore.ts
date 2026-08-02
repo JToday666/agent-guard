@@ -615,9 +615,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
-  async function loadTraceDetail(traceId: string): Promise<void> {
+  async function loadTraceDetail(traceId: string, force = false): Promise<void> {
     if (!traceId || traceDetailLoadingId.value === traceId) return;
-    if (getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) return;
+    if (!force && getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) return;
     const cachedDetail = getCachedValue(traceDetailCache.value, traceId);
     traceDetailLoadingId.value = traceId;
     traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
@@ -661,9 +661,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
     activeRefresh?.controller.abort();
   }
 
-  async function loadTraceProvenance(traceId: string): Promise<void> {
+  async function loadTraceProvenance(traceId: string, force = false): Promise<void> {
     if (!traceId || provenanceLoadingIds.has(traceId)) return;
-    if (getFreshCacheValue(provenanceCache.value, traceId, TRACE_PROVENANCE_TTL_MS)) return;
+    if (!force && getFreshCacheValue(provenanceCache.value, traceId, TRACE_PROVENANCE_TTL_MS))
+      return;
     const cachedProvenance = getCachedValue(provenanceCache.value, traceId);
     provenanceLoadingIds.add(traceId);
     provenanceErrors.value = { ...provenanceErrors.value, [traceId]: "" };
@@ -702,7 +703,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     traceDetailErrors,
     traceDetailLoadingId,
     policySummary,
-    policyHistory,
     policyError,
     auditIntegrity,
     auditIntegrityError,
@@ -712,7 +712,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     status,
     error,
     lastUpdatedAt,
-    isRefreshing,
     isManualRefreshing,
     submittingApprovalId,
     approvalResolutionError,

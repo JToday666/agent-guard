@@ -45,11 +45,18 @@
                   :label="getRiskSeverityLabel(approval.severity)"
                   :tone="getRiskSeverityTone(approval.severity)"
                 />
-                <time>{{ formatRelativeExpiry(approval.expiresAt) }}</time>
+                <time :datetime="approval.expiresAt ?? undefined">{{
+                  formatRelativeExpiry(approval.expiresAt)
+                }}</time>
               </span>
               <strong>{{ approval.tool }}</strong>
               <small>{{ approval.resource }}</small>
-              <span class="approval-queue__score">风险 {{ approval.riskScore }}</span>
+              <span
+                class="approval-queue__score"
+                :class="`approval-queue__score--${approval.severity}`"
+              >
+                风险 {{ approval.riskScore }}
+              </span>
             </button>
           </aside>
 
@@ -73,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onActivated, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ApprovalDetail from "../components/approvals/ApprovalDetail.vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
@@ -86,6 +93,7 @@ import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ApprovalRequest } from "../types/dashboard";
 import { getApprovalEvidenceRoutes } from "../utils/approval-evidence-route";
+import { formatRelativeApprovalExpiry, isApprovalExpired } from "../utils/approval-expiry";
 import { getRiskSeverityLabel, getRiskSeverityTone } from "../utils/dashboard-formatters";
 
 defineOptions({ name: "ApprovalsPage" });
@@ -96,6 +104,8 @@ const router = useRouter();
 const actionMessage = ref("");
 const pageMessage = ref("");
 const pendingDecision = ref<"allow_once" | "deny" | null>(null);
+const nowMs = ref(Date.now());
+let expiryClock: number | undefined;
 const sortedApprovals = computed(() =>
   [...store.approvals].sort((left, right) => {
     if (left.riskScore !== right.riskScore) return right.riskScore - left.riskScore;
@@ -118,8 +128,7 @@ const selectedApprovalRoutes = computed(() =>
 );
 const isSubmitting = computed(() => store.submittingApprovalId === selectedApproval.value?.id);
 const isExpired = computed(() => {
-  const expiresAt = selectedApproval.value?.expiresAt;
-  return Boolean(expiresAt && Date.parse(expiresAt) <= Date.now());
+  return isApprovalExpired(selectedApproval.value?.expiresAt, nowMs.value);
 });
 const resolutionDisabledReason = computed(() => {
   if (isSubmitting.value) return "审批正在提交";
@@ -153,6 +162,20 @@ watch(
   },
   { immediate: true },
 );
+
+function startExpiryClock() {
+  window.clearInterval(expiryClock);
+  nowMs.value = Date.now();
+  expiryClock = window.setInterval(() => {
+    nowMs.value = Date.now();
+  }, 1_000);
+}
+function stopExpiryClock() {
+  window.clearInterval(expiryClock);
+}
+onActivated(startExpiryClock);
+onDeactivated(stopExpiryClock);
+onUnmounted(stopExpiryClock);
 watch(
   () => selectedApproval.value?.id,
   () => {
@@ -192,9 +215,7 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
   }
 }
 function formatRelativeExpiry(value?: string | null) {
-  if (!value) return "到期时间未知";
-  const minutes = Math.ceil((Date.parse(value) - Date.now()) / 60_000);
-  return minutes <= 0 ? "已过期" : `${minutes} 分钟后过期`;
+  return formatRelativeApprovalExpiry(value, nowMs.value);
 }
 </script>
 
@@ -299,8 +320,15 @@ function formatRelativeExpiry(value?: string | null) {
   white-space: nowrap;
 }
 .approval-queue__score {
-  color: var(--color-danger);
+  color: var(--color-text-muted);
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-bold);
+}
+.approval-queue__score--critical,
+.approval-queue__score--high {
+  color: var(--color-danger);
+}
+.approval-queue__score--medium {
+  color: var(--color-warning);
 }
 </style>

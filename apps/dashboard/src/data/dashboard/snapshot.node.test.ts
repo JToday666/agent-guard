@@ -89,6 +89,16 @@ test("detects a visible audit event change", () => {
   assert.equal(hasSameEventWindow([makeEvent()], [makeEvent({ reason: "Updated reason" })]), false);
 });
 
+test("detects event type and malicious-label changes used by filters and metrics", () => {
+  assert.equal(
+    hasSameEventWindow(
+      [makeEvent()],
+      [makeEvent({ eventType: "model_output", isMalicious: true })],
+    ),
+    false,
+  );
+});
+
 test("compares evaluation metrics by value", () => {
   assert.equal(hasSameMetrics(metrics, { ...metrics }), true);
   assert.equal(hasSameMetrics(metrics, { ...metrics, blockedCount: 0 }), false);

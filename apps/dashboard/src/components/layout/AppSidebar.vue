@@ -30,7 +30,7 @@
           @pointerenter="preloadDashboardRoute(item.to)"
         >
           <span class="sidebar__icon" aria-hidden="true">
-            <component :is="item.icon" :size="18" :stroke-width="1.8" />
+            <component :is="item.icon" :size="20" :stroke-width="2" />
           </span>
           <span class="sidebar__label">{{ item.label }}</span>
           <small v-if="item.count" class="sidebar__badge">{{ item.count }}</small>
@@ -42,8 +42,8 @@
 
 <script setup lang="ts">
 import {
-  ChartNoAxesColumn,
-  CircleCheckBig,
+  ChartColumn,
+  ClipboardCheck,
   GitBranch,
   LayoutDashboard,
   PanelLeftClose,
@@ -77,7 +77,7 @@ const navigationGroups = computed(() => [
       { icon: ScanSearch, label: "事件调查", to: "/investigations" },
       {
         count: props.pendingCount,
-        icon: CircleCheckBig,
+        icon: ClipboardCheck,
         label: "人工审批",
         to: "/approvals",
       },
@@ -87,7 +87,7 @@ const navigationGroups = computed(() => [
   {
     label: "验证与运行",
     items: [
-      { icon: ChartNoAxesColumn, label: "安全评测", to: "/evaluation" },
+      { icon: ChartColumn, label: "安全评测", to: "/evaluation" },
       { icon: Server, label: "系统状态", to: "/system" },
     ],
   },

@@ -52,15 +52,6 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function logout(): Promise<void> {
-    if (dashboardEnv.dataSource === "api") {
-      await requestJson("/auth/browser/logout", { method: "POST" });
-    }
-    csrfToken.value = "";
-    expiresAt.value = null;
-    status.value = "idle";
-  }
-
   return {
     status,
     csrfToken,
@@ -69,6 +60,5 @@ export const useAuthStore = defineStore("auth", () => {
     isAuthenticated,
     invalidateSession,
     bootstrap,
-    logout,
   };
 });

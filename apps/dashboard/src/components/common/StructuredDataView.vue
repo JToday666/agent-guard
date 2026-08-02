@@ -1,7 +1,7 @@
 <template>
-  <section class="structured-data" aria-labelledby="structured-data-title">
+  <section class="structured-data" :aria-labelledby="titleId">
     <header>
-      <h3 id="structured-data-title">结构化原始数据</h3>
+      <h3 :id="titleId">结构化原始数据</h3>
       <button type="button" @click="handleCopy">{{ copyLabel }}</button>
     </header>
     <dl v-if="entries.length" class="structured-data__summary">
@@ -18,13 +18,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref, useId } from "vue";
 
 import { serializeStructuredData } from "../../utils/structured-data";
 
 defineOptions({ name: "StructuredDataView" });
 const props = defineProps<{ value: unknown }>();
+const titleId = useId();
 const copyLabel = ref("复制 JSON");
+let resetCopyTimer: number | undefined;
 const serializedValue = computed(() => serializeStructuredData(props.value));
 const entries = computed(() => {
   if (!props.value || typeof props.value !== "object" || Array.isArray(props.value)) return [];
@@ -42,16 +44,20 @@ const entries = computed(() => {
 });
 
 async function handleCopy(): Promise<void> {
+  window.clearTimeout(resetCopyTimer);
   try {
     await navigator.clipboard.writeText(serializedValue.value);
     copyLabel.value = "已复制";
   } catch {
     copyLabel.value = "复制失败";
   }
-  window.setTimeout(() => {
+  resetCopyTimer = window.setTimeout(() => {
     copyLabel.value = "复制 JSON";
   }, 1600);
 }
+onUnmounted(() => {
+  window.clearTimeout(resetCopyTimer);
+});
 </script>
 
 <style scoped lang="scss">

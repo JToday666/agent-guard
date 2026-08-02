@@ -11,13 +11,21 @@ import { computed } from "vue";
 import type { DataStatus } from "../../types/dashboard";
 
 const props = defineProps<{ status: DataStatus; updatedAt?: string | null }>();
+const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
 
 const label = computed(() => {
   if (props.status === "loading") return "正在同步";
   if (props.status === "stale") return "数据已陈旧";
   if (props.status === "error") return "连接异常";
   if (props.status === "ready" && props.updatedAt) {
-    return `更新于 ${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(props.updatedAt))}`;
+    const updatedAt = new Date(props.updatedAt);
+    if (!Number.isNaN(updatedAt.getTime())) {
+      return `更新于 ${timeFormatter.format(updatedAt)}`;
+    }
   }
   return "等待数据";
 });
