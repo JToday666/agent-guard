@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  OPENCLAW_REQUIRED_HOOK_COUNT,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../hook-contract.mjs";
 
 import {
   GuardApiClient,
@@ -43,7 +47,6 @@ test("buildPluginConfig accepts approval budget and diagnostic logging", () => {
       runtimeId: "openclaw-gateway",
       agentId: "openclaw-main",
       enforcementMode: "observe",
-      enabledHooks: ["before_tool_call", "message_sending"],
       failClosedStages: ["before_tool_call"],
       redaction: { enabled: true, previewLimit: 1200 },
       heartbeatIntervalMs: 30000,
@@ -56,7 +59,6 @@ test("buildPluginConfig accepts approval budget and diagnostic logging", () => {
   assert.equal(config.runtimeId, "openclaw-gateway");
   assert.equal(config.agentId, "openclaw-main");
   assert.equal(config.enforcementMode, "observe");
-  assert.deepEqual(config.enabledHooks, ["before_tool_call", "message_sending"]);
   assert.deepEqual(config.failClosedStages, ["before_tool_call"]);
   assert.deepEqual(config.redaction, { enabled: true, previewLimit: 1200 });
   assert.equal(config.heartbeatIntervalMs, 30000);
@@ -101,7 +103,6 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
       diagnosticLogging: false,
       runtimeId: "openclaw-gateway",
       agentId: "openclaw-main",
-      enabledHooks: ["before_tool_call"],
       failClosedStages: ["before_tool_call"],
       redaction: { enabled: true, previewLimit: 2000 },
       heartbeatIntervalMs: 60000,
@@ -129,11 +130,40 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
   assert.equal(requests[0].body.agent_id, "openclaw-main");
   assert.equal(requests[0].body.plugin_version, "0.1.0");
   assert.deepEqual(requests[0].body.hooks, ["before_tool_call", "message_sending"]);
+  assert.equal(requests[0].body.hook_count, 2);
+  assert.equal(requests[0].body.expected_hook_count, OPENCLAW_REQUIRED_HOOK_COUNT);
   assert.deepEqual(requests[0].body.fail_closed_stages, ["before_tool_call"]);
   assert.deepEqual(requests[0].body.capabilities.event_types, [
     "tool_call_proposed",
     "message_send_proposed",
   ]);
+});
+
+test("GuardApiClient falls back to the canonical hook contract for an empty heartbeat", async () => {
+  const requests = [];
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 10,
+      approvalTimeoutMs: 10,
+    },
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  await client.submitHeartbeat({
+    pluginVersion: "0.1.0",
+    hooks: [],
+    capabilities: {},
+  });
+
+  assert.deepEqual(requests[0].hooks, [...OPENCLAW_REQUIRED_HOOKS]);
+  assert.equal(requests[0].hook_count, OPENCLAW_REQUIRED_HOOK_COUNT);
+  assert.equal(requests[0].expected_hook_count, OPENCLAW_REQUIRED_HOOK_COUNT);
 });
 
 test("GuardApiClient fail-closed errors do not include adapter token", async () => {

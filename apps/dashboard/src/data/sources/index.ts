@@ -18,8 +18,6 @@ export function createDashboardDataSource(): DashboardDataSource {
 
   return {
     getAdapterStatus: (...args) => loadSource().then((source) => source.getAdapterStatus(...args)),
-    getAggregateMetrics: (...args) =>
-      loadSource().then((source) => source.getAggregateMetrics(...args)),
     getAuditIntegrity: (...args) =>
       loadSource().then((source) => source.getAuditIntegrity(...args)),
     getAuditWindow: (...args) => loadSource().then((source) => source.getAuditWindow(...args)),

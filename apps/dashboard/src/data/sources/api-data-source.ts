@@ -5,7 +5,6 @@ import type {
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
   GuardConfigAuditFindingRecordDto,
-  GuardEvalMetricsDto,
   GuardEvaluationRunDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
@@ -16,7 +15,6 @@ import { ApiError, requestHealth, requestJson } from "../../api/guard-http-clien
 import {
   emptyEvaluationRun,
   mapAdapterStatus,
-  mapAggregateMetrics,
   mapApproval,
   mapAuditEvent,
   mapAuditIntegrity,
@@ -76,15 +74,6 @@ export class ApiDashboardDataSource implements DashboardDataSource {
       hasMore: null,
       source: "legacy_audit_events",
     });
-  }
-
-  async getAggregateMetrics(filters?: EventFilters, signal?: AbortSignal) {
-    const rows = await requestJson<GuardEvalMetricsDto>(
-      `/metrics/eval${buildQueryString(filters)}`,
-      {},
-      signal,
-    );
-    return mapAggregateMetrics(rows);
   }
 
   async getPendingApprovals(signal?: AbortSignal) {

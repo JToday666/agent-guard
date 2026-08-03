@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  OPENCLAW_REQUIRED_HOOK_COUNT,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import {
   mapApproval,
   mapAdapterStatus,
   mapAuditEvent,
@@ -494,8 +498,8 @@ test("maps OpenClaw adapter status with hook coverage", () => {
   const status = mapAdapterStatus({
     status: "loaded",
     loaded: true,
-    hook_count: 16,
-    expected_hook_count: 16,
+    hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
+    expected_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
     last_verified_at: "2026-06-28T00:00:00+00:00",
     last_heartbeat_at: "2026-06-28T00:01:00+00:00",
     error: null,
@@ -503,7 +507,7 @@ test("maps OpenClaw adapter status with hook coverage", () => {
     plugin_version: "0.1.0",
     runtime_version: "2026.6.6",
     capabilities: { event_types: ["tool_call_proposed"] },
-    hooks: ["before_tool_call"],
+    hooks: [...OPENCLAW_REQUIRED_HOOKS],
     fail_closed_stages: ["before_install"],
   });
 
@@ -523,7 +527,7 @@ test("maps sparse adapter and provenance responses with safe defaults", () => {
     source: null,
   } as unknown as Parameters<typeof mapAdapterStatus>[0]);
 
-  assert.equal(status.expectedHookCount, 16);
+  assert.equal(status.expectedHookCount, OPENCLAW_REQUIRED_HOOK_COUNT);
   assert.equal(status.hookCoverage, null);
   assert.deepEqual(status.capabilities, {});
   assert.deepEqual(status.hooks, []);

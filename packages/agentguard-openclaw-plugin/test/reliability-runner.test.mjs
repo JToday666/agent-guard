@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../hook-contract.mjs";
 
 test("reliability runner plans every registered hook for each iteration", async () => {
   process.env.AGENTGUARD_ADAPTER_TOKEN = process.env.AGENTGUARD_ADAPTER_TOKEN || "test-adapter-token";
@@ -13,8 +14,8 @@ test("reliability runner plans every registered hook for each iteration", async 
 
   const plan = buildReliabilityPlan({ runId: "unit", iterations: 2 });
 
-  assert.equal(RELIABILITY_HOOKS.length, 22);
-  assert.equal(plan.cases.length, 44);
+  assert.equal(RELIABILITY_HOOKS.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+  assert.equal(plan.cases.length, OPENCLAW_REQUIRED_HOOK_COUNT * 2);
   assert.deepEqual(plan.expectedEventCounts, {
     tool_call_proposed: 2,
     context_assembled: 2,
@@ -69,8 +70,8 @@ test("reliability runner summarizes missing duplicate and wrong-runtime events",
 
   const summary = summarizeReliabilityEvents(plan, events);
 
-  assert.equal(summary.expected_total, 22);
-  assert.equal(summary.observed_total, 23);
+  assert.equal(summary.expected_total, OPENCLAW_REQUIRED_HOOK_COUNT);
+  assert.equal(summary.observed_total, OPENCLAW_REQUIRED_HOOK_COUNT + 1);
   assert.deepEqual(summary.missing_traces, [plan.cases.at(-1).traceId]);
   assert.deepEqual(summary.duplicate_trace_ids, [events[0].trace_id]);
   assert.equal(summary.non_openclaw_count, 1);
@@ -118,7 +119,7 @@ test("release gate summary is safe to persist in adapter status", async () => {
     ok: true,
     generated_at: "2026-06-30T00:00:00.000Z",
     plugin: {
-      registered_hook_count: 22,
+      registered_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
       registered_hooks: ["before_tool_call", "llm_input"],
     },
     audit: {
@@ -141,7 +142,7 @@ test("release gate summary is safe to persist in adapter status", async () => {
     kind: "reliability",
     ok: true,
     generated_at: "2026-06-30T00:00:00.000Z",
-    registered_hook_count: 22,
+    registered_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
     registered_hooks: ["before_tool_call", "llm_input"],
     audit: {
       expected_total: 950,

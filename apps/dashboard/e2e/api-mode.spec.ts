@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+
 const guardedServerErrorMessage = "Guard API 暂时无法完成请求，请稍后重试。";
 const guardedNotFoundMessage = "请求的资源不存在或已失效。";
 
@@ -104,7 +106,6 @@ async function installApiRoutes(
     if (path === "/audit/events") {
       return route.fulfill({ json: options.events ?? [eventDto] });
     }
-    if (path === "/metrics/eval") return route.fulfill({ json: metricsDto });
     if (path === "/approvals/pending") {
       return route.fulfill({ json: options.approvals ?? [] });
     }
@@ -158,7 +159,7 @@ async function installApiRoutes(
           status: "unknown",
           loaded: false,
           hook_count: null,
-          expected_hook_count: 16,
+          expected_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
           last_verified_at: null,
           error: null,
           source: null,

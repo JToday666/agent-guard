@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {
+  OPENCLAW_REQUIRED_HOOK_COUNT,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { MockDashboardDataSource } from "./mock-data-source.ts";
 
 test("mock provenance graph contains evidence nodes and event references", async () => {
@@ -55,19 +59,17 @@ test("mock evaluation cases stay consistent with linked audit events", async () 
   }
 });
 
-test("mock audit window deduplicates policy records and excludes runtime outcomes", async () => {
+test("mock audit window maps and deduplicates policy records", async () => {
   const source = new MockDashboardDataSource(0);
   const window = await source.getAuditWindow();
-  const aggregate = await source.getAggregateMetrics();
 
   assert.ok(window.events.some((event) => event.recordType === "runtime_outcome"));
+  assert.ok(window.events.every((event) => event.raw && typeof event.raw === "object"));
   assert.equal(window.metrics.evaluationCount, 8);
   assert.equal(
     window.metrics.allowCount + window.metrics.askCount + window.metrics.denyCount,
     window.metrics.evaluationCount,
   );
-  assert.equal(aggregate.scope.kind, "aggregate_history");
-  assert.equal(aggregate.reportedEventCount, window.metrics.evaluationCount);
 });
 
 test("mock source exposes config findings and OpenClaw status", async () => {
@@ -81,7 +83,7 @@ test("mock source exposes config findings and OpenClaw status", async () => {
   assert.ok(findings.some((row) => row.finding.severity === "high"));
   assert.equal(status.status, "loaded");
   assert.equal(status.loaded, true);
-  assert.equal(status.hookCount, 16);
-  assert.equal(status.expectedHookCount, 16);
-  assert.ok(status.hooks.includes("before_tool_call"));
+  assert.equal(status.hookCount, OPENCLAW_REQUIRED_HOOK_COUNT);
+  assert.equal(status.expectedHookCount, OPENCLAW_REQUIRED_HOOK_COUNT);
+  assert.deepEqual(status.hooks, [...OPENCLAW_REQUIRED_HOOKS]);
 });

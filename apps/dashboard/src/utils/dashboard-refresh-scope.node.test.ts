@@ -19,7 +19,6 @@ test("refresh resources include common shell data and only page-specific domains
   const evaluationResources = getDashboardRefreshResources("evaluation");
   assert.equal(evaluationResources.has("auditWindow"), true);
   assert.equal(evaluationResources.has("evaluationRun"), true);
-  assert.equal(evaluationResources.has("aggregateMetrics"), false);
 
   const systemResources = getDashboardRefreshResources("system");
   assert.equal(systemResources.has("auditWindow"), false);

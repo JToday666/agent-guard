@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  OPENCLAW_REQUIRED_HOOK_COUNT,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../hook-contract.mjs";
 
 test("plugin entry evaluates hooks with OpenClaw api.pluginConfig", async () => {
   const { default: plugin } = await import("../dist/index.js");
@@ -21,6 +25,9 @@ test("plugin entry evaluates hooks with OpenClaw api.pluginConfig", async () => 
         registered.push({ name, handler, options });
       },
     });
+
+    assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+    assert.deepEqual(registered.map((entry) => entry.name), [...OPENCLAW_REQUIRED_HOOKS]);
 
     let authHeader = null;
     globalThis.fetch = async (_url, init) => {

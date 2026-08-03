@@ -143,16 +143,19 @@ pnpm openclaw:plugin:verify
 
 ```json
 {
-  "plugin": { "id": "agentguard-security", "status": "loaded", "hookCount": 19 },
+  "plugin": { "id": "agentguard-security", "status": "loaded", "hookCount": 22 },
   "shape": "hook-only",
   "typedHooks": [
     { "name": "before_tool_call", "priority": 100 },
     { "name": "message_sending", "priority": 100 },
     { "name": "before_install", "priority": 100 },
+    { "name": "message_received", "priority": 0 },
     { "name": "before_prompt_build", "priority": 0 },
     { "name": "llm_input", "priority": 0 },
     { "name": "llm_output", "priority": 0 },
     { "name": "tool_result_persist", "priority": 0 },
+    { "name": "before_message_write", "priority": 100 },
+    { "name": "before_agent_finalize", "priority": 100 },
     { "name": "gateway_start", "priority": 0 },
     { "name": "gateway_stop", "priority": 0 },
     { "name": "session_start", "priority": 0 },

@@ -6,6 +6,11 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  OPENCLAW_BLOCKING_HOOKS,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const require = createRequire(import.meta.url);
@@ -40,38 +45,11 @@ const RUNTIME_DIST = path.join(
   "index.js",
 );
 
-const REQUIRED_RUNTIME_HOOKS = [
-  "after_compaction",
-  "before_compaction",
-  "before_install",
-  "before_agent_finalize",
-  "before_message_write",
-  "before_prompt_build",
-  "before_tool_call",
-  "cron_changed",
-  "gateway_start",
-  "gateway_stop",
-  "llm_input",
-  "llm_output",
-  "message_received",
-  "message_sending",
-  "model_call_ended",
-  "model_call_started",
-  "resolve_exec_env",
-  "session_end",
-  "session_start",
-  "subagent_ended",
-  "subagent_spawned",
-  "tool_result_persist",
-];
+const REQUIRED_RUNTIME_HOOKS = OPENCLAW_REQUIRED_HOOKS;
 
 export const RELIABILITY_HOOKS = [...REQUIRED_RUNTIME_HOOKS];
 
-const RELIABILITY_BLOCKING_HOOKS = new Set([
-  "before_tool_call",
-  "message_sending",
-  "before_install",
-]);
+const RELIABILITY_BLOCKING_HOOKS = new Set(OPENCLAW_BLOCKING_HOOKS);
 const RELIABILITY_EVENT_TYPE_BY_HOOK = {
   before_tool_call: "tool_call_proposed",
   before_prompt_build: "context_assembled",

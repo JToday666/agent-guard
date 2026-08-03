@@ -5,6 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { OPENCLAW_REQUIRED_HOOKS } from "../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+
 const ROOT = process.cwd();
 const PLUGIN_ID = "agentguard-security";
 const PLUGIN_PACKAGE = "@agentguard/openclaw-plugin";
@@ -26,30 +28,7 @@ const LOCAL_NODE_BIN = path.join(
   "node-v24.15.0-linux-x64",
   "bin",
 );
-const REQUIRED_HOOKS = [
-  "after_compaction",
-  "before_agent_finalize",
-  "before_compaction",
-  "before_install",
-  "before_message_write",
-  "before_prompt_build",
-  "before_tool_call",
-  "cron_changed",
-  "gateway_start",
-  "gateway_stop",
-  "llm_input",
-  "llm_output",
-  "message_received",
-  "message_sending",
-  "model_call_ended",
-  "model_call_started",
-  "resolve_exec_env",
-  "session_end",
-  "session_start",
-  "subagent_ended",
-  "subagent_spawned",
-  "tool_result_persist",
-];
+const REQUIRED_HOOKS = OPENCLAW_REQUIRED_HOOKS;
 
 const command = process.argv[2];
 const flags = new Set(process.argv.slice(3));
@@ -247,6 +226,7 @@ function rebuildStaging() {
   fs.mkdirSync(STAGING_DIR, { recursive: true });
   copyRecursive(path.join(PLUGIN_ROOT, "dist"), path.join(STAGING_DIR, "dist"));
   for (const fileName of [
+    "hook-contract.mjs",
     "openclaw.plugin.json",
     "package.json",
     "README.md",

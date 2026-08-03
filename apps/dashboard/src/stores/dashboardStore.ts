@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
+import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
 import { dashboardDataSource } from "../data/sources/index";
 import {
@@ -17,7 +18,6 @@ import {
 import { AUDIT_EVENT_WINDOW_LIMIT } from "../data/sources/dashboard-data-source";
 import type {
   AdapterStatus,
-  AggregateMetrics,
   ApprovalRequest,
   AuditWindow,
   AuditIntegrity,
@@ -64,7 +64,7 @@ const unknownOpenClawStatus: AdapterStatus = {
   status: "unknown",
   loaded: false,
   hookCount: null,
-  expectedHookCount: 16,
+  expectedHookCount: OPENCLAW_REQUIRED_HOOK_COUNT,
   hookCoverage: null,
   lastVerifiedAt: null,
   lastHeartbeatAt: null,
@@ -147,8 +147,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       source: "legacy_audit_events",
     }),
   );
-  const aggregateMetrics = ref<AggregateMetrics | null>(null);
-  const aggregateMetricsError = ref<string | null>(null);
   const approvals = ref<ApprovalRequest[]>([]);
   const evaluationRun = ref<EvaluationRun>({ ...emptyEvaluationRun });
   const evaluationRunError = ref<string | null>(null);
@@ -587,17 +585,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
-  async function loadAggregateMetrics(): Promise<void> {
-    aggregateMetricsError.value = null;
-    try {
-      aggregateMetrics.value = await dashboardDataSource.getAggregateMetrics();
-    } catch (reason) {
-      handleSessionError(reason);
-      aggregateMetricsError.value = errorMessage(reason, "历史聚合指标加载失败");
-      throw reason;
-    }
-  }
-
   async function loadTraceDetail(traceId: string, force = false): Promise<void> {
     if (!traceId || traceDetailLoadingId.value === traceId) return;
     if (!force && getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) return;
@@ -675,8 +662,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
   return {
     auditWindow,
     windowMetrics,
-    aggregateMetrics,
-    aggregateMetricsError,
     events,
     approvals,
     policyEvaluations,
@@ -712,7 +697,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     activeScope,
     refresh,
     setActiveScope,
-    loadAggregateMetrics,
     loadTraceDetail,
     loadTraceProvenance,
     resolveApproval,
