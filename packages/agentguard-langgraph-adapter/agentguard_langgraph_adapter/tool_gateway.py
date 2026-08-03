@@ -48,7 +48,15 @@ class GuardedToolGateway:
         if compatibility is not None:
             event.metadata["compatibility"] = dict(compatibility)
             audit_event.metadata["compatibility"] = dict(compatibility)
-        self.guard_adapter.submit_audit_event(audit_event)
+        audit_error = _submit_audit_event(self.guard_adapter, audit_event)
+        if audit_error is not None:
+            return _audit_failure_result(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                audit_event=audit_event,
+                error=audit_error,
+            )
 
         if decision.decision == "deny" or _ask_was_not_approved(
             self.guard_adapter, decision
@@ -185,7 +193,16 @@ def _evaluate_memory_write_gate(
         trace_id=trace_id,
     )
     audit_event = guard_adapter.build_audit_event(event, decision)
-    guard_adapter.submit_audit_event(audit_event)
+    audit_error = _submit_audit_event(guard_adapter, audit_event)
+    if audit_error is not None:
+        return _audit_failure_result(
+            tool_name=tool_name,
+            call_id=call_id,
+            event=event,
+            audit_event=audit_event,
+            error=audit_error,
+            compatibility=compatibility,
+        )
     if decision.decision != "deny" and not _ask_was_not_approved(
         guard_adapter, decision
     ):
@@ -236,7 +253,20 @@ def _apply_tool_result_guard(
         will_persist=_tool_result_will_persist(tool_name, side_effects),
     )
     audit_event = guard_adapter.build_audit_event(event, decision)
-    guard_adapter.submit_audit_event(audit_event)
+    audit_error = _submit_audit_event(guard_adapter, audit_event)
+    if audit_error is not None:
+        payload.blocked = True
+        payload.status = "audit_error"
+        payload.result = None
+        payload.safe_message = (
+            "The tool result was withheld because AgentGuard audit submission failed."
+        )
+        payload.error = audit_error
+        payload.audit_event = audit_event.model_dump()
+        payload.quarantine_applied = True
+        payload.block_semantics = "audit_failure"
+        payload.counts_as_effective_block = False
+        return payload
     if decision.decision != "deny" and not _ask_was_not_approved(
         guard_adapter, decision
     ):
@@ -307,3 +337,43 @@ def _approval_id(approval: Any) -> str | None:
         value = approval.get("approval_id") or approval.get("id")
         return str(value) if value else None
     return None
+
+
+def _submit_audit_event(guard_adapter: Any, audit_event: Any) -> str | None:
+    try:
+        response = guard_adapter.submit_audit_event(audit_event)
+    except Exception as exc:
+        return f"Audit submission failed: {exc}"
+    if isinstance(response, dict) and response.get("ok") is False:
+        return f"Audit submission failed: {response.get('error') or 'unknown error'}"
+    return None
+
+
+def _audit_failure_result(
+    *,
+    tool_name: str,
+    call_id: str,
+    event: Any,
+    audit_event: Any,
+    error: str,
+    compatibility: dict[str, Any] | None = None,
+) -> ToolExecutionResult:
+    payload = ToolExecutionResult(
+        tool_name=tool_name,
+        call_id=call_id,
+        executed=False,
+        blocked=True,
+        decision="deny",
+        status="audit_error",
+        result=None,
+        safe_message="The tool call was blocked because AgentGuard audit submission failed.",
+        side_effects=[],
+        event=_dump_event(event),
+        audit_event=_dump_event(audit_event),
+        error=error,
+        block_semantics="audit_failure",
+        counts_as_effective_block=False,
+    )
+    return ToolExecutionResult.model_validate(
+        tool_result_with_compatibility(payload.model_dump(), compatibility or {})
+    )

@@ -136,7 +136,8 @@ class LangGraphAdapter:
             assert self.core_client is not None
             if not hasattr(self.core_client, "evaluate_guard_event"):
                 return _allow_decision(
-                    "Core client does not implement runtime guard events; allowed for compatibility."
+                    "Core client does not implement runtime guard events; "
+                    "allowed for explicit compatibility clients."
                 )
             raw_decision = self.core_client.evaluate_guard_event(_event_dump(event))
             return PolicyDecision.model_validate(raw_decision)

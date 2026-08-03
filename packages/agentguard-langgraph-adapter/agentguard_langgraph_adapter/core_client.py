@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 
 import httpx
 
+from .config import DEFAULT_API_MODE, validate_api_mode
 from .event_models import PolicyDecision, RuleHit
 
 
@@ -24,6 +25,10 @@ class CoreClientProtocol(Protocol):
 
 class CoreClientError(RuntimeError):
     pass
+
+
+class UnsupportedApiModeError(CoreClientError):
+    """Raised when a legacy Core cannot provide a v0.3-only capability."""
 
 
 @dataclass(slots=True)
@@ -45,17 +50,10 @@ class AgentGuardCoreClient:
         if _api_mode(self.config) != "guard-api-v0.3":
             if event.get("event_type") == "tool_call_proposed":
                 return self.evaluate_tool_call(event)
-            return {
-                "decision_id": "dec_legacy_non_tool_allow",
-                "decision": "allow",
-                "risk_score": 0,
-                "severity": "low",
-                "rule_hits": [],
-                "reason": "Non-tool GuardEvent evaluation requires guard-api-v0.3.",
-                "safe_message": None,
-                "latency_ms": 0,
-                "approval": None,
-            }
+            raise UnsupportedApiModeError(
+                "legacy api_mode only supports tool_call_proposed; "
+                "use guard-api-v0.3 for runtime GuardEvent evaluation"
+            )
         response = self._post_json("/v1/guard/evaluate", event)
         decision = response.get("decision")
         if isinstance(decision, dict):
@@ -71,7 +69,10 @@ class AgentGuardCoreClient:
         self, approval_id: str, timeout: float | None = None
     ) -> dict[str, Any]:
         if _api_mode(self.config) != "guard-api-v0.3":
-            return {"status": "pending", "decision": None}
+            raise UnsupportedApiModeError(
+                "legacy api_mode does not support Guard API approval waiting; "
+                "use guard-api-v0.3"
+            )
         return self._get_json(f"/v1/approvals/{approval_id}/wait", timeout=timeout)
 
     def _get_json(self, path: str, timeout: float | None = None) -> dict[str, Any]:
@@ -121,7 +122,8 @@ class AgentGuardCoreClient:
 
 
 def _api_mode(config: Any) -> str:
-    return str(getattr(config, "core_api_mode", getattr(config, "api_mode", "legacy")))
+    mode = getattr(config, "core_api_mode", getattr(config, "api_mode", DEFAULT_API_MODE))
+    return validate_api_mode(mode)
 
 
 def _guard_api_v03_event(event: dict[str, Any]) -> dict[str, Any]:

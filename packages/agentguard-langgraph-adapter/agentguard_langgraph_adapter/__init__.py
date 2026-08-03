@@ -10,6 +10,7 @@ from .core_client import (
     FakeAllowCoreClient,
     FakeAskCoreClient,
     FakeDenyCoreClient,
+    UnsupportedApiModeError,
 )
 from .event_models import (
     AuditEvent,
@@ -42,6 +43,7 @@ __all__ = [
     "FakeAllowCoreClient",
     "FakeAskCoreClient",
     "FakeDenyCoreClient",
+    "UnsupportedApiModeError",
     "GuardedToolNode",
     "GuardedToolGateway",
     "LangGraphAdapter",
