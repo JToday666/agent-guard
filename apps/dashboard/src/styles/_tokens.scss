@@ -58,6 +58,7 @@
   --color-node-audit: #657a73;
   --color-node-config-audit: #2b8571;
   --color-node-action-critic: #ad711f;
+  --color-provenance-mask: rgb(16 39 36 / 0.12);
 
   /* Controlled brand/data effects */
   --gradient-page: linear-gradient(180deg, rgb(255 255 255 / 0.72), rgb(255 255 255 / 0) 17rem);
@@ -85,8 +86,29 @@
     rgb(255 255 255 / 0.82),
     rgb(255 255 255 / 0.36)
   );
+  --gradient-evidence-missing: linear-gradient(
+    135deg,
+    transparent 0 48%,
+    rgb(89 109 102 / 0.035) 48% 52%,
+    transparent 52% 100%
+  );
   --gradient-popover: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(243 247 244 / 0.96));
+  --gradient-provenance-lanes-horizontal: linear-gradient(
+    90deg,
+    rgb(95 119 112 / 0.035) 0 25%,
+    rgb(40 162 122 / 0.035) 25% 50%,
+    rgb(166 109 32 / 0.035) 50% 75%,
+    rgb(11 103 90 / 0.04) 75% 100%
+  );
+  --gradient-provenance-lanes-vertical: linear-gradient(
+    180deg,
+    rgb(95 119 112 / 0.035) 0 25%,
+    rgb(40 162 122 / 0.035) 25% 50%,
+    rgb(166 109 32 / 0.035) 50% 75%,
+    rgb(11 103 90 / 0.04) 75% 100%
+  );
   --glow-active: 0 0 0 4px rgb(21 149 111 / 0.12);
+  --glow-focus-soft: 0 0 0 4px rgb(201 121 29 / 0.2);
   --glow-live: 0 0 18px rgb(39 179 130 / 0.28);
   --glow-warning: 0 0 16px rgb(192 132 45 / 0.2);
   --filter-chart-primary: drop-shadow(0 2px 4px rgb(11 103 90 / 0.2));

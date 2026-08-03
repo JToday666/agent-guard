@@ -17,6 +17,8 @@
           <input
             :id="`${flowId}-search`"
             v-model.trim="searchQuery"
+            autocomplete="off"
+            name="provenance-search"
             type="search"
             placeholder="搜索节点、摘要或状态…"
             @keydown.enter.prevent="focusSearchResult"
@@ -36,7 +38,7 @@
         <label class="provenance-toolbar__select">
           <span class="sr-only">节点类型筛选</span>
           <Filter :size="14" aria-hidden="true" />
-          <select v-model="activeKind" aria-label="节点类型筛选">
+          <select v-model="activeKind" aria-label="节点类型筛选" name="provenance-kind-filter">
             <option value="all">全部类型</option>
             <option v-for="option in kindOptions" :key="option.value" :value="option.value">
               {{ option.label }} · {{ option.count }}
@@ -124,7 +126,7 @@
             :zoomable="true"
             :width="164"
             :height="104"
-            mask-color="rgb(16 39 36 / 0.12)"
+            mask-color="var(--color-provenance-mask)"
             mask-stroke-color="var(--color-active)"
             aria-label="溯源图缩略导航"
             position="bottom-right"
@@ -270,6 +272,7 @@ interface PositionedNode {
 }
 
 const LARGE_GRAPH_THRESHOLD = 24;
+const LAYOUT_CACHE_MAX_ENTRIES = 24;
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 108;
 const layoutCache = new Map<string, PositionedNode[]>();
@@ -306,22 +309,46 @@ const phaseDefinitions = [
 ] as const;
 
 const kindDefinitions: Record<string, { icon: Component; label: string; miniMapColor: string }> = {
-  action: { icon: Wrench, label: "工具动作", miniMapColor: "#a66d20" },
-  action_critic: { icon: FileSearch, label: "复核", miniMapColor: "#ad711f" },
-  approval: { icon: UserCheck, label: "人工审批", miniMapColor: "#a66d20" },
-  audit: { icon: Fingerprint, label: "审计记录", miniMapColor: "#657a73" },
-  config_audit: { icon: FileSearch, label: "配置审计", miniMapColor: "#2b8571" },
-  context: { icon: Layers3, label: "上下文", miniMapColor: "#28a27a" },
-  decision: { icon: Gavel, label: "安全决定", miniMapColor: "#b84a3c" },
-  event: { icon: Activity, label: "运行时事件", miniMapColor: "#0b675a" },
-  model_intent: { icon: BrainCircuit, label: "模型意图", miniMapColor: "#28a27a" },
-  policy: { icon: ShieldCheck, label: "事件时策略", miniMapColor: "#0b675a" },
-  resource: { icon: FileKey, label: "规范化资源", miniMapColor: "#a66d20" },
-  review: { icon: FileSearch, label: "风险组合", miniMapColor: "#ad711f" },
-  rule: { icon: ShieldCheck, label: "命中规则", miniMapColor: "#b84a3c" },
-  runtime_result: { icon: Activity, label: "运行时结果", miniMapColor: "#0b675a" },
-  source: { icon: MailWarning, label: "来源", miniMapColor: "#5f7770" },
-  task: { icon: ClipboardList, label: "原始任务", miniMapColor: "#5f7770" },
+  action: { icon: Wrench, label: "工具动作", miniMapColor: "var(--color-chart-warning)" },
+  action_critic: {
+    icon: FileSearch,
+    label: "复核",
+    miniMapColor: "var(--color-node-action-critic)",
+  },
+  approval: { icon: UserCheck, label: "人工审批", miniMapColor: "var(--color-chart-warning)" },
+  audit: { icon: Fingerprint, label: "审计记录", miniMapColor: "var(--color-node-audit)" },
+  config_audit: {
+    icon: FileSearch,
+    label: "配置审计",
+    miniMapColor: "var(--color-node-config-audit)",
+  },
+  context: { icon: Layers3, label: "上下文", miniMapColor: "var(--color-chart-secondary)" },
+  decision: {
+    icon: Gavel,
+    label: "安全决定",
+    miniMapColor: "var(--color-node-decision)",
+  },
+  event: { icon: Activity, label: "运行时事件", miniMapColor: "var(--color-node-event)" },
+  model_intent: {
+    icon: BrainCircuit,
+    label: "模型意图",
+    miniMapColor: "var(--color-chart-secondary)",
+  },
+  policy: { icon: ShieldCheck, label: "事件时策略", miniMapColor: "var(--color-node-event)" },
+  resource: { icon: FileKey, label: "规范化资源", miniMapColor: "var(--color-chart-warning)" },
+  review: {
+    icon: FileSearch,
+    label: "风险组合",
+    miniMapColor: "var(--color-node-action-critic)",
+  },
+  rule: { icon: ShieldCheck, label: "命中规则", miniMapColor: "var(--color-node-decision)" },
+  runtime_result: {
+    icon: Activity,
+    label: "运行时结果",
+    miniMapColor: "var(--color-node-event)",
+  },
+  source: { icon: MailWarning, label: "来源", miniMapColor: "var(--color-chart-slate)" },
+  task: { icon: ClipboardList, label: "原始任务", miniMapColor: "var(--color-chart-slate)" },
 };
 
 function metadataString(metadata: Record<string, unknown>, key: string): string {
@@ -380,8 +407,7 @@ function phaseShortLabel(phase: EvidenceStageId): string {
 }
 
 function nodeSummary(metadata: Record<string, unknown>): string {
-  const summary = displayText(metadataString(metadata, "summary"));
-  return summary.length > 72 ? `${summary.slice(0, 72)}…` : summary;
+  return displayText(metadataString(metadata, "summary"));
 }
 
 function nodeMetaBadge(metadata: Record<string, unknown>): string {
@@ -431,34 +457,42 @@ const kindOptions = computed(() => {
     .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
 });
 
-function buildReachableNodeIds(startNodeId: string | undefined): ReadonlySet<string> | null {
-  if (!startNodeId || !props.graph.nodes.some((node) => node.nodeId === startNodeId)) return null;
+const nodeById = computed(
+  () => new Map(props.graph.nodes.map((node) => [node.nodeId, node] as const)),
+);
+
+const graphAdjacency = computed(() => {
   const incoming = new Map<string, string[]>();
   const outgoing = new Map<string, string[]>();
   props.graph.edges.forEach((edge) => {
-    incoming.set(edge.targetNodeId, [
-      ...(incoming.get(edge.targetNodeId) ?? []),
-      edge.sourceNodeId,
-    ]);
-    outgoing.set(edge.sourceNodeId, [
-      ...(outgoing.get(edge.sourceNodeId) ?? []),
-      edge.targetNodeId,
-    ]);
+    const incomingNodes = incoming.get(edge.targetNodeId);
+    if (incomingNodes) incomingNodes.push(edge.sourceNodeId);
+    else incoming.set(edge.targetNodeId, [edge.sourceNodeId]);
+    const outgoingNodes = outgoing.get(edge.sourceNodeId);
+    if (outgoingNodes) outgoingNodes.push(edge.targetNodeId);
+    else outgoing.set(edge.sourceNodeId, [edge.targetNodeId]);
   });
+  return { incoming, outgoing };
+});
+
+function buildReachableNodeIds(startNodeId: string | undefined): ReadonlySet<string> | null {
+  if (!startNodeId || !nodeById.value.has(startNodeId)) return null;
   const reachable = new Set([startNodeId]);
   const walk = (lookup: Map<string, string[]>) => {
+    const visited = new Set([startNodeId]);
     const queue = [startNodeId];
-    while (queue.length) {
-      const current = queue.shift()!;
+    for (let index = 0; index < queue.length; index += 1) {
+      const current = queue[index]!;
       for (const next of lookup.get(current) ?? []) {
-        if (reachable.has(next)) continue;
+        if (visited.has(next)) continue;
+        visited.add(next);
         reachable.add(next);
         queue.push(next);
       }
     }
   };
-  walk(incoming);
-  walk(outgoing);
+  walk(graphAdjacency.value.incoming);
+  walk(graphAdjacency.value.outgoing);
   return reachable;
 }
 
@@ -540,6 +574,24 @@ function layoutKey(): string {
   });
 }
 
+function getCachedLayout(key: string): PositionedNode[] | undefined {
+  const cached = layoutCache.get(key);
+  if (!cached) return undefined;
+  layoutCache.delete(key);
+  layoutCache.set(key, cached);
+  return cached;
+}
+
+function cacheLayout(key: string, positioned: PositionedNode[]): void {
+  layoutCache.delete(key);
+  layoutCache.set(key, positioned);
+  while (layoutCache.size > LAYOUT_CACHE_MAX_ENTRIES) {
+    const oldestKey = layoutCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    layoutCache.delete(oldestKey);
+  }
+}
+
 function fallbackLayout(nodes: readonly ProvenanceNode[]): PositionedNode[] {
   const phaseIndexes = new Map(phaseDefinitions.map((phase, index) => [phase.id, index]));
   const phaseCounts = new Map<EvidenceStageId, number>();
@@ -584,7 +636,7 @@ async function runLayout(): Promise<void> {
     return;
   }
   const key = layoutKey();
-  const cached = layoutCache.get(key);
+  const cached = getCachedLayout(key);
   isLayouting.value = !cached;
   let positioned = cached;
   if (!positioned) {
@@ -647,7 +699,7 @@ async function runLayout(): Promise<void> {
     try {
       const result = await elk.layout(graph);
       positioned = collectElkPositions(result.children ?? []);
-      layoutCache.set(key, positioned);
+      cacheLayout(key, positioned);
     } catch {
       positioned = fallbackLayout(visibleNodes.value);
     }
@@ -725,12 +777,12 @@ const flowEdges = computed<Edge[]>(() =>
         isAdjacentToSelection ||
         (viewportZoom.value >= 1.15 && !props.selectedNodeId);
       const stroke = edgeStroke(type);
+      const sourceNode = nodeById.value.get(edge.sourceNodeId);
+      const targetNode = nodeById.value.get(edge.targetNodeId);
       return {
-        ariaLabel: `${kindLabel(
-          props.graph.nodes.find((node) => node.nodeId === edge.sourceNodeId)?.kind ?? "节点",
-        )} ${getProvenanceRelationLabel(edge.relation) || edge.relation} ${kindLabel(
-          props.graph.nodes.find((node) => node.nodeId === edge.targetNodeId)?.kind ?? "节点",
-        )}`,
+        ariaLabel: `${kindLabel(sourceNode?.kind ?? "节点")} ${
+          getProvenanceRelationLabel(edge.relation) || edge.relation
+        } ${kindLabel(targetNode?.kind ?? "节点")}`,
         class: [`prov-edge--${type}`, { "prov-edge--dimmed": !isInContext }],
         data: { relationType: type },
         id: edge.edgeId,
@@ -788,11 +840,11 @@ function handleViewportChange(viewport: ViewportTransform) {
 
 function miniMapNodeColor(node: GraphNode): string {
   const kind = (node.data as ProvenanceNodeData | undefined)?.kind ?? "";
-  return kindDefinitions[kind]?.miniMapColor ?? "#657a73";
+  return kindDefinitions[kind]?.miniMapColor ?? "var(--color-node-audit)";
 }
 
 function miniMapNodeStrokeColor(node: GraphNode): string {
-  return node.id === props.selectedNodeId ? "#c9791d" : "#ffffff";
+  return node.id === props.selectedNodeId ? "var(--color-focus)" : "var(--color-surface)";
 }
 
 function togglePhase(phase: EvidenceStageId) {
@@ -1148,29 +1200,13 @@ onBeforeUnmount(() => {
 }
 
 .provenance-flow {
-  background:
-    linear-gradient(
-      90deg,
-      rgb(95 119 112 / 0.035) 0 25%,
-      rgb(40 162 122 / 0.035) 25% 50%,
-      rgb(166 109 32 / 0.035) 50% 75%,
-      rgb(11 103 90 / 0.04) 75% 100%
-    ),
-    var(--color-surface-muted);
+  background: var(--gradient-provenance-lanes-horizontal), var(--color-surface-muted);
   height: 100%;
   width: 100%;
 }
 
 .provenance-workbench--compact .provenance-flow {
-  background:
-    linear-gradient(
-      180deg,
-      rgb(95 119 112 / 0.035) 0 25%,
-      rgb(40 162 122 / 0.035) 25% 50%,
-      rgb(166 109 32 / 0.035) 50% 75%,
-      rgb(11 103 90 / 0.04) 75% 100%
-    ),
-    var(--color-surface-muted);
+  background: var(--gradient-provenance-lanes-vertical), var(--color-surface-muted);
 }
 
 .provenance-flow :deep(.vue-flow__node) {
@@ -1234,7 +1270,7 @@ onBeforeUnmount(() => {
 
 .prov-node--selected {
   border-color: var(--color-focus);
-  box-shadow: 0 0 0 4px rgb(201 121 29 / 0.2);
+  box-shadow: var(--glow-focus-soft);
 }
 
 .prov-node--task,

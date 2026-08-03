@@ -41,7 +41,10 @@
       <div class="evidence-summary">
         <strong>{{ filteredTraces.length }}</strong>
         <span>条匹配证据链</span>
-        <span>一行代表一个 Trace · 按最新事件排序</span>
+        <span
+          >基于最近最多 {{ AUDIT_EVENT_WINDOW_LIMIT }} 条审计事件 · 一行代表一个 Trace ·
+          按最新事件排序</span
+        >
       </div>
       <div class="trace-table-wrap">
         <table class="trace-table">
@@ -111,7 +114,7 @@
       :message="
         store.traces.length
           ? '当前条件下没有证据链，请调整搜索或最终状态。'
-          : '审计事件写入后将在这里汇总同一任务的完整证据。'
+          : '审计事件写入后，将在当前审计窗口内按同一 Trace 汇总证据。'
       "
     />
   </section>
@@ -128,6 +131,7 @@ import EmptyState from "../components/common/EmptyState.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
+import { AUDIT_EVENT_WINDOW_LIMIT } from "../data/sources/dashboard-data-source";
 import { useDashboardStore } from "../stores/dashboardStore";
 import {
   formatDashboardDateTime,

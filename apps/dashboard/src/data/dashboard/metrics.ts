@@ -6,6 +6,19 @@ import type {
   WindowMetrics,
 } from "../../types/dashboard";
 
+const timeLabelFormatter = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  hour12: false,
+  minute: "2-digit",
+});
+const datedTimeLabelFormatter = new Intl.DateTimeFormat("zh-CN", {
+  day: "2-digit",
+  hour: "2-digit",
+  hour12: false,
+  minute: "2-digit",
+  month: "2-digit",
+});
+
 export interface LogicalPolicyEvaluationSelection {
   events: AuditEventRow[];
   duplicatePolicyRecordCount: number;
@@ -162,15 +175,7 @@ export function groupDecisionTrend(events: readonly AuditEventRow[]): DecisionTr
     if (Number.isNaN(date.getTime())) continue;
     date.setMinutes(Math.floor(date.getMinutes() / bucketMinutes) * bucketMinutes, 0, 0);
     const bucketTime = date.getTime();
-    const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(
-      date.getMinutes(),
-    ).padStart(2, "0")}`;
-    const label = includeDate
-      ? `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(
-          2,
-          "0",
-        )} ${timeLabel}`
-      : timeLabel;
+    const label = (includeDate ? datedTimeLabelFormatter : timeLabelFormatter).format(date);
     const point = buckets.get(bucketTime) ?? { label, allow: 0, ask: 0, deny: 0 };
     if (event.decision !== "unknown") point[event.decision] += 1;
     buckets.set(bucketTime, point);

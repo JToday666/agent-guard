@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const guardedServerErrorMessage = "Guard API 暂时无法完成请求，请稍后重试。";
+const guardedNotFoundMessage = "请求的资源不存在或已失效。";
+
 const eventDto = {
   audit_id: "audit_api_001",
   schema_version: "0.3",
@@ -260,9 +263,15 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
 
   await installApiRoutes(page, { failConfigAudit: true });
+  const auditRequestPromise = page.waitForRequest((request) =>
+    request.url().includes("/api/v1/audit/events?"),
+  );
   await page.goto("/overview");
+  const auditHeaders = (await auditRequestPromise).headers();
 
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
+  expect(auditHeaders.accept).toBe("application/json");
+  expect(auditHeaders["content-type"]).toBeUndefined();
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
   const deniedMetric = page.locator(".metric-strip__item").filter({ hasText: "拒绝" });
   await expect(deniedMetric.locator("dd")).toHaveText("0");
@@ -286,7 +295,8 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
 
   await page.goto("/system");
   await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
-  await expect(page.locator(".system-page")).toContainText("配置审计接口暂不可用");
+  await expect(page.locator(".system-page")).toContainText(guardedServerErrorMessage);
+  await expect(page.locator(".system-page")).not.toContainText("配置审计接口暂不可用");
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
   expect(runtimeErrors).toEqual([]);
 });
@@ -295,7 +305,7 @@ test("API mode never falls back to fixture evidence after a trace failure", asyn
   await installApiRoutes(page, { events: [], traceStatus: 404 });
   await page.goto("/evidence/trace_api_001");
 
-  await expect(page.getByRole("alert")).toContainText("请求失败 (404)");
+  await expect(page.getByRole("alert")).toContainText(guardedNotFoundMessage);
   await expect(page.locator("body")).not.toContainText("trace_001");
   await expect(page.locator("body")).not.toContainText("/private/token.txt");
   await expect(page.locator("body")).not.toContainText("总结邮件内容");
@@ -362,11 +372,12 @@ test("API mode retries provenance independently after a canonical endpoint failu
   await installApiRoutes(page, { provenanceFailuresBeforeSuccess: 1 });
   await page.goto("/evidence/trace_api_001");
 
-  await expect(page.getByText("溯源关系接口暂不可用")).toBeVisible();
+  await expect(page.getByText(guardedServerErrorMessage)).toBeVisible();
+  await expect(page.locator(".trace-provenance")).not.toContainText("溯源关系接口暂不可用");
   await page.getByRole("button", { name: "重新加载溯源关系" }).click();
 
   await expect(page.locator(".provenance-flow")).toBeVisible();
-  await expect(page.getByText("溯源关系接口暂不可用")).toHaveCount(0);
+  await expect(page.getByText(guardedServerErrorMessage)).toHaveCount(0);
 });
 
 test("API mode disables an approval when its expiry passes without another poll", async ({

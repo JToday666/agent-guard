@@ -67,7 +67,10 @@
                   }"
                 ></i>
               </span>
-              <b>{{ item.riskScore ?? "--" }}</b>
+              <b
+                ><span>{{ item.riskScore ?? "--" }}</span
+                ><small>{{ getRiskSeverityLabel(item.severity) }}</small></b
+              >
             </RouterLink>
           </div>
           <EmptyState
@@ -172,7 +175,11 @@ import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
-import { formatAuditHeadHash, formatDashboardDateTime } from "../utils/dashboard-formatters";
+import {
+  formatAuditHeadHash,
+  formatDashboardDateTime,
+  getRiskSeverityLabel,
+} from "../utils/dashboard-formatters";
 
 defineOptions({ name: "OverviewPage" });
 
@@ -188,6 +195,7 @@ const triageItems = computed(() => {
       kind: "待审批",
       resource: approval.resource,
       riskScore: approval.riskScore,
+      severity: approval.severity,
       tone: "warning" as const,
       tool: approval.tool,
       to: `/approvals/${approval.id}`,
@@ -206,6 +214,7 @@ const triageItems = computed(() => {
       kind: "高风险",
       resource: event.resource,
       riskScore: event.riskScore,
+      severity: event.severity,
       tone: "danger" as const,
       tool: event.tool,
       to: `/evidence/${event.traceId}?event_id=${event.id}`,
@@ -407,9 +416,17 @@ function handleRefresh() {
 }
 
 .triage-queue__rows b {
+  align-items: end;
   color: var(--color-danger);
+  display: grid;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.triage-queue__rows b small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+  font-weight: var(--font-weight-medium);
 }
 
 .overview-secondary {

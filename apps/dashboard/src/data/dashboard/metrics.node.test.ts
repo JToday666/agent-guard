@@ -146,8 +146,13 @@ test("creates an explicit client-derived audit window scope", () => {
 });
 
 test("groups only logical policy decisions into chronological buckets", () => {
-  const firstHour = `${String(new Date("2026-06-22T06:00:00Z").getHours()).padStart(2, "0")}:00`;
-  const secondHour = `${String(new Date("2026-06-22T07:00:00Z").getHours()).padStart(2, "0")}:00`;
+  const formatter = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+  });
+  const firstHour = formatter.format(new Date("2026-06-22T06:00:00Z"));
+  const secondHour = formatter.format(new Date("2026-06-22T07:00:00Z"));
   const outcome = event({
     ...events[1],
     id: "audit-outcome",

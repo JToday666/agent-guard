@@ -163,12 +163,7 @@ const emit = defineEmits<{ "select-event": [eventId: string] }>();
 }
 
 .stage-item--missing {
-  background: linear-gradient(
-    135deg,
-    transparent 0 48%,
-    rgb(89 109 102 / 0.035) 48% 52%,
-    transparent 52% 100%
-  );
+  background: var(--gradient-evidence-missing);
 }
 
 .stage-item--missing button,
