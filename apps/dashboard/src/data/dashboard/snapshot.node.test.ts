@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type {
-  AggregateMetrics,
-  ApprovalRequest,
-  AuditEventRow,
-  EvaluationRun,
-} from "../../types/dashboard.ts";
+import type { ApprovalRequest, AuditEventRow, EvaluationRun } from "../../types/dashboard.ts";
 import { createAuditWindow } from "./metrics.ts";
 import {
-  hasSameAggregateMetrics,
   hasSameAuditWindow,
   hasSameEventWindow,
   hasSameEvaluationRun,
@@ -48,25 +42,6 @@ function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
     ...overrides,
   };
 }
-
-const aggregateMetrics: AggregateMetrics = {
-  scope: {
-    kind: "aggregate_history",
-    source: "legacy_metrics_api",
-    from: null,
-    to: null,
-    deduplication: "backend_unspecified",
-  },
-  reportedEventCount: 1,
-  allowCount: 0,
-  denyCount: 1,
-  askCount: 0,
-  reportedInterventionCount: 1,
-  reportedInterventionRate: 1,
-  reportedFpr: null,
-  reportedFnr: null,
-  reportedAverageLatencyMs: 3,
-};
 
 function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -122,17 +97,6 @@ test("compares audit windows and their scoped metrics atomically", () => {
   assert.equal(hasSameAuditWindow(window, createAuditWindow([makeEvent()], window.scope)), true);
   assert.equal(
     hasSameAuditWindow(window, createAuditWindow([makeEvent({ decision: "allow" })], window.scope)),
-    false,
-  );
-});
-
-test("compares aggregate metrics by scope and reported values", () => {
-  assert.equal(hasSameAggregateMetrics(aggregateMetrics, { ...aggregateMetrics }), true);
-  assert.equal(
-    hasSameAggregateMetrics(aggregateMetrics, {
-      ...aggregateMetrics,
-      reportedInterventionCount: 0,
-    }),
     false,
   );
 });

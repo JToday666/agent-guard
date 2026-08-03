@@ -1,6 +1,12 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
+import type { PluginHookName } from "openclaw/plugin-sdk/types";
 
+import {
+  OPENCLAW_ENFORCEMENT_HOOKS,
+  OPENCLAW_OBSERVATION_HOOKS,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../hook-contract.mjs";
 import {
   GuardApiClient,
   buildPluginConfig,
@@ -33,39 +39,6 @@ import type {
 } from "./types.js";
 
 const PLUGIN_VERSION = "0.1.0";
-
-const OBSERVATION_HOOKS = [
-  "gateway_start",
-  "gateway_stop",
-  "session_start",
-  "session_end",
-  "before_compaction",
-  "after_compaction",
-  "subagent_spawned",
-  "subagent_ended",
-  "model_call_started",
-  "model_call_ended",
-  "cron_changed",
-  "resolve_exec_env",
-] as const;
-
-const PROMPT_MODEL_HOOKS = ["before_prompt_build", "llm_input", "llm_output"] as const;
-const BLOCKING_HOOKS = ["before_tool_call", "message_sending", "before_install"] as const;
-const ENFORCEMENT_HOOKS = [
-  ...BLOCKING_HOOKS,
-  "before_prompt_build",
-  "llm_input",
-  "before_agent_finalize",
-] as const;
-const ALL_REGISTERED_HOOKS = [
-  ...BLOCKING_HOOKS,
-  ...PROMPT_MODEL_HOOKS,
-  "tool_result_persist",
-  "message_received",
-  "before_message_write",
-  "before_agent_finalize",
-  ...OBSERVATION_HOOKS,
-] as const;
 
 type SessionState = {
   userTask?: string;
@@ -439,7 +412,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       { priority: 100, timeoutMs: 10_000 },
     );
 
-    for (const hookName of OBSERVATION_HOOKS) {
+    for (const hookName of OPENCLAW_OBSERVATION_HOOKS as readonly PluginHookName[]) {
       api.on(
         hookName,
         (event: unknown, context: Record<string, unknown>) => {
@@ -916,7 +889,7 @@ function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeCli
       .submitHeartbeat({
         pluginVersion: PLUGIN_VERSION,
         runtimeVersion: runtimeVersion(),
-        hooks: [...ALL_REGISTERED_HOOKS],
+        hooks: [...OPENCLAW_REQUIRED_HOOKS],
         capabilities: {
           event_types: [
             "tool_call_proposed",
@@ -927,8 +900,8 @@ function scheduleHeartbeat(config: ReturnType<typeof buildPluginConfig>, makeCli
             "memory_write_proposed",
             "message_send_proposed",
           ],
-          blocking_hooks: [...ENFORCEMENT_HOOKS],
-          observation_hooks: [...OBSERVATION_HOOKS, "message_received"],
+          blocking_hooks: [...OPENCLAW_ENFORCEMENT_HOOKS],
+          observation_hooks: [...OPENCLAW_OBSERVATION_HOOKS, "message_received"],
           redaction_hooks: ["tool_result_persist", "before_message_write", "before_agent_finalize"],
           fail_closed_stages: config.failClosedStages,
           enforcement_mode: config.enforcementMode,

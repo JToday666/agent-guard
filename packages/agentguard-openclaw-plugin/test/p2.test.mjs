@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { OPENCLAW_REQUIRED_HOOKS } from "../hook-contract.mjs";
 import { GuardApiClient } from "../dist/guard-api-client.js";
 import {
   buildRuntimeObservationAuditEvent,
@@ -174,30 +175,7 @@ test("plugin entry registers P2 hooks and handles before_install fail-closed", a
     });
 
     const names = new Set(registered.map((entry) => entry.name));
-    for (const name of [
-      "before_tool_call",
-      "message_sending",
-      "before_prompt_build",
-      "llm_input",
-      "llm_output",
-      "before_install",
-      "tool_result_persist",
-      "message_received",
-      "before_message_write",
-      "before_agent_finalize",
-      "gateway_start",
-      "gateway_stop",
-      "session_start",
-      "session_end",
-      "before_compaction",
-      "after_compaction",
-      "subagent_spawned",
-      "subagent_ended",
-      "model_call_started",
-      "model_call_ended",
-      "cron_changed",
-      "resolve_exec_env",
-    ]) {
+    for (const name of OPENCLAW_REQUIRED_HOOKS) {
       assert.equal(names.has(name), true, `${name} registered`);
     }
 

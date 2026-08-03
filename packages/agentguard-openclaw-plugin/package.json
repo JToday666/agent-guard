@@ -8,6 +8,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "hook-contract.d.mts",
+    "hook-contract.mjs",
     "openclaw.plugin.json",
     "README.md"
   ],

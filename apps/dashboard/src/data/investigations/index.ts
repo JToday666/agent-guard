@@ -17,19 +17,10 @@ export interface RuleFilterOption {
 export type InvestigationEventResolution =
   { status: "idle" } | { event: AuditEventRow; status: "found" } | { status: "not-found" };
 
-export interface TraceConclusion {
-  title: string;
-  reason: string;
-  result: string;
-  ruleHits: string[];
-}
-
 type TraceSummaryEvent = Pick<
   AuditEventRow,
   "approvalId" | "caseId" | "decision" | "occurredAt" | "raw" | "reason"
 >;
-
-type TraceConclusionEvent = Pick<AuditEventRow, "decision" | "reason" | "riskScore" | "ruleHits">;
 
 export function buildTraceSummary(
   id: string,
@@ -75,36 +66,6 @@ export function buildTraceSummary(
             ? "allowed"
             : "unknown",
     approvalId,
-  };
-}
-
-export function buildTraceConclusion(events: TraceConclusionEvent[]): TraceConclusion | undefined {
-  if (!events.length) return undefined;
-  const hasDeny = events.some((event) => event.decision === "deny");
-  const hasAsk = !hasDeny && events.some((event) => event.decision === "ask");
-  const hasAllow = !hasDeny && !hasAsk && events.some((event) => event.decision === "allow");
-  const outcomeDecision = hasDeny ? "deny" : hasAsk ? "ask" : hasAllow ? "allow" : "unknown";
-  const outcomeEvent = events
-    .filter((event) => event.decision === outcomeDecision)
-    .sort((left, right) => (right.riskScore ?? -1) - (left.riskScore ?? -1))[0]!;
-
-  return {
-    title: hasDeny
-      ? "策略拒绝"
-      : hasAsk
-        ? "需要人工审批"
-        : hasAllow
-          ? "策略允许"
-          : "策略决定未记录",
-    reason: outcomeEvent.reason,
-    result: hasDeny
-      ? "已记录拒绝决定；是否实际执行及副作用数量仍需运行时回执确认"
-      : hasAsk
-        ? "已记录需审批决定；审批结果与实际执行状态需分别确认"
-        : hasAllow
-          ? "已记录允许决定；实际执行状态需以运行时回执为准"
-          : "关键策略字段缺失，不能推断运行时结果",
-    ruleHits: outcomeEvent.ruleHits,
   };
 }
 

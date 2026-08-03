@@ -1,3 +1,7 @@
+import {
+  OPENCLAW_REQUIRED_HOOK_COUNT,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../hook-contract.mjs";
 import type {
   AgentGuardPluginConfig,
   AdapterHeartbeatInput,
@@ -34,30 +38,6 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   diagnosticLogging: false,
   runtimeId: "openclaw",
   agentId: "main",
-  enabledHooks: [
-    "before_tool_call",
-    "message_sending",
-    "before_install",
-    "before_prompt_build",
-    "llm_input",
-    "llm_output",
-    "tool_result_persist",
-    "message_received",
-    "before_message_write",
-    "before_agent_finalize",
-    "gateway_start",
-    "gateway_stop",
-    "session_start",
-    "session_end",
-    "before_compaction",
-    "after_compaction",
-    "subagent_spawned",
-    "subagent_ended",
-    "model_call_started",
-    "model_call_ended",
-    "cron_changed",
-    "resolve_exec_env",
-  ],
   failClosedStages: ["before_tool_call", "message_sending", "before_install", "before_prompt_build", "llm_input"],
   redaction: { enabled: true, previewLimit: 2000 },
   heartbeatIntervalMs: 60000,
@@ -119,6 +99,7 @@ export class GuardApiClient {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
+    const hooks = input.hooks.length > 0 ? input.hooks : [...OPENCLAW_REQUIRED_HOOKS];
 
     const response = await this.request("/v1/adapters/openclaw/heartbeat", {
       method: "POST",
@@ -132,9 +113,9 @@ export class GuardApiClient {
         runtime_version: input.runtimeVersion ?? null,
         source: "openclaw-plugin",
         capabilities: input.capabilities,
-        hooks: input.hooks.length > 0 ? input.hooks : this.config.enabledHooks,
-        hook_count: input.hooks.length,
-        expected_hook_count: this.config.enabledHooks.length,
+        hooks,
+        hook_count: hooks.length,
+        expected_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
         fail_closed_stages: this.config.failClosedStages,
         enforcement_mode: this.config.enforcementMode,
       }),
@@ -213,7 +194,6 @@ export function buildPluginConfig(
     diagnosticLogging: input?.diagnosticLogging === true,
     runtimeId: nonEmptyString(input?.runtimeId, DEFAULT_CONFIG.runtimeId),
     agentId: nonEmptyString(input?.agentId, DEFAULT_CONFIG.agentId),
-    enabledHooks: stringArray(input?.enabledHooks, DEFAULT_CONFIG.enabledHooks),
     failClosedStages: stringArray(input?.failClosedStages, DEFAULT_CONFIG.failClosedStages),
     redaction: redactionConfig(input?.redaction, DEFAULT_CONFIG.redaction),
     heartbeatIntervalMs: positiveInteger(input?.heartbeatIntervalMs, DEFAULT_CONFIG.heartbeatIntervalMs),

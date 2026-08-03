@@ -1,5 +1,4 @@
 import type {
-  AggregateMetrics,
   ApprovalRequest,
   AuditEventRow,
   AuditWindow,
@@ -88,25 +87,6 @@ export function hasSameAuditWindow(left: AuditWindow, right: AuditWindow): boole
     left.scope.deduplication === right.scope.deduplication &&
     hasSameEventWindow(left.events, right.events) &&
     hasSameWindowMetrics(left.metrics, right.metrics)
-  );
-}
-
-export function hasSameAggregateMetrics(left: AggregateMetrics, right: AggregateMetrics): boolean {
-  return (
-    left.scope.kind === right.scope.kind &&
-    left.scope.source === right.scope.source &&
-    left.scope.from === right.scope.from &&
-    left.scope.to === right.scope.to &&
-    left.scope.deduplication === right.scope.deduplication &&
-    left.reportedEventCount === right.reportedEventCount &&
-    left.allowCount === right.allowCount &&
-    left.denyCount === right.denyCount &&
-    left.askCount === right.askCount &&
-    left.reportedInterventionCount === right.reportedInterventionCount &&
-    left.reportedInterventionRate === right.reportedInterventionRate &&
-    left.reportedFpr === right.reportedFpr &&
-    left.reportedFnr === right.reportedFnr &&
-    left.reportedAverageLatencyMs === right.reportedAverageLatencyMs
   );
 }
 

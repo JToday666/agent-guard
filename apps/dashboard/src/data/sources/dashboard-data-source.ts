@@ -1,6 +1,5 @@
 import type {
   AdapterStatus,
-  AggregateMetrics,
   ApprovalRequest,
   ApprovalResolution,
   AuditWindow,
@@ -33,7 +32,6 @@ export interface ConfigAuditFindingFilters {
 
 export interface DashboardDataSource {
   getAuditWindow(filters?: EventFilters, signal?: AbortSignal): Promise<AuditWindow>;
-  getAggregateMetrics(filters?: EventFilters, signal?: AbortSignal): Promise<AggregateMetrics>;
   getPendingApprovals(signal?: AbortSignal): Promise<ApprovalRequest[]>;
   resolveApproval(
     approval: ApprovalRequest,

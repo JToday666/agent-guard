@@ -3,7 +3,6 @@ export type DashboardRefreshScope =
 
 export type DashboardRefreshResource =
   | "adapter"
-  | "aggregateMetrics"
   | "approvals"
   | "auditWindow"
   | "auditIntegrity"

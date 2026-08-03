@@ -11,6 +11,7 @@ import type {
   GuardProvenanceDto,
   GuardTraceDetailDto,
 } from "./guard-api-types";
+import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import type {
   AdapterStatus,
   AggregateMetrics,
@@ -446,7 +447,7 @@ export function mapConfigAuditFindingRecord(
 }
 
 export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
-  const expectedHookCount = readNumber(dto.expected_hook_count, 16);
+  const expectedHookCount = readNumber(dto.expected_hook_count, OPENCLAW_REQUIRED_HOOK_COUNT);
   const hookCount = readNullableNumber(dto.hook_count);
   return {
     status:

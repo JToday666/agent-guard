@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+
 test("evaluation page shows latest run, attack ASR and sample cases", async ({ page }) => {
   await page.goto("/evaluation");
 
@@ -34,7 +36,11 @@ test("system page shows OpenClaw verify status and config findings", async ({ pa
 
   const verifyPanel = page.locator(".adapter-verify");
   await expect(page.getByRole("heading", { name: "OpenClaw 插件验证" })).toBeVisible();
-  await expect(verifyPanel.locator(".adapter-verify__headline").getByText("16 / 16")).toBeVisible();
+  await expect(
+    verifyPanel
+      .locator(".adapter-verify__headline")
+      .getByText(`${OPENCLAW_REQUIRED_HOOK_COUNT} / ${OPENCLAW_REQUIRED_HOOK_COUNT}`),
+  ).toBeVisible();
   await expect(page.getByText("OpenClaw 2026.6.6")).toBeVisible();
   await expect(page.getByText("Raw conversation access enabled")).toBeVisible();
   await expect(

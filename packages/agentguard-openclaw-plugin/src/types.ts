@@ -11,7 +11,6 @@ export type AgentGuardPluginConfig = {
   diagnosticLogging: boolean;
   runtimeId: string;
   agentId: string;
-  enabledHooks: string[];
   failClosedStages: string[];
   redaction: RedactionConfig;
   heartbeatIntervalMs: number;

@@ -4,7 +4,6 @@ import test from "node:test";
 import type { AuditEventRow } from "../../types/dashboard.ts";
 import {
   buildInvestigationIndex,
-  buildTraceConclusion,
   buildTraceSummary,
   filterInvestigationEvents,
   getRuleFilterOptions,
@@ -193,34 +192,7 @@ test("rejects an event that does not belong to the requested trace", () => {
   });
 });
 
-test("builds a concise conclusion from the highest-risk trace event", () => {
-  const conclusion = buildTraceConclusion([
-    event({
-      blocked: true,
-      decision: "ask",
-      id: "approval",
-      reason: "发送目标不在当前任务允许范围内，需要人工确认",
-      riskScore: 64,
-      ruleHits: ["P005_external_send", "P004_task_mismatch"],
-    }),
-    event({
-      decision: "allow",
-      id: "context",
-      reason: "上下文进入任务",
-      riskScore: 28,
-      ruleHits: [],
-    }),
-  ]);
-
-  assert.deepEqual(conclusion, {
-    reason: "发送目标不在当前任务允许范围内，需要人工确认",
-    result: "已记录需审批决定；审批结果与实际执行状态需分别确认",
-    ruleHits: ["P005_external_send", "P004_task_mismatch"],
-    title: "需要人工审批",
-  });
-});
-
-test("keeps approval linkage and conclusion evidence aligned with the trace outcome", () => {
+test("keeps approval linkage aligned with the trace outcome", () => {
   const approvalEvent = event({
     approvalId: "approval-1",
     decision: "ask",
@@ -248,12 +220,6 @@ test("keeps approval linkage and conclusion evidence aligned with the trace outc
     buildTraceSummary("trace-1", [approvalEvent, deniedEvent, laterAllow])?.approvalId,
     "approval-1",
   );
-  assert.deepEqual(buildTraceConclusion([approvalEvent, deniedEvent, laterAllow]), {
-    reason: "危险动作被策略拒绝",
-    result: "已记录拒绝决定；是否实际执行及副作用数量仍需运行时回执确认",
-    ruleHits: ["P103_code_execution_abuse"],
-    title: "策略拒绝",
-  });
 });
 
 test("uses an explicitly recorded approval result for the trace list status", () => {
