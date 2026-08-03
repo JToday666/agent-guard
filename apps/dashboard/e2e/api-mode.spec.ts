@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const guardedServerErrorMessage = "Guard API 暂时无法完成请求，请稍后重试。";
+const guardedNotFoundMessage = "请求的资源不存在或已失效。";
+
 const eventDto = {
   audit_id: "audit_api_001",
   schema_version: "0.3",
@@ -19,8 +22,13 @@ const eventDto = {
   resource_targets: ["exfil@example.invalid"],
   rule_hits: ["P005_external_send", "P004_task_mismatch"],
   reason: "发送目标不在当前任务允许范围内，需要人工确认",
-  links: { event_id: "evt_api_001" },
+  links: {
+    action_id: "action_api_001",
+    decision_id: "decision_api_001",
+    event_id: "evt_api_001",
+  },
   latency_ms: 4,
+  record_type: "policy_evaluation",
   integrity: {
     sequence: 1,
     prev_hash: null,
@@ -255,9 +263,15 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
 
   await installApiRoutes(page, { failConfigAudit: true });
+  const auditRequestPromise = page.waitForRequest((request) =>
+    request.url().includes("/api/v1/audit/events?"),
+  );
   await page.goto("/overview");
+  const auditHeaders = (await auditRequestPromise).headers();
 
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
+  expect(auditHeaders.accept).toBe("application/json");
+  expect(auditHeaders["content-type"]).toBeUndefined();
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
   const deniedMetric = page.locator(".metric-strip__item").filter({ hasText: "拒绝" });
   await expect(deniedMetric.locator("dd")).toHaveText("0");
@@ -281,7 +295,8 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
 
   await page.goto("/system");
   await expect(page.getByRole("heading", { name: "系统状态" })).toBeVisible();
-  await expect(page.locator(".system-page")).toContainText("配置审计接口暂不可用");
+  await expect(page.locator(".system-page")).toContainText(guardedServerErrorMessage);
+  await expect(page.locator(".system-page")).not.toContainText("配置审计接口暂不可用");
   await expect(page.locator("body")).not.toContainText(/P\d{3}/);
   expect(runtimeErrors).toEqual([]);
 });
@@ -290,7 +305,7 @@ test("API mode never falls back to fixture evidence after a trace failure", asyn
   await installApiRoutes(page, { events: [], traceStatus: 404 });
   await page.goto("/evidence/trace_api_001");
 
-  await expect(page.getByRole("alert")).toContainText("请求失败 (404)");
+  await expect(page.getByRole("alert")).toContainText(guardedNotFoundMessage);
   await expect(page.locator("body")).not.toContainText("trace_001");
   await expect(page.locator("body")).not.toContainText("/private/token.txt");
   await expect(page.locator("body")).not.toContainText("总结邮件内容");
@@ -357,11 +372,12 @@ test("API mode retries provenance independently after a canonical endpoint failu
   await installApiRoutes(page, { provenanceFailuresBeforeSuccess: 1 });
   await page.goto("/evidence/trace_api_001");
 
-  await expect(page.getByText("溯源关系接口暂不可用")).toBeVisible();
+  await expect(page.getByText(guardedServerErrorMessage)).toBeVisible();
+  await expect(page.locator(".trace-provenance")).not.toContainText("溯源关系接口暂不可用");
   await page.getByRole("button", { name: "重新加载溯源关系" }).click();
 
   await expect(page.locator(".provenance-flow")).toBeVisible();
-  await expect(page.getByText("溯源关系接口暂不可用")).toHaveCount(0);
+  await expect(page.getByText(guardedServerErrorMessage)).toHaveCount(0);
 });
 
 test("API mode disables an approval when its expiry passes without another poll", async ({
@@ -395,7 +411,7 @@ test("API mode disables an approval when its expiry passes without another poll"
   });
   await page.goto("/approvals");
 
-  const denyButton = page.getByRole("button", { name: "拒绝并阻断" });
+  const denyButton = page.getByRole("button", { name: "拒绝授权" });
   await expect(denyButton).toBeEnabled();
   await expect(page.locator(".approval-queue time")).toContainText("分钟后过期");
   await page.clock.fastForward(61_000);
@@ -459,12 +475,12 @@ test("API polling requests only common data and the active page domain", async (
 
   await page.goto("/overview");
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
-  await expect(page.locator(".metric-strip")).toContainText("审计事件");
+  await expect(page.locator(".metric-strip")).toContainText("审计记录");
   await expect(page.locator(".freshness--ready").first()).toBeVisible();
 
   const overviewPaths = [...requestedPaths];
   expect(overviewPaths).toContain("/api/v1/audit/events");
-  expect(overviewPaths).toContain("/api/v1/metrics/eval");
+  expect(overviewPaths).not.toContain("/api/v1/metrics/eval");
   expect(overviewPaths).not.toContain("/api/v1/policies/current");
   expect(overviewPaths).not.toContain("/api/v1/config-audit/findings");
   expect(overviewPaths).not.toContain("/api/v1/adapters/openclaw/status");
@@ -502,5 +518,5 @@ test("manual refresh bypasses the shared-resource freshness window", async ({ pa
   requestedPaths.length = 0;
   await page.getByRole("button", { name: "刷新数据" }).click();
   await expect.poll(() => requestedPaths.includes("/api/v1/audit/events")).toBe(true);
-  expect(requestedPaths).toContain("/api/v1/metrics/eval");
+  expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
 });

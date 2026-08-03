@@ -2,7 +2,6 @@
   <div class="evidence-dossier">
     <section>
       <header>
-        <span>TOOL & RESOURCE</span>
         <h3>工具、参数与规范化资源</h3>
       </header>
       <dl class="evidence-dossier__facts">
@@ -39,7 +38,6 @@
 
     <section>
       <header>
-        <span>RULE & RISK</span>
         <h3>命中规则与风险组合</h3>
       </header>
       <div class="risk-composition">
@@ -96,7 +94,6 @@
 
     <section>
       <header>
-        <span>POLICY SNAPSHOT</span>
         <h3>事件时策略与审计窗口</h3>
       </header>
       <dl class="evidence-dossier__facts evidence-dossier__facts--grid">
@@ -182,14 +179,6 @@ const safeRawEvidence = computed(() =>
 .evidence-dossier header {
   display: grid;
   gap: var(--space-1);
-}
-
-.evidence-dossier header span {
-  color: var(--color-active);
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-11);
-  font-weight: var(--font-weight-bold);
-  letter-spacing: 0.06em;
 }
 
 .evidence-dossier h3 {

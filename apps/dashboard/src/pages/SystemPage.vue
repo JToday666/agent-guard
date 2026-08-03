@@ -355,7 +355,7 @@ const statusItems = computed(() => [
   {
     checkedAt: formatTime(store.lastUpdatedAt),
     checkedAtIso: store.lastUpdatedAt,
-    detail: "仅本次放行或拒绝并阻断",
+    detail: "仅本次放行或拒绝授权",
     label: "审批队列",
     tone: store.pendingCount ? ("warning" as const) : ("success" as const),
     value: `${store.pendingCount} 待处理`,

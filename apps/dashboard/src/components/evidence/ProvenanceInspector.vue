@@ -1,7 +1,6 @@
 <template>
   <aside class="provenance-inspector" aria-labelledby="provenance-inspector-title">
     <header>
-      <span>NODE INSPECTOR</span>
       <h3 id="provenance-inspector-title">节点检查器</h3>
     </header>
 
@@ -169,14 +168,6 @@ const safeMetadata = computed(() => {
   display: grid;
   gap: var(--space-1);
   padding-bottom: var(--space-3);
-}
-
-.provenance-inspector > header span {
-  color: var(--color-active);
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-11);
-  font-weight: var(--font-weight-bold);
-  letter-spacing: 0.06em;
 }
 
 .provenance-inspector h3 {

@@ -12,6 +12,11 @@ export type DataStatus = "idle" | "loading" | "ready" | "stale" | "error";
 
 export interface AuditEventRow {
   id: string;
+  auditSequence: number | null;
+  eventId: string | null;
+  decisionId: string | null;
+  actionId: string | null;
+  recordType: AuditRecordType;
   occurredAt: string;
   time: string;
   decision: DecisionStatus;
@@ -260,16 +265,63 @@ export interface TraceEvidenceViewModel {
   integrity: AuditChainEvidence;
 }
 
-export interface EvalMetrics {
-  eventCount: number;
+export interface AuditWindowScope {
+  kind: "audit_window";
+  source: "legacy_audit_events" | "audit_window_api";
+  limit: number;
+  returnedRecordCount: number;
+  hasMore: boolean | null;
+  from: string | null;
+  to: string | null;
+  deduplication: "logical_policy_evaluation";
+}
+
+export interface WindowMetrics {
+  evaluationCount: number;
+  unknownDecisionCount: number;
   allowCount: number;
   denyCount: number;
   askCount: number;
-  blockedCount: number;
-  blockRate: number | null;
-  fpr: number | null;
-  fnr: number | null;
-  averageLatencyMs: number | null;
+  interventionCount: number;
+  interventionRate: number | null;
+  policyDenyRate: number | null;
+  approvalTriggerRate: number | null;
+  policyFpr: number | null;
+  policyFnr: number | null;
+  benignLabelCount: number;
+  maliciousLabelCount: number;
+  unlabeledCount: number;
+  averageDecisionLatencyMs: number | null;
+  latencySampleCount: number;
+  duplicatePolicyRecordCount: number;
+  legacyFallbackCount: number;
+}
+
+export interface AuditWindow {
+  scope: AuditWindowScope;
+  events: AuditEventRow[];
+  metrics: WindowMetrics;
+}
+
+export interface AggregateMetricScope {
+  kind: "aggregate_history" | "trace_history";
+  source: "legacy_metrics_api" | "policy_metrics_api";
+  from: string | null;
+  to: string | null;
+  deduplication: "backend_unspecified" | "logical_policy_evaluation";
+}
+
+export interface AggregateMetrics {
+  scope: AggregateMetricScope;
+  reportedEventCount: number;
+  allowCount: number;
+  denyCount: number;
+  askCount: number;
+  reportedInterventionCount: number;
+  reportedInterventionRate: number | null;
+  reportedFpr: number | null;
+  reportedFnr: number | null;
+  reportedAverageLatencyMs: number | null;
 }
 
 export interface DecisionTrendPoint {
@@ -291,7 +343,7 @@ export interface ApprovalResolution {
   decision: "allow_once" | "deny";
 }
 
-export interface EvaluationSummary {
+export interface EvaluationRun {
   runId: string | null;
   runAt: string | null;
   datasetId: string | null;
@@ -301,10 +353,6 @@ export interface EvaluationSummary {
   asrAfter: number | null;
   perAttack: EvaluationAttackMetric[];
   cases: EvaluationCase[];
-  blockRate: number | null;
-  fpr: number | null;
-  fnr: number | null;
-  averageLatencyMs: number | null;
 }
 
 export interface EvaluationAttackMetric {
@@ -329,7 +377,7 @@ export interface TraceDetail {
   id: string;
   events: AuditEventRow[];
   approvals: ApprovalRequest[];
-  metrics: EvalMetrics;
+  aggregateMetrics: AggregateMetrics;
   loadedAt: string;
 }
 

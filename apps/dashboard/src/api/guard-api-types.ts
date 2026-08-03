@@ -17,10 +17,10 @@ export interface GuardAuditEventDto {
   attack_type: string | null;
   is_malicious: boolean | null;
   summary: string;
-  decision: PolicyDecision;
-  risk_score: number;
-  severity: Exclude<RiskSeverity, "unknown">;
-  blocked: boolean;
+  decision: PolicyDecision | null;
+  risk_score: number | null;
+  severity: Exclude<RiskSeverity, "unknown"> | null;
+  blocked: boolean | null;
   resource_targets: string[];
   rule_hits: string[];
   reason: string;

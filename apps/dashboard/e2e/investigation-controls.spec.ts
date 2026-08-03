@@ -15,7 +15,7 @@ test("CSV export uses rule names without raw policy numbers", async ({ page }) =
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "导出当前筛选结果" }).click(),
+    page.getByRole("button", { name: "导出当前窗口筛选结果" }).click(),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("CSV 下载流不可用");

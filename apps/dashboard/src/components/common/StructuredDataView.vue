@@ -20,6 +20,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, useId } from "vue";
 
+import { redactSensitiveData } from "../../utils/data-redaction";
 import { serializeStructuredData } from "../../utils/structured-data";
 
 defineOptions({ name: "StructuredDataView" });
@@ -27,10 +28,12 @@ const props = defineProps<{ value: unknown }>();
 const titleId = useId();
 const copyLabel = ref("复制 JSON");
 let resetCopyTimer: number | undefined;
-const serializedValue = computed(() => serializeStructuredData(props.value));
+const safeValue = computed(() => redactSensitiveData(props.value));
+const serializedValue = computed(() => serializeStructuredData(safeValue.value));
 const entries = computed(() => {
-  if (!props.value || typeof props.value !== "object" || Array.isArray(props.value)) return [];
-  return Object.entries(props.value as Record<string, unknown>)
+  if (!safeValue.value || typeof safeValue.value !== "object" || Array.isArray(safeValue.value))
+    return [];
+  return Object.entries(safeValue.value as Record<string, unknown>)
     .slice(0, 8)
     .map(([key, value]) => ({
       key,

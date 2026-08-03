@@ -3,23 +3,27 @@ import { computed, ref } from "vue";
 
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
 import { dashboardDataSource } from "../data/sources/index";
-import { deriveMetrics, groupDecisionTrend } from "../data/dashboard/metrics";
+import {
+  createAuditWindow,
+  groupDecisionTrend,
+  selectLogicalPolicyEvaluations,
+} from "../data/dashboard/metrics";
 import { buildInvestigationIndex, buildTraceSummary } from "../data/investigations";
 import {
-  hasSameEventWindow,
-  hasSameEvaluation,
-  hasSameMetrics,
+  hasSameAuditWindow,
+  hasSameEvaluationRun,
   reconcileApprovals,
 } from "../data/dashboard/snapshot";
+import { AUDIT_EVENT_WINDOW_LIMIT } from "../data/sources/dashboard-data-source";
 import type {
   AdapterStatus,
+  AggregateMetrics,
   ApprovalRequest,
+  AuditWindow,
   AuditIntegrity,
-  AuditEventRow,
   ConfigAuditFindingRecord,
   DataStatus,
-  EvalMetrics,
-  EvaluationSummary,
+  EvaluationRun,
   HealthStatus,
   PolicyHistoryEntry,
   PolicySummary,
@@ -44,19 +48,7 @@ import {
 } from "../utils/dashboard-refresh-scope";
 import { useAuthStore } from "./authStore";
 
-const emptyMetrics: EvalMetrics = {
-  eventCount: 0,
-  allowCount: 0,
-  denyCount: 0,
-  askCount: 0,
-  blockedCount: 0,
-  blockRate: null,
-  fpr: null,
-  fnr: null,
-  averageLatencyMs: null,
-};
-
-const emptyEvaluation: EvaluationSummary = {
+const emptyEvaluationRun: EvaluationRun = {
   runId: null,
   runAt: null,
   datasetId: null,
@@ -66,10 +58,6 @@ const emptyEvaluation: EvaluationSummary = {
   asrAfter: null,
   perAttack: [],
   cases: [],
-  blockRate: null,
-  fpr: null,
-  fnr: null,
-  averageLatencyMs: null,
 };
 
 const unknownOpenClawStatus: AdapterStatus = {
@@ -152,11 +140,18 @@ function applyLatestPolicyHistory(
 }
 
 export const useDashboardStore = defineStore("dashboard", () => {
-  const events = ref<AuditEventRow[]>([]);
+  const auditWindow = ref<AuditWindow>(
+    createAuditWindow([], {
+      limit: AUDIT_EVENT_WINDOW_LIMIT,
+      hasMore: null,
+      source: "legacy_audit_events",
+    }),
+  );
+  const aggregateMetrics = ref<AggregateMetrics | null>(null);
+  const aggregateMetricsError = ref<string | null>(null);
   const approvals = ref<ApprovalRequest[]>([]);
-  const metrics = ref<EvalMetrics>({ ...emptyMetrics });
-  const evaluation = ref<EvaluationSummary>({ ...emptyEvaluation });
-  const evaluationError = ref<string | null>(null);
+  const evaluationRun = ref<EvaluationRun>({ ...emptyEvaluationRun });
+  const evaluationRunError = ref<string | null>(null);
   const configAuditFindings = ref<ConfigAuditFindingRecord[]>([]);
   const configAuditError = ref<string | null>(null);
   const openclawStatus = ref<AdapterStatus>({ ...unknownOpenClawStatus });
@@ -206,11 +201,16 @@ export const useDashboardStore = defineStore("dashboard", () => {
   );
   const traceDetails = computed(() => unwrapTimedCache(traceDetailCache.value));
   const provenanceByTrace = computed(() => unwrapTimedCache(provenanceCache.value));
+  const events = computed(() => auditWindow.value.events);
+  const windowMetrics = computed(() => auditWindow.value.metrics);
+  const policyEvaluations = computed(
+    () => selectLogicalPolicyEvaluations(auditWindow.value.events).events,
+  );
   const pendingCount = computed(
     () => approvals.value.filter((item) => item.status === "pending").length,
   );
-  const decisionTrend = computed(() => groupDecisionTrend(events.value));
-  const investigationIndex = computed(() => buildInvestigationIndex(events.value));
+  const decisionTrend = computed(() => groupDecisionTrend(auditWindow.value.events));
+  const investigationIndex = computed(() => buildInvestigationIndex(auditWindow.value.events));
 
   function mapCounts(counts: Map<string, number>) {
     return [...counts.entries()]
@@ -226,14 +226,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   async function refreshApprovals(): Promise<void> {
     const pendingApprovals = await dashboardDataSource.getPendingApprovals();
-    const enrichedApprovals = mergeApprovalsWithAuditEvidence(pendingApprovals, events.value);
+    const enrichedApprovals = mergeApprovalsWithAuditEvidence(
+      pendingApprovals,
+      auditWindow.value.events,
+    );
     approvals.value = reconcileApprovals(approvals.value, enrichedApprovals);
     resourceUpdatedAt.set("approvals", Date.now());
   }
 
   const attackDistribution = computed(() => {
     const counts = new Map<string, number>();
-    for (const event of investigationIndex.value.latestEvents) {
+    for (const event of policyEvaluations.value) {
       const key = event.attackType || (event.caseId?.startsWith("BENIGN") ? "benign" : "unknown");
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
@@ -241,7 +244,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   });
   const ruleDistribution = computed(() => {
     const counts = new Map<string, number>();
-    for (const event of investigationIndex.value.latestEvents) {
+    for (const event of policyEvaluations.value) {
       for (const rule of event.ruleHits) {
         counts.set(rule, (counts.get(rule) ?? 0) + 1);
       }
@@ -276,53 +279,28 @@ export const useDashboardStore = defineStore("dashboard", () => {
       };
     }
 
-    const eventsRequest = resources.has("events")
-      ? dashboardDataSource.getEvents({}, controller.signal)
-      : null;
-    const metricsRequest = resources.has("metrics")
-      ? dashboardDataSource.getMetrics({}, controller.signal)
+    const auditWindowRequest = resources.has("auditWindow")
+      ? dashboardDataSource.getAuditWindow({}, controller.signal)
       : null;
     const policyHistoryRequest = resources.has("policyHistory")
       ? dashboardDataSource.getPolicyHistory(controller.signal)
       : null;
     const tasks: RefreshTask[] = [];
 
-    if (eventsRequest) {
+    if (auditWindowRequest) {
       tasks.push({
-        critical: scope === "overview" || scope === "investigations" || scope === "evidence",
-        label: "审计事件",
-        resource: "events",
-        promise: eventsRequest.then((nextEvents) => {
-          if (!hasSameEventWindow(events.value, nextEvents)) {
-            events.value = nextEvents;
+        critical:
+          scope === "overview" ||
+          scope === "investigations" ||
+          scope === "evidence" ||
+          scope === "evaluation",
+        label: "审计窗口",
+        resource: "auditWindow",
+        promise: auditWindowRequest.then((nextWindow) => {
+          if (!hasSameAuditWindow(auditWindow.value, nextWindow)) {
+            auditWindow.value = nextWindow;
           }
         }),
-      });
-    }
-
-    if (metricsRequest) {
-      tasks.push({
-        critical: false,
-        label: "审计指标",
-        resource: "metrics",
-        promise: metricsRequest
-          .then((nextMetrics) => {
-            if (!hasSameMetrics(metrics.value, nextMetrics)) {
-              metrics.value = nextMetrics;
-            }
-          })
-          .catch((reason: unknown) => {
-            if (eventsRequest) {
-              return eventsRequest.then((nextEvents) => {
-                const derivedMetrics = deriveMetrics(nextEvents);
-                if (!hasSameMetrics(metrics.value, derivedMetrics)) {
-                  metrics.value = derivedMetrics;
-                }
-                throw reason;
-              });
-            }
-            throw reason;
-          }),
       });
     }
 
@@ -334,9 +312,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
         promise: dashboardDataSource
           .getPendingApprovals(controller.signal)
           .then(async (pendingApprovals) => {
-            const visibleEvents = eventsRequest
-              ? await eventsRequest.catch(() => events.value)
-              : events.value;
+            const visibleEvents = auditWindowRequest
+              ? (await auditWindowRequest.catch(() => auditWindow.value)).events
+              : auditWindow.value.events;
             const enrichedApprovals = mergeApprovalsWithAuditEvidence(
               pendingApprovals,
               visibleEvents,
@@ -411,27 +389,22 @@ export const useDashboardStore = defineStore("dashboard", () => {
       });
     }
 
-    if (resources.has("evaluation")) {
-      const evaluationMetrics = metricsRequest
-        ? metricsRequest.catch(() => metrics.value)
-        : Promise.resolve(metrics.value);
+    if (resources.has("evaluationRun")) {
       tasks.push({
-        critical: scope === "evaluation",
+        critical: false,
         label: "安全评测",
-        resource: "evaluation",
-        promise: evaluationMetrics
-          .then((currentMetrics) =>
-            dashboardDataSource.getEvaluation(currentMetrics, controller.signal),
-          )
+        resource: "evaluationRun",
+        promise: dashboardDataSource
+          .getLatestEvaluationRun(controller.signal)
           .then((nextEvaluation) => {
-            if (!hasSameEvaluation(evaluation.value, nextEvaluation)) {
-              evaluation.value = nextEvaluation;
+            if (!hasSameEvaluationRun(evaluationRun.value, nextEvaluation)) {
+              evaluationRun.value = nextEvaluation;
             }
-            evaluationError.value = null;
+            evaluationRunError.value = null;
           })
           .catch((reason: unknown) => {
             if (!controller.signal.aborted) {
-              evaluationError.value = errorMessage(reason, "评测结果加载失败");
+              evaluationRunError.value = errorMessage(reason, "评测结果加载失败");
             }
             throw reason;
           }),
@@ -614,6 +587,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
+  async function loadAggregateMetrics(): Promise<void> {
+    aggregateMetricsError.value = null;
+    try {
+      aggregateMetrics.value = await dashboardDataSource.getAggregateMetrics();
+    } catch (reason) {
+      handleSessionError(reason);
+      aggregateMetricsError.value = errorMessage(reason, "历史聚合指标加载失败");
+      throw reason;
+    }
+  }
+
   async function loadTraceDetail(traceId: string, force = false): Promise<void> {
     if (!traceId || traceDetailLoadingId.value === traceId) return;
     if (!force && getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) return;
@@ -689,11 +673,15 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   return {
+    auditWindow,
+    windowMetrics,
+    aggregateMetrics,
+    aggregateMetricsError,
     events,
     approvals,
-    metrics,
-    evaluation,
-    evaluationError,
+    policyEvaluations,
+    evaluationRun,
+    evaluationRunError,
     configAuditFindings,
     configAuditError,
     openclawStatus,
@@ -724,6 +712,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     activeScope,
     refresh,
     setActiveScope,
+    loadAggregateMetrics,
     loadTraceDetail,
     loadTraceProvenance,
     resolveApproval,

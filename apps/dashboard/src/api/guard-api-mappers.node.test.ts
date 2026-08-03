@@ -35,16 +35,32 @@ test("maps Guard API audit evidence without inventing missing fields", () => {
     resource_targets: ["/private/token.txt"],
     rule_hits: ["P001_sensitive_file_access"],
     reason: "Sensitive resource",
-    links: { approval_id: "app_1" },
+    links: {
+      action_id: "action_1",
+      approval_id: "app_1",
+      decision_id: "decision_1",
+      event_id: "event_1",
+    },
+    integrity: {
+      canonicalization: "json:v1",
+      event_hash: "hash_1",
+      prev_hash: null,
+      sequence: 41,
+    },
     latency_ms: 3,
     metadata: { tool: "read_file" },
   });
 
   assert.equal(event.id, "audit_1");
+  assert.equal(event.auditSequence, 41);
   assert.equal(event.tool, "read_file");
   assert.equal(event.resource, "/private/token.txt");
   assert.equal(event.userTask, null);
   assert.equal(event.approvalId, "app_1");
+  assert.equal(event.actionId, "action_1");
+  assert.equal(event.decisionId, "decision_1");
+  assert.equal(event.eventId, "event_1");
+  assert.equal(event.recordType, "policy_evaluation");
   assert.deepEqual(event.resourceTargets, ["/private/token.txt"]);
 });
 
@@ -90,6 +106,20 @@ test("maps missing security fields to unknown instead of safe defaults", () => {
   assert.equal(event.severity, "unknown");
   assert.equal(event.blocked, null);
   assert.equal(event.runtime, "unknown");
+  assert.equal(event.recordType, "runtime_outcome");
+});
+
+test("does not infer an unknown legacy event type as a policy evaluation", () => {
+  const event = mapAuditEvent({
+    audit_id: "audit_unknown_legacy",
+    trace_id: "trace_unknown_legacy",
+    timestamp: "2026-06-22T06:30:00Z",
+    event_type: "adapter_custom_observation",
+    decision: "deny",
+  } as unknown as Parameters<typeof mapAuditEvent>[0]);
+
+  assert.equal(event.recordType, "unknown");
+  assert.equal(event.auditSequence, null);
 });
 
 test("maps P1 audit metadata into readable action and resource fields", () => {
@@ -291,7 +321,7 @@ test("maps trace detail response through existing event and approval mappers", (
     detail.events.map((event) => event.id),
     ["audit_1", "audit_2"],
   );
-  assert.equal(detail.metrics.fnr, 0.25);
+  assert.equal(detail.aggregateMetrics.reportedFnr, 0.25);
 });
 
 test("maps sparse trace detail responses with empty collections and metrics", () => {
@@ -302,16 +332,23 @@ test("maps sparse trace detail responses with empty collections and metrics", ()
   assert.equal(detail.id, "trace_sparse");
   assert.deepEqual(detail.events, []);
   assert.deepEqual(detail.approvals, []);
-  assert.deepEqual(detail.metrics, {
-    eventCount: 0,
+  assert.deepEqual(detail.aggregateMetrics, {
+    scope: {
+      kind: "trace_history",
+      source: "legacy_metrics_api",
+      from: null,
+      to: null,
+      deduplication: "backend_unspecified",
+    },
+    reportedEventCount: 0,
     allowCount: 0,
     denyCount: 0,
     askCount: 0,
-    blockedCount: 0,
-    blockRate: null,
-    fpr: null,
-    fnr: null,
-    averageLatencyMs: null,
+    reportedInterventionCount: 0,
+    reportedInterventionRate: null,
+    reportedFpr: null,
+    reportedFnr: null,
+    reportedAverageLatencyMs: null,
   });
 });
 
@@ -367,44 +404,31 @@ test("maps an empty audit integrity chain with a null head hash", () => {
   });
 });
 
-test("maps latest evaluation run into a rich dashboard summary", () => {
-  const evaluation = mapEvaluationRun(
-    {
-      run_id: "eval_20260628",
-      run_at: "2026-06-28T00:00:00+00:00",
-      dataset_id: "attackbench",
-      dataset_version: "v1",
-      asr_before: 0.72,
-      asr_after: 0.08,
-      per_attack: {
-        prompt_injection: { asr_before: 0.8, asr_after: 0.1 },
-        memory_poisoning: { asr_before: 0.58, asr_after: null },
+test("maps latest evaluation run without inheriting audit metrics", () => {
+  const evaluation = mapEvaluationRun({
+    run_id: "eval_20260628",
+    run_at: "2026-06-28T00:00:00+00:00",
+    dataset_id: "attackbench",
+    dataset_version: "v1",
+    asr_before: 0.72,
+    asr_after: 0.08,
+    per_attack: {
+      prompt_injection: { asr_before: 0.8, asr_after: 0.1 },
+      memory_poisoning: { asr_before: 0.58, asr_after: null },
+    },
+    cases: [
+      {
+        case_id: "PI-001",
+        attack_type: "prompt_injection",
+        runtime: "openclaw",
+        expected_decision: "deny",
+        actual_decision: "ask",
+        blocked: true,
+        attack_success: false,
+        trace_id: "trace_eval_001",
       },
-      cases: [
-        {
-          case_id: "PI-001",
-          attack_type: "prompt_injection",
-          runtime: "openclaw",
-          expected_decision: "deny",
-          actual_decision: "ask",
-          blocked: true,
-          attack_success: false,
-          trace_id: "trace_eval_001",
-        },
-      ],
-    },
-    {
-      eventCount: 8,
-      allowCount: 3,
-      denyCount: 3,
-      askCount: 2,
-      blockedCount: 5,
-      blockRate: 0.625,
-      fpr: 0.016,
-      fnr: 0.048,
-      averageLatencyMs: 3.4,
-    },
-  );
+    ],
+  });
 
   assert.equal(evaluation.runId, "eval_20260628");
   assert.equal(evaluation.datasetLabel, "attackbench / v1");
@@ -415,7 +439,7 @@ test("maps latest evaluation run into a rich dashboard summary", () => {
   assert.equal(evaluation.perAttack[1]?.reduction, null);
   assert.equal(evaluation.cases[0]?.traceId, "trace_eval_001");
   assert.equal(evaluation.cases[0]?.attackSuccess, false);
-  assert.equal(evaluation.blockRate, 0.625);
+  assert.equal("blockRate" in evaluation, false);
 });
 
 test("maps config audit finding records with display-ready fields", () => {

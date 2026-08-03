@@ -1,10 +1,10 @@
 import type {
   AdapterStatus,
+  AggregateMetrics,
   ApprovalRequest,
   AuditIntegrity,
   ConfigAuditFindingRecord,
-  EvalMetrics,
-  EvaluationSummary,
+  EvaluationRun,
   PolicyHistoryEntry,
   PolicySummary,
   ProvenanceGraph,
@@ -15,8 +15,9 @@ import type {
   DashboardDataSource,
   EventFilters,
 } from "./dashboard-data-source";
+import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
 import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
-import { deriveMetrics } from "../dashboard/metrics.ts";
+import { createAuditWindow } from "../dashboard/metrics.ts";
 import { buildProvenanceGraphFromEvidence } from "../evidence/provenance-builder.ts";
 import { buildTraceEvidenceViewModel } from "../evidence/trace-evidence.ts";
 import { maskSensitiveText } from "../../utils/data-redaction.ts";
@@ -160,8 +161,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
     this.delayMs = delayMs;
   }
 
-  async getEvents(filters: EventFilters = {}) {
-    await wait(this.delayMs);
+  private filteredEvents(filters: EventFilters = {}) {
     return fixtureEvents
       .filter((event) => !filters.traceId || event.traceId === filters.traceId)
       .filter((event) => !filters.caseId || event.caseId === filters.caseId)
@@ -176,21 +176,35 @@ export class MockDashboardDataSource implements DashboardDataSource {
       }));
   }
 
-  async getMetrics(): Promise<EvalMetrics> {
+  async getAuditWindow(filters: EventFilters = {}) {
     await wait(this.delayMs);
-    const metrics = deriveMetrics(
-      fixtureEvents
-        .filter(
-          (event) =>
-            (event.raw as { record_type?: unknown } | undefined)?.record_type ===
-            "policy_evaluation",
-        )
-        .map((event) => ({
-          ...event,
-          latencyMs: event.latencyMs ?? null,
-        })),
-    );
-    return { ...metrics, fpr: 0.016, fnr: 0.048 };
+    return createAuditWindow(this.filteredEvents(filters), {
+      limit: AUDIT_EVENT_WINDOW_LIMIT,
+      hasMore: false,
+      source: "audit_window_api",
+    });
+  }
+
+  async getAggregateMetrics(filters: EventFilters = {}): Promise<AggregateMetrics> {
+    const window = await this.getAuditWindow(filters);
+    return {
+      scope: {
+        kind: "aggregate_history",
+        source: "policy_metrics_api",
+        from: window.scope.from,
+        to: window.scope.to,
+        deduplication: "logical_policy_evaluation",
+      },
+      reportedEventCount: window.metrics.evaluationCount,
+      allowCount: window.metrics.allowCount,
+      denyCount: window.metrics.denyCount,
+      askCount: window.metrics.askCount,
+      reportedInterventionCount: window.metrics.interventionCount,
+      reportedInterventionRate: window.metrics.interventionRate,
+      reportedFpr: window.metrics.policyFpr,
+      reportedFnr: window.metrics.policyFnr,
+      reportedAverageLatencyMs: window.metrics.averageDecisionLatencyMs,
+    };
   }
 
   async getPendingApprovals() {
@@ -218,7 +232,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getEvaluation(metrics: EvalMetrics): Promise<EvaluationSummary> {
+  async getLatestEvaluationRun(): Promise<EvaluationRun> {
     return {
       runId: "eval_mock_20260628",
       runAt: "2026-06-28T00:00:00+00:00",
@@ -299,10 +313,6 @@ export class MockDashboardDataSource implements DashboardDataSource {
           traceId: "trace_003",
         },
       ],
-      blockRate: metrics.blockRate,
-      fpr: metrics.fpr,
-      fnr: metrics.fnr,
-      averageLatencyMs: metrics.averageLatencyMs,
     };
   }
 
@@ -335,7 +345,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
 
   async getTraceDetail(traceId: string): Promise<TraceDetail> {
     await wait(this.delayMs);
-    const events = (await this.getEvents({ traceId })).map((event) => ({
+    const window = await this.getAuditWindow({ traceId });
+    const events = window.events.map((event) => ({
       ...event,
     }));
     return {
@@ -344,12 +355,24 @@ export class MockDashboardDataSource implements DashboardDataSource {
       approvals: this.approvals
         .filter((approval) => approval.traceId === traceId)
         .map((approval) => ({ ...approval })),
-      metrics: deriveMetrics(
-        events.map((event) => ({
-          ...event,
-          latencyMs: event.latencyMs ?? null,
-        })),
-      ),
+      aggregateMetrics: {
+        scope: {
+          kind: "trace_history",
+          source: "policy_metrics_api",
+          from: window.scope.from,
+          to: window.scope.to,
+          deduplication: "logical_policy_evaluation",
+        },
+        reportedEventCount: window.metrics.evaluationCount,
+        allowCount: window.metrics.allowCount,
+        denyCount: window.metrics.denyCount,
+        askCount: window.metrics.askCount,
+        reportedInterventionCount: window.metrics.interventionCount,
+        reportedInterventionRate: window.metrics.interventionRate,
+        reportedFpr: window.metrics.policyFpr,
+        reportedFnr: window.metrics.policyFnr,
+        reportedAverageLatencyMs: window.metrics.averageDecisionLatencyMs,
+      },
       loadedAt: new Date().toISOString(),
     };
   }

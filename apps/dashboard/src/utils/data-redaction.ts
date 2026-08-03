@@ -15,16 +15,20 @@ export function maskSensitiveText(value: string): string {
     .replace(HOME_PATH_PATTERN, "/home/***");
 }
 
-export function redactSensitiveData(value: unknown, fieldName = ""): unknown {
+function redactSensitiveValue(value: unknown, fieldName: string, seen: WeakSet<object>): unknown {
   if (SENSITIVE_KEY_PATTERN.test(fieldName)) return "[已脱敏]";
 
   if (Array.isArray(value)) {
-    return value.map((item) => redactSensitiveData(item));
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
+    return value.map((item) => redactSensitiveValue(item, "", seen));
   }
 
   if (value && typeof value === "object") {
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, redactSensitiveData(item, key)]),
+      Object.entries(value).map(([key, item]) => [key, redactSensitiveValue(item, key, seen)]),
     );
   }
 
@@ -35,4 +39,8 @@ export function redactSensitiveData(value: unknown, fieldName = ""): unknown {
   }
 
   return value;
+}
+
+export function redactSensitiveData(value: unknown, fieldName = ""): unknown {
+  return redactSensitiveValue(value, fieldName, new WeakSet<object>());
 }

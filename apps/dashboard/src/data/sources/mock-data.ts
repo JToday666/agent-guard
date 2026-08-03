@@ -61,7 +61,12 @@ interface ScenarioEvidence {
   toolArguments: Record<string, unknown>;
 }
 
-const basePolicyEvents: AuditEventRow[] = [
+type BasePolicyEvent = Omit<
+  AuditEventRow,
+  "actionId" | "auditSequence" | "decisionId" | "eventId" | "recordType"
+>;
+
+const basePolicyEvents: BasePolicyEvent[] = [
   {
     agentAction: "read_file('/private/token.txt')",
     approvalId: undefined,
@@ -759,10 +764,20 @@ function buildRawAudit(
   };
 }
 
-const policyEvents = basePolicyEvents.map((event, index) => ({
-  ...event,
-  raw: buildRawAudit(event, scenarios[event.traceId]!, index * 2, "policy_evaluation"),
-}));
+const policyEvents: AuditEventRow[] = basePolicyEvents.map((event, index) => {
+  const policyEvent: AuditEventRow = {
+    ...event,
+    actionId: `action_${event.traceId}`,
+    auditSequence: index * 2 + 1,
+    decisionId: `decision_${event.traceId}`,
+    eventId: `guard_event_${event.traceId}`,
+    recordType: "policy_evaluation",
+  };
+  return {
+    ...policyEvent,
+    raw: buildRawAudit(policyEvent, scenarios[event.traceId]!, index * 2, "policy_evaluation"),
+  };
+});
 
 const outcomeDefinitions: Record<
   string,
@@ -821,7 +836,9 @@ const outcomeEvents = policyEvents.flatMap((policyEvent, index) => {
     ...policyEvent,
     ...definition,
     agentAction: scenarios[policyEvent.traceId]!.resultSummary ?? policyEvent.agentAction,
+    auditSequence: index * 2 + 2,
     id: `${policyEvent.id}_outcome`,
+    recordType,
     raw: undefined,
   };
   return [

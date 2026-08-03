@@ -106,7 +106,6 @@
         <section class="evidence-stage-section" aria-labelledby="evidence-stage-title">
           <header class="section-header">
             <div>
-              <span class="section-kicker">EVIDENCE FLOW</span>
               <h2 id="evidence-stage-title">四阶段证据流</h2>
               <p>按输入、意图、策略和结果复核关键事实，缺失证据明确标为未记录。</p>
             </div>
@@ -120,7 +119,6 @@
         <section class="trace-provenance section-divider" aria-labelledby="provenance-title">
           <header class="section-header">
             <div>
-              <span class="section-kicker">CAUSAL PROVENANCE</span>
               <h2 id="provenance-title">交互式攻击溯源图</h2>
               <p>
                 沿生命周期查看任务、来源、模型意图、能力请求、资源、规则、策略、决定和运行时结果。
@@ -156,7 +154,6 @@
         <section class="trace-records section-divider" aria-labelledby="trace-records-title">
           <header class="section-header">
             <div>
-              <span class="section-kicker">AUDIT EVIDENCE</span>
               <h2 id="trace-records-title">审计时间线与证据档案</h2>
               <p>时间线保留全部原始审计记录；重复策略审计仅在逻辑结论层合并。</p>
             </div>

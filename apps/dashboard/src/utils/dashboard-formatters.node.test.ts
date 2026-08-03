@@ -52,3 +52,13 @@ test("redacts credentials and contact fields in raw evidence", () => {
     },
   );
 });
+
+test("redacts cyclic structured data without recursing indefinitely", () => {
+  const value: Record<string, unknown> = { id: "event-1" };
+  value.self = value;
+
+  assert.deepEqual(redactSensitiveData(value), {
+    id: "event-1",
+    self: "[Circular]",
+  });
+});

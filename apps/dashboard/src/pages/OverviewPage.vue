@@ -35,7 +35,7 @@
         <ChartFrame
           class="overview-trend"
           description="Guard 决策随当前审计窗口变化"
-          range-label="当前审计窗口"
+          :range-label="windowRangeLabel"
           :summary="trendSummary"
           title="决策趋势"
         >
@@ -67,7 +67,10 @@
                   }"
                 ></i>
               </span>
-              <b>{{ item.riskScore ?? "--" }}</b>
+              <b
+                ><span>{{ item.riskScore ?? "--" }}</span
+                ><small>{{ getRiskSeverityLabel(item.severity) }}</small></b
+              >
             </RouterLink>
           </div>
           <EmptyState
@@ -81,6 +84,7 @@
       <div class="overview-secondary section-divider">
         <ChartFrame
           description="识别当前窗口中的主要攻击面"
+          :range-label="windowRangeLabel"
           :summary="`攻击类型分布，共 ${store.attackDistribution.length} 类`"
           title="攻击类型"
         >
@@ -88,6 +92,7 @@
         </ChartFrame>
         <ChartFrame
           description="定位最常触发的风险判断"
+          :range-label="windowRangeLabel"
           :summary="`规则命中排行，共 ${store.ruleDistribution.length} 项`"
           title="规则命中 Top 6"
         >
@@ -100,26 +105,26 @@
           <header class="section-header">
             <div>
               <h2 id="defense-ledger-title">防御效果</h2>
-              <p>当前审计窗口与最近评测指标</p>
+              <p>当前窗口中的逻辑唯一策略评估</p>
             </div>
             <RouterLink class="chart-link" to="/evaluation">查看评测</RouterLink>
           </header>
           <dl>
             <div>
               <dt>策略介入率</dt>
-              <dd>{{ formatPercent(store.metrics.blockRate) }}</dd>
+              <dd>{{ formatPercent(store.windowMetrics.interventionRate) }}</dd>
             </div>
             <div>
               <dt>误报率 FPR</dt>
-              <dd>{{ formatPercent(store.metrics.fpr) }}</dd>
+              <dd>{{ formatPercent(store.windowMetrics.policyFpr) }}</dd>
             </div>
             <div>
               <dt>漏报率 FNR</dt>
-              <dd>{{ formatPercent(store.metrics.fnr) }}</dd>
+              <dd>{{ formatPercent(store.windowMetrics.policyFnr) }}</dd>
             </div>
             <div>
               <dt>平均延迟</dt>
-              <dd>{{ formatLatency(store.metrics.averageLatencyMs) }}</dd>
+              <dd>{{ formatLatency(store.windowMetrics.averageDecisionLatencyMs) }}</dd>
             </div>
           </dl>
         </section>
@@ -170,7 +175,11 @@ import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
-import { formatAuditHeadHash } from "../utils/dashboard-formatters";
+import {
+  formatAuditHeadHash,
+  formatDashboardDateTime,
+  getRiskSeverityLabel,
+} from "../utils/dashboard-formatters";
 
 defineOptions({ name: "OverviewPage" });
 
@@ -186,12 +195,14 @@ const triageItems = computed(() => {
       kind: "待审批",
       resource: approval.resource,
       riskScore: approval.riskScore,
+      severity: approval.severity,
       tone: "warning" as const,
       tool: approval.tool,
       to: `/approvals/${approval.id}`,
     }));
   const approvalEventIds = new Set(store.approvals.map((approval) => approval.eventId));
-  const eventItems = store.investigationIndex.latestEvents
+  const eventItems = [...store.policyEvaluations]
+    .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
     .filter(
       (event) =>
         !approvalEventIds.has(event.id) &&
@@ -203,6 +214,7 @@ const triageItems = computed(() => {
       kind: "高风险",
       resource: event.resource,
       riskScore: event.riskScore,
+      severity: event.severity,
       tone: "danger" as const,
       tool: event.tool,
       to: `/evidence/${event.traceId}?event_id=${event.id}`,
@@ -217,21 +229,30 @@ const trendSummary = computed(() => {
     : "当前没有可绘制的决策趋势";
 });
 
+const windowRangeLabel = computed(() => {
+  const { from, to } = store.auditWindow.scope;
+  if (!from || !to) return "当前审计窗口";
+  return `${formatDashboardDateTime(from)} 至 ${formatDashboardDateTime(to)}`;
+});
+const windowCompletenessLabel = computed(() => {
+  if (store.auditWindow.scope.hasMore === true) return "仅显示部分记录";
+  if (store.auditWindow.scope.hasMore === false) return "当前窗口记录完整";
+  return "是否截断未知";
+});
+
 const metricItems = computed(() => [
   {
-    detail: "当前数据窗口",
-    label: "审计事件",
+    detail: `最近加载，上限 ${store.auditWindow.scope.limit} 条；${windowCompletenessLabel.value}`,
+    label: "审计记录",
     route: "/investigations",
-    value: countFormatter.format(store.metrics.eventCount),
+    value: countFormatter.format(store.auditWindow.scope.returnedRecordCount),
   },
   {
-    detail: formatPercent(
-      store.metrics.eventCount ? store.metrics.denyCount / store.metrics.eventCount : null,
-    ),
-    label: "拒绝",
+    detail: `策略拒绝率 ${formatPercent(store.windowMetrics.policyDenyRate)}`,
+    label: "策略拒绝",
     route: "/investigations?decision=deny",
     tone: "protective" as const,
-    value: countFormatter.format(store.metrics.denyCount),
+    value: countFormatter.format(store.windowMetrics.denyCount),
   },
   {
     detail: "需要人工处理",
@@ -244,19 +265,19 @@ const metricItems = computed(() => [
     detail: "策略允许动作继续",
     label: "允许",
     route: "/investigations?decision=allow",
-    value: countFormatter.format(store.metrics.allowCount),
+    value: countFormatter.format(store.windowMetrics.allowCount),
   },
   {
-    detail: "已标注样本",
-    label: "误报率 FPR",
+    detail: `${store.windowMetrics.benignLabelCount} 个正常标注评估`,
+    label: "策略误报率 FPR",
     route: "/evaluation",
-    value: formatPercent(store.metrics.fpr),
+    value: formatPercent(store.windowMetrics.policyFpr),
   },
   {
-    detail: "安全判定",
-    label: "平均延迟",
+    detail: `${store.windowMetrics.latencySampleCount} 次判定有耗时记录`,
+    label: "平均判定延迟",
     route: "/evaluation",
-    value: formatLatency(store.metrics.averageLatencyMs),
+    value: formatLatency(store.windowMetrics.averageDecisionLatencyMs),
   },
 ]);
 
@@ -395,9 +416,17 @@ function handleRefresh() {
 }
 
 .triage-queue__rows b {
+  align-items: end;
   color: var(--color-danger);
+  display: grid;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.triage-queue__rows b small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+  font-weight: var(--font-weight-medium);
 }
 
 .overview-secondary {

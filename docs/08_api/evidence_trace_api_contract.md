@@ -49,24 +49,28 @@
 | D-03 | Trace 窗口字段             | 新增 `audit_window`                                           | 新增平铺的 `returned_count/has_more`        | 待确认 |
 | D-04 | Evaluate 请求级幂等        | 以 `GuardEvent.event_id` 和规范化请求摘要实现                 | 只保证 AuditEvent 写入幂等                  | 待确认 |
 | D-05 | Evidence 大小边界          | 单事件 evidence 最大 64 KiB，字符串和数组分别限长             | 使用部署级配置覆盖默认值                    | 待确认 |
+| D-06 | Dashboard 指标作用域       | 原子审计窗口、显式历史 cohort、独立 evaluation run            | 前端继续组合三个不同接口                    | 已确认 |
+| D-07 | 实际阻止口径               | 仅运行时回执确认 `execution.status=not_invoked` 时统计        | 由 deny 或审批拒绝推断                      | 已确认 |
 
 本文后续示例采用推荐方案：GuardEvent `0.3`、AuditEvent `0.4`，纯观察事件的策略字段为 `null`。若评审选择备选方案，必须同步修改本文示例和字段矩阵后再冻结。
 
 ## 5. 复用接口矩阵
 
-| 接口                                       | 调用方           | 鉴权                                  | 当前响应是否保持兼容 | 目标修改                                               |
-| ------------------------------------------ | ---------------- | ------------------------------------- | -------------------- | ------------------------------------------------------ |
-| `POST /v1/guard/evaluate`                  | Adapter / Plugin | adapter token，`event:evaluate`       | 是                   | GuardDecision 增加可选风险分解；内部写入增强的策略审计 |
-| `POST /v1/audit/events`                    | Adapter / Plugin | adapter token，`event:audit:write`    | 是                   | 接收运行时结果和观察事件；实现统一幂等与冲突           |
-| `GET /v1/audit/events`                     | Dashboard / CLI  | browser session 或 `audit:read`       | 是，继续返回数组     | 返回存储的新增 AuditEvent 字段                         |
-| `GET /v1/traces/{trace_id}`                | Dashboard / CLI  | browser session 或 `trace:read`       | 是，新增字段可忽略   | 返回增强 AuditEvent 和 `audit_window`                  |
-| `GET /v1/traces/{trace_id}/provenance`     | Dashboard / CLI  | browser session 或 `trace:read`       | 是，顶层结构不变     | 扩展节点、关系和 metadata                              |
-| `GET /v1/audit/integrity`                  | Dashboard / CLI  | browser session 或 `audit:read`       | 是                   | 无必需改动                                             |
-| `GET /v1/metrics/eval`                     | Dashboard / CLI  | browser session 或 `metrics:read`     | 是                   | 只聚合逻辑唯一的策略评估                               |
-| `GET /v1/metrics/runtime`                  | Dashboard / CLI  | browser session 或 `metrics:read`     | 是                   | 决策统计排除运行时结果和观察记录                       |
-| `GET /v1/approvals/pending`                | Dashboard / CLI  | browser session 或审批读取 scope      | 是                   | 无字段要求变更                                         |
-| `GET /v1/approvals/{approval_id}/wait`     | Adapter / Plugin | adapter token，`approval:wait`        | 是                   | 无字段要求变更                                         |
-| `POST /v1/approvals/{approval_id}/resolve` | Dashboard        | browser session、CSRF、approval nonce | 是                   | 无字段要求变更                                         |
+| 接口                                       | 调用方           | 鉴权                                             | 当前响应是否保持兼容 | 目标修改                                                     |
+| ------------------------------------------ | ---------------- | ------------------------------------------------ | -------------------- | ------------------------------------------------------------ |
+| `POST /v1/guard/evaluate`                  | Adapter / Plugin | adapter token，`event:evaluate`                  | 是                   | GuardDecision 增加可选风险分解；内部写入增强的策略审计       |
+| `POST /v1/audit/events`                    | Adapter / Plugin | adapter token，`event:audit:write`               | 是                   | 接收运行时结果和观察事件；实现统一幂等与冲突                 |
+| `GET /v1/audit/events`                     | Dashboard / CLI  | browser session 或 `audit:read`                  | 是，继续返回数组     | 返回存储的新增 AuditEvent 字段                               |
+| `GET /v1/audit/window`                     | Dashboard / CLI  | browser session 或 `audit:read` + `metrics:read` | 新增接口             | 原子返回 sequence 窗口、事件、逻辑策略指标及 P1 动作结果指标 |
+| `GET /v1/traces/{trace_id}`                | Dashboard / CLI  | browser session 或 `trace:read`                  | 是，新增字段可忽略   | 返回增强 AuditEvent 和 `audit_window`                        |
+| `GET /v1/traces/{trace_id}/provenance`     | Dashboard / CLI  | browser session 或 `trace:read`                  | 是，顶层结构不变     | 扩展节点、关系和 metadata                                    |
+| `GET /v1/audit/integrity`                  | Dashboard / CLI  | browser session 或 `audit:read`                  | 是                   | 无必需改动                                                   |
+| `GET /v1/metrics/eval`                     | Dashboard / CLI  | browser session 或 `metrics:read`                | 是                   | 只聚合逻辑唯一的策略评估                                     |
+| `GET /v1/metrics/policy-evaluations`       | Dashboard / CLI  | browser session 或 `metrics:read`                | 新增接口             | 按显式时间 cohort 返回策略指标及同快照 P1 动作结果指标       |
+| `GET /v1/metrics/runtime`                  | Dashboard / CLI  | browser session 或 `metrics:read`                | 是                   | 决策统计排除运行时结果和观察记录                             |
+| `GET /v1/approvals/pending`                | Dashboard / CLI  | browser session 或审批读取 scope                 | 是                   | 无字段要求变更                                               |
+| `GET /v1/approvals/{approval_id}/wait`     | Adapter / Plugin | adapter token，`approval:wait`                   | 是                   | 无字段要求变更                                               |
+| `POST /v1/approvals/{approval_id}/resolve` | Dashboard        | browser session、CSRF、approval nonce            | 是                   | 无字段要求变更                                               |
 
 ## 6. 通用 HTTP 规范
 
@@ -137,8 +141,10 @@
 3. Guard API 开始写入 `policy_evaluation` 0.4。
 4. LangGraph Adapter 和 OpenClaw Plugin 开始写入 runtime 0.4。
 5. 指标切换为 record type 感知和逻辑去重。
-6. provenance writer 扩展节点和关系。
-7. 完成真实 API 端到端测试后冻结迁移窗口。
+6. 提供原子审计窗口与显式历史 cohort 指标接口。
+7. Dashboard data source 从兼容重建切换到原子审计窗口。
+8. provenance writer 扩展节点和关系。
+9. 完成真实 API 端到端测试后冻结迁移窗口。
 
 ### 7.3 存储迁移
 
@@ -1401,6 +1407,10 @@ Dashboard 组合：
 
 ## 19. 指标规则
 
+Dashboard 指标的三种作用域、窗口快照、历史 cohort、授权终态和执行覆盖率以
+[Dashboard 指标作用域与审计窗口 API 协作契约](dashboard_metrics_api_contract.md)
+为准。本节保留 AuditEvent 分类、逻辑去重和旧字段兼容规则。
+
 ### 19.1 新事件
 
 以下决策指标只统计：
@@ -1437,7 +1447,7 @@ decision in (deny, ask)
 
 它表示策略介入，不表示工具实际未调用。Dashboard 使用“策略介入率”。
 
-本轮不新增“实际阻断率”字段。需要该指标时，应单独设计为：
+P0 不新增“实际阻断率”字段。后续只有运行时回执满足以下事实时，才可进入确认阻止统计：
 
 ```text
 intervention=pre_execution_deny

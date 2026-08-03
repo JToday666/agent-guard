@@ -1,4 +1,5 @@
 import { dashboardEnv } from "../config/dashboard-env";
+import { getPublicApiErrorMessage } from "./public-api-error";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -12,28 +13,30 @@ export class ApiError extends Error {
   }
 }
 
-async function readErrorBody(response: Response): Promise<{ code: string; message: string }> {
-  const fallback = {
-    code: "REQUEST_FAILED",
-    message: `请求失败 (${response.status})`,
-  };
+async function readErrorCode(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) return "REQUEST_FAILED";
+  const payload: unknown = await response.json().catch(() => null);
+  if (!payload || typeof payload !== "object") return "REQUEST_FAILED";
+  const error = "error" in payload ? payload.error : null;
+  if (!error || typeof error !== "object" || !("code" in error)) return "REQUEST_FAILED";
+  return typeof error.code === "string" && error.code ? error.code : "REQUEST_FAILED";
+}
 
-  if (contentType.includes("application/json")) {
-    const payload = await response.json().catch(() => null);
-    const error = payload?.error;
-    return {
-      code: typeof error?.code === "string" && error.code ? error.code : fallback.code,
-      message:
-        typeof error?.message === "string" && error.message ? error.message : fallback.message,
-    };
+function createNetworkError(): ApiError {
+  return new ApiError(0, "NETWORK_ERROR", getPublicApiErrorMessage(0, "NETWORK_ERROR"));
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new ApiError(
+      response.status,
+      "INVALID_RESPONSE",
+      getPublicApiErrorMessage(response.status, "INVALID_RESPONSE"),
+    );
   }
-
-  const text = (await response.text().catch(() => "")).trim();
-  return {
-    code: fallback.code,
-    message: text ? `${text} (${response.status})` : fallback.message,
-  };
 }
 
 export async function requestJson<T>(
@@ -41,31 +44,47 @@ export async function requestJson<T>(
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(`${dashboardEnv.apiBaseUrl}${path}`, {
-    ...init,
-    credentials: "include",
-    signal,
-    headers: {
-      "Content-Type": "application/json",
-      ...init.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await readErrorBody(response);
-    throw new ApiError(response.status, error.code, error.message);
+  const headers = new Headers(init.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  if (typeof init.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
 
-  return response.json() as Promise<T>;
+  let response: Response;
+  try {
+    response = await fetch(`${dashboardEnv.apiBaseUrl}${path}`, {
+      ...init,
+      credentials: "include",
+      headers,
+      signal: signal ?? init.signal,
+    });
+  } catch (reason) {
+    if (reason instanceof Error && reason.name === "AbortError") throw reason;
+    throw createNetworkError();
+  }
+
+  if (!response.ok) {
+    const code = await readErrorCode(response);
+    throw new ApiError(response.status, code, getPublicApiErrorMessage(response.status, code));
+  }
+
+  return readJsonResponse<T>(response);
 }
 
 export async function requestHealth(
   signal?: AbortSignal,
 ): Promise<{ status: string; database?: string }> {
-  const response = await fetch("/api/health?check_db=true", {
-    credentials: "include",
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/health?check_db=true", {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+      signal,
+    });
+  } catch (reason) {
+    if (reason instanceof Error && reason.name === "AbortError") throw reason;
+    throw createNetworkError();
+  }
   if (!response.ok) throw new ApiError(response.status, "HEALTH_CHECK_FAILED", "健康检查失败");
-  return response.json() as Promise<{ status: string; database?: string }>;
+  return readJsonResponse<{ status: string; database?: string }>(response);
 }

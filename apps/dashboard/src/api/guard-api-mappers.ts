@@ -13,14 +13,15 @@ import type {
 } from "./guard-api-types";
 import type {
   AdapterStatus,
+  AggregateMetrics,
   ApprovalRequest,
   AuditEventRow,
   AuditIntegrity,
+  AuditRecordType,
   ConfigAuditFindingRecord,
-  EvalMetrics,
   EvaluationAttackMetric,
   EvaluationCase,
-  EvaluationSummary,
+  EvaluationRun,
   PolicyHistoryEntry,
   PolicySummary,
   ProvenanceEdge,
@@ -36,6 +37,15 @@ const eventTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   second: "2-digit",
   hour12: false,
 });
+const legacyPolicyEventTypes = new Set([
+  "context_assembled",
+  "memory_write_proposed",
+  "message_send_proposed",
+  "model_input_prepared",
+  "model_output_produced",
+  "tool_call_proposed",
+  "tool_result_produced",
+]);
 
 function formatEventTime(timestamp: string): string {
   const value = new Date(timestamp);
@@ -91,6 +101,28 @@ function readSeverity(value: unknown): AuditEventRow["severity"] {
 
 function readRuntime(value: unknown): AuditEventRow["runtime"] {
   return value === "langgraph" || value === "openclaw" ? value : "unknown";
+}
+
+function readRecordType(
+  value: unknown,
+  eventType: string,
+  decision: AuditEventRow["decision"],
+): AuditRecordType {
+  if (
+    value === "policy_evaluation" ||
+    value === "runtime_outcome" ||
+    value === "runtime_observation" ||
+    value === "config_audit" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  if (eventType === "runtime_outcome") return "runtime_outcome";
+  if (eventType === "runtime_observation") return "runtime_observation";
+  if (eventType === "config_audit") return "config_audit";
+  return decision !== "unknown" && legacyPolicyEventTypes.has(eventType)
+    ? "policy_evaluation"
+    : "unknown";
 }
 
 function fallbackResourceTargets(metadata: Record<string, unknown>): string[] {
@@ -151,17 +183,24 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
   const action = actionName(dto, metadata);
   const timestamp = readString(dto.timestamp) ?? "";
   const summary = readString(dto.summary);
+  const decision = readDecision(dto.decision);
+  const eventType = readString(dto.event_type) ?? "未提供";
   return {
     id: readString(dto.audit_id) ?? "未提供",
+    auditSequence: readNullableNumber(readRecord(dto.integrity).sequence),
+    eventId: readString(links.event_id),
+    decisionId: readString(links.decision_id),
+    actionId: readString(links.action_id),
+    recordType: readRecordType(dto.record_type, eventType, decision),
     occurredAt: timestamp,
     time: formatEventTime(timestamp),
-    decision: readDecision(dto.decision),
+    decision,
     riskScore: readNullableNumber(dto.risk_score),
     severity: readSeverity(dto.severity),
     blocked: readNullableBoolean(dto.blocked),
     runtime: readRuntime(dto.runtime),
     stage: stageName(dto),
-    eventType: readString(dto.event_type) ?? "未提供",
+    eventType,
     tool: action,
     resource: summarizeTargets(resourceTargets),
     resourceTargets,
@@ -219,23 +258,33 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
 
 function approvalConsequence(status: ApprovalRequest["status"]): string {
   if (status === "allowed") return "该动作已获得一次性放行。";
-  if (status === "denied") return "该动作已被拒绝并阻断，不会继续执行。";
+  if (status === "denied") return "该动作的本次授权已被拒绝；实际执行结果以运行时回执为准。";
   if (status === "expired") return "该审批已过期，当前动作不会继续执行。";
   return "允许一次后，当前暂停的工具动作将继续执行。";
 }
 
-export function mapMetrics(dto: GuardEvalMetricsDto): EvalMetrics {
+export function mapAggregateMetrics(
+  dto: GuardEvalMetricsDto,
+  kind: AggregateMetrics["scope"]["kind"] = "aggregate_history",
+): AggregateMetrics {
   const metrics = readRecord(dto);
   return {
-    eventCount: readNumber(metrics.event_count),
+    scope: {
+      kind,
+      source: "legacy_metrics_api",
+      from: null,
+      to: null,
+      deduplication: "backend_unspecified",
+    },
+    reportedEventCount: readNumber(metrics.event_count),
     allowCount: readNumber(metrics.allow_count),
     denyCount: readNumber(metrics.deny_count),
     askCount: readNumber(metrics.ask_count),
-    blockedCount: readNumber(metrics.blocked_count),
-    blockRate: readNullableNumber(metrics.block_rate),
-    fpr: readNullableNumber(metrics.fpr),
-    fnr: readNullableNumber(metrics.fnr),
-    averageLatencyMs: readNullableNumber(metrics.average_latency_ms),
+    reportedInterventionCount: readNumber(metrics.blocked_count),
+    reportedInterventionRate: readNullableNumber(metrics.block_rate),
+    reportedFpr: readNullableNumber(metrics.fpr),
+    reportedFnr: readNullableNumber(metrics.fnr),
+    reportedAverageLatencyMs: readNullableNumber(metrics.average_latency_ms),
   };
 }
 
@@ -253,7 +302,7 @@ function metricReduction(
     : before - after;
 }
 
-export function emptyEvaluationSummary(metrics: EvalMetrics): EvaluationSummary {
+export function emptyEvaluationRun(): EvaluationRun {
   return {
     runId: null,
     runAt: null,
@@ -264,17 +313,10 @@ export function emptyEvaluationSummary(metrics: EvalMetrics): EvaluationSummary 
     asrAfter: null,
     perAttack: [],
     cases: [],
-    blockRate: metrics.blockRate,
-    fpr: metrics.fpr,
-    fnr: metrics.fnr,
-    averageLatencyMs: metrics.averageLatencyMs,
   };
 }
 
-export function mapEvaluationRun(
-  dto: GuardEvaluationRunDto,
-  metrics: EvalMetrics,
-): EvaluationSummary {
+export function mapEvaluationRun(dto: GuardEvaluationRunDto): EvaluationRun {
   const datasetId = readString(dto.dataset_id);
   const datasetVersion = readString(dto.dataset_version);
   const perAttack: EvaluationAttackMetric[] = Object.entries(readRecord(dto.per_attack))
@@ -317,10 +359,6 @@ export function mapEvaluationRun(
     asrAfter: readNullableNumber(dto.asr_after),
     perAttack,
     cases,
-    blockRate: metrics.blockRate,
-    fpr: metrics.fpr,
-    fnr: metrics.fnr,
-    averageLatencyMs: metrics.averageLatencyMs,
   };
 }
 
@@ -332,7 +370,7 @@ export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
     id: readString(dto.trace_id) ?? "",
     events,
     approvals: readArray(dto.approvals).map((row) => mapApproval(row as GuardApprovalDto)),
-    metrics: mapMetrics(dto.metrics),
+    aggregateMetrics: mapAggregateMetrics(dto.metrics, "trace_history"),
     loadedAt: new Date().toISOString(),
   };
 }

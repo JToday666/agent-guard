@@ -197,7 +197,7 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
   pendingDecision.value = decision;
   try {
     await store.resolveApproval(selectedApproval.value, decision);
-    actionMessage.value = decision === "deny" ? "已拒绝并阻断该动作" : "已允许该动作执行一次";
+    actionMessage.value = decision === "deny" ? "已拒绝该动作的本次授权" : "已允许该动作执行一次";
     if (traceRoute) {
       void router.push(traceRoute);
       return;

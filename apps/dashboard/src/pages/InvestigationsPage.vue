@@ -16,7 +16,7 @@
             @click="handleExport"
           >
             <Download aria-hidden="true" :size="15" />
-            导出当前筛选结果
+            导出当前窗口筛选结果
           </button>
         </div>
       </header>
@@ -120,8 +120,11 @@
       <template v-else-if="filteredEvents.length">
         <div class="result-summary">
           <strong>{{ filteredEvents.length }}</strong
-          ><span>条匹配事件</span
-          ><span>第 {{ currentPage }} / {{ totalPages }} 页 · 按最新时间排序</span>
+          ><span>条窗口内匹配事件</span
+          ><span
+            >最近最多 {{ AUDIT_EVENT_WINDOW_LIMIT }} 条 · 第 {{ currentPage }} / {{ totalPages }} 页
+            · 按最新时间排序</span
+          >
         </div>
         <div class="event-table-wrap">
           <table class="event-table">
@@ -168,7 +171,10 @@
                         transform: `scaleX(${Math.min(1, Math.max(0, (event.riskScore ?? 0) / 100))})`,
                       }"
                     ></i
-                    ><strong>{{ event.riskScore ?? "--" }}</strong></span
+                    ><strong
+                      ><span>{{ event.riskScore ?? "--" }}</span
+                      ><small>{{ getRiskSeverityLabel(event.severity) }}</small></strong
+                    ></span
                   >
                 </td>
                 <td>{{ event.runtime }}</td>
@@ -259,6 +265,7 @@ import {
   getRuleFilterOptions,
   resolveInvestigationEvent,
 } from "../data/investigations";
+import { AUDIT_EVENT_WINDOW_LIMIT } from "../data/sources/dashboard-data-source";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { AuditEventRow } from "../types/dashboard";
 import { getAttackTypeLabel } from "../utils/attack-type";
@@ -722,6 +729,16 @@ function handleExport() {
   display: grid;
   gap: var(--space-2);
   grid-template-columns: minmax(2.5rem, 1fr) auto;
+}
+.event-risk strong {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.event-risk small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
 }
 .event-risk::before {
   background: var(--color-surface-muted);

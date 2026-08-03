@@ -13,13 +13,18 @@ import {
 
 function event(overrides: Partial<AuditEventRow>): AuditEventRow {
   return {
+    actionId: "action-1",
     agentAction: null,
+    auditSequence: 1,
     blocked: false,
     caseId: null,
     decision: "allow",
+    decisionId: "decision-1",
+    eventId: "guard-event-1",
     id: "event-1",
     occurredAt: "2026-01-01T10:00:00.000Z",
     raw: {},
+    recordType: "policy_evaluation",
     reason: "正常访问",
     resource: "/workspace/readme.md",
     resourceTargets: ["/workspace/readme.md"],

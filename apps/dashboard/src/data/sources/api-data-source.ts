@@ -14,27 +14,26 @@ import type {
 } from "../../api/guard-api-types";
 import { ApiError, requestHealth, requestJson } from "../../api/guard-http-client";
 import {
-  emptyEvaluationSummary,
+  emptyEvaluationRun,
   mapAdapterStatus,
+  mapAggregateMetrics,
   mapApproval,
   mapAuditEvent,
   mapAuditIntegrity,
   mapConfigAuditFindingRecord,
   mapEvaluationRun,
-  mapMetrics,
   mapPolicyHistory,
   mapPolicySummary,
   mapProvenance,
   mapTraceDetail,
 } from "../../api/guard-api-mappers";
 import { mergeApprovalsWithAuditEvidence } from "../approvals/evidence";
+import { createAuditWindow } from "../dashboard/metrics";
 import type {
   ApprovalRequest,
   ApprovalResolution,
   AuditIntegrity,
   ConfigAuditFindingRecord,
-  EvalMetrics,
-  EvaluationSummary,
   ProvenanceGraph,
 } from "../../types/dashboard";
 import type {
@@ -42,10 +41,11 @@ import type {
   DashboardDataSource,
   EventFilters,
 } from "./dashboard-data-source";
+import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
 
 function buildQueryString(filters: EventFilters = {}, includeLimit = false): string {
   const params = new URLSearchParams();
-  if (includeLimit) params.set("limit", "500");
+  if (includeLimit) params.set("limit", String(AUDIT_EVENT_WINDOW_LIMIT));
   if (filters.traceId) params.set("trace_id", filters.traceId);
   if (filters.caseId) params.set("case_id", filters.caseId);
   if (filters.runtime) params.set("runtime", filters.runtime);
@@ -65,22 +65,26 @@ function buildConfigFindingQueryString(filters: ConfigAuditFindingFilters = {}):
 }
 
 export class ApiDashboardDataSource implements DashboardDataSource {
-  async getEvents(filters?: EventFilters, signal?: AbortSignal) {
+  async getAuditWindow(filters?: EventFilters, signal?: AbortSignal) {
     const rows = await requestJson<GuardAuditEventDto[]>(
       `/audit/events${buildQueryString(filters, true)}`,
       {},
       signal,
     );
-    return rows.map(mapAuditEvent);
+    return createAuditWindow(rows.map(mapAuditEvent), {
+      limit: AUDIT_EVENT_WINDOW_LIMIT,
+      hasMore: null,
+      source: "legacy_audit_events",
+    });
   }
 
-  async getMetrics(filters?: EventFilters, signal?: AbortSignal) {
+  async getAggregateMetrics(filters?: EventFilters, signal?: AbortSignal) {
     const rows = await requestJson<GuardEvalMetricsDto>(
       `/metrics/eval${buildQueryString(filters)}`,
       {},
       signal,
     );
-    return mapMetrics(rows);
+    return mapAggregateMetrics(rows);
   }
 
   async getPendingApprovals(signal?: AbortSignal) {
@@ -121,15 +125,14 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getEvaluation(metrics: EvalMetrics, signal?: AbortSignal): Promise<EvaluationSummary> {
+  async getLatestEvaluationRun(signal?: AbortSignal) {
     try {
       return mapEvaluationRun(
         await requestJson<GuardEvaluationRunDto>("/evaluations/latest", {}, signal),
-        metrics,
       );
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === "EVALUATION_NOT_FOUND") {
-        return emptyEvaluationSummary(metrics);
+        return emptyEvaluationRun();
       }
       throw reason;
     }
