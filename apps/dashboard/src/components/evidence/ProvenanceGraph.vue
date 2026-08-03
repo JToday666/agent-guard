@@ -237,7 +237,8 @@ import {
   useVueFlow,
 } from "@vue-flow/core";
 import { MiniMap } from "@vue-flow/minimap";
-import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
+import ELK, { type ElkNode } from "elkjs/lib/elk-api.js";
+import ElkWorker from "elkjs/lib/elk-worker.min.js?worker";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 
 import type {
@@ -276,7 +277,10 @@ const LAYOUT_CACHE_MAX_ENTRIES = 24;
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 108;
 const layoutCache = new Map<string, PositionedNode[]>();
-const elk = new ELK();
+const elk = new ELK({
+  algorithms: ["layered"],
+  workerFactory: () => new ElkWorker(),
+});
 const flowId = `provenance-${props.graph.traceId}`;
 const { fitView, setCenter, updateNode, zoomTo } = useVueFlow(flowId);
 const flowNodes = ref<Node<ProvenanceNodeData>[]>([]);
@@ -1013,6 +1017,7 @@ onBeforeUnmount(() => {
   compactMedia?.removeEventListener("change", updateMediaState);
   motionMedia?.removeEventListener("change", updateMediaState);
   window.removeEventListener("keydown", handleEscape);
+  elk.terminateWorker();
 });
 </script>
 

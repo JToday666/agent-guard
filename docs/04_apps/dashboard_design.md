@@ -92,7 +92,7 @@ Authorization Bearer token
 - 策略拒绝记录必须显示工具名、参数、资源目标、命中规则和用户任务；只有运行时回执明确 `not_invoked` 时才追加“确认阻止”结论。命中规则展示可读名称，不展示 P 开头的内部数字编号。
 - 指标页必须分开独立 evaluation run、当前审计窗口和历史聚合；缺失指标不跨作用域补入。
 - 审批页必须说明放行风险，避免只提供按钮。
-- 溯源图节点使用固定宽高、多行截断和详情侧栏承载长文本；边标签只保留短动作词，避免覆盖节点内容。
+- 溯源图节点使用固定宽高、多行截断和详情侧栏承载长文本；边标签只保留短动作词，避免覆盖节点内容。Vue Flow 组件按需加载，ELK Layered 通过独立模块 Worker 执行并在组件卸载时释放，不阻塞主线程解析和布局。
 - API 模式遇到数组、链接、元数据、发现项或适配器状态字段缺省时，前端按空集合或“未提供”降级；局部接口失败只影响对应区块，不让整个 Dashboard 白屏。
 
 ## 7. 已交付边界
@@ -116,3 +116,4 @@ P0、P1 关键路径和部分 P2 功能均已交付：
 9. API 模式回归使用真实溯源字段和关系值，验证风险标签、关系文案以及审计节点与时间线的双向联动。
 10. 调查页轮询到新事件时，用户位于旧滚动位置则保留当前列表并提供“有新事件”入口；用户主动查看后再定位到最新事件。
 11. 封笔验证包含 `pnpm --filter @agentguard/dashboard typecheck`、`pnpm --filter @agentguard/dashboard build`、`pnpm --filter @agentguard/dashboard test:unit`、`pnpm --filter @agentguard/dashboard test:e2e` 和 `pnpm --filter @agentguard/dashboard test:e2e:api`。
+12. 生产构建保持溯源图组件与 ELK Worker 分离，溯源图主线程 chunk 低于 Vite 默认 500 KB 警告阈值，且不得通过调高阈值掩盖回归。

@@ -203,4 +203,4 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 
 ### 前端后续优化
 
-- [ ] 在不削减 ELK 分层布局、Minimap、折叠、搜索、筛选和路径高亮能力的前提下，继续拆分或按需加载溯源图依赖；当前生产构建的独立溯源图 chunk 约为 1.67 MB（gzip 约 521 KB），需要评估首开延迟和缓存效果。
+- [x] 已在不削减 ELK 分层布局、Minimap、折叠、搜索、筛选和路径高亮能力的前提下，将 ELK Layered 拆为独立模块 Worker，并在组件卸载时释放。生产构建的溯源图主线程 chunk 已由约 1.67 MB（gzip 约 521 KB）降至约 240 KB（gzip 约 79 KB）；ELK Worker 独立约 1.43 MB（gzip 约 423 KB），默认 500 KB chunk 警告已消除。
