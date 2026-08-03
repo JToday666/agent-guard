@@ -27,8 +27,7 @@ test("mock provenance graph contains evidence nodes and event references", async
 
 test("mock source exposes rich evaluation data for populated pages", async () => {
   const source = new MockDashboardDataSource(0);
-  const metrics = await source.getMetrics();
-  const evaluation = await source.getEvaluation(metrics);
+  const evaluation = await source.getLatestEvaluationRun();
 
   assert.equal(evaluation.runId, "eval_mock_20260628");
   assert.equal(evaluation.asrBefore, 0.732);
@@ -41,9 +40,8 @@ test("mock source exposes rich evaluation data for populated pages", async () =>
 
 test("mock evaluation cases stay consistent with linked audit events", async () => {
   const source = new MockDashboardDataSource(0);
-  const events = await source.getEvents();
-  const metrics = await source.getMetrics();
-  const evaluation = await source.getEvaluation(metrics);
+  const events = (await source.getAuditWindow()).events;
+  const evaluation = await source.getLatestEvaluationRun();
 
   for (const row of evaluation.cases) {
     const event = events.find(
@@ -55,6 +53,21 @@ test("mock evaluation cases stay consistent with linked audit events", async () 
     assert.equal(event.decision, row.actualDecision, `${row.caseId} actual decision`);
     assert.equal(event.blocked, row.blocked, `${row.caseId} blocked`);
   }
+});
+
+test("mock audit window deduplicates policy records and excludes runtime outcomes", async () => {
+  const source = new MockDashboardDataSource(0);
+  const window = await source.getAuditWindow();
+  const aggregate = await source.getAggregateMetrics();
+
+  assert.ok(window.events.some((event) => event.recordType === "runtime_outcome"));
+  assert.equal(window.metrics.evaluationCount, 8);
+  assert.equal(
+    window.metrics.allowCount + window.metrics.askCount + window.metrics.denyCount,
+    window.metrics.evaluationCount,
+  );
+  assert.equal(aggregate.scope.kind, "aggregate_history");
+  assert.equal(aggregate.reportedEventCount, window.metrics.evaluationCount);
 });
 
 test("mock source exposes config findings and OpenClaw status", async () => {

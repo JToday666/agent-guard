@@ -116,7 +116,7 @@
         :title="resolutionDisabledReason"
         @click="emit('resolve', 'deny')"
       >
-        {{ submittingDecision === "deny" ? "提交中…" : "拒绝并阻断" }}
+        {{ submittingDecision === "deny" ? "提交中…" : "拒绝授权" }}
       </button>
     </footer>
 

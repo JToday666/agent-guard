@@ -6,24 +6,24 @@
     </header>
 
     <ErrorState
-      v-if="store.status === 'error' && store.error"
+      v-if="windowUnavailable && !hasRunData"
       :is-retrying="store.isManualRefreshing"
-      :message="store.error"
+      :message="store.error ?? '当前审计窗口加载失败'"
       @retry="store.refresh"
     />
-    <LoadingState v-else-if="store.status === 'loading' && !store.events.length" />
+    <LoadingState v-else-if="store.status === 'loading' && !store.events.length && !hasRunData" />
     <template v-else>
-      <InlineNotice v-if="store.evaluationError" title="评测结果暂未更新" tone="warning">
-        <p>{{ store.evaluationError }}</p>
+      <InlineNotice v-if="store.evaluationRunError" title="评测结果暂未更新" tone="warning">
+        <p>{{ store.evaluationRunError }}</p>
       </InlineNotice>
 
       <section v-if="hasRunData" class="benchmark-section" aria-labelledby="benchmark-title">
         <header class="section-header">
           <div>
             <h2 id="benchmark-title">完整评测结果</h2>
-            <p>{{ store.evaluation.datasetLabel }} · 独立评测运行</p>
+            <p>{{ store.evaluationRun.datasetLabel }} · 独立评测运行</p>
           </div>
-          <span>{{ formatMaybeTime(store.evaluation.runAt) }}</span>
+          <span>{{ formatMaybeTime(store.evaluationRun.runAt) }}</span>
         </header>
 
         <div class="benchmark-layout">
@@ -31,43 +31,45 @@
             <dl class="asr-headline" aria-label="防护前后攻击成功率">
               <div>
                 <dt>防护前 ASR</dt>
-                <dd class="asr-headline__before">{{ percent(store.evaluation.asrBefore) }}</dd>
+                <dd class="asr-headline__before">{{ percent(store.evaluationRun.asrBefore) }}</dd>
               </div>
               <div class="asr-headline__change">
                 <dt>ASR 降幅</dt>
-                <dd>{{ pointDelta(store.evaluation.asrBefore, store.evaluation.asrAfter) }}</dd>
+                <dd>
+                  {{ pointDelta(store.evaluationRun.asrBefore, store.evaluationRun.asrAfter) }}
+                </dd>
               </div>
               <div>
                 <dt>防护后 ASR</dt>
-                <dd class="asr-headline__after">{{ percent(store.evaluation.asrAfter) }}</dd>
+                <dd class="asr-headline__after">{{ percent(store.evaluationRun.asrAfter) }}</dd>
               </div>
             </dl>
 
             <AsrComparisonChart
-              :before="store.evaluation.asrBefore"
-              :after="store.evaluation.asrAfter"
+              :before="store.evaluationRun.asrBefore"
+              :after="store.evaluationRun.asrAfter"
             />
 
             <dl class="benchmark-facts">
               <div>
                 <dt>运行 ID</dt>
                 <dd>
-                  <code>{{ store.evaluation.runId }}</code>
+                  <code>{{ store.evaluationRun.runId }}</code>
                 </dd>
               </div>
               <div>
                 <dt>数据集版本</dt>
-                <dd>{{ store.evaluation.datasetVersion ?? "未提供" }}</dd>
+                <dd>{{ store.evaluationRun.datasetVersion ?? "未提供" }}</dd>
               </div>
               <div>
                 <dt>样本量</dt>
-                <dd>{{ store.evaluation.cases.length }}</dd>
+                <dd>{{ store.evaluationRun.cases.length }}</dd>
               </div>
             </dl>
           </div>
 
           <section
-            v-if="store.evaluation.perAttack.length"
+            v-if="store.evaluationRun.perAttack.length"
             class="attack-asr"
             aria-labelledby="attack-asr-title"
           >
@@ -82,7 +84,11 @@
               </div>
             </header>
             <div class="attack-asr__rows" role="list">
-              <div v-for="row in store.evaluation.perAttack" :key="row.attackType" role="listitem">
+              <div
+                v-for="row in store.evaluationRun.perAttack"
+                :key="row.attackType"
+                role="listitem"
+              >
                 <div class="attack-asr__label">
                   <strong>{{ getAttackTypeLabel(row.attackType) }}</strong>
                   <span>下降 {{ pointDelta(row.asrBefore, row.asrAfter) }}</span>
@@ -113,50 +119,62 @@
         <header class="section-header">
           <div>
             <h2 id="window-title">当前审计窗口</h2>
-            <p>由当前加载的审计事件实时派生，不与完整评测结果混算</p>
+            <p>由当前加载记录中的逻辑唯一策略评估派生，不与完整评测结果混算</p>
           </div>
-          <span>{{ store.events.length }} 条事件 · {{ labeledEventCount }} 条已标注</span>
+          <span v-if="!windowUnavailable">
+            {{ store.auditWindow.scope.returnedRecordCount }} 条审计记录 ·
+            {{ store.windowMetrics.evaluationCount }} 次策略评估 ·
+            {{ windowCompletenessLabel }}
+          </span>
+          <span v-else>窗口数据暂不可用</span>
         </header>
-        <MetricStrip :items="metricItems" />
+        <InlineNotice v-if="windowUnavailable" title="当前审计窗口暂不可用" tone="warning">
+          <p>{{ store.error }}</p>
+        </InlineNotice>
+        <template v-else>
+          <MetricStrip :items="metricItems" />
 
-        <div class="window-analysis">
-          <ChartFrame
-            description="按有延迟记录的审计事件计算运行时均值"
-            :summary="runtimeLatencySummary"
-            title="运行时判定延迟"
-          >
-            <div v-if="hasRuntimeData" class="runtime-bars">
-              <div v-for="row in runtimeLatency" :key="row.runtime" class="runtime-bar-row">
-                <span class="runtime-bar-label">
-                  <strong>{{ row.runtime }}</strong>
-                  <small>{{ row.count }} 条记录</small>
-                </span>
-                <span class="runtime-bar-track" aria-hidden="true"
-                  ><i :style="{ transform: `scaleX(${row.pct / 100})` }"></i
-                ></span>
-                <span class="runtime-bar-val">{{
-                  row.avg === null ? "—" : `${row.avg.toFixed(1)} ms`
-                }}</span>
+          <div class="window-analysis">
+            <ChartFrame
+              description="按有判定延迟记录的逻辑唯一策略评估计算运行时均值"
+              :range-label="windowRangeLabel"
+              :summary="runtimeLatencySummary"
+              title="运行时判定延迟"
+            >
+              <div v-if="hasRuntimeData" class="runtime-bars">
+                <div v-for="row in runtimeLatency" :key="row.runtime" class="runtime-bar-row">
+                  <span class="runtime-bar-label">
+                    <strong>{{ row.runtime }}</strong>
+                    <small>{{ row.count }} 条记录</small>
+                  </span>
+                  <span class="runtime-bar-track" aria-hidden="true"
+                    ><i :style="{ transform: `scaleX(${row.pct / 100})` }"></i
+                  ></span>
+                  <span class="runtime-bar-val">{{
+                    row.avg === null ? "—" : `${row.avg.toFixed(1)} ms`
+                  }}</span>
+                </div>
               </div>
-            </div>
-            <p v-else class="chart-empty">当前窗口暂无延迟记录</p>
-          </ChartFrame>
+              <p v-else class="chart-empty">当前窗口暂无延迟记录</p>
+            </ChartFrame>
 
-          <ChartFrame
-            description="由恶意标注与实际阻断结果派生"
-            :summary="matrixSummary"
-            title="混淆矩阵"
-          >
-            <ConfusionMatrix
-              v-if="hasMatrixData"
-              :tp="matrix.tp"
-              :fp="matrix.fp"
-              :tn="matrix.tn"
-              :fn="matrix.fn"
-            />
-            <p v-else class="chart-empty">当前窗口暂无足够的恶意标注数据</p>
-          </ChartFrame>
-        </div>
+            <ChartFrame
+              description="由恶意标注与策略是否介入派生，不表示工具实际未执行"
+              :range-label="windowRangeLabel"
+              :summary="matrixSummary"
+              title="策略介入混淆矩阵"
+            >
+              <ConfusionMatrix
+                v-if="hasMatrixData"
+                :tp="matrix.tp"
+                :fp="matrix.fp"
+                :tn="matrix.tn"
+                :fn="matrix.fn"
+              />
+              <p v-else class="chart-empty">当前窗口暂无足够的恶意标注数据</p>
+            </ChartFrame>
+          </div>
+        </template>
       </section>
 
       <section class="evaluation-cases section-divider" aria-labelledby="case-title">
@@ -166,7 +184,7 @@
             <p>完整评测中的样本可追溯到对应证据链</p>
           </div>
           <span>
-            {{ store.evaluation.cases.length }} 个样本
+            {{ store.evaluationRun.cases.length }} 个样本
             <template v-if="totalCasePages > 1">
               · 第 {{ currentCasePage }} / {{ totalCasePages }} 页
             </template>
@@ -184,7 +202,7 @@
           }}</span>
           <button type="button" @click="handleClearCaseLocator">清除定位</button>
         </div>
-        <template v-if="store.evaluation.cases.length">
+        <template v-if="store.evaluationRun.cases.length">
           <div class="case-table-wrap">
             <table class="case-table">
               <caption>
@@ -300,7 +318,7 @@ const selectedCaseId = computed(() =>
 const selectedCaseExists = computed(() =>
   Boolean(
     selectedCaseId.value &&
-    store.evaluation.cases.some((row) => row.caseId === selectedCaseId.value),
+    store.evaluationRun.cases.some((row) => row.caseId === selectedCaseId.value),
   ),
 );
 const requestedCasePage = computed(() => {
@@ -311,95 +329,105 @@ const requestedCasePage = computed(() => {
   return Number.isFinite(page) && page > 0 ? page : 1;
 });
 const totalCasePages = computed(() =>
-  Math.max(1, Math.ceil(store.evaluation.cases.length / CASE_PAGE_SIZE)),
+  Math.max(1, Math.ceil(store.evaluationRun.cases.length / CASE_PAGE_SIZE)),
 );
 const selectedCasePage = computed(() => {
   if (!selectedCaseId.value) return null;
-  const index = store.evaluation.cases.findIndex((row) => row.caseId === selectedCaseId.value);
+  const index = store.evaluationRun.cases.findIndex((row) => row.caseId === selectedCaseId.value);
   return index < 0 ? null : Math.floor(index / CASE_PAGE_SIZE) + 1;
 });
 const currentCasePage = computed(() =>
   Math.min(selectedCasePage.value ?? requestedCasePage.value, totalCasePages.value),
 );
 const paginatedCases = computed(() =>
-  store.evaluation.cases.slice(
+  store.evaluationRun.cases.slice(
     (currentCasePage.value - 1) * CASE_PAGE_SIZE,
     currentCasePage.value * CASE_PAGE_SIZE,
   ),
 );
-const hasRunData = computed(() => store.evaluation.runId !== null);
+const hasRunData = computed(() => store.evaluationRun.runId !== null);
+const windowUnavailable = computed(() => store.status === "error" && Boolean(store.error));
 const matrix = computed(() => {
-  const events = store.events;
   let tp = 0;
   let fp = 0;
   let tn = 0;
   let fn = 0;
-  for (const event of events) {
-    if (event.isMalicious === null || event.isMalicious === undefined || event.blocked === null) {
+  for (const event of store.policyEvaluations) {
+    if (event.isMalicious === null || event.isMalicious === undefined) {
       continue;
     }
-    if (event.isMalicious && event.blocked) tp++;
-    else if (!event.isMalicious && event.blocked) fp++;
-    else if (!event.isMalicious && !event.blocked) tn++;
-    else if (event.isMalicious && !event.blocked) fn++;
+    const intervened = event.decision === "ask" || event.decision === "deny";
+    if (event.decision === "unknown") continue;
+    if (event.isMalicious && intervened) tp++;
+    else if (!event.isMalicious && intervened) fp++;
+    else if (!event.isMalicious && !intervened) tn++;
+    else if (event.isMalicious && !intervened) fn++;
   }
   return { tp, fp, tn, fn };
 });
 const hasMatrixData = computed(
   () => matrix.value.tp + matrix.value.fp + matrix.value.tn + matrix.value.fn > 0,
 );
-const labeledEventCount = computed(
-  () =>
-    store.events.filter((event) => event.isMalicious !== null && event.isMalicious !== undefined)
-      .length,
+const labeledEvaluationCount = computed(
+  () => store.windowMetrics.benignLabelCount + store.windowMetrics.maliciousLabelCount,
 );
+const windowRangeLabel = computed(() => {
+  const { from, to } = store.auditWindow.scope;
+  if (!from || !to) return "当前审计窗口";
+  return `${formatDashboardDateTime(from)} 至 ${formatDashboardDateTime(to)}`;
+});
+const windowCompletenessLabel = computed(() => {
+  if (store.auditWindow.scope.hasMore === true) return "仅显示部分记录";
+  if (store.auditWindow.scope.hasMore === false) return "当前窗口记录完整";
+  return "是否截断未知";
+});
 const metricItems = computed(() => [
   {
-    detail: "当前加载数据",
-    label: "审计事件",
+    detail: `最近加载，上限 ${store.auditWindow.scope.limit} 条；${windowCompletenessLabel.value}`,
+    label: "审计记录",
     route: "/investigations",
-    value: countFormatter.format(store.metrics.eventCount),
+    value: countFormatter.format(store.auditWindow.scope.returnedRecordCount),
   },
   {
-    detail: "含恶意性标注",
-    label: "已标注样本",
+    detail: `${labeledEvaluationCount.value} 次评估含可用恶意性标注`,
+    label: "策略评估",
     route: "/investigations",
-    value: countFormatter.format(labeledEventCount.value),
+    value: countFormatter.format(store.windowMetrics.evaluationCount),
   },
   {
-    detail: "兼容口径包含拒绝与需审批",
+    detail: `${store.windowMetrics.interventionCount} / ${store.windowMetrics.evaluationCount}，包含拒绝与需审批`,
     label: "策略介入率",
-    route: "/investigations?blocked=true",
-    tone: "protective" as const,
-    value: percent(store.metrics.blockRate),
-  },
-  {
-    detail: "正常样本被阻断",
-    label: "误报率 FPR",
     route: "/investigations",
-    value: percent(store.metrics.fpr),
+    tone: "protective" as const,
+    value: percent(store.windowMetrics.interventionRate),
   },
   {
-    detail: "恶意样本未阻断",
-    label: "漏报率 FNR",
+    detail: `分母为 ${store.windowMetrics.benignLabelCount} 个正常标注评估`,
+    label: "策略误报率 FPR",
+    route: "/investigations",
+    value: percent(store.windowMetrics.policyFpr),
+  },
+  {
+    detail: `分母为 ${store.windowMetrics.maliciousLabelCount} 个恶意标注评估`,
+    label: "策略漏报率 FNR",
     route: "/investigations?decision=allow",
     tone: "danger" as const,
-    value: percent(store.metrics.fnr),
+    value: percent(store.windowMetrics.policyFnr),
   },
   {
-    detail: "有耗时记录的事件",
+    detail: `${store.windowMetrics.latencySampleCount} 次策略判定有耗时记录`,
     label: "平均判定延迟",
     route: "/system",
     value:
-      store.metrics.averageLatencyMs === null
+      store.windowMetrics.averageDecisionLatencyMs === null
         ? "--"
-        : `${store.metrics.averageLatencyMs.toFixed(1)} ms`,
+        : `${store.windowMetrics.averageDecisionLatencyMs.toFixed(1)} ms`,
   },
 ]);
 const runtimeLatency = computed(() => {
   const runtimes = ["langgraph", "openclaw"] as const;
   const rows = runtimes.map((runtime) => {
-    const values = store.events
+    const values = store.policyEvaluations
       .filter((event) => event.runtime === runtime && event.latencyMs != null)
       .map((event) => event.latencyMs as number);
     const avg = values.length
@@ -419,7 +447,7 @@ const runtimeLatencySummary = computed(() => {
 });
 const matrixSummary = computed(() =>
   hasMatrixData.value
-    ? `共 ${labeledEventCount.value} 条已标注事件，正确阻断 ${matrix.value.tp}，误报 ${matrix.value.fp}，正确放行 ${matrix.value.tn}，漏报 ${matrix.value.fn}`
+    ? `共 ${labeledEvaluationCount.value} 次已标注策略评估，正确介入 ${matrix.value.tp}，误报 ${matrix.value.fp}，正确未介入 ${matrix.value.tn}，漏报 ${matrix.value.fn}`
     : "当前窗口暂无足够的恶意标注数据",
 );
 
@@ -455,7 +483,7 @@ function handleCasePage(page: number) {
 }
 
 watch(
-  [selectedCaseId, () => store.evaluation.cases.length],
+  [selectedCaseId, () => store.evaluationRun.cases.length],
   async ([caseId]) => {
     if (!caseId) return;
     await nextTick();

@@ -6,16 +6,21 @@ import { formatApprovalEvidenceFields, mergeApprovalsWithAuditEvidence } from ".
 
 function event(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {
+    actionId: "call_1",
     agentAction: "Agent attempted to call send_email",
     approvalId: "app_1",
+    auditSequence: 1,
     attackType: "prompt_injection",
     blocked: true,
     caseId: "PI-001",
     decision: "ask",
+    decisionId: "decision_1",
+    eventId: "event_1",
     id: "audit_1",
     latencyMs: 5,
     occurredAt: "2026-06-22T06:30:00Z",
     raw: {},
+    recordType: "policy_evaluation",
     reason: "External send requires approval",
     resource: "recipient@example.invalid",
     resourceTargets: ["recipient@example.invalid"],

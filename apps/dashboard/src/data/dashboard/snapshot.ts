@@ -1,8 +1,10 @@
 import type {
+  AggregateMetrics,
   ApprovalRequest,
   AuditEventRow,
-  EvalMetrics,
-  EvaluationSummary,
+  AuditWindow,
+  EvaluationRun,
+  WindowMetrics,
 } from "../../types/dashboard";
 
 function hasSameStringList(left: readonly string[], right: readonly string[]) {
@@ -12,6 +14,11 @@ function hasSameStringList(left: readonly string[], right: readonly string[]) {
 function hasSameEvent(left: AuditEventRow, right: AuditEventRow): boolean {
   return (
     left.id === right.id &&
+    left.auditSequence === right.auditSequence &&
+    left.eventId === right.eventId &&
+    left.decisionId === right.decisionId &&
+    left.actionId === right.actionId &&
+    left.recordType === right.recordType &&
     left.occurredAt === right.occurredAt &&
     left.time === right.time &&
     left.decision === right.decision &&
@@ -46,21 +53,64 @@ export function hasSameEventWindow(
   );
 }
 
-export function hasSameMetrics(left: EvalMetrics, right: EvalMetrics): boolean {
+function hasSameWindowMetrics(left: WindowMetrics, right: WindowMetrics): boolean {
   return (
-    left.eventCount === right.eventCount &&
+    left.evaluationCount === right.evaluationCount &&
+    left.unknownDecisionCount === right.unknownDecisionCount &&
     left.allowCount === right.allowCount &&
     left.denyCount === right.denyCount &&
     left.askCount === right.askCount &&
-    left.blockedCount === right.blockedCount &&
-    left.blockRate === right.blockRate &&
-    left.fpr === right.fpr &&
-    left.fnr === right.fnr &&
-    left.averageLatencyMs === right.averageLatencyMs
+    left.interventionCount === right.interventionCount &&
+    left.interventionRate === right.interventionRate &&
+    left.policyDenyRate === right.policyDenyRate &&
+    left.approvalTriggerRate === right.approvalTriggerRate &&
+    left.policyFpr === right.policyFpr &&
+    left.policyFnr === right.policyFnr &&
+    left.benignLabelCount === right.benignLabelCount &&
+    left.maliciousLabelCount === right.maliciousLabelCount &&
+    left.unlabeledCount === right.unlabeledCount &&
+    left.averageDecisionLatencyMs === right.averageDecisionLatencyMs &&
+    left.latencySampleCount === right.latencySampleCount &&
+    left.duplicatePolicyRecordCount === right.duplicatePolicyRecordCount &&
+    left.legacyFallbackCount === right.legacyFallbackCount
   );
 }
 
-export function hasSameEvaluation(left: EvaluationSummary, right: EvaluationSummary): boolean {
+export function hasSameAuditWindow(left: AuditWindow, right: AuditWindow): boolean {
+  return (
+    left.scope.kind === right.scope.kind &&
+    left.scope.source === right.scope.source &&
+    left.scope.limit === right.scope.limit &&
+    left.scope.returnedRecordCount === right.scope.returnedRecordCount &&
+    left.scope.hasMore === right.scope.hasMore &&
+    left.scope.from === right.scope.from &&
+    left.scope.to === right.scope.to &&
+    left.scope.deduplication === right.scope.deduplication &&
+    hasSameEventWindow(left.events, right.events) &&
+    hasSameWindowMetrics(left.metrics, right.metrics)
+  );
+}
+
+export function hasSameAggregateMetrics(left: AggregateMetrics, right: AggregateMetrics): boolean {
+  return (
+    left.scope.kind === right.scope.kind &&
+    left.scope.source === right.scope.source &&
+    left.scope.from === right.scope.from &&
+    left.scope.to === right.scope.to &&
+    left.scope.deduplication === right.scope.deduplication &&
+    left.reportedEventCount === right.reportedEventCount &&
+    left.allowCount === right.allowCount &&
+    left.denyCount === right.denyCount &&
+    left.askCount === right.askCount &&
+    left.reportedInterventionCount === right.reportedInterventionCount &&
+    left.reportedInterventionRate === right.reportedInterventionRate &&
+    left.reportedFpr === right.reportedFpr &&
+    left.reportedFnr === right.reportedFnr &&
+    left.reportedAverageLatencyMs === right.reportedAverageLatencyMs
+  );
+}
+
+export function hasSameEvaluationRun(left: EvaluationRun, right: EvaluationRun): boolean {
   return (
     left.runId === right.runId &&
     left.runAt === right.runAt &&
@@ -94,11 +144,7 @@ export function hasSameEvaluation(left: EvaluationSummary, right: EvaluationSumm
         row.attackSuccess === other.attackSuccess &&
         row.traceId === other.traceId
       );
-    }) &&
-    left.blockRate === right.blockRate &&
-    left.fpr === right.fpr &&
-    left.fnr === right.fnr &&
-    left.averageLatencyMs === right.averageLatencyMs
+    })
   );
 }
 

@@ -14,14 +14,15 @@ test("refresh scope maps both evidence routes to the evidence domain", () => {
 
 test("refresh resources include common shell data and only page-specific domains", () => {
   const investigationResources = getDashboardRefreshResources("investigations");
-  assert.deepEqual([...investigationResources], ["health", "approvals", "events"]);
+  assert.deepEqual([...investigationResources], ["health", "approvals", "auditWindow"]);
 
   const evaluationResources = getDashboardRefreshResources("evaluation");
-  assert.equal(evaluationResources.has("events"), true);
-  assert.equal(evaluationResources.has("evaluation"), true);
+  assert.equal(evaluationResources.has("auditWindow"), true);
+  assert.equal(evaluationResources.has("evaluationRun"), true);
+  assert.equal(evaluationResources.has("aggregateMetrics"), false);
 
   const systemResources = getDashboardRefreshResources("system");
-  assert.equal(systemResources.has("events"), false);
+  assert.equal(systemResources.has("auditWindow"), false);
   assert.equal(systemResources.has("policy"), true);
   assert.equal(systemResources.has("adapter"), true);
 });

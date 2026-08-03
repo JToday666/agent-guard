@@ -49,11 +49,15 @@ test("normalizes the five intervention classes without collapsing their meanings
 
 test("does not infer execution or zero side effects from deny and blocked", () => {
   const event: AuditEventRow = {
+    actionId: "action_sparse",
     agentAction: "read_file('/sensitive')",
+    auditSequence: 1,
     attackType: "prompt_injection",
     blocked: true,
     caseId: "PI-SPARSE",
     decision: "deny",
+    decisionId: "decision_sparse",
+    eventId: "event_sparse",
     eventType: "tool_call_proposed",
     id: "audit_sparse_policy",
     isMalicious: true,
@@ -82,6 +86,7 @@ test("does not infer execution or zero side effects from deny and blocked", () =
       risk_score: 90,
       rule_hits: ["P001_sensitive_file_access"],
     },
+    recordType: "policy_evaluation",
   };
 
   const evidence = buildTraceEvidenceViewModel("trace_sparse", [event], [], null);

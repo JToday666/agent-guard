@@ -1,18 +1,20 @@
 import type {
   AdapterStatus,
+  AggregateMetrics,
   ApprovalRequest,
   ApprovalResolution,
-  AuditEventRow,
+  AuditWindow,
   AuditIntegrity,
   ConfigAuditFindingRecord,
-  EvalMetrics,
-  EvaluationSummary,
+  EvaluationRun,
   HealthStatus,
   PolicyHistoryEntry,
   PolicySummary,
   ProvenanceGraph,
   TraceDetail,
 } from "../../types/dashboard";
+
+export const AUDIT_EVENT_WINDOW_LIMIT = 500;
 
 export interface EventFilters {
   traceId?: string;
@@ -30,8 +32,8 @@ export interface ConfigAuditFindingFilters {
 }
 
 export interface DashboardDataSource {
-  getEvents(filters?: EventFilters, signal?: AbortSignal): Promise<AuditEventRow[]>;
-  getMetrics(filters?: EventFilters, signal?: AbortSignal): Promise<EvalMetrics>;
+  getAuditWindow(filters?: EventFilters, signal?: AbortSignal): Promise<AuditWindow>;
+  getAggregateMetrics(filters?: EventFilters, signal?: AbortSignal): Promise<AggregateMetrics>;
   getPendingApprovals(signal?: AbortSignal): Promise<ApprovalRequest[]>;
   resolveApproval(
     approval: ApprovalRequest,
@@ -39,7 +41,7 @@ export interface DashboardDataSource {
     csrfToken: string,
   ): Promise<ApprovalResolution>;
   getHealth(signal?: AbortSignal): Promise<HealthStatus>;
-  getEvaluation(metrics: EvalMetrics, signal?: AbortSignal): Promise<EvaluationSummary>;
+  getLatestEvaluationRun(signal?: AbortSignal): Promise<EvaluationRun>;
   getConfigAuditFindings(
     filters?: ConfigAuditFindingFilters,
     signal?: AbortSignal,

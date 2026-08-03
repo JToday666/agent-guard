@@ -19,8 +19,13 @@ const eventDto = {
   resource_targets: ["exfil@example.invalid"],
   rule_hits: ["P005_external_send", "P004_task_mismatch"],
   reason: "发送目标不在当前任务允许范围内，需要人工确认",
-  links: { event_id: "evt_api_001" },
+  links: {
+    action_id: "action_api_001",
+    decision_id: "decision_api_001",
+    event_id: "evt_api_001",
+  },
   latency_ms: 4,
+  record_type: "policy_evaluation",
   integrity: {
     sequence: 1,
     prev_hash: null,
@@ -395,7 +400,7 @@ test("API mode disables an approval when its expiry passes without another poll"
   });
   await page.goto("/approvals");
 
-  const denyButton = page.getByRole("button", { name: "拒绝并阻断" });
+  const denyButton = page.getByRole("button", { name: "拒绝授权" });
   await expect(denyButton).toBeEnabled();
   await expect(page.locator(".approval-queue time")).toContainText("分钟后过期");
   await page.clock.fastForward(61_000);
@@ -459,12 +464,12 @@ test("API polling requests only common data and the active page domain", async (
 
   await page.goto("/overview");
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
-  await expect(page.locator(".metric-strip")).toContainText("审计事件");
+  await expect(page.locator(".metric-strip")).toContainText("审计记录");
   await expect(page.locator(".freshness--ready").first()).toBeVisible();
 
   const overviewPaths = [...requestedPaths];
   expect(overviewPaths).toContain("/api/v1/audit/events");
-  expect(overviewPaths).toContain("/api/v1/metrics/eval");
+  expect(overviewPaths).not.toContain("/api/v1/metrics/eval");
   expect(overviewPaths).not.toContain("/api/v1/policies/current");
   expect(overviewPaths).not.toContain("/api/v1/config-audit/findings");
   expect(overviewPaths).not.toContain("/api/v1/adapters/openclaw/status");
@@ -502,5 +507,5 @@ test("manual refresh bypasses the shared-resource freshness window", async ({ pa
   requestedPaths.length = 0;
   await page.getByRole("button", { name: "刷新数据" }).click();
   await expect.poll(() => requestedPaths.includes("/api/v1/audit/events")).toBe(true);
-  expect(requestedPaths).toContain("/api/v1/metrics/eval");
+  expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
 });

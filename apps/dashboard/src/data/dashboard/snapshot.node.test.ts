@@ -2,21 +2,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
+  AggregateMetrics,
   ApprovalRequest,
   AuditEventRow,
-  EvalMetrics,
-  EvaluationSummary,
+  EvaluationRun,
 } from "../../types/dashboard.ts";
+import { createAuditWindow } from "./metrics.ts";
 import {
+  hasSameAggregateMetrics,
+  hasSameAuditWindow,
   hasSameEventWindow,
-  hasSameEvaluation,
-  hasSameMetrics,
+  hasSameEvaluationRun,
   reconcileApprovals,
 } from "./snapshot.ts";
 
 function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   return {
     id: "audit_1",
+    auditSequence: 1,
+    eventId: "event_1",
+    decisionId: "decision_1",
+    actionId: "action_1",
+    recordType: "policy_evaluation",
     occurredAt: "2026-06-22T06:30:00Z",
     time: "14:30:00",
     decision: "deny",
@@ -42,16 +49,23 @@ function makeEvent(overrides: Partial<AuditEventRow> = {}): AuditEventRow {
   };
 }
 
-const metrics: EvalMetrics = {
-  eventCount: 1,
+const aggregateMetrics: AggregateMetrics = {
+  scope: {
+    kind: "aggregate_history",
+    source: "legacy_metrics_api",
+    from: null,
+    to: null,
+    deduplication: "backend_unspecified",
+  },
+  reportedEventCount: 1,
   allowCount: 0,
   denyCount: 1,
   askCount: 0,
-  blockedCount: 1,
-  blockRate: 1,
-  fpr: null,
-  fnr: null,
-  averageLatencyMs: 3,
+  reportedInterventionCount: 1,
+  reportedInterventionRate: 1,
+  reportedFpr: null,
+  reportedFnr: null,
+  reportedAverageLatencyMs: 3,
 };
 
 function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
@@ -99,13 +113,32 @@ test("detects event type and malicious-label changes used by filters and metrics
   );
 });
 
-test("compares evaluation metrics by value", () => {
-  assert.equal(hasSameMetrics(metrics, { ...metrics }), true);
-  assert.equal(hasSameMetrics(metrics, { ...metrics, blockedCount: 0 }), false);
+test("compares audit windows and their scoped metrics atomically", () => {
+  const window = createAuditWindow([makeEvent()], {
+    limit: 500,
+    hasMore: null,
+    source: "legacy_audit_events",
+  });
+  assert.equal(hasSameAuditWindow(window, createAuditWindow([makeEvent()], window.scope)), true);
+  assert.equal(
+    hasSameAuditWindow(window, createAuditWindow([makeEvent({ decision: "allow" })], window.scope)),
+    false,
+  );
 });
 
-test("compares evaluation summaries by value", () => {
-  const evaluation: EvaluationSummary = {
+test("compares aggregate metrics by scope and reported values", () => {
+  assert.equal(hasSameAggregateMetrics(aggregateMetrics, { ...aggregateMetrics }), true);
+  assert.equal(
+    hasSameAggregateMetrics(aggregateMetrics, {
+      ...aggregateMetrics,
+      reportedInterventionCount: 0,
+    }),
+    false,
+  );
+});
+
+test("compares evaluation runs without inheriting audit metrics", () => {
+  const evaluation: EvaluationRun = {
     runId: "eval_1",
     runAt: "2026-06-28T00:00:00+00:00",
     datasetId: "attackbench",
@@ -133,23 +166,17 @@ test("compares evaluation summaries by value", () => {
         traceId: "trace_1",
       },
     ],
-    blockRate: 1,
-    fpr: null,
-    fnr: 0.2,
-    averageLatencyMs: 3,
   };
-  assert.equal(hasSameEvaluation(evaluation, { ...evaluation }), true);
-  assert.equal(hasSameEvaluation(evaluation, { ...evaluation, blockRate: 0.5 }), false);
-  assert.equal(hasSameEvaluation(evaluation, { ...evaluation, fnr: null }), false);
+  assert.equal(hasSameEvaluationRun(evaluation, { ...evaluation }), true);
   assert.equal(
-    hasSameEvaluation(evaluation, {
+    hasSameEvaluationRun(evaluation, {
       ...evaluation,
       perAttack: [{ ...evaluation.perAttack[0]!, asrAfter: 0.2 }],
     }),
     false,
   );
   assert.equal(
-    hasSameEvaluation(evaluation, {
+    hasSameEvaluationRun(evaluation, {
       ...evaluation,
       cases: [{ ...evaluation.cases[0]!, actualDecision: "allow" }],
     }),

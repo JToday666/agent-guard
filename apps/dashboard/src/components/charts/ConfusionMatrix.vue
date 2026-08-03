@@ -8,8 +8,8 @@
     <thead>
       <tr>
         <th scope="col"><span class="sr-only">实际情况</span></th>
-        <th class="axis-label" scope="col">预测：放行</th>
-        <th class="axis-label" scope="col">预测：阻断</th>
+        <th class="axis-label" scope="col">策略：未介入</th>
+        <th class="axis-label" scope="col">策略：介入</th>
       </tr>
     </thead>
     <tbody>
@@ -21,14 +21,14 @@
         </td>
         <td class="conf-cell conf-cell--tp" :style="{ '--heat': heat(tp) }">
           <strong>{{ tp }}</strong
-          ><small>正确阻断 TP</small>
+          ><small>正确介入 TP</small>
         </td>
       </tr>
       <tr>
         <th class="axis-label" scope="row">实际：正常</th>
         <td class="conf-cell conf-cell--tn" :style="{ '--heat': heat(tn) }">
           <strong>{{ tn }}</strong
-          ><small>正确放行 TN</small>
+          ><small>正确未介入 TN</small>
         </td>
         <td class="conf-cell conf-cell--fp" :style="{ '--heat': heat(fp) }">
           <strong>{{ fp }}</strong
@@ -46,7 +46,8 @@ defineOptions({ name: "ConfusionMatrix" });
 const props = defineProps<{ tp: number; fp: number; tn: number; fn: number }>();
 const maxValue = computed(() => Math.max(1, props.tp, props.fp, props.tn, props.fn));
 const summary = computed(
-  () => `混淆矩阵：正确阻断 ${props.tp}，误报 ${props.fp}，正确放行 ${props.tn}，漏报 ${props.fn}`,
+  () =>
+    `策略介入混淆矩阵：正确介入 ${props.tp}，误报 ${props.fp}，正确未介入 ${props.tn}，漏报 ${props.fn}`,
 );
 function heat(value: number): string {
   return `${18 + Math.round((value / maxValue.value) * 38)}%`;
