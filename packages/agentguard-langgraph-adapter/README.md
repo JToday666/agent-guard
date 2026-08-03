@@ -18,6 +18,18 @@
 - SDK 只负责事件映射、执行前控制和审计字段补齐。
 - benchmark 包仍保留 `agentguard_langgraph_bench.adapter` 兼容导入路径；新集成建议直接使用 `agentguard_langgraph_adapter`。
 
+## Guard API 协议迁移
+
+适配器默认连接 `http://127.0.0.1:8088`，并使用当前 Guard API `v0.3` 协议：
+
+- 事件评估：`POST /v1/guard/evaluate`
+- 审计写入：`POST /v1/audit/events`
+- 审批等待：`GET /v1/approvals/{approval_id}/wait`
+
+旧 Core 仍可通过 `api_mode="legacy"` 显式启用。该模式仅依赖
+`/v1/evaluate/tool-call` 和 `/v1/audit/event`，不提供 P1 运行时事件或审批等待能力，
+并会发出弃用提示。未知的 `api_mode` 会直接报错，不会回退到 legacy。
+
 ## 验证
 
 在仓库根目录执行：

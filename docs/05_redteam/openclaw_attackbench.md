@@ -271,6 +271,10 @@ uv run agentguardctl eval run \
 | `--runtime langgraph`                         | 当前 `BN-001`、`BN-002`、`BN-003` 的 `runtime_targets` 是 `langgraph`，需要该参数让 runner 不过滤掉这些 case；这不改变实际 agent adapter，实际执行仍是 OpenClaw。 |
 | `--timeout 600`                               | 整体评测超时时间，单位秒。                                                                                                                                        |
 
+`guard-api-v0.3` 是 SDK 与 Bench 的默认协议。旧 Core 兼容调用必须显式传入
+`--core-api-mode legacy`；legacy 仅支持旧的工具评估和单事件审计路由，不支持当前 P1
+运行时事件与 Guard API 审批等待接口。legacy 将在后续发布周期继续保留，但已进入弃用窗口。
+
 ## 8. 执行全量数据集自动遍历
 
 全量遍历使用 `attack_cases` 目录作为 dataset。runner 会自动加载该目录下所有 `*.jsonl` AttackCase，并按加载顺序自动轮转执行。本文的“全量”仅指当前仓库内：

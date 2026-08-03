@@ -3019,7 +3019,7 @@ def _is_file_exfiltration_browser_case(row: dict[str, Any]) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run AgentGuard LangGraph AttackBench")
     parser.add_argument("--dataset", default=str(DEFAULT_DATASET_DIR), help="JSONL file or directory of AttackCase files")
-    parser.add_argument("--core-url", default="http://localhost:8000", help="Agent Security Core base URL")
+    parser.add_argument("--core-url", default="http://127.0.0.1:8088", help="AgentGuard API base URL")
     parser.add_argument("--token", default="demo-token", help="Agent Security Core bearer token")
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--defense", choices=["on", "off"], default="off")
@@ -3155,7 +3155,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool-server-host", default="127.0.0.1")
     parser.add_argument("--tool-server-port", type=int, default=18090)
     parser.add_argument("--runtime", default="", help="Runtime label. Defaults to adapter runtime.")
-    parser.add_argument("--core-api-mode", choices=["legacy", "guard-api-v0.3"], default="legacy")
+    parser.add_argument(
+        "--core-api-mode",
+        choices=["legacy", "guard-api-v0.3"],
+        default="guard-api-v0.3",
+        help="Guard API protocol; legacy is an explicit compatibility mode.",
+    )
     parser.add_argument("--strict-runtime-targets", action="store_true")
     return parser
 

@@ -489,3 +489,6 @@ class _InProcessCoreClient:
     def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
         self.guard_events.append(event)
         return evaluate(GuardEvent.model_validate(event)).model_dump(mode="json")
+
+    def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "audit_id": event.get("audit_id")}

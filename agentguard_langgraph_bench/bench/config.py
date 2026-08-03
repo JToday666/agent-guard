@@ -6,6 +6,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from agentguard_langgraph_adapter.config import (
+    ApiMode,
+    DEFAULT_API_MODE,
+    validate_api_mode,
+    warn_if_legacy_api_mode,
+)
+
 
 BENCH_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = BENCH_ROOT.parent
@@ -146,7 +153,7 @@ def _default_llm_provider() -> str:
 
 @dataclass(slots=True)
 class BenchConfig:
-    core_base_url: str = "http://localhost:8000"
+    core_base_url: str = "http://127.0.0.1:8088"
     token: str = "demo-token"
     timeout: float = 5.0
     fail_closed: bool = True
@@ -186,7 +193,7 @@ class BenchConfig:
     tool_server_mode: str = "inprocess"
     tool_server_host: str = "127.0.0.1"
     tool_server_port: int = 18090
-    core_api_mode: str = "legacy"
+    core_api_mode: ApiMode = DEFAULT_API_MODE
     strict_runtime_targets: bool = False
     agent_visible_payload_mode: str = DEFAULT_AGENT_VISIBLE_PAYLOAD_MODE
     closure_on_partial: bool = False
@@ -194,6 +201,10 @@ class BenchConfig:
     prompt_contamination_check: bool = True
     autonomous_planner_recovery_retry: bool = True
     autonomous_planner_recovery_max_observations: int = 2
+
+    def __post_init__(self) -> None:
+        self.core_api_mode = validate_api_mode(self.core_api_mode)
+        warn_if_legacy_api_mode(self.core_api_mode)
 
     @classmethod
     def from_values(
@@ -312,7 +323,7 @@ class BenchConfig:
             raise ValueError("approval_timeout must be greater than 0")
 
         return cls(
-            core_base_url=core_base_url or "http://localhost:8000",
+            core_base_url=core_base_url or "http://127.0.0.1:8088",
             token=token or "demo-token",
             timeout=timeout if timeout is not None else 5.0,
             fail_closed=fail_closed,
@@ -371,7 +382,11 @@ class BenchConfig:
             tool_server_mode=(tool_server_mode or os.getenv("AGENTGUARD_BENCH_TOOL_SERVER_MODE") or "inprocess").strip().lower(),
             tool_server_host=(tool_server_host or os.getenv("AGENTGUARD_BENCH_TOOL_SERVER_HOST") or "127.0.0.1").strip(),
             tool_server_port=tool_server_port if tool_server_port is not None else _env_int("AGENTGUARD_BENCH_TOOL_SERVER_PORT", 18090),
-            core_api_mode=(core_api_mode or os.getenv("AGENTGUARD_CORE_API_MODE") or "legacy").strip(),
+            core_api_mode=validate_api_mode(
+                core_api_mode
+                or os.getenv("AGENTGUARD_CORE_API_MODE")
+                or DEFAULT_API_MODE
+            ),
             strict_runtime_targets=(
                 _env_bool("AGENTGUARD_BENCH_STRICT_RUNTIME_TARGETS", False)
                 if strict_runtime_targets is None
