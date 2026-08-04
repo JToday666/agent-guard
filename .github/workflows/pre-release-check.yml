@@ -211,6 +211,12 @@ jobs:
         with:
           node-version: 24.18.0
       - run: corepack enable && corepack prepare pnpm@11.9.0 --activate
+      - name: Create ephemeral OpenClaw environment
+        shell: bash
+        run: |
+          printf 'AGENTGUARD_ADAPTER_TOKEN=%s\n' "$AGENTGUARD_ADAPTER_TOKEN" > .env
+          printf 'AGENTGUARD_CONTROL_TOKEN=%s\n' "$AGENTGUARD_CONTROL_TOKEN" >> .env
+          chmod 600 .env
       - run: |
           uv sync --frozen
           pnpm install --frozen-lockfile
