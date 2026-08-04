@@ -112,7 +112,7 @@ uv run agentguardctl audit export --limit 10
 uv run agentguardctl metrics --json
 uv run agentguardctl trace get <trace_id> --provenance
 uv run agentguardctl openclaw verify
-uv run agentguardctl eval run --help
+uv run agentguardctl eval import --help
 ```
 
 需要鉴权的命令读取 `AGENTGUARD_CONTROL_TOKEN`。CLI 默认连接 `AGENTGUARD_API_URL`；未设置时使用 `AGENTGUARD_HOST` 和 `AGENTGUARD_PORT`。
@@ -129,14 +129,14 @@ pnpm openclaw:plugin:reliability
 pnpm openclaw:plugin:uninstall
 ```
 
-E2E 和 reliability 报告写入 `/tmp/agentguard-openclaw-*.json` 与 `/tmp/agentguard-openclaw-*.md`。插件的详细配置见 `packages/agentguard-openclaw-plugin/README.md`。
+E2E 和 reliability 报告写入系统临时目录下的 `agentguard-openclaw-*.json` 与 `agentguard-openclaw-*.md`。插件的详细配置见 `packages/agentguard-openclaw-plugin/README.md`。
 
 ## 靶场入口
 
 LangGraph / AttackBench 靶场可直接通过 runner 或 CLI 使用。常用入口：
 
 ```bash
-uv run agentguardctl eval run --help
+uv run agentguardctl eval import --help
 uv run python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langgraph_bench/bench/datasets/attack_cases --defense off
 uv run python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langgraph_bench/bench/datasets/attack_cases --defense on --fake-core
 ```
