@@ -322,7 +322,7 @@ uv run agentguardctl eval run \
 
 全量验收标准：
 
-- shim 日志中 `/run` 次数应接近全量 case 数；当前目录合计 123 条 case，未来以实际数据集为准。
+- shim 日志中 `/run` 次数应接近全量 case 数；当前 `attack_cases` 目录合计 60 条 case，未来以实际数据集为准。
 - `summary_<run_id>.json` 中 `case_count` 应等于实际加载并执行的 case 数。
 - `run_valid_rate`、`invalid_case_count` 和 `artifact_integrity.ok` 是主要质量判断字段。
 - 每个 case 目录仍应包含 `case_result.json`、`tool_results.jsonl`、`policy_decisions.jsonl` 和 `audit_events.jsonl`。

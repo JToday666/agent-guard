@@ -39,14 +39,19 @@ AttackCase
 
 ## 数据集规模
 
-当前仓库内 AttackCase JSONL 共 112 条：
+当前仓库内 `attack_cases` 目录共 60 条 AttackCase JSONL：
 
 | 数据集 | 用例数 |
 | ------ | -----: |
-| 主攻击与对照样本 | 100 |
-| PoisonedRAG 扩展样本 | 12 |
+| `agent_abuse.jsonl` | 10 |
+| `benign.jsonl` | 10 |
+| `file_exfiltration.jsonl` | 10 |
+| `memory_poisoning.jsonl` | 10 |
+| `prompt_injection.jsonl` | 10 |
+| `tool_hijacking.jsonl` | 10 |
+| 合计 | 60 |
 
-主样本覆盖 `prompt_injection`、`tool_hijacking`、`memory_poisoning`、`file_exfiltration`、`agent_abuse` 和 `benign`。PoisonedRAG 扩展样本用于检索污染与记忆污染专项验证。
+样本覆盖 `prompt_injection`、`tool_hijacking`、`memory_poisoning`、`file_exfiltration`、`agent_abuse` 和 `benign`。PoisonedRAG、MCP Safety 和 Instrumentation 资源属于独立专项资源，不计入上述 60 条。
 
 ## 环境准备
 
