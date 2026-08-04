@@ -18,7 +18,7 @@
 基础检查：
 
 ```bash
-pnpm --filter @agentguard/openclaw-plugin test
+pnpm --filter @agentguard-ai/openclaw-plugin test
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 openclaw gateway status
 ```
@@ -83,7 +83,7 @@ pnpm openclaw:plugin:install
 
 该命令会执行：
 
-1. `pnpm --filter @agentguard/openclaw-plugin build`
+1. `pnpm --filter @agentguard-ai/openclaw-plugin build`
 2. 重建 `.openclaw-dev/agentguard-security`
 3. 只复制 `dist/`、`openclaw.plugin.json`、`package.json`、`README.md`
 4. 备份当前 OpenClaw config 到 `.openclaw-dev/backups/`
@@ -178,8 +178,8 @@ pnpm openclaw:plugin:e2e
 输出文件：
 
 ```text
-/tmp/agentguard-openclaw-e2e-report.json
-/tmp/agentguard-openclaw-e2e-acceptance-report.md
+<系统临时目录>/agentguard-openclaw-e2e-report.json
+<系统临时目录>/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
 验收重点：
@@ -205,8 +205,8 @@ API、复核 OpenClaw runtime 插件加载状态，并触发 22 个 hook 各 50 
 输出文件：
 
 ```text
-/tmp/agentguard-openclaw-reliability-report.json
-/tmp/agentguard-openclaw-reliability-acceptance-report.md
+<系统临时目录>/agentguard-openclaw-reliability-report.json
+<系统临时目录>/agentguard-openclaw-reliability-acceptance-report.md
 ```
 
 验收重点：
@@ -331,7 +331,7 @@ plugin entry does not expose defineToolPlugin metadata
 最近一次本机真实 E2E 验收报告：
 
 ```text
-/tmp/agentguard-openclaw-e2e-acceptance-report.md
+<系统临时目录>/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
 该验收使用 OpenClaw 2026.6.6、Guard API、PostgreSQL 和 repo 内确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_prompt_build`、`llm_input`、`llm_output`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。

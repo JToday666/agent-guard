@@ -195,7 +195,7 @@ uv run agentguardctl audit export --limit 10 --output /tmp/agentguard-audit.json
 uv run agentguardctl metrics --json
 uv run agentguardctl trace get <trace_id> --provenance
 uv run agentguardctl openclaw verify
-uv run agentguardctl eval run --help
+uv run agentguardctl eval import --help
 ```
 
 CLI 边界：
@@ -206,7 +206,7 @@ CLI 边界：
 - CLI 不处理审批 resolve。
 - CLI 不写策略、不安装或卸载 OpenClaw 插件。
 - `openclaw verify` 只封装 `pnpm openclaw:plugin:verify`。
-- `eval run` 只委托 AttackBench runner。
+- `eval import` 只负责导入通用评测结果；公开 CLI 不依赖 LangGraph runner。
 
 ## 7. 无头机器模式
 
@@ -262,7 +262,7 @@ uv run agentguardctl launch
 基础检查：
 
 ```bash
-pnpm --filter @agentguard/openclaw-plugin test
+pnpm --filter @agentguard-ai/openclaw-plugin test
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 openclaw gateway status
 ```
@@ -295,13 +295,13 @@ pnpm openclaw:plugin:uninstall
 
 ## 9. AttackBench 评测
 
-CLI 只委托现有 AttackBench runner。先查看 runner 参数：
+公开 CLI 只保留通用评测结果导入，不携带 LangGraph runner。查看导入参数：
 
 ```bash
-uv run agentguardctl eval run --help
+uv run agentguardctl eval import --help
 ```
 
-实际运行时，`eval run` 后面的参数透传给 runner。如果评测需要真实 Guard API 链路，先启动 API 并加载 `.env`。如果 runner 只做离线 core 评测，则按 runner 自身参数决定是否需要 API。
+评测 runner 由各自项目独立运行；生成结果后通过 `eval import` 写入 Guard API。这样 `agentguard-cli` 发布物不引入 LangGraph 依赖。
 
 ## 10. 生产化边界
 

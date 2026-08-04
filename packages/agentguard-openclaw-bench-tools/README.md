@@ -13,7 +13,7 @@
 - 不实现安全策略。
 - 不判断攻击是否成功。
 - 不调用 `agentguard-core`。
-- 不替代 `@agentguard/openclaw-plugin` 的检测、阻断和审计能力。
+- 不替代 `@agentguard-ai/openclaw-plugin` 的检测、阻断和审计能力。
 
 ## 验证
 
