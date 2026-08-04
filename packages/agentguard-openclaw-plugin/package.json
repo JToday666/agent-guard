@@ -1,9 +1,33 @@
 {
-  "name": "@agentguard/openclaw-plugin",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@agentguard-ai/openclaw-plugin",
+  "version": "0.1.0-beta.1",
   "type": "module",
   "description": "AgentGuard security hooks for OpenClaw",
+  "author": "AEGIS Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JToday666/agent-guard.git",
+    "directory": "packages/agentguard-openclaw-plugin"
+  },
+  "homepage": "https://github.com/JToday666/agent-guard#readme",
+  "bugs": {
+    "url": "https://github.com/JToday666/agent-guard/issues"
+  },
+  "keywords": [
+    "agentguard",
+    "openclaw",
+    "ai-agent",
+    "security",
+    "prompt-injection"
+  ],
+  "engines": {
+    "node": ">=24.18.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
@@ -11,17 +35,19 @@
     "hook-contract.d.mts",
     "hook-contract.mjs",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
-  "dependencies": {
-    "openclaw": "2026.6.6"
+  "peerDependencies": {
+    "openclaw": ">=2026.6.6 <2027.0.0"
   },
   "devDependencies": {
     "@types/node": "25.9.1",
+    "openclaw": "2026.6.6",
     "typescript": "6.0.3"
   },
   "openclaw": {

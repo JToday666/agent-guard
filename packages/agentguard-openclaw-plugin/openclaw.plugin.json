@@ -2,7 +2,7 @@
   "id": "agentguard-security",
   "name": "AgentGuard Security",
   "description": "Evaluates OpenClaw tool calls and outbound messages through AgentGuard Guard API.",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "activation": {
     "onStartup": true
   },

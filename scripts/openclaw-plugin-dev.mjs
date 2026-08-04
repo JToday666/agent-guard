@@ -9,7 +9,7 @@ import { OPENCLAW_REQUIRED_HOOKS } from "../packages/agentguard-openclaw-plugin/
 
 const ROOT = process.cwd();
 const PLUGIN_ID = "agentguard-security";
-const PLUGIN_PACKAGE = "@agentguard/openclaw-plugin";
+const PLUGIN_PACKAGE = "@agentguard-ai/openclaw-plugin";
 const PLUGIN_ROOT = path.join(ROOT, "packages", "agentguard-openclaw-plugin");
 const DEV_ROOT = path.join(ROOT, ".openclaw-dev");
 const STAGING_DIR = path.join(DEV_ROOT, PLUGIN_ID);
