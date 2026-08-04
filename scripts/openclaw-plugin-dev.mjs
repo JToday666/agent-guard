@@ -372,17 +372,18 @@ function restartGateway() {
 function waitForGateway() {
   const attempts = 12;
   let lastOutput = "";
+  const foregroundGateway =
+    process.env.AGENTGUARD_OPENCLAW_GATEWAY_MODE === "foreground";
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const result = run("openclaw", ["gateway", "status"], {
       allowFailure: true,
       capture: true,
     });
     lastOutput = combinedOutput(result);
-    if (
-      result.status === 0 &&
-      /Runtime:\s+running/.test(result.stdout) &&
-      /Connectivity probe:\s+ok/.test(result.stdout)
-    ) {
+    const connectivityHealthy = /Connectivity probe:\s+ok/.test(result.stdout);
+    const serviceHealthy =
+      result.status === 0 && /Runtime:\s+running/.test(result.stdout);
+    if (connectivityHealthy && (foregroundGateway || serviceHealthy)) {
       return;
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
