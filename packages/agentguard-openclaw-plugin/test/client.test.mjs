@@ -117,7 +117,7 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
   });
 
   await client.submitHeartbeat({
-    pluginVersion: "0.1.0",
+    pluginVersion: "0.1.0-beta.1",
     runtimeVersion: "2026.6.6",
     hooks: ["before_tool_call", "message_sending"],
     capabilities: { event_types: ["tool_call_proposed", "message_send_proposed"] },
@@ -128,7 +128,7 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
   assert.equal(requests[0].body.runtime, "openclaw");
   assert.equal(requests[0].body.runtime_id, "openclaw-gateway");
   assert.equal(requests[0].body.agent_id, "openclaw-main");
-  assert.equal(requests[0].body.plugin_version, "0.1.0");
+  assert.equal(requests[0].body.plugin_version, "0.1.0-beta.1");
   assert.deepEqual(requests[0].body.hooks, ["before_tool_call", "message_sending"]);
   assert.equal(requests[0].body.hook_count, 2);
   assert.equal(requests[0].body.expected_hook_count, OPENCLAW_REQUIRED_HOOK_COUNT);
@@ -156,7 +156,7 @@ test("GuardApiClient falls back to the canonical hook contract for an empty hear
   });
 
   await client.submitHeartbeat({
-    pluginVersion: "0.1.0",
+    pluginVersion: "0.1.0-beta.1",
     hooks: [],
     capabilities: {},
   });

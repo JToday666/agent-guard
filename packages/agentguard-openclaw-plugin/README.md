@@ -1,6 +1,6 @@
 # AgentGuard OpenClaw Plugin
 
-`@agentguard/openclaw-plugin` 是 AgentGuard 的 OpenClaw runtime security plugin。它是 hook-only `definePluginEntry` 插件，不提供业务工具本身；插件负责在 OpenClaw 关键 hook 中构造 GuardEvent、调用 Guard API，并把 `allow`、`deny`、`ask` 映射为运行时控制结果。
+`@agentguard-ai/openclaw-plugin` 是 AgentGuard 的 OpenClaw runtime security plugin。它是 hook-only `definePluginEntry` 插件，不提供业务工具本身；插件负责在 OpenClaw 关键 hook 中构造 GuardEvent、调用 Guard API，并把 `allow`、`deny`、`ask` 映射为运行时控制结果。
 
 ## Hook 覆盖
 
@@ -66,8 +66,8 @@ OpenClaw plugin config 示例：
 在仓库根目录运行：
 
 ```bash
-pnpm --filter @agentguard/openclaw-plugin build
-pnpm --filter @agentguard/openclaw-plugin test
+pnpm --filter @agentguard-ai/openclaw-plugin build
+pnpm --filter @agentguard-ai/openclaw-plugin test
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 ```
 
@@ -81,9 +81,9 @@ pnpm openclaw:plugin:reliability
 pnpm openclaw:plugin:uninstall
 ```
 
-`pnpm openclaw:plugin:e2e` 会读取根 `.env`，触发关键 hook，并输出 `/tmp/agentguard-openclaw-e2e-report.json` 和 `/tmp/agentguard-openclaw-e2e-acceptance-report.md`。
+`pnpm openclaw:plugin:e2e` 会读取根 `.env`，触发关键 hook，并在系统临时目录输出 `agentguard-openclaw-e2e-report.json` 和 `agentguard-openclaw-e2e-acceptance-report.md`。
 
-`pnpm openclaw:plugin:reliability` 会对注册 hook 做重复触发，使用隔离 PostgreSQL 测试库，并输出 `/tmp/agentguard-openclaw-reliability-report.json` 和 `/tmp/agentguard-openclaw-reliability-acceptance-report.md`。
+`pnpm openclaw:plugin:reliability` 会对注册 hook 做重复触发，使用隔离 PostgreSQL 测试库，并在系统临时目录输出 `agentguard-openclaw-reliability-report.json` 和 `agentguard-openclaw-reliability-acceptance-report.md`。
 
 ## 验收口径
 

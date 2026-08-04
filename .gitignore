@@ -4,9 +4,18 @@
 *.egg-info/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pyright/
+build/
+dist/
+release-dist/
+*.whl
+*.tar.gz
 
 # Node dependencies
 **/node_modules/
+.pnpm-store/
 
 # OpenClaw local development staging and backups
 .openclaw-dev/

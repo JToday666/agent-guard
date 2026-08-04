@@ -101,14 +101,13 @@ importers:
         version: 6.0.3
 
   packages/agentguard-openclaw-plugin:
-    dependencies:
-      openclaw:
-        specifier: 2026.6.6
-        version: 2026.6.6
     devDependencies:
       '@types/node':
         specifier: 25.9.1
         version: 25.9.1
+      openclaw:
+        specifier: 2026.6.6
+        version: 2026.6.6
       typescript:
         specifier: 6.0.3
         version: 6.0.3

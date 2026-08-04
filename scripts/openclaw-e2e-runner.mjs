@@ -3,6 +3,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,16 +27,16 @@ const ADAPTER_TOKEN = requiredEnv("AGENTGUARD_ADAPTER_TOKEN");
 const CONTROL_TOKEN = requiredEnv("AGENTGUARD_CONTROL_TOKEN");
 const REPORT_PATH =
   process.env.AGENTGUARD_OPENCLAW_E2E_REPORT ||
-  "/tmp/agentguard-openclaw-e2e-report.json";
+  path.join(os.tmpdir(), "agentguard-openclaw-e2e-report.json");
 const ACCEPTANCE_REPORT_PATH =
   process.env.AGENTGUARD_OPENCLAW_E2E_ACCEPTANCE_REPORT ||
-  "/tmp/agentguard-openclaw-e2e-acceptance-report.md";
+  path.join(os.tmpdir(), "agentguard-openclaw-e2e-acceptance-report.md");
 const RELIABILITY_REPORT_PATH =
   process.env.AGENTGUARD_OPENCLAW_RELIABILITY_REPORT ||
-  "/tmp/agentguard-openclaw-reliability-report.json";
+  path.join(os.tmpdir(), "agentguard-openclaw-reliability-report.json");
 const RELIABILITY_ACCEPTANCE_REPORT_PATH =
   process.env.AGENTGUARD_OPENCLAW_RELIABILITY_ACCEPTANCE_REPORT ||
-  "/tmp/agentguard-openclaw-reliability-acceptance-report.md";
+  path.join(os.tmpdir(), "agentguard-openclaw-reliability-acceptance-report.md");
 const PLUGIN_DIST = path.join(PLUGIN_ROOT, "dist", "index.js");
 const RUNTIME_DIST = path.join(
   ROOT,

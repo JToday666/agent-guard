@@ -36,7 +36,7 @@ packages/agentguard-openclaw-plugin/
     └── plugin-entry.test.mjs
 ```
 
-包名为 `@agentguard/openclaw-plugin`，OpenClaw manifest id 为 `agentguard-security`。入口是 `dist/index.js`，通过 `openclaw/plugin-sdk/plugin-entry` 的 `definePluginEntry` 注册 typed hooks。
+包名为 `@agentguard-ai/openclaw-plugin`，OpenClaw manifest id 为 `agentguard-security`。入口是 `dist/index.js`，通过 `openclaw/plugin-sdk/plugin-entry` 的 `definePluginEntry` 注册 typed hooks。
 
 ## 3. 配置
 
@@ -123,7 +123,7 @@ OpenClaw 插件不拥有 `approval:resolve`，不创建 browser session，不读
 代码验证：
 
 ```bash
-pnpm --filter @agentguard/openclaw-plugin test
+pnpm --filter @agentguard-ai/openclaw-plugin test
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 uv run pytest \
   tests/test_guard_api.py::test_ask_approval_resolve_and_wait_flow \
@@ -195,7 +195,7 @@ OpenClaw 2026.6.6 的 `openclaw plugins validate --root ... --entry ...` 面向 
 最近一次本机真实 E2E 验收报告保存在：
 
 ```text
-/tmp/agentguard-openclaw-e2e-acceptance-report.md
+<系统临时目录>/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
 该验收使用 OpenClaw 2026.6.6、Guard API、独立 PostgreSQL 测试库和确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_prompt_build`、`llm_input`、`llm_output`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。

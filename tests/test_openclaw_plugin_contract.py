@@ -1,13 +1,29 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent
 
+PLUGIN_ROOT = Path("packages/agentguard-openclaw-plugin").resolve()
+MAPPING_MODULE_URI = (PLUGIN_ROOT / "dist" / "mapping.js").as_uri()
+FIXTURES_URI = (
+    PLUGIN_ROOT / "test" / "fixtures" / "runtime-mapping-samples.json"
+).as_uri()
 
-PLUGIN_ROOT = Path("packages/agentguard-openclaw-plugin")
+
+@pytest.fixture(scope="module", autouse=True)
+def _build_openclaw_plugin() -> None:
+    pnpm = shutil.which("pnpm") or shutil.which("pnpm.cmd")
+    if pnpm is None:
+        pytest.fail("pnpm is required for the OpenClaw contract tests")
+    subprocess.run(
+        [pnpm, "--filter", "@agentguard-ai/openclaw-plugin", "build"], check=True
+    )
 
 
 def _node_json(script: str) -> dict:
@@ -21,9 +37,8 @@ def _node_json(script: str) -> dict:
 
 
 def test_openclaw_tool_call_mapping_matches_guard_event_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildToolCallGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildToolCallGuardEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildToolCallGuardEvent(
           {{
             toolName: 'read_file',
@@ -34,8 +49,7 @@ def test_openclaw_tool_call_mapping_matches_guard_event_contract() -> None:
           }},
           {{ agentId: 'openclaw-main', sessionId: 'sess_contract', sessionKey: 'session-key' }}
         )));
-        """
-    )
+        """)
 
     parsed = GuardEvent.model_validate(event)
 
@@ -46,19 +60,20 @@ def test_openclaw_tool_call_mapping_matches_guard_event_contract() -> None:
 
 
 def test_openclaw_runtime_sample_mapping_matches_guard_event_contract() -> None:
-    event = _node_json(
-        f"""
+    event = _node_json(f"""
         import {{ readFileSync }} from 'node:fs';
-        import {{ buildToolCallGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
-        const samples = JSON.parse(readFileSync('./{PLUGIN_ROOT}/test/fixtures/runtime-mapping-samples.json', 'utf8'));
+        import {{ buildToolCallGuardEvent }} from '{MAPPING_MODULE_URI}';
+        const samples = JSON.parse(readFileSync(new URL('{FIXTURES_URI}'), 'utf8'));
         const sample = samples.tool_call_event_fields_win;
         console.log(JSON.stringify(buildToolCallGuardEvent(sample.event, sample.context)));
-        """
-    )
+        """)
 
     parsed = GuardEvent.model_validate(event)
 
-    assert parsed.security_context.user_task == "Audit private token access from retrieved instructions"
+    assert (
+        parsed.security_context.user_task
+        == "Audit private token access from retrieved instructions"
+    )
     assert parsed.security_context.source_trust == "untrusted"
     assert parsed.security_context.source_type == "retrieved_context"
     assert parsed.security_context.derived_paths == ["/private/token.txt"]
@@ -67,9 +82,8 @@ def test_openclaw_runtime_sample_mapping_matches_guard_event_contract() -> None:
 
 
 def test_openclaw_message_send_mapping_matches_guard_event_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildMessageSendGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildMessageSendGuardEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildMessageSendGuardEvent(
           {{
             to: 'reviewer@example.com',
@@ -77,8 +91,7 @@ def test_openclaw_message_send_mapping_matches_guard_event_contract() -> None:
           }},
           {{ channelId: 'email', sessionKey: 'session-key', messageId: 'msg_contract' }}
         )));
-        """
-    )
+        """)
 
     parsed = GuardEvent.model_validate(event)
 
@@ -89,9 +102,8 @@ def test_openclaw_message_send_mapping_matches_guard_event_contract() -> None:
 
 
 def test_openclaw_tool_result_mapping_matches_guard_event_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildToolResultGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildToolResultGuardEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildToolResultGuardEvent(
           {{
             toolName: 'fetch',
@@ -113,8 +125,7 @@ def test_openclaw_tool_result_mapping_matches_guard_event_contract() -> None:
           }},
           {{ runId: 'run_result_contract', sessionKey: 'session-key' }}
         )));
-        """
-    )
+        """)
 
     parsed = GuardEvent.model_validate(event)
 
@@ -125,13 +136,14 @@ def test_openclaw_tool_result_mapping_matches_guard_event_contract() -> None:
     assert parsed.payload.contains_instruction_like_text is True
     assert parsed.security_context.user_task == "Review fetched documentation safely"
     assert parsed.security_context.derived_paths == ["https://docs.example.test/result"]
-    assert parsed.payload.derived_resources[0].target == "https://docs.example.test/result"
+    assert (
+        parsed.payload.derived_resources[0].target == "https://docs.example.test/result"
+    )
 
 
 def test_openclaw_prompt_build_mapping_matches_guard_event_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildContextGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildContextGuardEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildContextGuardEvent(
           'before_prompt_build',
           {{
@@ -145,23 +157,23 @@ def test_openclaw_prompt_build_mapping_matches_guard_event_contract() -> None:
           }},
           {{ runId: 'run_prompt_contract', sessionKey: 'session-key' }}
         )));
-        """
-    )
+        """)
 
     parsed = GuardEvent.model_validate(event)
 
     assert parsed.event_type == "context_assembled"
     assert parsed.runtime == "openclaw"
     assert parsed.security_context.user_task == "Ignore previous instructions"
-    assert parsed.security_context.derived_paths == ["https://docs.example.test/context"]
+    assert parsed.security_context.derived_paths == [
+        "https://docs.example.test/context"
+    ]
     assert parsed.payload.sources[0].source_trust == "untrusted"
     assert parsed.payload.sources[0].contains_instruction_like_text is True
 
 
 def test_openclaw_model_hook_mapping_matches_guard_event_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildModelGuardEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildModelGuardEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildModelGuardEvent(
           'llm_output',
           {{
@@ -170,8 +182,7 @@ def test_openclaw_model_hook_mapping_matches_guard_event_contract() -> None:
           }},
           {{ runId: 'run_model_contract', sessionKey: 'session-key', provider: 'openai', model: 'gpt-test' }}
         )));
-        """
-    )
+        """)
 
     parsed = GuardEvent.model_validate(event)
 
@@ -184,9 +195,8 @@ def test_openclaw_model_hook_mapping_matches_guard_event_contract() -> None:
 
 
 def test_openclaw_before_install_mapping_matches_config_audit_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildBeforeInstallConfigAuditEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildBeforeInstallConfigAuditEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildBeforeInstallConfigAuditEvent({{
           request: {{
             targetType: 'plugin',
@@ -203,8 +213,7 @@ def test_openclaw_before_install_mapping_matches_config_audit_contract() -> None
           sourceTrust: 'trusted',
           sourceType: 'plugin_manifest'
         }})));
-        """
-    )
+        """)
 
     parsed = ConfigAuditEvent.model_validate(event)
 
@@ -218,16 +227,14 @@ def test_openclaw_before_install_mapping_matches_config_audit_contract() -> None
 
 
 def test_openclaw_observation_mapping_matches_audit_contract() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildRuntimeObservationAuditEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildRuntimeObservationAuditEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildRuntimeObservationAuditEvent(
           'session_start',
           {{ sessionId: 'sess_contract', adapterToken: 'must-redact' }},
           {{ sessionKey: 'session-key' }}
         )));
-        """
-    )
+        """)
 
     parsed = AuditEvent.model_validate(event)
 
@@ -238,16 +245,14 @@ def test_openclaw_observation_mapping_matches_audit_contract() -> None:
 
 
 def test_openclaw_model_observation_mapping_has_task_and_model_resource() -> None:
-    event = _node_json(
-        f"""
-        import {{ buildRuntimeObservationAuditEvent }} from './{PLUGIN_ROOT}/dist/mapping.js';
+    event = _node_json(f"""
+        import {{ buildRuntimeObservationAuditEvent }} from '{MAPPING_MODULE_URI}';
         console.log(JSON.stringify(buildRuntimeObservationAuditEvent(
           'model_call_ended',
           {{ runId: 'run_model_obs_contract', userTask: 'Summarize external content safely' }},
           {{ sessionKey: 'session-key', agentId: 'main', provider: 'openai', model: 'gpt-test' }}
         )));
-        """
-    )
+        """)
 
     parsed = AuditEvent.model_validate(event)
 

@@ -17,7 +17,7 @@
 ```text
 agent-guard/
 ├── README.md
-├── DEPLOYMENT_LOCAL.md
+├── DEPLOYMENT_LOCAL.md  # 根目录最小启动入口
 ├── apps/
 │   ├── cli/
 │   ├── guard-api/
@@ -71,6 +71,9 @@ docs/
 | `tests/`                                   | 单元测试、契约测试、集成测试                                                |
 | `scripts/`                                 | 本地开发、插件安装验证和辅助命令                                            |
 | `docs/`                                    | 架构、稳定接口、API 协作提案、适配器、部署、鉴权和评测文档                  |
+
+完整部署流程以 `docs/06_delivery/deployment_install_usage.md` 为唯一事实来源；
+根目录 `DEPLOYMENT_LOCAL.md` 只提供快速导航和最小启动命令。
 
 ## 5. 边界规则
 

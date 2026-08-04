@@ -38,7 +38,7 @@ import type {
   OpenClawPluginConfigInput,
 } from "./types.js";
 
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.1.0-beta.1";
 
 type SessionState = {
   userTask?: string;

@@ -110,6 +110,7 @@ docs/
 ## 4. 维护规则
 
 - 根目录 `README.md` 只保留项目门面和关键入口，完整文档地图只维护在本文件。
+- 根目录 `DEPLOYMENT_LOCAL.md` 只保留最小启动入口；完整部署、安装和故障排查只维护在 [deployment_install_usage.md](06_delivery/deployment_install_usage.md)。
 - `08_api/` 中的协作契约用于评审尚未冻结的接口提案；提案通过后，接口字段变更必须先更新 [interface_contract.md](02_core/interface_contract.md)，再同步 schemas 和实现。
 - Core 不依赖 Adapter，不暴露 HTTP API，不读写数据库；Adapter 不写核心规则；Dashboard 不直连运行时。
 - 攻击样本真值由 Redteam 提供，评测指标由 AttackBench runner 汇总。
