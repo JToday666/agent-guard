@@ -40,7 +40,7 @@ main().catch((error) => {
 
 async function main() {
   if (command === "install") {
-    install();
+    install({ restart: !flags.has("--no-restart") });
     return;
   }
   if (command === "verify") {
@@ -55,7 +55,7 @@ async function main() {
   process.exit(command ? 1 : 0);
 }
 
-function install() {
+function install({ restart }) {
   const env = readDotEnv();
   const adapterToken = requireEnv(env, "AGENTGUARD_ADAPTER_TOKEN");
   const host = env.AGENTGUARD_HOST || "127.0.0.1";
@@ -88,8 +88,10 @@ function install() {
     },
   });
   refreshPluginRegistry();
-  restartGateway();
-  waitForGateway();
+  if (restart) {
+    restartGateway();
+    waitForGateway();
+  }
   console.log(`Installed ${PLUGIN_ID} from ${relativePath(STAGING_DIR)}.`);
 }
 
@@ -566,7 +568,7 @@ function relativePath(value) {
 
 function usage() {
   console.log(`Usage:
-  node scripts/openclaw-plugin-dev.mjs install
+  node scripts/openclaw-plugin-dev.mjs install [--no-restart]
   node scripts/openclaw-plugin-dev.mjs verify [--record]
   node scripts/openclaw-plugin-dev.mjs uninstall [--clean-staging]`);
 }

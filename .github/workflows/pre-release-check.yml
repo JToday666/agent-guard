@@ -199,6 +199,10 @@ jobs:
       AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_openclaw_test
       AGENTGUARD_ADAPTER_TOKEN: ci-adapter-token
       AGENTGUARD_CONTROL_TOKEN: ci-control-token
+      OPENCLAW_HOME: ${{ github.workspace }}/../.openclaw-home
+      OPENCLAW_STATE_DIR: ${{ github.workspace }}/../.openclaw
+      OPENCLAW_CONFIG_PATH: ${{ github.workspace }}/../.openclaw/openclaw.json
+      OPENCLAW_GATEWAY_TOKEN: ci-gateway-token
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -221,7 +225,16 @@ jobs:
           uv sync --frozen
           pnpm install --frozen-lockfile
           pnpm --filter @agentguard-ai/openclaw-plugin build
-          pnpm openclaw:plugin:install
+          node scripts/openclaw-plugin-dev.mjs install --no-restart
+          pnpm exec openclaw gateway run --allow-unconfigured --auth token --token "$OPENCLAW_GATEWAY_TOKEN" > "$RUNNER_TEMP/openclaw-gateway.log" 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          healthy=false
+          for attempt in {1..30}; do
+            if pnpm exec openclaw gateway health >/dev/null 2>&1; then healthy=true; break; fi
+            sleep 1
+          done
+          if [ "$healthy" != true ]; then cat "$RUNNER_TEMP/openclaw-gateway.log"; exit 1; fi
           pnpm openclaw:plugin:reliability
         env:
           AGENTGUARD_OPENCLAW_RELIABILITY_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-report.json
@@ -233,4 +246,5 @@ jobs:
           path: |
             ${{ runner.temp }}/agentguard-openclaw-reliability-report.json
             ${{ runner.temp }}/agentguard-openclaw-reliability-acceptance-report.md
+            ${{ runner.temp }}/openclaw-gateway.log
           if-no-files-found: warn
