@@ -200,8 +200,6 @@ jobs:
       AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_openclaw_test
       AGENTGUARD_ADAPTER_TOKEN: ci-adapter-token
       AGENTGUARD_CONTROL_TOKEN: ci-control-token
-      AGENTGUARD_OPENCLAW_RELIABILITY_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-report.json
-      AGENTGUARD_OPENCLAW_RELIABILITY_ACCEPTANCE_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-acceptance-report.md
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -221,6 +219,9 @@ jobs:
           pnpm --filter @agentguard-ai/openclaw-plugin build
           pnpm openclaw:plugin:install
           pnpm openclaw:plugin:reliability
+        env:
+          AGENTGUARD_OPENCLAW_RELIABILITY_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-report.json
+          AGENTGUARD_OPENCLAW_RELIABILITY_ACCEPTANCE_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-acceptance-report.md
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
