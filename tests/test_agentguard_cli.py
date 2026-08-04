@@ -3,10 +3,10 @@ from __future__ import annotations
 import io
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import httpx
+import pytest
 
 from agentguard_cli import cli
 
@@ -17,7 +17,6 @@ def _run_cli(
     env: dict[str, str] | None = None,
     transport: httpx.MockTransport | None = None,
     run_command=None,
-    bench_main=None,
 ):
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -28,7 +27,6 @@ def _run_cli(
         stderr=stderr,
         transport=transport,
         run_command=run_command,
-        bench_main=bench_main,
     )
     return exit_code, stdout.getvalue(), stderr.getvalue()
 
@@ -86,7 +84,10 @@ def test_launch_requires_control_token_and_prints_dashboard_url() -> None:
 
     exit_code, output, error = _run_cli(
         ["launch", "--dashboard-url", "http://dashboard.local/app"],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
         transport=httpx.MockTransport(handler),
     )
 
@@ -113,13 +114,28 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
 
     stdout_code, stdout_output, stdout_error = _run_cli(
         ["audit", "export", "--trace-id", "trace_1", "--limit", "2"],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
         transport=httpx.MockTransport(handler),
     )
     output_path = tmp_path / "audit.jsonl"
     file_code, file_output, file_error = _run_cli(
-        ["audit", "export", "--trace-id", "trace_1", "--limit", "2", "--output", str(output_path)],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        [
+            "audit",
+            "export",
+            "--trace-id",
+            "trace_1",
+            "--limit",
+            "2",
+            "--output",
+            str(output_path),
+        ],
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
         transport=httpx.MockTransport(handler),
     )
 
@@ -129,7 +145,10 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
     assert file_code == 0
     assert file_output == f"Wrote 2 audit events to {output_path}\n"
     assert file_error == ""
-    assert [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()] == events
+    assert [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ] == events
     assert seen_urls == [
         "http://guard.local/v1/audit/events?trace_id=trace_1&limit=2",
         "http://guard.local/v1/audit/events?trace_id=trace_1&limit=2",
@@ -143,7 +162,10 @@ def test_metrics_outputs_stable_json() -> None:
 
     exit_code, output, error = _run_cli(
         ["metrics", "--runtime", "openclaw", "--json"],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
         transport=httpx.MockTransport(handler),
     )
 
@@ -161,21 +183,32 @@ def test_trace_get_writes_provenance_json(tmp_path: Path) -> None:
 
     exit_code, output, error = _run_cli(
         ["trace", "get", "trace_1", "--provenance", "--output", str(output_path)],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
         transport=httpx.MockTransport(handler),
     )
 
     assert exit_code == 0
     assert output == f"Wrote trace trace_1 to {output_path}\n"
     assert error == ""
-    assert json.loads(output_path.read_text(encoding="utf-8")) == {"graph": {"nodes": []}, "trace_id": "trace_1"}
+    assert json.loads(output_path.read_text(encoding="utf-8")) == {
+        "graph": {"nodes": []},
+        "trace_id": "trace_1",
+    }
 
 
 def test_http_error_and_connection_error_return_nonzero() -> None:
     http_code, _, http_error = _run_cli(
         ["metrics"],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "bad-token"},
-        transport=httpx.MockTransport(lambda _: httpx.Response(403, json={"error": {"code": "SCOPE_DENIED"}})),
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "bad-token",
+        },
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(403, json={"error": {"code": "SCOPE_DENIED"}})
+        ),
     )
 
     def raise_connect_error(request: httpx.Request) -> httpx.Response:
@@ -216,7 +249,9 @@ def test_openclaw_verify_record_passes_record_flag_to_dev_script() -> None:
         commands.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    exit_code, output, error = _run_cli(["openclaw", "verify", "--record"], run_command=run_command)
+    exit_code, output, error = _run_cli(
+        ["openclaw", "verify", "--record"], run_command=run_command
+    )
 
     assert exit_code == 0
     assert output == ""
@@ -224,7 +259,7 @@ def test_openclaw_verify_record_passes_record_flag_to_dev_script() -> None:
     assert commands == [["pnpm", "openclaw:plugin:verify", "--", "--record"]]
 
 
-def test_eval_import_posts_evaluation_run() -> None:
+def test_eval_import_posts_evaluation_run(tmp_path: Path) -> None:
     seen: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -246,12 +281,15 @@ def test_eval_import_posts_evaluation_run() -> None:
         "per_attack": {},
         "cases": [],
     }
-    output_path = Path("/tmp/agentguard-cli-eval-import.json")
+    output_path = tmp_path / "agentguard-cli-eval-import.json"
     output_path.write_text(json.dumps(payload), encoding="utf-8")
 
     exit_code, output, error = _run_cli(
         ["eval", "import", str(output_path)],
-        env={"AGENTGUARD_API_URL": "http://guard.local", "AGENTGUARD_CONTROL_TOKEN": "control-secret"},
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
         transport=httpx.MockTransport(handler),
     )
 
@@ -268,49 +306,10 @@ def test_eval_import_posts_evaluation_run() -> None:
     ]
 
 
-def test_eval_run_delegates_to_attackbench_runner() -> None:
-    seen_args: list[list[str] | None] = []
+def test_eval_run_is_not_part_of_the_published_cli() -> None:
+    parser = cli.build_parser()
 
-    def bench_main(argv: list[str] | None = None) -> int:
-        seen_args.append(argv)
-        return 0
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["eval", "run"])
 
-    exit_code, output, error = _run_cli(
-        ["eval", "run", "--dataset", "cases.jsonl", "--defense", "on"],
-        bench_main=bench_main,
-    )
-
-    assert exit_code == 0
-    assert output == ""
-    assert error == ""
-    assert seen_args == [["--dataset", "cases.jsonl", "--defense", "on"]]
-
-
-def test_eval_run_forwards_help_to_attackbench_runner() -> None:
-    seen_args: list[list[str] | None] = []
-
-    def bench_main(argv: list[str] | None = None) -> int:
-        seen_args.append(argv)
-        return 0
-
-    exit_code, _, _ = _run_cli(["eval", "run", "--help"], bench_main=bench_main)
-
-    assert exit_code == 0
-    assert seen_args == [["--help"]]
-
-
-def test_attackbench_loader_works_when_console_script_path_hides_repo_root(monkeypatch) -> None:
-    repo_root = Path.cwd().resolve()
-    filtered_path = [
-        item
-        for item in sys.path
-        if item and Path(item).resolve() != repo_root
-    ]
-    monkeypatch.setattr(sys, "path", filtered_path)
-    sys.modules.pop("agentguard_langgraph_bench", None)
-    sys.modules.pop("agentguard_langgraph_bench.bench", None)
-    sys.modules.pop("agentguard_langgraph_bench.bench.runner", None)
-
-    loaded = cli._load_bench_main()
-
-    assert loaded.__name__ == "main"
+    assert exc_info.value.code == 2
