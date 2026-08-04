@@ -1,0 +1,169 @@
+name: Publish beta
+
+on:
+  push:
+    tags: ["v*-beta.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build immutable release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - run: corepack enable && corepack prepare pnpm@11.9.0 --activate
+      - run: |
+          uv sync --frozen
+          pnpm install --frozen-lockfile
+          uv run python scripts/check-release-versions.py --tag "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Build Python distributions in publication order
+        run: |
+          uv build packages/agentguard-core --out-dir release-dist/agentguard-core
+          uv build apps/guard-api --out-dir release-dist/agentguard-api
+          uv build apps/cli --out-dir release-dist/agentguard-cli
+          uv build packages/agentguard-meta --out-dir release-dist/agentguard
+          find release-dist -name .gitignore -delete
+          uvx twine check release-dist/*/*
+      - name: Build and pack npm package
+        run: |
+          pnpm --filter @agentguard-ai/openclaw-plugin test
+          pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination release-dist/npm
+          uv run python scripts/check-release-artifacts.py release-dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist/
+          if-no-files-found: error
+
+  pypi-core:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: release-dist/agentguard-core/
+
+  pypi-api:
+    needs: pypi-core
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: release-dist/agentguard-api/
+
+  pypi-cli:
+    needs: pypi-api
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: release-dist/agentguard-cli/
+
+  pypi-meta:
+    needs: pypi-cli
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: release-dist/agentguard/
+
+  npm:
+    needs: pypi-meta
+    if: ${{ vars.NPM_TRUSTED_PUBLISHING_READY == 'true' }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify npm trusted publishing client
+        run: npm --version
+      - name: Publish beta with npm trusted publishing
+        run: npm publish release-dist/npm/*.tgz --access public --tag beta --provenance
+
+  ghcr:
+    needs: [pypi-meta, npm]
+    if: ${{ always() && needs.pypi-meta.result == 'success' && (needs.npm.result == 'success' || needs.npm.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment: ghcr
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: beta-release-${{ github.sha }}
+          path: release-dist
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: apps/guard-api/Dockerfile
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: |
+            ghcr.io/jtoday666/agentguard-api:0.1.0-beta.1
+            ghcr.io/jtoday666/agentguard-api:sha-${{ github.sha }}

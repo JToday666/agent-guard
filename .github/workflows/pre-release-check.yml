@@ -1,0 +1,231 @@
+name: Pre-release check
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-and-openclaw:
+    name: ${{ matrix.os }} / Python 3.12 / Node 24.18
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Enable pnpm 11.9
+        run: corepack enable && corepack prepare pnpm@11.9.0 --activate
+      - name: Install dependencies
+        run: |
+          uv sync --frozen
+          pnpm install --frozen-lockfile
+      - name: Validate release versions
+        run: uv run python scripts/check-release-versions.py
+      - name: Lint, format, and type check publishable Python packages
+        run: |
+          uv run ruff check apps/cli apps/guard-api packages/agentguard-core packages/agentguard-meta scripts/check-release-artifacts.py scripts/check-release-versions.py scripts/verify-wheel-install.py tests/test_agentguard_cli.py tests/test_core_engine.py tests/test_core_extended_capabilities.py tests/test_core_rule_matrix.py tests/test_guard_api.py tests/test_guard_api_extended_capabilities.py tests/test_openclaw_plugin_contract.py tests/test_release_versions.py tests/test_schemas.py
+          uv run black --check apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core scripts/check-release-artifacts.py scripts/check-release-versions.py scripts/verify-wheel-install.py tests/test_agentguard_cli.py tests/test_core_rule_matrix.py tests/test_openclaw_plugin_contract.py tests/test_release_versions.py
+          uv run pyright apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core
+      - name: Test Core, API, CLI, schemas, and OpenClaw contract
+        run: >-
+          uv run pytest
+          tests/test_core_engine.py
+          tests/test_core_extended_capabilities.py
+          tests/test_core_rule_matrix.py
+          tests/test_guard_api.py
+          tests/test_guard_api_dashboard_capabilities.py
+          tests/test_guard_api_extended_capabilities.py
+          tests/test_agentguard_cli.py
+          tests/test_schemas.py
+          tests/test_release_versions.py
+          tests/test_openclaw_plugin_contract.py
+      - name: Build and test OpenClaw plugin
+        run: |
+          pnpm --filter @agentguard-ai/openclaw-plugin build
+          pnpm --filter @agentguard-ai/openclaw-plugin test
+      - name: Build Python distributions
+        shell: bash
+        run: |
+          uv build packages/agentguard-core --out-dir release-dist/agentguard-core
+          uv build apps/guard-api --out-dir release-dist/agentguard-api
+          uv build apps/cli --out-dir release-dist/agentguard-cli
+          uv build packages/agentguard-meta --out-dir release-dist/agentguard
+          find release-dist -name .gitignore -delete
+          uvx twine check release-dist/*/*
+      - name: Pack OpenClaw plugin
+        run: pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination release-dist/npm
+      - name: Install npm tarball in an empty directory
+        run: node scripts/verify-npm-tarball.mjs
+      - name: Install local wheels in an empty environment
+        run: uv run python scripts/verify-wheel-install.py release-dist
+      - name: Scan release artifacts
+        run: uv run python scripts/check-release-artifacts.py release-dist
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-artifacts-${{ matrix.os }}
+          path: release-dist/
+          if-no-files-found: error
+
+  postgres:
+    name: PostgreSQL migration and persistence
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_DB: agent_guard_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - run: uv sync --frozen
+      - run: uv run pytest tests/test_postgres_test_utils.py tests/test_guard_api_postgres.py
+
+  container:
+    name: Guard API container
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_DB: agent_guard_container_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_container_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Build local wheels for the container
+        run: |
+          uv build --wheel packages/agentguard-core --out-dir release-dist/agentguard-core
+          uv build --wheel apps/guard-api --out-dir release-dist/agentguard-api
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: apps/guard-api/Dockerfile
+          push: false
+          load: true
+          tags: agentguard-api:pre-release-check
+      - name: Verify non-root memory-mode health
+        shell: bash
+        run: |
+          test "$(docker image inspect agentguard-api:pre-release-check --format '{{.Config.User}}')" = "agentguard:agentguard"
+          docker run --detach --rm --name agentguard-api-check -e AGENTGUARD_STORAGE_BACKEND=memory -p 8088:8088 agentguard-api:pre-release-check
+          healthy=false
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8088/health; then healthy=true; break; fi
+            sleep 1
+          done
+          if [ "$healthy" != true ]; then docker logs agentguard-api-check; exit 1; fi
+          docker stop agentguard-api-check
+      - name: Verify PostgreSQL migration and health
+        shell: bash
+        run: |
+          docker run --detach --rm --name agentguard-api-postgres-check \
+            --add-host=host.docker.internal:host-gateway \
+            -e AGENTGUARD_DATABASE_URL=postgresql+psycopg://postgres:123456@host.docker.internal:5432/agent_guard_container_test \
+            -p 8088:8088 agentguard-api:pre-release-check
+          healthy=false
+          for attempt in {1..30}; do
+            if curl --fail --silent 'http://127.0.0.1:8088/health?check_db=true' | grep -q '"database":"ok"'; then healthy=true; break; fi
+            sleep 1
+          done
+          if [ "$healthy" != true ]; then docker logs agentguard-api-postgres-check; exit 1; fi
+          docker stop agentguard-api-postgres-check
+      - if: always()
+        run: docker stop agentguard-api-check agentguard-api-postgres-check || true
+
+  openclaw-reliability:
+    name: OpenClaw reliability with PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_DB: agent_guard_openclaw_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_openclaw_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_openclaw_test
+      AGENTGUARD_ADAPTER_TOKEN: ci-adapter-token
+      AGENTGUARD_CONTROL_TOKEN: ci-control-token
+      AGENTGUARD_OPENCLAW_RELIABILITY_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-report.json
+      AGENTGUARD_OPENCLAW_RELIABILITY_ACCEPTANCE_REPORT: ${{ runner.temp }}/agentguard-openclaw-reliability-acceptance-report.md
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: corepack enable && corepack prepare pnpm@11.9.0 --activate
+      - run: |
+          uv sync --frozen
+          pnpm install --frozen-lockfile
+          pnpm --filter @agentguard-ai/openclaw-plugin build
+          pnpm openclaw:plugin:install
+          pnpm openclaw:plugin:reliability
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-reliability
+          path: |
+            ${{ runner.temp }}/agentguard-openclaw-reliability-report.json
+            ${{ runner.temp }}/agentguard-openclaw-reliability-acceptance-report.md
+          if-no-files-found: warn
