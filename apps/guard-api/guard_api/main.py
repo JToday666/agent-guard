@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import Cookie, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+from guard_api import __version__
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -227,7 +229,7 @@ def create_app(
         store.initialize()
         yield
 
-    app = FastAPI(title="AgentGuard Guard API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="AgentGuard Guard API", version=__version__, lifespan=lifespan)
 
     @app.exception_handler(ApiAuthError)
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:

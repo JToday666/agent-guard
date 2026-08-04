@@ -1,5 +1,6 @@
 """Stateless AgentGuard Core package."""
 
+from ._version import __version__
 from .action_critic import ActionCritic, ActionCriticReview
 from .audit_integrity import AuditIntegrityMetadata
 from .config_audit import (
@@ -42,6 +43,7 @@ from .models import (
 from .provenance import ProvenanceEdge, ProvenanceNode
 
 __all__ = [
+    "__version__",
     "ActionCritic",
     "ActionCriticReview",
     "ApprovalIntent",

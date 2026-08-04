@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Formal AgentGuard Core and API service"
 requires-python = ">=3.12"
 dependencies = [
+  "agentguard",
   "agentguard-cli",
   "agentguard-core",
-  "agentguard-guard-api",
+  "agentguard-api",
   "agentguard-langgraph-bench",
   "agentguard-langgraph-adapter",
   "httpx>=0.28",
@@ -25,9 +26,10 @@ dev = [
 package = false
 
 [tool.uv.sources]
+agentguard = { path = "packages/agentguard-meta", editable = true }
 agentguard-cli = { path = "apps/cli", editable = true }
 agentguard-core = { path = "packages/agentguard-core", editable = true }
-agentguard-guard-api = { path = "apps/guard-api", editable = true }
+agentguard-api = { path = "apps/guard-api", editable = true }
 agentguard-langgraph-bench = { path = "agentguard_langgraph_bench/bench", editable = true }
 agentguard-langgraph-adapter = { path = "packages/agentguard-langgraph-adapter", editable = true }
 

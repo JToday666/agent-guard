@@ -14,9 +14,10 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from ._version import __version__
+
 Env = Mapping[str, str]
 RunCommand = Callable[[list[str]], subprocess.CompletedProcess[bytes]]
-BenchMain = Callable[[list[str] | None], int]
 
 
 class CliError(RuntimeError):
@@ -39,7 +40,6 @@ def run(
     stderr: TextIO | None = None,
     transport: httpx.BaseTransport | None = None,
     run_command: RunCommand | None = None,
-    bench_main: BenchMain | None = None,
 ) -> int:
     actual_env: Env = os.environ if env is None else env
     out = stdout or sys.stdout
@@ -52,12 +52,9 @@ def run(
             parser.print_help(out)
             return 0
         if unknown_args:
-            if handler is _cmd_eval_run:
-                args.bench_args = unknown_args
-            else:
-                raise CliError(
-                    f"Unrecognized arguments: {' '.join(unknown_args)}", exit_code=2
-                )
+            raise CliError(
+                f"Unrecognized arguments: {' '.join(unknown_args)}", exit_code=2
+            )
         return int(
             handler(
                 args,
@@ -65,7 +62,6 @@ def run(
                 stdout=out,
                 transport=transport,
                 run_command=run_command,
-                bench_main=bench_main,
             )
         )
     except CliError as exc:
@@ -77,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agentguardctl", description="AgentGuard headless control CLI"
     )
+    parser.add_argument("--version", action="version", version=__version__)
     subcommands = parser.add_subparsers(dest="command")
 
     health = subcommands.add_parser("health", help="Check Guard API health")
@@ -140,12 +137,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_import.add_argument("path", help="Evaluation result JSON file")
     eval_import.set_defaults(handler=_cmd_eval_import)
-    eval_run = eval_subcommands.add_parser(
-        "run", help="Run AttackBench", add_help=False
-    )
-    eval_run.set_defaults(bench_args=[])
-    eval_run.set_defaults(handler=_cmd_eval_run)
-
     return parser
 
 
@@ -316,13 +307,6 @@ def _cmd_eval_import(
     return 0
 
 
-def _cmd_eval_run(
-    args: argparse.Namespace, *, bench_main: BenchMain | None, **_: Any
-) -> int:
-    runner = bench_main or _load_bench_main()
-    return int(runner(args.bench_args))
-
-
 def _request_json(
     method: str,
     path: str,
@@ -437,22 +421,6 @@ def _http_error_message(response: httpx.Response) -> str:
 
 def _default_run_command(command: list[str]) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(command, check=False)
-
-
-def _load_bench_main() -> BenchMain:
-    try:
-        from agentguard_langgraph_bench.bench.runner import main as bench_main
-    except ModuleNotFoundError as exc:
-        repo_root = Path(__file__).resolve().parents[3]
-        if (repo_root / "agentguard_langgraph_bench").is_dir():
-            sys.path.insert(0, str(repo_root))
-            from agentguard_langgraph_bench.bench.runner import main as bench_main
-        else:
-            raise CliError(
-                "AttackBench runner is not importable from this environment"
-            ) from exc
-
-    return bench_main
 
 
 if __name__ == "__main__":
