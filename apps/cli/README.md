@@ -1,9 +1,9 @@
-# agentguard-cli
+# agentguardctl
 
 AgentGuard 无头控制与诊断命令行工具。
 
 ```bash
-pip install --pre agentguard-cli
+pip install --pre agentguardctl
 agentguardctl --help
 ```
 

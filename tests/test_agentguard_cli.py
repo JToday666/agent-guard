@@ -281,7 +281,7 @@ def test_eval_import_posts_evaluation_run(tmp_path: Path) -> None:
         "per_attack": {},
         "cases": [],
     }
-    output_path = tmp_path / "agentguard-cli-eval-import.json"
+    output_path = tmp_path / "agentguardctl-eval-import.json"
     output_path.write_text(json.dumps(payload), encoding="utf-8")
 
     exit_code, output, error = _run_cli(

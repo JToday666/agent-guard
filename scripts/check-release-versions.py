@@ -20,7 +20,7 @@ GHCR_TAG = f"{GHCR_IMAGE}:{PUBLIC_VERSION}"
 PYTHON_PROJECTS = {
     "agentguard-core": ROOT / "packages/agentguard-core/pyproject.toml",
     "agentguard-api": ROOT / "apps/guard-api/pyproject.toml",
-    "agentguard-cli": ROOT / "apps/cli/pyproject.toml",
+    "agentguardctl": ROOT / "apps/cli/pyproject.toml",
     "agentguard": ROOT / "packages/agentguard-meta/pyproject.toml",
 }
 

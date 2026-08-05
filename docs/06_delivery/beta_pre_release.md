@@ -14,6 +14,7 @@ npm / OpenClaw / GHCR:   0.1.0-beta.1
 
 ```bash
 pip install --pre agentguard
+pip install agentguardctl==0.1.0b1
 pip install "agentguard[api]==0.1.0b1"
 pip install "agentguard[cli]==0.1.0b1"
 pip install "agentguard[all]==0.1.0b1"
@@ -78,7 +79,7 @@ uv run pytest tests/test_postgres_test_utils.py tests/test_guard_api_postgres.py
 ```bash
 uv build packages/agentguard-core --out-dir release-dist/agentguard-core
 uv build apps/guard-api --out-dir release-dist/agentguard-api
-uv build apps/cli --out-dir release-dist/agentguard-cli
+uv build apps/cli --out-dir release-dist/agentguardctl
 uv build packages/agentguard-meta --out-dir release-dist/agentguard
 uvx twine check release-dist/*/*
 uv run python scripts/verify-wheel-install.py release-dist
@@ -116,7 +117,7 @@ docker run --rm -e AGENTGUARD_STORAGE_BACKEND=memory -p 8088:8088 agentguard-api
 
 发布顺序固定为 Core → API → CLI → meta → npm → GHCR。开始上传前必须确认：
 
-- PyPI 上 `agentguard-core`、`agentguard-api`、`agentguard-cli` 和 `agentguard` 名称可用。
+- PyPI 上 `agentguard-core`、`agentguard-api`、`agentguardctl` 和 `agentguard` 名称可用。
 - npm scope 管理员已启用 2FA，并确认 `@agentguard-ai/openclaw-plugin` 所有权。
 - 所有本地检查均通过，制品摘要已由团队成员复核。
 - 发布凭证只存在于本机凭证存储或进程环境中，不写入仓库。

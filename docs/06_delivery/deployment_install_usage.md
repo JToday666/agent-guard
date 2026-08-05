@@ -24,7 +24,7 @@ uv sync
 pnpm install
 ```
 
-当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.5.2`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `agentguard-core`、Guard API 和 `agentguard-cli`。
+当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.5.2`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `agentguard-core`、Guard API 和 `agentguardctl`。
 
 准备本地配置：
 
@@ -301,7 +301,7 @@ pnpm openclaw:plugin:uninstall
 uv run agentguardctl eval import --help
 ```
 
-评测 runner 由各自项目独立运行；生成结果后通过 `eval import` 写入 Guard API。这样 `agentguard-cli` 发布物不引入 LangGraph 依赖。
+评测 runner 由各自项目独立运行；生成结果后通过 `eval import` 写入 Guard API。这样 `agentguardctl` 发布物不引入 LangGraph 依赖。
 
 ## 10. 生产化边界
 
