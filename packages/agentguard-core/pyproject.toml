@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentguard-core"
+name = "aegis-agentguard-core"
 version = "0.1.0b1"
 description = "Stateless AgentGuard Core security decision engine"
 readme = "README.md"

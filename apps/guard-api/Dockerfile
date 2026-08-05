@@ -5,10 +5,10 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /wheelhouse
-COPY release-dist/agentguard-core/*.whl /wheelhouse/
-COPY release-dist/agentguard-api/*.whl /wheelhouse/
+COPY release-dist/aegis-agentguard-core/*.whl /wheelhouse/
+COPY release-dist/aegis-agentguard-api/*.whl /wheelhouse/
 RUN python -m pip download --dest /wheelhouse --only-binary=:all: \
-      --find-links=/wheelhouse agentguard-api==0.1.0b1
+      --find-links=/wheelhouse aegis-agentguard-api==0.1.0b1
 
 FROM python:3.12-slim AS runtime
 
@@ -24,7 +24,7 @@ RUN groupadd --system agentguard \
 
 COPY --from=builder /wheelhouse /wheelhouse
 RUN python -m pip install --no-index --find-links=/wheelhouse \
-      agentguard-core==0.1.0b1 agentguard-api==0.1.0b1 \
+      aegis-agentguard-core==0.1.0b1 aegis-agentguard-api==0.1.0b1 \
     && rm -rf /wheelhouse
 
 USER agentguard:agentguard
