@@ -87,7 +87,7 @@ importers:
         specifier: 3.3.5
         version: 3.3.5(typescript@6.0.3)
 
-  packages/agentguard-openclaw-bench-tools:
+  benchmarks/openclaw-bench-tools:
     dependencies:
       openclaw:
         specifier: 2026.6.6

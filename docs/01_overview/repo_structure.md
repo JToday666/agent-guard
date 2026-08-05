@@ -25,8 +25,9 @@ agent-guard/
 ├── packages/
 │   ├── agentguard-core/
 │   ├── agentguard-langgraph-adapter/
-│   ├── agentguard-openclaw-bench-tools/
 │   └── agentguard-openclaw-plugin/
+├── benchmarks/
+│   └── openclaw-bench-tools/
 ├── agentguard_langgraph_bench/
 │   ├── bench/          # AttackBench runner、样本、沙箱和评测逻辑
 │   ├── adapter/        # 旧导入路径兼容层
@@ -65,7 +66,7 @@ docs/
 | `packages/agentguard-core`                 | 无状态安全判定库，负责事件规范化、检测、策略匹配、风险评分和决策输出        |
 | `packages/agentguard-langgraph-adapter`    | LangGraph 风格工具执行的事件映射和执行前控制                                |
 | `packages/agentguard-openclaw-plugin`      | OpenClaw runtime hook 插件                                                  |
-| `packages/agentguard-openclaw-bench-tools` | OpenClaw AttackBench 本地工具桥接                                           |
+| `benchmarks/openclaw-bench-tools`          | OpenClaw AttackBench 本地工具桥接                                           |
 | `agentguard_langgraph_bench/`              | AttackBench runner、样本、沙箱、演示 Agent 和外部 Agent 适配器              |
 | `schemas/`                                 | JSON Schema 与 OpenAPI                                                      |
 | `tests/`                                   | 单元测试、契约测试、集成测试                                                |

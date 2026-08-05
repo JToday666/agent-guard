@@ -34,8 +34,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGE = "@agentguard/openclaw-bench-tools";
 const PLUGIN_ROOT = path.join(
   ROOT,
-  "packages",
-  "agentguard-openclaw-bench-tools",
+  "benchmarks",
+  "openclaw-bench-tools",
 );
 const DEV_ROOT = path.join(ROOT, ".openclaw-dev");
 const STAGING_DIR = path.join(DEV_ROOT, BENCH_PLUGIN_ID);

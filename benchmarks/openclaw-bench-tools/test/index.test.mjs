@@ -50,7 +50,6 @@ test("declares fixed local task tools and fallback tool", () => {
     assertNoForbiddenAgentVisibleTerms(tool.parameters ?? {});
   }
 });
-
 test("forwards a static tool call to the current tool server and sanitizes the result", async () => {
   const requests = [];
   const server = createServer((request, response) => {
