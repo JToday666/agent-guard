@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from postgres_test_utils import (
+from tests.support.postgres import (
     UnsafeTestDatabaseUrlError,
     assert_safe_test_database_url,
     get_test_database_url,

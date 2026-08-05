@@ -16,7 +16,10 @@ from guard_api.models import ApprovalRequest
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, EvalMetricFilters
 from guard_api.storage.postgres import PostgresControlPlaneStore
-from postgres_test_utils import get_test_database_url, reset_control_plane_schema
+from tests.support.postgres import (
+    get_test_database_url,
+    reset_control_plane_schema,
+)
 
 
 def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:

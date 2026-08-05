@@ -19,8 +19,8 @@
 **/build
 **/*.whl
 **/*.tar.gz
-!release-dist/agentguard-core/*.whl
-!release-dist/agentguard-api/*.whl
+!release-dist/aegis-agentguard-core/*.whl
+!release-dist/aegis-agentguard-api/*.whl
 apps/cli
 apps/dashboard
 agentguard_langgraph_bench

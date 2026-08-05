@@ -9,7 +9,7 @@ OpenClaw 和故障排查统一维护在
 
 - [文档地图](docs/README.md)
 - [OpenClaw 插件部署与验证](docs/03_adapters/openclaw_plugin_deployment.md)
-- [AgentGuard 0.1.0 Beta 1 本地预发布清单](docs/06_delivery/beta_pre_release.md)
+- [AgentGuard 0.1.0 Beta 1 发布记录](docs/06_delivery/beta_release.md)
 
 ## 最小初始化
 
