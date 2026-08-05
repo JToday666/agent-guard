@@ -1,9 +1,10 @@
-# agentguard-api
+# aegis-agentguard-api
 
-AgentGuard Guard API / Control Plane，提供安全判定、策略、审批、审计、指标与溯源 HTTP API。
+AgentGuard Guard API / Control Plane 的 PyPI 分发名为 `aegis-agentguard-api`，内部 Python
+import 保持为 `guard_api`。服务提供安全判定、策略、审批、审计、指标与溯源 HTTP API。
 
 ```bash
-pip install --pre agentguard-api
+pip install --pre aegis-agentguard-api
 agentguard-api
 ```
 

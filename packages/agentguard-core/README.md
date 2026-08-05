@@ -1,9 +1,11 @@
-# agentguard-core
+# aegis-agentguard-core
 
-AgentGuard 的无状态安全判定内核。它负责规范化安全事件、执行检测器与策略，并返回可审计的 `GuardDecision`。
+AgentGuard Core 是无状态安全判定内核。PyPI 分发名为 `aegis-agentguard-core`，
+Python import 保持为 `agentguard_core`。它负责规范化安全事件、执行检测器与策略，并返回可审计的
+`GuardDecision`。
 
 ```bash
-pip install --pre agentguard-core
+pip install --pre aegis-agentguard-core
 ```
 
 ```python

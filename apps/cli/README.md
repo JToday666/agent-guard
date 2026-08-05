@@ -1,9 +1,10 @@
-# agentguardctl
+# aegis-agentguard-cli
 
-AgentGuard 无头控制与诊断命令行工具。
+AgentGuard 无头控制与诊断命令行工具。PyPI 分发名为 `aegis-agentguard-cli`，console
+script 继续使用 `agentguardctl`，内部 Python import 保持为 `agentguard_cli`。
 
 ```bash
-pip install --pre agentguardctl
+pip install --pre aegis-agentguard-cli
 agentguardctl --help
 ```
 
