@@ -2,14 +2,15 @@
 
 ## 1. 文档状态与边界
 
-本文定义 Dashboard 指标的目标后端契约、兼容路径和验收口径。
+本文定义 Dashboard 指标的已冻结目标后端契约、兼容路径和验收口径。目标契约于
+2026-08-05 冻结，但后端代码、Schema、存储和查询迁移尚未实施。
 
 - 前端三作用域隔离已经实施。
 - 新后端接口尚未实施，本文不表示当前 Guard API 已提供目标响应。
 - 当前 Dashboard 继续读取 `GET /v1/audit/events`，在已加载记录内按稳定关联 ID 重建窗口策略指标。
 - `GET /v1/metrics/eval` 只保留为历史兼容入口，不再参与当前窗口或独立评测展示。
 - AuditEvent 结构、运行时回执与证据语义继续以
-  [证据链与溯源 API 协作契约](evidence_trace_api_contract.md) 为准。
+  [证据链与溯源 API 目标契约](evidence_trace_api_contract.md) 为准。
 
 目标不是为 Dashboard 制造一套平行事实，而是为审计记录、策略评估、授权终态和执行事实提供明确的查询作用域。
 

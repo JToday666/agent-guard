@@ -15,7 +15,7 @@ docs/
 ├── 05_redteam/           # AttackBench、攻击样本与评测
 ├── 06_delivery/          # 部署使用、实施路线、演示脚本
 ├── 07_auth/              # Capability Auth、前端与适配器鉴权
-└── 08_api/               # 跨端 API 协作提案、联调结构与契约冻结清单
+└── 08_api/               # 跨端 API 目标契约、联调结构与迁移清单
 ```
 
 ## 2. 开发阅读路径
@@ -52,14 +52,14 @@ docs/
 2. [接口契约与事件模型](02_core/interface_contract.md)
 3. [Dashboard 与审批流](04_apps/dashboard_design.md)
 4. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
-5. [证据链与溯源 API 协作契约](08_api/evidence_trace_api_contract.md)
+5. [证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)
 6. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
 7. [实施路线与验收标准](06_delivery/implementation_plan.md)
 
 ### API 联调与契约评审
 
 1. [接口契约与事件模型](02_core/interface_contract.md)
-2. [证据链与溯源 API 协作契约](08_api/evidence_trace_api_contract.md)
+2. [证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)
 3. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
 4. [Capability Auth 总体方案](07_auth/鉴权总体方案.md)
 5. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
@@ -104,14 +104,14 @@ docs/
 | [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                               | Capability Auth、control token、adapter token、browser session 与接口鉴权      |
 | [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                           | Adapter / Plugin token 使用边界和 scope                                        |
 | [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                               | Dashboard browser session、CSRF 和 launch code 边界                            |
-| [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 证据链与溯源 API 的跨端协作提案、目标结构、示例、兼容策略和冻结清单            |
+| [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 已冻结的证据链与溯源目标结构、示例、兼容策略和迁移清单                        |
 | [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort、兼容与验收契约                |
 
 ## 4. 维护规则
 
 - 根目录 `README.md` 只保留项目门面和关键入口，完整文档地图只维护在本文件。
 - 根目录 `DEPLOYMENT_LOCAL.md` 只保留最小启动入口；完整部署、安装和故障排查只维护在 [deployment_install_usage.md](06_delivery/deployment_install_usage.md)。
-- `08_api/` 中的协作契约用于评审尚未冻结的接口提案；提案通过后，接口字段变更必须先更新 [interface_contract.md](02_core/interface_contract.md)，再同步 schemas 和实现。
+- `08_api/` 保存目标契约及迁移状态；目标冻结后，先在 [interface_contract.md](02_core/interface_contract.md) 区分当前实现与冻结目标，再同步 schemas、类型、存储和实现。目标契约不得被描述为当前能力。
 - Core 不依赖 Adapter，不暴露 HTTP API，不读写数据库；Adapter 不写核心规则；Dashboard 不直连运行时。
 - 攻击样本真值由 Redteam 提供，评测指标由 AttackBench runner 汇总。
 - `agentguard_langgraph_bench/` 下的 runner、样本和演示适配器属于评测边界，产品主链路文档只引用其稳定入口，不复制其内部实现说明。

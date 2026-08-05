@@ -24,9 +24,9 @@ uv sync
 pnpm install
 ```
 
-当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.5.2`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `aegis-agentguard-core`、`aegis-agentguard-api` 和 `aegis-agentguard-cli`。
+当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.9.0`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `aegis-agentguard-core`、`aegis-agentguard-api` 和 `aegis-agentguard-cli`。
 
-Beta 发布后也可以从 PyPI 安装统一入口或独立组件：
+Beta 1 已于 2026-08-05 发布，可以从 PyPI 安装统一入口或独立组件：
 
 ```bash
 pip install --pre aegis-agentguard

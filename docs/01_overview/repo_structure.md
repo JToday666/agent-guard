@@ -53,7 +53,7 @@ docs/
 └── 08_api/
 ```
 
-文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。`08_api/` 保存尚待跨端评审的 API 协作提案；提案冻结后必须同步回稳定接口契约和 schemas。
+文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。`08_api/` 保存跨端 API 目标契约和迁移清单；目标冻结后先同步稳定接口契约中的当前/目标边界，再同步 schemas 和实现。
 
 ## 4. 目录职责
 
@@ -70,7 +70,7 @@ docs/
 | `schemas/`                                 | JSON Schema 与 OpenAPI                                                      |
 | `tests/`                                   | 单元测试、契约测试、集成测试                                                |
 | `scripts/`                                 | 本地开发、插件安装验证和辅助命令                                            |
-| `docs/`                                    | 架构、稳定接口、API 协作提案、适配器、部署、鉴权和评测文档                  |
+| `docs/`                                    | 架构、稳定接口、API 目标契约、适配器、部署、鉴权和评测文档                  |
 
 完整部署流程以 `docs/06_delivery/deployment_install_usage.md` 为唯一事实来源；
 根目录 `DEPLOYMENT_LOCAL.md` 只提供快速导航和最小启动命令。

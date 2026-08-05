@@ -147,12 +147,13 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 状态标记：
 
 - `[x]` 已完成并验证；
-- `[~]` 已形成协作提案，仍需前后端共同确认后冻结；
+- `[~]` 目标契约已冻结，但代码或跨组件迁移尚未完成；
 - `[ ]` 尚未实现。
 
-详细请求、响应、字段、示例、兼容和验收提案见
-[证据链与溯源 API 协作契约](08_api/evidence_trace_api_contract.md)。该文档当前是协作提案，
-不替代稳定的 [接口契约与事件模型](02_core/interface_contract.md)，也不表示后端已经实现目标字段。
+详细请求、响应、字段、示例、兼容和验收目标见
+[证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)。该目标契约已于
+2026-08-05 冻结，但不替代当前 AuditEvent `0.3` 的
+[接口契约与事件模型](02_core/interface_contract.md)，也不表示后端已经实现目标字段。
 
 ### 已完成
 
@@ -167,19 +168,24 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 - [x] Dashboard API DTO 已允许 0.4 非策略记录的顶层策略字段为空，并以 `record_type` 和稳定 links 决定指标成员资格。
 - [x] 已建立指标作用域与原子审计窗口协作契约；当前前端使用旧事件数组兼容重建，等待后端目标接口。
 
-### 待协商并冻结
+### 已冻结的目标契约
 
-- [~] `GuardEvent` 继续使用 `schema_version="0.3"`；是否将目标 AuditEvent 升级为 `"0.4"`，需在兼容策略评审后确认。
-- [~] `runtime_observation` 等非策略记录的顶层 `decision`、`risk_score`、`severity`、`blocked` 是允许为空，还是保留兼容投影，需前后端共同确认。
-- [~] `GET /v1/traces/{trace_id}` 的查询完整性字段名暂建议为 `audit_window.returned_count`、`limit` 和 `has_more`。
-- [~] `POST /v1/guard/evaluate` 是否以 `GuardEvent.event_id` 提供请求级幂等，需确认；`POST /v1/audit/events` 的 `audit_id` 幂等与冲突规则为 P0 必需项。
-- [~] 证据投影的最大体积、字符串上限和数组上限需与现有审批脱敏逻辑统一后冻结。
+- [x] `GuardEvent` 保持 `schema_version="0.3"`；当前 AuditEvent 仍为 `0.3`，迁移目标冻结为 `0.4`。
+- [x] `runtime_outcome`、`runtime_observation` 等非策略记录允许顶层 `decision`、`risk_score`、`severity`、`blocked` 为 `null`。
+- [x] `GET /v1/traces/{trace_id}` 的目标窗口字段冻结为 `audit_window.limit/returned_count/has_more`。
+- [x] `POST /v1/guard/evaluate` 的目标幂等语义冻结为 `GuardEvent.event_id + 规范化请求摘要`；同内容复用原结果，不同内容返回 HTTP 409。
+- [x] 证据投影默认限制冻结为正文 2000 字符、摘要 500 字符、普通数组及 context sources 20 项、资源 50 项、规则/风险因子 100 项、嵌套 6 层、单事件 evidence 64 KiB。
+- [x] 运行时回执继续复用 `POST /v1/audit/events`，不新增 `/v1/runtime/outcomes`。
+
+本轮只完成事实修正和目标契约冻结。时间图判定、QQ/微信真实消息渠道、前端实现和
+LangGraph 实现均不在本轮范围内。
 
 ### 后端待完成
 
 | 状态 | 优先级 | 待办                                                                                                        | 影响组件                                                     | 验收条件                                                                                                                   |
 | ---- | ------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| [ ]  | P0     | 冻结 AuditEvent 目标版本、`record_type`、`evidence`、`links` 和字段可空性，并同步稳定接口契约与 JSON Schema | Core schema、Guard API、Adapters、Dashboard contract tests   | 四类记录均通过契约测试；旧记录有明确读取规则；缺失字段保持未知                                                             |
+| [x]  | P0     | 冻结 AuditEvent 目标版本、`record_type`、`evidence`、`links`、字段可空性、幂等与证据边界                  | 稳定接口文档、API 目标契约                                  | D-01 至 D-05 已确认；当前 `0.3`、目标 `0.4` 和未实施状态清晰分离                                                          |
+| [ ]  | P0     | 实现 AuditEvent `0.4` Schema、类型、存储兼容和共享契约测试                                                 | Core schema、Guard API、Adapters、Dashboard contract tests  | 四类记录均通过契约测试；旧记录有明确读取规则；缺失字段保持未知                                                           |
 | [ ]  | P0     | `POST /v1/guard/evaluate` 使用同一次策略快照完成判定和审计，只写一条 `policy_evaluation`                    | Policy store、Guard API、Audit service                       | 同一逻辑评估只有一条策略审计；审计中的 bundle、version、revision 和 digest 与实际判定一致                                  |
 | [ ]  | P0     | 移除 LangGraph Guard API 模式下的重复策略审计                                                               | LangGraph Adapter                                            | Adapter 不再为 Guard API 已写入的 `event_id + decision_id` 重复提交策略审计                                                |
 | [ ]  | P0     | 通过现有 `POST /v1/audit/events` 回写结构化运行时结果                                                       | LangGraph Adapter、OpenClaw Plugin                           | 成功、失败、未调用、隔离、修订、审批释放和观察路径均产生对应回执；未测量副作用不按零处理                                   |
@@ -193,7 +199,7 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 | [ ]  | P1     | 扩展 provenance 写入的节点和关系                                                                            | Guard API provenance writer/query                            | 返回任务、来源、上下文、意图、动作、资源、规则、策略、决策、审批、结果、审计和复核；ID 稳定且不包含前端坐标                |
 | [ ]  | P1     | 为 trace 查询增加明确的窗口完整性信息                                                                       | Trace service、Memory/PostgreSQL store                       | Dashboard 不再根据“恰好返回 1000 条”猜测截断；旧客户端可忽略新增字段                                                       |
 
-### 前端待后端契约冻结后完成
+### 前端待后端实现后完成
 
 - [ ] 根据冻结后的 `context_sources` 结构决定是否从字符串摘要升级为结构化来源对象。
 - [ ] 后端提供 `audit_window.has_more` 后，将当前“是否截断未知”升级为服务端确认的完整或截断状态。
