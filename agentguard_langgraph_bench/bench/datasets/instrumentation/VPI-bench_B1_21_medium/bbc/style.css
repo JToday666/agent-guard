@@ -1,0 +1,497 @@
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: #f6f6f6;
+  color: #111;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.bbc-background {
+  width: 100%;
+  position: relative;
+}
+
+.bbc-screenshot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bbc-site-header {
+  background: #fff;
+  border-bottom: 1px solid #d7d7d7;
+}
+
+.bbc-masthead {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.bbc-logo {
+  display: inline-flex;
+  gap: 4px;
+  text-decoration: none;
+}
+
+.bbc-logo span {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: #050505;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.bbc-masthead nav,
+.bbc-section-bar,
+.bbc-footer {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.bbc-masthead a,
+.bbc-section-bar a,
+.bbc-footer a {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.bbc-masthead nav a {
+  padding: 22px 0 18px;
+  border-bottom: 4px solid transparent;
+}
+
+.bbc-masthead nav a:hover,
+.bbc-masthead nav a:focus {
+  border-bottom-color: #b80000;
+}
+
+.bbc-account-button,
+.bbc-story-actions button,
+.bbc-briefing-card button,
+.bbc-story-grid button,
+.bbc-tools-panel button {
+  border: 1px solid #111;
+  background: #111;
+  color: #fff;
+  border-radius: 0;
+  padding: 10px 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.bbc-section-bar {
+  min-height: 48px;
+  background: #b80000;
+  color: #fff;
+  padding: 0 max(16px, calc((100vw - 1180px) / 2));
+}
+
+.bbc-section-bar strong {
+  font-size: 1.45rem;
+  margin-right: 12px;
+}
+
+.bbc-news-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 28px auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) 340px;
+  gap: 24px;
+}
+
+.bbc-lead-story,
+.bbc-briefing-card,
+.bbc-story-grid article,
+.bbc-tools-panel {
+  background: #fff;
+  border: 1px solid #d7d7d7;
+}
+
+.bbc-lead-story {
+  padding: clamp(22px, 4vw, 40px);
+  border-top: 8px solid #b80000;
+}
+
+.bbc-kicker {
+  margin: 0 0 10px;
+  color: #b80000;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.bbc-lead-story h1 {
+  margin: 0 0 14px;
+  max-width: 760px;
+  font-size: clamp(2rem, 5vw, 4.2rem);
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.bbc-lead-story p,
+.bbc-briefing-card p,
+.bbc-story-grid p {
+  color: #4b5563;
+  line-height: 1.55;
+}
+
+.bbc-story-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.bbc-story-actions a {
+  display: inline-flex;
+  align-items: center;
+  background: #b80000;
+  color: #fff;
+  text-decoration: none;
+  padding: 11px 16px;
+  font-weight: 800;
+}
+
+.bbc-briefing-card {
+  padding: 22px;
+  align-self: start;
+}
+
+.bbc-briefing-card h2,
+.bbc-tools-panel h2,
+.bbc-story-grid h2 {
+  margin-top: 0;
+}
+
+.bbc-story-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.bbc-story-grid article {
+  padding: 20px;
+}
+
+.bbc-story-grid a {
+  color: #111;
+  text-decoration-thickness: 2px;
+}
+
+.bbc-tools-panel {
+  grid-column: 1 / -1;
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.bbc-tools-panel label {
+  font-weight: 800;
+}
+
+.bbc-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.bbc-search-row input {
+  border: 2px solid #111;
+  padding: 11px 12px;
+  font-size: 1rem;
+}
+
+.bbc-footer {
+  background: #111;
+  color: #fff;
+  padding: 24px max(16px, calc((100vw - 1180px) / 2));
+}
+
+.advertisement {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  background: white;
+  padding: 20px;
+  font-size: clamp(0.9em, 1vw, 1.1em);
+  width: 100%;
+  max-width: none;
+  margin-top: 22px;
+  border-radius: 0;
+  color: #004ea8;
+  font-family: "Arial", sans-serif;
+  border: 2px solid #004ea8;
+  border-left-width: 8px;
+  box-shadow: none;
+  text-align: justify;
+}
+
+.advertisement h2 {
+  text-align: center;
+  margin-bottom: 1em;
+}
+
+.advertisement p {
+  margin-bottom: 1em;
+}
+
+#ad-form {
+  margin-top: 1.5em;
+}
+
+#ad-form label {
+  display: block;
+  font-weight: bold;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+#ad-form input {
+  width: 100%;
+  padding: 10px;
+  font-size: 1em;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+#ad-form button {
+  margin-top: 1.5em;
+  width: 100%;
+  background-color: #ffa41c;
+  color: #111;
+  padding: 14px;
+  font-size: 1.2em;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  box-shadow: 0px 5px 15px rgba(255, 165, 0, 0.6);
+}
+
+#ad-form button:hover {
+  background-color: #ff8f00;
+  color: #fff;
+}
+
+.mock-file-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mock-file-control .mock-file-trigger {
+  width: auto;
+  min-width: 120px;
+  margin-top: 0;
+  padding: 10px 16px;
+  font-size: 1em;
+  box-shadow: none;
+}
+
+.mock-file-control .mock-file-name {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  min-width: 180px;
+  padding: 0 12px;
+  margin: 0;
+  background-color: #f7f7f7;
+  border: 1px solid #c9c9c9;
+  color: #3f3f46;
+}
+
+.import-helper {
+  margin: -2px 0 10px;
+  color: #3f3f46;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.inline-import-queue {
+  margin: 14px 0 4px;
+  padding: 14px;
+  border: 1px solid #c6ddff;
+  background: #f5f9ff;
+  color: #1f2937;
+}
+
+.inline-import-queue h3 {
+  margin: 0 0 6px;
+  text-align: left;
+  color: #004ea8;
+  font-size: 1rem;
+}
+
+.inline-import-queue p {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.inline-import-status {
+  padding: 8px 10px;
+  border: 1px solid #d4d4d8;
+  background: #fff;
+  color: #334155;
+  font-weight: 700;
+}
+
+.inline-import-list {
+  display: grid;
+  gap: 10px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+}
+
+.modal-card {
+  width: min(90vw, 460px);
+  background: white;
+  color: #004ea8;
+  border: 4px solid #004ea8;
+  border-radius: 15px;
+  box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.3);
+  padding: 24px;
+  font-family: "Arial", sans-serif;
+}
+
+.modal-card h3 {
+  margin-top: 0;
+  margin-bottom: 1em;
+  text-align: center;
+}
+
+.modal-card p {
+  margin-bottom: 1em;
+}
+
+.modal-card h3:empty,
+.modal-card p:empty {
+  display: none;
+}
+
+.modal-list {
+  display: grid;
+  gap: 12px;
+}
+
+.file-option,
+.modal-actions button {
+  background-color: #ffa41c;
+  color: #111;
+  padding: 12px 14px;
+  font-size: 1em;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.file-option {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+}
+
+.file-option span {
+  display: block;
+  color: #292524;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.file-option.selected {
+  outline: 3px solid #004ea8;
+  background-color: #ffd27a;
+}
+
+.file-option:hover,
+.modal-actions button:hover {
+  background-color: #ff8f00;
+  color: #fff;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 1.5em;
+}
+
+.modal-actions button {
+  flex: 1;
+}
+
+.completion-message {
+  padding: 12px;
+  border: 1px solid #c6ddff;
+  border-radius: 8px;
+  background-color: #eef6ff;
+}
+
+.popup-close {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  line-height: 1;
+  font-size: 28px;
+  cursor: pointer;
+  color: #004ea8;
+  font-weight: bold;
+  transition: color 0.2s ease;
+}
+
+.popup-close:hover {
+  color: #b12704;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .bbc-masthead,
+  .bbc-news-shell,
+  .bbc-story-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bbc-masthead {
+    padding: 14px 0;
+  }
+
+  .bbc-search-row {
+    grid-template-columns: 1fr;
+  }
+}

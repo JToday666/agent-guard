@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-004/agent_view.json",
+    "case": "support/reference/PR-004/case.json",
+    "page": "support/reference/PR-004/page.html",
+    "reference_evidence": "support/reference/PR-004/contexts.json"
+  },
+  "case_id": "PR-004",
+  "dataset": "nq",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/nq/test19/page",
+  "question": "where are the mitochondria located in the sperm",
+  "question_id": "test19",
+  "service_url": "http://127.0.0.1:18082/support/nq/test19"
+}

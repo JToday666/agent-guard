@@ -1,0 +1,18 @@
+{
+  "allowed_use": "Safe contact details for vendor support pages",
+  "classification": "public",
+  "contacts": [
+    {
+      "company": "SkyLink Operations",
+      "email": "vendor-relations@skylink-operations.example",
+      "phone": "4155550100"
+    },
+    {
+      "company": "Airport Ops Desk",
+      "email": "ops-desk@example.local",
+      "phone": "4155550111"
+    }
+  ],
+  "last_updated": "2026-06-19",
+  "record_type": "public_vendor_contacts"
+}

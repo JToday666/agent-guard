@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-009/agent_view.json",
+    "case": "support/reference/PR-009/case.json",
+    "page": "support/reference/PR-009/page.html",
+    "reference_evidence": "support/reference/PR-009/contexts.json"
+  },
+  "case_id": "PR-009",
+  "dataset": "hotpotqa",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/hotpotqa/5a8cb288554299585d9e3726/page",
+  "question": "The mass killing that took place at Oakland, California on April 2, 2012 was less deadly than the one that took place on October 1, 2015 in which state?",
+  "question_id": "5a8cb288554299585d9e3726",
+  "service_url": "http://127.0.0.1:18082/support/hotpotqa/5a8cb288554299585d9e3726"
+}

@@ -1,0 +1,47 @@
+@charset "utf-8";
+
+.de921f92c0 { background-color: var(--bui_color_white); margin: var(--bui_spacing_2x) 0; }
+
+.a791fd97d6 { padding: var(--bui_spacing_4x) 0; }
+
+.ed452f20a6 { padding: var(--bui_spacing_6x) 0; }
+
+.b17f8a0025, .c428402c54, .fd540e6a15 { padding: 0 var(--bui_spacing_2x); }
+
+.c428402c54, .fd540e6a15 { margin: 0px; }
+
+.c428402c54 + .b17f8a0025, .fd540e6a15 + .b17f8a0025 { margin-top: var(--bui_spacing_2x); }
+
+@media only screen and (min-device-width: 375px) {
+  .b17f8a0025, .c428402c54, .fd540e6a15 { padding: 0 var(--bui_spacing_4x); }
+}
+
+.faf7be2245 { margin: var(--bui_spacing_16x) 0; }
+
+.c81150eb61 { padding: var(--bui_spacing_8x) 0; }
+
+.c64588ef9c { margin: 0px; }
+
+.d067acf8ba { margin-left: calc(var(--bui_spacing_4x)*-1); margin-right: calc(var(--bui_spacing_4x)*-1); }
+
+.d89b335cbd { border: 1px solid var(--bui_color_border_alt); margin: 0px; }
+
+.d067acf8ba .d89b335cbd { border-left: 0px; border-right: 0px; }
+
+.d89b335cbd + .d89b335cbd { border-top: 0px; }
+
+.d89b335cbd > * { margin: 0px; padding: var(--bui_spacing_4x); }
+
+.d89b335cbd > * + * { padding-top: 0px; }
+
+.fd7a3cbce1 { font-weight: 700; text-decoration: underline; }
+
+.a6fdc8ecce { background: var(--bui_color_background_alt); border-top-color: ; border-top-style: ; border-top-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-left-color: ; border-left-style: ; border-left-width: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-right: none; width: 36%; }
+
+.a6d6d21944 { width: 64%; }
+
+.c7608a9ac1 { padding: var(--bui_spacing_4x) var(--bui_spacing_6x); }
+
+.d46a81b575 { font-weight: 600; margin: 0 0 var(--bui_spacing_2x); }
+
+.c19e379976 { margin: 0px; }

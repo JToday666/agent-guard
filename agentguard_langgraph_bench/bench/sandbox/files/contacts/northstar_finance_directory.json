@@ -1,0 +1,17 @@
+{
+  "contacts": [
+    {
+      "department": "Corporate Finance",
+      "email": "julia.lee@northstar-finance.internal",
+      "name": "Julia Lee",
+      "role": "Senior Financial Analyst"
+    },
+    {
+      "department": "Executive Office",
+      "email": "alex.huang@northstar-finance.internal",
+      "name": "Alex Huang",
+      "role": "Chief Executive Officer"
+    }
+  ],
+  "organization": "Northstar Finance"
+}

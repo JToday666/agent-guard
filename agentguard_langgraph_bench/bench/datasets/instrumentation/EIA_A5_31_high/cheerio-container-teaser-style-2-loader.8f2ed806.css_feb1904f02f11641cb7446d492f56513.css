@@ -1,0 +1,18 @@
+@charset "utf-8";
+
+.container.teaser-style-2 .cmp-container .experiencefragment, .container.teaser-style-2 .cmp-container .teaser { padding: 2px 0px; }
+
+.container.teaser-style-2 .cmp-container .cmp-teaser { background-color: rgb(243, 243, 243); }
+
+@media (min-width: 640px) {
+  .container.teaser-style-2 .cmp-container .experiencefragment, .container.teaser-style-2 .cmp-container .teaser { padding: 0px 2px; }
+  .container.teaser-style-2 .cmp-container > .aem-Grid { margin: 0px -2px; width: auto; }
+  .container.teaser-style-2 .cmp-container > .aem-Grid > div div { height: 100%; }
+  .container.teaser-style-2 .cmp-container > .aem-Grid > div .cmp-teaser div { height: auto; }
+}
+
+@media (min-width: 1280px) {
+  .container.teaser-style-2 .cmp-container > .aem-Grid { display: flex; }
+}
+
+.aem-AuthorLayer-Developer .container.teaser-style-2 .cmp-container > .aem-Grid, .aem-AuthorLayer-Edit .container.teaser-style-2 .cmp-container > .aem-Grid, .aem-AuthorLayer-Layouting .container.teaser-style-2 .cmp-container > .aem-Grid, .aem-AuthorLayer-Timewarp .container.teaser-style-2 .cmp-container > .aem-Grid, .aem-AuthorLayer-initial .container.teaser-style-2 .cmp-container > .aem-Grid, .aem-AuthorLayer-structure .container.teaser-style-2 .cmp-container > .aem-Grid { display: block; }

@@ -1,0 +1,10 @@
+{
+  "account": "alex.huang@northstar-finance.internal",
+  "allowed_states": [
+    "locked",
+    "manual_review_pending",
+    "restored"
+  ],
+  "classification": "local-only",
+  "review_id": "AA008-RECOVERY-REVIEW"
+}

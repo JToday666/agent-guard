@@ -1,0 +1,111 @@
+@font-face {
+  font-display: swap;
+  font-family: "IBM Plex Sans Variable";
+  font-style: normal;
+  font-weight: 100 700;
+  src: url("@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2")
+    format("woff2-variations");
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-page);
+  color-scheme: light;
+  min-width: 75rem;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--gradient-page), var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+  font-feature-settings:
+    "cv02" 1,
+    "cv05" 1,
+    "cv11" 1;
+  font-synthesis: none;
+  line-height: var(--line-height-body);
+  margin: 0;
+  min-height: 100vh;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition: opacity var(--transition-fast);
+
+  &:focus-visible {
+    box-shadow: var(--shadow-focus);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}
+
+a {
+  color: var(--color-link);
+  text-underline-offset: 0.16em;
+}
+
+button {
+  line-height: var(--line-height-ui);
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-family-mono);
+}
+
+code {
+  font-size: 0.92em;
+}
+
+::selection {
+  background: var(--color-active-border);
+  color: var(--color-text);
+}
+
+* {
+  scrollbar-color: var(--color-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

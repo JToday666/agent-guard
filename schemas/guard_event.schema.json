@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GuardEvent",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "runtime",
+    "trace_id",
+    "pre_execution",
+    "security_context",
+    "payload",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.3" },
+    "event_id": { "type": "string" },
+    "event_type": {
+      "enum": [
+        "tool_call_proposed",
+        "context_assembled",
+        "model_input_prepared",
+        "model_output_produced",
+        "tool_result_produced",
+        "memory_write_proposed",
+        "message_send_proposed"
+      ]
+    },
+    "runtime": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "case_id": { "type": ["string", "null"] },
+    "attack_type": { "type": ["string", "null"] },
+    "is_malicious": { "type": ["boolean", "null"] },
+    "timestamp": { "type": "string" },
+    "pre_execution": { "type": "boolean" },
+    "security_context": { "type": "object" },
+    "payload": {
+      "anyOf": [
+        { "$ref": "#/$defs/contextBuildPayload" },
+        { "$ref": "#/$defs/modelCallPayload" },
+        { "$ref": "#/$defs/toolResultPayload" },
+        { "$ref": "#/$defs/memoryEventPayload" },
+        { "$ref": "#/$defs/messageSendPayload" },
+        { "$ref": "#/$defs/toolCallPayload" }
+      ]
+    },
+    "metadata": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "event_type": { "const": "tool_call_proposed" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/toolCallPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "context_assembled" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/contextBuildPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "model_input_prepared" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/modelInputPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "model_output_produced" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/modelOutputPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "tool_result_produced" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/toolResultPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "memory_write_proposed" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/memoryEventPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "message_send_proposed" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/messageSendPayload" } } }
+    }
+  ],
+  "$defs": {
+    "derivedResource": {
+      "type": "object",
+      "required": ["resource_type", "operation", "target", "direction"],
+      "properties": {
+        "resource_type": { "type": "string" },
+        "operation": { "type": "string" },
+        "target": { "type": "string" },
+        "data_classification": { "type": ["string", "null"] },
+        "direction": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "toolDescriptor": {
+      "type": "object",
+      "required": ["name", "call_id"],
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "kind": { "type": ["string", "null"] },
+        "input_kind": { "type": ["string", "null"] },
+        "call_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "toolCallPayload": {
+      "type": "object",
+      "required": ["tool", "arguments", "derived_resources"],
+      "properties": {
+        "tool": { "$ref": "#/$defs/toolDescriptor" },
+        "arguments": { "type": "object" },
+        "derived_resources": { "type": "array", "items": { "$ref": "#/$defs/derivedResource" } }
+      },
+      "additionalProperties": true
+    },
+    "contextSource": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "source_type",
+        "source_trust",
+        "summary",
+        "contains_instruction_like_text",
+        "contains_sensitive_data"
+      ],
+      "properties": {
+        "source_id": { "type": "string" },
+        "source_type": { "type": "string" },
+        "source_trust": { "type": "string" },
+        "summary": { "type": "string" },
+        "contains_instruction_like_text": { "type": "boolean" },
+        "contains_sensitive_data": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "contextBuildPayload": {
+      "type": "object",
+      "required": ["sources", "will_enter_context", "sanitized"],
+      "properties": {
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/contextSource" } },
+        "will_enter_context": { "type": "boolean" },
+        "sanitized": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "modelCallPayload": {
+      "type": "object",
+      "required": ["phase", "content_preview", "contains_instruction_like_text", "contains_sensitive_data", "sanitized"],
+      "properties": {
+        "phase": { "enum": ["input", "output"] },
+        "content_preview": { "type": "string" },
+        "provider": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] },
+        "contains_instruction_like_text": { "type": "boolean" },
+        "contains_sensitive_data": { "type": "boolean" },
+        "sanitized": { "type": "boolean" },
+        "tool_plan": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "modelInputPayload": {
+      "allOf": [
+        { "$ref": "#/$defs/modelCallPayload" },
+        { "properties": { "phase": { "const": "input" } } }
+      ]
+    },
+    "modelOutputPayload": {
+      "allOf": [
+        { "$ref": "#/$defs/modelCallPayload" },
+        { "properties": { "phase": { "const": "output" } } }
+      ]
+    },
+    "toolResult": {
+      "type": "object",
+      "required": ["content_preview", "content_type", "size_bytes"],
+      "properties": {
+        "content_preview": { "type": "string" },
+        "content_type": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "toolResultPayload": {
+      "type": "object",
+      "required": [
+        "tool",
+        "result",
+        "will_enter_context",
+        "will_persist",
+        "sanitized",
+        "contains_sensitive_data",
+        "contains_instruction_like_text"
+      ],
+      "properties": {
+        "tool": { "$ref": "#/$defs/toolDescriptor" },
+        "result": { "$ref": "#/$defs/toolResult" },
+        "will_enter_context": { "type": "boolean" },
+        "will_persist": { "type": "boolean" },
+        "sanitized": { "type": "boolean" },
+        "contains_sensitive_data": { "type": "boolean" },
+        "contains_instruction_like_text": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "memoryRecord": {
+      "type": "object",
+      "required": ["namespace", "key", "value_preview", "source_trust", "operation"],
+      "properties": {
+        "namespace": { "type": "string" },
+        "key": { "type": "string" },
+        "value_preview": { "type": "string" },
+        "source_trust": { "type": "string" },
+        "operation": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "memoryEventPayload": {
+      "type": "object",
+      "required": ["memory", "will_persist", "requires_approval"],
+      "properties": {
+        "memory": { "$ref": "#/$defs/memoryRecord" },
+        "will_persist": { "type": "boolean" },
+        "requires_approval": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "messageSendPayload": {
+      "type": "object",
+      "required": ["channel", "recipient", "content_preview"],
+      "properties": {
+        "channel": { "type": "string" },
+        "recipient": { "type": "string" },
+        "content_preview": { "type": "string" },
+        "contains_sensitive_data": { "type": "boolean" },
+        "sanitized": { "type": "boolean" },
+        "derived_resources": { "type": "array", "items": { "$ref": "#/$defs/derivedResource" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

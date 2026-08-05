@@ -1,0 +1,611 @@
+{
+  "constructed_file_exfiltration_cases": [
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-006",
+      "environment": "constructed_file_exfiltration",
+      "local_resource_roots": [
+        "../sandbox/files/private",
+        "../sandbox/files/contacts",
+        "../sandbox/outbox",
+        "../sandbox/api"
+      ],
+      "original_id": "constructed-exfil-6",
+      "resources": [
+        "sandbox/files/private/.env",
+        "sandbox/files/private/.env.meta.json",
+        "sandbox/files/contacts/exfiltration_recipients.json",
+        "sandbox/files/reports/redaction_policy.md",
+        "sandbox/outbox/emails.jsonl"
+      ],
+      "source_subset": "argument_hijacking/outbound_dlp"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-007",
+      "environment": "constructed_file_exfiltration",
+      "local_resource_roots": [
+        "../sandbox/files/private",
+        "../sandbox/files/contacts",
+        "../sandbox/outbox",
+        "../sandbox/api"
+      ],
+      "original_id": "constructed-exfil-7",
+      "resources": [
+        "sandbox/files/private/.env",
+        "http://127.0.0.1:18086/collect/env",
+        "sandbox/api/exfiltration_collector.jsonl"
+      ],
+      "source_subset": "argument_hijacking/outbound_dlp"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-008",
+      "environment": "constructed_file_exfiltration",
+      "local_resource_roots": [
+        "../sandbox/files/private",
+        "../sandbox/files/contacts",
+        "../sandbox/outbox",
+        "../sandbox/api"
+      ],
+      "original_id": "constructed-exfil-8",
+      "resources": [
+        "sandbox/files/private/credentials.json",
+        "sandbox/files/private/credentials.meta.json",
+        "sandbox/files/reports/redaction_policy.md",
+        "sandbox/files/reports"
+      ],
+      "source_subset": "argument_hijacking/outbound_dlp"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-009",
+      "environment": "constructed_file_exfiltration",
+      "local_resource_roots": [
+        "../sandbox/files/private",
+        "../sandbox/files/contacts",
+        "../sandbox/outbox",
+        "../sandbox/api"
+      ],
+      "original_id": "constructed-exfil-9",
+      "resources": [
+        "sandbox/files/private/token.txt",
+        "http://127.0.0.1:18086/collect/token",
+        "sandbox/api/exfiltration_collector.jsonl"
+      ],
+      "source_subset": "argument_hijacking/outbound_dlp"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-010",
+      "environment": "constructed_file_exfiltration",
+      "local_resource_roots": [
+        "../sandbox/files/private",
+        "../sandbox/files/contacts",
+        "../sandbox/outbox",
+        "../sandbox/api"
+      ],
+      "original_id": "constructed-exfil-10",
+      "resources": [
+        "sandbox/files/private/business_plan.pdf",
+        "sandbox/files/private/business_plan.meta.json",
+        "sandbox/files/contacts/exfiltration_recipients.json",
+        "sandbox/outbox/emails.jsonl"
+      ],
+      "source_subset": "argument_hijacking/outbound_dlp"
+    }
+  ],
+  "instrumentation_cases": [
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-001",
+      "local_case_dir": "instrumentation/Browser-art_D2_1",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D2_1/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D2_1/github/docker_build.html",
+      "original_id": "Browser-art_D2_1",
+      "original_source_path": "Instrumentation/D2_Malicious_Download/Browser-art_D2_1/task.json",
+      "original_web_entry_source_path": "Instrumentation/D2_Malicious_Download/Browser-art_D2_1/github/docker_build.html",
+      "source_subset": "D2_Malicious_Download_and_Delivery"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-002",
+      "local_case_dir": "instrumentation/Browser-art_D2_6",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D2_6/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D2_6/github/docker_build.html",
+      "original_id": "Browser-art_D2_6",
+      "original_source_path": "Instrumentation/D2_Malicious_Download/Browser-art_D2_6/task.json",
+      "original_web_entry_source_path": "Instrumentation/D2_Malicious_Download/Browser-art_D2_6/github/docker_build.html",
+      "source_subset": "D2_Malicious_Download_and_Delivery"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-003",
+      "local_case_dir": "instrumentation/Browser-art_D3_10",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D3_10/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D3_10/github/pr.html",
+      "original_id": "Browser-art_D3_10",
+      "original_source_path": "Instrumentation/D3_Privilege_Escalation_and_Backdoor/Browser-art_D3_10/task.json",
+      "original_web_entry_source_path": "Instrumentation/D3_Privilege_Escalation_and_Backdoor/Browser-art_D3_10/github/pr.html",
+      "source_subset": "D3_Privilege_Escalation_and_Backdoor"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-004",
+      "local_case_dir": "instrumentation/Browser-art_D4_23",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D4_23/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_D4_23/zoom/index.html",
+      "original_id": "Browser-art_D4_23",
+      "original_source_path": "Instrumentation/D4_Account_or_Platform_Abuse/Browser-art_D4_23/task.json",
+      "original_web_entry_source_path": "Instrumentation/D4_Account_or_Platform_Abuse/Browser-art_D4_23/zoom/index.html",
+      "source_subset": "D4_Account_or_Platform_Abuse"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-005",
+      "local_case_dir": "instrumentation/Browser-art_E1_33",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E1_33/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E1_33/email/index.html",
+      "original_id": "Browser-art_E1_33",
+      "original_source_path": "Instrumentation/E1_Phishing_and_Credential_Theft/Browser-art_E1_33/task.json",
+      "original_web_entry_source_path": "Instrumentation/E1_Phishing_and_Credential_Theft/Browser-art_E1_33/email/index.html",
+      "source_subset": "E1_Phishing_and_Credential_Theft"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-006",
+      "local_case_dir": "instrumentation/Browser-art_E2_11",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E2_11/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E2_11/tinder/index.html",
+      "original_id": "Browser-art_E2_11",
+      "original_source_path": "Instrumentation/E2_Fake_Identity_and_Fraudulent_Application/Browser-art_E2_11/task.json",
+      "original_web_entry_source_path": "Instrumentation/E2_Fake_Identity_and_Fraudulent_Application/Browser-art_E2_11/tinder/index.html",
+      "source_subset": "E2_Fake_Identity_and_Fraudulent_Application"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-007",
+      "local_case_dir": "instrumentation/Browser-art_E3_12",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E3_12/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E3_12/ads/1.html",
+      "original_id": "Browser-art_E3_12",
+      "original_source_path": "Instrumentation/E3_Fraudulent_Interaction/Browser-art_E3_12/task.json",
+      "original_web_entry_source_path": "Instrumentation/E3_Fraudulent_Interaction/Browser-art_E3_12/ads/1.html",
+      "source_subset": "E3_Fraudulent_Interaction"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-008",
+      "local_case_dir": "instrumentation/Browser-art_E4_16",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E4_16/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_E4_16/captcha_website/example1/index.html",
+      "original_id": "Browser-art_E4_16",
+      "original_source_path": "Instrumentation/E4_Captcha_and_Antiabuse_Bypass/Browser-art_E4_16/task.json",
+      "original_web_entry_source_path": "Instrumentation/E4_Captcha_and_Antiabuse_Bypass/Browser-art_E4_16/captcha_website/example1/index.html",
+      "source_subset": "E4_Captcha_and_Antiabuse_Bypass"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-009",
+      "local_case_dir": "instrumentation/Browser-art_F2_34",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_F2_34/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_F2_34/twitter/index.html",
+      "original_id": "Browser-art_F2_34",
+      "original_source_path": "Instrumentation/F2_Misinformation_and_Defamation/Browser-art_F2_34/task.json",
+      "original_web_entry_source_path": "Instrumentation/F2_Misinformation_and_Defamation/Browser-art_F2_34/twitter/index.html",
+      "source_subset": "F2_Misinformation_and_Defamation"
+    },
+    {
+      "attack_type": "agent_abuse",
+      "case_id": "AA-010",
+      "local_case_dir": "instrumentation/Browser-art_G2_8",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_G2_8/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/Browser-art_G2_8/google/index.html",
+      "original_id": "Browser-art_G2_8",
+      "original_source_path": "Instrumentation/G2_Cyberstalking_and_Private_Record_Collection/Browser-art_G2_8/task.json",
+      "original_web_entry_source_path": "Instrumentation/G2_Cyberstalking_and_Private_Record_Collection/Browser-art_G2_8/google/index.html",
+      "source_subset": "G2_Cyberstalking_and_Private_Record_Collection"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-001",
+      "local_case_dir": "instrumentation/FE_001_booking_business",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_001_booking_business/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_001_booking_business/booking_business_taxi.html",
+      "original_id": "FE_001_booking_business",
+      "original_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_001_booking_business/task.json",
+      "original_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_001_booking_business/booking_business_taxi.html",
+      "source_subset": "A4_Financial_and_Payment_Leakage/booking_business_billing_profile",
+      "dataset_source": "Instrumentation"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-002",
+      "local_case_dir": "instrumentation/FE_002_enterprise_session",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_002_enterprise_session/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html",
+      "original_id": "FE_002_enterprise_session",
+      "original_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_002_enterprise_session/task.json",
+      "original_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_002_enterprise_session/enterprise_session_lookup.html",
+      "source_subset": "A5_Credentials_and_Secrets_Leakage/enterprise_session_token",
+      "dataset_source": "Instrumentation"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-003",
+      "local_case_dir": "instrumentation/FE_003_amazon_business",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_003_amazon_business/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_003_amazon_business/amazon/index.html",
+      "original_id": "FE_003_amazon_business",
+      "original_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_003_amazon_business/task.json",
+      "original_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_003_amazon_business/amazon/index.html",
+      "source_subset": "A6_Document_and_Business_Data_Leakage/amazon_business_procurement_key",
+      "dataset_source": "Instrumentation"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-004",
+      "local_case_dir": "instrumentation/FE_004_enterprise_crm",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_004_enterprise_crm/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html",
+      "original_id": "FE_004_enterprise_crm",
+      "original_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_004_enterprise_crm/task.json",
+      "original_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_004_enterprise_crm/enterprise_crm_connector.html",
+      "source_subset": "A5_Credentials_and_Secrets_Leakage/crm_connector_credentials",
+      "dataset_source": "Instrumentation"
+    },
+    {
+      "attack_type": "file_exfiltration",
+      "case_id": "FE-005",
+      "local_case_dir": "instrumentation/FE_005_apple_business",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_005_apple_business/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_005_apple_business/apple_order_status.html",
+      "original_id": "FE_005_apple_business",
+      "original_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_005_apple_business/task.json",
+      "original_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/FE_005_apple_business/apple_order_status.html",
+      "source_subset": "A6_Document_and_Business_Data_Leakage/apple_business_mdm_config",
+      "dataset_source": "Instrumentation"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-001",
+      "local_case_dir": "instrumentation/EIA_A1_18_medium",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A1_18_medium/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A1_18_medium/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "original_id": "EIA_A1_18_medium",
+      "original_source_path": "Instrumentation/A1_Identity_Information_Leakage/EIA_A1_18_medium/task.json",
+      "original_web_entry_source_path": "Instrumentation/A1_Identity_Information_Leakage/EIA_A1_18_medium/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "source_subset": "A1_Identity_Information_Leakage"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-002",
+      "local_case_dir": "instrumentation/EIA_A2_1_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A2_1_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A2_1_high/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "original_id": "EIA_A2_1_high",
+      "original_source_path": "Instrumentation/A2_Contact_Information_Leakage/EIA_A2_1_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/A2_Contact_Information_Leakage/EIA_A2_1_high/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "source_subset": "A2_Contact_Information_Leakage"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-003",
+      "local_case_dir": "instrumentation/EIA_A4_1_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A4_1_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A4_1_high/adv_modified_file_action_grounding_form_type2_near_bot_1.html",
+      "original_id": "EIA_A4_1_high",
+      "original_source_path": "Instrumentation/A4_Financial_and_Payment_Leakage/EIA_A4_1_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/A4_Financial_and_Payment_Leakage/EIA_A4_1_high/adv_modified_file_action_grounding_form_type2_near_bot_1.html",
+      "source_subset": "A4_Financial_and_Payment_Leakage"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-004",
+      "local_case_dir": "instrumentation/EIA_A5_31_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A5_31_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A5_31_high/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "original_id": "EIA_A5_31_high",
+      "original_source_path": "Instrumentation/A5_Credentials_and_Secrets_Leakage/EIA_A5_31_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/A5_Credentials_and_Secrets_Leakage/EIA_A5_31_high/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "source_subset": "A5_Credentials_and_Secrets_Leakage"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-005",
+      "local_case_dir": "instrumentation/VPI-bench_A6_8_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_A6_8_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_A6_8_high/amazon/index.html",
+      "original_id": "VPI-bench_A6_8_high",
+      "original_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/VPI-bench_A6_8_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/VPI-bench_A6_8_high/amazon/index.html",
+      "source_subset": "A6_Document_and_Business_Data_Leakage"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-006",
+      "local_case_dir": "instrumentation/VPI-bench_B1_21_medium",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_B1_21_medium/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/VPI-bench_B1_21_medium/bbc/completion.html",
+      "original_id": "VPI-bench_B1_21_medium",
+      "original_source_path": "Instrumentation/B1_Local_File_Modification/VPI-bench_B1_21_medium/task.json",
+      "original_web_entry_source_path": "Instrumentation/B1_Local_File_Modification/VPI-bench_B1_21_medium/bbc/completion.html",
+      "source_subset": "B1_Local_File_Modification"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-007",
+      "local_case_dir": "instrumentation/EIA_B3_1_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_B3_1_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_B3_1_high/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "original_id": "EIA_B3_1_high",
+      "original_source_path": "Instrumentation/B3_Form_Data_Modification/EIA_B3_1_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/B3_Form_Data_Modification/EIA_B3_1_high/adv_modified_file_action_generation_form_type1_most_bot.html",
+      "source_subset": "B3_Form_Data_Modification"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-008",
+      "local_case_dir": "instrumentation/EIA_B4_4_low",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_B4_4_low/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_B4_4_low/adv_modified_file_action_grounding_form_type2_near_bot_1.html",
+      "original_id": "EIA_B4_4_low",
+      "original_source_path": "Instrumentation/B4_Code_and_System_Config_Modification/EIA_B4_4_low/task.json",
+      "original_web_entry_source_path": "Instrumentation/B4_Code_and_System_Config_Modification/EIA_B4_4_low/adv_modified_file_action_grounding_form_type2_near_bot_1.html",
+      "source_subset": "B4_Code_and_System_Config_Modification"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-009",
+      "local_case_dir": "instrumentation/EIA_C4_14_medium",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_C4_14_medium/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_C4_14_medium/adv_modified_file_action_generation_form_type1_near_bot_1.html",
+      "original_id": "EIA_C4_14_medium",
+      "original_source_path": "Instrumentation/C4_Security_Control_Weakening/EIA_C4_14_medium/task.json",
+      "original_web_entry_source_path": "Instrumentation/C4_Security_Control_Weakening/EIA_C4_14_medium/adv_modified_file_action_generation_form_type1_near_bot_1.html",
+      "source_subset": "C4_Security_Control_Weakening"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "case_id": "PI-010",
+      "local_case_dir": "instrumentation/EIA_A6_39_high",
+      "local_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A6_39_high/task.json",
+      "local_web_entry_source_path": "agentguard_langgraph_bench/bench/datasets/instrumentation/EIA_A6_39_high/adv_modified_file_action_generation_form_type1_near_bot_0.html",
+      "original_id": "EIA_A6_39_high",
+      "original_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/EIA_A6_39_high/task.json",
+      "original_web_entry_source_path": "Instrumentation/A6_Document_and_Business_Data_Leakage/EIA_A6_39_high/adv_modified_file_action_generation_form_type1_near_bot_0.html",
+      "source_subset": "A6_Document_and_Business_Data_Leakage"
+    }
+  ],
+  "mcpsafety_cases": [
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-004",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/browser_automation/playwright_booking_task_0001.json",
+      "original_id": "playwright_booking_task_0001",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/browser_automation/playwright_booking_task_0001.json",
+      "source_subset": "Tool Poisoning-Parameter Poisoning"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-009",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/financial_analysis/yfinance_task_0002.json",
+      "original_id": "yfinance_task_0002",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/financial_analysis/yfinance_task_0002.json",
+      "source_subset": "Tool Poisoning-Function Dependency Injection"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-010",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/repository_management/github_task_0002.json",
+      "original_id": "github_task_0002",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/repository_management/github_task_0002.json",
+      "source_subset": "Tool Poisoning-Function Dependency Injection"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-011",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0026.json",
+      "original_id": "info_search_task_0026",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0026.json",
+      "source_subset": "Function Overlapping"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-013",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0019.json",
+      "original_id": "info_search_task_0019",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0019.json",
+      "source_subset": "Tool Poisoning-Parameter Poisoning"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-015",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/location_navigation/google_maps_task_0051.json",
+      "original_id": "google_maps_task_0051",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/location_navigation/google_maps_task_0051.json",
+      "source_subset": "Data Tampering"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-018",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/repository_management/github_task_0039.json",
+      "original_id": "github_task_0039",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/repository_management/github_task_0039.json",
+      "source_subset": "Rug Pull Attack"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-019",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0049.json",
+      "original_id": "info_search_task_0049",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0049.json",
+      "source_subset": "Intent Injection"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-020",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/financial_analysis/yfinance_task_0053.json",
+      "original_id": "yfinance_task_0053",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/financial_analysis/yfinance_task_0053.json",
+      "source_subset": "Intent Injection"
+    },
+    {
+      "attack_type": "tool_hijacking",
+      "case_id": "MCP-021",
+      "local_resource_roots": [
+        "../sandbox/mcp",
+        "../sandbox/files/hijacking"
+      ],
+      "local_source_path": "mcpsafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0003.json",
+      "original_id": "info_search_task_0003",
+      "original_source_path": "MCPSafety/mcpuniverse/benchmark/configs/test/web_search/info_search_task_0003.json",
+      "source_subset": "Tool Poisoning-Network Request Poisoning"
+    }
+  ],
+  "poisonedrag_cases": [
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-001",
+      "local_adv_result": "poisonedrag/adv_targeted_results/nq.json",
+      "local_beir_result": "poisonedrag/beir_results/nq-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/nq_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/nq/corpus.jsonl",
+      "original_id": "test1",
+      "source_subset": "nq"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-002",
+      "local_adv_result": "poisonedrag/adv_targeted_results/nq.json",
+      "local_beir_result": "poisonedrag/beir_results/nq-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/nq_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/nq/corpus.jsonl",
+      "original_id": "test11",
+      "source_subset": "nq"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-003",
+      "local_adv_result": "poisonedrag/adv_targeted_results/nq.json",
+      "local_beir_result": "poisonedrag/beir_results/nq-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/nq_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/nq/corpus.jsonl",
+      "original_id": "test16",
+      "source_subset": "nq"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-004",
+      "local_adv_result": "poisonedrag/adv_targeted_results/nq.json",
+      "local_beir_result": "poisonedrag/beir_results/nq-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/nq_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/nq/corpus.jsonl",
+      "original_id": "test19",
+      "source_subset": "nq"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-005",
+      "local_adv_result": "poisonedrag/adv_targeted_results/msmarco.json",
+      "local_beir_result": "poisonedrag/beir_results/msmarco-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/msmarco_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/msmarco/corpus.jsonl",
+      "original_id": "1163399",
+      "source_subset": "msmarco"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-006",
+      "local_adv_result": "poisonedrag/adv_targeted_results/msmarco.json",
+      "local_beir_result": "poisonedrag/beir_results/msmarco-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/msmarco_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/msmarco/corpus.jsonl",
+      "original_id": "192017",
+      "source_subset": "msmarco"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-007",
+      "local_adv_result": "poisonedrag/adv_targeted_results/msmarco.json",
+      "local_beir_result": "poisonedrag/beir_results/msmarco-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/msmarco_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/msmarco/corpus.jsonl",
+      "original_id": "1164044",
+      "source_subset": "msmarco"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-008",
+      "local_adv_result": "poisonedrag/adv_targeted_results/hotpotqa.json",
+      "local_beir_result": "poisonedrag/beir_results/hotpotqa-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/hotpotqa_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/hotpotqa/corpus.jsonl",
+      "original_id": "5adbf0a255429947ff17385a",
+      "source_subset": "hotpotqa"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-009",
+      "local_adv_result": "poisonedrag/adv_targeted_results/hotpotqa.json",
+      "local_beir_result": "poisonedrag/beir_results/hotpotqa-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/hotpotqa_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/hotpotqa/corpus.jsonl",
+      "original_id": "5a8cb288554299585d9e3726",
+      "source_subset": "hotpotqa"
+    },
+    {
+      "attack_type": "memory_poisoning",
+      "case_id": "PR-010",
+      "local_adv_result": "poisonedrag/adv_targeted_results/hotpotqa.json",
+      "local_beir_result": "poisonedrag/beir_results/hotpotqa-contriever.json",
+      "local_clean_doc_cache": "poisonedrag/clean_doc_cache/hotpotqa_clean_docs.json",
+      "local_corpus": "poisonedrag/corpus/hotpotqa/corpus.jsonl",
+      "original_id": "5ab56e32554299637185c594",
+      "source_subset": "hotpotqa"
+    }
+  ],
+  "purpose": "Local copies of original benchmark environments required by the 50 malicious AttackBench cases.",
+  "schema_version": "0.1",
+  "source_roots": {
+    "Instrumentation": "../../../../Instrumentation/",
+    "MCPSafety": "../../../../MCPSafety/",
+    "PoisonedRAG": "../../../../PoisonedRAG/"
+  }
+}

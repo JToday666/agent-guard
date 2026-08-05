@@ -1,0 +1,7 @@
+@charset "utf-8";
+
+section.cf.reserve-widget-band.colors { }
+
+@media (max-width: 61.24em) {
+  section.cf.reserve-widget-band.colors { background-color: white; }
+}

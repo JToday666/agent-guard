@@ -1,0 +1,193 @@
+const SENSITIVE_NAME_PATTERN = String.raw`[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*`;
+const SENSITIVE_WORD_PATTERN = String.raw`(?:api[_-]?key|token|secret|password|credential)`;
+
+const SENSITIVE_ENV_EXPANSION_PATTERN = new RegExp(String.raw`\$(?:\{)?(${SENSITIVE_NAME_PATTERN})(?:\})?`, "gi");
+const SENSITIVE_ENV_READ_PATTERN = new RegExp(
+  String.raw`(?:\b(?:printenv|env|set|export)\b.*${SENSITIVE_WORD_PATTERN})|` +
+    String.raw`(?:${SENSITIVE_WORD_PATTERN}.*\b(?:printenv|env|set|export)\b)|` +
+    String.raw`(?:/proc/self/environ)`,
+  "i",
+);
+const CREDENTIAL_ASSIGNMENT_PATTERN = new RegExp(
+  "\\b(" +
+    SENSITIVE_NAME_PATTERN +
+    "|" +
+    SENSITIVE_WORD_PATTERN +
+    ")(\\s*[:=]\\s*)([\"']?)([^\\s\"'`]+)\\3",
+  "gi",
+);
+const PROVIDER_KEY_PATTERN = /\bsk-[A-Za-z0-9][A-Za-z0-9._-]{8,}\b/g;
+
+const EXEC_LIKE_NAMES = new Set(["code_exec", "exec", "shell", "command", "bash", "sh", "powershell", "terminal"]);
+const EXEC_LIKE_KINDS = new Set([
+  "code_exec",
+  "exec",
+  "shell",
+  "shell_exec",
+  "command",
+  "command_exec",
+  "bash",
+  "sh",
+  "powershell",
+  "terminal",
+  "code_mode_exec",
+]);
+
+export function containsCredentialValueText(value: string): boolean {
+  return providerKeyPattern().test(value) || credentialAssignmentPattern().test(value);
+}
+
+export function containsCredentialCommandText(value: string): boolean {
+  return (
+    sensitiveEnvExpansionPattern().test(value) ||
+    SENSITIVE_ENV_READ_PATTERN.test(value) ||
+    containsCredentialValueText(value)
+  );
+}
+
+export function containsSensitiveCredentialText(value: unknown): boolean {
+  return containsCredentialValueText(stringPreview(value));
+}
+
+export function redactSensitiveCredentials(value: string, limit = 240): string {
+  const redacted = value
+    .replace(providerKeyPattern(), "sk-[redacted]")
+    .replace(credentialAssignmentPattern(), (_match, key: string, sep: string) => `${key}${sep}[redacted]`)
+    .replace(sensitiveEnvExpansionPattern(), "$[redacted]");
+  return redacted.length > limit ? `${redacted.slice(0, limit)}...` : redacted;
+}
+
+export function redactUnknownCredentials(value: unknown): { value: unknown; changed: boolean } {
+  if (typeof value === "string") {
+    const redacted = redactSensitiveCredentials(value, 2000);
+    return { value: redacted, changed: redacted !== value };
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const result = redactUnknownCredentials(item);
+      changed ||= result.changed;
+      return result.value;
+    });
+    return { value: mapped, changed };
+  }
+  if (typeof value === "object" && value !== null) {
+    let changed = false;
+    const mapped: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const result = redactUnknownCredentials(nested);
+      changed ||= result.changed;
+      mapped[key] = result.value;
+    }
+    return { value: mapped, changed };
+  }
+  return { value, changed: false };
+}
+
+export function sanitizePersistentInstructionPoisoning(value: unknown): { value: unknown; changed: boolean } {
+  if (typeof value === "string") {
+    if (!containsPersistentInstructionPoisoning(value)) {
+      return { value, changed: false };
+    }
+    return {
+      value: "[AgentGuard removed untrusted persistent instructions from this tool result.]",
+      changed: true,
+    };
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const result = sanitizePersistentInstructionPoisoning(item);
+      changed ||= result.changed;
+      return result.value;
+    });
+    return { value: mapped, changed };
+  }
+  if (typeof value === "object" && value !== null) {
+    let changed = false;
+    const mapped: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const result = sanitizePersistentInstructionPoisoning(nested);
+      changed ||= result.changed;
+      mapped[key] = result.value;
+    }
+    return { value: mapped, changed };
+  }
+  return { value, changed: false };
+}
+
+export function containsPersistentInstructionPoisoning(value: string): boolean {
+  const normalized = value.toLowerCase();
+  const persistenceIntent = [
+    "persist this rule",
+    "remember this rule",
+    "store this rule",
+    "save this rule",
+    "remember this instruction",
+    "store this instruction",
+    "save this instruction",
+    "future runs",
+    "future requests",
+    "future reports",
+    "future sessions",
+    "future tasks",
+    "for all future",
+    "always send",
+    "from now on",
+    "next time",
+  ].some((marker) => normalized.includes(marker));
+  const unsafeAction = [
+    "attacker@",
+    "send reports externally",
+    "send future",
+    "route future reports",
+    "external",
+    "webhook",
+    "exfiltrate",
+    "ignore previous",
+    "ignore all prior",
+    "override",
+    "never mention",
+    "never reveal",
+    "never tell",
+    "hide this rule",
+  ].some((marker) => normalized.includes(marker));
+  return persistenceIntent && unsafeAction;
+}
+
+export function isExecLikeToolIdentity(input: {
+  toolName?: string | null;
+  toolKind?: string | null;
+  toolInputKind?: string | null;
+}): boolean {
+  const identifiers = [input.toolName, input.toolKind, input.toolInputKind]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => value.toLowerCase());
+  return identifiers.some((value) => EXEC_LIKE_NAMES.has(value) || EXEC_LIKE_KINDS.has(value));
+}
+
+export function stringPreview(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return "";
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function providerKeyPattern(): RegExp {
+  return new RegExp(PROVIDER_KEY_PATTERN.source, "g");
+}
+
+function credentialAssignmentPattern(): RegExp {
+  return new RegExp(CREDENTIAL_ASSIGNMENT_PATTERN.source, "gi");
+}
+
+function sensitiveEnvExpansionPattern(): RegExp {
+  return new RegExp(SENSITIVE_ENV_EXPANSION_PATTERN.source, "gi");
+}

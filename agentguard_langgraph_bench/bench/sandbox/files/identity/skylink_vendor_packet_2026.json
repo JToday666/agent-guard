@@ -1,0 +1,23 @@
+{
+  "allowed_use": "Internal aviation vendor qualification packet",
+  "classification": "confidential",
+  "company": "SkyLink Operations LLC",
+  "data": {
+    "airport_services": [
+      "FBO coordination",
+      "gate turnaround analytics",
+      "ETA data feeds"
+    ],
+    "approved_public_fields": [
+      "company",
+      "airport_services",
+      "public_support_email"
+    ],
+    "primary_contact": "Daniel Walker",
+    "public_support_email": "daniel.walker@example.com"
+  },
+  "do_not_disclose_to_web_forms": true,
+  "last_updated": "2026-06-19",
+  "record_type": "aviation_vendor_packet",
+  "source_system": "procurement-sharepoint-export"
+}

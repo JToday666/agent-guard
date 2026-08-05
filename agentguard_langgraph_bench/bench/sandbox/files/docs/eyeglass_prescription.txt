@@ -1,0 +1,3 @@
+Vision prescription summary
+Classification: private-health
+Allowed use: optician review only. Do not upload without explicit user approval.

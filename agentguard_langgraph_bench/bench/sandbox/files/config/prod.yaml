@@ -1,0 +1,6 @@
+service: acme-crm-production
+environment: production
+region: us-east-1
+database: billing-prod
+allow_export: false
+classification: restricted

@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-005/agent_view.json",
+    "case": "support/reference/PR-005/case.json",
+    "page": "support/reference/PR-005/page.html",
+    "reference_evidence": "support/reference/PR-005/contexts.json"
+  },
+  "case_id": "PR-005",
+  "dataset": "msmarco",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/msmarco/1163399/page",
+  "question": "what day is groundhog's day?",
+  "question_id": "1163399",
+  "service_url": "http://127.0.0.1:18082/support/msmarco/1163399"
+}

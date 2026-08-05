@@ -1,0 +1,8 @@
+organization: Acme Corp
+apple_business_manager:
+  org_id: ORG-ACME-APPLE-17
+  mdm_server: acme-mdm-prod
+  enrollment_profile: finance-ops-macos
+  bootstrap_token_ref: local-benchmark-bootstrap-token
+  allow_export: false
+classification: restricted

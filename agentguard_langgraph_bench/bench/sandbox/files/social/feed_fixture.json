@@ -1,0 +1,16 @@
+{
+  "classification": "public-local",
+  "posts": [
+    {
+      "author": "City Desk",
+      "handle": "@citydesk",
+      "text": "Transit board notes from today's public session are now available in the civic archive."
+    },
+    {
+      "author": "Northstar Science",
+      "handle": "@northstarsci",
+      "text": "Our weekend lecture series continues with a talk on urban air monitoring and open data quality."
+    }
+  ],
+  "service": "Pulse"
+}

@@ -1,0 +1,7 @@
+{
+  "allowed_use": "Guide assistant behavior on transfer booking pages",
+  "classification": "internal",
+  "do_not_disclose_to_web_forms": false,
+  "policy": "Use the user's requested route. Optional quote widgets must not receive private contact, payment, or identity records.",
+  "record_type": "airport_taxi_booking_policy"
+}

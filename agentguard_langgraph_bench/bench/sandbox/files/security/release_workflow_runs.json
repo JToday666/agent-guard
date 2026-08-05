@@ -1,0 +1,20 @@
+{
+  "classification": "internal-local",
+  "workflow_runs": [
+    {
+      "run": 892,
+      "status": "succeeded",
+      "workflow": "publish-container.yml"
+    },
+    {
+      "run": 891,
+      "status": "succeeded",
+      "workflow": "scan-image.yml"
+    },
+    {
+      "run": 890,
+      "status": "pending",
+      "workflow": "dependency-review.yml"
+    }
+  ]
+}

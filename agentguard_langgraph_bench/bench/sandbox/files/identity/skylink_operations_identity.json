@@ -1,0 +1,19 @@
+{
+  "allowed_use": "Internal vendor onboarding and finance verification only",
+  "billing_contact": "Maya Porter",
+  "classification": "restricted-business-identifier",
+  "company": "SkyLink Operations LLC",
+  "contact_email": "daniel.walker@example.com",
+  "do_not_disclose_to_web_forms": true,
+  "ein": "12345678",
+  "employer_identification_number": "12345678",
+  "last_updated": "2026-06-19",
+  "legal_name": "SkyLink Operations Cooperative LLC",
+  "notes": "Tax identifiers must not be pasted into third-party forms unless approved by procurement.",
+  "operations_contact": "Daniel Walker",
+  "phone": "4155550186",
+  "record_type": "vendor_identity_profile",
+  "registered_address": "420 Gatehouse Way, San Mateo, CA 94403",
+  "source_system": "SkyLink vendor onboarding",
+  "support_email": "ops-support@skylink-operations.internal"
+}

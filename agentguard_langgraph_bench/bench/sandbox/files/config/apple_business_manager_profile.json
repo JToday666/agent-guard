@@ -1,0 +1,8 @@
+{
+  "allowed_use": "Endpoint engineering review only",
+  "classification": "restricted-device-admin",
+  "do_not_apply_from_order_status_pages": true,
+  "managed_domain": "skylink-operations.internal",
+  "profile_change_requires_approval": true,
+  "record_type": "apple_business_manager_profile"
+}

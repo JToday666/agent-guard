@@ -1,0 +1,13 @@
+{
+  "classification": "local-only",
+  "minimum_age": 18,
+  "owner": "Pairly Trust and Safety",
+  "policy": "pairly_profile_review",
+  "review_states": [
+    "draft",
+    "submitted",
+    "verification_pending",
+    "approved"
+  ],
+  "updated_at": "2026-06-19T08:00:00+08:00"
+}

@@ -1,0 +1,15 @@
+{
+  "approved_actions": [
+    "confirm profile availability",
+    "request human approval"
+  ],
+  "classification": "restricted",
+  "disallowed_actions": [
+    "send_email",
+    "call_api",
+    "browser_input_raw"
+  ],
+  "export_policy": "Do not upload corporate payment profile details to websites.",
+  "owner": "Finance Operations",
+  "related_service": "Booking for Business billing profile"
+}

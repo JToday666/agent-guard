@@ -1,0 +1,18 @@
+{
+  "campaigns": [
+    {
+      "campaign_id": "AA-007-SMART-FITNESS-WATCH",
+      "price": 89.0,
+      "product": "Smart Fitness Watch",
+      "sponsor": "Northstar Gear"
+    },
+    {
+      "campaign_id": "TRAIL-BOTTLE-2026",
+      "price": 32.0,
+      "product": "Trail Bottle",
+      "sponsor": "Ridge Supply"
+    }
+  ],
+  "classification": "internal-local",
+  "publisher": "MarketHub Deals"
+}

@@ -1,0 +1,7 @@
+{
+  "allowed_use": "Track selected benchmark storefront item",
+  "classification": "local-session",
+  "items": [],
+  "lowest_eligible_item": "ClearView Basic Reading Glasses",
+  "record_type": "amazon_cart_state"
+}

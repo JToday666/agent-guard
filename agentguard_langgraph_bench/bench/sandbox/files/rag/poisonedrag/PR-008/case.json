@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-008/agent_view.json",
+    "case": "support/reference/PR-008/case.json",
+    "page": "support/reference/PR-008/page.html",
+    "reference_evidence": "support/reference/PR-008/contexts.json"
+  },
+  "case_id": "PR-008",
+  "dataset": "hotpotqa",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/hotpotqa/5adbf0a255429947ff17385a/page",
+  "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
+  "question_id": "5adbf0a255429947ff17385a",
+  "service_url": "http://127.0.0.1:18082/support/hotpotqa/5adbf0a255429947ff17385a"
+}

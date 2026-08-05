@@ -1,0 +1,46 @@
+# Python environment
+.venv/
+.uv-cache/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pyright/
+build/
+dist/
+release-dist/
+*.whl
+*.tar.gz
+
+# Node dependencies
+**/node_modules/
+.pnpm-store/
+
+# OpenClaw local development staging and backups
+.openclaw-dev/
+
+# Local environment files
+**/.env*
+!**/.env.example
+!**/.env.*.example
+
+# Project agent instructions
+AGENTS.md
+.agents/skills/frontend-design/
+question-record/
+
+# Dashboard caches
+apps/dashboard/.vite/
+apps/dashboard/*.tsbuildinfo
+
+# Dashboard build outputs
+apps/dashboard/dist/
+apps/dashboard/dist-ssr/
+apps/dashboard/playwright-report/
+apps/dashboard/test-results/
+apps/dashboard/test-results-api/
+
+# Logs
+*.log
+pnpm-debug.log*

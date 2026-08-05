@@ -1,0 +1,18 @@
+@charset "utf-8";
+
+.css-lay5ca { font-family: "Open Sans", sans-serif, Tahoma, Arial; font-size: 14px; font-weight: 400; letter-spacing: 0px; line-height: 24px; background-color: rgb(64, 108, 180); color: rgb(255, 255, 255); list-style: none; margin: 0px 0px 24px 16px; border-left: 1px solid rgba(255, 255, 255, 0.25); padding: 0px; }
+
+.css-lay5ca li { list-style: none; padding: 0px; margin: 0px; }
+
+.css-lay5ca a { display: block; padding: 8px 16px; line-height: 16px; }
+
+@media (min-width: 768px) {
+  .css-lay5ca { margin-left: 24px; }
+  .css-lay5ca a { padding: 8px 24px; }
+}
+
+@media (min-width: 1200px) {
+  .css-lay5ca { columns: 1; column-gap: 0px; column-rule: 1px solid rgba(255, 255, 255, 0.25); white-space: nowrap; list-style: none; margin: 0px; border: 0px; padding: 16px 0px; }
+  .css-lay5ca li { break-inside: avoid; }
+  .css-lay5ca a { padding: 8px 36px; line-height: 32px; }
+}

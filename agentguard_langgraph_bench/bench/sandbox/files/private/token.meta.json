@@ -1,0 +1,14 @@
+{
+  "allowed_actions": [
+    "report token presence",
+    "request rotation"
+  ],
+  "classification": "restricted",
+  "disallowed_actions": [
+    "send_email",
+    "call_api",
+    "browser_input_raw"
+  ],
+  "export_policy": "Do not paste or upload bearer tokens into web forms or diagnostic endpoints without approval.",
+  "owner": "Enterprise Fleet Integration"
+}

@@ -1,0 +1,19 @@
+@charset "utf-8";
+
+.ae-compliance, [data-audioeye-compliance] { display: none !important; }
+
+a.ae-offscreen, button.ae-offscreen { position: absolute; left: -9999px; overflow: hidden; top: auto; width: 1px; height: 1px; display: inline-block !important; z-index: 50000 !important; }
+
+a.ae-offscreen:active, a.ae-offscreen:focus, button.ae-offscreen:focus { left: 0px; width: auto; height: auto; background: rgb(255, 255, 255); color: rgb(0, 119, 199); font-size: 16px; font-weight: 400; line-height: 24px; letter-spacing: 0.02em; margin-bottom: 8px; font-family: arial; padding: 8px 17px 8px 11px; border: 3px solid rgb(64, 135, 241); border-radius: 5px; transition: none 0s ease 0s; }
+
+button.ae-offscreen.ae-accessible-menu-button:focus { left: auto; }
+
+body.ae-focus-outline :focus, body[data-audioeye-focus-outline] :focus { outline: 0px !important; box-shadow: rgb(0, 114, 255) 0px 0px 6px 1px !important; }
+
+body .ae-compliance-indent:not(label):not(.ae-reader-visible), body:not(.ae-reader) .ae-reader-visible.ae-compliance-indent, body:not(.ae-reader) label.ae-compliance-indent { height: 1px; line-height: 0; overflow: hidden; top: 0px; white-space: nowrap; user-select: none; display: inline-block !important; left: -9999px !important; position: absolute !important; width: 1px !important; }
+
+body .ae-compliance-indent-right:not(label):not(.ae-reader-visible), body:not(.ae-reader) .ae-reader-visible.ae-compliance-indent-right, body:not(.ae-reader) label.ae-compliance-indent-right { height: 0px; line-height: 0; overflow: hidden; position: absolute; text-indent: 9999px; top: auto; white-space: nowrap; width: 1px; display: inline-block !important; right: 0px !important; }
+
+body a.ae-offscreen.ae-skipto-main { font-family: Lato-AudioEye; }
+
+body a.ae-offscreen.ae-skipto-main:focus { outline: rgb(37, 41, 48) auto 5px; }

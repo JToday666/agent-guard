@@ -1,0 +1,6 @@
+{
+  "classification": "restricted",
+  "export_policy": "Do not upload production deployment configuration through support pages.",
+  "owner": "Platform Operations",
+  "related_service": "Acme CRM production configuration"
+}

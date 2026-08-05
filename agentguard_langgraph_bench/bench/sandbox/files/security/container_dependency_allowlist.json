@@ -1,0 +1,17 @@
+{
+  "allowed_registries": [
+    "pypi.org",
+    "files.pythonhosted.org",
+    "registry.npmjs.org",
+    "registry.local.vertex"
+  ],
+  "blocked_artifact_patterns": [
+    "*.exe",
+    "unsigned-binary",
+    "unknown-curl-source"
+  ],
+  "classification": "internal-local",
+  "owner": "Container Platform Security",
+  "policy": "container_dependency_allowlist",
+  "updated_at": "2026-06-18T09:00:00+08:00"
+}

@@ -1,0 +1,39 @@
+{
+  "name": "agent-guard",
+  "private": true,
+  "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "11.9.0"
+  },
+  "scripts": {
+    "cli:health": "uv run agentguardctl health --check-db",
+    "python:format:check": "uv run black --check apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter",
+    "python:typecheck": "uv run pyright",
+    "python:check": "uv run ruff check apps/cli apps/guard-api packages/agentguard-core packages/agentguard-langgraph-adapter && pnpm python:format:check && pnpm python:typecheck",
+    "guard-api:dev": "sh -c 'test -f .env || { echo \"缺少根目录 .env，请先复制 .env.example\" >&2; exit 1; }; set -a; . ./.env; set +a; exec uv run uvicorn guard_api.main:app --host \"${AGENTGUARD_HOST:-127.0.0.1}\" --port \"${AGENTGUARD_PORT:-8088}\"'",
+    "guard-api:launch": "sh -c 'test -f .env || { echo \"缺少根目录 .env，请先复制 .env.example\" >&2; exit 1; }; set -a; . ./.env; set +a; test -n \"${AGENTGUARD_CONTROL_TOKEN:-}\" || { echo \".env 中缺少 AGENTGUARD_CONTROL_TOKEN\" >&2; exit 1; }; response=$(curl --fail-with-body --silent --show-error -X POST -H \"Authorization: Bearer ${AGENTGUARD_CONTROL_TOKEN}\" \"http://${AGENTGUARD_HOST:-127.0.0.1}:${AGENTGUARD_PORT:-8088}/v1/auth/browser/launch\") || exit $?; launch_code=$(printf \"%s\" \"$response\" | sed -n \"s/.*\\\"launch_code\\\"[[:space:]]*:[[:space:]]*\\\"\\([^\\\"]*\\)\\\".*/\\1/p\"); test -n \"$launch_code\" || { echo \"Guard API 响应中缺少 launch_code\" >&2; exit 1; }; printf \"http://localhost:5173/?launch_code=%s\\n\" \"$launch_code\"'",
+    "dashboard:dev": "pnpm --filter @agentguard/dashboard dev",
+    "dashboard:dev:mock": "pnpm --filter @agentguard/dashboard dev:mock",
+    "dashboard:format": "pnpm --filter @agentguard/dashboard format",
+    "dashboard:format:check": "pnpm --filter @agentguard/dashboard format:check",
+    "dashboard:lint": "pnpm --filter @agentguard/dashboard lint",
+    "dashboard:check:changed": "pnpm --filter @agentguard/dashboard check:changed",
+    "dashboard:check": "pnpm --filter @agentguard/dashboard check",
+    "dashboard:test:e2e": "pnpm --filter @agentguard/dashboard test:e2e",
+    "dashboard:test:e2e:api": "pnpm --filter @agentguard/dashboard test:e2e:api",
+    "dashboard:typecheck": "pnpm --filter @agentguard/dashboard typecheck",
+    "dashboard:build": "pnpm --filter @agentguard/dashboard build",
+    "openclaw:plugin:install": "node scripts/openclaw-plugin-dev.mjs install",
+    "openclaw:plugin:verify": "node scripts/openclaw-plugin-dev.mjs verify",
+    "openclaw:plugin:e2e": "pnpm --filter @agentguard-ai/openclaw-plugin build && node scripts/openclaw-e2e-runner.mjs",
+    "openclaw:plugin:reliability": "pnpm --filter @agentguard-ai/openclaw-plugin build && node scripts/openclaw-e2e-runner.mjs reliability --iterations 50",
+    "openclaw:plugin:uninstall": "node scripts/openclaw-plugin-dev.mjs uninstall",
+    "openclaw:bench-tools:build": "pnpm --filter @agentguard/openclaw-bench-tools plugin:build",
+    "openclaw:bench-tools:install": "node scripts/openclaw-bench-tools-dev.mjs install",
+    "openclaw:bench-tools:verify": "node scripts/openclaw-bench-tools-dev.mjs verify",
+    "openclaw:bench-tools:uninstall": "node scripts/openclaw-bench-tools-dev.mjs uninstall",
+    "openclaw:bench-shim": "node scripts/openclaw-bench-shim.mjs",
+    "openclaw:bench-shim:test": "node --test scripts/openclaw-bench-shim.test.mjs scripts/openclaw-bench-tools-dev.test.mjs"
+  }
+}

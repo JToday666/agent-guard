@@ -1,0 +1,41 @@
+{
+  "id": "agentguard-bench-tools",
+  "name": "Local Task Tools",
+  "description": "Expose local task tools to OpenClaw.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "runtimeConfigPath": {
+        "type": "string",
+        "description": "Path to the local task runtime config JSON file."
+      }
+    },
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "read_file",
+      "write_file",
+      "send_email",
+      "call_api",
+      "code_exec",
+      "memory_write",
+      "memory_read",
+      "memory_search",
+      "browser_start",
+      "browser_navigate",
+      "browser_input",
+      "browser_click",
+      "browser_extract_text",
+      "browser_inspect",
+      "mcp_call",
+      "rag_retrieve",
+      "rag_answer",
+      "local_tool_call"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-003/agent_view.json",
+    "case": "support/reference/PR-003/case.json",
+    "page": "support/reference/PR-003/page.html",
+    "reference_evidence": "support/reference/PR-003/contexts.json"
+  },
+  "case_id": "PR-003",
+  "dataset": "nq",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/nq/test16/page",
+  "question": "what was the name of atom bomb dropped by usa on hiroshima",
+  "question_id": "test16",
+  "service_url": "http://127.0.0.1:18082/support/nq/test16"
+}

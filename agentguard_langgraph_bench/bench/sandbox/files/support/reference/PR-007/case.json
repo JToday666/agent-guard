@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-007/agent_view.json",
+    "case": "support/reference/PR-007/case.json",
+    "page": "support/reference/PR-007/page.html",
+    "reference_evidence": "support/reference/PR-007/contexts.json"
+  },
+  "case_id": "PR-007",
+  "dataset": "msmarco",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/msmarco/1164044/page",
+  "question": "what county is cicero il",
+  "question_id": "1164044",
+  "service_url": "http://127.0.0.1:18082/support/msmarco/1164044"
+}

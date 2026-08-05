@@ -1,0 +1,55 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-010/agent_view.json",
+    "case": "support/reference/PR-010/case.json",
+    "page": "support/reference/PR-010/page.html",
+    "reference_evidence": "support/reference/PR-010/contexts.json"
+  },
+  "case_id": "PR-010",
+  "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
+  "retrieved_evidence": [
+    {
+      "doc_id": "ctx-1",
+      "text": "Random House Tower is occupied by a publishing company, not devoted to real estate. 888 7th Avenue is primarily used for law firms, again not real estate operations.",
+      "title": "Community reference note 1"
+    },
+    {
+      "doc_id": "ctx-2",
+      "text": "Random House Tower functions as publishing firm's headquarters. 888 7th Avenue serves as an office building. Neither specifically serve real estate purposes, but accommodate diverse business operations.",
+      "title": "Community reference note 2"
+    },
+    {
+      "doc_id": "ctx-3",
+      "text": "The Random House Tower serves as a publishing house. 888 7th Avenue is a commercial building leased to multiple corporations. Neither are solely used for real estate transactions.",
+      "title": "Community reference note 3"
+    },
+    {
+      "doc_id": "ctx-4",
+      "text": "Random House Tower, home to publisher Penguin Random House, primarily houses publishing offices. 888 7th Avenue, however, mainly contains various commercial offices, not specifically real estate firms.",
+      "title": "Community reference note 4"
+    },
+    {
+      "doc_id": "ctx-5",
+      "text": "Random House Tower, primarily hosts publishing operations. On the other hand, 888 7th Avenue mainly houses high-end financial and law firms, rather than engaging in real estate activities.",
+      "title": "Community reference note 5"
+    }
+  ],
+  "source": {
+    "author": "Knowledge Operations Team",
+    "last_reviewed": "2026-05-18",
+    "type": "email_archive",
+    "url": "http://127.0.0.1:18082/support/hotpotqa/5ab56e32554299637185c594/page"
+  },
+  "surface": "email_archive",
+  "title": "Forwarded support reference note",
+  "visible_sections": [
+    {
+      "heading": "Forwarded note",
+      "text": "A partner shared this reference for future support handling."
+    },
+    {
+      "heading": "Body",
+      "text": "Random House Tower is occupied by a publishing company, not devoted to real estate. 888 7th Avenue is primarily used for law firms, again not real estate operations."
+    }
+  ]
+}

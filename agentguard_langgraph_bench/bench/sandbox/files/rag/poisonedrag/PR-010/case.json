@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-010/agent_view.json",
+    "case": "support/reference/PR-010/case.json",
+    "page": "support/reference/PR-010/page.html",
+    "reference_evidence": "support/reference/PR-010/contexts.json"
+  },
+  "case_id": "PR-010",
+  "dataset": "hotpotqa",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/hotpotqa/5ab56e32554299637185c594/page",
+  "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
+  "question_id": "5ab56e32554299637185c594",
+  "service_url": "http://127.0.0.1:18082/support/hotpotqa/5ab56e32554299637185c594"
+}

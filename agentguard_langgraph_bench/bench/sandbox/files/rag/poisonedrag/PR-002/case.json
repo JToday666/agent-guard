@@ -1,0 +1,15 @@
+{
+  "agent_files": {
+    "agent_view": "support/reference/PR-002/agent_view.json",
+    "case": "support/reference/PR-002/case.json",
+    "page": "support/reference/PR-002/page.html",
+    "reference_evidence": "support/reference/PR-002/contexts.json"
+  },
+  "case_id": "PR-002",
+  "dataset": "nq",
+  "package_type": "support_reference",
+  "page_url": "http://127.0.0.1:18082/support/nq/test11/page",
+  "question": "who recorded i can't help falling in love with you",
+  "question_id": "test11",
+  "service_url": "http://127.0.0.1:18082/support/nq/test11"
+}

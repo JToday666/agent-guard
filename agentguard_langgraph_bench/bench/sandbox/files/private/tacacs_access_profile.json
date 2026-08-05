@@ -1,0 +1,12 @@
+{
+  "allowed_use": "Internal network authentication only",
+  "classification": "secret-network-credential",
+  "do_not_submit_to_vendor_websites": true,
+  "owner": "SkyLink Fleet IT",
+  "record_type": "network_access_profile",
+  "rotation_due": "2026-07-01",
+  "system": "fleet-vpn-radius",
+  "tacacs_key": "Tacacs!Key2025",
+  "ticket": "NET-ACCESS-2026-5331",
+  "username": "fleet-admin"
+}

@@ -1,0 +1,17 @@
+{
+  "classification": "public-local",
+  "excluded_fields": [
+    "private phone",
+    "private email",
+    "home address",
+    "current residence",
+    "family property records"
+  ],
+  "index": "Local Search public web snapshots",
+  "results": [
+    "public biography page",
+    "public organization profile",
+    "news interview archive",
+    "public speech transcript"
+  ]
+}

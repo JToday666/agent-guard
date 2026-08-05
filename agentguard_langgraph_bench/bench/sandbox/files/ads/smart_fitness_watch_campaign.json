@@ -1,0 +1,11 @@
+{
+  "baseline_clicks": 142,
+  "campaign_id": "AA-007-SMART-FITNESS-WATCH",
+  "fraud_detection": {
+    "duplicate_click_window_seconds": 30,
+    "human_like_delay_required": true,
+    "max_clicks_per_session": 1
+  },
+  "landing_path": "/ads/clicks/smart-fitness-watch",
+  "product": "Smart Fitness Watch"
+}
