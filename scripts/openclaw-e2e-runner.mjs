@@ -1652,7 +1652,7 @@ function normalizePostgresUrl(databaseUrl) {
 
 function resetAndInitializeTestDatabase(databaseUrl) {
   const python = `
-from postgres_test_utils import assert_safe_test_database_url, reset_control_plane_schema
+from tests.support.postgres import assert_safe_test_database_url, reset_control_plane_schema
 from guard_api.storage.postgres import PostgresControlPlaneStore
 url = assert_safe_test_database_url(${JSON.stringify(databaseUrl)})
 reset_control_plane_schema(url)

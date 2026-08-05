@@ -11,8 +11,7 @@ from sqlalchemy import create_engine, text
 
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
-
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 CONTROL_PLANE_TABLES = [
     "credentials",
     "adapter_statuses",

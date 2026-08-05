@@ -8,12 +8,14 @@ dependencies = [
   "aegis-agentguard-cli",
   "aegis-agentguard-core",
   "aegis-agentguard-api",
-  "agentguard-langgraph-bench",
-  "agentguard-langgraph-adapter",
   "httpx>=0.28",
 ]
 
 [dependency-groups]
+bench = [
+  "agentguard-langgraph-bench",
+  "agentguard-langgraph-adapter",
+]
 dev = [
   "black>=25.1.0",
   "jsonschema>=4.26",

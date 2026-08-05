@@ -76,12 +76,14 @@ dependencies = [
     { name = "aegis-agentguard-api" },
     { name = "aegis-agentguard-cli" },
     { name = "aegis-agentguard-core" },
-    { name = "agentguard-langgraph-adapter" },
-    { name = "agentguard-langgraph-bench" },
     { name = "httpx" },
 ]
 
 [package.dev-dependencies]
+bench = [
+    { name = "agentguard-langgraph-adapter" },
+    { name = "agentguard-langgraph-bench" },
+]
 dev = [
     { name = "black" },
     { name = "jsonschema" },
@@ -96,12 +98,14 @@ requires-dist = [
     { name = "aegis-agentguard-api", editable = "apps/guard-api" },
     { name = "aegis-agentguard-cli", editable = "apps/cli" },
     { name = "aegis-agentguard-core", editable = "packages/agentguard-core" },
-    { name = "agentguard-langgraph-adapter", editable = "packages/agentguard-langgraph-adapter" },
-    { name = "agentguard-langgraph-bench", editable = "agentguard_langgraph_bench/bench" },
     { name = "httpx", specifier = ">=0.28" },
 ]
 
 [package.metadata.requires-dev]
+bench = [
+    { name = "agentguard-langgraph-adapter", editable = "packages/agentguard-langgraph-adapter" },
+    { name = "agentguard-langgraph-bench", editable = "agentguard_langgraph_bench/bench" },
+]
 dev = [
     { name = "black", specifier = ">=25.1.0" },
     { name = "jsonschema", specifier = ">=4.26" },

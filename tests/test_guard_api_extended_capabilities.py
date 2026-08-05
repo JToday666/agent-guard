@@ -16,7 +16,10 @@ from guard_api.main import create_app
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
-from postgres_test_utils import get_test_database_url, reset_control_plane_schema
+from tests.support.postgres import (
+    get_test_database_url,
+    reset_control_plane_schema,
+)
 
 
 def _login(client: TestClient, *, control_token: str = "control-secret") -> None:
