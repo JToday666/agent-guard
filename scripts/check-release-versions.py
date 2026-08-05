@@ -18,10 +18,10 @@ GHCR_IMAGE = "ghcr.io/jtoday666/agentguard-api"
 GHCR_TAG = f"{GHCR_IMAGE}:{PUBLIC_VERSION}"
 
 PYTHON_PROJECTS = {
-    "agentguard-core": ROOT / "packages/agentguard-core/pyproject.toml",
-    "agentguard-api": ROOT / "apps/guard-api/pyproject.toml",
-    "agentguardctl": ROOT / "apps/cli/pyproject.toml",
-    "agentguard": ROOT / "packages/agentguard-meta/pyproject.toml",
+    "aegis-agentguard-core": ROOT / "packages/agentguard-core/pyproject.toml",
+    "aegis-agentguard-api": ROOT / "apps/guard-api/pyproject.toml",
+    "aegis-agentguard-cli": ROOT / "apps/cli/pyproject.toml",
+    "aegis-agentguard": ROOT / "packages/agentguard-meta/pyproject.toml",
 }
 
 
@@ -71,8 +71,8 @@ def validate(tag: str | None = None) -> list[str]:
     expected_fragments = {
         ROOT
         / "apps/guard-api/Dockerfile": [
-            f"agentguard-core=={PYTHON_VERSION}",
-            f"agentguard-api=={PYTHON_VERSION}",
+            f"aegis-agentguard-core=={PYTHON_VERSION}",
+            f"aegis-agentguard-api=={PYTHON_VERSION}",
         ],
     }
     for path, fragments in expected_fragments.items():

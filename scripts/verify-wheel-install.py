@@ -20,26 +20,27 @@ def main() -> int:
     root = args.wheelhouse.resolve()
     find_links: list[str] = []
     for directory in (
-        "agentguard-core",
-        "agentguard-api",
-        "agentguardctl",
-        "agentguard",
+        "aegis-agentguard-core",
+        "aegis-agentguard-api",
+        "aegis-agentguard-cli",
+        "aegis-agentguard",
     ):
         find_links.extend(["--find-links", str(root / directory)])
 
     with tempfile.TemporaryDirectory(prefix="agentguard-wheel-install-") as temp_dir:
         environment = Path(temp_dir)
-        _run(["uv", "venv", str(environment), "--python", "3.12", "--seed"])
+        _run(["uv", "venv", str(environment), "--python", "3.12"])
         scripts = environment / ("Scripts" if os.name == "nt" else "bin")
         python = scripts / ("python.exe" if os.name == "nt" else "python")
         _run(
             [
-                str(python),
-                "-m",
+                "uv",
                 "pip",
                 "install",
+                "--python",
+                str(python),
                 *find_links,
-                "agentguard[all]==0.1.0b1",
+                "aegis-agentguard[all]==0.1.0b1",
             ]
         )
         _run(
@@ -48,10 +49,17 @@ def main() -> int:
                 "-c",
                 (
                     "import importlib.util; "
-                    "import agentguard_core, guard_api, agentguard_cli; "
+                    "import aegis_agentguard, agentguard_core, guard_api, "
+                    "agentguard_cli; "
+                    "assert aegis_agentguard.__version__ == '0.1.0b1'; "
                     "assert agentguard_core.__version__ == '0.1.0b1'; "
                     "assert guard_api.__version__ == '0.1.0b1'; "
                     "assert agentguard_cli.__version__ == '0.1.0b1'; "
+                    "assert aegis_agentguard.GuardEngine is agentguard_core.GuardEngine; "
+                    "assert aegis_agentguard.GuardEvent is agentguard_core.GuardEvent; "
+                    "assert aegis_agentguard.GuardDecision is agentguard_core.GuardDecision; "
+                    "assert aegis_agentguard.PolicyBundle is agentguard_core.PolicyBundle; "
+                    "assert aegis_agentguard.evaluate is agentguard_core.evaluate; "
                     "assert importlib.util.find_spec('agentguard') is None"
                 ),
             ]
@@ -65,6 +73,13 @@ def main() -> int:
         if completed.stdout.strip() != "0.1.0b1":
             raise RuntimeError(
                 f"unexpected agentguardctl version: {completed.stdout!r}"
+            )
+        api_command = scripts / (
+            "agentguard-api.exe" if os.name == "nt" else "agentguard-api"
+        )
+        if not api_command.is_file():
+            raise RuntimeError(
+                f"agentguard-api console script is missing: {api_command}"
             )
 
     print("isolated wheelhouse install: ok")

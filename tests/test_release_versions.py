@@ -18,6 +18,12 @@ def test_release_versions_are_consistent() -> None:
     versions = _load_version_module()
     assert versions.validate() == []
     assert versions.validate(versions.GIT_TAG) == []
+    assert set(versions.PYTHON_PROJECTS) == {
+        "aegis-agentguard",
+        "aegis-agentguard-api",
+        "aegis-agentguard-cli",
+        "aegis-agentguard-core",
+    }
     assert versions.GHCR_TAG == "ghcr.io/jtoday666/agentguard-api:0.1.0-beta.1"
 
 

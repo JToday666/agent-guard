@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentguard"
+name = "aegis-agentguard"
 version = "0.1.0b1"
 description = "AgentGuard installation entry point"
 readme = "README.md"
@@ -18,14 +18,14 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Security",
 ]
-dependencies = ["agentguard-core==0.1.0b1"]
+dependencies = ["aegis-agentguard-core==0.1.0b1"]
 
 [project.optional-dependencies]
-api = ["agentguard-api==0.1.0b1"]
-cli = ["agentguardctl==0.1.0b1"]
+api = ["aegis-agentguard-api==0.1.0b1"]
+cli = ["aegis-agentguard-cli==0.1.0b1"]
 all = [
-  "agentguard-api==0.1.0b1",
-  "agentguardctl==0.1.0b1",
+  "aegis-agentguard-api==0.1.0b1",
+  "aegis-agentguard-cli==0.1.0b1",
 ]
 
 [project.urls]
@@ -33,5 +33,9 @@ Homepage = "https://github.com/JToday666/agent-guard"
 Repository = "https://github.com/JToday666/agent-guard"
 Issues = "https://github.com/JToday666/agent-guard/issues"
 
-[tool.setuptools]
-packages = []
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aegis_agentguard*"]
+
+[tool.setuptools.package-data]
+aegis_agentguard = ["py.typed"]

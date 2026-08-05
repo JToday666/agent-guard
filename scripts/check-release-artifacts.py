@@ -10,14 +10,14 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
 EXPECTED_ARCHIVES = {
-    "agentguard_core-0.1.0b1-py3-none-any.whl",
-    "agentguard_core-0.1.0b1.tar.gz",
-    "agentguard_api-0.1.0b1-py3-none-any.whl",
-    "agentguard_api-0.1.0b1.tar.gz",
-    "agentguardctl-0.1.0b1-py3-none-any.whl",
-    "agentguardctl-0.1.0b1.tar.gz",
-    "agentguard-0.1.0b1-py3-none-any.whl",
-    "agentguard-0.1.0b1.tar.gz",
+    "aegis_agentguard_core-0.1.0b1-py3-none-any.whl",
+    "aegis_agentguard_core-0.1.0b1.tar.gz",
+    "aegis_agentguard_api-0.1.0b1-py3-none-any.whl",
+    "aegis_agentguard_api-0.1.0b1.tar.gz",
+    "aegis_agentguard_cli-0.1.0b1-py3-none-any.whl",
+    "aegis_agentguard_cli-0.1.0b1.tar.gz",
+    "aegis_agentguard-0.1.0b1-py3-none-any.whl",
+    "aegis_agentguard-0.1.0b1.tar.gz",
     "agentguard-ai-openclaw-plugin-0.1.0-beta.1.tgz",
 }
 
@@ -87,12 +87,19 @@ def validate(root: Path) -> list[str]:
                     )
         if not any(name.lower().endswith("license") for name in member_names):
             errors.append(f"{archive_name}: LICENSE is missing")
-        if archive_name == "agentguard-0.1.0b1-py3-none-any.whl" and any(
-            name.startswith("agentguard/") for name in member_names
-        ):
-            errors.append(
-                f"{archive_name}: must not provide an agentguard import package"
-            )
+        if archive_name == "aegis_agentguard-0.1.0b1-py3-none-any.whl":
+            if any(name.startswith("agentguard/") for name in member_names):
+                errors.append(
+                    f"{archive_name}: must not provide an agentguard import package"
+                )
+            for required_member in (
+                "aegis_agentguard/__init__.py",
+                "aegis_agentguard/py.typed",
+            ):
+                if required_member not in member_names:
+                    errors.append(
+                        f"{archive_name}: required member {required_member!r} is missing"
+                    )
         if archive_name.endswith(".tgz") and not any(
             name == "package/dist/index.js" for name in member_names
         ):
