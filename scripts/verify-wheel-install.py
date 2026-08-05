@@ -22,7 +22,7 @@ def main() -> int:
     for directory in (
         "agentguard-core",
         "agentguard-api",
-        "agentguard-cli",
+        "agentguardctl",
         "agentguard",
     ):
         find_links.extend(["--find-links", str(root / directory)])

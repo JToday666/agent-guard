@@ -5,7 +5,7 @@ description = "Formal AgentGuard Core and API service"
 requires-python = ">=3.12"
 dependencies = [
   "agentguard",
-  "agentguard-cli",
+  "agentguardctl",
   "agentguard-core",
   "agentguard-api",
   "agentguard-langgraph-bench",
@@ -27,7 +27,7 @@ package = false
 
 [tool.uv.sources]
 agentguard = { path = "packages/agentguard-meta", editable = true }
-agentguard-cli = { path = "apps/cli", editable = true }
+agentguardctl = { path = "apps/cli", editable = true }
 agentguard-core = { path = "packages/agentguard-core", editable = true }
 agentguard-api = { path = "apps/guard-api", editable = true }
 agentguard-langgraph-bench = { path = "agentguard_langgraph_bench/bench", editable = true }

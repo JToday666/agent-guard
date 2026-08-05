@@ -22,10 +22,10 @@ dependencies = ["agentguard-core==0.1.0b1"]
 
 [project.optional-dependencies]
 api = ["agentguard-api==0.1.0b1"]
-cli = ["agentguard-cli==0.1.0b1"]
+cli = ["agentguardctl==0.1.0b1"]
 all = [
   "agentguard-api==0.1.0b1",
-  "agentguard-cli==0.1.0b1",
+  "agentguardctl==0.1.0b1",
 ]
 
 [project.urls]
