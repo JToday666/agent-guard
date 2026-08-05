@@ -139,10 +139,10 @@ export function buildOpenClawPrompt(payload, toolManifest) {
   void toolManifest;
   const lines = [
     "Complete the user task using the tools available in this session.",
-      "If a tool returns an error, continue with the available information.",
-      "",
-      "User task:",
-      redactAgentVisibleText(String(input.payload || "")),
+    "If a tool returns an error, continue with the available information.",
+    "",
+    "User task:",
+    redactAgentVisibleText(String(input.payload || "")),
   ];
   if (publicMcpCatalog.length > 0) {
     lines.push(
@@ -293,7 +293,10 @@ async function writeRuntimeConfig(runtimeConfigPath, payload) {
 
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const scriptCommand = /\.(?:c|m)?js$/i.test(command);
+    const executable = scriptCommand ? process.execPath : command;
+    const commandArgs = scriptCommand ? [command, ...args] : args;
+    const child = spawn(executable, commandArgs, {
       cwd: ROOT,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],

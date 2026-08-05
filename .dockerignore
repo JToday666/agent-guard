@@ -26,7 +26,7 @@ apps/dashboard
 agentguard_langgraph_bench
 packages/agentguard-langgraph-adapter
 packages/agentguard-meta
-packages/agentguard-openclaw-bench-tools
+benchmarks
 packages/agentguard-openclaw-plugin
 benchmark
 docs

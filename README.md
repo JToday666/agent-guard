@@ -168,7 +168,8 @@ packages/
   agentguard-core/     # 无状态安全判定库
   agentguard-langgraph-adapter/
   agentguard-openclaw-plugin/
-  agentguard-openclaw-bench-tools/
+benchmarks/
+  openclaw-bench-tools/
 agentguard_langgraph_bench/
   bench/               # AttackCase、runner、沙箱、Mock Tools
   adapter/             # 兼容导入路径
