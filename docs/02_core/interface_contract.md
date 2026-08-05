@@ -343,6 +343,33 @@ Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `
 AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
 AuditEvent 保持 `schema_version="0.3"`，并允许未知扩展字段用于前向兼容。
 
+### 9.1 当前版本与已冻结目标
+
+当前实现、`schemas/audit_event.schema.json` 和下方示例仍以 AuditEvent `0.3` 为准。
+2026-08-05 已冻结下一版本 AuditEvent `0.4` 的目标契约，但尚未完成 Schema、类型、
+存储或接口迁移。冻结目标不表示当前 Guard API 已接受或返回 `0.4`。
+
+已冻结的迁移边界：
+
+- `GuardEvent` 继续使用 `schema_version="0.3"`；只有 AuditEvent 目标版本升级为 `0.4`。
+- `0.4` 使用 `policy_evaluation`、`runtime_outcome`、`runtime_observation` 和
+  `config_audit` 四类 `record_type`。
+- 非策略记录的 `decision`、`risk_score`、`severity` 和 `blocked` 允许为 `null`；
+  缺失事实不得投影为允许、低风险、未执行或零副作用。
+- `GET /v1/traces/{trace_id}` 的目标窗口字段为
+  `audit_window.limit/returned_count/has_more`。
+- `POST /v1/guard/evaluate` 的目标请求幂等键为 `GuardEvent.event_id`，并比较规范化
+  请求摘要；同内容重试复用原结果，不重复写审计，不同内容返回 HTTP 409。
+- 运行时回执复用 `POST /v1/audit/events`，不新增 `/v1/runtime/outcomes`。
+- Evidence 使用服务端统一脱敏和有界投影：正文 2000 字符、普通摘要 500 字符、
+  普通数组及 `context_sources` 20 项、`normalized_resources` 50 项、
+  `rule_hits`/风险因子 100 项、嵌套 6 层、单事件序列化后最大 64 KiB。
+
+完整字段矩阵、兼容规则和待实施清单见
+[证据链与溯源 API 目标契约](../08_api/evidence_trace_api_contract.md)。迁移实现必须同步
+JSON Schema、Core/Guard API/OpenClaw 类型、存储、共享 fixtures 和 contract tests，
+完成前不得把上述目标描述为当前安全保障。
+
 ```json
 {
   "audit_id": "audit_001",

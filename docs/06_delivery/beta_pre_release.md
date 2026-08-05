@@ -1,15 +1,28 @@
-# AgentGuard 0.1.0 Beta 1 预发布说明
+# AgentGuard 0.1.0 Beta 1 发布记录与复现说明
+
+> 发布状态：PyPI、npm 与 Git tag 已发布；Guard API 容器与 GHCR 延期
+> 发布日期：2026-08-05
+> 许可证：MIT
 
 ## 发布物与版本
 
-本次 Beta 固定使用以下映射：
+本次 Beta 已按以下版本映射发布：
 
 ```text
-Git tag:                 v0.1.0-beta.1
-Python:                  0.1.0b1
-npm / OpenClaw:          0.1.0-beta.1
-GHCR（延期）:            0.1.0-beta.1
+Git tag:                 v0.1.0-beta.1（已发布）
+Python:                  0.1.0b1（已发布）
+npm / OpenClaw:          0.1.0-beta.1（已发布）
+GHCR:                    未发布
 ```
+
+公开注册表中的发布物：
+
+| 注册表 | 包 | 版本 | 状态 |
+| ------ | -- | ---- | ---- |
+| PyPI | [`aegis-agentguard`](https://pypi.org/project/aegis-agentguard/)、[`aegis-agentguard-core`](https://pypi.org/project/aegis-agentguard-core/)、[`aegis-agentguard-api`](https://pypi.org/project/aegis-agentguard-api/)、[`aegis-agentguard-cli`](https://pypi.org/project/aegis-agentguard-cli/) | `0.1.0b1` | 2026-08-05 已发布；每个项目均包含 wheel 和 sdist |
+| npm | [`@agentguard-ai/openclaw-plugin`](https://www.npmjs.com/package/@agentguard-ai/openclaw-plugin) | `0.1.0-beta.1` | 2026-08-05 已发布；`latest` 与 `beta` 均指向该版本 |
+
+上述日期使用注册表记录的 UTC 上传日期，不记录容易产生时区歧义的本地时刻。
 
 公开安装入口：
 
@@ -41,18 +54,19 @@ import guard_api
 import agentguard_cli
 ```
 
-## 当前阶段边界
+## 当前发布边界
 
-仓库当前不配置 CI/CD，也不在 PR、push 或 tag 时自动检查或发布。所有验证均由
-发布负责人在本地执行并保存结果；实际 PyPI、npm 上传和最终 tag 不属于
-本次预发布前置工作。
+截至 2026-08-05，仓库没有配置 CI/CD，也不会在 PR、push 或 tag 时自动检查或
+发布。本次 PyPI、npm 和 Git tag 由发布负责人在本地完成；以下命令用于复现构建和
+验证，不代表仓库已经具备自动发布能力。
 
-Docker 构建与 GHCR 发布本轮明确延期，不作为 Python/npm Beta 发布的前置条件。
+Guard API 镜像构建和 GHCR 发布仍未完成，不属于本次 Python/npm Beta 发布物。
 
-可信发布绑定、自动制品构建、SBOM、provenance 和远端审批门禁推迟到恢复自动化
-发布时再配置。任何 registry 凭证、token、`.env` 或本地测试结果都不得提交。
+Trusted Publishing、自动制品构建、SBOM、provenance 和远端审批门禁均未配置，
+不能作为当前发布的已有保障。任何 registry 凭证、token、`.env` 或本地测试结果
+都不得提交。
 
-## 本地预发布检查
+## 本地发布复现检查
 
 先安装冻结依赖并验证版本映射：
 
@@ -109,25 +123,24 @@ uv run python scripts/check-release-artifacts.py release-dist
 - npm tarball 可在空目录安装并加载插件。
 - 制品不包含 `.env`、凭证、Dashboard、LangGraph、benchmark、测试结果或本地路径。
 
-## Guard API 容器延期
+## Guard API 容器与 GHCR 延期
 
-本轮不构建或发布 Guard API 镜像，也不把 Docker/GHCR 验证作为 Python/npm Beta 的
-阻塞条件。现有 Dockerfile 仅同步新的 Python 分发名，容器 healthcheck、PostgreSQL
-迁移和 GHCR 发布在后续容器交付任务中单独验证。
+本轮没有发布 Guard API 镜像，也不把 Docker/GHCR 验证追溯为 Python/npm Beta 的
+既有保障。仓库已经提供使用发布 wheel 的多阶段 Dockerfile、非 root 运行配置和
+healthcheck，但完整镜像构建、PostgreSQL 迁移、公开 manifest 读取和 GHCR 发布仍需
+在后续容器交付任务中单独验证。
 
-## 首次发布准备
+## 已完成发布记录与后续要求
 
-发布顺序固定为 Core → API → CLI → 主包 → npm。开始上传前必须确认：
+本次发布已按 Core → API → CLI → 主包 → npm 的顺序完成：
 
-- PyPI 上 `aegis-agentguard-core`、`aegis-agentguard-api`、`aegis-agentguard-cli` 和 `aegis-agentguard` 当前均返回 404。
-- npm scope 管理员已启用 2FA，并确认 `@agentguard-ai/openclaw-plugin` 所有权。
-- 所有本地检查均通过，制品摘要已由团队成员复核。
-- 发布凭证只存在于本机凭证存储或进程环境中，不写入仓库。
+- PyPI 四个项目均已存在，版本为 `0.1.0b1`。
+- npm 包已存在，版本为 `0.1.0-beta.1`。
+- Git tag `v0.1.0-beta.1` 已存在并指向本次 Beta 源码。
 
-PyPI 的 404 不能证明名称一定通过相似项目校验。首次发布必须先只上传
-`aegis-agentguard-core` wheel；成功后再上传其 sdist，然后依次发布 API、CLI 和主包。
-任一首次上传被拒绝时立即停止，不混用旧分发名。若统一前缀仍被拒绝，整组改用
-`aegis-team-agentguard-*` 后重新构建和验证。
+后续发布继续要求所有本地检查通过、制品摘要经复核，且发布凭证只存在于本机凭证
+存储或进程环境中。不得根据本次手工发布推断自动发布、供应链签名或远端审批已经
+配置完成。
 
-当前阶段不创建 `v0.1.0-beta.1` tag，也不上传任何 registry。后续即使推送该 tag，
-也只会形成 Git 引用，不会自动发布制品。
+当前 tag 只形成 Git 引用；仓库没有 tag 触发的自动发布流程。创建后续 tag 前必须
+重新完成版本、制品和注册表检查。
