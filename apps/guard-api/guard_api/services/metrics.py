@@ -44,9 +44,10 @@ class MetricService:
                 },
             )
             bucket["event_count"] = int(bucket["event_count"]) + 1
-            bucket[f"{event.decision}_count"] = (
-                int(bucket[f"{event.decision}_count"]) + 1
-            )
+            if event.decision in {"allow", "deny", "ask"}:
+                bucket[f"{event.decision}_count"] = (
+                    int(bucket[f"{event.decision}_count"]) + 1
+                )
             if event.blocked or event.decision in {"deny", "ask"}:
                 bucket["blocked_count"] = int(bucket["blocked_count"]) + 1
             if event.latency_ms is not None:
