@@ -2323,7 +2323,6 @@ def test_guard_api_accepts_and_returns_audit_event_04() -> None:
         trace_id="trace_v04_api",
         decision="allow",
         runtime="langgraph",
-        blocked=False,
     )
     payload.update(
         {
@@ -2335,7 +2334,7 @@ def test_guard_api_accepts_and_returns_audit_event_04() -> None:
             "risk_score": None,
             "severity": None,
             "blocked": None,
-            "evidence": {},
+            "evidence": {"observation": "model responded"},
         }
     )
 
@@ -2358,6 +2357,10 @@ def test_guard_api_accepts_and_returns_audit_event_04() -> None:
     assert events[0]["schema_version"] == "0.4"
     assert events[0]["record_type"] == "runtime_observation"
     assert events[0]["decision"] is None
+    assert events[0]["risk_score"] is None
+    assert events[0]["blocked"] is None
+    assert events[0]["evidence"] == {"observation": "model responded"}
+    assert events[0]["links"] == {}
 
     integrity_response = client.get("/v1/audit/integrity")
 
