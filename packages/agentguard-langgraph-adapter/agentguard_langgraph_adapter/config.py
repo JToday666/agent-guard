@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Literal
 import warnings
 
-
 ApiMode = Literal["guard-api-v0.3", "legacy"]
 SUPPORTED_API_MODES: tuple[ApiMode, ...] = ("guard-api-v0.3", "legacy")
 DEFAULT_API_MODE: ApiMode = "guard-api-v0.3"
