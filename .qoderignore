@@ -34,3 +34,6 @@ question-record/
 # 日志
 *.log
 pnpm-debug.log*
+
+# Qoder IDE 本地工作目录（repowiki 与 better-harness 为自动生成的本地数据，不纳入代码索引）
+.qoder/
