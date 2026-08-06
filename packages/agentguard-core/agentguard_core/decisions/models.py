@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..ids import new_id, utc_now_iso
 
 Decision = Literal["allow", "deny", "ask"]
+AuditRecordType = Literal[
+    "policy_evaluation", "runtime_outcome", "runtime_observation", "config_audit"
+]
 ApprovalResolution = Literal["allow_once", "deny"]
 RuleOverrideDecision = Literal["ask", "deny"]
 EnforcementMode = Literal["enforce", "audit_only", "shadow_deny", "modify"]
@@ -70,7 +73,8 @@ class AuditEvent(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     audit_id: str = Field(default_factory=lambda: new_id("audit"))
-    schema_version: Literal["0.3"] = "0.3"
+    schema_version: Literal["0.3", "0.4"] = "0.3"
+    record_type: AuditRecordType | None = None
     trace_id: str
     case_id: str | None = None
     runtime: str = "langgraph"
@@ -80,13 +84,40 @@ class AuditEvent(BaseModel):
     attack_type: str | None = None
     is_malicious: bool | None = None
     summary: str
-    decision: Decision
-    risk_score: int = Field(ge=0, le=100)
-    severity: str
-    blocked: bool
+    decision: Decision | None = None
+    risk_score: int | None = Field(default=None, ge=0, le=100)
+    severity: str | None = None
+    blocked: bool | None = None
     resource_targets: list[str] = Field(default_factory=list)
     rule_hits: list[str] = Field(default_factory=list)
     reason: str
     links: dict[str, str] = Field(default_factory=dict)
     latency_ms: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _validate_version_and_record_type(self) -> "AuditEvent":
+        policy_fields_present = (
+            self.decision is not None
+            and self.risk_score is not None
+            and self.severity is not None
+            and self.blocked is not None
+        )
+        if self.record_type is None:
+            if self.schema_version != "0.3":
+                raise ValueError("record_type is required for AuditEvent 0.4")
+            if not policy_fields_present:
+                raise ValueError(
+                    "AuditEvent 0.3 requires decision, risk_score, severity and blocked"
+                )
+            return self
+        if self.schema_version != "0.4":
+            raise ValueError("record_type is only supported for AuditEvent 0.4")
+        if self.record_type in {"policy_evaluation", "config_audit"}:
+            if not policy_fields_present:
+                raise ValueError(
+                    f"AuditEvent record_type '{self.record_type}' requires "
+                    "decision, risk_score, severity and blocked"
+                )
+        return self

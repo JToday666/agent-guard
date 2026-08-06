@@ -519,3 +519,125 @@ def test_guard_event_schema_rejects_payload_contract_mismatches() -> None:
 
     with pytest.raises(JsonSchemaValidationError):
         validate(unknown_event, schema)
+
+
+def _audit_event_json(*, schema_version: str, **overrides) -> dict:
+    payload = {
+        "audit_id": "audit_json_schema",
+        "schema_version": schema_version,
+        "trace_id": "trace_json_schema",
+        "case_id": None,
+        "runtime": "langgraph",
+        "timestamp": "2026-08-06T00:00:00+00:00",
+        "stage": "before_tool_call",
+        "event_type": "tool_call_proposed",
+        "attack_type": None,
+        "is_malicious": None,
+        "summary": "Audit summary",
+        "decision": "allow",
+        "risk_score": 0,
+        "severity": "low",
+        "blocked": False,
+        "resource_targets": [],
+        "rule_hits": [],
+        "reason": "Allowed.",
+        "links": {},
+        "latency_ms": None,
+        "metadata": {},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_audit_event_schema_accepts_03_documents() -> None:
+    validate(_audit_event_json(schema_version="0.3"), _load_schema("audit_event.schema.json"))
+
+
+def test_audit_event_schema_accepts_04_policy_evaluation() -> None:
+    validate(
+        _audit_event_json(
+            schema_version="0.4",
+            record_type="policy_evaluation",
+            links={"event_id": "evt_json", "decision_id": "dec_json"},
+            evidence={"guard_decision": {"decision": "allow"}},
+        ),
+        _load_schema("audit_event.schema.json"),
+    )
+
+
+def test_audit_event_schema_accepts_04_runtime_observation_with_null_fields() -> None:
+    validate(
+        _audit_event_json(
+            schema_version="0.4",
+            record_type="runtime_observation",
+            event_type="llm_output",
+            stage="after_model_call",
+            decision=None,
+            risk_score=None,
+            severity=None,
+            blocked=None,
+        ),
+        _load_schema("audit_event.schema.json"),
+    )
+
+
+def test_audit_event_schema_rejects_04_without_record_type() -> None:
+    with pytest.raises(JsonSchemaValidationError):
+        validate(
+            _audit_event_json(schema_version="0.4"),
+            _load_schema("audit_event.schema.json"),
+        )
+
+
+def test_audit_event_schema_rejects_04_policy_evaluation_without_decision() -> None:
+    with pytest.raises(JsonSchemaValidationError):
+        validate(
+            _audit_event_json(
+                schema_version="0.4",
+                record_type="policy_evaluation",
+                decision=None,
+                risk_score=None,
+                severity=None,
+                blocked=None,
+            ),
+            _load_schema("audit_event.schema.json"),
+        )
+
+
+def test_audit_event_schema_rejects_03_with_null_decision() -> None:
+    with pytest.raises(JsonSchemaValidationError):
+        validate(
+            _audit_event_json(schema_version="0.3", decision=None),
+            _load_schema("audit_event.schema.json"),
+        )
+
+
+def test_audit_event_schema_rejects_unknown_record_type() -> None:
+    with pytest.raises(JsonSchemaValidationError):
+        validate(
+            _audit_event_json(schema_version="0.4", record_type="not_a_type"),
+            _load_schema("audit_event.schema.json"),
+        )
+
+
+def test_audit_event_schema_rejects_03_with_record_type() -> None:
+    with pytest.raises(JsonSchemaValidationError):
+        validate(
+            _audit_event_json(schema_version="0.3", record_type="runtime_observation"),
+            _load_schema("audit_event.schema.json"),
+        )
+
+
+def test_audit_event_04_model_dump_round_trips_through_schema() -> None:
+    event = AuditEvent(
+        audit_id="audit_round_trip",
+        schema_version="0.4",
+        record_type="runtime_observation",
+        trace_id="trace_round_trip",
+        event_type="llm_output",
+        stage="after_model_call",
+        summary="Model output observed",
+        reason="Observed.",
+    )
+
+    validate(event.model_dump(mode="json"), _load_schema("audit_event.schema.json"))

@@ -122,7 +122,9 @@ class AgentGuardCoreClient:
 
 
 def _api_mode(config: Any) -> str:
-    mode = getattr(config, "core_api_mode", getattr(config, "api_mode", DEFAULT_API_MODE))
+    mode = getattr(
+        config, "core_api_mode", getattr(config, "api_mode", DEFAULT_API_MODE)
+    )
     return validate_api_mode(mode)
 
 

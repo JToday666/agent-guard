@@ -1,30 +1,80 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AuditEvent",
-  "type": "object",
-  "required": ["audit_id", "schema_version", "trace_id", "runtime", "stage", "event_type", "summary", "decision", "risk_score", "severity", "blocked", "reason"],
-  "properties": {
-    "audit_id": { "type": "string" },
-    "schema_version": { "const": "0.3" },
-    "trace_id": { "type": "string" },
-    "case_id": { "type": ["string", "null"] },
-    "runtime": { "type": "string" },
-    "timestamp": { "type": "string" },
-    "stage": { "type": "string" },
-    "event_type": { "type": "string" },
-    "attack_type": { "type": ["string", "null"] },
-    "is_malicious": { "type": ["boolean", "null"] },
-    "summary": { "type": "string" },
-    "decision": { "enum": ["allow", "deny", "ask"] },
-    "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
-    "severity": { "type": "string" },
-    "blocked": { "type": "boolean" },
-    "resource_targets": { "type": "array", "items": { "type": "string" } },
-    "rule_hits": { "type": "array", "items": { "type": "string" } },
-    "reason": { "type": "string" },
-    "links": { "type": "object" },
-    "latency_ms": { "type": ["integer", "null"] },
-    "metadata": { "type": "object" }
-  },
-  "additionalProperties": true
+  "anyOf": [
+    {
+      "title": "AuditEvent 0.3",
+      "type": "object",
+      "required": ["audit_id", "schema_version", "trace_id", "runtime", "stage", "event_type", "summary", "decision", "risk_score", "severity", "blocked", "reason"],
+      "properties": {
+        "audit_id": { "type": "string" },
+        "schema_version": { "const": "0.3" },
+        "record_type": { "type": "null" },
+        "trace_id": { "type": "string" },
+        "case_id": { "type": ["string", "null"] },
+        "runtime": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "stage": { "type": "string" },
+        "event_type": { "type": "string" },
+        "attack_type": { "type": ["string", "null"] },
+        "is_malicious": { "type": ["boolean", "null"] },
+        "summary": { "type": "string" },
+        "decision": { "enum": ["allow", "deny", "ask"] },
+        "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "severity": { "type": "string" },
+        "blocked": { "type": "boolean" },
+        "resource_targets": { "type": "array", "items": { "type": "string" } },
+        "rule_hits": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": "string" },
+        "links": { "type": "object" },
+        "latency_ms": { "type": ["integer", "null"] },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    {
+      "title": "AuditEvent 0.4",
+      "type": "object",
+      "required": ["audit_id", "schema_version", "record_type", "trace_id", "runtime", "stage", "event_type", "summary", "reason"],
+      "properties": {
+        "audit_id": { "type": "string" },
+        "schema_version": { "const": "0.4" },
+        "record_type": { "enum": ["policy_evaluation", "runtime_outcome", "runtime_observation", "config_audit"] },
+        "trace_id": { "type": "string" },
+        "case_id": { "type": ["string", "null"] },
+        "runtime": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "stage": { "type": "string" },
+        "event_type": { "type": "string" },
+        "attack_type": { "type": ["string", "null"] },
+        "is_malicious": { "type": ["boolean", "null"] },
+        "summary": { "type": "string" },
+        "decision": { "enum": ["allow", "deny", "ask", null] },
+        "risk_score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+        "severity": { "type": ["string", "null"] },
+        "blocked": { "type": ["boolean", "null"] },
+        "resource_targets": { "type": "array", "items": { "type": "string" } },
+        "rule_hits": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": "string" },
+        "links": { "type": "object" },
+        "latency_ms": { "type": ["integer", "null"] },
+        "metadata": { "type": "object" },
+        "evidence": { "type": ["object", "null"] }
+      },
+      "if": {
+        "properties": { "record_type": { "enum": ["policy_evaluation", "config_audit"] } },
+        "required": ["record_type"]
+      },
+      "then": {
+        "properties": {
+          "decision": { "enum": ["allow", "deny", "ask"] },
+          "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "severity": { "type": "string" },
+          "blocked": { "type": "boolean" }
+        },
+        "required": ["decision", "risk_score", "severity", "blocked"]
+      },
+      "additionalProperties": true
+    }
+  ]
 }
