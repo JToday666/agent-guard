@@ -9,6 +9,7 @@
       "properties": {
         "audit_id": { "type": "string" },
         "schema_version": { "const": "0.3" },
+        "record_type": { "type": "null" },
         "trace_id": { "type": "string" },
         "case_id": { "type": ["string", "null"] },
         "runtime": { "type": "string" },
@@ -58,10 +59,11 @@
         "links": { "type": "object" },
         "latency_ms": { "type": ["integer", "null"] },
         "metadata": { "type": "object" },
-        "evidence": { "type": "object" }
+        "evidence": { "type": ["object", "null"] }
       },
       "if": {
-        "properties": { "record_type": { "enum": ["policy_evaluation", "config_audit"] } }
+        "properties": { "record_type": { "enum": ["policy_evaluation", "config_audit"] } },
+        "required": ["record_type"]
       },
       "then": {
         "properties": {

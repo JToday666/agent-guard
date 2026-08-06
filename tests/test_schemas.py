@@ -618,3 +618,26 @@ def test_audit_event_schema_rejects_unknown_record_type() -> None:
             _audit_event_json(schema_version="0.4", record_type="not_a_type"),
             _load_schema("audit_event.schema.json"),
         )
+
+
+def test_audit_event_schema_rejects_03_with_record_type() -> None:
+    with pytest.raises(JsonSchemaValidationError):
+        validate(
+            _audit_event_json(schema_version="0.3", record_type="runtime_observation"),
+            _load_schema("audit_event.schema.json"),
+        )
+
+
+def test_audit_event_04_model_dump_round_trips_through_schema() -> None:
+    event = AuditEvent(
+        audit_id="audit_round_trip",
+        schema_version="0.4",
+        record_type="runtime_observation",
+        trace_id="trace_round_trip",
+        event_type="llm_output",
+        stage="after_model_call",
+        summary="Model output observed",
+        reason="Observed.",
+    )
+
+    validate(event.model_dump(mode="json"), _load_schema("audit_event.schema.json"))
