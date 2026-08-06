@@ -2310,3 +2310,56 @@ def _audit_event_payload(
 
 def _audit_event_model(**kwargs):
     return AuditEvent.model_validate(_audit_event_payload(**kwargs))
+
+
+def test_guard_api_accepts_and_returns_audit_event_04() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    payload = _audit_event_payload(
+        audit_id="audit_v04_api",
+        trace_id="trace_v04_api",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    payload.update(
+        {
+            "schema_version": "0.4",
+            "record_type": "runtime_observation",
+            "event_type": "llm_output",
+            "stage": "after_model_call",
+            "decision": None,
+            "risk_score": None,
+            "severity": None,
+            "blocked": None,
+            "evidence": {},
+        }
+    )
+
+    write_response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert write_response.status_code == 200
+    assert write_response.json()["audit_id"] == "audit_v04_api"
+
+    _login_dashboard(client, control_token="control-secret")
+
+    read_response = client.get("/v1/audit/events?trace_id=trace_v04_api")
+
+    assert read_response.status_code == 200
+    events = read_response.json()
+    assert len(events) == 1
+    assert events[0]["schema_version"] == "0.4"
+    assert events[0]["record_type"] == "runtime_observation"
+    assert events[0]["decision"] is None
+
+    integrity_response = client.get("/v1/audit/integrity")
+
+    assert integrity_response.status_code == 200
+    assert integrity_response.json()["valid"] is True
