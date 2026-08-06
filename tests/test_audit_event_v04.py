@@ -103,3 +103,17 @@ def test_audit_event_defaults_stay_on_03_without_record_type() -> None:
     assert event.schema_version == "0.3"
     assert event.record_type is None
     assert event.evidence is None
+
+
+def test_audit_event_03_rejects_record_type() -> None:
+    with pytest.raises(PydanticValidationError):
+        AuditEvent(
+            **_audit_kwargs(
+                schema_version="0.3",
+                record_type="runtime_observation",
+                decision="allow",
+                risk_score=0,
+                severity="low",
+                blocked=False,
+            )
+        )

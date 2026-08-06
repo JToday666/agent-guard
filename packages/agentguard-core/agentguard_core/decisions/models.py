@@ -112,6 +112,8 @@ class AuditEvent(BaseModel):
                     "AuditEvent 0.3 requires decision, risk_score, severity and blocked"
                 )
             return self
+        if self.schema_version != "0.4":
+            raise ValueError("record_type is only supported for AuditEvent 0.4")
         if self.record_type in {"policy_evaluation", "config_audit"}:
             if not policy_fields_present:
                 raise ValueError(
