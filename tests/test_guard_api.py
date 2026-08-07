@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -8,13 +9,22 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agentguard_core import AuditEvent, PolicyBundle, RuleOverride, ToolProfile
+from agentguard_core import (
+    AuditEvent,
+    GuardDecision,
+    GuardEvent,
+    PolicyBundle,
+    RuleOverride,
+    ToolProfile,
+)
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.llm_approval import HttpLlmApprovalReviewer
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest, LlmApprovalReviewInput
 from guard_api.services import PolicyService
+from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
+from guard_api.storage.integrity import canonical_sha256
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
 
@@ -2232,7 +2242,7 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
     ask_response = client.post(
         "/v1/guard/evaluate",
         headers={"Authorization": "Bearer adapter-secret"},
-        json=_guard_event_payload(trace_id="trace_ask_smoke"),
+        json=_guard_event_payload(event_id="evt_smoke_ask", trace_id="trace_ask_smoke"),
     )
     assert ask_response.status_code == 200
     approval_id = ask_response.json()["approval"]["approval_id"]
@@ -2406,3 +2416,346 @@ def test_runtime_metrics_ignore_null_decision_records() -> None:
     )
 
     assert metrics_response.status_code == 200
+
+
+_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _evaluate_once(payload: dict) -> tuple[TestClient, MemoryControlPlaneStore, object]:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    return client, store, response
+
+
+def test_evaluate_audit_records_request_digest() -> None:
+    client, store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_request"))
+
+    audit = store.audit_events[0]
+
+    assert _DIGEST_PATTERN.match(audit.links["request_digest"])
+    assert "policy_revision" not in audit.links
+
+
+def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    PolicyService(store=store).save_snapshot(
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+    )
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(event_id="evt_digest_policy"),
+    )
+
+    assert response.status_code == 200
+    audit = store.audit_events[0]
+    assert _DIGEST_PATTERN.match(audit.links["policy_digest"])
+    assert audit.links["policy_revision"] == "1"
+
+
+def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    bundle = PolicyBundle(disabled_rules=["P001_sensitive_file_access"])
+    PolicyService(store=store).save_snapshot(bundle, updated_by="test")
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(event_id="evt_digest_policy_semantic"),
+    )
+
+    assert response.status_code == 200
+    audit = store.audit_events[0]
+    assert audit.links["policy_digest"] == canonical_sha256(
+        bundle.model_dump(mode="json")
+    )
+
+
+def test_evaluate_request_digest_is_deterministic() -> None:
+    _, first_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
+    _, second_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
+
+    assert (
+        first_store.audit_events[0].links["request_digest"]
+        == second_store.audit_events[0].links["request_digest"]
+    )
+
+
+def test_evaluate_audit_stores_full_decision_dump() -> None:
+    _, store, response = _evaluate_once(_guard_event_payload(event_id="evt_digest_decision"))
+
+    audit = store.audit_events[0]
+    dump = audit.metadata["guard_decision"]
+
+    assert dump == response.json()["decision"]
+
+
+def test_build_audit_event_rejects_extra_links_collision() -> None:
+    event = GuardEvent.model_validate(_guard_event_payload(event_id="evt_link_collision"))
+    decision = GuardDecision(
+        decision_id="dec_link_collision",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        categories=[],
+        rule_hits=[],
+        reason="Allowed.",
+        safe_message=None,
+        approval_intent=None,
+        latency_ms=1,
+    )
+
+    with pytest.raises(ValueError):
+        build_audit_event(event, decision, extra_links={"event_id": "evt_other"})
+
+
+def test_policy_snapshot_history_returns_latest_record_first() -> None:
+    store = MemoryControlPlaneStore()
+    service = PolicyService(store=store)
+    service.save_snapshot(PolicyBundle(), updated_by="test")
+    service.save_snapshot(
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+    )
+
+    history = store.list_policy_snapshot_history(limit=1)
+
+    assert len(history) == 1
+    assert history[0].revision == 2
+
+
+def _evaluate_store(payload: dict) -> MemoryControlPlaneStore:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    return store
+
+
+def test_policy_evaluation_lookup_returns_audit_for_event_id() -> None:
+    store = _evaluate_store(_guard_event_payload(event_id="evt_lookup_hit"))
+
+    found = store.get_policy_evaluation_by_event_id("evt_lookup_hit")
+
+    assert found is not None
+    assert found.links["event_id"] == "evt_lookup_hit"
+    assert "request_digest" in found.links
+
+
+def test_policy_evaluation_lookup_returns_none_for_unknown_event_id() -> None:
+    store = _evaluate_store(_guard_event_payload(event_id="evt_lookup_known"))
+
+    assert store.get_policy_evaluation_by_event_id("evt_lookup_missing") is None
+
+
+def test_policy_evaluation_lookup_ignores_config_audit_records() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/config-audit/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "runtime": "openclaw",
+            "target_type": "plugin",
+            "target_id": "lookup-config-audit",
+            "action": "before_install",
+            "findings": [
+                {
+                    "severity": "high",
+                    "category": "openclaw.plugin",
+                    "title": "Raw conversation access enabled",
+                    "subject": "lookup-config-audit.hooks.allowConversationAccess",
+                    "description": "Plugin can read raw conversation content.",
+                    "evidence": ["allowConversationAccess=true"],
+                }
+            ],
+            "metadata": {
+                "trace_id": "trace_lookup_config_audit",
+                "user_task": "Install reviewed plugins only",
+                "source_type": "plugin_manifest",
+                "source_trust": "trusted",
+                "run_id": "trace_lookup_config_audit",
+                "agent_id": "main",
+                "current_step": "before_install",
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    assert store.get_policy_evaluation_by_event_id("lookup-config-audit") is None
+
+
+def test_policy_evaluation_lookup_filters_record_type_and_returns_earliest() -> None:
+    store = MemoryControlPlaneStore()
+
+    earliest = _audit_event_model(
+        audit_id="audit_lookup_earliest",
+        trace_id="trace_lookup_type",
+        decision="deny",
+        runtime="langgraph",
+        blocked=True,
+    ).model_copy(update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_1"}})
+    later = _audit_event_model(
+        audit_id="audit_lookup_later",
+        trace_id="trace_lookup_type",
+        decision="ask",
+        runtime="langgraph",
+        blocked=True,
+    ).model_copy(update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_2"}})
+    config_audit_record = AuditEvent(
+        audit_id="audit_lookup_config",
+        schema_version="0.4",
+        record_type="config_audit",
+        trace_id="trace_lookup_type",
+        event_type="config_audit",
+        stage="before_install",
+        summary="Config audit",
+        decision="allow",
+        risk_score=10,
+        severity="low",
+        blocked=False,
+        reason="Config checked.",
+        links={"event_id": "evt_type_filter", "decision_id": "dec_3"},
+    )
+
+    store.add_audit_event(earliest)
+    store.add_audit_event(later)
+    store.add_audit_event(config_audit_record)
+
+    found = store.get_policy_evaluation_by_event_id("evt_type_filter")
+
+    assert found is not None
+    assert found.audit_id == "audit_lookup_earliest"
+
+
+def _evaluate_client_and_store() -> tuple[TestClient, MemoryControlPlaneStore]:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    return TestClient(app), store
+
+
+def _post_evaluate(client: TestClient, payload: dict):
+    return client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+
+def test_evaluate_retry_with_same_content_returns_original_result() -> None:
+    client, store = _evaluate_client_and_store()
+    payload = _guard_event_payload(event_id="evt_idem_same")
+
+    first = _post_evaluate(client, payload)
+    second = _post_evaluate(client, payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["decision"]["decision_id"] == first.json()["decision"]["decision_id"]
+    assert second.json()["approval"] == first.json()["approval"]
+    assert len(store.audit_events) == 1
+
+
+def test_evaluate_conflict_when_same_event_id_has_different_content() -> None:
+    client, store = _evaluate_client_and_store()
+    first_payload = _guard_event_payload(event_id="evt_idem_conflict")
+    second_payload = _guard_event_payload(
+        event_id="evt_idem_conflict",
+        arguments={"to": "different-recipient@red-team.agentguard.local"},
+    )
+
+    first = _post_evaluate(client, first_payload)
+    second = _post_evaluate(client, second_payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "EVALUATION_CONFLICT"
+    assert len(store.audit_events) == 1
+    assert store.audit_events[0].links["event_id"] == "evt_idem_conflict"
+
+
+def test_evaluate_distinct_event_ids_create_separate_audits() -> None:
+    client, store = _evaluate_client_and_store()
+
+    first = _post_evaluate(client, _guard_event_payload(event_id="evt_idem_a"))
+    second = _post_evaluate(client, _guard_event_payload(event_id="evt_idem_b"))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(store.audit_events) == 2
+
+
+def test_evaluate_conflicts_with_legacy_audit_missing_request_digest() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    legacy_audit = _audit_event_model(
+        audit_id="audit_legacy_no_digest",
+        trace_id="trace_legacy_no_digest",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    ).model_copy(update={"links": {"event_id": "evt_legacy_replay", "decision_id": "dec_legacy"}})
+    store.add_audit_event(legacy_audit)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(event_id="evt_legacy_replay"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "EVALUATION_CONFLICT"
+    assert len(store.audit_events) == 1
+
+
+def test_evaluate_conflicts_when_stored_audit_lacks_decision_dump() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    payload = _guard_event_payload(event_id="evt_missing_dump")
+    digest = canonical_sha256(GuardEvent.model_validate(payload).model_dump(mode="json"))
+    stale_audit = _audit_event_model(
+        audit_id="audit_missing_dump",
+        trace_id="trace_missing_dump",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    ).model_copy(update={"links": {"event_id": "evt_missing_dump", "decision_id": "dec_missing_dump", "request_digest": digest}})
+    store.add_audit_event(stale_audit)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "EVALUATION_CONFLICT"

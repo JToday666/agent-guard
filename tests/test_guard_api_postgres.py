@@ -645,6 +645,40 @@ def test_postgres_store_persists_terminal_control_plane_registry_state() -> None
         reset_control_plane_schema(database_url)
 
 
+def test_postgres_store_looks_up_policy_evaluation_by_event_id() -> None:
+    database_url = get_test_database_url()
+
+    run_id = uuid4().hex
+    event_id = f"evt_pg_lookup_{run_id}"
+    trace_id = f"trace_pg_lookup_{run_id}"
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        store.add_audit_event(
+            _audit_event(
+                audit_id=f"audit_pg_lookup_{run_id}",
+                trace_id=trace_id,
+                decision="deny",
+                runtime="langgraph",
+                blocked=True,
+                is_malicious=True,
+                latency_ms=10,
+                links={"event_id": event_id, "decision_id": f"dec_{run_id}"},
+            )
+        )
+
+        found = store.get_policy_evaluation_by_event_id(event_id)
+        missing = store.get_policy_evaluation_by_event_id(f"evt_pg_missing_{run_id}")
+
+        assert found is not None
+        assert found.links["event_id"] == event_id
+        assert found.audit_id == f"audit_pg_lookup_{run_id}"
+        assert missing is None
+    finally:
+        _cleanup_test_rows(database_url, trace_id, None)
+
+
 def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None) -> None:
     try:
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
@@ -715,6 +749,7 @@ def _audit_event(
     blocked: bool,
     is_malicious: bool | None,
     latency_ms: int,
+    links: dict[str, str] | None = None,
 ) -> AuditEvent:
     return AuditEvent(
         audit_id=audit_id,
@@ -729,6 +764,7 @@ def _audit_event(
         reason="postgres metric test",
         is_malicious=is_malicious,
         latency_ms=latency_ms,
+        links=links or {},
     )
 
 

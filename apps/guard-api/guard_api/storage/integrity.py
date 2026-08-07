@@ -13,6 +13,17 @@ from guard_api.storage.base import AuditIntegrityStatus
 CANONICALIZATION = "json:v1"
 
 
+def _canonical_json_bytes(payload: dict[str, object]) -> bytes:
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def canonical_sha256(payload: dict[str, object]) -> str:
+    encoded = _canonical_json_bytes(payload)
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
 def attach_audit_integrity(
     event: AuditEvent,
     *,
@@ -41,9 +52,7 @@ def compute_audit_event_hash(
         "prev_hash": prev_hash,
         "event": event.model_dump(mode="json", exclude={"integrity"}),
     }
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    encoded = _canonical_json_bytes(payload)
     return hashlib.sha256(encoded).hexdigest()
 
 

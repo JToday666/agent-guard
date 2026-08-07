@@ -44,6 +44,14 @@ class PolicyService:
         self.policy_bundle = policy_bundle
         return policy_bundle
 
+    def current_snapshot_record(self) -> PolicySnapshotRecord | None:
+        if self.store is None:
+            return None
+        history = self.store.list_policy_snapshot_history(limit=1)
+        if not history:
+            return None
+        return history[0]
+
     def list_history(self, *, limit: int = 100) -> list[PolicySnapshotRecord]:
         if self.store is None:
             return []

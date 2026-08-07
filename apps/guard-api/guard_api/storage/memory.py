@@ -94,6 +94,13 @@ class MemoryControlPlaneStore:
         with self.audit_integrity_lock:
             return verify_audit_chain(list(self.audit_events))
 
+    def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None:
+        with self.audit_integrity_lock:
+            for event in self.audit_events:
+                if _is_policy_evaluation_for(event, event_id):
+                    return event
+        return None
+
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         events = _filter_audit_events(
             list(reversed(self.audit_events)), filters or EvalMetricFilters()
@@ -443,6 +450,14 @@ class MemoryControlPlaneStore:
         )
         self.approval_nonces[nonce_hash] = consumed
         return consumed
+
+
+def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:
+    if event.links.get("event_id") != event_id:
+        return False
+    if "decision_id" not in event.links:
+        return False
+    return event.record_type in (None, "policy_evaluation")
 
 
 def _filter_audit_events(
