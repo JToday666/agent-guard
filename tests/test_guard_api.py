@@ -2605,3 +2605,46 @@ def test_policy_evaluation_lookup_ignores_config_audit_records() -> None:
     assert response.status_code == 200
 
     assert store.get_policy_evaluation_by_event_id("lookup-config-audit") is None
+
+
+def test_policy_evaluation_lookup_filters_record_type_and_returns_earliest() -> None:
+    store = MemoryControlPlaneStore()
+
+    earliest = _audit_event_model(
+        audit_id="audit_lookup_earliest",
+        trace_id="trace_lookup_type",
+        decision="deny",
+        runtime="langgraph",
+        blocked=True,
+    ).model_copy(update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_1"}})
+    later = _audit_event_model(
+        audit_id="audit_lookup_later",
+        trace_id="trace_lookup_type",
+        decision="ask",
+        runtime="langgraph",
+        blocked=True,
+    ).model_copy(update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_2"}})
+    config_audit_record = AuditEvent(
+        audit_id="audit_lookup_config",
+        schema_version="0.4",
+        record_type="config_audit",
+        trace_id="trace_lookup_type",
+        event_type="config_audit",
+        stage="before_install",
+        summary="Config audit",
+        decision="allow",
+        risk_score=10,
+        severity="low",
+        blocked=False,
+        reason="Config checked.",
+        links={"event_id": "evt_type_filter", "decision_id": "dec_3"},
+    )
+
+    store.add_audit_event(earliest)
+    store.add_audit_event(later)
+    store.add_audit_event(config_audit_record)
+
+    found = store.get_policy_evaluation_by_event_id("evt_type_filter")
+
+    assert found is not None
+    assert found.audit_id == "audit_lookup_earliest"
