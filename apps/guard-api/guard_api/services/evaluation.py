@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from agentguard_core import (
     ActionCritic,
     AuditEvent,
@@ -11,6 +13,7 @@ from agentguard_core import (
     MemoryGuardChange,
     evaluate as core_evaluate,
 )
+from sqlalchemy.exc import IntegrityError
 
 from guard_api.models import (
     ApprovalRequest,
@@ -23,6 +26,10 @@ from .approval import ApprovalService
 from .audit import AuditService
 from .memory import MemoryGuardService
 from .policy import PolicyService
+
+# memory store 下等待在途评估入链的最长时间（秒）。
+_RESERVATION_WAIT_SECONDS = 5.0
+_RESERVATION_POLL_INTERVAL = 0.02
 
 
 class EvaluationConflictError(ValueError):
@@ -69,17 +76,20 @@ class EvaluationService:
         self, event: GuardEvent, *, requesting_principal_id: str
     ) -> GuardEvaluationResponse:
         request_digest = canonical_sha256(event.model_dump(mode="json"))
-        # Idempotency is check-then-act: two identical requests racing before the
-        # first audit lands can both miss and evaluate twice. Acceptable for the
-        # single-process contest deployment; tighten with a unique event_id index
-        # on policy evaluations before multi-worker deployment.
-        existing = self.audit_service.store.get_policy_evaluation_by_event_id(
-            event.event_id
+        # 快路径预检：已入链的评估零成本重放，不再调用 Core、不重复创建审批。
+        replayed = self._replay_or_conflict(
+            self.audit_service.store.get_policy_evaluation_by_event_id(
+                event.event_id
+            ),
+            request_digest,
+            event.event_id,
         )
-        if existing is not None:
-            if _stored_request_digest(existing) == request_digest:
-                return self._rebuild_response(existing)
-            raise EvaluationConflictError(event.event_id)
+        if replayed is not None:
+            return replayed
+        # 写入前占位：memory 在哈希链锁内原子判定；PostgreSQL 恒 True，
+        # 真实约束由部分唯一索引（migration 0007）在写入时承担。
+        if not self.audit_service.store.reserve_policy_evaluation(event.event_id):
+            return self._await_committed_replay(event.event_id, request_digest)
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
             bundle = snapshot_record.policy_bundle
@@ -95,29 +105,73 @@ class EvaluationService:
         approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(event, decision)
         # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
-        audit_event = self.audit_service.record_evaluation(
-            event,
-            decision,
-            policy_bundle=bundle,
-            policy_revision=(
-                snapshot_record.revision if snapshot_record is not None else None
-            ),
-            approval_id=approval.approval_id if approval is not None else None,
-            critic_review=critic_review,
-            memory_change_id=(
-                memory_change.change_id if memory_change is not None else None
-            ),
-            extra_metadata={
-                "request_digest": request_digest,
-                "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
-            },
-            decision_dump=decision.model_dump(mode="json"),
-        )
+        try:
+            audit_event = self.audit_service.record_evaluation(
+                event,
+                decision,
+                policy_bundle=bundle,
+                policy_revision=(
+                    snapshot_record.revision if snapshot_record is not None else None
+                ),
+                approval_id=approval.approval_id if approval is not None else None,
+                critic_review=critic_review,
+                memory_change_id=(
+                    memory_change.change_id if memory_change is not None else None
+                ),
+                extra_metadata={
+                    "request_digest": request_digest,
+                    "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+                },
+                decision_dump=decision.model_dump(mode="json"),
+            )
+        except IntegrityError:
+            # 并发下同 event_id 的写入先入链（部分唯一索引冲突）：
+            # 重读并比较规范化请求摘要，同内容回放、异内容 409。
+            replayed = self._replay_or_conflict(
+                self.audit_service.store.get_policy_evaluation_by_event_id(
+                    event.event_id
+                ),
+                request_digest,
+                event.event_id,
+            )
+            if replayed is not None:
+                return replayed
+            raise
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),
             policy_audit_id=audit_event.audit_id,
         )
+
+    def _replay_or_conflict(
+        self,
+        existing: AuditEvent | None,
+        request_digest: str,
+        event_id: str,
+    ) -> GuardEvaluationResponse | None:
+        if existing is None:
+            return None
+        if _stored_request_digest(existing) == request_digest:
+            return self._rebuild_response(existing)
+        raise EvaluationConflictError(event_id)
+
+    def _await_committed_replay(
+        self, event_id: str, request_digest: str
+    ) -> GuardEvaluationResponse:
+        # memory store 中在途评估持有占位直至入链；有界等待其落盘后
+        # 回放或报冲突，与 PostgreSQL “写入即权威”的索引语义对齐。
+        deadline = time.monotonic() + _RESERVATION_WAIT_SECONDS
+        while True:
+            existing = self.audit_service.store.get_policy_evaluation_by_event_id(
+                event_id
+            )
+            if existing is not None:
+                if _stored_request_digest(existing) == request_digest:
+                    return self._rebuild_response(existing)
+                raise EvaluationConflictError(event_id)
+            if time.monotonic() >= deadline:
+                raise EvaluationConflictError(event_id)
+            time.sleep(_RESERVATION_POLL_INTERVAL)
 
     def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
         raw_decision = _stored_decision_dump(audit)

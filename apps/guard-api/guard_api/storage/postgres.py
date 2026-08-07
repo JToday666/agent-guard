@@ -209,6 +209,12 @@ class PostgresControlPlaneStore:
             row = session.execute(stmt).scalars().first()
         return AuditEvent.model_validate(row) if row is not None else None
 
+    def reserve_policy_evaluation(self, event_id: str) -> bool:
+        # 真实唯一性约束由部分唯一索引 ux_audit_policy_evaluation_event_id
+        # （migration 0007）承担；并发冲突在写入时以 IntegrityError 暴露，
+        # 由调用方重读并回放或报 409。
+        return True
+
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
             select(audit_events.c.payload_json)
