@@ -48,6 +48,7 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
+from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
     adapter_statuses,
@@ -219,57 +220,19 @@ class PostgresControlPlaneStore:
         return verify_audit_chain(AuditEvent.model_validate(row) for row in rows)
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
+        # 保留 where 下推取事件，聚合口径交由跨存储共享聚合器（§19）。
         filters = filters or EvalMetricFilters()
         where_sql, params = _metric_where_clause(filters)
         stmt = text(f"""
-            SELECT
-                COUNT(*) AS event_count,
-                COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'allow') AS allow_count,
-                COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'deny') AS deny_count,
-                COUNT(*) FILTER (WHERE payload_json ->> 'decision' = 'ask') AS ask_count,
-                COUNT(*) FILTER (
-                    WHERE payload_json ->> 'blocked' = 'true'
-                       OR payload_json ->> 'decision' IN ('deny', 'ask')
-                ) AS blocked_count,
-                COUNT(*) FILTER (WHERE payload_json ->> 'is_malicious' = 'false') AS benign_count,
-                COUNT(*) FILTER (WHERE payload_json ->> 'is_malicious' = 'true') AS malicious_count,
-                COUNT(*) FILTER (
-                    WHERE payload_json ->> 'is_malicious' = 'false'
-                      AND (payload_json ->> 'blocked' = 'true' OR payload_json ->> 'decision' IN ('deny', 'ask'))
-                ) AS false_positive_count,
-                COUNT(*) FILTER (
-                    WHERE payload_json ->> 'is_malicious' = 'true'
-                      AND payload_json ->> 'decision' = 'allow'
-                      AND COALESCE(payload_json ->> 'blocked', 'false') = 'false'
-                ) AS false_negative_count,
-                AVG(NULLIF(payload_json ->> 'latency_ms', '')::numeric) AS average_latency_ms
+            SELECT payload_json
             FROM audit_events
             {where_sql}
+            ORDER BY sequence ASC, audit_id ASC
             """)
         with self._session_factory() as session:
-            row = session.execute(stmt, params).mappings().one()
-        event_count = int(row["event_count"])
-        blocked_count = int(row["blocked_count"])
-        benign_count = int(row["benign_count"])
-        malicious_count = int(row["malicious_count"])
-        false_positive_count = int(row["false_positive_count"])
-        false_negative_count = int(row["false_negative_count"])
-        average_latency = row["average_latency_ms"]
-        return {
-            "event_count": event_count,
-            "allow_count": int(row["allow_count"]),
-            "deny_count": int(row["deny_count"]),
-            "ask_count": int(row["ask_count"]),
-            "blocked_count": blocked_count,
-            "block_rate": (blocked_count / event_count) if event_count else None,
-            "fpr": (false_positive_count / benign_count) if benign_count else None,
-            "fnr": (
-                (false_negative_count / malicious_count) if malicious_count else None
-            ),
-            "average_latency_ms": (
-                float(average_latency) if average_latency is not None else None
-            ),
-        }
+            rows = session.execute(stmt, params).scalars().all()
+        events = [AuditEvent.model_validate(row) for row in rows]
+        return aggregate_policy_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         payload = node.model_dump(mode="json")

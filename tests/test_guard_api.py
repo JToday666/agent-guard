@@ -2441,8 +2441,11 @@ def test_evaluate_audit_records_request_digest() -> None:
 
     audit = store.audit_events[0]
 
-    assert _DIGEST_PATTERN.match(audit.links["request_digest"])
+    # §9.9：digest 移入 metadata，links 只保留稳定 ID。
+    assert _DIGEST_PATTERN.match(audit.metadata["request_digest"])
+    assert "request_digest" not in audit.links
     assert "policy_revision" not in audit.links
+    assert "policy_revision" not in audit.metadata
 
 
 def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save() -> None:
@@ -2462,8 +2465,10 @@ def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save()
 
     assert response.status_code == 200
     audit = store.audit_events[0]
-    assert _DIGEST_PATTERN.match(audit.links["policy_digest"])
-    assert audit.links["policy_revision"] == "1"
+    assert _DIGEST_PATTERN.match(audit.metadata["policy_digest"])
+    assert "policy_digest" not in audit.links
+    assert "policy_revision" not in audit.links
+    assert audit.evidence["policy"]["revision"] == 1
 
 
 def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
@@ -2482,9 +2487,10 @@ def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
 
     assert response.status_code == 200
     audit = store.audit_events[0]
-    assert audit.links["policy_digest"] == canonical_sha256(
-        bundle.model_dump(mode="json")
-    )
+    expected_digest = canonical_sha256(bundle.model_dump(mode="json"))
+    assert audit.metadata["policy_digest"] == expected_digest
+    # §9.3：事件时策略 digest 与同一次快照读取的 bundle 一致。
+    assert audit.evidence["policy"]["canonical_digest"] == expected_digest
 
 
 def test_evaluate_request_digest_is_deterministic() -> None:
@@ -2492,8 +2498,8 @@ def test_evaluate_request_digest_is_deterministic() -> None:
     _, second_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
 
     assert (
-        first_store.audit_events[0].links["request_digest"]
-        == second_store.audit_events[0].links["request_digest"]
+        first_store.audit_events[0].metadata["request_digest"]
+        == second_store.audit_events[0].metadata["request_digest"]
     )
 
 
@@ -2522,7 +2528,13 @@ def test_build_audit_event_rejects_extra_links_collision() -> None:
     )
 
     with pytest.raises(ValueError):
-        build_audit_event(event, decision, extra_links={"event_id": "evt_other"})
+        build_audit_event(
+            event,
+            decision,
+            policy_bundle=PolicyBundle(),
+            policy_revision=None,
+            extra_links={"event_id": "evt_other"},
+        )
 
 
 def test_policy_snapshot_history_returns_latest_record_first() -> None:
@@ -2560,7 +2572,8 @@ def test_policy_evaluation_lookup_returns_audit_for_event_id() -> None:
 
     assert found is not None
     assert found.links["event_id"] == "evt_lookup_hit"
-    assert "request_digest" in found.links
+    assert "request_digest" in found.metadata
+    assert "request_digest" not in found.links
 
 
 def test_policy_evaluation_lookup_returns_none_for_unknown_event_id() -> None:

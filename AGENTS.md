@@ -10,12 +10,11 @@
 
 ## 修改边界
 
-- 默认可修改：`apps/dashboard/**`。
+- 可修改范围限于当前任务直接相关的模块与文件；涉及任务范围之外的模块、根配置文件（如 `AGENTS.md`、`package.json`、`pnpm-workspace.yaml`、`pyproject.toml`、锁文件等）或跨模块接口契约时，先向用户确认后实施。
 - 谨慎修改：`docs/**` 中与当前任务直接相关的段落。
-- 必要时可修改根配置：`.gitignore`、`AGENTS.md`、`package.json`、`pnpm-workspace.yaml`、`.npmrc`、`.nvmrc`、`pyrightconfig.json`、`pnpm-lock.yaml`。
-- 严禁修改后端代码及其他无关代码。
 - 只做当前任务所需的最小改动；不得顺手重构、迁移、重命名或修复无关历史问题。
 - 不得回滚、覆盖或删除用户未要求处理的未提交修改。
+- 个人工作偏好（如特定模块的默认修改范围）不写入本文件，放在各自代理的用户级配置中维护。
 
 ## 实现规则
 
