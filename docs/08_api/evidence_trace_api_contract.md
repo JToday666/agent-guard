@@ -1,14 +1,21 @@
 # 证据链与溯源 API 目标契约
 
-> 状态：目标契约已冻结，代码与 Schema 迁移尚未实施
+> 状态：目标契约已冻结；Schema、Core 类型和 Guard API 基础双读已实现，跨组件迁移尚未完成
+>
 > 冻结日期：2026-08-05
+>
+> 状态复核：2026-08-07
+>
 > 参与方：Dashboard、Guard API / Control Plane、AgentGuard Core、LangGraph Adapter、OpenClaw Plugin
 
 ## 1. 文档定位
 
 本文定义攻击证据展示所需的已冻结目标 API，包含请求、响应、字段语义、示例、兼容策略、写入归属和验收方式。
 
-当前稳定实现仍以 [接口契约与事件模型](../02_core/interface_contract.md) 中的 AuditEvent `0.3` 为准。本文冻结的是下一版本目标，不表示 Guard API、Core、Adapter、Plugin 或 Dashboard 已实现目标字段。迁移必须同步 `schemas/`、类型、存储、实现和 contract tests 后才能声明交付。
+现有生产者默认仍以 [接口契约与事件模型](../02_core/interface_contract.md) 中的 AuditEvent
+`0.3` 为兼容基线。JSON Schema、Core 类型和 Guard API 基础写入/读取已经接受 `0.4`，
+但 Guard API 策略 writer、Adapter / Plugin、完整存储语义、Provenance 和跨组件 contract
+tests 尚未完成。本文冻结的是完整目标，不得把基础双读描述为端到端交付。
 
 本文只覆盖证据链与溯源目标契约，不扩展登录、长期 token、策略回放或新的 Dashboard 管理能力。本轮不实施前端或 LangGraph 改造，也不包含时间图判定、QQ/微信真实消息渠道接入。运行时回执复用 `POST /v1/audit/events`，不新增 `/v1/runtime/outcomes`。
 
@@ -27,32 +34,48 @@
 
 ## 3. 当前实现与目标差异
 
-| 能力          | 当前实现                                                                  | 目标                                                       |
-| ------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| GuardEvent    | `schema_version="0.3"`                                                    | 保持不变                                                   |
-| GuardDecision | 最终风险分、规则命中和原因                                                | 可选增加结构化 `risk_breakdown`                            |
-| AuditEvent    | `schema_version="0.3"`，顶层兼容字段为主                                  | 增加明确的 `record_type`、结构化 `evidence` 和稳定 `links` |
-| 策略审计      | Guard API 已写入；LangGraph Guard API 模式仍可能重复提交                  | Guard API 唯一写入一条逻辑策略审计                         |
-| 运行时回执    | LangGraph 有本地结果对象，OpenClaw 有 Hook 观察，但未形成统一审计结构     | Adapter 通过现有审计写入接口回写                           |
-| 幂等          | PostgreSQL 同 ID 直接忽略，未比较内容；内存存储行为不同                   | 两种存储具有相同的同内容重试和异内容冲突语义               |
-| 完整性元数据  | 已由服务端写入 `integrity.sequence/prev_hash/event_hash/canonicalization` | 直接复用，不新增第二套字段                                 |
-| Trace 窗口    | 最多返回 1000 条，无明确截断事实                                          | 增加向后兼容的窗口元数据                                   |
-| 指标          | 所有审计记录可能进入 allow/ask/deny 聚合                                  | 只统计逻辑唯一的策略评估                                   |
-| Provenance    | event、decision、audit、review 等基础节点                                 | 扩展完整生命周期节点与关系                                 |
+| 能力          | 当前实现                                                                        | 目标                                                                 |
+| ------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| GuardEvent    | `schema_version="0.3"`                                                          | 保持不变                                                             |
+| GuardDecision | 最终风险分、规则命中和原因                                                      | 可选增加结构化 `risk_breakdown`                                      |
+| AuditEvent    | Schema、Core 和 Guard API 基础双读支持 `0.3 \| 0.4`；现有 writer 主要仍为 `0.3` | 全部生产者写入明确的 `record_type`、结构化 `evidence` 和稳定 `links` |
+| 策略审计      | Guard API 已写入；LangGraph Guard API 模式仍可能重复提交                        | Guard API 唯一写入一条逻辑策略审计                                   |
+| 运行时回执    | LangGraph 有本地结果对象，OpenClaw 有 Hook 观察，但未形成统一审计结构           | Adapter 通过现有审计写入接口回写                                     |
+| 幂等          | PostgreSQL 同 ID 直接忽略，未比较内容；内存存储行为不同                         | 两种存储具有相同的同内容重试和异内容冲突语义                         |
+| 完整性元数据  | 已由服务端写入 `integrity.sequence/prev_hash/event_hash/canonicalization`       | 直接复用，不新增第二套字段                                           |
+| Trace 窗口    | 最多返回 1000 条，无明确截断事实                                                | 增加向后兼容的窗口元数据                                             |
+| 指标          | 所有审计记录可能进入 allow/ask/deny 聚合                                        | 只统计逻辑唯一的策略评估                                             |
+| Provenance    | event、decision、audit、review 等基础节点                                       | 扩展完整生命周期节点与关系                                           |
 
 ## 4. 已冻结的共同决策
 
-| 编号 | 决策                       | 冻结结论                                                                                                                                                         | 状态   |
-| ---- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| D-01 | AuditEvent 版本            | GuardEvent 保持 `0.3`；当前 AuditEvent 仍为 `0.3`，迁移目标为 `0.4`                                                                                               | 已确认 |
-| D-02 | 非策略记录的旧顶层策略字段 | `0.4` 中 `decision/risk_score/severity/blocked` 允许为 `null`；缺失事实不创建中性兼容投影                                                                          | 已确认 |
-| D-03 | Trace 窗口字段             | `GET /v1/traces/{trace_id}` 目标响应新增 `audit_window.limit/returned_count/has_more`                                                                              | 已确认 |
-| D-04 | Evaluate 请求级幂等        | 以 `GuardEvent.event_id` 定位请求并比较规范化请求摘要；同内容重试复用原结果且不重复审计，不同内容返回 HTTP 409                                                     | 已确认 |
-| D-05 | Evidence 大小边界          | 正文 2000 字符、摘要 500 字符、普通数组及 context sources 20 项、资源 50 项、规则/风险因子 100 项、嵌套 6 层、单事件 evidence 最大 64 KiB                            | 已确认 |
-| D-06 | Dashboard 指标作用域       | 原子审计窗口、显式历史 cohort、独立 evaluation run                                                                                                                | 已确认 |
-| D-07 | 实际阻止口径               | 仅运行时回执确认 `execution.status=not_invoked` 时统计                                                                                                            | 已确认 |
+| 编号 | 决策                       | 冻结结论                                                                                                                                  | 状态   |
+| ---- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| D-01 | AuditEvent 版本            | GuardEvent 保持 `0.3`；AuditEvent 默认兼容 `0.3`，完整迁移目标为 `0.4`                                                                    | 已确认 |
+| D-02 | 非策略记录的旧顶层策略字段 | `0.4` 中 `decision/risk_score/severity/blocked` 允许为 `null`；缺失事实不创建中性兼容投影                                                 | 已确认 |
+| D-03 | Trace 窗口字段             | `GET /v1/traces/{trace_id}` 目标响应新增 `audit_window.limit/returned_count/has_more`                                                     | 已确认 |
+| D-04 | Evaluate 请求级幂等        | 以 `GuardEvent.event_id` 定位请求并比较规范化请求摘要；同内容重试复用原结果且不重复审计，不同内容返回 HTTP 409                            | 已确认 |
+| D-05 | Evidence 大小边界          | 正文 2000 字符、摘要 500 字符、普通数组及 context sources 20 项、资源 50 项、规则/风险因子 100 项、嵌套 6 层、单事件 evidence 最大 64 KiB | 已确认 |
+| D-06 | Dashboard 指标作用域       | 原子审计窗口、显式历史 cohort、独立 evaluation run                                                                                        | 已确认 |
+| D-07 | 实际阻止口径               | 仅运行时回执确认 `execution.status=not_invoked` 时统计                                                                                    | 已确认 |
 
-本文后续示例表示已冻结的目标形态：GuardEvent `0.3`、AuditEvent `0.4`，纯观察事件的策略字段为 `null`。当前实现仍只保证 AuditEvent `0.3`；目标 Schema、类型和存储迁移完成前，示例不能作为当前接口能力证明。
+本文后续示例表示已冻结的目标形态：GuardEvent `0.3`、AuditEvent `0.4`，纯观察事件的策略字段为
+`null`。当前基础类型和接口能够接收该版本，但完整 writer、links、evidence、幂等和跨存储
+迁移完成前，示例不能作为当前端到端能力证明。
+
+### 4.1 运行时安全观测对齐
+
+2026-08-07 已冻结
+[Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)：
+
+- 不新增 `AgentActionEvent` 或 Dashboard 专用 trace events 端点；
+- 执行轨迹只投影本文的 AuditEvent、Approval 和 Provenance 事实；
+- 不扩展本文冻结的 `execution.status`；
+- 不增加含义不清的 `complete` 或 JSON `snapshot_version`；
+- 后续条件刷新使用分别覆盖完整 Trace 和 Provenance 响应的 HTTP ETag；
+- 缺少显式 start observation 时，不得显示“正在执行”。
+
+该设计没有修改本文的请求、响应或枚举契约。
 
 ## 5. 复用接口矩阵
 
@@ -493,6 +516,11 @@ unknown
 ```
 
 审批表本身可以继续使用 `status=resolved` 和 `decision=allow_once|deny`；Guard API 在 evidence 投影中把二者规范化为 `allowed` 或 `denied`。
+
+当 policy override 把原本的拒绝规则调整为 `ask`，而
+`GuardDecision.approval_intent.resource` 为空时，Guard API 创建 ApprovalRequest 必须
+回退到本次 GuardEvent 已规范化、已脱敏的首个资源目标。没有安全资源事实时保持为空，
+不得使用原始参数，也不得要求 Dashboard 补造。
 
 ### 9.9 Links
 
@@ -1828,16 +1856,19 @@ Adapter / Plugin
 ### 25.1 设计冻结已完成
 
 - [x] D-01 至 D-05 已按推荐方案确认。
-- [x] [接口契约与事件模型](../02_core/interface_contract.md) 已增加当前 `0.3` 与冻结目标 `0.4` 的双状态说明。
+- [x] [接口契约与事件模型](../02_core/interface_contract.md) 已增加默认 `0.3`、基础双读与完整 `0.4` 目标的状态说明。
 - [x] 已记录冻结日期 `2026-08-05`。
 - [x] 已确认运行时回执复用 `POST /v1/audit/events`，不新增独立 runtime outcome 端点。
+- [x] 已冻结运行时安全观测的事实投影、状态语义、真实演示链和刷新边界。
 
-### 25.2 代码迁移待完成
+### 25.2 代码迁移状态
 
-- [ ] 更新 `schemas/audit_event.schema.json`。
+- [x] `schemas/audit_event.schema.json` 和 Core `AuditEvent` 类型已支持 `0.3 | 0.4`。
+- [x] Guard API 已有 AuditEvent `0.4` 基础写入、读取和完整性测试。
 - [ ] 更新 `schemas/guard_decision.schema.json`。
-- [ ] 更新 Core、Guard API、LangGraph、OpenClaw 和 Dashboard 类型。
-- [ ] 增加共享 JSON fixtures。
+- [ ] 完成 Guard API writer、LangGraph、OpenClaw、存储语义和 Dashboard 的完整 `0.4` 迁移。
+- [x] 增加
+      [运行时安全主演示链共享 JSON fixture](../../tests/fixtures/runtime_safety_trace_v04.json)。
 - [ ] Memory 和 PostgreSQL store 运行相同幂等与指标 contract tests。
 - [ ] Dashboard API 模式运行真实目标 AuditEvent fixtures。
 - [ ] 更新 CLI 输出兼容性测试。

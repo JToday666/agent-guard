@@ -341,13 +341,19 @@ Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `
 ## 9. AuditEvent
 
 AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
-AuditEvent 保持 `schema_version="0.3"`，并允许未知扩展字段用于前向兼容。
+AuditEvent 默认保持 `schema_version="0.3"` 以兼容现有生产者，并允许未知扩展字段用于前向兼容。
 
 ### 9.1 当前版本与已冻结目标
 
-当前实现、`schemas/audit_event.schema.json` 和下方示例仍以 AuditEvent `0.3` 为准。
-2026-08-05 已冻结下一版本 AuditEvent `0.4` 的目标契约，但尚未完成 Schema、类型、
-存储或接口迁移。冻结目标不表示当前 Guard API 已接受或返回 `0.4`。
+当前 `schemas/audit_event.schema.json`、Core `AuditEvent` 类型和 Guard API 基础写入/读取
+已经支持 AuditEvent `0.3 | 0.4`，并有 `0.4` 基础契约测试。现有 Guard API 策略审计、
+LangGraph Adapter 和 OpenClaw Plugin 仍主要生产 `0.3`；事件时策略快照、结构化 evidence、
+稳定 links、统一幂等、runtime outcome 和 PostgreSQL 共享契约测试尚未完成。因此基础双读
+不等于 AuditEvent `0.4` 端到端迁移已经交付。
+
+2026-08-05 冻结了 AuditEvent `0.4` 目标契约；2026-08-07 进一步冻结了
+[Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)，
+但后者不新增后端事实模型或接口。
 
 已冻结的迁移边界：
 
@@ -368,7 +374,7 @@ AuditEvent 保持 `schema_version="0.3"`，并允许未知扩展字段用于前�
 完整字段矩阵、兼容规则和待实施清单见
 [证据链与溯源 API 目标契约](../08_api/evidence_trace_api_contract.md)。迁移实现必须同步
 JSON Schema、Core/Guard API/OpenClaw 类型、存储、共享 fixtures 和 contract tests，
-完成前不得把上述目标描述为当前安全保障。
+完成前不得把基础 `0.4` 接收能力描述为完整的运行时安全保障。
 
 ```json
 {

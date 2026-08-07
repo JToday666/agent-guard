@@ -12,8 +12,9 @@
 Provenance 目标拆成可直接实施的后端要求。本文不改变冻结契约，不表示代码、Schema、
 存储或生产数据已经完成迁移。
 
-本轮 Dashboard 修复只新增本文和 TODO 状态，不修改 Guard API、Core、Adapter、Plugin、
-数据库迁移或后端测试。
+运行时安全观测的视图职责、主演示链和非对称刷新边界见
+[Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)。
+该设计只引用本实施要求中的持久化事实，不允许 Dashboard 临时补图。
 
 目标是在不补造事实的前提下，让未来新产生的真实 Trace 能够展示任务、来源、上下文、
 动作、资源、规则、策略、审批、运行结果和审计之间的完整关系。历史 Trace 不自动回填，
@@ -38,7 +39,8 @@ Provenance 目标拆成可直接实施的后端要求。本文不改变冻结契
 
 完整生命周期图开始写入前，必须满足：
 
-1. Guard API 能够读取并返回 AuditEvent `0.3 | 0.4`。
+1. Guard API 能够读取并返回 AuditEvent `0.3 | 0.4`；基础双读已经具备，仍需完成跨存储
+   共享契约测试。
 2. 新策略评估由 Guard API 唯一写入 `policy_evaluation`。
 3. AuditEvent `0.4` 提供稳定的 `links` 和有界、脱敏的 `evidence`。
 4. Adapter / Plugin 通过现有 `POST /v1/audit/events` 写入结构化
@@ -273,7 +275,9 @@ contract tests 保证最终状态一致。
 推荐顺序：
 
 1. 完成 AuditEvent 0.4、幂等、runtime outcome 和稳定 links。
-2. 增加共享 provenance fixtures 与 Memory/PostgreSQL contract tests。
+2. 以
+   [运行时安全主演示链 fixture](../../tests/fixtures/runtime_safety_trace_v04.json)
+   为第一条共享基线，补充 Memory/PostgreSQL contract tests。
 3. 先在测试环境启用 writer，比较 audit 数量、节点数、孤儿边和冲突数。
 4. Dashboard 使用真实 API fixture 验证节点、关系、时间线联动和长文本布局。
 5. 对新事件启用生产写入，不处理历史 Trace。
