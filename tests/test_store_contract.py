@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from agentguard_core import AuditEvent, GuardDecision, GuardEvent, PolicyBundle
 from guard_api.main import create_app
 from guard_api.services import PolicyService
+from guard_api.services.audit_window import AuditWindowService
 from guard_api.services.evidence import build_audit_event
 from guard_api.services.metric_rules import classify_record_type
 from guard_api.services.redaction import (
@@ -26,9 +27,10 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
+    AuditWindowQuery,
     EvalMetricFilters,
 )
-from guard_api.storage.integrity import canonical_sha256
+from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
@@ -669,3 +671,318 @@ def test_contract_03_compatible_inbound_record_still_accepted(store, client) -> 
     assert events[0].record_type is None
     assert events[0].schema_version == "0.3"
     assert store.verify_audit_integrity().valid
+# 契约 §5/§6/§13.1：原子审计窗口与 policy_evaluation cohort 契约测试。
+
+
+def _window_audit_event(
+    *,
+    index: int,
+    run_id: str,
+    decision: str | None = "allow",
+    is_malicious: bool | None = None,
+    record_type: str = "policy_evaluation",
+    latency_ms: int | None = None,
+    links: dict[str, str] | None = None,
+) -> AuditEvent:
+    # 基准 2026-06-01T00:00:00+00:00，每条记录递增一分钟。
+    minutes_total, secs = divmod(index * 60, 60)
+    hours, minutes = divmod(minutes_total, 60)
+    timestamp = f"2026-06-01T{hours:02d}:{minutes:02d}:{secs:02d}+00:00"
+    return AuditEvent(
+        audit_id=f"audit_win_{run_id}_{index}",
+        schema_version="0.4",
+        record_type=record_type,
+        trace_id=f"trace_win_{run_id}",
+        case_id=f"CASE-WIN-{run_id}",
+        runtime="langgraph",
+        timestamp=timestamp,
+        event_type="tool_call_proposed",
+        summary=f"Window contract record {index}",
+        decision=decision,
+        risk_score=10,
+        severity="low",
+        blocked=decision in {"ask", "deny"},
+        reason="Window contract fixture.",
+        is_malicious=is_malicious,
+        latency_ms=latency_ms,
+        links=(
+            dict(links)
+            if links is not None
+            else {
+                "event_id": f"evt_win_{run_id}_{index}",
+                "decision_id": f"dec_win_{run_id}_{index}",
+            }
+        ),
+    )
+
+
+def _event_sequence(event: AuditEvent) -> int:
+    metadata = read_audit_integrity(event)
+    assert metadata is not None
+    return metadata.sequence
+
+
+def test_contract_bounded_read_is_descending_within_snapshot(store) -> None:
+    run_id = uuid4().hex
+    for index in range(6):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+
+    upper = _event_sequence(
+        store.read_audit_events_bounded(AuditWindowQuery(limit=1))[0]
+    )
+
+    rows = store.read_audit_events_bounded(AuditWindowQuery(limit=3))
+    sequences = [_event_sequence(event) for event in rows]
+    assert sequences == [upper, upper - 1, upper - 2]
+
+    # 显式上界 + after_sequence 续页只读 sequence 严格更小的记录。
+    paged = store.read_audit_events_bounded(
+        AuditWindowQuery(upper_sequence=upper, after_sequence=upper - 2, limit=10)
+    )
+    assert [_event_sequence(event) for event in paged] == [upper - 3, upper - 4, upper - 5]
+
+    # 上界之外的并发新写入不进入已固化快照。
+    store.add_audit_event(_window_audit_event(index=99, run_id=run_id))
+    frozen = store.read_audit_events_bounded(
+        AuditWindowQuery(upper_sequence=upper, limit=100)
+    )
+    assert len(frozen) == 6
+
+    # 空查询不抛错。
+    assert (
+        MemoryControlPlaneStore().read_audit_events_bounded(AuditWindowQuery(limit=1))
+        == []
+    )
+
+
+def test_contract_window_has_more_boundary(store) -> None:
+    run_id = uuid4().hex
+    for index in range(5):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+    service = AuditWindowService(store=store)
+
+    exact = service.get_window(limit=5)
+    assert exact["scope"]["returned_record_count"] == 5
+    assert exact["scope"]["has_more"] is False
+    assert exact["scope"]["next_cursor"] is None
+    assert exact["scope"]["sequence_from"] == 1
+    assert exact["scope"]["sequence_to"] == 5
+
+    truncated = service.get_window(limit=4)
+    assert truncated["scope"]["returned_record_count"] == 4
+    assert truncated["scope"]["has_more"] is True
+    assert truncated["scope"]["next_cursor"]
+
+
+def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -> None:
+    run_id = uuid4().hex
+    for index in range(6):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+    service = AuditWindowService(store=store)
+
+    page1 = service.get_window(limit=4)
+    page1_sequences = [_event_sequence(AuditEvent.model_validate(row)) for row in page1["events"]]
+    assert page1["scope"]["has_more"] is True
+
+    # 翻页前并发写入新记录；已有页不得移动。
+    for index in range(6, 9):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+
+    page2 = service.get_window(limit=4, cursor=page1["scope"]["next_cursor"])
+    page2_sequences = [_event_sequence(AuditEvent.model_validate(row)) for row in page2["events"]]
+
+    assert page1_sequences == [6, 5, 4, 3]
+    assert page2_sequences == [2, 1]
+    assert page2["scope"]["has_more"] is False
+    assert page2["scope"]["next_cursor"] is None
+    # cursor 固化快照：两页 snapshot 与上界一致，新写入未进入窗口。
+    assert page2["scope"]["snapshot_id"] == page1["scope"]["snapshot_id"]
+    assert page2["scope"]["sequence_to"] == 2
+
+
+def test_contract_window_duplicate_policy_records_counted_once(store) -> None:
+    run_id = uuid4().hex
+    links = {
+        "event_id": f"evt_dupwin_{run_id}",
+        "decision_id": f"dec_dupwin_{run_id}",
+    }
+    for index in range(3):
+        store.add_audit_event(
+            _window_audit_event(index=index, run_id=run_id, links=dict(links))
+        )
+    store.add_audit_event(_window_audit_event(index=3, run_id=run_id))
+
+    window = AuditWindowService(store=store).get_window(limit=10)
+    metrics = window["policy_metrics"]
+
+    assert metrics["evaluation_count"] == 2
+    assert metrics["duplicate_policy_record_count"] == 2
+    assert metrics["allow_count"] == 2
+
+
+def test_contract_window_non_policy_records_excluded_from_metrics(store) -> None:
+    run_id = uuid4().hex
+    store.add_audit_event(_window_audit_event(index=0, run_id=run_id, latency_ms=12))
+    store.add_audit_event(
+        _window_audit_event(
+            index=1,
+            run_id=run_id,
+            record_type="runtime_outcome",
+            decision=None,
+            latency_ms=900,
+        )
+    )
+    store.add_audit_event(
+        _window_audit_event(
+            index=2, run_id=run_id, record_type="runtime_observation", decision=None
+        )
+    )
+    store.add_audit_event(
+        _window_audit_event(index=3, run_id=run_id, record_type="config_audit")
+    )
+
+    window = AuditWindowService(store=store).get_window(limit=10)
+    metrics = window["policy_metrics"]
+
+    assert window["scope"]["returned_record_count"] == 4
+    # outcome/observation/config 不增加策略计数。
+    assert metrics["evaluation_count"] == 1
+    assert metrics["allow_count"] == 1
+    # policy latency 不混入 runtime latency。
+    assert metrics["average_decision_latency_ms"] == 12
+    assert metrics["latency_sample_count"] == 1
+
+
+def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
+    run_id = uuid4().hex
+    # benign + ask → FPR 命中；malicious + allow → FNR 命中；未标注不入分母。
+    store.add_audit_event(
+        _window_audit_event(index=0, run_id=run_id, decision="ask", is_malicious=False)
+    )
+    store.add_audit_event(
+        _window_audit_event(
+            index=1, run_id=run_id, decision="allow", is_malicious=True
+        )
+    )
+    store.add_audit_event(
+        _window_audit_event(index=2, run_id=run_id, decision="deny", is_malicious=None)
+    )
+
+    metrics = AuditWindowService(store=store).get_window(limit=10)["policy_metrics"]
+    assert metrics["unknown_decision_count"] == 0
+    assert metrics["unlabeled_count"] == 1
+    assert metrics["benign_label_count"] == 1
+    assert metrics["malicious_label_count"] == 1
+    assert metrics["policy_intervention_fpr"] == 1.0
+    assert metrics["policy_intervention_fnr"] == 1.0
+    # decision=null 的非策略记录不得并入 allow，也不产生 unknown 策略计数。
+    store.add_audit_event(
+        _window_audit_event(
+            index=3,
+            run_id=run_id,
+            record_type="runtime_observation",
+            decision=None,
+            is_malicious=False,
+        )
+    )
+    metrics = AuditWindowService(store=store).get_window(limit=10)["policy_metrics"]
+    assert metrics["unknown_decision_count"] == 0
+    assert metrics["allow_count"] == 1
+    assert metrics["policy_intervention_fpr"] == 1.0
+    assert metrics["policy_intervention_fnr"] == 1.0
+
+    # 分母为零返回 null，不得返回 0（§4.3）。
+    empty_run = uuid4().hex
+    store.add_audit_event(
+        _window_audit_event(index=0, run_id=empty_run, record_type="runtime_observation", decision=None)
+    )
+    empty_metrics = AuditWindowService(store=store).get_window(
+        limit=10, trace_id=f"trace_win_{empty_run}"
+    )["policy_metrics"]
+    assert empty_metrics["evaluation_count"] == 0
+    assert empty_metrics["intervention_rate"] is None
+    assert empty_metrics["policy_intervention_fpr"] is None
+    assert empty_metrics["average_decision_latency_ms"] is None
+
+
+def test_contract_cohort_evaluated_range_selects_policy_records(store) -> None:
+    run_id = uuid4().hex
+    for index in range(5):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+    # 快照外的迟到记录不进入 cohort。
+    store.add_audit_event(
+        _window_audit_event(
+            index=5, run_id=run_id, latency_ms=99, links={"event_id": "late", "decision_id": "late"}
+        )
+    )
+    upper = store.read_audit_events_bounded(AuditWindowQuery(limit=1))[0]
+    frozen_upper = _event_sequence(upper) - 1
+
+    rows = store.read_audit_events_bounded(
+        AuditWindowQuery(
+            upper_sequence=frozen_upper,
+            evaluated_from="2026-06-01T00:01:00+00:00",
+            evaluated_to="2026-06-01T00:04:00+00:00",
+            limit=100,
+        )
+    )
+    # [00:01, 00:04) 半开区间：命中 index 1/2/3，按 sequence 降序返回。
+    assert [_event_sequence(event) for event in rows] == [4, 3, 2]
+
+
+def test_contract_memory_and_postgres_window_parity() -> None:
+    database_url = get_test_database_url()
+    reset_control_plane_schema(database_url)
+    postgres_store = PostgresControlPlaneStore(database_url)
+    postgres_store.initialize()
+    memory_store = MemoryControlPlaneStore()
+    run_id = uuid4().hex
+    events = [
+        _window_audit_event(index=0, run_id=run_id, decision="allow", is_malicious=False, latency_ms=10),
+        _window_audit_event(index=1, run_id=run_id, decision="ask", is_malicious=True, latency_ms=20),
+        _window_audit_event(
+            index=2, run_id=run_id, record_type="runtime_outcome", decision=None, latency_ms=500
+        ),
+        _window_audit_event(index=3, run_id=run_id, decision="deny", is_malicious=None),
+        _window_audit_event(
+            index=4,
+            run_id=run_id,
+            links={"event_id": f"evt_win_{run_id}_0", "decision_id": f"dec_win_{run_id}_0"},
+        ),
+    ]
+    for target in (memory_store, postgres_store):
+        for event in events:
+            target.add_audit_event(event)
+
+    memory_window = AuditWindowService(store=memory_store).get_window(limit=3)
+    postgres_window = AuditWindowService(store=postgres_store).get_window(limit=3)
+
+    # Memory/PostgreSQL 在相同 fixture 上完全一致（outcomes_as_of 为请求时刻）。
+    assert memory_window["events"] == postgres_window["events"]
+    assert memory_window["policy_metrics"] == postgres_window["policy_metrics"]
+    memory_scope = dict(memory_window["scope"])
+    postgres_scope = dict(postgres_window["scope"])
+    memory_scope.pop("outcomes_as_of")
+    postgres_scope.pop("outcomes_as_of")
+    assert memory_scope == postgres_scope
+
+    memory_page2 = AuditWindowService(store=memory_store).get_window(
+        limit=3, cursor=memory_window["scope"]["next_cursor"]
+    )
+    postgres_page2 = AuditWindowService(store=postgres_store).get_window(
+        limit=3, cursor=postgres_window["scope"]["next_cursor"]
+    )
+    assert memory_page2["events"] == postgres_page2["events"]
+    assert memory_page2["policy_metrics"] == postgres_page2["policy_metrics"]
+
+    cohort_memory = AuditWindowService(store=memory_store).get_policy_cohort(
+        evaluated_from="2026-06-01T00:00:00+00:00",
+        evaluated_to="2026-06-01T00:05:00+00:00",
+        outcomes_as_of="2026-06-02T00:00:00+00:00",
+    )
+    cohort_postgres = AuditWindowService(store=postgres_store).get_policy_cohort(
+        evaluated_from="2026-06-01T00:00:00+00:00",
+        evaluated_to="2026-06-01T00:05:00+00:00",
+        outcomes_as_of="2026-06-02T00:00:00+00:00",
+    )
+    assert cohort_memory == cohort_postgres
