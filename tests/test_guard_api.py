@@ -2706,3 +2706,56 @@ def test_evaluate_distinct_event_ids_create_separate_audits() -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert len(store.audit_events) == 2
+
+
+def test_evaluate_conflicts_with_legacy_audit_missing_request_digest() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    legacy_audit = _audit_event_model(
+        audit_id="audit_legacy_no_digest",
+        trace_id="trace_legacy_no_digest",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    ).model_copy(update={"links": {"event_id": "evt_legacy_replay", "decision_id": "dec_legacy"}})
+    store.add_audit_event(legacy_audit)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(event_id="evt_legacy_replay"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "EVALUATION_CONFLICT"
+    assert len(store.audit_events) == 1
+
+
+def test_evaluate_conflicts_when_stored_audit_lacks_decision_dump() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    payload = _guard_event_payload(event_id="evt_missing_dump")
+    digest = canonical_sha256(GuardEvent.model_validate(payload).model_dump(mode="json"))
+    stale_audit = _audit_event_model(
+        audit_id="audit_missing_dump",
+        trace_id="trace_missing_dump",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    ).model_copy(update={"links": {"event_id": "evt_missing_dump", "decision_id": "dec_missing_dump", "request_digest": digest}})
+    store.add_audit_event(stale_audit)
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "EVALUATION_CONFLICT"

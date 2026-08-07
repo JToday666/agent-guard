@@ -49,6 +49,10 @@ class EvaluationService:
         self, event: GuardEvent, *, requesting_principal_id: str
     ) -> GuardEvaluationResponse:
         request_digest = canonical_sha256(event.model_dump(mode="json"))
+        # Idempotency is check-then-act: two identical requests racing before the
+        # first audit lands can both miss and evaluate twice. Acceptable for the
+        # single-process contest deployment; tighten with a unique event_id index
+        # on policy evaluations before multi-worker deployment.
         existing = self.audit_service.store.get_policy_evaluation_by_event_id(
             event.event_id
         )
@@ -93,7 +97,10 @@ class EvaluationService:
         )
 
     def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
-        decision = GuardDecision.model_validate(audit.metadata["guard_decision"])
+        raw_decision = audit.metadata.get("guard_decision")
+        if raw_decision is None:
+            raise EvaluationConflictError(audit.links.get("event_id", ""))
+        decision = GuardDecision.model_validate(raw_decision)
         approval: ApprovalRequest | None = None
         approval_id = audit.links.get("approval_id")
         if approval_id:
