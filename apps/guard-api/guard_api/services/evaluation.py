@@ -12,6 +12,7 @@ from agentguard_core import (
 )
 
 from guard_api.models import EvaluationApproval, GuardEvaluationResponse
+from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
 from .audit import AuditService
@@ -38,7 +39,13 @@ class EvaluationService:
     def evaluate(
         self, event: GuardEvent, *, requesting_principal_id: str
     ) -> GuardEvaluationResponse:
-        decision = core_evaluate(event, self.policy_service.current_snapshot())
+        request_digest = canonical_sha256(event.model_dump(mode="json"))
+        snapshot_record = self.policy_service.current_snapshot_record()
+        if snapshot_record is not None:
+            bundle = snapshot_record.policy_bundle
+        else:
+            bundle = self.policy_service.current_snapshot()
+        decision = core_evaluate(event, bundle)
         critic_review = self.action_critic.review(event, decision)
         approval = self.approval_service.create_for_decision(
             event,
@@ -47,6 +54,12 @@ class EvaluationService:
         )
         approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(event, decision)
+        extra_links: dict[str, str] = {
+            "request_digest": request_digest,
+            "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+        }
+        if snapshot_record is not None:
+            extra_links["policy_revision"] = str(snapshot_record.revision)
         self.audit_service.record_evaluation(
             event,
             decision,
@@ -55,6 +68,8 @@ class EvaluationService:
             memory_change_id=(
                 memory_change.change_id if memory_change is not None else None
             ),
+            extra_links=extra_links,
+            decision_dump=decision.model_dump(mode="json"),
         )
         return GuardEvaluationResponse(
             decision=decision,

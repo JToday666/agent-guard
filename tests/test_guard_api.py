@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -2406,3 +2407,83 @@ def test_runtime_metrics_ignore_null_decision_records() -> None:
     )
 
     assert metrics_response.status_code == 200
+
+
+_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _evaluate_once(payload: dict) -> tuple[TestClient, MemoryControlPlaneStore, object]:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    return client, store, response
+
+
+def test_evaluate_audit_records_request_digest() -> None:
+    client, store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_request"))
+
+    audit = store.audit_events[0]
+
+    assert _DIGEST_PATTERN.match(audit.links["request_digest"])
+
+
+def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    PolicyService(store=store).save_snapshot(
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+    )
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(event_id="evt_digest_policy"),
+    )
+
+    assert response.status_code == 200
+    audit = store.audit_events[0]
+    assert _DIGEST_PATTERN.match(audit.links["policy_digest"])
+    assert audit.links["policy_revision"] == "1"
+
+
+def test_evaluate_request_digest_is_deterministic() -> None:
+    _, first_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
+    _, second_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
+
+    assert (
+        first_store.audit_events[0].links["request_digest"]
+        == second_store.audit_events[0].links["request_digest"]
+    )
+
+
+def test_evaluate_audit_stores_full_decision_dump() -> None:
+    _, store, response = _evaluate_once(_guard_event_payload(event_id="evt_digest_decision"))
+
+    audit = store.audit_events[0]
+    dump = audit.metadata["guard_decision"]
+
+    assert dump["decision_id"] == response.json()["decision"]["decision_id"]
+    assert dump["decision"] == response.json()["decision"]["decision"]
+
+
+def test_policy_snapshot_history_returns_latest_record_first() -> None:
+    store = MemoryControlPlaneStore()
+    service = PolicyService(store=store)
+    service.save_snapshot(PolicyBundle(), updated_by="test")
+    service.save_snapshot(
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+    )
+
+    history = store.list_policy_snapshot_history(limit=1)
+
+    assert len(history) == 1
+    assert history[0].revision == 2

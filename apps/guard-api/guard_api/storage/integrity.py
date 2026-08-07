@@ -13,6 +13,13 @@ from guard_api.storage.base import AuditIntegrityStatus
 CANONICALIZATION = "json:v1"
 
 
+def canonical_sha256(payload: dict[str, object]) -> str:
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
 def attach_audit_integrity(
     event: AuditEvent,
     *,

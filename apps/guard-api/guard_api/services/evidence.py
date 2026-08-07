@@ -35,6 +35,8 @@ def build_audit_event(
     approval_id: str | None = None,
     critic_review_id: str | None = None,
     memory_change_id: str | None = None,
+    extra_links: dict[str, str] | None = None,
+    decision_dump: dict[str, object] | None = None,
 ) -> AuditEvent:
     description = describe_guard_event(event)
     links = {"event_id": event.event_id, "decision_id": decision.decision_id}
@@ -44,6 +46,15 @@ def build_audit_event(
         links["critic_review_id"] = critic_review_id
     if memory_change_id is not None:
         links["memory_change_id"] = memory_change_id
+    if extra_links:
+        links.update(extra_links)
+    metadata = _merge_metadata(
+        _security_context_metadata(event),
+        event.metadata,
+        description.metadata,
+    )
+    if decision_dump is not None:
+        metadata["guard_decision"] = decision_dump
     return AuditEvent(
         trace_id=event.trace_id,
         case_id=event.case_id,
@@ -61,11 +72,7 @@ def build_audit_event(
         reason=decision.reason,
         links=links,
         latency_ms=decision.latency_ms,
-        metadata=_merge_metadata(
-            _security_context_metadata(event),
-            event.metadata,
-            description.metadata,
-        ),
+        metadata=metadata,
     )
 
 

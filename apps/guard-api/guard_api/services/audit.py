@@ -38,6 +38,8 @@ class AuditService:
         approval_id: str | None = None,
         critic_review: ActionCriticReview | None = None,
         memory_change_id: str | None = None,
+        extra_links: dict[str, str] | None = None,
+        decision_dump: dict[str, object] | None = None,
     ) -> AuditEvent:
         audit_event = build_audit_event(
             event,
@@ -47,6 +49,8 @@ class AuditService:
                 critic_review.review_id if critic_review is not None else None
             ),
             memory_change_id=memory_change_id,
+            extra_links=extra_links,
+            decision_dump=decision_dump,
         )
         self.store.add_audit_event(audit_event)
         if critic_review is not None:
