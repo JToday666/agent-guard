@@ -1,5 +1,5 @@
 <template>
-  <figure class="asr-chart" :aria-label="summary">
+  <figure class="asr-chart" :class="`asr-chart--${change.direction}`" :aria-label="summary">
     <figcaption><strong>攻击成功率变化</strong><span>同一尺度比较防护效果</span></figcaption>
     <div class="asr-chart__scale" aria-hidden="true">
       <span>0%</span><span>50%</span><span>100%</span>
@@ -15,8 +15,9 @@
       <div>
         <i class="after"></i><span>防护后</span><strong>{{ percent(after) }}</strong>
       </div>
-      <div class="asr-chart__delta">
-        <span>ASR 降幅</span><strong>{{ reduction }}</strong>
+      <div class="asr-chart__delta" :class="`asr-chart__delta--${change.direction}`">
+        <span>{{ change.label }}</span
+        ><strong>{{ change.value }}</strong>
       </div>
     </div>
   </figure>
@@ -24,6 +25,8 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { describeAsrChange } from "../../utils/asr-change";
+
 const props = defineProps<{ after: number | null; before: number | null }>();
 function percent(value: number | null) {
   return value === null ? "--" : `${(value * 100).toFixed(1)}%`;
@@ -31,14 +34,10 @@ function percent(value: number | null) {
 function ratio(value: number | null) {
   return value === null ? 0 : Math.min(1, Math.max(0, value));
 }
-const reduction = computed(() =>
-  props.before === null || props.after === null
-    ? "--"
-    : `${((props.before - props.after) * 100).toFixed(1)}pp`,
-);
+const change = computed(() => describeAsrChange(props.before, props.after));
 const summary = computed(
   () =>
-    `防护前攻击成功率 ${percent(props.before)}，防护后 ${percent(props.after)}，降幅 ${reduction.value}`,
+    `防护前攻击成功率 ${percent(props.before)}，防护后 ${percent(props.after)}，${change.value.text}`,
 );
 </script>
 
@@ -83,9 +82,15 @@ const summary = computed(
   opacity: 0.5;
 }
 .asr-chart__after {
+  background: var(--color-text-muted);
+  height: 0.6rem;
+}
+.asr-chart--decrease .asr-chart__after {
   background: var(--gradient-data-active);
   box-shadow: var(--glow-active);
-  height: 0.6rem;
+}
+.asr-chart--increase .asr-chart__after {
+  background: var(--gradient-data-danger);
 }
 .asr-chart__labels {
   align-items: center;
@@ -107,13 +112,30 @@ const summary = computed(
   background: var(--color-danger);
 }
 .asr-chart__labels i.after {
+  background: var(--color-text-muted);
+}
+.asr-chart--decrease .asr-chart__labels i.after {
   background: var(--color-success);
+}
+.asr-chart--increase .asr-chart__labels i.after {
+  background: var(--color-danger);
 }
 .asr-chart__delta {
   margin-left: auto;
 }
-.asr-chart__delta strong {
+.asr-chart__delta--decrease strong {
   color: var(--color-success);
+}
+.asr-chart__delta--increase strong {
+  color: var(--color-danger);
+}
+.asr-chart__delta--unchanged strong {
+  color: var(--color-text-muted);
+}
+.asr-chart__delta--unknown strong {
+  color: var(--color-text-subtle);
+}
+.asr-chart__delta strong {
   font-size: var(--font-size-24);
 }
 </style>

@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { expectPrimaryRoutesLayout } from "./support/dashboard-layout";
 
-const guardedServerErrorMessage = "Guard API 暂时无法完成请求，请稍后重试。";
+const guardedServerErrorMessage = "核心服务暂时无法完成请求，请稍后重试。";
 const guardedNotFoundMessage = "请求的资源不存在或已失效。";
 
 const eventDto = {
@@ -348,6 +348,14 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
     "href",
     "/investigations?decision=deny",
   );
+  const approvalMetric = page.locator(".metric-strip__item").filter({ hasText: "需审批" });
+  await expect(approvalMetric.locator("dd")).toHaveText("1");
+  await expect(approvalMetric).toContainText("审批触发率 100.0%");
+  await expect(approvalMetric.getByRole("link")).toHaveAttribute(
+    "href",
+    "/investigations?decision=ask",
+  );
+  await expect(page.locator("body")).not.toContainText("Guard 决策随当前审计窗口变化");
 
   await page.goto("/evidence/trace_api_001");
   await expect(page.locator(".evidence-hero")).toContainText("策略决定：需审批");
@@ -359,7 +367,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   await expect(page.locator(".provenance-flow").getByText("判定", { exact: true })).toBeVisible();
   await page.locator(".prov-node--audit").click();
   await expect(page).toHaveURL(/event_id=audit_api_001/);
-  await page.getByRole("button", { name: "查看关联原始审计" }).click();
+  await page.getByRole("button", { name: "查看关联事件" }).click();
   await expect(page.getByRole("dialog")).toContainText("send_email");
 
   await page.goto("/system");
@@ -475,11 +483,14 @@ test("API mode keeps an uncertain approval available when reconciliation still r
   });
   await page.goto("/approvals/approval_uncertain");
   await page.getByRole("button", { name: "拒绝授权" }).click();
+  await page.getByRole("button", { name: "确认拒绝授权" }).click();
 
   await expect(
     page.getByText("审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。"),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "拒绝授权" })).toBeEnabled();
+  await expect(page.getByRole("dialog", { name: "确认拒绝本次授权？" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认拒绝授权", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "拒绝授权", exact: true })).toBeEnabled();
   await expect(page).toHaveURL(/\/approvals\/approval_uncertain$/);
 });
 
@@ -493,6 +504,7 @@ test("API mode leaves a removed uncertain approval without inferring its outcome
   });
   await page.goto("/approvals/approval_uncertain");
   await page.getByRole("button", { name: "拒绝授权" }).click();
+  await page.getByRole("button", { name: "确认拒绝授权" }).click();
 
   await expect(
     page.getByText("审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。"),
@@ -583,8 +595,8 @@ test("API mode shows a session error instead of a blank dashboard", async ({ pag
   await installApiRoutes(page, { authenticated: false });
   await page.goto("/overview");
 
-  await expect(page.getByRole("alert")).toContainText("无法建立监督端会话");
-  await expect(page.getByRole("alert")).toContainText("监督端会话已过期");
+  await expect(page.getByRole("alert")).toContainText("无法建立安全会话");
+  await expect(page.getByRole("alert")).toContainText("当前会话已过期");
 });
 
 test("API polling requests only common data and the active page domain", async ({ page }) => {

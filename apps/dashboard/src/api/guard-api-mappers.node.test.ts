@@ -145,6 +145,34 @@ test("does not infer an unknown legacy event type as a policy evaluation", () =>
   assert.equal(event.auditSequence, null);
 });
 
+test("keeps AuditEvent 0.3 inference and 0.4 record type classification", () => {
+  const legacy = mapAuditEvent({
+    audit_id: "audit_legacy_policy",
+    schema_version: "0.3",
+    trace_id: "trace_compat",
+    timestamp: "2026-06-22T06:30:00Z",
+    event_type: "tool_call_proposed",
+    decision: "deny",
+  } as unknown as Parameters<typeof mapAuditEvent>[0]);
+  const current = mapAuditEvent({
+    audit_id: "audit_runtime_outcome",
+    schema_version: "0.4",
+    trace_id: "trace_compat",
+    timestamp: "2026-06-22T06:31:00Z",
+    event_type: "runtime_outcome",
+    record_type: "runtime_outcome",
+    decision: null,
+    risk_score: null,
+    severity: null,
+    blocked: null,
+  } as unknown as Parameters<typeof mapAuditEvent>[0]);
+
+  assert.equal(legacy.recordType, "policy_evaluation");
+  assert.equal(current.recordType, "runtime_outcome");
+  assert.equal(current.decision, "unknown");
+  assert.equal(current.blocked, null);
+});
+
 test("maps P1 audit metadata into readable action and resource fields", () => {
   const event = mapAuditEvent({
     audit_id: "audit_p1",
@@ -344,10 +372,10 @@ test("maps trace detail response through existing event and approval mappers", (
     detail.events.map((event) => event.id),
     ["audit_1", "audit_2"],
   );
-  assert.equal(detail.aggregateMetrics.reportedFnr, 0.25);
+  assert.equal("aggregateMetrics" in detail, false);
 });
 
-test("maps sparse trace detail responses with empty collections and metrics", () => {
+test("maps sparse trace detail responses without creating an unused metrics model", () => {
   const detail = mapTraceDetail({
     trace_id: "trace_sparse",
   } as unknown as Parameters<typeof mapTraceDetail>[0]);
@@ -355,24 +383,7 @@ test("maps sparse trace detail responses with empty collections and metrics", ()
   assert.equal(detail.id, "trace_sparse");
   assert.deepEqual(detail.events, []);
   assert.deepEqual(detail.approvals, []);
-  assert.deepEqual(detail.aggregateMetrics, {
-    scope: {
-      kind: "trace_history",
-      source: "legacy_metrics_api",
-      from: null,
-      to: null,
-      deduplication: "backend_unspecified",
-    },
-    reportedEventCount: 0,
-    allowCount: 0,
-    denyCount: 0,
-    askCount: 0,
-    reportedInterventionCount: 0,
-    reportedInterventionRate: null,
-    reportedFpr: null,
-    reportedFnr: null,
-    reportedAverageLatencyMs: null,
-  });
+  assert.equal("aggregateMetrics" in detail, false);
 });
 
 test("maps current policy with latest history metadata", () => {
@@ -458,8 +469,8 @@ test("maps latest evaluation run without inheriting audit metrics", () => {
   assert.equal(evaluation.asrBefore, 0.72);
   assert.equal(evaluation.asrAfter, 0.08);
   assert.equal(evaluation.perAttack[0]?.attackType, "prompt_injection");
-  assert.equal(evaluation.perAttack[0]?.reduction, 0.7000000000000001);
-  assert.equal(evaluation.perAttack[1]?.reduction, null);
+  assert.equal("reduction" in evaluation.perAttack[0]!, false);
+  assert.equal("reduction" in evaluation.perAttack[1]!, false);
   assert.equal(evaluation.cases[0]?.traceId, "trace_eval_001");
   assert.equal(evaluation.cases[0]?.attackSuccess, false);
   assert.equal("blockRate" in evaluation, false);

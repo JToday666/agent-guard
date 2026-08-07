@@ -16,7 +16,7 @@
             @click="handleExport"
           >
             <Download aria-hidden="true" :size="15" />
-            导出当前窗口筛选结果
+            导出当前筛选结果
           </button>
         </div>
       </header>
@@ -120,7 +120,7 @@
       <template v-else-if="filteredEvents.length">
         <div class="result-summary">
           <strong>{{ filteredEvents.length }}</strong
-          ><span>条窗口内匹配事件</span
+          ><span>条匹配事件</span
           ><span
             >最近最多 {{ AUDIT_EVENT_WINDOW_LIMIT }} 条 · 第 {{ currentPage }} / {{ totalPages }} 页
             · 按最新时间排序</span
@@ -177,7 +177,7 @@
                     ></span
                   >
                 </td>
-                <td>{{ event.runtime }}</td>
+                <td>{{ getRuntimeLabel(event.runtime) }}</td>
                 <td>
                   <code>{{ event.tool }}</code
                   ><span class="truncate-cell" :title="event.resource">{{ event.resource }}</span>
@@ -210,7 +210,7 @@
       ><EmptyState
         v-else
         title="没有匹配事件"
-        message="当前条件下没有审计事件，清除筛选后可查看完整记录。"
+        message="当前条件下没有审计事件，清除筛选后可查看全部已加载记录。"
       >
         <button type="button" @click="handleClearFilters">清除筛选</button>
       </EmptyState>
@@ -218,7 +218,7 @@
 
     <DetailDrawer
       :is-open="Boolean(query.eventId)"
-      eyebrow="事件证据"
+      eyebrow="事件详情"
       :title="selectedEvent?.tool ?? '事件未找到'"
       @close="handleCloseEvent"
     >
@@ -227,7 +227,7 @@
           <header>
             <div>
               <h3>关联证据链</h3>
-              <span>{{ selectedTraceEvents.length }} 个事件节点</span>
+              <span>{{ selectedTraceEvents.length }} 条关联事件</span>
             </div>
             <RouterLink :to="`/evidence/${selectedEvent.traceId}`">查看完整证据链</RouterLink>
           </header>
@@ -273,7 +273,9 @@ import { downloadCsv } from "../utils/csv-export";
 import {
   getDecisionLabel,
   getDecisionTone,
+  getEventTypeLabel,
   getRiskSeverityLabel,
+  getRuntimeLabel,
 } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery, normalizeInvestigationQuery } from "../utils/investigation-query";
 import { formatRuleListForDisplay } from "../utils/rule-display";
@@ -360,7 +362,9 @@ function buildDynamicOptions(
     ...[...types].map((value) => ({ label: getLabel(value), value })),
   ];
 }
-const eventTypeOptions = computed(() => buildDynamicOptions(index.value.latestEvents, "eventType"));
+const eventTypeOptions = computed(() =>
+  buildDynamicOptions(index.value.latestEvents, "eventType", getEventTypeLabel),
+);
 const attackTypeOptions = computed(() =>
   buildDynamicOptions(index.value.latestEvents, "attackType", getAttackTypeLabel),
 );
@@ -608,7 +612,7 @@ function handleExport() {
   cursor: pointer;
   font-size: var(--font-size-12);
   max-width: 16rem;
-  min-height: 2rem;
+  min-height: 2.25rem;
   overflow: hidden;
   padding: 0 var(--space-3);
   text-overflow: ellipsis;
@@ -634,13 +638,14 @@ function handleExport() {
   padding: var(--space-2) var(--space-3);
 }
 .new-event-notice button {
-  background: transparent;
-  border: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-active-border);
+  border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
   font-weight: var(--font-weight-bold);
-  min-height: 2rem;
-  padding: 0;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
 }
 .result-summary {
   align-items: baseline;

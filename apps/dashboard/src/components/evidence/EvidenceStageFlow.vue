@@ -1,5 +1,5 @@
 <template>
-  <ol class="evidence-stage-flow" aria-label="四阶段证据流">
+  <ol class="evidence-stage-flow" aria-label="关键证据路径">
     <li v-for="stage in stages" :key="stage.id">
       <header>
         <span>{{ stage.eyebrow }}</span>

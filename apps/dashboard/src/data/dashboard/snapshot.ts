@@ -106,8 +106,7 @@ export function hasSameEvaluationRun(left: EvaluationRun, right: EvaluationRun):
         other !== undefined &&
         row.attackType === other.attackType &&
         row.asrBefore === other.asrBefore &&
-        row.asrAfter === other.asrAfter &&
-        row.reduction === other.reduction
+        row.asrAfter === other.asrAfter
       );
     }) &&
     left.cases.length === right.cases.length &&

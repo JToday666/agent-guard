@@ -31,7 +31,7 @@
         <InlineNotice
           v-else-if="authStore.status === 'error'"
           class="session-error"
-          title="无法建立监督端会话"
+          title="无法建立安全会话"
           tone="danger"
         >
           <p>{{ authStore.error ?? "会话无效或启动链接已过期。" }}</p>

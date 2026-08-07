@@ -2,7 +2,7 @@
   <div class="evidence-dossier">
     <section>
       <header>
-        <h3>工具、参数与规范化资源</h3>
+        <h3>动作与资源</h3>
       </header>
       <dl class="evidence-dossier__facts">
         <div>
@@ -25,25 +25,25 @@
       <ul v-if="primary?.resources.length" class="resource-evidence-list">
         <li v-for="resource in primary.resources" :key="resource.id">
           <div>
-            <strong>{{ resource.type ?? "资源" }}</strong>
+            <strong>{{ resourceTypeLabel(resource.type) }}</strong>
             <span>
-              {{ [resource.operation, resource.sensitivity].filter(Boolean).join(" · ") }}
+              {{ resourceDetail(resource.operation, resource.sensitivity) }}
             </span>
           </div>
           <code>{{ resource.value }}</code>
         </li>
       </ul>
-      <p v-else class="evidence-dossier__missing">规范化资源未记录</p>
+      <p v-else class="evidence-dossier__missing">资源目标未记录</p>
     </section>
 
     <section>
       <header>
-        <h3>命中规则与风险组合</h3>
+        <h3>命中规则与风险原因</h3>
       </header>
       <div class="risk-composition">
         <div>
           <span>聚合方法</span>
-          <strong>{{ primary?.risk.aggregationMethod ?? "未记录" }}</strong>
+          <strong>{{ riskAggregationLabel }}</strong>
         </div>
         <div>
           <span>最终风险</span>
@@ -94,7 +94,7 @@
 
     <section>
       <header>
-        <h3>事件时策略与审计窗口</h3>
+        <h3>当时生效的策略与数据范围</h3>
       </header>
       <dl class="evidence-dossier__facts evidence-dossier__facts--grid">
         <div>
@@ -116,23 +116,23 @@
           </dd>
         </div>
         <div>
-          <dt>返回审计</dt>
+          <dt>审计记录</dt>
           <dd>{{ evidence.originalAuditCount }} 条</dd>
         </div>
         <div>
-          <dt>逻辑审计</dt>
+          <dt>去重后记录</dt>
           <dd>{{ evidence.logicalAuditCount }} 条</dd>
         </div>
       </dl>
       <p v-if="evidence.duplicatePolicyAuditCount" class="evidence-dossier__notice">
         已将 {{ evidence.duplicatePolicyAuditCount }}
-        条重复策略审计合并为逻辑决定；原始审计仍保留在时间线与原始证据中。
+        条重复的策略记录合并为一条判断；全部审计记录仍保留在时间线与原始证据中。
       </p>
     </section>
 
     <details>
       <summary>查看脱敏原始证据</summary>
-      <p>敏感键和值已在浏览器展示前统一脱敏。</p>
+      <p>敏感信息已隐藏。</p>
       <StructuredDataView :value="safeRawEvidence" />
     </details>
   </div>
@@ -144,6 +144,12 @@ import { computed } from "vue";
 import type { TraceEvidenceViewModel } from "../../types/dashboard";
 import { getDecisionEvidenceLabel } from "../../data/evidence/trace-evidence";
 import { redactSensitiveData } from "../../utils/data-redaction";
+import {
+  getResourceOperationLabel,
+  getResourceSensitivityLabel,
+  getResourceTypeLabel,
+  getRiskAggregationLabel,
+} from "../../utils/dashboard-formatters";
 import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
 import StructuredDataView from "../common/StructuredDataView.vue";
 
@@ -155,6 +161,23 @@ const safeRawEvidence = computed(() =>
     redactSensitiveData(props.evidence.events.map((event) => event.raw)),
   ),
 );
+const riskAggregationLabel = computed(() => {
+  const method = primary.value?.risk.aggregationMethod;
+  return method ? getRiskAggregationLabel(method) : "未记录";
+});
+
+function resourceTypeLabel(type: string | null): string {
+  return type ? getResourceTypeLabel(type) : "资源";
+}
+
+function resourceDetail(operation: string | null, sensitivity: string | null): string {
+  return [
+    operation ? getResourceOperationLabel(operation) : null,
+    sensitivity ? getResourceSensitivityLabel(sensitivity) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 </script>
 
 <style scoped lang="scss">
@@ -377,9 +400,12 @@ const safeRawEvidence = computed(() =>
 }
 
 .evidence-dossier > details summary {
+  align-items: center;
   color: var(--color-link);
   cursor: pointer;
+  display: flex;
   font-weight: var(--font-weight-semibold);
+  min-height: 2.25rem;
 }
 
 .evidence-dossier > details > p {

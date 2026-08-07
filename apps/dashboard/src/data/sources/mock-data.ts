@@ -287,7 +287,7 @@ const scenarios: Record<string, ScenarioEvidence> = {
       },
     ],
     resultDisposition: "not_applicable",
-    resultSummary: "Core 返回 deny，Adapter 未调用 read_file",
+    resultSummary: "安全策略返回拒绝，运行时未调用 read_file",
     riskMethod: "max_detection_score",
     rules: [
       {
@@ -348,7 +348,7 @@ const scenarios: Record<string, ScenarioEvidence> = {
       },
     ],
     resultDisposition: "passed_through",
-    resultSummary: "人工单次放行后，Adapter 调用 send_email 并收到成功回执",
+    resultSummary: "人工单次放行后，运行时调用 send_email 并收到成功回执",
     riskMethod: "max_detection_score",
     rules: [
       {

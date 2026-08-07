@@ -54,7 +54,7 @@ function policySummary(primary: NormalizedAuditEvidence): string {
     primary.policy.version,
     primary.policy.revision === null ? null : `r${primary.policy.revision}`,
   ].filter((value): value is string => Boolean(value));
-  return parts.length ? parts.join(" / ") : "事件时策略引用未记录";
+  return parts.length ? parts.join(" / ") : "当时生效的策略未记录";
 }
 
 function approvalLabel(primary: NormalizedAuditEvidence): string {
@@ -118,7 +118,7 @@ function buildInputs(primary: NormalizedAuditEvidence): {
       phase: "tool_policy",
       refId: "policy",
       status: primary.policy.digest ? `摘要 ${primary.policy.digest.slice(0, 12)}…` : undefined,
-      summary: "事件时策略",
+      summary: "当时生效的策略",
     },
     {
       critical: true,

@@ -86,7 +86,7 @@ onUnmounted(() => {
   color: var(--color-link);
   cursor: pointer;
   font-size: var(--font-size-12);
-  padding: var(--space-1) var(--space-3);
+  padding: 0 var(--space-3);
   &:hover {
     background: var(--color-surface-muted);
     border-color: var(--color-active);
@@ -122,16 +122,18 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
 }
 .structured-data summary {
+  align-items: center;
   background: transparent;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
-  display: inline-block;
+  display: inline-flex;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
   list-style: none;
-  padding: var(--space-1) var(--space-3);
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
   &:hover {
     background: var(--color-surface-muted);
     border-color: var(--color-active);

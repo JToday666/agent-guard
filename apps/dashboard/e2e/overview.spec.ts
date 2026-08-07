@@ -68,7 +68,7 @@ test("top page headers use primary titles without category subtitles", async ({ 
     const header = page.locator(".page-header").first();
     await expect(header.locator("h1")).toBeVisible();
     if (path === "/evidence/trace_002") {
-      await expect(header.locator("p")).toContainText("完整证据");
+      await expect(header.locator("p")).toContainText("关键证据");
     } else {
       await expect(header.locator("p")).toHaveCount(0);
     }
@@ -120,11 +120,68 @@ test("global search shortcut opens event investigation with URL state", async ({
   await expect(page.getByRole("heading", { name: "安全总览" })).toBeVisible();
   await page.keyboard.press("/");
   const search = page.getByRole("searchbox", {
-    name: "搜索证据链、Case、资源或规则",
+    name: "搜索证据链、评测样本、资源或规则",
   });
   await expect(search).toBeFocused();
   await search.fill("trace_002");
   await search.press("Enter");
 
   await expect(page).toHaveURL(/\/investigations\?search=trace_002$/);
+});
+
+test("browser theme and primary actions match the dashboard interaction contract", async ({
+  page,
+}) => {
+  await page.goto("/overview");
+
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#102724");
+  const actionHeights = await page
+    .locator(".chart-link, .page-action")
+    .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+  expect(actionHeights.length).toBeGreaterThan(0);
+  expect(actionHeights.every((height) => height >= 36)).toBe(true);
+
+  const approvalMetric = page.locator(".metric-strip__item").filter({ hasText: "需审批" });
+  const box = await approvalMetric.boundingBox();
+  if (!box) throw new Error("需审批指标卡不可见");
+  await page.mouse.click(box.x + 12, box.y + 12);
+  await expect(page).toHaveURL(/\/investigations\?decision=ask$/);
+});
+
+test("overview uses user-facing copy and semantic decision colors", async ({ page }) => {
+  await page.goto("/overview");
+
+  const body = page.locator("body");
+  for (const removedCopy of [
+    "Guard 决策随当前审计窗口变化",
+    "优先处理待审批与高风险事件",
+    "识别当前窗口中的主要攻击面",
+    "当前窗口中的逻辑唯一策略评估",
+  ]) {
+    await expect(body).not.toContainText(removedCopy);
+  }
+  await expect(body).toContainText("查看近期允许、需审批与拒绝的变化");
+  await expect(body).toContainText("查看近期风险主要来自哪些攻击类型");
+
+  const colors = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    document.body.append(probe);
+    const resolveColor = (token: string) => {
+      probe.style.color = `var(${token})`;
+      return getComputedStyle(probe).color;
+    };
+    const result = {
+      allow: getComputedStyle(document.querySelector(".trend-chart .series-allow")!).stroke,
+      ask: getComputedStyle(document.querySelector(".trend-chart .series-ask")!).stroke,
+      danger: resolveColor("--color-danger"),
+      deny: getComputedStyle(document.querySelector(".trend-chart .series-deny")!).stroke,
+      success: resolveColor("--color-success"),
+      warning: resolveColor("--color-chart-warning"),
+    };
+    probe.remove();
+    return result;
+  });
+  expect(colors.allow).toBe(colors.success);
+  expect(colors.ask).toBe(colors.warning);
+  expect(colors.deny).toBe(colors.danger);
 });

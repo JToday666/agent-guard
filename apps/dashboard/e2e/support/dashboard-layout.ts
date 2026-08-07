@@ -20,6 +20,28 @@ async function expectUnfilledDecisionTrend(page: Page): Promise<void> {
       series.evaluateAll((elements) => elements.map((element) => getComputedStyle(element).fill)),
     )
     .toEqual(["none", "none", "none"]);
+
+  const colors = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    document.body.append(probe);
+    const resolveColor = (token: string) => {
+      probe.style.color = `var(${token})`;
+      return getComputedStyle(probe).color;
+    };
+    const result = {
+      allow: getComputedStyle(document.querySelector(".trend-chart .series-allow")!).stroke,
+      ask: getComputedStyle(document.querySelector(".trend-chart .series-ask")!).stroke,
+      danger: resolveColor("--color-danger"),
+      deny: getComputedStyle(document.querySelector(".trend-chart .series-deny")!).stroke,
+      success: resolveColor("--color-success"),
+      warning: resolveColor("--color-chart-warning"),
+    };
+    probe.remove();
+    return result;
+  });
+  expect(colors.allow).toBe(colors.success);
+  expect(colors.ask).toBe(colors.warning);
+  expect(colors.deny).toBe(colors.danger);
 }
 
 export async function expectPrimaryRoutesLayout(page: Page, traceId: string): Promise<void> {
@@ -40,7 +62,19 @@ export async function expectPrimaryRoutesLayout(page: Page, traceId: string): Pr
     }));
     expect(dimensions.mainWidth).toBeGreaterThan(0);
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-    if (path === "/overview") await expectUnfilledDecisionTrend(page);
+    const undersizedButtons = await page.locator("main button:visible").evaluateAll((elements) =>
+      elements
+        .map((element) => ({
+          height: element.getBoundingClientRect().height,
+          text: element.textContent?.trim() ?? "",
+        }))
+        .filter((item) => item.height < 36),
+    );
+    expect(undersizedButtons).toEqual([]);
+    if (path === "/overview") {
+      await expectUnfilledDecisionTrend(page);
+      await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#102724");
+    }
   }
 
   expect(runtimeErrors).toEqual([]);

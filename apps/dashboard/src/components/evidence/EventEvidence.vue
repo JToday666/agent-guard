@@ -20,20 +20,8 @@
           <dd>{{ getRiskSeverityLabel(event.severity) }}</dd>
         </div>
         <div>
-          <dt>旧版阻断标记</dt>
-          <dd>
-            {{
-              event.blocked === null
-                ? "未记录"
-                : event.blocked
-                  ? "true（已记录）"
-                  : "false（已记录）"
-            }}
-          </dd>
-        </div>
-        <div>
           <dt>运行时</dt>
-          <dd>{{ event.runtime }}</dd>
+          <dd>{{ getRuntimeLabel(event.runtime) }}</dd>
         </div>
       </dl>
     </section>
@@ -63,18 +51,20 @@
         </div>
       </dl>
       <p class="event-evidence__caveat">
-        策略决定、旧版阻断标记、实际执行与副作用证据分别展示，缺失项不作安全推断。
+        策略决定与实际执行结果分别记录；没有运行时证据时，不推断动作是否执行或产生副作用。
       </p>
     </section>
 
     <section v-if="normalized" class="event-evidence__section">
-      <h3>来源、参数与事件时策略</h3>
+      <h3>来源、参数与当时策略</h3>
       <dl class="evidence-copy">
         <div>
           <dt>来源</dt>
           <dd>
             {{ normalized.source.label ?? normalized.source.type ?? "未记录" }}
-            <small>信任等级：{{ normalized.source.trustLevel ?? "未记录" }}</small>
+            <small
+              >信任等级：{{ getTrustLevelLabel(normalized.source.trustLevel ?? "unknown") }}</small
+            >
           </dd>
         </div>
         <div>
@@ -178,6 +168,8 @@ import {
   getDecisionLabel,
   getDecisionTone,
   getRiskSeverityLabel,
+  getRuntimeLabel,
+  getTrustLevelLabel,
 } from "../../utils/dashboard-formatters";
 import StatusBadge from "../common/StatusBadge.vue";
 import StructuredDataView from "../common/StructuredDataView.vue";
@@ -375,13 +367,16 @@ async function copy(value: string, label: string): Promise<void> {
 }
 .evidence-links a,
 .evidence-links button {
+  align-items: center;
   background: transparent;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
+  display: inline-flex;
   font-size: var(--font-size-12);
-  padding: var(--space-1) var(--space-3);
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
   text-decoration: none;
   &:hover {
     background: var(--color-surface-muted);

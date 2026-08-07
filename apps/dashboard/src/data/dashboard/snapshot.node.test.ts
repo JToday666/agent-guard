@@ -115,7 +115,6 @@ test("compares evaluation runs without inheriting audit metrics", () => {
         attackType: "prompt_injection",
         asrBefore: 0.8,
         asrAfter: 0.1,
-        reduction: 0.7000000000000001,
       },
     ],
     cases: [

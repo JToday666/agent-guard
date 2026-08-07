@@ -34,13 +34,13 @@
       <div class="overview-primary section-divider">
         <ChartFrame
           class="overview-trend"
-          description="Guard 决策随当前审计窗口变化"
+          description="查看近期允许、需审批与拒绝的变化"
           :range-label="windowRangeLabel"
           :summary="trendSummary"
           title="决策趋势"
         >
           <template #controls>
-            <RouterLink class="chart-link" to="/investigations">进入调查</RouterLink>
+            <RouterLink class="chart-link" to="/investigations">调查相关事件</RouterLink>
           </template>
           <DecisionTrendChart :points="store.decisionTrend" />
         </ChartFrame>
@@ -49,9 +49,11 @@
           <header class="section-header">
             <div>
               <h2 id="triage-title">待分诊</h2>
-              <p>优先处理待审批与高风险事件</p>
+              <p>集中查看等待确认和风险较高的请求</p>
             </div>
-            <RouterLink class="chart-link" to="/investigations?severity=high">查看全部</RouterLink>
+            <RouterLink class="chart-link" to="/investigations?severity=high">
+              查看高风险事件
+            </RouterLink>
           </header>
           <div v-if="triageItems.length" class="triage-queue__rows">
             <RouterLink v-for="item in triageItems" :key="item.id" :to="item.to">
@@ -73,17 +75,13 @@
               >
             </RouterLink>
           </div>
-          <EmptyState
-            v-else
-            title="当前无需分诊"
-            message="当前审计窗口内没有待审批或高风险事件。"
-          />
+          <EmptyState v-else title="当前无需分诊" message="近期记录中没有等待审批或高风险事件。" />
         </section>
       </div>
 
       <div class="overview-secondary section-divider">
         <ChartFrame
-          description="识别当前窗口中的主要攻击面"
+          description="查看近期风险主要来自哪些攻击类型"
           :range-label="windowRangeLabel"
           :summary="`攻击类型分布，共 ${store.attackDistribution.length} 类`"
           title="攻击类型"
@@ -91,10 +89,10 @@
           <AttackDistributionChart :items="store.attackDistribution" />
         </ChartFrame>
         <ChartFrame
-          description="定位最常触发的风险判断"
+          description="查看最常触发的安全规则"
           :range-label="windowRangeLabel"
           :summary="`规则命中排行，共 ${store.ruleDistribution.length} 项`"
-          title="规则命中 Top 6"
+          title="规则命中排行"
         >
           <template #controls>
             <RouterLink class="chart-link" to="/investigations">查看事件</RouterLink>
@@ -105,7 +103,7 @@
           <header class="section-header">
             <div>
               <h2 id="defense-ledger-title">防御效果</h2>
-              <p>当前窗口中的逻辑唯一策略评估</p>
+              <p>基于去重后的策略判断</p>
             </div>
             <RouterLink class="chart-link" to="/evaluation">查看评测</RouterLink>
           </header>
@@ -115,11 +113,11 @@
               <dd>{{ formatPercent(store.windowMetrics.interventionRate) }}</dd>
             </div>
             <div>
-              <dt>误报率 FPR</dt>
+              <dt>误报率</dt>
               <dd>{{ formatPercent(store.windowMetrics.policyFpr) }}</dd>
             </div>
             <div>
-              <dt>漏报率 FNR</dt>
+              <dt>漏报率</dt>
               <dd>{{ formatPercent(store.windowMetrics.policyFnr) }}</dd>
             </div>
             <div>
@@ -134,7 +132,7 @@
         <header class="section-header">
           <div>
             <h2 id="integrity-bar-title">审计链完整性</h2>
-            <p>确认当前证据链是否连续且可验证</p>
+            <p>查看审计记录是否连续且可验证</p>
           </div>
           <RouterLink class="chart-link" to="/system#audit-integrity">查看详情</RouterLink>
         </header>
@@ -231,12 +229,12 @@ const trendSummary = computed(() => {
 
 const windowRangeLabel = computed(() => {
   const { from, to } = store.auditWindow.scope;
-  if (!from || !to) return "当前审计窗口";
+  if (!from || !to) return "近期审计数据";
   return `${formatDashboardDateTime(from)} 至 ${formatDashboardDateTime(to)}`;
 });
 const windowCompletenessLabel = computed(() => {
   if (store.auditWindow.scope.hasMore === true) return "仅显示部分记录";
-  if (store.auditWindow.scope.hasMore === false) return "当前窗口记录完整";
+  if (store.auditWindow.scope.hasMore === false) return "近期记录完整";
   return "是否截断未知";
 });
 
@@ -251,25 +249,26 @@ const metricItems = computed(() => [
     detail: `策略拒绝率 ${formatPercent(store.windowMetrics.policyDenyRate)}`,
     label: "策略拒绝",
     route: "/investigations?decision=deny",
-    tone: "protective" as const,
+    tone: "danger" as const,
     value: countFormatter.format(store.windowMetrics.denyCount),
   },
   {
-    detail: "需要人工处理",
-    label: "待审批",
-    route: "/approvals",
+    detail: `审批触发率 ${formatPercent(store.windowMetrics.approvalTriggerRate)}`,
+    label: "需审批",
+    route: "/investigations?decision=ask",
     tone: "warning" as const,
-    value: countFormatter.format(store.pendingCount),
+    value: countFormatter.format(store.windowMetrics.askCount),
   },
   {
     detail: "策略允许动作继续",
     label: "允许",
     route: "/investigations?decision=allow",
+    tone: "success" as const,
     value: countFormatter.format(store.windowMetrics.allowCount),
   },
   {
     detail: `${store.windowMetrics.benignLabelCount} 个正常标注评估`,
-    label: "策略误报率 FPR",
+    label: "策略误报率",
     route: "/evaluation",
     value: formatPercent(store.windowMetrics.policyFpr),
   },
@@ -337,14 +336,22 @@ function handleRefresh() {
 }
 
 .chart-link {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
   color: var(--color-link);
+  display: inline-flex;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
   text-decoration: none;
   white-space: nowrap;
 
   &:hover {
-    text-decoration: underline;
+    background: var(--color-row-hover);
+    border-color: var(--color-active-border);
   }
 }
 

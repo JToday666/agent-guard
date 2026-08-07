@@ -14,7 +14,7 @@
             v-model.trim="searchDraft"
             autocomplete="off"
             name="trace-search"
-            placeholder="Trace ID、Case 或结论…"
+            placeholder="证据链 ID、评测样本或结论…"
             type="search"
           />
         </span>
@@ -41,10 +41,7 @@
       <div class="evidence-summary">
         <strong>{{ filteredTraces.length }}</strong>
         <span>条匹配证据链</span>
-        <span
-          >基于最近最多 {{ AUDIT_EVENT_WINDOW_LIMIT }} 条审计事件 · 一行代表一个 Trace ·
-          按最新事件排序</span
-        >
+        <span>基于最近加载的最多 {{ AUDIT_EVENT_WINDOW_LIMIT }} 条审计事件 · 按最新事件排序</span>
       </div>
       <div class="trace-table-wrap">
         <table class="trace-table">
@@ -53,8 +50,8 @@
           </caption>
           <thead>
             <tr>
-              <th>Case</th>
-              <th>Trace 与最终结论</th>
+              <th>评测样本</th>
+              <th>证据链与结论</th>
               <th>事件</th>
               <th>最终状态</th>
               <th>最后事件</th>
@@ -84,7 +81,7 @@
               </td>
               <td>
                 <RouterLink class="trace-table__action" :to="`/evidence/${trace.id}`">
-                  查看
+                  查看详情
                   <ArrowUpRight aria-hidden="true" :size="14" />
                 </RouterLink>
               </td>
@@ -114,7 +111,7 @@
       :message="
         store.traces.length
           ? '当前条件下没有证据链，请调整搜索或最终状态。'
-          : '审计事件写入后，将在当前审计窗口内按同一 Trace 汇总证据。'
+          : '审计事件写入后，这里会按证据链汇总展示。'
       "
     />
   </section>
@@ -378,12 +375,21 @@ function handleClearFilters(): void {
 
 .trace-table__action {
   align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
   color: var(--color-link);
   display: inline-flex;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
   gap: var(--space-1);
+  min-height: 2.25rem;
+  padding: 0 var(--space-2);
   text-decoration: none;
+}
+
+.trace-table__action:hover {
+  background: var(--color-surface-muted);
+  border-color: var(--color-active-border);
 }
 
 .evidence-pagination {

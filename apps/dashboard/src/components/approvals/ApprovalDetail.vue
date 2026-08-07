@@ -19,7 +19,7 @@
           <p>{{ approval.userTask || "未提供" }}</p>
         </div>
         <div>
-          <h3>Agent 请求执行的动作</h3>
+          <h3>智能体请求执行的动作</h3>
           <p>{{ approval.agentAction || "未提供" }}</p>
         </div>
       </section>
@@ -105,35 +105,35 @@
         class="button-warning"
         :disabled="!canResolve"
         :title="resolutionDisabledReason"
-        @click="confirmAllow = true"
+        @click="confirmationDecision = 'allow_once'"
       >
-        仅本次放行
+        {{ submittingDecision === "allow_once" ? "提交中…" : "仅本次放行" }}
       </button>
       <button
         type="button"
-        class="button-primary"
+        class="button-danger"
         :disabled="!canResolve"
         :title="resolutionDisabledReason"
-        @click="emit('resolve', 'deny')"
+        @click="confirmationDecision = 'deny'"
       >
         {{ submittingDecision === "deny" ? "提交中…" : "拒绝授权" }}
       </button>
     </footer>
 
     <ConfirmDialog
-      v-if="confirmAllow"
-      busy-label="正在放行…"
-      confirm-label="确认仅本次放行"
+      v-if="confirmationDecision && confirmationContent"
+      :busy-label="confirmationContent.busyLabel"
+      :confirm-label="confirmationContent.confirmLabel"
       :confirm-disabled="!canResolve"
       :error-message="actionMessage"
-      eyebrow="高影响操作"
-      :is-submitting="submittingDecision === 'allow_once'"
-      title="确认仅本次放行？"
-      tone="warning"
-      @close="confirmAllow = false"
-      @confirm="emit('resolve', 'allow_once')"
+      :eyebrow="confirmationContent.eyebrow"
+      :is-submitting="submittingDecision === confirmationDecision"
+      :title="confirmationContent.title"
+      :tone="confirmationContent.tone"
+      @close="confirmationDecision = null"
+      @confirm="handleConfirm"
     >
-      <p>该动作将绕过当前 Guard 决策并继续执行一次。</p>
+      <p>{{ confirmationContent.description }}</p>
       <dl class="confirm-impact">
         <div>
           <dt>工具</dt>
@@ -148,8 +148,8 @@
           </dd>
         </div>
         <div>
-          <dt>放行影响</dt>
-          <dd>{{ approval.consequence }}</dd>
+          <dt>{{ confirmationContent.impactLabel }}</dt>
+          <dd>{{ confirmationImpact }}</dd>
         </div>
       </dl>
     </ConfirmDialog>
@@ -176,16 +176,52 @@ const props = defineProps<{
 
 const emit = defineEmits<{ resolve: [decision: "allow_once" | "deny"] }>();
 
-const confirmAllow = ref(false);
+type ConfirmationDecision = "allow_once" | "deny";
+
+const confirmationDecision = ref<ConfirmationDecision | null>(null);
+const confirmationContent = computed(() => {
+  if (confirmationDecision.value === "allow_once") {
+    return {
+      busyLabel: "正在放行…",
+      confirmLabel: "确认仅本次放行",
+      description: "该动作将绕过当前安全判断并继续执行一次。",
+      eyebrow: "高影响操作",
+      impactLabel: "放行影响",
+      title: "确认仅本次放行？",
+      tone: "warning" as const,
+    };
+  }
+  if (confirmationDecision.value === "deny") {
+    return {
+      busyLabel: "正在拒绝…",
+      confirmLabel: "确认拒绝授权",
+      description: "本次授权将被拒绝；实际执行状态仍以运行时回执为准。",
+      eyebrow: "拒绝授权",
+      impactLabel: "处理结果",
+      title: "确认拒绝本次授权？",
+      tone: "danger" as const,
+    };
+  }
+  return null;
+});
+const confirmationImpact = computed(() =>
+  confirmationDecision.value === "deny"
+    ? "拒绝本次授权；运行时是否产生其他结果，以后续审计记录为准。"
+    : props.approval.consequence,
+);
 
 watch(
   () => props.approval.id,
   () => {
-    confirmAllow.value = false;
+    confirmationDecision.value = null;
   },
 );
 
 const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approval));
+
+function handleConfirm(): void {
+  if (confirmationDecision.value) emit("resolve", confirmationDecision.value);
+}
 </script>
 
 <style scoped lang="scss">
@@ -351,11 +387,14 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   gap: var(--space-2);
 }
 .evidence-links a {
+  align-items: center;
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   color: var(--color-text);
-  padding: var(--space-2) var(--space-3);
+  display: inline-flex;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
   text-decoration: none;
 }
 .evidence-links a:hover {
@@ -395,7 +434,7 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   cursor: pointer;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   padding: 0 var(--space-4);
 }
 .approval-actions button:disabled {
@@ -408,14 +447,14 @@ const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approva
   color: var(--color-warning);
   font-weight: var(--font-weight-bold);
 }
-.button-primary {
-  background: var(--color-active);
-  border-color: var(--color-active) !important;
+.button-danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger) !important;
   color: var(--color-active-text);
   font-weight: var(--font-weight-bold);
 }
 .button-warning:hover:not(:disabled),
-.button-primary:hover:not(:disabled) {
+.button-danger:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 .confirm-impact {

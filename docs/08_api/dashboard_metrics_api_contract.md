@@ -417,15 +417,15 @@ enforcement_coverage
 
 当前 Dashboard 已完成：
 
-- `AuditWindow`、`WindowMetrics`、`AggregateMetrics`、`EvaluationRun` 类型分离；
+- `AuditWindow`、`WindowMetrics` 与 `EvaluationRun` 类型分离；
 - 当前窗口以事件、scope 和策略指标作为单一对象更新；
 - API 兼容模式从 `/audit/events` 客户端重建逻辑唯一策略指标；
 - 客户端重复评估在 `integrity.sequence` 可用时采用最早审计记录；
-- `/metrics/eval` 不再进入 Overview 或 Evaluation 自动刷新；
+- `/metrics/eval` 和 trace DTO 中的旧 `metrics` 不再映射为未消费的前端领域对象；
 - evaluation run mapper 不接收外部指标；
 - 趋势、攻击类型、规则分布、混淆矩阵和判定延迟只读取逻辑唯一策略评估；
 - UI 使用“策略介入”“策略拒绝”“策略误报/漏报”，不声称实际阻断；
-- 历史聚合保留显式按需入口，但在缺少范围与去重元数据时不展示。
+- 历史聚合仅在后端提供明确范围、去重语义与显式查询入口后按需接入。
 
 后端目标接口上线后，只替换 data source 的窗口映射，不改变页面领域模型。
 

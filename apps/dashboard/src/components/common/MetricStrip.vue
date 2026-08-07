@@ -11,7 +11,12 @@
     >
       <dt>{{ item.label }}</dt>
       <dd>
-        <RouterLink v-if="item.route" :to="item.route">{{ item.value }}</RouterLink>
+        <RouterLink
+          v-if="item.route"
+          :aria-label="`${item.label}：${item.value}。${item.detail}`"
+          :to="item.route"
+          >{{ item.value }}</RouterLink
+        >
         <span v-else>{{ item.value }}</span>
       </dd>
       <small>{{ item.detail }}</small>
@@ -56,8 +61,13 @@ defineProps<{
     width: 1px;
   }
 
-  &--interactive:hover {
+  &--interactive:has(dd a:hover) {
     background: var(--color-row-hover);
+  }
+
+  &--interactive:has(dd a:focus-visible) {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
 }
 
@@ -91,6 +101,13 @@ dd span {
   color: inherit;
   text-decoration: none;
 }
+
+dd a::after {
+  content: "";
+  inset: 0;
+  position: absolute;
+}
+
 dd a:hover {
   color: var(--color-active);
 }

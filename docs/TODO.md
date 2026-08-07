@@ -157,7 +157,7 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 
 ### 已完成
 
-- [x] Dashboard `/evidence/:trace_id` 已升级为攻击证据展示器，包含最终结论、六维事实、四阶段证据流、交互式溯源图、节点检查器、生命周期时间线、证据档案和脱敏原始证据。
+- [x] Dashboard `/evidence/:trace_id` 已升级为证据链详情，包含最终结论、六维事实、关键证据路径、攻击溯源关系、节点检查器、事件时间线、证据档案和脱敏原始证据。
 - [x] 前端已区分执行前拒绝、工具结果隔离、模型输出修订、仅审计观察和审批后放行；`deny` 不再自动推断工具未调用或副作用为零。
 - [x] API 与 Mock 共用证据规范化器、页面组件和图布局；API 模式失败时不实例化或回退到 Mock。
 - [x] Mock 已覆盖五类代表 trace，并使用与目标 AuditEvent 一致的证据结构。
@@ -165,7 +165,7 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 - [x] Dashboard 已直接读取后端现有的 `AuditEvent.integrity.sequence`、`prev_hash`、`event_hash` 和 `canonicalization`；已删除 `evidence.audit`、`chain_index`、`entry_hash`、`previous_hash` 平行结构的读取和 Mock 生成逻辑。
 - [x] 已建立本轮 API 协作契约文档，明确不新增 Dashboard 专用证据端点或独立 execution receipt 端点。
 - [x] 已建立 [Provenance 丰富化后端实施要求](08_api/provenance_enrichment_backend_requirements.md)，细化节点、关系、写入时机、幂等、历史数据和跨存储验收；后端代码仍未实施。
-- [x] Dashboard 已分离 `AuditWindow`、历史 `AggregateMetrics` 和 `EvaluationRun`；趋势、分布、混淆矩阵与延迟只读取逻辑唯一策略评估。
+- [x] Dashboard 已分离 `AuditWindow` 与 `EvaluationRun`；旧 trace `metrics` 不再映射为未消费的前端领域对象，历史聚合待显式 cohort 接口上线后按需接入。
 - [x] Dashboard API DTO 已允许 0.4 非策略记录的顶层策略字段为空，并以 `record_type` 和稳定 links 决定指标成员资格。
 - [x] 已建立指标作用域与原子审计窗口协作契约；当前前端使用旧事件数组兼容重建，等待后端目标接口。
 

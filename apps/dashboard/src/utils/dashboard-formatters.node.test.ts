@@ -5,8 +5,17 @@ import {
   formatAuditHeadHash,
   getDecisionLabel,
   getDecisionTone,
+  getEventTypeLabel,
+  getResourceOperationLabel,
+  getResourceSensitivityLabel,
+  getResourceTypeLabel,
   getRiskSeverityLabel,
+  getRiskAggregationLabel,
+  getRuntimeLabel,
+  getStageLabel,
   getTraceStatusLabel,
+  getTraceStatusTone,
+  getTrustLevelLabel,
 } from "./dashboard-formatters.ts";
 import { maskSensitiveText, redactSensitiveData } from "./data-redaction.ts";
 
@@ -15,11 +24,29 @@ test("uses one Chinese vocabulary for security states", () => {
   assert.equal(getDecisionLabel("ask"), "需审批");
   assert.equal(getDecisionLabel("allow"), "允许");
   assert.equal(getDecisionLabel("unknown"), "未记录");
-  assert.equal(getDecisionTone("deny"), "protective");
+  assert.equal(getDecisionTone("deny"), "danger");
   assert.equal(getDecisionTone("ask"), "warning");
+  assert.equal(getDecisionTone("allow"), "success");
   assert.equal(getRiskSeverityLabel("critical"), "严重");
   assert.equal(getTraceStatusLabel("paused"), "需审批");
   assert.equal(getTraceStatusLabel("denied"), "拒绝");
+  assert.equal(getTraceStatusTone("denied"), "danger");
+  assert.equal(getTraceStatusTone("allowed"), "success");
+});
+
+test("formats known event and runtime enums without rewriting unknown API values", () => {
+  assert.equal(getEventTypeLabel("tool_call_proposed"), "工具调用待确认");
+  assert.equal(getEventTypeLabel("vendor_custom_event"), "vendor_custom_event");
+  assert.equal(getRuntimeLabel("langgraph"), "LangGraph");
+  assert.equal(getRuntimeLabel("openclaw"), "OpenClaw");
+  assert.equal(getRuntimeLabel("unknown"), "未记录");
+  assert.equal(getRuntimeLabel("vendor-runtime"), "vendor-runtime");
+  assert.equal(getStageLabel("before_tool_call"), "工具调用前");
+  assert.equal(getTrustLevelLabel("untrusted"), "不可信");
+  assert.equal(getResourceTypeLabel("email_recipient"), "邮件收件人");
+  assert.equal(getResourceOperationLabel("send"), "发送");
+  assert.equal(getResourceSensitivityLabel("external"), "外部");
+  assert.equal(getRiskAggregationLabel("max_detection_score"), "取最高风险分");
 });
 
 test("formats an empty audit chain head without throwing", () => {

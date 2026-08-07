@@ -8,7 +8,7 @@
     <ErrorState
       v-if="windowUnavailable && !hasRunData"
       :is-retrying="store.isManualRefreshing"
-      :message="store.error ?? '当前审计窗口加载失败'"
+      :message="store.error ?? '近期审计数据加载失败'"
       @retry="store.refresh"
     />
     <LoadingState v-else-if="store.status === 'loading' && !store.events.length && !hasRunData" />
@@ -20,8 +20,8 @@
       <section v-if="hasRunData" class="benchmark-section" aria-labelledby="benchmark-title">
         <header class="section-header">
           <div>
-            <h2 id="benchmark-title">完整评测结果</h2>
-            <p>{{ store.evaluationRun.datasetLabel }} · 独立评测运行</p>
+            <h2 id="benchmark-title">最近一次完整评测</h2>
+            <p>{{ store.evaluationRun.datasetLabel }} · 与近期审计数据分开统计</p>
           </div>
           <span>{{ formatMaybeTime(store.evaluationRun.runAt) }}</span>
         </header>
@@ -30,18 +30,24 @@
           <div class="benchmark-result">
             <dl class="asr-headline" aria-label="防护前后攻击成功率">
               <div>
-                <dt>防护前 ASR</dt>
+                <dt>防护前攻击成功率</dt>
                 <dd class="asr-headline__before">{{ percent(store.evaluationRun.asrBefore) }}</dd>
               </div>
-              <div class="asr-headline__change">
-                <dt>ASR 降幅</dt>
-                <dd>
-                  {{ pointDelta(store.evaluationRun.asrBefore, store.evaluationRun.asrAfter) }}
-                </dd>
+              <div
+                class="asr-headline__change"
+                :class="`asr-headline__change--${overallAsrChange.direction}`"
+              >
+                <dt>{{ overallAsrChange.label }}</dt>
+                <dd>{{ overallAsrChange.value }}</dd>
               </div>
               <div>
-                <dt>防护后 ASR</dt>
-                <dd class="asr-headline__after">{{ percent(store.evaluationRun.asrAfter) }}</dd>
+                <dt>防护后攻击成功率</dt>
+                <dd
+                  class="asr-headline__after"
+                  :class="`asr-headline__after--${overallAsrChange.direction}`"
+                >
+                  {{ percent(store.evaluationRun.asrAfter) }}
+                </dd>
               </div>
             </dl>
 
@@ -52,7 +58,7 @@
 
             <dl class="benchmark-facts">
               <div>
-                <dt>运行 ID</dt>
+                <dt>评测运行 ID</dt>
                 <dd>
                   <code>{{ store.evaluationRun.runId }}</code>
                 </dd>
@@ -75,8 +81,8 @@
           >
             <header class="section-header">
               <div>
-                <h3 id="attack-asr-title">攻击类型 ASR</h3>
-                <p>按防护前攻击成功率对比防护效果</p>
+                <h3 id="attack-asr-title">各攻击类型成功率</h3>
+                <p>比较防护前后的攻击成功率</p>
               </div>
               <div class="attack-asr__legend" aria-label="图例">
                 <span><i class="before"></i>防护前</span>
@@ -84,14 +90,12 @@
               </div>
             </header>
             <div class="attack-asr__rows" role="list">
-              <div
-                v-for="row in store.evaluationRun.perAttack"
-                :key="row.attackType"
-                role="listitem"
-              >
+              <div v-for="row in perAttackRows" :key="row.attackType" role="listitem">
                 <div class="attack-asr__label">
                   <strong>{{ getAttackTypeLabel(row.attackType) }}</strong>
-                  <span>下降 {{ pointDelta(row.asrBefore, row.asrAfter) }}</span>
+                  <span :class="`attack-asr__change--${row.change.direction}`">
+                    {{ row.change.text }}
+                  </span>
                 </div>
                 <div class="attack-asr__bars" aria-hidden="true">
                   <i
@@ -118,8 +122,8 @@
       <section class="window-section section-divider" aria-labelledby="window-title">
         <header class="section-header">
           <div>
-            <h2 id="window-title">当前审计窗口</h2>
-            <p>由当前加载记录中的逻辑唯一策略评估派生，不与完整评测结果混算</p>
+            <h2 id="window-title">近期安全判断</h2>
+            <p>基于已加载记录中去重后的策略判断，与完整评测结果分开统计</p>
           </div>
           <span v-if="!windowUnavailable">
             {{ store.auditWindow.scope.returnedRecordCount }} 条审计记录 ·
@@ -128,15 +132,45 @@
           </span>
           <span v-else>窗口数据暂不可用</span>
         </header>
-        <InlineNotice v-if="windowUnavailable" title="当前审计窗口暂不可用" tone="warning">
+        <InlineNotice v-if="windowUnavailable" title="近期审计数据暂不可用" tone="warning">
           <p>{{ store.error }}</p>
         </InlineNotice>
         <template v-else>
           <MetricStrip :items="metricItems" />
 
+          <details class="window-data-details">
+            <summary>查看数据说明</summary>
+            <dl>
+              <div>
+                <dt>数据来源</dt>
+                <dd>最近加载的审计记录</dd>
+              </div>
+              <div>
+                <dt>观察范围</dt>
+                <dd>{{ windowRangeLabel }}</dd>
+              </div>
+              <div>
+                <dt>完整性</dt>
+                <dd>{{ windowCompletenessLabel }}</dd>
+              </div>
+              <div>
+                <dt>去重处理</dt>
+                <dd>{{ deduplicationLabel }}</dd>
+              </div>
+              <div>
+                <dt>关联信息</dt>
+                <dd>{{ associationLabel }}</dd>
+              </div>
+              <div>
+                <dt>数据覆盖</dt>
+                <dd>{{ dataCoverageLabel }}</dd>
+              </div>
+            </dl>
+          </details>
+
           <div class="window-analysis">
             <ChartFrame
-              description="按有判定延迟记录的逻辑唯一策略评估计算运行时均值"
+              description="按有耗时记录的安全判断，比较不同运行时的平均判定时间"
               :range-label="windowRangeLabel"
               :summary="runtimeLatencySummary"
               title="运行时判定延迟"
@@ -144,7 +178,7 @@
               <div v-if="hasRuntimeData" class="runtime-bars">
                 <div v-for="row in runtimeLatency" :key="row.runtime" class="runtime-bar-row">
                   <span class="runtime-bar-label">
-                    <strong>{{ row.runtime }}</strong>
+                    <strong>{{ getRuntimeLabel(row.runtime) }}</strong>
                     <small>{{ row.count }} 条记录</small>
                   </span>
                   <span class="runtime-bar-track" aria-hidden="true"
@@ -155,11 +189,11 @@
                   }}</span>
                 </div>
               </div>
-              <p v-else class="chart-empty">当前窗口暂无延迟记录</p>
+              <p v-else class="chart-empty">近期数据暂无延迟记录</p>
             </ChartFrame>
 
             <ChartFrame
-              description="由恶意标注与策略是否介入派生，不表示工具实际未执行"
+              description="根据样本标注与安全策略是否介入计算，不代表工具一定未执行"
               :range-label="windowRangeLabel"
               :summary="matrixSummary"
               title="策略介入混淆矩阵"
@@ -171,7 +205,7 @@
                 :tn="matrix.tn"
                 :fn="matrix.fn"
               />
-              <p v-else class="chart-empty">当前窗口暂无足够的恶意标注数据</p>
+              <p v-else class="chart-empty">近期数据暂无足够的恶意标注数据</p>
             </ChartFrame>
           </div>
         </template>
@@ -232,7 +266,7 @@
                     >
                   </td>
                   <td>{{ getAttackTypeLabel(row.attackType) }}</td>
-                  <td>{{ row.runtime }}</td>
+                  <td>{{ getRuntimeLabel(row.runtime) }}</td>
                   <td>
                     <StatusBadge
                       :label="getDecisionLabel(row.expectedDecision)"
@@ -299,10 +333,12 @@ import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";
 import { getAttackTypeLabel } from "../utils/attack-type";
+import { describeAsrChange } from "../utils/asr-change";
 import {
   formatDashboardDateTime,
   getDecisionLabel,
   getDecisionTone,
+  getRuntimeLabel,
 } from "../utils/dashboard-formatters";
 
 defineOptions({ name: "EvaluationPage" });
@@ -346,6 +382,15 @@ const paginatedCases = computed(() =>
   ),
 );
 const hasRunData = computed(() => store.evaluationRun.runId !== null);
+const overallAsrChange = computed(() =>
+  describeAsrChange(store.evaluationRun.asrBefore, store.evaluationRun.asrAfter),
+);
+const perAttackRows = computed(() =>
+  store.evaluationRun.perAttack.map((row) => ({
+    ...row,
+    change: describeAsrChange(row.asrBefore, row.asrAfter),
+  })),
+);
 const windowUnavailable = computed(() => store.status === "error" && Boolean(store.error));
 const matrix = computed(() => {
   let tp = 0;
@@ -373,13 +418,29 @@ const labeledEvaluationCount = computed(
 );
 const windowRangeLabel = computed(() => {
   const { from, to } = store.auditWindow.scope;
-  if (!from || !to) return "当前审计窗口";
+  if (!from || !to) return "近期审计数据";
   return `${formatDashboardDateTime(from)} 至 ${formatDashboardDateTime(to)}`;
 });
 const windowCompletenessLabel = computed(() => {
   if (store.auditWindow.scope.hasMore === true) return "仅显示部分记录";
-  if (store.auditWindow.scope.hasMore === false) return "当前窗口记录完整";
+  if (store.auditWindow.scope.hasMore === false) return "近期记录完整";
   return "是否截断未知";
+});
+const deduplicationLabel = computed(() =>
+  store.windowMetrics.duplicatePolicyRecordCount
+    ? `已合并 ${store.windowMetrics.duplicatePolicyRecordCount} 条重复策略记录`
+    : "未发现重复策略记录",
+);
+const associationLabel = computed(() =>
+  store.windowMetrics.legacyFallbackCount
+    ? `${store.windowMetrics.legacyFallbackCount} 条较早记录缺少关联标识，按单条记录统计`
+    : "用于去重的关联信息完整",
+);
+const dataCoverageLabel = computed(() => {
+  const unknown = store.windowMetrics.unknownDecisionCount;
+  const unlabeled = store.windowMetrics.unlabeledCount;
+  if (!unknown && !unlabeled) return "决定与样本标注均有记录";
+  return `${unknown} 次判断缺少明确决定；${unlabeled} 次评估缺少样本标注`;
 });
 const metricItems = computed(() => [
   {
@@ -395,7 +456,7 @@ const metricItems = computed(() => [
     value: countFormatter.format(store.windowMetrics.evaluationCount),
   },
   {
-    detail: `${store.windowMetrics.interventionCount} / ${store.windowMetrics.evaluationCount}，包含拒绝与需审批`,
+    detail: `拒绝率 ${percent(store.windowMetrics.policyDenyRate)} · 审批触发率 ${percent(store.windowMetrics.approvalTriggerRate)}`,
     label: "策略介入率",
     route: "/investigations",
     tone: "protective" as const,
@@ -403,13 +464,13 @@ const metricItems = computed(() => [
   },
   {
     detail: `分母为 ${store.windowMetrics.benignLabelCount} 个正常标注评估`,
-    label: "策略误报率 FPR",
+    label: "策略误报率",
     route: "/investigations",
     value: percent(store.windowMetrics.policyFpr),
   },
   {
     detail: `分母为 ${store.windowMetrics.maliciousLabelCount} 个恶意标注评估`,
-    label: "策略漏报率 FNR",
+    label: "策略漏报率",
     route: "/investigations?decision=allow",
     tone: "danger" as const,
     value: percent(store.windowMetrics.policyFnr),
@@ -442,22 +503,19 @@ const hasRuntimeData = computed(() => runtimeLatency.value.some((row) => row.avg
 const runtimeLatencySummary = computed(() => {
   const rows = runtimeLatency.value.filter((row) => row.avg !== null);
   return rows.length
-    ? rows.map((row) => `${row.runtime} 平均 ${row.avg!.toFixed(1)} 毫秒`).join("，")
-    : "当前窗口暂无延迟记录";
+    ? rows
+        .map((row) => `${getRuntimeLabel(row.runtime)} 平均 ${row.avg!.toFixed(1)} 毫秒`)
+        .join("，")
+    : "近期数据暂无延迟记录";
 });
 const matrixSummary = computed(() =>
   hasMatrixData.value
     ? `共 ${labeledEvaluationCount.value} 次已标注策略评估，正确介入 ${matrix.value.tp}，误报 ${matrix.value.fp}，正确未介入 ${matrix.value.tn}，漏报 ${matrix.value.fn}`
-    : "当前窗口暂无足够的恶意标注数据",
+    : "近期数据暂无足够的恶意标注数据",
 );
 
 function percent(value: number | null): string {
   return value === null ? "--" : `${(value * 100).toFixed(1)}%`;
-}
-
-function pointDelta(before: number | null, after: number | null): string {
-  if (before === null || after === null) return "--";
-  return `${((before - after) * 100).toFixed(1)}pp`;
 }
 
 function barScale(value: number | null): number {
@@ -554,8 +612,14 @@ watch(
   color: var(--color-danger);
 }
 .asr-headline__after {
-  color: var(--color-success);
+  color: var(--color-text-muted);
   text-align: right;
+}
+.asr-headline__after--decrease {
+  color: var(--color-success);
+}
+.asr-headline__after--increase {
+  color: var(--color-danger);
 }
 .asr-headline > div:last-child dt {
   text-align: right;
@@ -567,9 +631,15 @@ watch(
   text-align: center;
 }
 .asr-headline__change dd {
-  color: var(--color-active);
+  color: var(--color-text-muted);
   font-size: var(--font-size-24);
   letter-spacing: -0.025em;
+}
+.asr-headline__change--decrease dd {
+  color: var(--color-success);
+}
+.asr-headline__change--increase dd {
+  color: var(--color-danger);
 }
 .benchmark-facts {
   display: grid;
@@ -672,9 +742,18 @@ watch(
   overflow-wrap: anywhere;
 }
 .attack-asr__label span {
-  color: var(--color-success);
+  color: var(--color-text-subtle);
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
+}
+.attack-asr__label .attack-asr__change--decrease {
+  color: var(--color-success);
+}
+.attack-asr__label .attack-asr__change--increase {
+  color: var(--color-danger);
+}
+.attack-asr__label .attack-asr__change--unchanged {
+  color: var(--color-text-muted);
 }
 .attack-asr__bars {
   display: grid;
@@ -704,6 +783,43 @@ watch(
 .runtime-bars {
   display: grid;
   gap: var(--space-3);
+}
+.window-data-details {
+  border-block: 1px solid var(--color-border);
+}
+.window-data-details summary {
+  align-items: center;
+  color: var(--color-link);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-semibold);
+  min-height: 2.25rem;
+  width: fit-content;
+}
+.window-data-details summary:hover {
+  color: var(--color-active);
+}
+.window-data-details dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: var(--space-2) 0 var(--space-4);
+}
+.window-data-details dl > div {
+  border-left: 1px solid var(--color-border);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+}
+.window-data-details dt {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+}
+.window-data-details dd {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-12);
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
 }
 .runtime-bar-row {
   align-items: center;
@@ -768,7 +884,7 @@ watch(
   border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
-  min-height: 2rem;
+  min-height: 2.25rem;
   padding: 0 var(--space-3);
 }
 .case-locator--missing {

@@ -412,7 +412,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (resources.has("configAudit")) {
       tasks.push({
         critical: false,
-        label: "配置审计",
+        label: "配置检查",
         resource: "configAudit",
         promise: dashboardDataSource
           .getConfigAuditFindings({ limit: 20 }, controller.signal)
@@ -422,7 +422,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
           })
           .catch((reason: unknown) => {
             if (!controller.signal.aborted) {
-              configAuditError.value = errorMessage(reason, "配置审计发现项加载失败");
+              configAuditError.value = errorMessage(reason, "配置检查结果加载失败");
             }
             throw reason;
           }),

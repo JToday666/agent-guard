@@ -56,7 +56,7 @@ export const routes: RouteRecordRaw[] = [
     component: getDashboardPageLoader("evidenceDetail"),
     meta: {
       keepAlive: true,
-      title: "攻击证据展示器",
+      title: "证据链详情",
     },
   },
   {

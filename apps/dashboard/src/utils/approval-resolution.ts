@@ -47,7 +47,7 @@ export function getApprovalResolutionFailure(reason: unknown): ApprovalResolutio
   if (code === "SESSION_INVALID" || code === "SESSION_EXPIRED" || code === "CSRF_INVALID") {
     return {
       kind: "session",
-      message: "监督端会话已失效，请通过本机启动器重新打开 Dashboard。",
+      message: "当前会话已失效，请通过本机启动器重新打开 Dashboard。",
       shouldRefreshQueue: false,
     };
   }

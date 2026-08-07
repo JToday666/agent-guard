@@ -26,6 +26,13 @@ import type {
   TraceEvidenceViewModel,
 } from "../../types/dashboard";
 import { maskSensitiveText, redactSensitiveData } from "../../utils/data-redaction.ts";
+import {
+  getResourceOperationLabel,
+  getResourceSensitivityLabel,
+  getResourceTypeLabel,
+  getRiskAggregationLabel,
+  getTrustLevelLabel,
+} from "../../utils/dashboard-formatters.ts";
 import { ruleLabel } from "../../utils/rule-display.ts";
 import { serializeStructuredData } from "../../utils/structured-data.ts";
 
@@ -716,12 +723,12 @@ function policyDetail(policy: PolicyReferenceEvidence): string {
     policy.revision === null ? null : `修订 ${policy.revision}`,
     policy.digest ? `摘要 ${policy.digest.slice(0, 12)}…` : null,
   ].filter((part): part is string => Boolean(part));
-  return parts.length ? parts.join(" · ") : "事件时策略引用未记录";
+  return parts.length ? parts.join(" · ") : "当时生效的策略未记录";
 }
 
 function executionDetail(execution: ExecutionEvidence): string {
   if (!execution.receiptRecorded) return "不能由策略决定推断工具是否调用";
-  if (execution.status === "not_invoked") return "Adapter 回执确认未调用工具";
+  if (execution.status === "not_invoked") return "运行时回执确认未调用工具";
   if (execution.status === "executed") {
     return execution.completedAt ? `完成于 ${execution.completedAt}` : "运行时回执确认已执行";
   }
@@ -801,8 +808,8 @@ function integrityLabel(
       integrity.traceMetadataStatus === "complete"
         ? "全局校验通过，当前返回事件均带完整性元数据"
         : integrity.traceMetadataStatus === "partial"
-          ? "全局校验通过，但当前 trace 仅部分事件带完整性元数据"
-          : "全局校验通过，当前 trace 未返回逐事件完整性元数据";
+          ? "全局校验通过，但当前证据链仅部分事件带完整性元数据"
+          : "全局校验通过，当前证据链未返回逐事件完整性元数据";
     return {
       availability: "recorded",
       detail: integrity.mayBeTruncated ? `${detail}；返回窗口可能达到上限` : detail,
@@ -836,7 +843,7 @@ function buildFacts(
       label: "策略决定",
       tone:
         decision === "deny"
-          ? "protective"
+          ? "danger"
           : decision === "ask"
             ? "warning"
             : decision === "allow"
@@ -859,17 +866,17 @@ function buildFacts(
                   ? "策略在副作用发生前拒绝动作"
                   : intervention === "none"
                     ? "运行时明确记录未采取干预"
-                    : "不能由 deny、blocked 或审批状态推断",
+                    : "不能仅根据策略决定或审批状态推断",
       id: "intervention",
       label: "干预方式",
       tone:
-        intervention === "pre_execution_deny" ||
-        intervention === "tool_result_quarantine" ||
-        intervention === "model_output_revision"
-          ? "protective"
-          : intervention === "approval_release"
-            ? "success"
-            : "neutral",
+        intervention === "pre_execution_deny"
+          ? "danger"
+          : intervention === "tool_result_quarantine" || intervention === "model_output_revision"
+            ? "protective"
+            : intervention === "approval_release"
+              ? "success"
+              : "neutral",
       value: getInterventionLabel(intervention),
     },
     {
@@ -966,7 +973,7 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
 
   return [
     {
-      eyebrow: "阶段 01",
+      eyebrow: "步骤 1",
       id: "input_trust",
       index: 1,
       items: [
@@ -980,7 +987,9 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
         },
         {
           availability: availability(Boolean(source.type || source.label)),
-          detail: source.trustLevel ? `信任等级：${source.trustLevel}` : "信任等级未记录",
+          detail: source.trustLevel
+            ? `信任等级：${getTrustLevelLabel(source.trustLevel)}`
+            : "信任等级未记录",
           eventId: primary?.auditId ?? null,
           id: "source",
           label: "来源与信任",
@@ -990,7 +999,7 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
       title: "输入与信任",
     },
     {
-      eyebrow: "阶段 02",
+      eyebrow: "步骤 2",
       id: "context_intent",
       index: 2,
       items: [
@@ -1014,7 +1023,7 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
       title: "上下文与模型意图",
     },
     {
-      eyebrow: "阶段 03",
+      eyebrow: "步骤 3",
       id: "tool_policy",
       index: 3,
       items: [
@@ -1031,16 +1040,20 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           detail: resources.length
             ? resources
                 .map((resource) =>
-                  [resource.type, resource.operation, resource.sensitivity]
+                  [
+                    resource.type ? getResourceTypeLabel(resource.type) : null,
+                    resource.operation ? getResourceOperationLabel(resource.operation) : null,
+                    resource.sensitivity ? getResourceSensitivityLabel(resource.sensitivity) : null,
+                  ]
                     .filter(Boolean)
                     .join(" / "),
                 )
                 .filter(Boolean)
-                .join(" · ") || "已完成资源规范化"
+                .join(" · ") || "已记录资源类型与操作"
             : null,
           eventId: primary?.auditId ?? null,
           id: "resources",
-          label: "规范化资源",
+          label: "资源目标",
           value: resourceValue(resources),
         },
         {
@@ -1058,9 +1071,9 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
         {
           availability: availability(risk.finalScore !== null || risk.factors.length > 0),
           detail: risk.aggregationMethod
-            ? `${risk.aggregationMethod} · ${risk.factors.length} 个检测因子`
+            ? `${getRiskAggregationLabel(risk.aggregationMethod)} · ${risk.factors.length} 个风险因素`
             : risk.factors.length
-              ? `${risk.factors.length} 个检测因子`
+              ? `${risk.factors.length} 个风险因素`
               : null,
           eventId: primary?.auditId ?? null,
           id: "risk",
@@ -1074,14 +1087,14 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           detail: policy.digest ? `规范摘要 ${policy.digest}` : "规范摘要未记录",
           eventId: primary?.auditId ?? null,
           id: "policy",
-          label: "事件时策略",
+          label: "当时生效的策略",
           value: policyDetail(policy),
         },
       ],
       title: "工具、资源与策略",
     },
     {
-      eyebrow: "阶段 04",
+      eyebrow: "步骤 4",
       id: "outcome_audit",
       index: 4,
       items: [
@@ -1148,7 +1161,7 @@ function buildConclusion(primary: NormalizedAuditEvidence | null): TraceEvidence
   if (!primary) {
     return {
       confidence: "unknown",
-      outcome: "当前 trace 没有可用审计事件",
+      outcome: "当前证据链没有可用审计事件",
       reason: "未返回证据",
       title: "结论未形成",
     };
@@ -1164,8 +1177,8 @@ function buildConclusion(primary: NormalizedAuditEvidence | null): TraceEvidence
     return {
       confidence: confirmed ? "confirmed" : "partial",
       outcome: confirmed
-        ? `Adapter 回执确认工具未调用${sideEffectSuffix}`
-        : "Core 已拒绝动作，但尚不能确认 Adapter 是否实际调用工具",
+        ? `运行时回执确认工具未调用${sideEffectSuffix}`
+        : "安全策略已拒绝动作，但尚不能确认运行时是否实际调用工具",
       reason,
       title: confirmed ? "执行前拒绝已确认" : "策略拒绝，执行回执待补充",
     };

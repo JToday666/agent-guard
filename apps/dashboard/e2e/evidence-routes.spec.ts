@@ -52,8 +52,8 @@ test("approval detail exposes explicit control-flow evidence fields", async ({ p
   await expect(detail).not.toContainText("approvalNonce");
 
   const content = await detail.textContent();
-  expect(content?.indexOf("用户任务")).toBeLessThan(content?.indexOf("Agent 请求执行的动作") ?? -1);
-  expect(content?.indexOf("Agent 请求执行的动作")).toBeLessThan(content?.indexOf("命中规则") ?? -1);
+  expect(content?.indexOf("用户任务")).toBeLessThan(content?.indexOf("智能体请求执行的动作") ?? -1);
+  expect(content?.indexOf("智能体请求执行的动作")).toBeLessThan(content?.indexOf("命中规则") ?? -1);
   expect(content?.indexOf("命中规则")).toBeLessThan(content?.indexOf("判定原因") ?? -1);
   expect(content?.indexOf("判定原因")).toBeLessThan(content?.indexOf("放行影响") ?? -1);
 });
@@ -66,8 +66,31 @@ test("one-time approval requires confirmation and restores trigger focus", async
 
   const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("该动作将绕过当前 Guard 决策并继续执行一次");
+  await expect(dialog).toContainText("该动作将绕过当前安全判断并继续执行一次");
   await expect(page.getByRole("button", { name: "取消" })).toBeFocused();
+  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
+    /confirm-dialog__signal--warning/,
+  );
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test("deny approval uses a danger confirmation and restores trigger focus", async ({ page }) => {
+  await page.goto("/approvals");
+
+  const trigger = page.getByRole("button", { name: "拒绝授权" });
+  await expect(trigger).toHaveCSS("min-height", "44px");
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "确认拒绝本次授权？" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("本次授权将被拒绝");
+  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
+    /confirm-dialog__signal--danger/,
+  );
+  await expect(page.getByRole("button", { name: "确认拒绝授权" })).toHaveCSS("min-height", "44px");
 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
@@ -97,6 +120,8 @@ test("evidence detail surfaces the final security conclusion", async ({ page }) 
   await expect(conclusion).toContainText("任务目标偏离");
   await expect(conclusion).toContainText("审批释放后：已执行");
   await expect(conclusion).not.toContainText(/P\d{3}/);
+  await expect(page.getByRole("heading", { name: "证据链详情" })).toBeVisible();
+  await expect(page.getByText("旧版阻断标记", { exact: true })).toHaveCount(0);
 });
 
 test("evidence detail keeps five intervention outcomes distinct", async ({ page }) => {

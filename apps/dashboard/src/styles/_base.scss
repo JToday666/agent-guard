@@ -67,6 +67,7 @@ a {
 
 button {
   line-height: var(--line-height-ui);
+  min-height: 2.25rem;
 }
 
 button:not(:disabled),
