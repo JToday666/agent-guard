@@ -205,8 +205,14 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
     if (!store.approvals.some((approval) => approval.id === id)) void router.replace("/approvals");
   } catch {
     const message = store.approvalResolutionError ?? "审批提交失败";
-    if (store.approvalResolutionState === "conflict") {
+    if (
+      store.approvalResolutionState === "conflict" ||
+      store.approvalResolutionState === "uncertain"
+    ) {
       pageMessage.value = message;
+      if (!store.approvals.some((approval) => approval.id === id)) {
+        await router.replace("/approvals");
+      }
     } else {
       actionMessage.value = message;
     }

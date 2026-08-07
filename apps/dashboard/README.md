@@ -41,6 +41,16 @@ pnpm dashboard:dev:mock
 
 Mock 模式不需要 PostgreSQL、Guard API、launch code 或 browser session，适合前端页面演示和离线截图。
 
+Dashboard 默认通过同源代理路径访问 Guard API：
+
+```dotenv
+VITE_API_BASE_URL=/api/v1
+VITE_API_HEALTH_URL=/api/health
+VITE_API_REQUEST_TIMEOUT_MS=10000
+```
+
+`VITE_API_REQUEST_TIMEOUT_MS` 必须为正数，非法值回退到 10 秒。API 与健康地址应保持为同源代理路径；`VITE_BACKEND_TARGET` 只配置 Vite 代理连接的后端地址，不支持浏览器跨域直连 Guard API。
+
 ## 常用命令
 
 ```bash

@@ -1,5 +1,7 @@
 import { dashboardEnv } from "../config/dashboard-env";
+import type { GuardHealthDto } from "./guard-api-types";
 import { getPublicApiErrorMessage } from "./public-api-error";
+import { createTimedRequestSignal } from "./request-lifecycle";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -27,6 +29,10 @@ function createNetworkError(): ApiError {
   return new ApiError(0, "NETWORK_ERROR", getPublicApiErrorMessage(0, "NETWORK_ERROR"));
 }
 
+function createTimeoutError(): ApiError {
+  return new ApiError(0, "REQUEST_TIMEOUT", getPublicApiErrorMessage(0, "REQUEST_TIMEOUT"));
+}
+
 async function readJsonResponse<T>(response: Response): Promise<T> {
   try {
     return (await response.json()) as T;
@@ -36,6 +42,24 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
       "INVALID_RESPONSE",
       getPublicApiErrorMessage(response.status, "INVALID_RESPONSE"),
     );
+  }
+}
+
+async function request(
+  input: string,
+  init: RequestInit,
+  callerSignal?: AbortSignal | null,
+): Promise<Response> {
+  const lifecycle = createTimedRequestSignal(callerSignal, dashboardEnv.requestTimeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: lifecycle.signal });
+  } catch (reason) {
+    if (lifecycle.didTimeout()) throw createTimeoutError();
+    if (callerSignal?.aborted) throw lifecycle.signal.reason;
+    if (reason instanceof Error && reason.name === "AbortError") throw reason;
+    throw createNetworkError();
+  } finally {
+    lifecycle.dispose();
   }
 }
 
@@ -50,18 +74,15 @@ export async function requestJson<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${dashboardEnv.apiBaseUrl}${path}`, {
+  const response = await request(
+    `${dashboardEnv.apiBaseUrl}${path}`,
+    {
       ...init,
       credentials: "include",
       headers,
-      signal: signal ?? init.signal,
-    });
-  } catch (reason) {
-    if (reason instanceof Error && reason.name === "AbortError") throw reason;
-    throw createNetworkError();
-  }
+    },
+    signal ?? init.signal,
+  );
 
   if (!response.ok) {
     const code = await readErrorCode(response);
@@ -71,20 +92,20 @@ export async function requestJson<T>(
   return readJsonResponse<T>(response);
 }
 
-export async function requestHealth(
-  signal?: AbortSignal,
-): Promise<{ status: string; database?: string }> {
-  let response: Response;
-  try {
-    response = await fetch("/api/health?check_db=true", {
+export async function requestHealth(signal?: AbortSignal): Promise<GuardHealthDto> {
+  const separator = dashboardEnv.apiHealthUrl.includes("?") ? "&" : "?";
+  const response = await request(
+    `${dashboardEnv.apiHealthUrl}${separator}check_db=true`,
+    {
       credentials: "include",
       headers: { Accept: "application/json" },
-      signal,
-    });
-  } catch (reason) {
-    if (reason instanceof Error && reason.name === "AbortError") throw reason;
-    throw createNetworkError();
+    },
+    signal,
+  );
+  if (response.ok) return readJsonResponse<GuardHealthDto>(response);
+  if (response.status === 503) {
+    const result = await readJsonResponse<GuardHealthDto>(response);
+    if (result.status === "degraded") return result;
   }
-  if (!response.ok) throw new ApiError(response.status, "HEALTH_CHECK_FAILED", "健康检查失败");
-  return readJsonResponse<{ status: string; database?: string }>(response);
+  throw new ApiError(response.status, "HEALTH_CHECK_FAILED", "健康检查失败");
 }

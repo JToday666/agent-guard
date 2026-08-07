@@ -6,7 +6,7 @@ export function createDashboardDataSource(): DashboardDataSource {
   const loadSource = (): Promise<DashboardDataSource> => {
     if (sourcePromise) return sourcePromise;
     sourcePromise =
-      dashboardEnv.dataSource === "mock"
+      import.meta.env.MODE === "mock"
         ? import("./mock-data-source").then(
             ({ MockDashboardDataSource }) => new MockDashboardDataSource(dashboardEnv.mockDelayMs),
           )

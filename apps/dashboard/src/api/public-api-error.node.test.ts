@@ -24,6 +24,10 @@ test("provides a controlled network failure message", () => {
   );
 });
 
+test("provides a distinct request timeout message", () => {
+  assert.equal(getPublicApiErrorMessage(0, "REQUEST_TIMEOUT"), "Guard API 请求超时，请稍后重试。");
+});
+
 test("uses a controlled message for an invalid success response", () => {
   assert.equal(
     getPublicApiErrorMessage(200, "INVALID_RESPONSE"),

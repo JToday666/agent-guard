@@ -6,6 +6,7 @@ import type {
   GuardConfigAuditFindingRecordDto,
   GuardEvalMetricsDto,
   GuardEvaluationRunDto,
+  GuardHealthDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
   GuardProvenanceDto,
@@ -23,6 +24,7 @@ import type {
   EvaluationAttackMetric,
   EvaluationCase,
   EvaluationRun,
+  HealthStatus,
   PolicyHistoryEntry,
   PolicySummary,
   ProvenanceEdge,
@@ -505,4 +507,20 @@ export function mapProvenance(dto: GuardProvenanceDto): ProvenanceGraph {
       };
     }),
   };
+}
+
+export function mapHealth(dto: GuardHealthDto, checkedAt = new Date().toISOString()): HealthStatus {
+  const api =
+    dto.status === "ok" || dto.status === "degraded"
+      ? "online"
+      : dto.status === "error" || dto.status === "offline"
+        ? "offline"
+        : "unknown";
+  const database =
+    dto.database === "ok"
+      ? "online"
+      : dto.database === "error" || dto.database === "offline"
+        ? "offline"
+        : "unknown";
+  return { api, database, checkedAt };
 }

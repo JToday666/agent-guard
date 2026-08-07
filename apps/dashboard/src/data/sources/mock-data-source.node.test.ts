@@ -14,7 +14,22 @@ test("mock provenance graph contains evidence nodes and event references", async
   assert.equal(graph.traceId, "trace_002");
   assert.ok(graph.nodes.length >= 10);
   assert.ok(graph.edges.length >= 9);
-  assert.ok(graph.nodes.some((node) => node.refId === "audit:evt_20260607_002"));
+  assert.ok(
+    graph.nodes.some(
+      (node) => node.refId === "evt_20260607_002" && node.nodeId.endsWith("audit:evt_20260607_002"),
+    ),
+  );
+  const auditNodes = graph.nodes.filter((node) => node.kind === "audit");
+  assert.ok(auditNodes.length >= 2);
+  assert.ok(
+    auditNodes.every(
+      (node) => !node.refId.startsWith("audit:") && node.nodeId.endsWith(`audit:${node.refId}`),
+    ),
+  );
+  const nodeIds = new Set(graph.nodes.map((node) => node.nodeId));
+  assert.ok(
+    graph.edges.every((edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)),
+  );
   assert.ok(graph.nodes.some((node) => node.kind === "task"));
   assert.ok(graph.nodes.some((node) => node.kind === "source"));
   assert.ok(graph.nodes.some((node) => node.kind === "context"));
@@ -27,6 +42,21 @@ test("mock provenance graph contains evidence nodes and event references", async
   assert.ok(
     graph.nodes.every((node) => node.metadata.source !== "mock" && node.metadata.source !== "api"),
   );
+  assert.ok(graph.nodes.every((node) => !("eventId" in node.metadata)));
+  assert.ok(graph.nodes.every((node) => !("riskScore" in node.metadata)));
+});
+
+test("mock read methods reject pre-aborted and in-flight requests", async () => {
+  const source = new MockDashboardDataSource(1_000);
+  const preAborted = new AbortController();
+  preAborted.abort();
+
+  await assert.rejects(source.getHealth(preAborted.signal), { name: "AbortError" });
+
+  const inFlight = new AbortController();
+  const evaluation = source.getLatestEvaluationRun(inFlight.signal);
+  inFlight.abort();
+  await assert.rejects(evaluation, { name: "AbortError" });
 });
 
 test("mock source exposes rich evaluation data for populated pages", async () => {

@@ -40,8 +40,30 @@ import type {
 import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
 import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
 
-function wait(delayMs: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+function abortError(signal: AbortSignal): DOMException {
+  return signal.reason instanceof DOMException && signal.reason.name === "AbortError"
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
+function wait(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
+
+    const handleAbort = () => {
+      globalThis.clearTimeout(timer);
+      signal?.removeEventListener("abort", handleAbort);
+      reject(abortError(signal!));
+    };
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
 }
 
 function readFixtureAuditEvent(event: AuditEventRow): GuardAuditEventDto {
@@ -373,8 +395,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .map(mapAuditEvent);
   }
 
-  async getAuditWindow(filters: EventFilters = {}) {
-    await wait(this.delayMs);
+  async getAuditWindow(filters: EventFilters = {}, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return createAuditWindow(this.filteredAuditEvents(filters), {
       limit: AUDIT_EVENT_WINDOW_LIMIT,
       hasMore: null,
@@ -382,8 +404,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     });
   }
 
-  async getPendingApprovals() {
-    await wait(this.delayMs);
+  async getPendingApprovals(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return this.approvalDtos.filter((approval) => approval.status === "pending").map(mapApproval);
   }
 
@@ -397,8 +419,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     return { approvalId: target.approval_id, status: "resolved", decision } as const;
   }
 
-  async getHealth() {
-    await wait(this.delayMs);
+  async getHealth(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return {
       api: "online" as const,
       database: "online" as const,
@@ -406,12 +428,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getLatestEvaluationRun() {
+  async getLatestEvaluationRun(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapEvaluationRun(mockEvaluationRun);
   }
 
-  async getConfigAuditFindings(filters: ConfigAuditFindingFilters = {}) {
-    await wait(this.delayMs);
+  async getConfigAuditFindings(filters: ConfigAuditFindingFilters = {}, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mockConfigAuditFindings
       .filter((row) => !filters.traceId || row.trace_id === filters.traceId)
       .filter((row) => !filters.targetId || row.target_id === filters.targetId)
@@ -421,13 +444,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .map(mapConfigAuditFindingRecord);
   }
 
-  async getAdapterStatus(adapterId: string) {
-    await wait(this.delayMs);
+  async getAdapterStatus(adapterId: string, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapAdapterStatus(adapterId === "openclaw" ? mockOpenClawStatus : unknownAdapterStatus);
   }
 
-  async getTraceDetail(traceId: string) {
-    await wait(this.delayMs);
+  async getTraceDetail(traceId: string, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     const detail = mapTraceDetail(createTraceDetail(traceId, this.approvalDtos));
     return {
       ...detail,
@@ -435,23 +458,23 @@ export class MockDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getCurrentPolicy() {
-    await wait(this.delayMs);
+  async getCurrentPolicy(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapPolicySummary(mockPolicyBundle);
   }
 
-  async getPolicyHistory() {
-    await wait(this.delayMs);
+  async getPolicyHistory(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapPolicyHistory(mockPolicyHistory);
   }
 
-  async getAuditIntegrity() {
-    await wait(this.delayMs);
+  async getAuditIntegrity(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapAuditIntegrity(mockAuditIntegrity);
   }
 
-  async getTraceProvenance(traceId: string) {
-    await wait(this.delayMs);
+  async getTraceProvenance(traceId: string, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     const events = this.filteredAuditEvents({ traceId });
     const approvals = mergeApprovalsWithAuditEvidence(
       this.approvalDtos.filter((approval) => approval.trace_id === traceId).map(mapApproval),

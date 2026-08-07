@@ -12,6 +12,7 @@ import {
   mapAuditIntegrity,
   mapConfigAuditFindingRecord,
   mapEvaluationRun,
+  mapHealth,
   mapPolicyHistory,
   mapPolicySummary,
   mapProvenance,
@@ -66,6 +67,24 @@ test("maps Guard API audit evidence without inventing missing fields", () => {
   assert.equal(event.eventId, "event_1");
   assert.equal(event.recordType, "policy_evaluation");
   assert.deepEqual(event.resourceTargets, ["/private/token.txt"]);
+});
+
+test("maps missing and degraded health facts without inventing availability", () => {
+  assert.deepEqual(mapHealth({ status: "ok" }, "2026-08-07T00:00:00Z"), {
+    api: "online",
+    database: "unknown",
+    checkedAt: "2026-08-07T00:00:00Z",
+  });
+  assert.deepEqual(mapHealth({ status: "degraded", database: "error" }, "2026-08-07T00:00:01Z"), {
+    api: "online",
+    database: "offline",
+    checkedAt: "2026-08-07T00:00:01Z",
+  });
+  assert.deepEqual(mapHealth({ status: "future" }, "2026-08-07T00:00:02Z"), {
+    api: "unknown",
+    database: "unknown",
+    checkedAt: "2026-08-07T00:00:02Z",
+  });
 });
 
 test("maps sparse audit DTOs without throwing on missing arrays or records", () => {

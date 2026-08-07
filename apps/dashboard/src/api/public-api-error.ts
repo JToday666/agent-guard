@@ -6,6 +6,7 @@ const publicCodeMessages: Readonly<Record<string, string>> = {
   LAUNCH_CODE_EXPIRED: "启动链接已过期，请通过本机启动器重新打开 Dashboard。",
   LAUNCH_CODE_INVALID: "启动链接无效或已使用，请通过本机启动器重新打开 Dashboard。",
   METHOD_NOT_ALLOWED: "当前操作不受支持。",
+  REQUEST_TIMEOUT: "Guard API 请求超时，请稍后重试。",
   SESSION_EXPIRED: "监督端会话已过期，请通过本机启动器重新打开 Dashboard。",
   SESSION_INVALID: "监督端会话无效，请通过本机启动器重新打开 Dashboard。",
   SCOPE_DENIED: "当前凭证无权执行此操作。",

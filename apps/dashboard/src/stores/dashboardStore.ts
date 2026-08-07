@@ -176,9 +176,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const activeRefreshIntent = ref<DashboardRefreshIntent | null>(null);
   const submittingApprovalId = ref<string | null>(null);
   const approvalResolutionError = ref<string | null>(null);
-  const approvalResolutionState = ref<"idle" | "submitting" | "succeeded" | "conflict" | "failed">(
-    "idle",
-  );
+  const approvalResolutionState = ref<
+    "idle" | "submitting" | "succeeded" | "conflict" | "uncertain" | "failed"
+  >("idle");
   let pollTimer: number | null = null;
   let activeRefresh: {
     controller: AbortController;
@@ -575,7 +575,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
       handleSessionError(reason);
       const failure = getApprovalResolutionFailure(reason);
       approvalResolutionError.value = failure.message;
-      approvalResolutionState.value = failure.kind === "conflict" ? "conflict" : "failed";
+      approvalResolutionState.value =
+        failure.kind === "conflict" || failure.kind === "uncertain" ? failure.kind : "failed";
       if (failure.shouldRefreshQueue) {
         await refreshApprovals().catch(handleSessionError);
       }
