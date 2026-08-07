@@ -161,6 +161,7 @@ export type DerivedResource = {
 export type GuardEvaluationResponse = {
   decision: GuardDecision;
   approval: EvaluationApproval | null;
+  policy_audit_id?: string | null;
 };
 
 export type GuardDecision = {
@@ -222,9 +223,16 @@ export type ConfigAuditResult = {
   reason?: string;
 };
 
+export type AuditRecordType =
+  | "policy_evaluation"
+  | "runtime_outcome"
+  | "runtime_observation"
+  | "config_audit";
+
 export type AuditEvent = {
   audit_id?: string;
-  schema_version: "0.3";
+  schema_version: "0.4";
+  record_type: AuditRecordType;
   trace_id: string;
   case_id?: string | null;
   runtime: "openclaw";
@@ -234,16 +242,17 @@ export type AuditEvent = {
   attack_type?: string | null;
   is_malicious?: boolean | null;
   summary: string;
-  decision: "allow" | "deny" | "ask";
-  risk_score: number;
-  severity: string;
-  blocked: boolean;
+  decision: "allow" | "deny" | "ask" | null;
+  risk_score: number | null;
+  severity: string | null;
+  blocked: boolean | null;
   resource_targets?: string[];
   rule_hits?: string[];
   reason: string;
   links?: Record<string, string>;
   latency_ms?: number | null;
   metadata?: JsonObject;
+  evidence?: JsonObject;
 };
 
 export type ToolHookResult = {

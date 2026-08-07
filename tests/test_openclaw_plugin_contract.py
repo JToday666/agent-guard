@@ -32,6 +32,7 @@ def _node_json(script: str) -> dict:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     return json.loads(completed.stdout)
 
@@ -242,6 +243,22 @@ def test_openclaw_observation_mapping_matches_audit_contract() -> None:
     assert parsed.event_type == "runtime_observation"
     assert parsed.stage == "session_start"
     assert parsed.metadata["event"]["adapterToken"] == "[redacted]"
+    # 0.4 形态（契约 §8.2/§8.3/§14）：策略字段必须为 null，不再用 allow/0 污染。
+    assert parsed.schema_version == "0.4"
+    assert parsed.record_type == "runtime_observation"
+    assert parsed.decision is None
+    assert parsed.risk_score is None
+    assert parsed.severity is None
+    assert parsed.blocked is None
+    # §8.3：observation 有事件 ID 时 links.event_id 必填。
+    assert event["links"]["event_id"]
+    # §14：最小 evidence 块，干预类型固定 audit_observation，未观察字段 unknown。
+    evidence = event["evidence"]
+    assert evidence["intervention"]["type"] == "audit_observation"
+    assert evidence["execution"]["status"] == "unknown"
+    assert evidence["side_effects"]["measurement_status"] == "unknown"
+    assert evidence["result"]["disposition"] == "unknown"
+    assert evidence["approval"]["status"] == "not_required"
 
 
 def test_openclaw_model_observation_mapping_has_task_and_model_resource() -> None:
@@ -260,3 +277,153 @@ def test_openclaw_model_observation_mapping_has_task_and_model_resource() -> Non
     assert parsed.stage == "model_call_ended"
     assert parsed.metadata["user_task"] == "Summarize external content safely"
     assert parsed.resource_targets == ["gpt-test"]
+    assert parsed.record_type == "runtime_observation"
+    assert parsed.decision is None
+    assert parsed.blocked is None
+
+
+# ---------------------------------------------------------------------------
+# runtime_outcome 回执构造器（契约 §8.2/§8.3/§9/§12.2/§13）
+# ---------------------------------------------------------------------------
+
+_OUTCOME_NODE_PREAMBLE = f"""
+        import {{
+          buildToolCallGuardEvent,
+          buildRuntimeOutcomeAuditEvent,
+        }} from '{MAPPING_MODULE_URI}';
+        const guardEvent = buildToolCallGuardEvent(
+          {{
+            toolName: 'read_file',
+            params: {{ path: '/private/token.txt' }},
+            toolCallId: 'call_contract',
+            runId: 'run_contract',
+            derivedPaths: ['/private/token.txt']
+          }},
+          {{ agentId: 'openclaw-main', sessionId: 'sess_contract', sessionKey: 'session-key' }}
+        );
+        const evaluation = {{
+          decision: {{
+            decision_id: 'decision_contract',
+            decision: 'deny',
+            risk_score: 90,
+            severity: 'high',
+            categories: ['secret_access'],
+            rule_hits: [{{ rule_id: 'rule_secret_path' }}],
+            reason: '拒绝读取私有凭据文件'
+          }},
+          approval: null,
+          policy_audit_id: 'audit_policy_contract'
+        }};
+        """
+
+
+def test_openclaw_outcome_pre_execution_deny_matches_contract() -> None:
+    event = _node_json(_OUTCOME_NODE_PREAMBLE + """
+        console.log(JSON.stringify(buildRuntimeOutcomeAuditEvent(
+          guardEvent, evaluation, 'pre_execution_deny',
+          { stage: 'before_tool_call', timestamp: '2026-08-08T00:00:00.000Z' }
+        )));
+        """)
+
+    parsed = AuditEvent.model_validate(event)
+
+    assert parsed.schema_version == "0.4"
+    assert parsed.record_type == "runtime_outcome"
+    assert parsed.runtime == "openclaw"
+    # 确定性 audit_id：event_id + 干预类型派生，重试幂等（§12.3）。
+    assert event["audit_id"].startswith("audit_outcome_")
+    assert event["audit_id"].endswith("_pre_execution_deny")
+    # §8.3：runtime_outcome 必填 links。
+    links = event["links"]
+    assert links["policy_audit_id"] == "audit_policy_contract"
+    assert links["event_id"]
+    assert links["decision_id"] == "decision_contract"
+    assert links["action_id"] == "call_contract"
+    # 有关联策略时复制顶层策略摘要。
+    assert parsed.decision == "deny"
+    assert parsed.blocked is True
+    evidence = event["evidence"]
+    assert evidence["intervention"]["type"] == "pre_execution_deny"
+    # §9.5：deny 后插件确证动作未被执行。
+    assert evidence["execution"]["status"] == "not_invoked"
+    assert evidence["execution"]["tool_result_entered_context"] is False
+    assert evidence["execution"]["persisted"] is False
+    # §9.6：执行前拒绝可确证副作用为 0。
+    assert evidence["side_effects"]["measurement_status"] == "measured"
+    assert evidence["side_effects"]["count"] == 0
+    # §9.7：无工具结果产生。
+    assert evidence["result"]["disposition"] == "not_applicable"
+    assert evidence["approval"]["status"] == "not_required"
+
+
+def test_openclaw_outcome_approval_release_keeps_unknown_execution() -> None:
+    event = _node_json(_OUTCOME_NODE_PREAMBLE + """
+        evaluation.decision.decision = 'ask';
+        console.log(JSON.stringify(buildRuntimeOutcomeAuditEvent(
+          guardEvent, evaluation, 'approval_release',
+          {
+            approval: {
+              approvalId: 'apr_contract',
+              status: 'allowed',
+              decision: 'allow_once'
+            },
+            stage: 'before_tool_call'
+          }
+        )));
+        """)
+
+    parsed = AuditEvent.model_validate(event)
+
+    assert parsed.record_type == "runtime_outcome"
+    assert parsed.decision == "ask"
+    assert event["links"]["approval_id"] == "apr_contract"
+    evidence = event["evidence"]
+    assert evidence["intervention"]["type"] == "approval_release"
+    # 放行发生在执行前，插件未观察到结果：按事实保持 unknown，不臆造 executed。
+    assert evidence["execution"]["status"] == "unknown"
+    assert evidence["execution"]["tool_result_entered_context"] is None
+    assert evidence["execution"]["persisted"] is None
+    assert evidence["side_effects"]["measurement_status"] == "not_measured"
+    assert evidence["result"]["disposition"] == "unknown"
+    assert evidence["approval"]["status"] == "allowed"
+    assert evidence["approval"]["decision"] == "allow_once"
+
+
+def test_openclaw_outcome_tool_result_quarantine_matches_contract() -> None:
+    event = _node_json(_OUTCOME_NODE_PREAMBLE + """
+        console.log(JSON.stringify(buildRuntimeOutcomeAuditEvent(
+          guardEvent, evaluation, 'tool_result_quarantine',
+          { resultDisposition: 'quarantined', stage: 'tool_result_persist' }
+        )));
+        """)
+
+    parsed = AuditEvent.model_validate(event)
+
+    assert parsed.record_type == "runtime_outcome"
+    evidence = event["evidence"]
+    assert evidence["intervention"]["type"] == "tool_result_quarantine"
+    # 能进入 persist hook 说明工具已执行并产生结果。
+    assert evidence["execution"]["status"] == "executed"
+    assert evidence["execution"]["tool_result_entered_context"] is False
+    assert evidence["execution"]["persisted"] is False
+    # §9.7：隔离处置。
+    assert evidence["result"]["disposition"] == "quarantined"
+    assert evidence["result"]["sanitized"] is False
+
+
+def test_openclaw_outcome_tool_result_modified_marks_sanitized() -> None:
+    event = _node_json(_OUTCOME_NODE_PREAMBLE + """
+        console.log(JSON.stringify(buildRuntimeOutcomeAuditEvent(
+          guardEvent, evaluation, 'tool_result_quarantine',
+          { resultDisposition: 'modified', stage: 'tool_result_persist' }
+        )));
+        """)
+
+    parsed = AuditEvent.model_validate(event)
+
+    assert parsed.record_type == "runtime_outcome"
+    evidence = event["evidence"]
+    assert evidence["execution"]["status"] == "executed"
+    assert evidence["result"]["disposition"] == "modified"
+    # §9.7：sanitized=true 时 disposition 用 modified。
+    assert evidence["result"]["sanitized"] is True

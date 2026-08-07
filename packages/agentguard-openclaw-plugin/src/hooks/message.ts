@@ -43,6 +43,7 @@ import {
   shouldFailClosedRuntimeStage,
   shouldRuntimeBlock,
 } from "../runtime/enforcement.js";
+import { fireRuntimeOutcomeReceipt } from "../runtime/outcome-receipt.js";
 import type { HookContext } from "./context.js";
 
 export function registerMessageSending(hookContext: HookContext): void {
@@ -72,10 +73,25 @@ export function registerMessageSending(hookContext: HookContext): void {
         if (isObserve(config)) {
           return undefined;
         }
-        return await decisionToMessageResult(decision, {
-          waitForApproval: (approvalId) =>
-            client.waitForApproval(approvalId, config.approvalWaitBudgetMs),
-        });
+        return await decisionToMessageResult(
+          decision,
+          {
+            waitForApproval: (approvalId) =>
+              client.waitForApproval(approvalId, config.approvalWaitBudgetMs),
+          },
+          (outcome) => {
+            fireRuntimeOutcomeReceipt({
+              client,
+              config,
+              guardEvent,
+              evaluation: decision,
+              kind: outcome.kind,
+              approval: outcome.approval,
+              stage: "message_sending",
+              logLabel: "message_sending",
+            });
+          },
+        );
       } catch (error) {
         logDiagnostic(config, "message_sending failed closed", {
           error: error instanceof Error ? error.message : String(error),

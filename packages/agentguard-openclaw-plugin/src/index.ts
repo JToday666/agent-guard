@@ -3,7 +3,7 @@ import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry"
 
 import { GuardApiClient, buildPluginConfig } from "./guard-api-client.js";
 import { registerBeforePromptBuild } from "./hooks/context-guard.js";
-import type { HookContext } from "./hooks/context.js";
+import type { HookContext, PolicyOutcomeContext } from "./hooks/context.js";
 import {
   registerBeforeInstall,
   registerObservationHooks,
@@ -44,6 +44,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       makeClient,
       sessionState: new Map<string, SessionState>(),
       toolCallState: new Map<string, ToolCallState>(),
+      policyOutcomeState: new Map<string, PolicyOutcomeContext>(),
       finalizeRevisionKeys: new Set<string>(),
     };
 

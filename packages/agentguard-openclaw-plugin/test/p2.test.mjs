@@ -33,10 +33,18 @@ test("GuardApiClient evaluates config audit and submits runtime observations wit
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ ok: true, audit_id: "audit_obs" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          audit_id: "audit_obs",
+          created: true,
+          idempotent_replay: false,
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     },
   });
 
@@ -49,21 +57,27 @@ test("GuardApiClient evaluates config audit and submits runtime observations wit
   });
   const observationResult = await client.submitRuntimeObservation({
     audit_id: "audit_obs",
-    schema_version: "0.3",
+    schema_version: "0.4",
+    record_type: "runtime_observation",
     trace_id: "trace_obs",
     runtime: "openclaw",
     stage: "session_start",
     event_type: "runtime_observation",
     summary: "session started",
-    decision: "allow",
-    risk_score: 0,
-    severity: "low",
-    blocked: false,
+    decision: null,
+    risk_score: null,
+    severity: null,
+    blocked: null,
     reason: "Observation only.",
+    links: { event_id: "evt_obs" },
+    evidence: { intervention: { type: "audit_observation" } },
   });
 
   assert.equal(configResult.decision, "block");
   assert.equal(observationResult.audit_id, "audit_obs");
+  // §12.3：后端返回 created/idempotent_replay 区分首写与幂等重放。
+  assert.equal(observationResult.created, true);
+  assert.equal(observationResult.idempotent_replay, false);
   assert.equal(requests[0].url, "http://guard.test/v1/config-audit/evaluate");
   assert.equal(requests[1].url, "http://guard.test/v1/audit/events");
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
@@ -259,10 +273,18 @@ test("plugin entry carries cached task evidence into runtime observations", asyn
 
     globalThis.fetch = async (_url, init) => {
       requests.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ ok: true, audit_id: "audit_obs" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          audit_id: "audit_obs",
+          created: true,
+          idempotent_replay: false,
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     };
 
     const sessionKey = "agent:main:cached-observation";
