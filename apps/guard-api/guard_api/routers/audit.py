@@ -28,7 +28,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         auth.verify_bearer(authorization, "event:audit:write")
         try:
             return audit_service.submit(payload)
-        except AuditIdConflictError as exc:
+        except AuditIdConflictError:
             raise ApiAuthError(
                 "AUDIT_ID_CONFLICT",
                 status_code=409,
