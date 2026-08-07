@@ -8,12 +8,14 @@ from agentguard_core import AuditEvent
 
 from guard_api.auth import ApiAuthError
 from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
+from guard_api.errors import error_response
 from guard_api.storage.base import AuditIdConflictError
 from fastapi import Cookie, FastAPI, Header
+from fastapi.responses import JSONResponse
 
 from guard_api.storage.base import AuditEventFilters
 
-from .common import bounded_limit, verify_browser_or_bearer_read
+from .common import bounded_limit, verify_browser_or_bearer_read, verify_browser_or_bearer_scopes
 from .context import ApiContext
 
 
@@ -21,6 +23,8 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     auth = context.auth
     audit_service = context.audit_service
     trace_service = context.trace_service
+    audit_window_service = context.audit_window_service
+    settings = context.settings
 
     @app.post("/v1/audit/events")
     def audit_event(
@@ -68,6 +72,36 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             event.model_dump(mode="json")
             for event in audit_service.list_events(filters)
         ]
+
+    @app.get("/v1/audit/window", response_model=None)
+    def audit_window(
+        limit: int = 500,
+        trace_id: str | None = None,
+        case_id: str | None = None,
+        runtime: str | None = None,
+        decision: str | None = None,
+        cursor: str | None = None,
+        authorization: str | None = Header(default=None),
+        agentguard_session: str | None = Cookie(default=None),
+    ) -> dict[str, Any] | JSONResponse:
+        # 契约 §14.1：feature flag 关闭时端点不存在。
+        if not settings.audit_window_enabled:
+            return error_response("NOT_FOUND", status_code=404)
+        # 契约 §5.1：bearer 需同时具备 audit:read 与 metrics:read。
+        verify_browser_or_bearer_scopes(
+            auth,
+            required_scopes=("audit:read", "metrics:read"),
+            authorization=authorization,
+            agentguard_session=agentguard_session,
+        )
+        return audit_window_service.get_window(
+            limit=bounded_limit(limit),
+            trace_id=trace_id,
+            case_id=case_id,
+            runtime=runtime,
+            decision=decision,
+            cursor=cursor,
+        )
 
     @app.get("/v1/audit/integrity")
     def audit_integrity(
