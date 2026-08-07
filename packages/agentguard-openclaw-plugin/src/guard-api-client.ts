@@ -15,6 +15,7 @@ import type {
   OpenClawPluginConfigInput,
   ToolHookResult,
 } from "./types.js";
+import type { OutcomeApprovalEvidence } from "./mapping/audit-outcomes.js";
 
 type FetchLike = typeof fetch;
 
@@ -50,6 +51,30 @@ export class GuardApiError extends Error {
   }
 }
 
+/**
+ * HTTP 409：同 audit_id 已绑定不同内容（§12.3 AUDIT_ID_CONFLICT）。
+ * 与 5xx / 网络错误区分开：回执对 409 只记诊断，不重试也不 fail-closed。
+ */
+export class GuardApiConflictError extends GuardApiError {
+  constructor(message: string) {
+    super(message);
+    this.name = "GuardApiConflictError";
+  }
+}
+
+/** §12.3 审计提交响应：首次写入与幂等重放用 created/idempotent_replay 区分。 */
+export type AuditSubmitResponse = {
+  ok: boolean;
+  audit_id: string;
+  created?: boolean;
+  idempotent_replay?: boolean;
+};
+
+/** decisionToToolResult / decisionToMessageResult 回传给调用方的运行时结果通知。 */
+export type DecisionOutcome =
+  | { kind: "pre_execution_deny"; approval: OutcomeApprovalEvidence | null }
+  | { kind: "approval_release"; approval: OutcomeApprovalEvidence };
+
 export class GuardApiClient {
   private readonly config: AgentGuardPluginConfig;
   private readonly fetchImpl: FetchLike;
@@ -83,7 +108,7 @@ export class GuardApiClient {
     return (await response.json()) as ConfigAuditResult;
   }
 
-  async submitRuntimeObservation(event: AuditEvent): Promise<{ ok: boolean; audit_id: string }> {
+  async submitRuntimeObservation(event: AuditEvent): Promise<AuditSubmitResponse> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -92,7 +117,41 @@ export class GuardApiClient {
       method: "POST",
       body: JSON.stringify(event),
     });
-    return (await response.json()) as { ok: boolean; audit_id: string };
+    return (await response.json()) as AuditSubmitResponse;
+  }
+
+  /**
+   * 提交 runtime_outcome 回执（复用 POST /v1/audit/events，不新增端点）。
+   * 回执是 fire-and-forget：409 只记诊断（不重试、不 fail-closed），
+   * 其余错误继续抛给调用方的 .catch(logDiagnostic) 处理。
+   */
+  async submitRuntimeOutcome(event: AuditEvent): Promise<AuditSubmitResponse> {
+    if (!this.config.adapterToken) {
+      throw new GuardApiError("AgentGuard adapter token is not configured");
+    }
+
+    try {
+      const response = await this.request("/v1/audit/events", {
+        method: "POST",
+        body: JSON.stringify(event),
+      });
+      return (await response.json()) as AuditSubmitResponse;
+    } catch (error) {
+      if (error instanceof GuardApiConflictError) {
+        logDiagnostic(
+          this.config,
+          "runtime outcome receipt rejected with 409 conflict",
+          { audit_id: event.audit_id ?? null },
+        );
+        return {
+          ok: false,
+          audit_id: event.audit_id ?? "",
+          created: false,
+          idempotent_replay: false,
+        };
+      }
+      throw error;
+    }
   }
 
   async submitHeartbeat(input: AdapterHeartbeatInput): Promise<Record<string, unknown>> {
@@ -158,6 +217,11 @@ export class GuardApiClient {
           path,
           status: response.status,
         });
+        if (response.status === 409) {
+          throw new GuardApiConflictError(
+            "Guard API request failed with status 409",
+          );
+        }
         throw new GuardApiError(`Guard API request failed with status ${response.status}`);
       }
       return response;
@@ -203,39 +267,83 @@ export function buildPluginConfig(
 export async function decisionToToolResult(
   response: GuardEvaluationResponse,
   waiter: ApprovalWaiter,
+  onOutcome?: (outcome: DecisionOutcome) => void,
 ): Promise<ToolHookResult | undefined> {
   if (response.decision.decision === "allow") {
     return undefined;
   }
   if (response.decision.decision === "deny") {
+    onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return { block: true, blockReason: safeDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
+    onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return { block: true, blockReason: safeDecisionMessage(response, response.approval?.approval_id) };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
-  return approval.status === "resolved" && approval.decision === "allow_once"
-    ? undefined
-    : { block: true, blockReason: safeDecisionMessage(response, response.approval.approval_id) };
+  if (approval.status === "resolved" && approval.decision === "allow_once") {
+    onOutcome?.({
+      kind: "approval_release",
+      approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
+    });
+    return undefined;
+  }
+  onOutcome?.({
+    kind: "pre_execution_deny",
+    approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
+  });
+  return { block: true, blockReason: safeDecisionMessage(response, response.approval.approval_id) };
 }
 
 export async function decisionToMessageResult(
   response: GuardEvaluationResponse,
   waiter: ApprovalWaiter,
+  onOutcome?: (outcome: DecisionOutcome) => void,
 ): Promise<MessageHookResult | undefined> {
   if (response.decision.decision === "allow") {
     return undefined;
   }
   if (response.decision.decision === "deny") {
+    onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return { cancel: true, cancelReason: safeDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
+    onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return { cancel: true, cancelReason: safeDecisionMessage(response, response.approval?.approval_id) };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
-  return approval.status === "resolved" && approval.decision === "allow_once"
-    ? undefined
-    : { cancel: true, cancelReason: safeDecisionMessage(response, response.approval.approval_id) };
+  if (approval.status === "resolved" && approval.decision === "allow_once") {
+    onOutcome?.({
+      kind: "approval_release",
+      approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
+    });
+    return undefined;
+  }
+  onOutcome?.({
+    kind: "pre_execution_deny",
+    approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
+  });
+  return { cancel: true, cancelReason: safeDecisionMessage(response, response.approval.approval_id) };
+}
+
+/** 把审批等待结果映射为 §9.8 evidence 稳定状态（timeout→expired）。 */
+function approvalEvidenceFromWait(
+  approvalId: string,
+  wait: ApprovalWaitResponse,
+): OutcomeApprovalEvidence {
+  const resolvedAt = new Date().toISOString();
+  if (wait.decision === "allow_once") {
+    return { approvalId, status: "allowed", decision: "allow_once", resolvedAt };
+  }
+  if (wait.status === "timeout" || wait.status === "expired") {
+    return { approvalId, status: "expired", decision: null, resolvedAt };
+  }
+  return {
+    approvalId,
+    status: "denied",
+    decision: wait.decision === "deny" ? "deny" : null,
+    resolvedAt,
+  };
 }
 
 export function failClosedToolResult(): ToolHookResult {

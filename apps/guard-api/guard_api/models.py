@@ -107,6 +107,9 @@ class EvaluationApproval(BaseModel):
 class GuardEvaluationResponse(BaseModel):
     decision: GuardDecision
     approval: EvaluationApproval | None = None
+    # 本次评估写入的 policy_evaluation AuditEvent 稳定 ID（§9.9 links.policy_audit_id），
+    # 供 Adapter / Plugin 回写 runtime_outcome 时建立关联；无审计写入时为 null。
+    policy_audit_id: str | None = None
 
 
 class EvaluationAttackSummary(BaseModel):

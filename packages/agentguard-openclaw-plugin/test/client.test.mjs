@@ -279,3 +279,188 @@ test("GuardApiClient diagnostic logging redacts adapter token", async () => {
   assert.equal(warnings.join("\n").includes("secret-token"), false);
   assert.equal(warnings.join("\n").includes("[redacted]"), true);
 });
+
+test("submitRuntimeOutcome posts to /v1/audit/events and surfaces created flags", async () => {
+  const requests = [];
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 10,
+      approvalTimeoutMs: 10,
+    },
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          audit_id: "audit_outcome_evt_001_pre_execution_deny",
+          created: true,
+          idempotent_replay: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const result = await client.submitRuntimeOutcome({
+    audit_id: "audit_outcome_evt_001_pre_execution_deny",
+    schema_version: "0.4",
+    record_type: "runtime_outcome",
+    trace_id: "run_outcome",
+    runtime: "openclaw",
+    stage: "before_tool_call",
+    event_type: "runtime_outcome",
+    summary: "denied",
+    decision: "deny",
+    risk_score: 90,
+    severity: "high",
+    blocked: true,
+    reason: "deny",
+    links: { event_id: "evt_001", policy_audit_id: "audit_policy_001" },
+  });
+
+  assert.equal(requests[0].url, "http://guard.test/v1/audit/events");
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(result.ok, true);
+  assert.equal(result.created, true);
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("submitRuntimeOutcome treats 409 conflict as diagnostics without throwing", async () => {
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 10,
+      approvalTimeoutMs: 10,
+      diagnosticLogging: false,
+    },
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ error: "AUDIT_ID_CONFLICT" }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+  });
+
+  const result = await client.submitRuntimeOutcome({
+    audit_id: "audit_outcome_conflict",
+    schema_version: "0.4",
+    record_type: "runtime_outcome",
+    trace_id: "run_outcome",
+    runtime: "openclaw",
+    stage: "before_tool_call",
+    event_type: "runtime_outcome",
+    summary: "conflict",
+    decision: "deny",
+    risk_score: null,
+    severity: null,
+    blocked: true,
+    reason: "conflict",
+    links: { event_id: "evt_conflict", policy_audit_id: "audit_policy_conflict" },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.created, false);
+  assert.equal(result.audit_id, "audit_outcome_conflict");
+});
+
+test("submitRuntimeOutcome still rejects on server errors", async () => {
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 10,
+      approvalTimeoutMs: 10,
+      diagnosticLogging: false,
+    },
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ error: "boom" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+  });
+
+  await assert.rejects(() =>
+    client.submitRuntimeOutcome({
+      audit_id: "audit_outcome_err",
+      schema_version: "0.4",
+      record_type: "runtime_outcome",
+      trace_id: "run_outcome",
+      runtime: "openclaw",
+      stage: "before_tool_call",
+      event_type: "runtime_outcome",
+      summary: "error",
+      decision: "deny",
+      risk_score: null,
+      severity: null,
+      blocked: true,
+      reason: "error",
+      links: { event_id: "evt_err", policy_audit_id: "audit_policy_err" },
+    }),
+  );
+});
+
+test("decisionToToolResult reports outcome receipts for confirmed interventions", async () => {
+  const denyOutcomes = [];
+  await decisionToToolResult(
+    denyDecision,
+    {},
+    (outcome) => denyOutcomes.push(outcome),
+  );
+  assert.equal(denyOutcomes.length, 1);
+  assert.equal(denyOutcomes[0].kind, "pre_execution_deny");
+  assert.equal(denyOutcomes[0].approval, null);
+
+  const allowDecisionOutcome = [];
+  assert.equal(await decisionToToolResult(allowDecision, {}, (outcome) => allowDecisionOutcome.push(outcome)), undefined);
+  assert.equal(allowDecisionOutcome.length, 0);
+
+  const releaseOutcomes = [];
+  await decisionToToolResult(
+    askDecision,
+    { waitForApproval: async () => ({ status: "resolved", decision: "allow_once" }) },
+    (outcome) => releaseOutcomes.push(outcome),
+  );
+  assert.equal(releaseOutcomes.length, 1);
+  assert.equal(releaseOutcomes[0].kind, "approval_release");
+  assert.equal(releaseOutcomes[0].approval.status, "allowed");
+  assert.equal(releaseOutcomes[0].approval.approvalId, "app_001");
+
+  const approvalDenyOutcomes = [];
+  await decisionToToolResult(
+    askDecision,
+    { waitForApproval: async () => ({ status: "resolved", decision: "deny" }) },
+    (outcome) => approvalDenyOutcomes.push(outcome),
+  );
+  assert.equal(approvalDenyOutcomes.length, 1);
+  assert.equal(approvalDenyOutcomes[0].kind, "pre_execution_deny");
+  assert.equal(approvalDenyOutcomes[0].approval.status, "denied");
+
+  const timeoutOutcomes = [];
+  await decisionToToolResult(
+    askDecision,
+    { waitForApproval: async () => ({ status: "timeout", decision: "deny" }) },
+    (outcome) => timeoutOutcomes.push(outcome),
+  );
+  assert.equal(timeoutOutcomes.length, 1);
+  assert.equal(timeoutOutcomes[0].kind, "pre_execution_deny");
+  assert.equal(timeoutOutcomes[0].approval.status, "expired");
+});
+
+test("decisionToMessageResult reports cancel outcomes for message sends", async () => {
+  const outcomes = [];
+  await decisionToMessageResult(denyDecision, {}, (outcome) => outcomes.push(outcome));
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].kind, "pre_execution_deny");
+
+  const allowOutcomes = [];
+  assert.equal(
+    await decisionToMessageResult(allowDecision, {}, (outcome) => allowOutcomes.push(outcome)),
+    undefined,
+  );
+  assert.equal(allowOutcomes.length, 0);
+});

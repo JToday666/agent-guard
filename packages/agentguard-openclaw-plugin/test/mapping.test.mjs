@@ -7,6 +7,7 @@ import {
   buildMessageSendGuardEvent,
   buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
+  buildRuntimeOutcomeAuditEvent,
   buildToolCallGuardEvent,
   buildToolResultGuardEvent,
 } from "../dist/mapping.js";
@@ -631,4 +632,129 @@ test("maps lifecycle runtime observations to dashboard-visible fallback evidence
     assert.equal(event.metadata.user_task, item.userTask, item.hookName);
     assert.deepEqual(event.resource_targets, item.resourceTargets, item.hookName);
   }
+});
+
+test("runtime observations carry AuditEvent 0.4 shape with null policy fields", () => {
+  const event = buildRuntimeObservationAuditEvent(
+    "session_start",
+    { sessionId: "sess_shape" },
+    { sessionKey: "session-key" },
+  );
+
+  assert.equal(event.schema_version, "0.4");
+  assert.equal(event.record_type, "runtime_observation");
+  assert.equal(event.decision, null);
+  assert.equal(event.risk_score, null);
+  assert.equal(event.severity, null);
+  assert.equal(event.blocked, null);
+  assert.ok(event.links.event_id);
+  assert.equal(event.evidence.intervention.type, "audit_observation");
+  assert.equal(event.evidence.execution.status, "unknown");
+  assert.equal(event.evidence.side_effects.measurement_status, "unknown");
+  assert.equal(event.evidence.result.disposition, "unknown");
+  assert.equal(event.evidence.approval.status, "not_required");
+});
+
+function outcomeFixture() {
+  const guardEvent = buildToolCallGuardEvent(
+    {
+      toolName: "read_file",
+      params: { path: "/private/token.txt" },
+      toolCallId: "call_outcome",
+      runId: "run_outcome",
+      derivedPaths: ["/private/token.txt"],
+    },
+    { agentId: "agent-main", sessionId: "sess_outcome", sessionKey: "session-key" },
+  );
+  const evaluation = {
+    decision: {
+      decision_id: "decision_outcome",
+      decision: "deny",
+      risk_score: 90,
+      severity: "high",
+      categories: ["secret_access"],
+      rule_hits: [{ rule_id: "rule_secret_path" }],
+      reason: "deny private credential read",
+    },
+    approval: null,
+    policy_audit_id: "audit_policy_outcome",
+  };
+  return { guardEvent, evaluation };
+}
+
+test("builds pre_execution_deny outcome receipts with required links", () => {
+  const { guardEvent, evaluation } = outcomeFixture();
+  const event = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, "pre_execution_deny", {
+    stage: "before_tool_call",
+  });
+
+  assert.equal(event.schema_version, "0.4");
+  assert.equal(event.record_type, "runtime_outcome");
+  assert.equal(event.audit_id, `audit_outcome_${guardEvent.event_id}_pre_execution_deny`);
+  assert.equal(event.links.policy_audit_id, "audit_policy_outcome");
+  assert.equal(event.links.event_id, guardEvent.event_id);
+  assert.equal(event.links.decision_id, "decision_outcome");
+  assert.equal(event.links.action_id, "call_outcome");
+  assert.equal(event.decision, "deny");
+  assert.equal(event.blocked, true);
+  assert.deepEqual(event.rule_hits, ["rule_secret_path"]);
+  assert.equal(event.evidence.intervention.type, "pre_execution_deny");
+  assert.equal(event.evidence.execution.status, "not_invoked");
+  assert.equal(event.evidence.execution.tool_result_entered_context, false);
+  assert.equal(event.evidence.execution.persisted, false);
+  assert.equal(event.evidence.side_effects.measurement_status, "measured");
+  assert.equal(event.evidence.side_effects.count, 0);
+  assert.equal(event.evidence.result.disposition, "not_applicable");
+  assert.equal(event.evidence.approval.status, "not_required");
+});
+
+test("approval_release receipts keep execution status unknown until observed", () => {
+  const { guardEvent, evaluation } = outcomeFixture();
+  evaluation.decision.decision = "ask";
+  const event = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, "approval_release", {
+    approval: { approvalId: "apr_outcome", status: "allowed", decision: "allow_once" },
+  });
+
+  assert.equal(event.links.approval_id, "apr_outcome");
+  assert.equal(event.evidence.execution.status, "unknown");
+  assert.equal(event.evidence.execution.tool_result_entered_context, null);
+  assert.equal(event.evidence.execution.persisted, null);
+  assert.equal(event.evidence.side_effects.measurement_status, "not_measured");
+  assert.equal(event.evidence.result.disposition, "unknown");
+  assert.equal(event.evidence.approval.status, "allowed");
+  assert.equal(event.evidence.approval.decision, "allow_once");
+});
+
+test("tool_result_quarantine receipts distinguish modified and quarantined dispositions", () => {
+  const { guardEvent, evaluation } = outcomeFixture();
+  const quarantined = buildRuntimeOutcomeAuditEvent(
+    guardEvent,
+    evaluation,
+    "tool_result_quarantine",
+    { resultDisposition: "quarantined", stage: "tool_result_persist" },
+  );
+  assert.equal(quarantined.evidence.execution.status, "executed");
+  assert.equal(quarantined.evidence.execution.tool_result_entered_context, false);
+  assert.equal(quarantined.evidence.execution.persisted, false);
+  assert.equal(quarantined.evidence.result.disposition, "quarantined");
+  assert.equal(quarantined.evidence.result.sanitized, false);
+
+  const modified = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, "tool_result_quarantine", {
+    resultDisposition: "modified",
+    stage: "tool_result_persist",
+  });
+  assert.equal(modified.evidence.result.disposition, "modified");
+  assert.equal(modified.evidence.result.sanitized, true);
+  assert.equal(modified.evidence.execution.tool_result_entered_context, null);
+});
+
+test("outcome receipts derive deterministic audit ids for idempotent retries", () => {
+  const { guardEvent, evaluation } = outcomeFixture();
+  const first = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, "pre_execution_deny", {
+    timestamp: "2026-08-08T00:00:00.000Z",
+  });
+  const second = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, "pre_execution_deny", {
+    timestamp: "2026-08-09T00:00:00.000Z",
+  });
+  assert.equal(first.audit_id, second.audit_id);
 });

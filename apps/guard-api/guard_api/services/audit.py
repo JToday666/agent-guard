@@ -27,7 +27,13 @@ class AuditService:
         is_new = self.store.add_audit_event(event)
         if is_new:
             self._record_audit_provenance(event)
-        return {"ok": True, "audit_id": event.audit_id}
+        # §12.3：首次写入与同内容重试都返回 200，用 created/idempotent_replay 区分。
+        return {
+            "ok": True,
+            "audit_id": event.audit_id,
+            "created": is_new,
+            "idempotent_replay": not is_new,
+        }
 
     def list_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
         return self.store.list_audit_events(filters)

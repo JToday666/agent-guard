@@ -95,7 +95,7 @@ class EvaluationService:
         approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(event, decision)
         # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
-        self.audit_service.record_evaluation(
+        audit_event = self.audit_service.record_evaluation(
             event,
             decision,
             policy_bundle=bundle,
@@ -116,6 +116,7 @@ class EvaluationService:
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),
+            policy_audit_id=audit_event.audit_id,
         )
 
     def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
@@ -130,6 +131,7 @@ class EvaluationService:
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),
+            policy_audit_id=audit.audit_id,
         )
 
     def _approval_summary(

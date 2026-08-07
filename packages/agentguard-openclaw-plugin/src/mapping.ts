@@ -6,6 +6,7 @@ export {
   buildMessageSendGuardEvent,
   buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
+  buildRuntimeOutcomeAuditEvent,
   buildToolCallGuardEvent,
   buildToolResultGuardEvent,
 } from "./mapping/index.js";

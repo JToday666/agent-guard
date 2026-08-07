@@ -138,22 +138,29 @@ export function buildRuntimeObservationAuditEvent(
     stringMaybe(eventRecord.sessionId),
     stringMaybe(eventRecord.id),
   );
+  const timestamp = new Date().toISOString();
+  // §8.3/§14：observation 不携带策略结论，顶层策略字段一律置 null；
+  // evidence 只补齐必填的 intervention/execution/side_effects/result 块。
+  const eventId =
+    stringMaybe(eventRecord.id) ?? createLocalId("runtime_event");
 
   return {
-    schema_version: "0.3",
+    schema_version: "0.4",
+    record_type: "runtime_observation",
     trace_id: traceId,
     runtime: "openclaw",
+    timestamp,
     stage: hookName,
     event_type: "runtime_observation",
     summary: `OpenClaw ${hookName} observation`,
-    decision: "allow",
-    risk_score: 0,
-    severity: "low",
-    blocked: false,
+    decision: null,
+    risk_score: null,
+    severity: null,
+    blocked: null,
     reason: "Observation only.",
     resource_targets: resourceTargets,
     rule_hits: [],
-    links: {},
+    links: { event_id: eventId },
     metadata: {
       openclaw_hook: hookName,
       ...definedMetadata({
@@ -175,6 +182,40 @@ export function buildRuntimeObservationAuditEvent(
       ...(resourceTargets.length > 0 ? { derived_paths: resourceTargets } : {}),
       event: sanitizeJson(event),
       context: sanitizeJson(context),
+    },
+    evidence: {
+      guard_event: null,
+      guard_decision: null,
+      policy: null,
+      intervention: {
+        type: "audit_observation",
+        reason: "该 Hook 只记录事实，不改变执行路径",
+      },
+      execution: {
+        status: "unknown",
+        receipt_recorded: true,
+        invoked_at: null,
+        completed_at: timestamp,
+        error: null,
+        tool_result_entered_context: null,
+        persisted: null,
+      },
+      side_effects: {
+        measurement_status: "unknown",
+        count: null,
+        summary: null,
+      },
+      result: {
+        disposition: "unknown",
+        summary: null,
+        sanitized: null,
+      },
+      approval: {
+        approval_id: null,
+        status: "not_required",
+        decision: null,
+        resolved_at: null,
+      },
     },
   };
 }
