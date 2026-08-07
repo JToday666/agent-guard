@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,12 +37,14 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
+    AuditWindowQuery,
     EvalMetricFilters,
     EvalMetrics,
     PolicySnapshotRecord,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
+    within_evaluated_range,
 )
 from guard_api.storage.integrity import (
     attach_audit_integrity,
@@ -191,6 +194,50 @@ class PostgresControlPlaneStore:
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
         return [AuditEvent.model_validate(row) for row in rows]
+
+    def read_audit_events_bounded(
+        self, query: AuditWindowQuery
+    ) -> list[AuditEvent]:
+        # 上界读 audit_integrity_heads 链头；序列范围命中现有
+        # ix_audit_events_chain_sequence；JSONB 过滤为残余谓词（契约 §7.3）。
+        conditions: list[Any] = [audit_events.c.chain_id == _AUDIT_CHAIN_ID]
+        if query.after_sequence is not None:
+            conditions.append(audit_events.c.sequence < query.after_sequence)
+        conditions.extend(_window_filter_conditions(query))
+        time_range_present = (
+            query.evaluated_from is not None or query.evaluated_to is not None
+        )
+        with self._session_factory() as session:
+            with session.begin():
+                upper = query.upper_sequence
+                if upper is None:
+                    upper = session.execute(
+                        select(audit_integrity_heads.c.sequence).where(
+                            audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID
+                        )
+                    ).scalar_one_or_none()
+                if upper is None:
+                    return []
+                stmt = (
+                    select(audit_events.c.payload_json)
+                    .where(audit_events.c.sequence <= upper, *conditions)
+                    .order_by(desc(audit_events.c.sequence))
+                )
+                # 时间 cohort 经由共享解析函数在 Python 层过滤以保证与
+                # Memory 端口径一致；无时间条件时 SQL LIMIT 直接限流。
+                if not time_range_present:
+                    stmt = stmt.limit(query.limit)
+                rows = session.execute(stmt).scalars().all()
+        events = (AuditEvent.model_validate(row) for row in rows)
+        if time_range_present:
+            events = (
+                event
+                for event in events
+                if within_evaluated_range(
+                    event.timestamp, query.evaluated_from, query.evaluated_to
+                )
+            )
+        return list(itertools.islice(events, query.limit))
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None:
         links = audit_events.c.payload_json.op("->")("links")
@@ -1078,6 +1125,19 @@ def _audit_filter_conditions(filters: AuditEventFilters) -> list[Any]:
         conditions.append(_json_text("runtime") == filters.runtime)
     if filters.decision is not None:
         conditions.append(_json_text("decision") == filters.decision)
+    return conditions
+
+
+def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
+    conditions: list[Any] = []
+    if query.trace_id is not None:
+        conditions.append(_json_text("trace_id") == query.trace_id)
+    if query.case_id is not None:
+        conditions.append(_json_text("case_id") == query.case_id)
+    if query.runtime is not None:
+        conditions.append(_json_text("runtime") == query.runtime)
+    if query.decision is not None:
+        conditions.append(_json_text("decision") == query.decision)
     return conditions
 
 
