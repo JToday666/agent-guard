@@ -883,6 +883,71 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert metrics_response.json()["ask_count"] == 1
 
 
+def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+
+    decision_response = client.post(
+        "/v1/guard/evaluate",
+        headers=headers,
+        json=_guard_event_payload(),
+    )
+    assert decision_response.status_code == 200
+    policy_audit_id = decision_response.json()["policy_audit_id"]
+    assert policy_audit_id
+
+    _login_dashboard(client, control_token="control-secret")
+    events = client.get("/v1/audit/events").json()
+    policy_events = [
+        event for event in events if event.get("record_type") == "policy_evaluation"
+    ]
+    assert any(event["audit_id"] == policy_audit_id for event in policy_events)
+
+    # §12.3：同一请求重放返回同一 policy_audit_id，供回执幂等关联。
+    replay_response = client.post(
+        "/v1/guard/evaluate",
+        headers=headers,
+        json=_guard_event_payload(),
+    )
+    assert replay_response.status_code == 200
+    assert replay_response.json()["policy_audit_id"] == policy_audit_id
+
+
+def test_audit_events_submit_reports_created_and_idempotent_replay() -> None:
+    app = create_app(
+        store=MemoryControlPlaneStore(),
+        settings=GuardApiSettings(adapter_token="adapter-secret"),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+    payload = _audit_event_payload(
+        audit_id="audit_receipt",
+        trace_id="trace_receipt",
+        decision="allow",
+        runtime="openclaw",
+    )
+
+    first = client.post("/v1/audit/events", headers=headers, json=payload)
+    assert first.status_code == 200
+    assert first.json() == {
+        "ok": True,
+        "audit_id": "audit_receipt",
+        "created": True,
+        "idempotent_replay": False,
+    }
+
+    second = client.post("/v1/audit/events", headers=headers, json=payload)
+    assert second.status_code == 200
+    assert second.json() == {
+        "ok": True,
+        "audit_id": "audit_receipt",
+        "created": False,
+        "idempotent_replay": True,
+    }
+
+
 def test_control_token_can_read_cli_endpoints_without_browser_session() -> None:
     settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
     app = create_app(
