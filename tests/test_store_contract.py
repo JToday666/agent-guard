@@ -683,6 +683,7 @@ def _window_audit_event(
     record_type: str = "policy_evaluation",
     latency_ms: int | None = None,
     links: dict[str, str] | None = None,
+    legacy: bool = False,
 ) -> AuditEvent:
     # 基准 2026-06-01T00:00:00+00:00，每条记录递增一分钟。
     minutes_total, secs = divmod(index * 60, 60)
@@ -690,8 +691,8 @@ def _window_audit_event(
     timestamp = f"2026-06-01T{hours:02d}:{minutes:02d}:{secs:02d}+00:00"
     return AuditEvent(
         audit_id=f"audit_win_{run_id}_{index}",
-        schema_version="0.4",
-        record_type=record_type,
+        schema_version="0.3" if legacy else "0.4",
+        record_type=None if legacy else record_type,
         trace_id=f"trace_win_{run_id}",
         case_id=f"CASE-WIN-{run_id}",
         runtime="langgraph",
@@ -801,6 +802,9 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
 
 
 def test_contract_window_duplicate_policy_records_counted_once(store) -> None:
+    # 0007 部分唯一索引已阻断显式 0.4 policy_evaluation 的写入侧重复；
+    # 读时逻辑去重的目标数据是 legacy（0.3，record_type=None）重复审计，
+    # 故重复记录以 legacy 形态构造（与 §19.1 用例同型处理）。
     run_id = uuid4().hex
     links = {
         "event_id": f"evt_dupwin_{run_id}",
@@ -808,15 +812,17 @@ def test_contract_window_duplicate_policy_records_counted_once(store) -> None:
     }
     for index in range(3):
         store.add_audit_event(
-            _window_audit_event(index=index, run_id=run_id, links=dict(links))
+            _window_audit_event(index=index, run_id=run_id, links=dict(links), legacy=True)
         )
     store.add_audit_event(_window_audit_event(index=3, run_id=run_id))
 
     window = AuditWindowService(store=store).get_window(limit=10)
     metrics = window["policy_metrics"]
 
+    # legacy 重复记录经 §19.2 分类回退判为 policy_evaluation，读时只计一次。
     assert metrics["evaluation_count"] == 2
     assert metrics["duplicate_policy_record_count"] == 2
+    assert metrics["legacy_fallback_count"] == 0
     assert metrics["allow_count"] == 2
 
 
@@ -944,10 +950,12 @@ def test_contract_memory_and_postgres_window_parity() -> None:
             index=2, run_id=run_id, record_type="runtime_outcome", decision=None, latency_ms=500
         ),
         _window_audit_event(index=3, run_id=run_id, decision="deny", is_malicious=None),
+        # 与 index 0 同逻辑键的重复记录：legacy 形态构造以兼容 0007 部分唯一索引。
         _window_audit_event(
             index=4,
             run_id=run_id,
             links={"event_id": f"evt_win_{run_id}_0", "decision_id": f"dec_win_{run_id}_0"},
+            legacy=True,
         ),
     ]
     for target in (memory_store, postgres_store):
