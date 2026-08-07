@@ -34,6 +34,7 @@ from guard_api.models import (
 )
 from guard_api.storage.base import (
     AuditEventFilters,
+    AuditIdConflictError,
     AuditIntegrityStatus,
     EvalMetricFilters,
     EvalMetrics,
@@ -93,7 +94,7 @@ class PostgresControlPlaneStore:
         except Exception:
             return False
 
-    def add_audit_event(self, event: AuditEvent) -> None:
+    def add_audit_event(self, event: AuditEvent) -> bool:
         with self._session_factory() as session:
             with session.begin():
                 session.execute(
@@ -106,7 +107,21 @@ class PostgresControlPlaneStore:
                     )
                 ).scalar_one_or_none()
                 if existing is not None:
-                    return
+                    stored_payload = session.execute(
+                        select(audit_events.c.payload_json).where(
+                            audit_events.c.audit_id == event.audit_id
+                        )
+                    ).scalar_one()
+                    from guard_api.storage.integrity import _canonical_json_bytes
+                    stored_content = _canonical_json_bytes(
+                        {k: v for k, v in stored_payload.items() if k != "integrity"}
+                    )
+                    incoming_content = _canonical_json_bytes(
+                        event.model_dump(mode="json", exclude={"integrity"})
+                    )
+                    if stored_content == incoming_content:
+                        return False
+                    raise AuditIdConflictError(event.audit_id)
                 head = (
                     session.execute(
                         select(
@@ -160,6 +175,7 @@ class PostgresControlPlaneStore:
                     },
                 )
                 session.execute(head_stmt)
+                return True
 
     def list_audit_events(
         self, filters: AuditEventFilters | None = None
