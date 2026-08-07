@@ -9,13 +9,22 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agentguard_core import AuditEvent, PolicyBundle, RuleOverride, ToolProfile
+from agentguard_core import (
+    AuditEvent,
+    GuardDecision,
+    GuardEvent,
+    PolicyBundle,
+    RuleOverride,
+    ToolProfile,
+)
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.llm_approval import HttpLlmApprovalReviewer
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest, LlmApprovalReviewInput
 from guard_api.services import PolicyService
+from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
+from guard_api.storage.integrity import canonical_sha256
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
 
@@ -2432,6 +2441,7 @@ def test_evaluate_audit_records_request_digest() -> None:
     audit = store.audit_events[0]
 
     assert _DIGEST_PATTERN.match(audit.links["request_digest"])
+    assert "policy_revision" not in audit.links
 
 
 def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save() -> None:
@@ -2455,6 +2465,27 @@ def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save()
     assert audit.links["policy_revision"] == "1"
 
 
+def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    bundle = PolicyBundle(disabled_rules=["P001_sensitive_file_access"])
+    PolicyService(store=store).save_snapshot(bundle, updated_by="test")
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_guard_event_payload(event_id="evt_digest_policy_semantic"),
+    )
+
+    assert response.status_code == 200
+    audit = store.audit_events[0]
+    assert audit.links["policy_digest"] == canonical_sha256(
+        bundle.model_dump(mode="json")
+    )
+
+
 def test_evaluate_request_digest_is_deterministic() -> None:
     _, first_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
     _, second_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
@@ -2471,8 +2502,26 @@ def test_evaluate_audit_stores_full_decision_dump() -> None:
     audit = store.audit_events[0]
     dump = audit.metadata["guard_decision"]
 
-    assert dump["decision_id"] == response.json()["decision"]["decision_id"]
-    assert dump["decision"] == response.json()["decision"]["decision"]
+    assert dump == response.json()["decision"]
+
+
+def test_build_audit_event_rejects_extra_links_collision() -> None:
+    event = GuardEvent.model_validate(_guard_event_payload(event_id="evt_link_collision"))
+    decision = GuardDecision(
+        decision_id="dec_link_collision",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        categories=[],
+        rule_hits=[],
+        reason="Allowed.",
+        safe_message=None,
+        approval_intent=None,
+        latency_ms=1,
+    )
+
+    with pytest.raises(ValueError):
+        build_audit_event(event, decision, extra_links={"event_id": "evt_other"})
 
 
 def test_policy_snapshot_history_returns_latest_record_first() -> None:

@@ -47,6 +47,11 @@ def build_audit_event(
     if memory_change_id is not None:
         links["memory_change_id"] = memory_change_id
     if extra_links:
+        collision = set(extra_links) & set(links)
+        if collision:
+            raise ValueError(
+                f"extra_links collides with reserved link keys: {sorted(collision)}"
+            )
         links.update(extra_links)
     metadata = _merge_metadata(
         _security_context_metadata(event),
