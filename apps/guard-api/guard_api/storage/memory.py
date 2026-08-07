@@ -65,6 +65,7 @@ class MemoryControlPlaneStore:
     audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
+    policy_evaluation_reservations: set[str] = field(default_factory=set)
 
     def initialize(self) -> None:
         return None
@@ -110,6 +111,21 @@ class MemoryControlPlaneStore:
                 if _is_policy_evaluation_for(event, event_id):
                     return event
         return None
+
+    def reserve_policy_evaluation(self, event_id: str) -> bool:
+        # 与 PostgreSQL 部分唯一索引（migration 0007）语义对齐：
+        # 单进程内在哈希链锁内原子判定，已入链或已在途的评估不得重复写入。
+        with self.audit_integrity_lock:
+            if any(
+                _is_policy_evaluation_for(event, event_id)
+                for event in self.audit_events
+            ):
+                self.policy_evaluation_reservations.discard(event_id)
+                return False
+            if event_id in self.policy_evaluation_reservations:
+                return False
+            self.policy_evaluation_reservations.add(event_id)
+            return True
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         # 按入链顺序传入，共享聚合器对重复逻辑键保留最早入链记录（§19.1）。
