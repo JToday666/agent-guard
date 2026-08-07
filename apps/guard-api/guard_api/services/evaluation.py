@@ -29,6 +29,26 @@ class EvaluationConflictError(ValueError):
     """Raised when the same event_id is re-evaluated with different content."""
 
 
+def _stored_request_digest(audit: AuditEvent) -> object:
+    """先新后旧双读：0.4 记录存 metadata，PR #92/#93 旧记录存 links。"""
+
+    digest = audit.metadata.get("request_digest")
+    if digest is None:
+        digest = audit.links.get("request_digest")
+    return digest
+
+
+def _stored_decision_dump(audit: AuditEvent) -> object:
+    """先新后旧双读：0.4 记录存 evidence，旧记录存 metadata。"""
+
+    evidence = audit.evidence
+    if isinstance(evidence, dict):
+        dump = evidence.get("guard_decision")
+        if dump is not None:
+            return dump
+    return audit.metadata.get("guard_decision")
+
+
 class EvaluationService:
     def __init__(
         self,
@@ -57,7 +77,7 @@ class EvaluationService:
             event.event_id
         )
         if existing is not None:
-            if existing.links.get("request_digest") == request_digest:
+            if _stored_request_digest(existing) == request_digest:
                 return self._rebuild_response(existing)
             raise EvaluationConflictError(event.event_id)
         snapshot_record = self.policy_service.current_snapshot_record()
@@ -74,21 +94,23 @@ class EvaluationService:
         )
         approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(event, decision)
-        extra_links: dict[str, str] = {
-            "request_digest": request_digest,
-            "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
-        }
-        if snapshot_record is not None:
-            extra_links["policy_revision"] = str(snapshot_record.revision)
+        # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
         self.audit_service.record_evaluation(
             event,
             decision,
+            policy_bundle=bundle,
+            policy_revision=(
+                snapshot_record.revision if snapshot_record is not None else None
+            ),
             approval_id=approval.approval_id if approval is not None else None,
             critic_review=critic_review,
             memory_change_id=(
                 memory_change.change_id if memory_change is not None else None
             ),
-            extra_links=extra_links,
+            extra_metadata={
+                "request_digest": request_digest,
+                "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+            },
             decision_dump=decision.model_dump(mode="json"),
         )
         return GuardEvaluationResponse(
@@ -97,7 +119,7 @@ class EvaluationService:
         )
 
     def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
-        raw_decision = audit.metadata.get("guard_decision")
+        raw_decision = _stored_decision_dump(audit)
         if raw_decision is None:
             raise EvaluationConflictError(audit.links.get("event_id", ""))
         decision = GuardDecision.model_validate(raw_decision)

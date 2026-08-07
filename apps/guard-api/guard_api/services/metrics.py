@@ -12,6 +12,7 @@ from guard_api.storage.base import (
 )
 
 from .evidence import _event_hook_name
+from .metric_rules import classify_record_type
 
 
 class MetricService:
@@ -44,11 +45,13 @@ class MetricService:
                 },
             )
             bucket["event_count"] = int(bucket["event_count"]) + 1
-            if event.decision in {"allow", "deny", "ask"}:
+            # §19.2/§19.3：allow/ask/deny/blocked 只统计策略判定记录。
+            is_policy = classify_record_type(event) == "policy_evaluation"
+            if is_policy and event.decision in {"allow", "deny", "ask"}:
                 bucket[f"{event.decision}_count"] = (
                     int(bucket[f"{event.decision}_count"]) + 1
                 )
-            if event.blocked or event.decision in {"deny", "ask"}:
+            if is_policy and event.decision in {"deny", "ask"}:
                 bucket["blocked_count"] = int(bucket["blocked_count"]) + 1
             if event.latency_ms is not None:
                 bucket["_latency_values"].append(event.latency_ms)  # type: ignore[union-attr]
@@ -72,8 +75,13 @@ class MetricService:
             or adapter_id == runtime
         }
         event_count = len(events)
+        policy_events = [
+            event
+            for event in events
+            if classify_record_type(event) == "policy_evaluation"
+        ]
         blocked_count = sum(
-            1 for event in events if event.blocked or event.decision in {"deny", "ask"}
+            1 for event in policy_events if event.decision in {"deny", "ask"}
         )
         latency_values = [
             event.latency_ms for event in events if event.latency_ms is not None
@@ -81,9 +89,15 @@ class MetricService:
         return {
             "runtime": runtime,
             "event_count": event_count,
-            "allow_count": sum(1 for event in events if event.decision == "allow"),
-            "deny_count": sum(1 for event in events if event.decision == "deny"),
-            "ask_count": sum(1 for event in events if event.decision == "ask"),
+            "allow_count": sum(
+                1 for event in policy_events if event.decision == "allow"
+            ),
+            "deny_count": sum(
+                1 for event in policy_events if event.decision == "deny"
+            ),
+            "ask_count": sum(
+                1 for event in policy_events if event.decision == "ask"
+            ),
             "blocked_count": blocked_count,
             "block_rate": (blocked_count / event_count) if event_count else None,
             "average_latency_ms": (

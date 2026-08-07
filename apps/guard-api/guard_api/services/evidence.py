@@ -12,9 +12,28 @@ from agentguard_core import (
     GuardDecision,
     GuardEvent,
     MemoryGuardChange,
+    PolicyBundle,
     ToolCallPayload,
 )
 from agentguard_core.resources import derive_resources
+
+from guard_api.storage.integrity import canonical_sha256
+
+from .redaction import (
+    CONTENT_PREVIEW_LIMIT,
+    CONTEXT_SOURCES_LIMIT,
+    NORMALIZED_RESOURCES_LIMIT,
+    RULE_HITS_LIMIT,
+    SUMMARY_TEXT_LIMIT,
+    bound_redacted_value,
+    bound_value,
+    enforce_evidence_budget,
+    redact_structure,
+    truncate_text,
+)
+
+# §9.3 事件时策略 digest 规范化标识。
+POLICY_CANONICALIZATION = "json:sorted-keys:v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,14 +51,23 @@ def build_audit_event(
     event: GuardEvent,
     decision: GuardDecision,
     *,
+    policy_bundle: PolicyBundle,
+    policy_revision: int | None,
     approval_id: str | None = None,
     critic_review_id: str | None = None,
     memory_change_id: str | None = None,
     extra_links: dict[str, str] | None = None,
+    extra_metadata: dict[str, object] | None = None,
     decision_dump: dict[str, object] | None = None,
 ) -> AuditEvent:
+    """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10)."""
+
     description = describe_guard_event(event)
-    links = {"event_id": event.event_id, "decision_id": decision.decision_id}
+    links: dict[str, str] = {
+        "event_id": event.event_id,
+        "decision_id": decision.decision_id,
+        "action_id": description.action_id,
+    }
     if approval_id is not None:
         links["approval_id"] = approval_id
     if critic_review_id is not None:
@@ -58,27 +86,211 @@ def build_audit_event(
         event.metadata,
         description.metadata,
     )
-    if decision_dump is not None:
-        metadata["guard_decision"] = decision_dump
+    if extra_metadata:
+        for key, value in extra_metadata.items():
+            if value in (None, ""):
+                continue
+            metadata[key] = value
+    if policy_revision is None:
+        # §9.3：使用启动时默认策略时不得伪造 revision，只标记来源。
+        metadata["policy_source"] = "default"
+    # 幂等回放依赖完整 decision dump（先新后旧双读，见 evaluation.py）。
+    dump = (
+        decision_dump
+        if decision_dump is not None
+        else decision.model_dump(mode="json")
+    )
+    metadata["guard_decision"] = dump
+    evidence = _policy_evaluation_evidence(
+        event,
+        decision,
+        dump,
+        policy_bundle=policy_bundle,
+        policy_revision=policy_revision,
+        approval_id=approval_id,
+    )
     return AuditEvent(
+        schema_version="0.4",
+        record_type="policy_evaluation",
         trace_id=event.trace_id,
         case_id=event.case_id,
         runtime=event.runtime,
         event_type=event.event_type,
         attack_type=event.attack_type,
         is_malicious=event.is_malicious,
-        summary=description.summary,
+        summary=truncate_text(description.summary, SUMMARY_TEXT_LIMIT),
         decision=decision.decision,
         risk_score=decision.risk_score,
         severity=decision.severity,
         blocked=decision.blocked,
         resource_targets=description.resource_targets,
-        rule_hits=[hit.rule_id for hit in decision.rule_hits],
+        rule_hits=[hit.rule_id for hit in decision.rule_hits][:RULE_HITS_LIMIT],
         reason=decision.reason,
         links=links,
         latency_ms=decision.latency_ms,
         metadata=metadata,
+        evidence=evidence,
     )
+
+
+def _policy_evaluation_evidence(
+    event: GuardEvent,
+    decision: GuardDecision,
+    decision_dump: dict[str, object],
+    *,
+    policy_bundle: PolicyBundle,
+    policy_revision: int | None,
+    approval_id: str | None,
+) -> dict[str, object]:
+    evidence: dict[str, object] = {
+        "guard_event": _guard_event_projection(event),
+        "guard_decision": _bounded_decision_dump(decision_dump),
+        "policy": {
+            "bundle_id": policy_bundle.bundle_id,
+            "version": policy_bundle.version,
+            "revision": policy_revision,
+            # §9.3：digest 必须来自同一次快照读取的 PolicyBundle。
+            "canonical_digest": canonical_sha256(
+                policy_bundle.model_dump(mode="json")
+            ),
+            "canonicalization": POLICY_CANONICALIZATION,
+        },
+        "intervention": _policy_intervention(decision),
+        "execution": {
+            "status": "unknown",
+            "receipt_recorded": False,
+            "invoked_at": None,
+            "completed_at": None,
+            "error": None,
+            "tool_result_entered_context": None,
+            "persisted": None,
+        },
+        "side_effects": {
+            "measurement_status": "unknown",
+            "count": None,
+            "summary": None,
+        },
+        "result": {
+            "disposition": "unknown",
+            "summary": None,
+            "sanitized": None,
+        },
+        "approval": (
+            {
+                "approval_id": approval_id,
+                "status": "pending",
+                "decision": None,
+                "resolved_at": None,
+            }
+            if approval_id is not None
+            else {
+                "approval_id": None,
+                "status": "not_required",
+                "decision": None,
+                "resolved_at": None,
+            }
+        ),
+    }
+    return enforce_evidence_budget(evidence)
+
+
+def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
+    """§9.1 有界、脱敏的 GuardEvent 投影。"""
+
+    context = event.security_context
+    projection: dict[str, object] = {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "user_task": bound_redacted_value(
+            context.user_task, text_limit=CONTENT_PREVIEW_LIMIT
+        ),
+    }
+    source: dict[str, object] = {
+        "type": context.source_type,
+        "trust_level": context.source_trust,
+    }
+    if context.sender_id:
+        source["source_id"] = redact_structure(context.sender_id)
+    projection["source"] = source
+    projection["context_sources"] = bound_value(
+        redact_structure(list(context.context_sources)),
+        text_limit=SUMMARY_TEXT_LIMIT,
+        array_limit=CONTEXT_SOURCES_LIMIT,
+    )
+    projection["model_intent"] = (
+        bound_redacted_value(context.model_intent, text_limit=CONTENT_PREVIEW_LIMIT)
+        if context.model_intent is not None
+        else None
+    )
+    payload = event.payload
+    if isinstance(payload, ToolCallPayload):
+        projection["tool"] = {
+            "name": payload.tool.name,
+            "category": payload.tool.category,
+            "call_id": payload.tool.call_id,
+            # tool.arguments 必须服务端递归脱敏。
+            "arguments": bound_redacted_value(payload.arguments),
+        }
+    else:
+        projection["tool"] = None
+    resources = [
+        {
+            "type": resource.resource_type,
+            "operation": resource.operation,
+            "target": resource.target,
+            "sensitivity": resource.data_classification,
+            "direction": resource.direction,
+        }
+        for resource in derive_resources(event)
+    ]
+    projection["normalized_resources"] = bound_value(
+        redact_structure(resources),
+        text_limit=SUMMARY_TEXT_LIMIT,
+        array_limit=NORMALIZED_RESOURCES_LIMIT,
+    )
+    return projection
+
+
+def _bounded_decision_dump(dump: dict[str, object]) -> dict[str, object]:
+    """完整 decision dump，仅套用 §21.2 规则 evidence / reason 单项边界。"""
+
+    bounded = dict(dump)
+    rule_hits = bounded.get("rule_hits")
+    if isinstance(rule_hits, list):
+        bounded_hits: list[object] = []
+        for hit in rule_hits[:RULE_HITS_LIMIT]:
+            if isinstance(hit, dict):
+                item = dict(hit)
+                evidence_items = item.get("evidence")
+                if isinstance(evidence_items, list):
+                    item["evidence"] = [
+                        truncate_text(str(entry), SUMMARY_TEXT_LIMIT)
+                        for entry in evidence_items
+                    ]
+                if isinstance(item.get("reason"), str):
+                    item["reason"] = truncate_text(
+                        str(item["reason"]), SUMMARY_TEXT_LIMIT
+                    )
+                bounded_hits.append(item)
+            else:
+                bounded_hits.append(hit)
+        bounded["rule_hits"] = bounded_hits
+    if isinstance(bounded.get("reason"), str):
+        bounded["reason"] = truncate_text(str(bounded["reason"]), SUMMARY_TEXT_LIMIT)
+    return bounded
+
+
+def _policy_intervention(decision: GuardDecision) -> dict[str, object]:
+    if decision.decision == "allow":
+        return {
+            "type": "none",
+            "reason": "The action was allowed without intervention.",
+        }
+    if decision.decision == "deny":
+        reason = "策略已拒绝，尚未收到 Adapter 执行回执"
+    else:
+        reason = "策略要求审批，尚未收到 Adapter 执行回执"
+    return {"type": "unknown", "reason": reason}
 
 
 def _approval_evidence(
@@ -112,32 +324,8 @@ def _approval_evidence(
 
 
 def _approval_payload_preview(value: object) -> object:
-    if hasattr(value, "model_dump"):
-        return _approval_payload_preview(value.model_dump(mode="json"))  # type: ignore[attr-defined]
-    if isinstance(value, dict):
-        return {
-            str(key): _approval_field_preview(str(key), nested)
-            for key, nested in value.items()
-        }
-    if isinstance(value, list):
-        return [_approval_payload_preview(item) for item in value[:20]]
-    if isinstance(value, str):
-        return value if len(value) <= 500 else f"{value[:500]}..."
-    return value
-
-
-def _approval_field_preview(key: str, value: object) -> object:
-    if _looks_sensitive_key(key):
-        return "[redacted]"
-    return _approval_payload_preview(value)
-
-
-def _looks_sensitive_key(key: str) -> bool:
-    normalized = key.lower()
-    return any(
-        marker in normalized
-        for marker in ("token", "secret", "password", "authorization", "credential")
-    )
+    # §21.2：审批 payload 清洗与 evidence 投影共用同一服务端工具。
+    return bound_redacted_value(value, text_limit=SUMMARY_TEXT_LIMIT)
 
 
 def _config_audit_event(

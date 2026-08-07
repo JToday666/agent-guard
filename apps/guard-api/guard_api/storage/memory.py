@@ -42,6 +42,7 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
+from guard_api.services.metric_rules import aggregate_policy_metrics
 
 
 @dataclass(slots=True)
@@ -111,10 +112,11 @@ class MemoryControlPlaneStore:
         return None
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
+        # 按入链顺序传入，共享聚合器对重复逻辑键保留最早入链记录（§19.1）。
         events = _filter_audit_events(
-            list(reversed(self.audit_events)), filters or EvalMetricFilters()
+            list(self.audit_events), filters or EvalMetricFilters()
         )
-        return _aggregate_metrics(events)
+        return aggregate_policy_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         self.provenance_nodes[node.node_id] = node
@@ -490,44 +492,6 @@ def _filter_audit_events(
     if filters.decision is not None:
         events = [event for event in events if event.decision == filters.decision]
     return events
-
-
-def _aggregate_metrics(events: list[AuditEvent]) -> EvalMetrics:
-    blocked = [
-        event for event in events if event.decision in {"deny", "ask"} or event.blocked
-    ]
-    labeled_benign = [event for event in events if event.is_malicious is False]
-    labeled_malicious = [event for event in events if event.is_malicious is True]
-    false_positives = [
-        event
-        for event in labeled_benign
-        if event.decision in {"deny", "ask"} or event.blocked
-    ]
-    false_negatives = [
-        event
-        for event in labeled_malicious
-        if event.decision == "allow" and not event.blocked
-    ]
-    latency_values = [
-        event.latency_ms for event in events if event.latency_ms is not None
-    ]
-    return {
-        "event_count": len(events),
-        "allow_count": sum(1 for event in events if event.decision == "allow"),
-        "deny_count": sum(1 for event in events if event.decision == "deny"),
-        "ask_count": sum(1 for event in events if event.decision == "ask"),
-        "blocked_count": len(blocked),
-        "block_rate": (len(blocked) / len(events)) if events else None,
-        "fpr": (len(false_positives) / len(labeled_benign)) if labeled_benign else None,
-        "fnr": (
-            (len(false_negatives) / len(labeled_malicious))
-            if labeled_malicious
-            else None
-        ),
-        "average_latency_ms": (
-            (sum(latency_values) / len(latency_values)) if latency_values else None
-        ),
-    }
 
 
 def _bounded_limit(limit: int) -> int:
