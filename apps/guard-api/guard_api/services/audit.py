@@ -23,8 +23,9 @@ class AuditService:
         self.store = store
 
     def submit(self, event: AuditEvent) -> dict[str, str | bool]:
-        self.store.add_audit_event(event)
-        self._record_audit_provenance(event)
+        is_new = self.store.add_audit_event(event)
+        if is_new:
+            self._record_audit_provenance(event)
         return {"ok": True, "audit_id": event.audit_id}
 
     def list_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:

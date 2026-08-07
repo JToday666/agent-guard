@@ -2804,3 +2804,65 @@ def test_memory_store_audit_id_conflict_raises_on_different_content() -> None:
         store.add_audit_event(different)
 
     assert len(store.audit_events) == 1
+
+def test_audit_events_post_returns_409_on_conflict() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    first_payload = _audit_event_payload(
+        audit_id="audit_api_conflict",
+        trace_id="trace_api_conflict",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    first_response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=first_payload,
+    )
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={**first_payload, "decision": "deny", "blocked": True, "risk_score": 90, "severity": "high"},
+    )
+
+    assert second_response.status_code == 409
+    assert second_response.json()["error"]["code"] == "AUDIT_ID_CONFLICT"
+    assert len(store.audit_events) == 1
+
+
+def test_audit_events_post_idempotent_hit_skips_provenance() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    payload = _audit_event_payload(
+        audit_id="audit_api_idem",
+        trace_id="trace_api_idem",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+
+    first = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    second = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["audit_id"] == "audit_api_idem"
+    assert len(store.audit_events) == 1
+    assert len(store.provenance_nodes) == 1  # audit node only (no source link in payload), not doubled

@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from agentguard_core import AuditEvent
+
+from guard_api.auth import ApiAuthError
+from guard_api.storage.base import AuditIdConflictError
 from fastapi import Cookie, FastAPI, Header
 
 from guard_api.storage.base import AuditEventFilters
@@ -23,7 +26,13 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         payload: AuditEvent, authorization: str | None = Header(default=None)
     ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "event:audit:write")
-        return audit_service.submit(payload)
+        try:
+            return audit_service.submit(payload)
+        except AuditIdConflictError as exc:
+            raise ApiAuthError(
+                "AUDIT_ID_CONFLICT",
+                status_code=409,
+            ) from None
 
     @app.get("/v1/audit/events")
     def audit_events(
