@@ -2536,3 +2536,72 @@ def test_policy_snapshot_history_returns_latest_record_first() -> None:
 
     assert len(history) == 1
     assert history[0].revision == 2
+
+
+def _evaluate_store(payload: dict) -> MemoryControlPlaneStore:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    return store
+
+
+def test_policy_evaluation_lookup_returns_audit_for_event_id() -> None:
+    store = _evaluate_store(_guard_event_payload(event_id="evt_lookup_hit"))
+
+    found = store.get_policy_evaluation_by_event_id("evt_lookup_hit")
+
+    assert found is not None
+    assert found.links["event_id"] == "evt_lookup_hit"
+    assert "request_digest" in found.links
+
+
+def test_policy_evaluation_lookup_returns_none_for_unknown_event_id() -> None:
+    store = _evaluate_store(_guard_event_payload(event_id="evt_lookup_known"))
+
+    assert store.get_policy_evaluation_by_event_id("evt_lookup_missing") is None
+
+
+def test_policy_evaluation_lookup_ignores_config_audit_records() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/config-audit/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "runtime": "openclaw",
+            "target_type": "plugin",
+            "target_id": "lookup-config-audit",
+            "action": "before_install",
+            "findings": [
+                {
+                    "severity": "high",
+                    "category": "openclaw.plugin",
+                    "title": "Raw conversation access enabled",
+                    "subject": "lookup-config-audit.hooks.allowConversationAccess",
+                    "description": "Plugin can read raw conversation content.",
+                    "evidence": ["allowConversationAccess=true"],
+                }
+            ],
+            "metadata": {
+                "trace_id": "trace_lookup_config_audit",
+                "user_task": "Install reviewed plugins only",
+                "source_type": "plugin_manifest",
+                "source_trust": "trusted",
+                "run_id": "trace_lookup_config_audit",
+                "agent_id": "main",
+                "current_step": "before_install",
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    assert store.get_policy_evaluation_by_event_id("lookup-config-audit") is None

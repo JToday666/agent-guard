@@ -8,7 +8,7 @@ from typing import Any
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, desc, select, text, update
+from sqlalchemy import create_engine, desc, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -174,6 +174,23 @@ class PostgresControlPlaneStore:
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
         return [AuditEvent.model_validate(row) for row in rows]
+
+    def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None:
+        links = audit_events.c.payload_json.op("->")("links")
+        record_type = audit_events.c.payload_json.op("->>")("record_type")
+        stmt = (
+            select(audit_events.c.payload_json)
+            .where(
+                links.op("->>")("event_id") == event_id,
+                links.op("?")("decision_id"),
+                func.coalesce(record_type, "policy_evaluation") == "policy_evaluation",
+            )
+            .order_by(audit_events.c.sequence.asc(), audit_events.c.audit_id.asc())
+            .limit(1)
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalars().first()
+        return AuditEvent.model_validate(row) if row is not None else None
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
