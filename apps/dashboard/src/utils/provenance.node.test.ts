@@ -29,19 +29,19 @@ test("maps canonical Guard API provenance relations to concise Chinese labels", 
   assert.equal(getProvenanceRelationLabel("future_relation"), "");
 });
 
-test("reads canonical snake-case and mock camel-case risk metadata", () => {
+test("reads only canonical snake-case risk metadata", () => {
   assert.equal(getProvenanceRiskScore({ risk_score: 64 }), "64");
-  assert.equal(getProvenanceRiskScore({ riskScore: "72" }), "72");
+  assert.equal(getProvenanceRiskScore({ riskScore: "72" }), "");
   assert.equal(getProvenanceRiskScore({}), "");
 });
 
-test("links raw and prefixed provenance references to audit events", () => {
+test("links only raw provenance references to audit events", () => {
   const events = [{ id: "audit_1" }, { id: "audit_2" }];
   const rawNode = node();
   const prefixedNode = node({ nodeId: "mock:event", refId: "event:audit_2" });
 
   assert.equal(resolveProvenanceEventId(rawNode, events), "audit_1");
-  assert.equal(resolveProvenanceEventId(prefixedNode, events), "audit_2");
+  assert.equal(resolveProvenanceEventId(prefixedNode, events), undefined);
   assert.equal(resolveProvenanceEventId(node({ refId: "guard_event_1" }), events), undefined);
-  assert.equal(findProvenanceNodeForEvent([rawNode, prefixedNode], "audit_2"), prefixedNode);
+  assert.equal(findProvenanceNodeForEvent([rawNode, prefixedNode], "audit_2"), undefined);
 });

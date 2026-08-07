@@ -37,3 +37,17 @@ test("does not expose arbitrary transport error messages", () => {
     shouldRefreshQueue: false,
   });
 });
+
+test("refreshes the queue when an approval result is uncertain", () => {
+  for (const reason of [
+    apiError("NETWORK_ERROR", 0),
+    apiError("REQUEST_TIMEOUT", 0),
+    apiError("INTERNAL_ERROR", 503),
+  ]) {
+    assert.deepEqual(getApprovalResolutionFailure(reason), {
+      kind: "uncertain",
+      message: "审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。",
+      shouldRefreshQueue: true,
+    });
+  }
+});

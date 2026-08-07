@@ -11,7 +11,11 @@
   >
     <div class="confirm-dialog__surface" @animationend="handleSurfaceAnimationEnd">
       <header>
-        <span class="confirm-dialog__signal" aria-hidden="true"></span>
+        <span
+          class="confirm-dialog__signal"
+          :class="`confirm-dialog__signal--${tone}`"
+          aria-hidden="true"
+        ></span>
         <div>
           <p>{{ eyebrow }}</p>
           <h2 :id="titleId">{{ title }}</h2>
@@ -200,10 +204,16 @@ function handleBackdropClick(): void {
 }
 
 .confirm-dialog__signal {
-  background: var(--color-warning);
+  background: var(--color-active);
   border-radius: var(--radius-pill);
   height: 100%;
   min-height: 2.75rem;
+}
+.confirm-dialog__signal--warning {
+  background: var(--color-warning);
+}
+.confirm-dialog__signal--danger {
+  background: var(--color-danger);
 }
 
 .confirm-dialog header p,
@@ -251,7 +261,7 @@ function handleBackdropClick(): void {
   border-radius: var(--radius-2);
   color: var(--color-text);
   cursor: pointer;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   padding: 0 var(--space-4);
 }
 

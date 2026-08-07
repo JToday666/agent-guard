@@ -3,7 +3,7 @@ interface ApiErrorLike {
   status?: unknown;
 }
 
-export type ApprovalResolutionFailureKind = "conflict" | "session" | "failed";
+export type ApprovalResolutionFailureKind = "conflict" | "session" | "uncertain" | "failed";
 
 export interface ApprovalResolutionFailure {
   kind: ApprovalResolutionFailureKind;
@@ -47,8 +47,20 @@ export function getApprovalResolutionFailure(reason: unknown): ApprovalResolutio
   if (code === "SESSION_INVALID" || code === "SESSION_EXPIRED" || code === "CSRF_INVALID") {
     return {
       kind: "session",
-      message: "监督端会话已失效，请通过本机启动器重新打开 Dashboard。",
+      message: "当前会话已失效，请通过本机启动器重新打开 Dashboard。",
       shouldRefreshQueue: false,
+    };
+  }
+
+  if (
+    code === "NETWORK_ERROR" ||
+    code === "REQUEST_TIMEOUT" ||
+    (status !== null && status >= 500)
+  ) {
+    return {
+      kind: "uncertain",
+      message: "审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。",
+      shouldRefreshQueue: true,
     };
   }
 

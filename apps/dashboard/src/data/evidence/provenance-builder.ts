@@ -33,6 +33,7 @@ interface NodeInput {
   critical?: boolean;
   kind: EvidenceNodeKind;
   label: string;
+  nodeKey?: string;
   phase: EvidenceStageId;
   refId: string;
   status?: string;
@@ -53,7 +54,7 @@ function policySummary(primary: NormalizedAuditEvidence): string {
     primary.policy.version,
     primary.policy.revision === null ? null : `r${primary.policy.revision}`,
   ].filter((value): value is string => Boolean(value));
-  return parts.length ? parts.join(" / ") : "事件时策略引用未记录";
+  return parts.length ? parts.join(" / ") : "当时生效的策略未记录";
 }
 
 function approvalLabel(primary: NormalizedAuditEvidence): string {
@@ -117,7 +118,7 @@ function buildInputs(primary: NormalizedAuditEvidence): {
       phase: "tool_policy",
       refId: "policy",
       status: primary.policy.digest ? `摘要 ${primary.policy.digest.slice(0, 12)}…` : undefined,
-      summary: "事件时策略",
+      summary: "当时生效的策略",
     },
     {
       critical: true,
@@ -141,8 +142,9 @@ function buildInputs(primary: NormalizedAuditEvidence): {
       critical: true,
       kind: "audit",
       label: primary.entryHash ? "审计记录已进入哈希链" : "审计完整性元数据未记录",
+      nodeKey: `audit:${primary.auditId}`,
       phase: "outcome_audit",
-      refId: `audit:${primary.auditId}`,
+      refId: primary.auditId,
       status: primary.chainIndex === null ? undefined : `链位置 ${primary.chainIndex}`,
       summary: primary.auditId,
     },
@@ -347,6 +349,7 @@ export function buildProvenanceGraphFromEvidence(
   const input = buildInputs(primary);
   const timestamp = primary.occurredAt;
   const nodeId = (refId: string) => `${evidence.traceId}:${refId}`;
+  const nodeKey = (node: NodeInput) => node.nodeKey ?? node.refId;
   const nodes: ProvenanceNode[] = input.nodes.map((node) => ({
     kind: node.kind,
     label: node.label,
@@ -357,8 +360,8 @@ export function buildProvenanceGraphFromEvidence(
       status: node.status,
       summary: node.summary,
     },
-    nodeId: nodeId(node.refId),
-    refId: node.refId.startsWith("audit:") ? node.refId : node.refId,
+    nodeId: nodeId(nodeKey(node)),
+    refId: node.refId,
     timestamp,
     traceId: evidence.traceId,
   }));
@@ -384,12 +387,12 @@ export function buildProvenanceGraphFromEvidence(
           summary: event.auditId,
         },
         nodeId: nodeId(`audit:${event.auditId}`),
-        refId: `audit:${event.auditId}`,
+        refId: event.auditId,
         timestamp: event.occurredAt,
         traceId: evidence.traceId,
       });
     });
-  const availableNodeIds = new Set(input.nodes.map((node) => node.refId));
+  const availableNodeIds = new Set(input.nodes.map(nodeKey));
   const edges: ProvenanceEdge[] = input.edges
     .filter((edge) => availableNodeIds.has(edge.source) && availableNodeIds.has(edge.target))
     .map((edge, index) => ({

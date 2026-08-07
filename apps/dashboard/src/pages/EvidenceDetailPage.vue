@@ -3,8 +3,8 @@
     <section class="workspace-panel evidence-detail__main" aria-labelledby="trace-title">
       <header class="page-header evidence-page-header">
         <div>
-          <h1 id="trace-title">攻击证据展示器</h1>
-          <p>从输入信任到运行时结果，复核一条 Agent 安全事件的完整证据。</p>
+          <h1 id="trace-title">证据链详情</h1>
+          <p>查看任务从输入到执行结果的关键证据。</p>
         </div>
         <div class="trace-header-actions">
           <DataFreshness :status="store.status" :updated-at="store.lastUpdatedAt" />
@@ -18,7 +18,7 @@
         title="证据刷新未完成"
         tone="warning"
       >
-        <p>{{ traceDetailError }}。当前保留上次成功数据或已加载审计窗口，链路可能不完整。</p>
+        <p>{{ traceDetailError }}。当前保留上次成功数据或已加载的近期记录，证据可能不完整。</p>
         <button class="inline-retry" type="button" @click="handleTraceRetry">重新加载证据链</button>
       </InlineNotice>
       <ErrorState
@@ -48,16 +48,16 @@
         >
           <div class="evidence-hero__meta">
             <span
-              >TRACE <code>{{ traceId }}</code></span
+              >证据链 <code>{{ traceId }}</code></span
             >
             <span
-              >CASE <code>{{ evidenceModel.caseId ?? "未记录" }}</code></span
+              >评测样本 <code>{{ evidenceModel.caseId ?? "未记录" }}</code></span
             >
             <span
               >时间范围 <time>{{ traceRange }}</time></span
             >
             <span>
-              审计 {{ evidenceModel.originalAuditCount }} 条 · 逻辑记录
+              审计记录 {{ evidenceModel.originalAuditCount }} 条 · 去重后
               {{ evidenceModel.logicalAuditCount }} 条
             </span>
           </div>
@@ -106,8 +106,8 @@
         <section class="evidence-stage-section" aria-labelledby="evidence-stage-title">
           <header class="section-header">
             <div>
-              <h2 id="evidence-stage-title">四阶段证据流</h2>
-              <p>按输入、意图、策略和结果复核关键事实，缺失证据明确标为未记录。</p>
+              <h2 id="evidence-stage-title">关键证据路径</h2>
+              <p>查看输入来源、任务意图、安全判断和执行结果；缺失信息明确标记为未记录。</p>
             </div>
           </header>
           <EvidenceStageFlow
@@ -119,10 +119,8 @@
         <section class="trace-provenance section-divider" aria-labelledby="provenance-title">
           <header class="section-header">
             <div>
-              <h2 id="provenance-title">交互式攻击溯源图</h2>
-              <p>
-                沿生命周期查看任务、来源、模型意图、能力请求、资源、规则、策略、决定和运行时结果。
-              </p>
+              <h2 id="provenance-title">攻击溯源关系</h2>
+              <p>查看任务、来源、动作、资源、安全规则与执行结果之间的关联。</p>
             </div>
             <span v-if="provenance" class="trace-provenance__count">
               {{ provenance.nodes.length }} 节点 · {{ provenance.edges.length }} 关系
@@ -154,15 +152,15 @@
         <section class="trace-records section-divider" aria-labelledby="trace-records-title">
           <header class="section-header">
             <div>
-              <h2 id="trace-records-title">审计时间线与证据档案</h2>
-              <p>时间线保留全部原始审计记录；重复策略审计仅在逻辑结论层合并。</p>
+              <h2 id="trace-records-title">事件时间线与详细证据</h2>
+              <p>按发生顺序查看全部审计记录；重复的策略记录只在结论汇总中合并。</p>
             </div>
           </header>
           <div class="trace-records__layout">
             <section class="trace-events" aria-labelledby="trace-events-title">
               <header>
-                <h3 id="trace-events-title">生命周期时间线</h3>
-                <span>{{ traceEvents.length }} 条原始审计</span>
+                <h3 id="trace-events-title">事件时间线</h3>
+                <span>{{ traceEvents.length }} 条审计记录</span>
               </header>
               <TraceTimeline
                 :events="traceEvents"
@@ -186,7 +184,7 @@
 
     <DetailDrawer
       :is-open="isEventDrawerOpen"
-      eyebrow="原始审计证据"
+      eyebrow="事件详情"
       :title="selectedEvent?.tool ?? '事件未找到'"
       @close="handleCloseEvidence"
     >
@@ -624,14 +622,17 @@ watch(
 }
 
 .inline-retry {
-  background: transparent;
-  border: 0;
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-2);
   color: var(--color-link);
   cursor: pointer;
+  display: inline-flex;
   font-weight: var(--font-weight-semibold);
   justify-self: start;
-  min-height: 2rem;
-  padding: 0;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
 }
 
 @media (max-width: 82rem) {

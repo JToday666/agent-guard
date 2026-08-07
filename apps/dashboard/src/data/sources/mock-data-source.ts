@@ -40,8 +40,30 @@ import type {
 import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
 import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
 
-function wait(delayMs: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+function abortError(signal: AbortSignal): DOMException {
+  return signal.reason instanceof DOMException && signal.reason.name === "AbortError"
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
+function wait(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
+
+    const handleAbort = () => {
+      globalThis.clearTimeout(timer);
+      signal?.removeEventListener("abort", handleAbort);
+      reject(abortError(signal!));
+    };
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
 }
 
 function readFixtureAuditEvent(event: AuditEventRow): GuardAuditEventDto {
@@ -71,11 +93,11 @@ const mockConfigAuditFindings: GuardConfigAuditFindingRecordDto[] = [
       finding_id: "finding_cfg_critical_exec",
       severity: "critical",
       category: "openclaw.plugin",
-      title: "Exec environment exposes shell access",
+      title: "执行环境开放了 Shell 访问",
       subject: "permissions.exec",
       description: "插件请求执行环境能力，可能绕过工具前置审批边界。",
       evidence: ["resolve_exec_env=true", "exec.shell=/bin/bash"],
-      recommendation: "仅允许受控 profile 启用 exec env，并保持 before_install fail-closed。",
+      recommendation: "仅允许受控配置启用执行环境，并在安装前校验失败时停止操作。",
     },
   },
   {
@@ -89,7 +111,7 @@ const mockConfigAuditFindings: GuardConfigAuditFindingRecordDto[] = [
       finding_id: "finding_cfg_high_raw_conversation",
       severity: "high",
       category: "openclaw.plugin",
-      title: "Raw conversation access enabled",
+      title: "已启用原始会话访问",
       subject: "hooks.allowConversationAccess",
       description: "插件可以读取原始会话内容，需确认其只用于安全判定并完成脱敏。",
       evidence: ["allowConversationAccess=true"],
@@ -107,11 +129,11 @@ const mockConfigAuditFindings: GuardConfigAuditFindingRecordDto[] = [
       finding_id: "finding_cfg_medium_prompt",
       severity: "medium",
       category: "openclaw.gateway",
-      title: "Prompt injection compatibility flag is enabled",
+      title: "已启用提示注入兼容配置",
       subject: "gateway.allowPromptInjection",
-      description: "当前 profile 允许测试注入样本进入运行时，适合评测但不适合普通工作区。",
+      description: "当前评测配置允许测试注入样本进入运行时，不应在普通工作区启用。",
       evidence: ["allowPromptInjection=true", "profile=attackbench-local"],
-      recommendation: "生产 profile 禁用该配置，并与评测 profile 保持隔离。",
+      recommendation: "生产配置应关闭该选项，并与评测配置隔离。",
     },
   },
 ];
@@ -373,8 +395,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .map(mapAuditEvent);
   }
 
-  async getAuditWindow(filters: EventFilters = {}) {
-    await wait(this.delayMs);
+  async getAuditWindow(filters: EventFilters = {}, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return createAuditWindow(this.filteredAuditEvents(filters), {
       limit: AUDIT_EVENT_WINDOW_LIMIT,
       hasMore: null,
@@ -382,8 +404,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     });
   }
 
-  async getPendingApprovals() {
-    await wait(this.delayMs);
+  async getPendingApprovals(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return this.approvalDtos.filter((approval) => approval.status === "pending").map(mapApproval);
   }
 
@@ -397,8 +419,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     return { approvalId: target.approval_id, status: "resolved", decision } as const;
   }
 
-  async getHealth() {
-    await wait(this.delayMs);
+  async getHealth(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return {
       api: "online" as const,
       database: "online" as const,
@@ -406,12 +428,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getLatestEvaluationRun() {
+  async getLatestEvaluationRun(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapEvaluationRun(mockEvaluationRun);
   }
 
-  async getConfigAuditFindings(filters: ConfigAuditFindingFilters = {}) {
-    await wait(this.delayMs);
+  async getConfigAuditFindings(filters: ConfigAuditFindingFilters = {}, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mockConfigAuditFindings
       .filter((row) => !filters.traceId || row.trace_id === filters.traceId)
       .filter((row) => !filters.targetId || row.target_id === filters.targetId)
@@ -421,13 +444,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
       .map(mapConfigAuditFindingRecord);
   }
 
-  async getAdapterStatus(adapterId: string) {
-    await wait(this.delayMs);
+  async getAdapterStatus(adapterId: string, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapAdapterStatus(adapterId === "openclaw" ? mockOpenClawStatus : unknownAdapterStatus);
   }
 
-  async getTraceDetail(traceId: string) {
-    await wait(this.delayMs);
+  async getTraceDetail(traceId: string, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     const detail = mapTraceDetail(createTraceDetail(traceId, this.approvalDtos));
     return {
       ...detail,
@@ -435,23 +458,23 @@ export class MockDashboardDataSource implements DashboardDataSource {
     };
   }
 
-  async getCurrentPolicy() {
-    await wait(this.delayMs);
+  async getCurrentPolicy(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapPolicySummary(mockPolicyBundle);
   }
 
-  async getPolicyHistory() {
-    await wait(this.delayMs);
+  async getPolicyHistory(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapPolicyHistory(mockPolicyHistory);
   }
 
-  async getAuditIntegrity() {
-    await wait(this.delayMs);
+  async getAuditIntegrity(signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     return mapAuditIntegrity(mockAuditIntegrity);
   }
 
-  async getTraceProvenance(traceId: string) {
-    await wait(this.delayMs);
+  async getTraceProvenance(traceId: string, signal?: AbortSignal) {
+    await wait(this.delayMs, signal);
     const events = this.filteredAuditEvents({ traceId });
     const approvals = mergeApprovalsWithAuditEvidence(
       this.approvalDtos.filter((approval) => approval.trace_id === traceId).map(mapApproval),

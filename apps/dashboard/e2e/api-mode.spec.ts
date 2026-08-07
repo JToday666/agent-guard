@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import { expectPrimaryRoutesLayout } from "./support/dashboard-layout";
 
-const guardedServerErrorMessage = "Guard API 暂时无法完成请求，请稍后重试。";
+const guardedServerErrorMessage = "核心服务暂时无法完成请求，请稍后重试。";
 const guardedNotFoundMessage = "请求的资源不存在或已失效。";
 
 const eventDto = {
@@ -62,18 +63,27 @@ async function installApiRoutes(
   options: {
     approvals?: Record<string, unknown>[];
     authenticated?: boolean;
+    dropApprovalAfterResolveFailure?: boolean;
+    evaluation?: Record<string, unknown>;
     events?: Array<typeof eventDto>;
     failConfigAudit?: boolean;
+    health?: { database?: string; status: string };
+    healthStatus?: number;
     provenance?: Record<string, unknown>;
     provenanceFailuresBeforeSuccess?: number;
+    resolveApprovalStatus?: number;
     traceStatus?: number;
   } = {},
 ) {
   const authenticated = options.authenticated ?? true;
   let provenanceFailuresRemaining = options.provenanceFailuresBeforeSuccess ?? 0;
+  let resolutionAttempted = false;
 
   await page.route("**/api/health?check_db=true", (route) =>
-    route.fulfill({ json: { status: "ok", database: "ok" } }),
+    route.fulfill({
+      status: options.healthStatus ?? 200,
+      json: options.health ?? { status: "ok", database: "ok" },
+    }),
   );
 
   await page.route("**/api/v1/**", (route) => {
@@ -107,7 +117,26 @@ async function installApiRoutes(
       return route.fulfill({ json: options.events ?? [eventDto] });
     }
     if (path === "/approvals/pending") {
-      return route.fulfill({ json: options.approvals ?? [] });
+      return route.fulfill({
+        json:
+          resolutionAttempted && options.dropApprovalAfterResolveFailure
+            ? []
+            : (options.approvals ?? []),
+      });
+    }
+    if (path.startsWith("/approvals/") && path.endsWith("/resolve")) {
+      resolutionAttempted = true;
+      return route.fulfill({
+        status: options.resolveApprovalStatus ?? 200,
+        json:
+          options.resolveApprovalStatus && options.resolveApprovalStatus >= 400
+            ? { error: { code: "INTERNAL_ERROR" } }
+            : {
+                approval_id: path.split("/")[2],
+                status: "resolved",
+                decision: "deny",
+              },
+      });
     }
     if (path === "/policies/current") {
       return route.fulfill({
@@ -138,6 +167,9 @@ async function installApiRoutes(
       });
     }
     if (path === "/evaluations/latest") {
+      if (options.evaluation) {
+        return route.fulfill({ json: options.evaluation });
+      }
       return route.fulfill({
         status: 404,
         json: { error: { code: "EVALUATION_NOT_FOUND" } },
@@ -257,6 +289,42 @@ async function installApiRoutes(
   });
 }
 
+function uncertainApproval() {
+  return {
+    approval_id: "approval_uncertain",
+    trace_id: "trace_api_001",
+    tool_call_id: "call_uncertain",
+    requesting_principal_id: "agent_api",
+    runtime: "langgraph",
+    agent_id: "agent_api",
+    status: "pending",
+    decision_options: ["allow_once", "deny"],
+    decision: null,
+    tool: "send_email",
+    resource: "external@example.invalid",
+    reason: "外部发送需要人工确认",
+    risk_score: 64,
+    severity: "medium",
+    created_at: "2026-06-28T08:00:00Z",
+    expires_at: "2099-06-28T08:05:00Z",
+    resolved_at: null,
+    approval_nonce: "nonce_uncertain",
+  };
+}
+
+test("API mode preserves primary layouts across supported desktop workspaces", async ({ page }) => {
+  await installApiRoutes(page, {
+    evaluation: {
+      run_id: "eval_api_layout",
+      run_at: "2026-06-28T00:00:00+00:00",
+      dataset_id: "api-layout",
+      dataset_version: "v1",
+      cases: [],
+    },
+  });
+  await expectPrimaryRoutesLayout(page, "trace_api_001");
+});
+
 test("API mode renders authenticated dashboard and tolerates partial endpoint failure", async ({
   page,
 }) => {
@@ -280,6 +348,14 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
     "href",
     "/investigations?decision=deny",
   );
+  const approvalMetric = page.locator(".metric-strip__item").filter({ hasText: "需审批" });
+  await expect(approvalMetric.locator("dd")).toHaveText("1");
+  await expect(approvalMetric).toContainText("审批触发率 100.0%");
+  await expect(approvalMetric.getByRole("link")).toHaveAttribute(
+    "href",
+    "/investigations?decision=ask",
+  );
+  await expect(page.locator("body")).not.toContainText("Guard 决策随当前审计窗口变化");
 
   await page.goto("/evidence/trace_api_001");
   await expect(page.locator(".evidence-hero")).toContainText("策略决定：需审批");
@@ -291,7 +367,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   await expect(page.locator(".provenance-flow").getByText("判定", { exact: true })).toBeVisible();
   await page.locator(".prov-node--audit").click();
   await expect(page).toHaveURL(/event_id=audit_api_001/);
-  await page.getByRole("button", { name: "查看关联原始审计" }).click();
+  await page.getByRole("button", { name: "查看关联事件" }).click();
   await expect(page.getByRole("dialog")).toContainText("send_email");
 
   await page.goto("/system");
@@ -381,6 +457,63 @@ test("API mode retries provenance independently after a canonical endpoint failu
   await expect(page.getByText(guardedServerErrorMessage)).toHaveCount(0);
 });
 
+test("API mode renders degraded database health without marking the API offline", async ({
+  page,
+}) => {
+  await installApiRoutes(page, {
+    health: { status: "degraded", database: "error" },
+    healthStatus: 503,
+  });
+  await page.goto("/system");
+
+  const apiRow = page.locator(".status-ledger__rows article").filter({ hasText: "Guard API" });
+  const databaseRow = page
+    .locator(".status-ledger__rows article")
+    .filter({ hasText: "PostgreSQL" });
+  await expect(apiRow).toContainText("正常");
+  await expect(databaseRow).toContainText("异常");
+});
+
+test("API mode keeps an uncertain approval available when reconciliation still returns it", async ({
+  page,
+}) => {
+  await installApiRoutes(page, {
+    approvals: [uncertainApproval()],
+    resolveApprovalStatus: 503,
+  });
+  await page.goto("/approvals/approval_uncertain");
+  await page.getByRole("button", { name: "拒绝授权" }).click();
+  await page.getByRole("button", { name: "确认拒绝授权" }).click();
+
+  await expect(
+    page.getByText("审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。"),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "确认拒绝本次授权？" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认拒绝授权", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "拒绝授权", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/\/approvals\/approval_uncertain$/);
+});
+
+test("API mode leaves a removed uncertain approval without inferring its outcome", async ({
+  page,
+}) => {
+  await installApiRoutes(page, {
+    approvals: [uncertainApproval()],
+    dropApprovalAfterResolveFailure: true,
+    resolveApprovalStatus: 503,
+  });
+  await page.goto("/approvals/approval_uncertain");
+  await page.getByRole("button", { name: "拒绝授权" }).click();
+  await page.getByRole("button", { name: "确认拒绝授权" }).click();
+
+  await expect(
+    page.getByText("审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。"),
+  ).toBeVisible();
+  await expect(page.getByText("审批队列已清空")).toBeVisible();
+  await expect(page).toHaveURL(/\/approvals$/);
+  await expect(page.getByText(/已拒绝|已允许/)).toHaveCount(0);
+});
+
 test("API mode disables an approval when its expiry passes without another poll", async ({
   page,
 }) => {
@@ -462,8 +595,8 @@ test("API mode shows a session error instead of a blank dashboard", async ({ pag
   await installApiRoutes(page, { authenticated: false });
   await page.goto("/overview");
 
-  await expect(page.getByRole("alert")).toContainText("无法建立监督端会话");
-  await expect(page.getByRole("alert")).toContainText("监督端会话已过期");
+  await expect(page.getByRole("alert")).toContainText("无法建立安全会话");
+  await expect(page.getByRole("alert")).toContainText("当前会话已过期");
 });
 
 test("API polling requests only common data and the active page domain", async ({ page }) => {

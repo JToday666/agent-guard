@@ -335,7 +335,7 @@ function getOptionId(index: number): string {
   font-size: var(--font-size-13);
   gap: var(--space-2);
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 2.125rem;
+  min-height: 2.25rem;
   padding: 0 var(--space-2);
 
   span {

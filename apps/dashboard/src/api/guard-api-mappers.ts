@@ -4,8 +4,8 @@ import type {
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
   GuardConfigAuditFindingRecordDto,
-  GuardEvalMetricsDto,
   GuardEvaluationRunDto,
+  GuardHealthDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
   GuardProvenanceDto,
@@ -14,7 +14,6 @@ import type {
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import type {
   AdapterStatus,
-  AggregateMetrics,
   ApprovalRequest,
   AuditEventRow,
   AuditIntegrity,
@@ -23,6 +22,7 @@ import type {
   EvaluationAttackMetric,
   EvaluationCase,
   EvaluationRun,
+  HealthStatus,
   PolicyHistoryEntry,
   PolicySummary,
   ProvenanceEdge,
@@ -264,43 +264,9 @@ function approvalConsequence(status: ApprovalRequest["status"]): string {
   return "允许一次后，当前暂停的工具动作将继续执行。";
 }
 
-export function mapAggregateMetrics(
-  dto: GuardEvalMetricsDto,
-  kind: AggregateMetrics["scope"]["kind"] = "aggregate_history",
-): AggregateMetrics {
-  const metrics = readRecord(dto);
-  return {
-    scope: {
-      kind,
-      source: "legacy_metrics_api",
-      from: null,
-      to: null,
-      deduplication: "backend_unspecified",
-    },
-    reportedEventCount: readNumber(metrics.event_count),
-    allowCount: readNumber(metrics.allow_count),
-    denyCount: readNumber(metrics.deny_count),
-    askCount: readNumber(metrics.ask_count),
-    reportedInterventionCount: readNumber(metrics.blocked_count),
-    reportedInterventionRate: readNullableNumber(metrics.block_rate),
-    reportedFpr: readNullableNumber(metrics.fpr),
-    reportedFnr: readNullableNumber(metrics.fnr),
-    reportedAverageLatencyMs: readNullableNumber(metrics.average_latency_ms),
-  };
-}
-
 function evaluationDatasetLabel(datasetId: string | null, datasetVersion: string | null): string {
   if (datasetId && datasetVersion) return `${datasetId} / ${datasetVersion}`;
   return datasetId ?? datasetVersion ?? "未提供";
-}
-
-function metricReduction(
-  before: number | null | undefined,
-  after: number | null | undefined,
-): number | null {
-  return before === null || before === undefined || after === null || after === undefined
-    ? null
-    : before - after;
 }
 
 export function emptyEvaluationRun(): EvaluationRun {
@@ -329,7 +295,6 @@ export function mapEvaluationRun(dto: GuardEvaluationRunDto): EvaluationRun {
         attackType,
         asrBefore,
         asrAfter,
-        reduction: metricReduction(asrBefore, asrAfter),
       };
     })
     .sort((left, right) => {
@@ -371,7 +336,6 @@ export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
     id: readString(dto.trace_id) ?? "",
     events,
     approvals: readArray(dto.approvals).map((row) => mapApproval(row as GuardApprovalDto)),
-    aggregateMetrics: mapAggregateMetrics(dto.metrics, "trace_history"),
     loadedAt: new Date().toISOString(),
   };
 }
@@ -505,4 +469,20 @@ export function mapProvenance(dto: GuardProvenanceDto): ProvenanceGraph {
       };
     }),
   };
+}
+
+export function mapHealth(dto: GuardHealthDto, checkedAt = new Date().toISOString()): HealthStatus {
+  const api =
+    dto.status === "ok" || dto.status === "degraded"
+      ? "online"
+      : dto.status === "error" || dto.status === "offline"
+        ? "offline"
+        : "unknown";
+  const database =
+    dto.database === "ok"
+      ? "online"
+      : dto.database === "error" || dto.database === "offline"
+        ? "offline"
+        : "unknown";
+  return { api, database, checkedAt };
 }

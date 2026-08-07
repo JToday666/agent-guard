@@ -1,11 +1,15 @@
 <template>
   <header class="top-bar">
     <div class="top-bar__brand">
-      <RouterLink class="top-bar__brand-link" to="/overview" aria-label="AgentGuard 攻击证据展示器">
+      <RouterLink
+        class="top-bar__brand-link"
+        to="/overview"
+        aria-label="AgentGuard 智能体安全工作台"
+      >
         <span class="top-bar__mark" aria-hidden="true"> <i></i><i></i><i></i> </span>
         <span>
           <strong>AgentGuard</strong>
-          <small>攻击证据展示器</small>
+          <small>智能体安全工作台</small>
         </span>
       </RouterLink>
     </div>
@@ -18,7 +22,7 @@
     </div>
 
     <form class="top-bar__search" role="search" @submit.prevent="handleSearch">
-      <label class="sr-only" for="global-search">搜索证据链、Case、资源或规则</label>
+      <label class="sr-only" for="global-search">搜索证据链、评测样本、资源或规则</label>
       <Search aria-hidden="true" :size="16" :stroke-width="1.8" />
       <input
         id="global-search"
@@ -27,7 +31,7 @@
         aria-keyshortcuts="/"
         autocomplete="off"
         name="search"
-        placeholder="搜索证据链、Case、资源或规则…"
+        placeholder="搜索证据链、评测样本、资源或规则…"
         type="search"
         @keydown.esc="searchText = ''"
       />
@@ -65,7 +69,7 @@ const props = defineProps<{
   updatedAt: string | null;
 }>();
 const healthLabel = computed(() => {
-  if (props.apiStatus === "offline") return "Guard API 异常";
+  if (props.apiStatus === "offline") return "核心服务异常";
   if (props.databaseStatus === "offline") return "数据库异常";
   if (props.apiStatus === "online" && props.databaseStatus === "online") return "核心服务正常";
   return "核心服务未确认";

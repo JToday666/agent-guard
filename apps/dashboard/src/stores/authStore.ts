@@ -2,8 +2,6 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import type { BrowserSessionDto } from "../api/guard-api-types";
-import { requestJson } from "../api/guard-http-client";
-import { dashboardEnv } from "../config/dashboard-env";
 import { getAuthErrorMessage } from "../utils/auth-error-messages";
 
 export const useAuthStore = defineStore("auth", () => {
@@ -22,7 +20,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function bootstrap(): Promise<void> {
     if (status.value === "loading" || status.value === "authenticated") return;
-    if (dashboardEnv.dataSource === "mock") {
+    if (import.meta.env.MODE === "mock") {
       csrfToken.value = "mock_csrf";
       expiresAt.value = new Date(Date.now() + 60 * 60_000).toISOString();
       status.value = "authenticated";
@@ -32,6 +30,7 @@ export const useAuthStore = defineStore("auth", () => {
     status.value = "loading";
     error.value = null;
     try {
+      const { requestJson } = await import("../api/guard-http-client");
       const url = new URL(window.location.href);
       const launchCode = url.searchParams.get("launch_code");
       const session = launchCode

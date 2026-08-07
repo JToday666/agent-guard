@@ -77,7 +77,7 @@
         </div>
       </header>
 
-      <nav class="provenance-phases" aria-label="生命周期区域显示控制">
+      <nav class="provenance-phases" aria-label="处理阶段显示控制">
         <button
           v-for="phase in phaseOptions"
           :key="phase.id"
@@ -192,7 +192,7 @@
 
       <p class="sr-only" aria-live="polite">
         当前显示 {{ visibleNodes.length }} 个节点、{{ visibleEdges.length }} 条关系；已选择
-        {{ selectedNodeId ? "一个节点并高亮其全部祖先与后代" : "无节点" }}。
+        {{ selectedNodeId ? "一个节点并显示相关路径" : "无节点" }}。
       </p>
     </template>
     <p v-else class="provenance-empty">该证据链暂无溯源节点</p>
@@ -247,7 +247,7 @@ import type {
   ProvenanceGraph,
   ProvenanceNode,
 } from "../../types/dashboard";
-import { getDecisionLabel } from "../../utils/dashboard-formatters";
+import { getDecisionLabel, getEventTypeLabel } from "../../utils/dashboard-formatters";
 import { getProvenanceRelationLabel, getProvenanceRiskScore } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 
@@ -338,8 +338,8 @@ const kindDefinitions: Record<string, { icon: Component; label: string; miniMapC
     label: "模型意图",
     miniMapColor: "var(--color-chart-secondary)",
   },
-  policy: { icon: ShieldCheck, label: "事件时策略", miniMapColor: "var(--color-node-event)" },
-  resource: { icon: FileKey, label: "规范化资源", miniMapColor: "var(--color-chart-warning)" },
+  policy: { icon: ShieldCheck, label: "当时生效的策略", miniMapColor: "var(--color-node-event)" },
+  resource: { icon: FileKey, label: "资源目标", miniMapColor: "var(--color-chart-warning)" },
   review: {
     icon: FileSearch,
     label: "风险组合",
@@ -379,6 +379,9 @@ function nodeIcon(kind: string): Component {
 function nodeLabel(value: string, kind: string): string {
   if (kind === "decision" && ["allow", "ask", "deny", "unknown"].includes(value)) {
     return getDecisionLabel(value as "allow" | "ask" | "deny" | "unknown");
+  }
+  if (kind === "event" || kind === "audit" || kind === "config_audit") {
+    return getEventTypeLabel(value);
   }
   return displayText(value);
 }
@@ -716,7 +719,7 @@ async function runLayout(): Promise<void> {
     const position = positions.get(node.nodeId) ?? { x: 0, y: 0 };
     const isInContext = !contextNodeIds.value || contextNodeIds.value.has(node.nodeId);
     nextNodes.push({
-      ariaLabel: `${kindLabel(node.kind)}：${node.label}`,
+      ariaLabel: `${kindLabel(node.kind)}：${nodeLabel(node.label, node.kind)}`,
       class: isInContext ? "prov-flow-node--context" : "prov-flow-node--dimmed",
       data: { ...node, phase: nodePhase(node) },
       focusable: true,
@@ -1117,7 +1120,7 @@ onBeforeUnmount(() => {
   color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-11);
-  min-height: 2.1rem;
+  min-height: 2.25rem;
   outline: 0;
   padding-right: var(--space-2);
 }

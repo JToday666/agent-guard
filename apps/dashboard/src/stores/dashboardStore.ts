@@ -176,9 +176,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const activeRefreshIntent = ref<DashboardRefreshIntent | null>(null);
   const submittingApprovalId = ref<string | null>(null);
   const approvalResolutionError = ref<string | null>(null);
-  const approvalResolutionState = ref<"idle" | "submitting" | "succeeded" | "conflict" | "failed">(
-    "idle",
-  );
+  const approvalResolutionState = ref<
+    "idle" | "submitting" | "succeeded" | "conflict" | "uncertain" | "failed"
+  >("idle");
   let pollTimer: number | null = null;
   let activeRefresh: {
     controller: AbortController;
@@ -412,7 +412,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (resources.has("configAudit")) {
       tasks.push({
         critical: false,
-        label: "配置审计",
+        label: "配置检查",
         resource: "configAudit",
         promise: dashboardDataSource
           .getConfigAuditFindings({ limit: 20 }, controller.signal)
@@ -422,7 +422,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
           })
           .catch((reason: unknown) => {
             if (!controller.signal.aborted) {
-              configAuditError.value = errorMessage(reason, "配置审计发现项加载失败");
+              configAuditError.value = errorMessage(reason, "配置检查结果加载失败");
             }
             throw reason;
           }),
@@ -575,7 +575,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
       handleSessionError(reason);
       const failure = getApprovalResolutionFailure(reason);
       approvalResolutionError.value = failure.message;
-      approvalResolutionState.value = failure.kind === "conflict" ? "conflict" : "failed";
+      approvalResolutionState.value =
+        failure.kind === "conflict" || failure.kind === "uncertain" ? failure.kind : "failed";
       if (failure.shouldRefreshQueue) {
         await refreshApprovals().catch(handleSessionError);
       }

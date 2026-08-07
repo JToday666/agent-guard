@@ -25,7 +25,7 @@
       <header>
         <div>
           <h2 id="status-ledger-title">服务与会话</h2>
-          <p>当前监督端依赖及数据同步状态</p>
+          <p>查看服务、会话与数据更新是否正常</p>
         </div>
         <span>{{ statusItems.length }} 项状态</span>
       </header>
@@ -91,7 +91,7 @@
             <dd>{{ store.policySummary.ruleOverrideCount }}</dd>
           </div>
           <div>
-            <dt>工具画像</dt>
+            <dt>工具配置</dt>
             <dd>{{ store.policySummary.toolProfileCount }}</dd>
           </div>
         </dl> </template
@@ -102,7 +102,7 @@
       <header>
         <div>
           <h2 id="integrity-title">审计链完整性</h2>
-          <p>审计事件哈希链验证状态</p>
+          <p>确认审计记录是否连续且可验证</p>
         </div>
       </header>
       <template v-if="store.auditIntegrity">
@@ -148,7 +148,7 @@
       <header>
         <div>
           <h2 id="openclaw-verify-title">OpenClaw 插件验证</h2>
-          <p>最近一次验证或心跳上报状态</p>
+          <p>查看最近一次插件验证和连接状态</p>
         </div>
         <StatusBadge :label="adapterStatusLabel" :tone="adapterStatusTone" />
       </header>
@@ -171,11 +171,11 @@
         </div>
         <div class="hook-coverage">
           <span><i :style="{ transform: `scaleX(${hookCoverageRatio})` }"></i></span>
-          <small>已上报 Hook 覆盖 {{ hookCoverageText }}</small>
+          <small>已上报安全检查点 {{ hookCoverageText }}</small>
         </div>
         <dl class="adapter-verify__facts">
           <div>
-            <dt>Hook 覆盖</dt>
+            <dt>安全检查点覆盖</dt>
             <dd>{{ hookCoverageText }}</dd>
           </div>
           <div>
@@ -195,7 +195,7 @@
             <dd>{{ store.openclawStatus.pluginVersion ?? "未提供" }}</dd>
           </div>
           <div>
-            <dt>失败关闭阶段</dt>
+            <dt>异常时阻止执行</dt>
             <dd>{{ store.openclawStatus.failClosedStages.length }} 阶段</dd>
           </div>
         </dl>
@@ -211,8 +211,8 @@
     <section class="system-ledger" aria-labelledby="config-audit-title">
       <header>
         <div>
-          <h2 id="config-audit-title">配置审计发现项</h2>
-          <p>后端保存的配置检查发现项</p>
+          <h2 id="config-audit-title">配置检查结果</h2>
+          <p>查看已记录的配置风险与处理建议</p>
         </div>
         <div class="finding-summary" aria-label="发现项严重性摘要">
           <span v-for="item in findingSummary" :key="item.label"
@@ -244,7 +244,7 @@
             </div>
             <div>
               <dt>运行时</dt>
-              <dd>{{ row.runtime }}</dd>
+              <dd>{{ getRuntimeLabel(row.runtime) }}</dd>
             </div>
             <div>
               <dt>时间</dt>
@@ -271,8 +271,8 @@
       </div>
       <EmptyState
         v-else
-        title="暂无配置审计发现项"
-        message="配置审计结果写入后将在这里展示发现项明细。"
+        title="暂无配置检查结果"
+        message="完成配置检查后将在这里展示风险与处理建议。"
       />
     </section>
   </section>
@@ -291,6 +291,7 @@ import {
   formatAuditHeadHash,
   getRiskSeverityLabel,
   getRiskSeverityTone,
+  getRuntimeLabel,
   type StatusBadgeTone,
 } from "../utils/dashboard-formatters";
 
@@ -309,7 +310,7 @@ const statusItems = computed(() => [
   {
     checkedAt: formatTime(store.health.checkedAt),
     checkedAtIso: store.health.checkedAt,
-    detail: "核心审计、指标与审批接口",
+    detail: "负责审计、指标与审批的核心服务",
     label: "Guard API",
     tone: stateTone(store.health.api),
     value: stateLabel(store.health.api),
@@ -317,7 +318,7 @@ const statusItems = computed(() => [
   {
     checkedAt: formatTime(store.health.checkedAt),
     checkedAtIso: store.health.checkedAt,
-    detail: "审计与审批数据持久化",
+    detail: "保存审计与审批数据",
     label: "PostgreSQL",
     tone: stateTone(store.health.database),
     value: stateLabel(store.health.database),
@@ -325,7 +326,7 @@ const statusItems = computed(() => [
   {
     checkedAt: formatTime(auth.expiresAt),
     checkedAtIso: auth.expiresAt,
-    detail: auth.error ?? "HttpOnly Cookie 会话",
+    detail: auth.error ?? "当前浏览器的安全会话",
     label: "浏览器会话",
     tone: auth.isAuthenticated ? ("success" as const) : ("danger" as const),
     value: auth.isAuthenticated ? "有效" : "异常",
@@ -333,7 +334,7 @@ const statusItems = computed(() => [
   {
     checkedAt: formatTime(store.lastUpdatedAt),
     checkedAtIso: store.lastUpdatedAt,
-    detail: "页面可见时每 10 秒同步",
+    detail: "页面打开时自动更新",
     label: "审计轮询",
     tone:
       store.status === "ready"
@@ -703,9 +704,12 @@ function handleRefresh() {
   padding-top: var(--space-2);
 }
 .finding-list__evidence summary {
+  align-items: center;
   color: var(--color-text-subtle);
   cursor: pointer;
+  display: flex;
   font-size: var(--font-size-12);
+  min-height: 2.25rem;
   user-select: none;
 }
 .finding-list__evidence ul {

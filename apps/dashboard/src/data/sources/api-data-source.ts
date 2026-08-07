@@ -20,6 +20,7 @@ import {
   mapAuditIntegrity,
   mapConfigAuditFindingRecord,
   mapEvaluationRun,
+  mapHealth,
   mapPolicyHistory,
   mapPolicySummary,
   mapProvenance,
@@ -106,12 +107,7 @@ export class ApiDashboardDataSource implements DashboardDataSource {
   }
 
   async getHealth(signal?: AbortSignal) {
-    const result = await requestHealth(signal);
-    return {
-      api: result.status === "ok" ? ("online" as const) : ("offline" as const),
-      database: result.database === "ok" ? ("online" as const) : ("offline" as const),
-      checkedAt: new Date().toISOString(),
-    };
+    return mapHealth(await requestHealth(signal));
   }
 
   async getLatestEvaluationRun(signal?: AbortSignal) {

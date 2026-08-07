@@ -10,6 +10,8 @@ test("evaluation page shows latest run, attack ASR and sample cases", async ({ p
   await expect(page.getByText("AttackBench / v1")).toBeVisible();
   await expect(latestRun.locator(".asr-headline").getByText("73.2%")).toBeVisible();
   await expect(latestRun.locator(".asr-headline").getByText("4.8%")).toBeVisible();
+  await expect(latestRun.locator(".asr-headline")).toContainText("攻击成功率下降");
+  await expect(latestRun.locator(".asr-headline")).toContainText("68.4pp");
   await expect(page.locator(".attack-asr").getByText("提示注入")).toBeVisible();
   await expect(page.getByRole("link", { name: /PI-002/ })).toBeVisible();
 });
@@ -42,7 +44,7 @@ test("system page shows OpenClaw verify status and config findings", async ({ pa
       .getByText(`${OPENCLAW_REQUIRED_HOOK_COUNT} / ${OPENCLAW_REQUIRED_HOOK_COUNT}`),
   ).toBeVisible();
   await expect(page.getByText("OpenClaw 2026.6.6")).toBeVisible();
-  await expect(page.getByText("Raw conversation access enabled")).toBeVisible();
+  await expect(page.getByText("已启用原始会话访问")).toBeVisible();
   await expect(
     page.locator(".finding-list").getByText("agentguard-security").first(),
   ).toBeVisible();
@@ -57,14 +59,32 @@ test("system page shows OpenClaw verify status and config findings", async ({ pa
 test("system page uses localized operator-facing terminology", async ({ page }) => {
   await page.goto("/system");
 
-  await expect(page.locator(".system-page")).toContainText("配置审计发现项");
+  await expect(page.locator(".system-page")).toContainText("配置检查结果");
   await expect(page.locator(".system-page")).toContainText("最近心跳");
-  await expect(page.locator(".system-page")).toContainText("失败关闭阶段");
+  await expect(page.locator(".system-page")).toContainText("异常时阻止执行");
   await expect(page.locator(".system-page")).toContainText("运行时");
   await expect(page.locator(".system-page")).not.toContainText("Findings");
   await expect(page.locator(".system-page")).not.toContainText("Fail-closed");
   await expect(page.locator(".system-page")).not.toContainText("heartbeat");
   await expect(page.locator(".system-page")).not.toContainText("Runtime");
+});
+
+test("evaluation explains scoped data without occupying the primary summary", async ({ page }) => {
+  await page.goto("/evaluation");
+
+  const details = page.locator(".window-data-details");
+  await expect(details).not.toHaveAttribute("open", "");
+  await expect(page.locator(".metric-strip__item").filter({ hasText: "策略介入率" })).toContainText(
+    "拒绝率",
+  );
+  await expect(page.locator(".metric-strip__item").filter({ hasText: "策略介入率" })).toContainText(
+    "审批触发率",
+  );
+  await details.getByText("查看数据说明", { exact: true }).click();
+  await expect(details).toHaveAttribute("open", "");
+  await expect(details).toContainText("去重处理");
+  await expect(details).toContainText("关联信息");
+  await expect(details).toContainText("数据覆盖");
 });
 
 test("operator-facing pages do not expose raw policy rule numbers", async ({ page }) => {

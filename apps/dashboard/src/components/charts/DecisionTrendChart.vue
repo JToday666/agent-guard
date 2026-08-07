@@ -255,19 +255,18 @@ function handleKeydown(event: KeyboardEvent) {
   gap: var(--space-1);
 }
 .trend-legend i {
-  border-radius: var(--radius-pill);
   display: inline-block;
-  height: 0.1875rem;
+  height: 0;
   width: 1.25rem;
 }
 .trend-legend .series-allow i {
-  background: var(--gradient-line-slate);
+  border-top: 3px dashed var(--color-success);
 }
 .trend-legend .series-ask i {
-  background: var(--gradient-line-warning);
+  border-top: 3px dotted var(--color-warning);
 }
 .trend-legend .series-deny i {
-  background: var(--color-chart-primary);
+  border-top: 3px solid var(--color-danger);
 }
 .trend-chart svg {
   height: 15rem;
@@ -289,6 +288,7 @@ function handleKeydown(event: KeyboardEvent) {
   stroke: none;
 }
 .trend-chart polyline {
+  fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.5;
@@ -329,8 +329,8 @@ function handleKeydown(event: KeyboardEvent) {
   fill: var(--color-text);
 }
 .series-allow {
-  fill: var(--color-chart-slate);
-  stroke: var(--color-chart-slate);
+  fill: var(--color-success);
+  stroke: var(--color-success);
   stroke-dasharray: 6 4;
 }
 .series-ask {
@@ -339,9 +339,8 @@ function handleKeydown(event: KeyboardEvent) {
   stroke-dasharray: 2 4;
 }
 .series-deny {
-  fill: var(--color-chart-primary);
-  filter: var(--filter-chart-primary);
-  stroke: var(--color-chart-primary);
+  fill: var(--color-danger);
+  stroke: var(--color-danger);
 }
 .trend-chart text {
   font-size: 12px;

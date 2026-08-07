@@ -303,27 +303,6 @@ export interface AuditWindow {
   metrics: WindowMetrics;
 }
 
-export interface AggregateMetricScope {
-  kind: "aggregate_history" | "trace_history";
-  source: "legacy_metrics_api" | "policy_metrics_api";
-  from: string | null;
-  to: string | null;
-  deduplication: "backend_unspecified" | "logical_policy_evaluation";
-}
-
-export interface AggregateMetrics {
-  scope: AggregateMetricScope;
-  reportedEventCount: number;
-  allowCount: number;
-  denyCount: number;
-  askCount: number;
-  reportedInterventionCount: number;
-  reportedInterventionRate: number | null;
-  reportedFpr: number | null;
-  reportedFnr: number | null;
-  reportedAverageLatencyMs: number | null;
-}
-
 export interface DecisionTrendPoint {
   label: string;
   allow: number;
@@ -359,7 +338,6 @@ export interface EvaluationAttackMetric {
   attackType: string;
   asrBefore: number | null;
   asrAfter: number | null;
-  reduction: number | null;
 }
 
 export interface EvaluationCase {
@@ -377,7 +355,6 @@ export interface TraceDetail {
   id: string;
   events: AuditEventRow[];
   approvals: ApprovalRequest[];
-  aggregateMetrics: AggregateMetrics;
   loadedAt: string;
 }
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="trace-timeline" aria-label="按生命周期分组的审计事件">
+  <div class="trace-timeline" aria-label="按处理阶段分组的审计事件">
     <section v-for="group in groups" :key="group.id" class="trace-timeline__group">
       <header class="trace-timeline__group-header">
         <span>{{ group.index }}</span>
@@ -25,7 +25,7 @@
             <header>
               <div>
                 <strong>{{ recordTypeLabel(event) }}</strong>
-                <span>{{ event.stage }}</span>
+                <span>{{ getStageLabel(event.stage) }}</span>
               </div>
               <time :datetime="event.occurredAt">{{ event.time }}</time>
             </header>
@@ -66,6 +66,7 @@ import { getInterventionLabel } from "../../data/evidence/trace-evidence";
 import {
   getDecisionLabel,
   getDecisionTone,
+  getStageLabel,
   type StatusBadgeTone,
 } from "../../utils/dashboard-formatters";
 import StatusBadge from "../common/StatusBadge.vue";
@@ -168,11 +169,8 @@ function eventStatusLabel(event: AuditEventRow): string {
 
 function eventStatusTone(event: AuditEventRow): StatusBadgeTone {
   const intervention = normalizedById.value.get(event.id)?.intervention;
-  if (
-    intervention === "pre_execution_deny" ||
-    intervention === "tool_result_quarantine" ||
-    intervention === "model_output_revision"
-  ) {
+  if (intervention === "pre_execution_deny") return "danger";
+  if (intervention === "tool_result_quarantine" || intervention === "model_output_revision") {
     return "protective";
   }
   if (intervention === "approval_release") return "success";
@@ -345,8 +343,8 @@ function eventStatusTone(event: AuditEventRow): StatusBadgeTone {
   color: var(--color-link);
   cursor: pointer;
   font-size: var(--font-size-11);
-  min-height: 1.75rem;
-  padding: 0 var(--space-2);
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
 }
 
 .timeline-select-btn:hover {

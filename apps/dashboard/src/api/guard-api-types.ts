@@ -216,3 +216,8 @@ export interface GuardProvenanceDto {
   nodes: GuardProvenanceNodeDto[];
   edges: GuardProvenanceEdgeDto[];
 }
+
+export interface GuardHealthDto {
+  status: string;
+  database?: string;
+}

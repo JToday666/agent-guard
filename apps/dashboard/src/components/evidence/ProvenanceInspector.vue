@@ -1,19 +1,19 @@
 <template>
   <aside class="provenance-inspector" aria-labelledby="provenance-inspector-title">
     <header>
-      <h3 id="provenance-inspector-title">节点检查器</h3>
+      <h3 id="provenance-inspector-title">节点详情</h3>
     </header>
 
     <template v-if="node">
       <div class="provenance-inspector__identity">
         <span>{{ kindLabel(node.kind) }}</span>
-        <strong>{{ formatRuleIdsInTextForDisplay(node.label) }}</strong>
+        <strong>{{ nodeDisplayLabel }}</strong>
         <p v-if="summary">{{ summary }}</p>
       </div>
 
       <dl>
         <div>
-          <dt>生命周期</dt>
+          <dt>处理阶段</dt>
           <dd>{{ phaseLabel }}</dd>
         </div>
         <div>
@@ -48,7 +48,7 @@
         class="provenance-inspector__event"
         @click="emit('select-event', eventId)"
       >
-        查看关联原始审计
+        查看关联事件
       </button>
 
       <details v-if="Object.keys(safeMetadata).length">
@@ -70,7 +70,11 @@ import { computed } from "vue";
 
 import type { ProvenanceGraph, ProvenanceNode } from "../../types/dashboard";
 import { redactSensitiveData } from "../../utils/data-redaction";
-import { formatDashboardDateTime } from "../../utils/dashboard-formatters";
+import {
+  formatDashboardDateTime,
+  getDecisionLabel,
+  getEventTypeLabel,
+} from "../../utils/dashboard-formatters";
 import { resolveProvenanceEventId } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 import StructuredDataView from "../common/StructuredDataView.vue";
@@ -93,8 +97,8 @@ const kindLabels: Record<string, string> = {
   decision: "安全决定",
   event: "运行时事件",
   model_intent: "模型意图",
-  policy: "事件时策略",
-  resource: "规范化资源",
+  policy: "当时生效的策略",
+  resource: "资源目标",
   review: "风险组合",
   rule: "命中规则",
   runtime_result: "运行时结果",
@@ -105,6 +109,24 @@ const kindLabels: Record<string, string> = {
 function kindLabel(kind: string): string {
   return kindLabels[kind] ?? kind;
 }
+
+const nodeDisplayLabel = computed(() => {
+  if (!props.node) return "";
+  if (
+    props.node.kind === "decision" &&
+    ["allow", "ask", "deny", "unknown"].includes(props.node.label)
+  ) {
+    return getDecisionLabel(props.node.label as "allow" | "ask" | "deny" | "unknown");
+  }
+  if (
+    props.node.kind === "event" ||
+    props.node.kind === "audit" ||
+    props.node.kind === "config_audit"
+  ) {
+    return getEventTypeLabel(props.node.label);
+  }
+  return formatRuleIdsInTextForDisplay(props.node.label);
+});
 
 const summary = computed(() => {
   const value = props.node?.metadata.summary;
@@ -244,11 +266,14 @@ const safeMetadata = computed(() => {
 }
 
 .provenance-inspector summary {
+  align-items: center;
   color: var(--color-link);
   cursor: pointer;
+  display: flex;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
   margin-bottom: var(--space-3);
+  min-height: 2.25rem;
 }
 
 .provenance-inspector__empty {
