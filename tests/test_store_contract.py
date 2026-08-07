@@ -6,6 +6,7 @@ Memory 与 PostgreSQL store 必须运行相同的幂等与指标契约测试（�
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
@@ -263,6 +264,9 @@ def test_contract_audit_id_different_content_raises_conflict(store) -> None:
 
 
 def test_contract_duplicate_policy_audits_counted_once(store) -> None:
+    # 0007 部分唯一索引已阻断显式 0.4 policy_evaluation 的写入侧重复；
+    # §19.1 读时去重的目标数据是 legacy（0.3，record_type=None）重复审计，
+    # 故本用例以 legacy 形态记录继续验证读时去重（leader 确认的唯一例外）。
     run_id = uuid4().hex
     trace_id = f"trace_dedupe_{run_id}"
     links = {
@@ -273,8 +277,7 @@ def test_contract_duplicate_policy_audits_counted_once(store) -> None:
         store.add_audit_event(
             AuditEvent(
                 audit_id=f"audit_dedupe_{run_id}_{index}",
-                schema_version="0.4",
-                record_type="policy_evaluation",
+                schema_version="0.3",
                 trace_id=trace_id,
                 event_type="tool_call_proposed",
                 summary=f"Duplicate policy audit {index}",
@@ -469,3 +472,200 @@ def test_contract_legacy_shape_record_replays_via_fallback_reads(store, client) 
     assert (
         len(store.list_audit_events(AuditEventFilters(trace_id=trace_id))) == 1
     )
+
+
+def _thread_client(store) -> TestClient:
+    # PostgreSQL 下每线程独立 store 实例（独立 engine/session）；
+    # memory 状态在进程内共享，多线程复用同一实例。
+    thread_store = (
+        PostgresControlPlaneStore(store.database_url)
+        if isinstance(store, PostgresControlPlaneStore)
+        else store
+    )
+    return TestClient(create_app(store=thread_store, settings=_settings()))
+
+
+def test_contract_concurrent_same_content_single_chain_entry(store) -> None:
+    # 并发同 event_id 同内容：仅一条入链且全部响应回放同一 decision_id。
+    run_id = uuid4().hex
+    event_id = f"evt_concurrent_{run_id}"
+    trace_id = f"trace_concurrent_{run_id}"
+    payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
+    worker_count = 8
+
+    def worker(_: int):
+        return _post_evaluate(_thread_client(store), payload)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        responses = list(executor.map(worker, range(worker_count)))
+
+    assert [response.status_code for response in responses] == [200] * worker_count
+    decision_ids = {
+        response.json()["decision"]["decision_id"] for response in responses
+    }
+    assert len(decision_ids) == 1
+    events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
+    assert len(events) == 1
+    assert events[0].links["event_id"] == event_id
+    assert store.verify_audit_integrity().valid
+
+
+def test_contract_concurrent_different_content_exactly_one_conflict(store) -> None:
+    # 并发同 event_id 异内容：恰好一个 409 EVALUATION_CONFLICT，另一侧正常入链。
+    run_id = uuid4().hex
+    event_id = f"evt_raceconflict_{run_id}"
+    trace_id = f"trace_raceconflict_{run_id}"
+    payloads = [
+        _guard_event_payload(event_id=event_id, trace_id=trace_id),
+        _guard_event_payload(
+            event_id=event_id,
+            trace_id=trace_id,
+            arguments={"to": "other@red-team.agentguard.local"},
+        ),
+    ]
+
+    def worker(index: int):
+        return _post_evaluate(_thread_client(store), payloads[index])
+
+    with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
+        responses = list(executor.map(worker, range(len(payloads))))
+
+    statuses = sorted(response.status_code for response in responses)
+    assert statuses == [200, 409]
+    conflict = next(response for response in responses if response.status_code == 409)
+    assert conflict.json()["error"]["code"] == "EVALUATION_CONFLICT"
+    events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
+    assert len(events) == 1
+    assert store.verify_audit_integrity().valid
+
+
+def test_contract_legacy_shape_record_replays_under_concurrency(store) -> None:
+    # 存量 legacy 形态记录（digest 在 links、decision dump 在 metadata）
+    # 在并发评估下仍被全部线程回放，不新增链上记录。
+    run_id = uuid4().hex
+    event_id = f"evt_legacyswarm_{run_id}"
+    trace_id = f"trace_legacyswarm_{run_id}"
+    payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
+    decision = GuardDecision(
+        decision_id=f"dec_legacyswarm_{run_id}",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        categories=[],
+        rule_hits=[],
+        reason="Legacy concurrent replay.",
+        safe_message=None,
+        approval_intent=None,
+        latency_ms=1,
+    )
+    store.add_audit_event(
+        AuditEvent(
+            audit_id=f"audit_legacyswarm_{run_id}",
+            schema_version="0.3",
+            trace_id=trace_id,
+            event_type="tool_call_proposed",
+            summary="Legacy shape audit under concurrency",
+            decision="allow",
+            risk_score=0,
+            severity="low",
+            blocked=False,
+            reason="Legacy shape.",
+            links={
+                "event_id": event_id,
+                "decision_id": decision.decision_id,
+                "request_digest": canonical_sha256(
+                    GuardEvent.model_validate(payload).model_dump(mode="json")
+                ),
+            },
+            metadata={"guard_decision": decision.model_dump(mode="json")},
+        )
+    )
+    worker_count = 4
+
+    def worker(_: int):
+        return _post_evaluate(_thread_client(store), payload)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        responses = list(executor.map(worker, range(worker_count)))
+
+    assert [response.status_code for response in responses] == [200] * worker_count
+    assert all(
+        response.json()["decision"]["decision_id"] == decision.decision_id
+        for response in responses
+    )
+    assert (
+        len(store.list_audit_events(AuditEventFilters(trace_id=trace_id))) == 1
+    )
+    assert store.verify_audit_integrity().valid
+
+
+def test_contract_explicit_policy_evaluation_inbound_rejected(store, client) -> None:
+    # §12.1：显式 record_type=policy_evaluation 的入站记录被 422 拒收且不入链。
+    run_id = uuid4().hex
+    trace_id = f"trace_forbidden_{run_id}"
+    payload = {
+        "audit_id": f"audit_forbidden_{run_id}",
+        "schema_version": "0.4",
+        "record_type": "policy_evaluation",
+        "trace_id": trace_id,
+        "case_id": "CASE-CONTRACT",
+        "runtime": "langgraph",
+        "timestamp": "2026-06-11T00:00:00+00:00",
+        "stage": "before_tool_call",
+        "event_type": "tool_call_proposed",
+        "summary": "Forbidden inbound policy evaluation",
+        "decision": "deny",
+        "risk_score": 90,
+        "severity": "critical",
+        "blocked": True,
+        "reason": "Contract guard test.",
+        "links": {
+            "event_id": f"evt_forbidden_{run_id}",
+            "decision_id": f"dec_forbidden_{run_id}",
+        },
+        "metadata": {},
+    }
+
+    response = client.post(
+        "/v1/audit/events", headers=ADAPTER_HEADERS, json=payload
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "POLICY_EVALUATION_WRITE_FORBIDDEN"
+    assert store.list_audit_events(AuditEventFilters(trace_id=trace_id)) == []
+    assert store.verify_audit_integrity().valid
+
+
+def test_contract_03_compatible_inbound_record_still_accepted(store, client) -> None:
+    # §12.1 守卫不得打断 record_type=None 的 0.3 兼容写入（LangGraph adapter 路径）。
+    run_id = uuid4().hex
+    trace_id = f"trace_compat03_{run_id}"
+    payload = {
+        "audit_id": f"audit_compat03_{run_id}",
+        "schema_version": "0.3",
+        "trace_id": trace_id,
+        "case_id": "CASE-CONTRACT",
+        "runtime": "langgraph",
+        "timestamp": "2026-06-11T00:00:00+00:00",
+        "stage": "before_tool_call",
+        "event_type": "runtime_observation",
+        "summary": "Legacy compatible inbound record",
+        "decision": "allow",
+        "risk_score": 0,
+        "severity": "low",
+        "blocked": False,
+        "reason": "Contract compatibility test.",
+        "links": {},
+        "metadata": {},
+    }
+
+    response = client.post(
+        "/v1/audit/events", headers=ADAPTER_HEADERS, json=payload
+    )
+
+    assert response.status_code == 200
+    events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
+    assert len(events) == 1
+    assert events[0].record_type is None
+    assert events[0].schema_version == "0.3"
+    assert store.verify_audit_integrity().valid
