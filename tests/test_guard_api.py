@@ -24,6 +24,7 @@ from guard_api.models import ApprovalRequest, LlmApprovalReviewInput
 from guard_api.services import PolicyService
 from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
+from guard_api.storage.base import AuditIdConflictError
 from guard_api.storage.integrity import canonical_sha256
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
@@ -2759,3 +2760,109 @@ def test_evaluate_conflicts_when_stored_audit_lacks_decision_dump() -> None:
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "EVALUATION_CONFLICT"
+
+def test_memory_store_audit_id_idempotent_hit_does_not_extend_chain() -> None:
+    store = MemoryControlPlaneStore()
+    event = _audit_event_model(
+        audit_id="audit_idem_store",
+        trace_id="trace_idem_store",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+
+    first = store.add_audit_event(event)
+    second = store.add_audit_event(event)
+
+    assert first is True
+    assert second is False
+    assert len(store.audit_events) == 1
+    assert store.verify_audit_integrity().valid
+
+
+def test_memory_store_audit_id_conflict_raises_on_different_content() -> None:
+    store = MemoryControlPlaneStore()
+    store.add_audit_event(
+        _audit_event_model(
+            audit_id="audit_conflict_store",
+            trace_id="trace_conflict",
+            decision="allow",
+            runtime="langgraph",
+            blocked=False,
+        )
+    )
+
+    different = _audit_event_model(
+        audit_id="audit_conflict_store",
+        trace_id="trace_conflict",
+        decision="deny",
+        runtime="langgraph",
+        blocked=True,
+    )
+
+    with pytest.raises(AuditIdConflictError):
+        store.add_audit_event(different)
+
+    assert len(store.audit_events) == 1
+
+def test_audit_events_post_returns_409_on_conflict() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    first_payload = _audit_event_payload(
+        audit_id="audit_api_conflict",
+        trace_id="trace_api_conflict",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    first_response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=first_payload,
+    )
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={**first_payload, "decision": "deny", "blocked": True, "risk_score": 90, "severity": "high"},
+    )
+
+    assert second_response.status_code == 409
+    assert second_response.json()["error"]["code"] == "AUDIT_ID_CONFLICT"
+    assert len(store.audit_events) == 1
+
+
+def test_audit_events_post_idempotent_hit_skips_provenance() -> None:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    client = TestClient(app)
+
+    payload = _audit_event_payload(
+        audit_id="audit_api_idem",
+        trace_id="trace_api_idem",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+
+    first = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    second = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["audit_id"] == "audit_api_idem"
+    assert len(store.audit_events) == 1
+    assert len(store.provenance_nodes) == 1  # audit node only (no source link in payload), not doubled

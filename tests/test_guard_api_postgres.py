@@ -14,7 +14,7 @@ from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import AuditEventFilters, EvalMetricFilters
+from guard_api.storage.base import AuditEventFilters, AuditIdConflictError, EvalMetricFilters
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.postgres import (
     get_test_database_url,
@@ -783,3 +783,38 @@ def _login_dashboard(client: TestClient, *, control_token: str) -> None:
         json={"launch_code": launch_response.json()["launch_code"]},
     )
     assert exchange_response.status_code == 200
+
+def test_postgres_store_audit_id_idempotent_and_conflict() -> None:
+    database_url = get_test_database_url()
+    run_id = uuid4().hex
+    audit_id = f"audit_pg_idem_{run_id}"
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        event = _audit_event(
+            audit_id=audit_id,
+            trace_id=f"trace_pg_idem_{run_id}",
+            decision="ask",
+            runtime="langgraph",
+            blocked=True,
+            is_malicious=True,
+            latency_ms=10,
+        )
+
+        assert store.add_audit_event(event) is True
+        assert store.add_audit_event(event) is False
+
+        different = _audit_event(
+            audit_id=audit_id,
+            trace_id=f"trace_pg_idem_{run_id}",
+            decision="deny",
+            runtime="langgraph",
+            blocked=True,
+            is_malicious=True,
+            latency_ms=10,
+        )
+        with pytest.raises(AuditIdConflictError):
+            store.add_audit_event(different)
+    finally:
+        reset_control_plane_schema(database_url)

@@ -88,12 +88,16 @@ class AuditIntegrityStatus:
     first_broken_audit_id: str | None = None
 
 
+class AuditIdConflictError(ValueError):
+    """Raised when the same audit_id is re-submitted with different content."""
+
+
 class ControlPlaneStore(Protocol):
     def initialize(self) -> None: ...
 
     def health_check(self) -> bool: ...
 
-    def add_audit_event(self, event: AuditEvent) -> None: ...
+    def add_audit_event(self, event: AuditEvent) -> bool: ...
 
     def list_audit_events(
         self, filters: AuditEventFilters | None = None

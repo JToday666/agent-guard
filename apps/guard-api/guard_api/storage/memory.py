@@ -28,6 +28,7 @@ from guard_api.models import (
 )
 from guard_api.storage.base import (
     AuditEventFilters,
+    AuditIdConflictError,
     AuditIntegrityStatus,
     EvalMetricFilters,
     EvalMetrics,
@@ -62,6 +63,7 @@ class MemoryControlPlaneStore:
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
 
     def initialize(self) -> None:
         return None
@@ -69,8 +71,13 @@ class MemoryControlPlaneStore:
     def health_check(self) -> bool:
         return True
 
-    def add_audit_event(self, event: AuditEvent) -> None:
+    def add_audit_event(self, event: AuditEvent) -> bool:
         with self.audit_integrity_lock:
+            existing = self.audit_events_by_id.get(event.audit_id)
+            if existing is not None:
+                if _audit_content_matches(existing, event):
+                    return False
+                raise AuditIdConflictError(event.audit_id)
             prev = (
                 read_audit_integrity(self.audit_events[-1])
                 if self.audit_events
@@ -82,6 +89,8 @@ class MemoryControlPlaneStore:
                 prev_hash=prev.event_hash if prev is not None else None,
             )
             self.audit_events.append(event_with_integrity)
+            self.audit_events_by_id[event.audit_id] = event_with_integrity
+            return True
 
     def list_audit_events(
         self, filters: AuditEventFilters | None = None
@@ -450,6 +459,14 @@ class MemoryControlPlaneStore:
         )
         self.approval_nonces[nonce_hash] = consumed
         return consumed
+
+
+def _audit_content_matches(existing: AuditEvent, incoming: AuditEvent) -> bool:
+    from guard_api.storage.integrity import _canonical_json_bytes
+    return (
+        _canonical_json_bytes(existing.model_dump(mode="json", exclude={"integrity"}))
+        == _canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
+    )
 
 
 def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:
