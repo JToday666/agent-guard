@@ -1866,10 +1866,11 @@ Adapter / Plugin
 - [x] `schemas/audit_event.schema.json` 和 Core `AuditEvent` 类型已支持 `0.3 | 0.4`。
 - [x] Guard API 已有 AuditEvent `0.4` 基础写入、读取和完整性测试。
 - [ ] 更新 `schemas/guard_decision.schema.json`。
-- [ ] 完成 Guard API writer、LangGraph、OpenClaw、存储语义和 Dashboard 的完整 `0.4` 迁移。
+- [x] 完成 Guard API evaluate writer 与跨存储语义的 `0.4` 迁移（policy_evaluation 写入、幂等与指标口径）。
+- [ ] 完成 LangGraph、OpenClaw 和 Dashboard 的完整 `0.4` 迁移。
 - [x] 增加
       [运行时安全主演示链共享 JSON fixture](../../tests/fixtures/runtime_safety_trace_v04.json)。
-- [ ] Memory 和 PostgreSQL store 运行相同幂等与指标 contract tests。
+- [x] Memory 和 PostgreSQL store 运行相同幂等与指标 contract tests。
 - [ ] Dashboard API 模式运行真实目标 AuditEvent fixtures。
 - [ ] 更新 CLI 输出兼容性测试。
 - [ ] 完成跨组件实现评审并验证迁移结果。
