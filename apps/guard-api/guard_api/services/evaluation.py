@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agentguard_core import (
     ActionCritic,
+    AuditEvent,
     GuardDecision,
     GuardEvent,
     MemoryEventPayload,
@@ -11,13 +12,21 @@ from agentguard_core import (
     evaluate as core_evaluate,
 )
 
-from guard_api.models import EvaluationApproval, GuardEvaluationResponse
+from guard_api.models import (
+    ApprovalRequest,
+    EvaluationApproval,
+    GuardEvaluationResponse,
+)
 from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
 from .audit import AuditService
 from .memory import MemoryGuardService
 from .policy import PolicyService
+
+
+class EvaluationConflictError(ValueError):
+    """Raised when the same event_id is re-evaluated with different content."""
 
 
 class EvaluationService:
@@ -40,6 +49,13 @@ class EvaluationService:
         self, event: GuardEvent, *, requesting_principal_id: str
     ) -> GuardEvaluationResponse:
         request_digest = canonical_sha256(event.model_dump(mode="json"))
+        existing = self.audit_service.store.get_policy_evaluation_by_event_id(
+            event.event_id
+        )
+        if existing is not None:
+            if existing.links.get("request_digest") == request_digest:
+                return self._rebuild_response(existing)
+            raise EvaluationConflictError(event.event_id)
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
             bundle = snapshot_record.policy_bundle
@@ -73,20 +89,34 @@ class EvaluationService:
         )
         return GuardEvaluationResponse(
             decision=decision,
-            approval=(
-                EvaluationApproval(
-                    approval_id=approval.approval_id,
-                    status=approval.status,
-                    decision_options=approval.decision_options,
-                    decision=approval.decision,
-                    resolution_source=approval.resolution_source,
-                    resolved_by=approval.resolved_by,
-                    resolution_reason=approval.resolution_reason,
-                    llm_review=approval.llm_review,
-                )
-                if approval is not None
-                else None
-            ),
+            approval=self._approval_summary(approval),
+        )
+
+    def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
+        decision = GuardDecision.model_validate(audit.metadata["guard_decision"])
+        approval: ApprovalRequest | None = None
+        approval_id = audit.links.get("approval_id")
+        if approval_id:
+            approval = self.approval_service.get_approval(approval_id)
+        return GuardEvaluationResponse(
+            decision=decision,
+            approval=self._approval_summary(approval),
+        )
+
+    def _approval_summary(
+        self, approval: ApprovalRequest | None
+    ) -> EvaluationApproval | None:
+        if approval is None:
+            return None
+        return EvaluationApproval(
+            approval_id=approval.approval_id,
+            status=approval.status,
+            decision_options=approval.decision_options,
+            decision=approval.decision,
+            resolution_source=approval.resolution_source,
+            resolved_by=approval.resolved_by,
+            resolution_reason=approval.resolution_reason,
+            llm_review=approval.llm_review,
         )
 
     def _record_memory_change(

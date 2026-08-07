@@ -32,6 +32,7 @@ _ERROR_MESSAGES = {
     "APPROVAL_NOT_FOUND": "Approval was not found.",
     "APPROVAL_DECISION_INVALID": "Approval decision is invalid.",
     "APPROVAL_WAIT_DENIED": "Approval wait is not allowed for this principal.",
+    "EVALUATION_CONFLICT": "Evaluation conflicts with an existing result for the same event.",
     "VALIDATION_ERROR": "Request validation failed.",
     "NOT_FOUND": "Resource was not found.",
     "METHOD_NOT_ALLOWED": "HTTP method is not allowed.",

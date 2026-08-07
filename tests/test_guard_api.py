@@ -2242,7 +2242,7 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
     ask_response = client.post(
         "/v1/guard/evaluate",
         headers={"Authorization": "Bearer adapter-secret"},
-        json=_guard_event_payload(trace_id="trace_ask_smoke"),
+        json=_guard_event_payload(event_id="evt_smoke_ask", trace_id="trace_ask_smoke"),
     )
     assert ask_response.status_code == 200
     approval_id = ask_response.json()["approval"]["approval_id"]
@@ -2648,3 +2648,61 @@ def test_policy_evaluation_lookup_filters_record_type_and_returns_earliest() -> 
 
     assert found is not None
     assert found.audit_id == "audit_lookup_earliest"
+
+
+def _evaluate_client_and_store() -> tuple[TestClient, MemoryControlPlaneStore]:
+    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    store = MemoryControlPlaneStore()
+    app = create_app(store=store, settings=settings)
+    return TestClient(app), store
+
+
+def _post_evaluate(client: TestClient, payload: dict):
+    return client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+
+def test_evaluate_retry_with_same_content_returns_original_result() -> None:
+    client, store = _evaluate_client_and_store()
+    payload = _guard_event_payload(event_id="evt_idem_same")
+
+    first = _post_evaluate(client, payload)
+    second = _post_evaluate(client, payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["decision"]["decision_id"] == first.json()["decision"]["decision_id"]
+    assert second.json()["approval"] == first.json()["approval"]
+    assert len(store.audit_events) == 1
+
+
+def test_evaluate_conflict_when_same_event_id_has_different_content() -> None:
+    client, store = _evaluate_client_and_store()
+    first_payload = _guard_event_payload(event_id="evt_idem_conflict")
+    second_payload = _guard_event_payload(
+        event_id="evt_idem_conflict",
+        arguments={"to": "different-recipient@red-team.agentguard.local"},
+    )
+
+    first = _post_evaluate(client, first_payload)
+    second = _post_evaluate(client, second_payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "EVALUATION_CONFLICT"
+    assert len(store.audit_events) == 1
+    assert store.audit_events[0].links["event_id"] == "evt_idem_conflict"
+
+
+def test_evaluate_distinct_event_ids_create_separate_audits() -> None:
+    client, store = _evaluate_client_and_store()
+
+    first = _post_evaluate(client, _guard_event_payload(event_id="evt_idem_a"))
+    second = _post_evaluate(client, _guard_event_payload(event_id="evt_idem_b"))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(store.audit_events) == 2
