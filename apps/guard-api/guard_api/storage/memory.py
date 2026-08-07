@@ -30,12 +30,14 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
+    AuditWindowQuery,
     EvalMetricFilters,
     EvalMetrics,
     PolicySnapshotRecord,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
+    within_evaluated_range,
 )
 from guard_api.storage.integrity import (
     attach_audit_integrity,
@@ -100,6 +102,26 @@ class MemoryControlPlaneStore:
         filters = filters or AuditEventFilters()
         events = _filter_audit_events(list(reversed(self.audit_events)), filters)
         return events[: _bounded_limit(filters.limit)]
+
+    def read_audit_events_bounded(
+        self, query: AuditWindowQuery
+    ) -> list[AuditEvent]:
+        # 链内 sequence 即位序（sequence = index + 1），位序切片即上界读取：
+        # sequence <= upper，且 after_sequence 存在时 sequence < after_sequence。
+        with self.audit_integrity_lock:
+            head_sequence = len(self.audit_events)
+            upper = (
+                head_sequence if query.upper_sequence is None else query.upper_sequence
+            )
+            end = upper
+            if query.after_sequence is not None:
+                end = min(end, query.after_sequence - 1)
+            events = [
+                event
+                for event in self.audit_events[: max(end, 0)]
+                if _matches_window_filters(event, query)
+            ]
+        return list(reversed(events))[: query.limit]
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         with self.audit_integrity_lock:
@@ -508,6 +530,20 @@ def _filter_audit_events(
     if filters.decision is not None:
         events = [event for event in events if event.decision == filters.decision]
     return events
+
+
+def _matches_window_filters(event: AuditEvent, query: AuditWindowQuery) -> bool:
+    if query.trace_id is not None and event.trace_id != query.trace_id:
+        return False
+    if query.case_id is not None and event.case_id != query.case_id:
+        return False
+    if query.runtime is not None and event.runtime != query.runtime:
+        return False
+    if query.decision is not None and event.decision != query.decision:
+        return False
+    return within_evaluated_range(
+        event.timestamp, query.evaluated_from, query.evaluated_to
+    )
 
 
 def _bounded_limit(limit: int) -> int:

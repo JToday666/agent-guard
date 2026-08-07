@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from agentguard_core import (
@@ -28,6 +29,27 @@ from guard_api.models import (
 
 @dataclass(frozen=True, slots=True)
 class AuditEventFilters:
+    trace_id: str | None = None
+    case_id: str | None = None
+    runtime: str | None = None
+    decision: str | None = None
+    limit: int = 500
+
+
+@dataclass(frozen=True, slots=True)
+class AuditWindowQuery:
+    """审计链有界读取参数（契约 §5.2/§6.1）。
+
+    upper_sequence 为 None 时以当前链头上界为准；after_sequence 用于
+    cursor 续页，只读取 sequence 严格小于它的记录；evaluated_from/to
+    按 RFC 3339 规范化 UTC 字符串过滤记录 timestamp，范围语义为
+    [evaluated_from, evaluated_to)。窗口与 cohort 共用本查询。
+    """
+
+    upper_sequence: int | None = None
+    after_sequence: int | None = None
+    evaluated_from: str | None = None
+    evaluated_to: str | None = None
     trace_id: str | None = None
     case_id: str | None = None
     runtime: str | None = None
@@ -80,6 +102,37 @@ class PolicySnapshotRecord:
 EvalMetrics = dict[str, int | float | None]
 
 
+def within_evaluated_range(
+    timestamp: str,
+    evaluated_from: str | None,
+    evaluated_to: str | None,
+) -> bool:
+    """判断记录 timestamp 是否落入 [evaluated_from, evaluated_to) 区间。
+
+    两端存储必须经由本函数完成时间 cohort 过滤，避免字符串比较因
+    RFC 3339 后缀差异（+00:00 与 Z）产生口径漂移；无法解析的
+    timestamp 一律不进入 cohort。
+    """
+
+    if evaluated_from is None and evaluated_to is None:
+        return True
+    try:
+        occurred_at = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return False
+    if occurred_at.tzinfo is None:
+        return False
+    if evaluated_from is not None and occurred_at < datetime.fromisoformat(
+        evaluated_from
+    ):
+        return False
+    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(
+        evaluated_to
+    ):
+        return False
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class AuditIntegrityStatus:
     valid: bool
@@ -101,6 +154,10 @@ class ControlPlaneStore(Protocol):
 
     def list_audit_events(
         self, filters: AuditEventFilters | None = None
+    ) -> list[AuditEvent]: ...
+
+    def read_audit_events_bounded(
+        self, query: AuditWindowQuery
     ) -> list[AuditEvent]: ...
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
