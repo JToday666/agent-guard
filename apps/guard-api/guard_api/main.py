@@ -19,6 +19,8 @@ from guard_api.routers import ApiContext, register_routes
 from guard_api.services import (
     ApprovalService,
     AuditService,
+    AuditWindowRequestError,
+    AuditWindowService,
     ConfigAuditService,
     EvaluationService,
     MemoryGuardService,
@@ -49,6 +51,7 @@ def create_app(
 
     auth = CapabilityAuthService(settings=settings, store=store)
     audit_service = AuditService(store=store)
+    audit_window_service = AuditWindowService(store=store)
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
     memory_guard_service = MemoryGuardService(store=store)
     approval_service = ApprovalService(
@@ -83,6 +86,12 @@ def create_app(
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:
         return error_response(exc.code, status_code=exc.status_code)
 
+    @app.exception_handler(AuditWindowRequestError)
+    async def audit_window_error_handler(
+        _: Request, exc: AuditWindowRequestError
+    ) -> JSONResponse:
+        return error_response(exc.code, status_code=exc.status_code)
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
         _: Request, exc: RequestValidationError
@@ -111,6 +120,7 @@ def create_app(
             store=store,
             auth=auth,
             audit_service=audit_service,
+            audit_window_service=audit_window_service,
             config_audit_service=config_audit_service,
             memory_guard_service=memory_guard_service,
             approval_service=approval_service,

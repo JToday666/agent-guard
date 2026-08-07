@@ -8,6 +8,7 @@ from guard_api.auth import CapabilityAuthService
 from guard_api.services import (
     ApprovalService,
     AuditService,
+    AuditWindowService,
     ConfigAuditService,
     EvaluationService,
     MemoryGuardService,
@@ -25,6 +26,7 @@ class ApiContext:
     store: ControlPlaneStore
     auth: CapabilityAuthService
     audit_service: AuditService
+    audit_window_service: AuditWindowService
     config_audit_service: ConfigAuditService
     memory_guard_service: MemoryGuardService
     approval_service: ApprovalService
