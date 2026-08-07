@@ -19,11 +19,23 @@ from guard_api.storage.base import AuditEventFilters, ControlPlaneStore
 from .evidence import build_audit_event
 
 
+class PolicyEvaluationWriteForbiddenError(ValueError):
+    """Raised when an inbound record explicitly claims record_type=policy_evaluation.
+
+    契约 §12.1：POST /v1/audit/events 不得重复提交 Guard API 已经写入的
+    policy_evaluation；该记录只能由 POST /v1/guard/evaluate 内部唯一写入（§10）。
+    record_type=None 的 0.3 兼容记录不受影响。
+    """
+
+
 class AuditService:
     def __init__(self, *, store: ControlPlaneStore) -> None:
         self.store = store
 
     def submit(self, event: AuditEvent) -> dict[str, str | bool]:
+        # §12.1 守卫：仅拒显式声明 policy_evaluation 的入站记录。
+        if event.record_type == "policy_evaluation":
+            raise PolicyEvaluationWriteForbiddenError(event.audit_id)
         is_new = self.store.add_audit_event(event)
         if is_new:
             self._record_audit_provenance(event)

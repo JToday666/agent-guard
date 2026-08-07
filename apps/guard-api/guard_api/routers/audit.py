@@ -7,6 +7,7 @@ from typing import Any
 from agentguard_core import AuditEvent
 
 from guard_api.auth import ApiAuthError
+from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
 from guard_api.storage.base import AuditIdConflictError
 from fastapi import Cookie, FastAPI, Header
 
@@ -28,6 +29,12 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         auth.verify_bearer(authorization, "event:audit:write")
         try:
             return audit_service.submit(payload)
+        except PolicyEvaluationWriteForbiddenError:
+            # §12.1：policy_evaluation 只能由 POST /v1/guard/evaluate 写入。
+            raise ApiAuthError(
+                "POLICY_EVALUATION_WRITE_FORBIDDEN",
+                status_code=422,
+            ) from None
         except AuditIdConflictError:
             raise ApiAuthError(
                 "AUDIT_ID_CONFLICT",

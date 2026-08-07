@@ -33,6 +33,9 @@ _ERROR_MESSAGES = {
     "APPROVAL_DECISION_INVALID": "Approval decision is invalid.",
     "APPROVAL_WAIT_DENIED": "Approval wait is not allowed for this principal.",
     "AUDIT_ID_CONFLICT": "The audit_id is already bound to different content.",
+    "POLICY_EVALUATION_WRITE_FORBIDDEN": (
+        "policy_evaluation records can only be written by POST /v1/guard/evaluate."
+    ),
     "EVALUATION_CONFLICT": "Evaluation conflicts with an existing result for the same event.",
     "VALIDATION_ERROR": "Request validation failed.",
     "NOT_FOUND": "Resource was not found.",
