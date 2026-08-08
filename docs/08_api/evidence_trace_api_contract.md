@@ -39,7 +39,7 @@ tests 尚未完成。本文冻结的是完整目标，不得把基础双读描�
 | GuardEvent    | `schema_version="0.3"`                                                          | 保持不变                                                             |
 | GuardDecision | 最终风险分、规则命中和原因                                                      | 可选增加结构化 `risk_breakdown`                                      |
 | AuditEvent    | Schema、Core 和 Guard API 基础双读支持 `0.3 \| 0.4`；现有 writer 主要仍为 `0.3` | 全部生产者写入明确的 `record_type`、结构化 `evidence` 和稳定 `links` |
-| 策略审计      | Guard API 已写入；LangGraph Guard API 模式仍可能重复提交                        | Guard API 唯一写入一条逻辑策略审计                                   |
+| 策略审计      | Guard API 已写入；LangGraph Guard API 模式已停止重复提交                        | Guard API 唯一写入一条逻辑策略审计                                   |
 | 运行时回执    | LangGraph 有本地结果对象，OpenClaw 有 Hook 观察，但未形成统一审计结构           | Adapter 通过现有审计写入接口回写                                     |
 | 幂等          | PostgreSQL 同 ID 直接忽略，未比较内容；内存存储行为不同                         | 两种存储具有相同的同内容重试和异内容冲突语义                         |
 | 完整性元数据  | 已由服务端写入 `integrity.sequence/prev_hash/event_hash/canonicalization`       | 直接复用，不新增第二套字段                                           |

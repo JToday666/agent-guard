@@ -224,8 +224,27 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
         ),
         tool_decision,
     )
-    assert adapter.submit_audit_event(audit_event)["ok"] is True
-    assert len(store.list_audit_events()) >= 6
+    # G-01：adapter 产物升级为 0.4 policy_evaluation 形态。
+    assert audit_event.schema_version == "0.4"
+    assert audit_event.record_type == "policy_evaluation"
+    assert audit_event.links["action_id"] == "call_v03_audit"
+    assert set(audit_event.evidence) == {
+        "guard_event",
+        "guard_decision",
+        "policy",
+        "intervention",
+        "execution",
+        "side_effects",
+        "result",
+        "approval",
+    }
+    assert audit_event.evidence["policy"] is None
+    # G-02/§12.1：Guard API 模式下 policy_evaluation 由 evaluate writer 唯一
+    # 写入，显式重复提交会被守卫拒绝。
+    assert adapter.submit_audit_event(audit_event)["ok"] is False
+    stored = store.list_audit_events()
+    assert len(stored) >= 6
+    assert {item.record_type for item in stored} == {"policy_evaluation"}
 
     _, approval_decision = adapter.evaluate_before_tool(
         tool_name="send_email",
@@ -267,3 +286,74 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
     )
     assert resolved.status_code == 200
     assert adapter.wait_for_approval(approval_id)["decision"] == "allow_once"
+
+
+def test_guard_api_v03_gateway_skips_audit_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G-02：gateway 完整流程不得经 POST /v1/audit/events 重复提交策略审计。"""
+    store = MemoryControlPlaneStore()
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(
+            adapter_token="adapter-secret",
+            control_token="control-secret",
+            storage_backend="memory",
+        ),
+    )
+    api = TestClient(app)
+    request_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_paths.append(request.url.path)
+        response = api.request(
+            request.method,
+            str(request.url),
+            headers=dict(request.headers),
+            content=request.content,
+        )
+        return httpx.Response(
+            response.status_code,
+            headers=dict(response.headers),
+            content=response.content,
+            request=request,
+        )
+
+    class MockClient(httpx.Client):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(transport=httpx.MockTransport(handler), *args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", MockClient)
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(
+            core_base_url="http://guard-api.test",
+            token="adapter-secret",
+            api_mode="guard-api-v0.3",
+        )
+    )
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        def invoke(self, tool_name: str, arguments: dict[str, Any]) -> str:
+            self.calls.append((tool_name, dict(arguments)))
+            return "public content"
+
+    runtime = Runtime()
+    result = GuardedToolGateway(adapter, runtime).invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "/docs/public.txt"},
+        security={"user_task": "Read a public document", "source_trust": "trusted"},
+        trace_id="trace_v03_gateway",
+        call_id="call_v03_gateway",
+    )
+
+    assert result.executed is True
+    assert result.blocked is False
+    # Guard API 模式下 adapter 不再自行提交审计：审计由 evaluate writer 写入。
+    assert "/v1/audit/events" not in request_paths
+    assert result.audit_event is None
+    stored = store.list_audit_events()
+    assert len(stored) >= 2
+    assert {item.record_type for item in stored} == {"policy_evaluation"}

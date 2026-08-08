@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .event_models import ToolExecutionResult, new_id
+from .event_models import AuditEvent, ToolExecutionResult, new_id
 from .langgraph_adapter import blocked_result
 from .tool_compat import tool_result_with_compatibility
 
@@ -44,19 +44,24 @@ class GuardedToolGateway:
             trace_id=trace_id,
             call_id=call_id,
         )
-        audit_event = self.guard_adapter.build_audit_event(event, decision)
         if compatibility is not None:
             event.metadata["compatibility"] = dict(compatibility)
-            audit_event.metadata["compatibility"] = dict(compatibility)
-        audit_error = _submit_audit_event(self.guard_adapter, audit_event)
-        if audit_error is not None:
-            return _audit_failure_result(
-                tool_name=tool_name,
-                call_id=call_id,
-                event=event,
-                audit_event=audit_event,
-                error=audit_error,
-            )
+        # Guard API 模式下策略审计由 evaluate writer 唯一写入，adapter 不再
+        # 重复提交（契约 §12.1/§22.1）；仅 legacy Core 保留自提交路径。
+        audit_event: AuditEvent | None = None
+        if _adapter_submits_policy_audit(self.guard_adapter):
+            audit_event = self.guard_adapter.build_audit_event(event, decision)
+            if compatibility is not None:
+                audit_event.metadata["compatibility"] = dict(compatibility)
+            audit_error = _submit_audit_event(self.guard_adapter, audit_event)
+            if audit_error is not None:
+                return _audit_failure_result(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    event=event,
+                    audit_event=audit_event,
+                    error=audit_error,
+                )
 
         if decision.decision == "deny" or _ask_was_not_approved(
             self.guard_adapter, decision
@@ -110,7 +115,7 @@ class GuardedToolGateway:
                 safe_message=None,
                 side_effects=side_effects,
                 event=event.model_dump(),
-                audit_event=audit_event.model_dump(),
+                audit_event=_dump_audit_event(audit_event),
             )
             payload = _apply_tool_result_guard(
                 self.guard_adapter,
@@ -146,7 +151,7 @@ class GuardedToolGateway:
                 safe_message=None,
                 side_effects=side_effects,
                 event=event.model_dump(),
-                audit_event=audit_event.model_dump(),
+                audit_event=_dump_audit_event(audit_event),
                 error=str(exc),
             )
             return ToolExecutionResult.model_validate(
@@ -192,17 +197,19 @@ def _evaluate_memory_write_gate(
         security=security,
         trace_id=trace_id,
     )
-    audit_event = guard_adapter.build_audit_event(event, decision)
-    audit_error = _submit_audit_event(guard_adapter, audit_event)
-    if audit_error is not None:
-        return _audit_failure_result(
-            tool_name=tool_name,
-            call_id=call_id,
-            event=event,
-            audit_event=audit_event,
-            error=audit_error,
-            compatibility=compatibility,
-        )
+    audit_event: AuditEvent | None = None
+    if _adapter_submits_policy_audit(guard_adapter):
+        audit_event = guard_adapter.build_audit_event(event, decision)
+        audit_error = _submit_audit_event(guard_adapter, audit_event)
+        if audit_error is not None:
+            return _audit_failure_result(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                audit_event=audit_event,
+                error=audit_error,
+                compatibility=compatibility,
+            )
     if decision.decision != "deny" and not _ask_was_not_approved(
         guard_adapter, decision
     ):
@@ -219,7 +226,7 @@ def _evaluate_memory_write_gate(
         or "The memory write was blocked by AgentGuard.",
         side_effects=[],
         event=_dump_event(event),
-        audit_event=audit_event.model_dump(),
+        audit_event=_dump_audit_event(audit_event),
         block_semantics=_block_semantics(decision),
         counts_as_effective_block=decision.decision == "deny",
     )
@@ -252,21 +259,23 @@ def _apply_tool_result_guard(
         will_enter_context=True,
         will_persist=_tool_result_will_persist(tool_name, side_effects),
     )
-    audit_event = guard_adapter.build_audit_event(event, decision)
-    audit_error = _submit_audit_event(guard_adapter, audit_event)
-    if audit_error is not None:
-        payload.blocked = True
-        payload.status = "audit_error"
-        payload.result = None
-        payload.safe_message = (
-            "The tool result was withheld because AgentGuard audit submission failed."
-        )
-        payload.error = audit_error
-        payload.audit_event = audit_event.model_dump()
-        payload.quarantine_applied = True
-        payload.block_semantics = "audit_failure"
-        payload.counts_as_effective_block = False
-        return payload
+    audit_event: AuditEvent | None = None
+    if _adapter_submits_policy_audit(guard_adapter):
+        audit_event = guard_adapter.build_audit_event(event, decision)
+        audit_error = _submit_audit_event(guard_adapter, audit_event)
+        if audit_error is not None:
+            payload.blocked = True
+            payload.status = "audit_error"
+            payload.result = None
+            payload.safe_message = (
+                "The tool result was withheld because AgentGuard audit submission failed."
+            )
+            payload.error = audit_error
+            payload.audit_event = audit_event.model_dump()
+            payload.quarantine_applied = True
+            payload.block_semantics = "audit_failure"
+            payload.counts_as_effective_block = False
+            return payload
     if decision.decision != "deny" and not _ask_was_not_approved(
         guard_adapter, decision
     ):
@@ -280,7 +289,7 @@ def _apply_tool_result_guard(
         or "The tool result was quarantined by AgentGuard before entering context."
     )
     payload.event = _dump_event(event)
-    payload.audit_event = audit_event.model_dump()
+    payload.audit_event = _dump_audit_event(audit_event)
     payload.quarantine_applied = True
     payload.counts_as_effective_block = decision.decision == "deny"
     payload.block_semantics = _block_semantics(decision)
@@ -306,6 +315,25 @@ def _dump_event(event: Any) -> dict[str, Any]:
         dumped = event.model_dump()
         return dumped if isinstance(dumped, dict) else {}
     return {}
+
+
+def _dump_audit_event(audit_event: AuditEvent | None) -> dict[str, Any] | None:
+    if audit_event is None:
+        return None
+    return audit_event.model_dump()
+
+
+def _adapter_submits_policy_audit(guard_adapter: Any) -> bool:
+    """判断 adapter 是否仍需自行提交策略审计。
+
+    Guard API v0.3 模式下 POST /v1/guard/evaluate 已在服务端唯一写入
+    policy_evaluation（契约 §10/§22.1），adapter 重复提交会被 §12.1 守卫
+    拒绝并造成指标重复；legacy Core 没有 evaluate writer，保留 adapter
+    自提交路径。
+    """
+    config = getattr(guard_adapter, "config", None)
+    mode = getattr(config, "core_api_mode", getattr(config, "api_mode", None))
+    return mode == "legacy"
 
 
 def _block_semantics(decision: Any) -> str:
