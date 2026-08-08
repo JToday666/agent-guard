@@ -270,10 +270,14 @@ Trace 顶部的“运行中、等待审批、已结束”也只能由明确生�
 
 不新增一级页面。`/evidence/:trace_id` 继续承担一次 Trace 的调查和治理上下文。
 
-顶部保留 Trace 基本信息、最终安全结论、六维事实和紧凑阶段摘要；主体已实现为三个互补视图：
+顶部只保留 Trace 基本信息和当前已确认的安全结论；主体立即进入三个互补视图。六维事实和
+紧凑阶段摘要位于工作区后的折叠“调查摘要”，需要时再展开：
 
 1. **执行轨迹**（默认）
-   - 按运行步骤展示紧凑时间流；动作生命周期聚合，非动作 Guard 阶段显示为检查点；
+   - 默认按运行步骤展示确定性图形流，并提供信息等价的紧凑列表；动作生命周期聚合，
+     非动作 Guard 阶段显示为检查点；
+   - 图形流按智能体处理、受控动作、检查与结果划分泳道；边只表达“随后记录”的审计顺序，
+     不把时间邻接冒充因果关系；
    - 决策颜色与运行状态图标分层编码；
    - 待审批动作提供“处理审批”；
    - 提供搜索和待审批、风险、失败等筛选；详情展开后仍可逐条查看该步骤的审计记录；
@@ -298,10 +302,15 @@ Trace 顶部的“运行中、等待审批、已结束”也只能由明确生�
 
 组件实现为：
 
-- `ExecutionTrace.vue` 接收步骤投影，在组件内以顶层步骤和折叠的逐条记录表达两个层级；
-- 现有 `TraceTimeline.vue` 在迁移时重命名为 `AuditTimeline.vue`，继续按 AuditEvent 展示，
-  不承担动作聚合；
-- `EvidenceStageFlow.vue` 收敛为顶部紧凑阶段摘要；
+- `ExecutionTrace.vue` 作为执行视图控制器，管理刷新状态、筛选、选择和图形/列表切换；
+- `ExecutionFlowGraph.vue` 使用确定性泳道布局展示全部步骤，保留稳定位置、当前步骤聚焦、
+  Minimap、适配和全屏能力；普通滚轮不被嵌入式画布劫持；
+- `ExecutionTraceList.vue` 提供信息和键盘操作等价的紧凑列表回退；
+- `ExecutionTraceToolbar.vue` 统一搜索、状态筛选与布局切换；
+- `ExecutionStepInspector.vue` 统一解释安全判断、审批、运行结果和审计记录；
+- `execution-flow-layout.ts` 只依据步骤顺序和类别生成可测试的确定性位置及审计顺序边；
+- `AuditTimeline.vue` 继续按 AuditEvent 展示，不承担动作聚合；
+- `EvidenceStageFlow.vue` 收敛为折叠调查摘要中的紧凑阶段说明；
 - `ProvenanceGraph.vue` 保持溯源调查职责，不复制执行卡片；
 - 不保留两套动作时间线；逐条 AuditEvent 的完整调查职责仍由审计记录视图承担。
 
@@ -309,6 +318,7 @@ Trace 顶部的“运行中、等待审批、已结束”也只能由明确生�
 
 ```text
 view=execution | provenance | audit
+execution_layout=graph | list
 action_id=<raw action id>
 node_id=<provenance node id>
 event_id=<raw audit id>
@@ -337,6 +347,8 @@ If-None-Match: <trace-etag>
 - 审批提交得到服务端响应后立即刷新 Trace，不等待下一轮定时器。
 - 普通新增或状态更新不抢夺用户滚动位置和焦点，只显示“查看最新”提示；待审批、拒绝、
   执行失败等优先变化才进入辅助技术播报。
+- 图中既有节点的位置只由稳定步骤顺序和类别决定，状态更新或尾部追加不得让既有节点跳动；
+  用户缩放、拖动画布或选择旧步骤后暂停自动跟随，只能由“查看最新”主动恢复并聚焦。
 - 没有明确 Trace 终态时，即使当前已知动作都已结束也继续观察后续步骤；有待审批动作时
   不得因为其他动作终态停止刷新。
 - 收到明确 `trace_completed/trace_failed/trace_cancelled` 后停止循环，随即强制读取一次
