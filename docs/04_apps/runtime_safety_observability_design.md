@@ -1,6 +1,6 @@
 # Agent 运行时安全可观测与动态治理设计
 
-> 状态：设计已冻结，后端与 Dashboard 代码已实施；真实跨存储演示链待验收
+> 状态：设计与实施已完成；Memory/PostgreSQL 真实演示链和 Dashboard 读链验收通过
 >
 > 冻结日期：2026-08-07
 >
@@ -22,10 +22,13 @@
 - Trace 与 Provenance 使用独立 ETag 和 `304`，Trace 响应包含窗口完整性；
 - Provenance writer 在写入时物化稳定节点与关系，并保护节点、边和审批状态冲突；
 - Dashboard 已提供三视图、确定性动作投影、约 2 秒条件轮询和按需溯源更新。
+- 真实 LangGraph / AttackBench 主演示链已通过实际 Uvicorn HTTP 服务分别连接 Memory 与
+  PostgreSQL，完成审批释放、受控执行、Trace、ETag 和 Provenance 验收；Dashboard 又通过
+  真实 PostgreSQL API 读取同一场景并验证两动作投影和溯源定位。
 
-尚未完成的是用真实 LangGraph 主演示链分别连接 Memory 与 PostgreSQL 跑通同一场景，
-以及在真实 PostgreSQL 环境关闭跨存储验收门禁。共享 fixture、单元测试、Mock E2E 和
-拦截式 API E2E 只能证明契约与前端行为，不能替代该真实联调。
+共享 fixture、单元测试和拦截式 API E2E 继续承担可重复的分层回归职责；真实链验收由
+`tests/test_runtime_safety_e2e.py` 和本机浏览器只读核验独立证明，不用 TestClient 或页面
+路由拦截冒充端到端结果。
 
 ## 2. 产品目标与非目标
 
@@ -73,13 +76,13 @@ OpenClaw 保留为跨运行时增强链，不作为本轮主演示链。只有�
 
 ### 3.2 选择依据
 
-| 维度         | LangGraph / AttackBench                                     | OpenClaw                                                 |
-| ------------ | ----------------------------------------------------------- | -------------------------------------------------------- |
-| 当前演示定位 | 已是 P0 主演示路径                                          | 当前演示脚本列为 P1                                      |
-| 动作事实     | `memory_read`、`code_exec` 已有明确工具名和 `call_id`       | 工具 Hook 有 `toolCallId`                                |
-| 资源事实     | Adapter 已能规范化 memory/code 资源                         | 依赖 Hook payload 和缓存恢复                             |
-| 执行结果     | 已统一写入 0.4 outcome 与生命周期 observation，真实链待验收 | 已覆盖最小 0.4 outcome；allow 后执行确证仍非本期完整范围 |
-| 决赛风险     | 链路较短，行为和结果更容易确定性复现                        | Hook 版本和执行后语义带来额外联调面                      |
+| 维度         | LangGraph / AttackBench                                           | OpenClaw                                                 |
+| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------- |
+| 当前演示定位 | 已是 P0 主演示路径                                                | 当前演示脚本列为 P1                                      |
+| 动作事实     | `memory_read`、`code_exec` 已有明确工具名和 `call_id`             | 工具 Hook 有 `toolCallId`                                |
+| 资源事实     | Adapter 已能规范化 memory/code 资源                               | 依赖 Hook payload 和缓存恢复                             |
+| 执行结果     | 已统一写入 0.4 outcome 与生命周期 observation，真实链已跨存储验收 | 已覆盖最小 0.4 outcome；allow 后执行确证仍非本期完整范围 |
+| 决赛风险     | 链路较短，行为和结果更容易确定性复现                              | Hook 版本和执行后语义带来额外联调面                      |
 
 选择 LangGraph 不代表 OpenClaw 能力被弱化，而是先保证一条可重复、可审计、可现场恢复的
 真实闭环，再用 OpenClaw 证明跨运行时扩展性。
@@ -177,6 +180,11 @@ Core 只回答“应该如何处理”；Adapter / Plugin 才能回答“后来�
 
 所有 ID 都是不透明字符串。消费者不得通过拆分前缀或内容推断事实。
 
+`event_id` 与 `action_id` 不可互换。常规 `context_assembled`、
+`model_input_prepared` 只进入审计和溯源，不得仅因被 Guard 评估就创建执行动作；
+`tool_result_produced` 复用来源工具的原始 `call_id`。需要审批的内部阶段可使用稳定
+`event_id` 作为受控审批主体，但这不改变其他同类记录的默认边界。
+
 Provenance 策略节点使用 Trace 级内部键
 `policy:{trace_id}:{bundle_id}:{revision-or-version}`，避免不同 Trace 复用同一策略快照时发生
 节点归属冲突；`ref_id` 仍只保存原始 `bundle_id:revision-or-version`。该格式属于 writer
@@ -217,6 +225,9 @@ timestamps
   Approval 关联的决定；其余情况才使用最近一次逻辑策略判断。
 - links 缺失或互相冲突时，主决定保持 `unknown`，不得按时间邻近选择。
 - 没有稳定 `action_id` 的记录只进入审计记录，不创建匿名动作卡片。
+- 常规上下文组装、模型输入和仅有 `allow` 的模型输出不占据执行轨迹；模型输出发生非允许
+  决策、输出修订、审批或运行时回执时才作为动作展示。被省略的内部阶段仍完整保留在溯源
+  关系和审计记录中。
 - 动作按首次已知事实排序；并列时使用不透明 `action_id` 保证顺序稳定。
 
 ### 5.4 生命周期投影规则
@@ -339,9 +350,11 @@ Provenance 使用独立条件请求和非对称刷新：
 7. 为 Trace 与 Provenance 分别实现完整响应 ETag 和 `304`。
 8. Memory 与 PostgreSQL 共用同一套幂等、关联和条件请求 contract tests。
 
-当前 Memory 契约测试已通过；PostgreSQL 实现已接入相同契约，但本地缺少真实数据库环境，
-仍需在可用 PostgreSQL 上执行完整测试。真实 LangGraph / AttackBench 演示链也仍需分别在
-两种存储上验收，不能由 TestClient、共享 fixture 或浏览器路由拦截测试代替。
+Memory 与本机 PostgreSQL 已通过相同存储契约。`tests/test_runtime_safety_e2e.py` 使用实际
+Uvicorn 回环 HTTP 服务运行 LangGraph / AttackBench 主演示场景，并分别验证两种存储中的
+审批、运行回执、Trace、独立 ETag 和 Provenance；本机只读浏览器核验又确认 Dashboard 可
+通过真实 PostgreSQL Guard API 显示两个动作并定位代码动作的溯源节点。测试完成后专用
+PostgreSQL 测试库恢复为空，不向开发库写入演示数据。
 
 审批终态发生变化但 AuditEvent 未增加时，Trace ETag 也必须变化。禁止只使用最大
 `integrity.sequence` 计算 Trace ETag。
@@ -360,8 +373,8 @@ Provenance 使用独立条件请求和非对称刷新：
 
 [runtime_safety_trace_v04.json](../../tests/fixtures/runtime_safety_trace_v04.json)
 冻结本场景的源事实、最终 Provenance 和分阶段投影断言。Schema、存储、Provenance writer
-和 Dashboard 动作投影均已复用该 fixture；它仍是目标契约样例，不代表真实 Adapter、
-Guard API、数据库和 Dashboard 已经端到端跑通该结构。
+和 Dashboard 动作投影均已复用该 fixture；它仍是目标契约样例，真实 Adapter、Guard API
+与两种数据库的端到端证据由 `tests/test_runtime_safety_e2e.py` 独立提供。
 
 后续跨组件测试必须至少验证：
 
@@ -384,7 +397,7 @@ Guard API、数据库和 Dashboard 已经端到端跑通该结构。
 - 页面位置、三视图职责和非对称刷新方案已冻结；
 - 后端后续边界、ETag 覆盖范围和禁止推断项已记录；
 - 共享 fixture 可通过 AuditEvent `0.4` Schema 和交叉引用检查；
-- TODO 清楚区分“设计完成”“代码已实施”和“真实端到端验收尚未完成”。
+- TODO 清楚区分“设计完成”“代码已实施”“真实端到端验收通过”和后续增强项。
 
-上述定义继续作为实施约束。当前代码状态以第 1、8 节为准；真实跨存储演示链通过前，
-不得把 fixture、Mock 或拦截式 API E2E 描述为端到端交付证据。
+上述定义继续作为实施约束。当前代码和验收状态以第 1、8 节为准；fixture、Mock 与拦截式
+API E2E 仍不得单独描述为端到端交付证据。

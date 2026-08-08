@@ -155,8 +155,8 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 2026-08-05 冻结。Schema、Core 类型和 Guard API 基础双读已经支持 AuditEvent
 `0.3 | 0.4`。Guard API writer、稳定 links、结构化 evidence、LangGraph 运行时回执、
 Trace 窗口与独立 ETag、丰富 Provenance writer 和 Dashboard 三视图均已进入代码；真实
-LangGraph + Memory/PostgreSQL 联调仍未完成，不能把单元或拦截式 E2E 描述为整项目能力
-已经交付。
+LangGraph 主演示链已通过 Uvicorn HTTP 服务分别连接 Memory/PostgreSQL，Dashboard 也已
+通过真实 PostgreSQL API 完成只读验收。单元或拦截式 E2E 仍只作为分层回归证据。
 
 ### 已完成
 
@@ -167,7 +167,7 @@ LangGraph + Memory/PostgreSQL 联调仍未完成，不能把单元或拦截式 E
 - [x] 溯源图已使用 Vue Flow、ELK Layered 和 Minimap，支持生命周期分区、关键路径、折叠、搜索、筛选、全屏、递归路径高亮及 URL/时间线/检查器同步。
 - [x] Dashboard 已直接读取后端现有的 `AuditEvent.integrity.sequence`、`prev_hash`、`event_hash` 和 `canonicalization`；已删除 `evidence.audit`、`chain_index`、`entry_hash`、`previous_hash` 平行结构的读取和 Mock 生成逻辑。
 - [x] 已建立本轮 API 协作契约文档，明确不新增 Dashboard 专用证据端点或独立 execution receipt 端点。
-- [x] 已建立 [Provenance 丰富化后端实施要求](08_api/provenance_enrichment_backend_requirements.md)，细化节点、关系、写入时机、幂等、历史数据和跨存储验收；Guard API 写入实现已完成，整链验收进行中。
+- [x] 已建立 [Provenance 丰富化后端实施要求](08_api/provenance_enrichment_backend_requirements.md)，细化节点、关系、写入时机、幂等、历史数据和跨存储验收；Guard API 写入与真实跨存储整链验收均已完成。
 - [x] AuditEvent JSON Schema、Core 类型和 Guard API 基础写入/读取已支持 `0.3 | 0.4`；完整跨组件迁移继续列为待办。
 - [x] Dashboard 已分离 `AuditWindow` 与 `EvaluationRun`；旧 trace `metrics` 不再映射为未消费的前端领域对象，历史聚合待显式 cohort 接口上线后按需接入。
 - [x] Dashboard API DTO 已允许 0.4 非策略记录的顶层策略字段为空，并以 `record_type` 和稳定 links 决定指标成员资格。
@@ -177,7 +177,7 @@ LangGraph + Memory/PostgreSQL 联调仍未完成，不能把单元或拦截式 E
       选定 LangGraph / AttackBench 主演示链，冻结事实生产者、稳定 ID、三层状态、
       三视图联动、非对称刷新和 ETag 覆盖边界，并增加
       [共享目标 fixture](../tests/fixtures/runtime_safety_trace_v04.json)。2026-08-08 已完成
-      后端与 Dashboard 代码实施；真实跨存储演示链继续受联调门禁约束。
+      后端与 Dashboard 代码实施；真实跨存储演示链和 PostgreSQL Dashboard 读链已通过。
 
 ### 已冻结的目标契约
 
@@ -197,8 +197,8 @@ LangGraph + Memory/PostgreSQL 联调仍未完成，不能把单元或拦截式 E
 | 状态 | 优先级 | 待办                                                                                                     | 影响组件                                                     | 验收条件                                                                                                                                                      |
 | ---- | ------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [x]  | P0     | 冻结 AuditEvent 目标版本、`record_type`、`evidence`、`links`、字段可空性、幂等与证据边界                 | 稳定接口文档、API 目标契约                                   | D-01 至 D-05 已确认；默认 `0.3`、基础 `0.4` 兼容和完整迁移未交付状态清晰分离                                                                                  |
-| [~]  | P0     | 完成 AuditEvent `0.4` evaluate writer、跨存储语义与跨存储共享契约测试                                    | Guard API、Memory/PostgreSQL                                 | writer 与共享契约已实现；Memory 服务级契约已验证，仍需在真实 PostgreSQL 环境关闭跨存储测试门禁                                                               |
-| [ ]  | P0     | 完成 Adapters 与 Dashboard 的跨组件 `0.4` 共享契约测试                                                   | Adapters、Dashboard contract tests                           | 四类记录由权威生产者正确写入                                                                                                                                  |
+| [x]  | P0     | 完成 AuditEvent `0.4` evaluate writer、跨存储语义与跨存储共享契约测试                                    | Guard API、Memory/PostgreSQL                                 | writer、共享契约和真实 Memory/PostgreSQL HTTP 主演示链均已通过                                                                                                |
+| [x]  | P0     | 完成 Adapters 与 Dashboard 的跨组件 `0.4` 共享契约测试                                                   | Adapters、Dashboard contract tests                           | 四类记录由权威生产者写入；共享 fixture、Adapter 集成测试、Dashboard 投影测试与真实链共同覆盖                                                                  |
 | [x]  | P0     | `POST /v1/guard/evaluate` 使用同一次策略快照完成判定和审计，只写一条 `policy_evaluation`                 | Policy store、Guard API、Audit service                       | 同一逻辑评估只有一条策略审计；审计中的 bundle、version、revision 和 digest 与实际判定一致                                                                     |
 | [x]  | P0     | 移除 LangGraph Guard API 模式下的重复策略审计                                                            | LangGraph Adapter                                            | Adapter 不再为 Guard API 已写入的 `event_id + decision_id` 重复提交策略审计                                                                                   |
 | [x]  | P0     | 通过现有 `POST /v1/audit/events` 回写结构化运行时结果（LangGraph Adapter）                               | LangGraph Adapter                                            | 成功、失败、未调用、隔离、修订、审批释放和观察路径均产生对应回执；未测量副作用不按零处理                                                                      |
@@ -210,24 +210,24 @@ LangGraph + Memory/PostgreSQL 联调仍未完成，不能把单元或拦截式 E
 | [x]  | P1     | 新增显式 cohort 的 `GET /v1/metrics/policy-evaluations`                                                  | Guard API、Metric service                                    | 必须回显 evaluated range、outcomes as-of、去重方式、分母和覆盖率；不提供无范围“全部历史”                                                                      |
 | [ ]  | P1     | 在窗口与历史指标响应中按 `action_id` 汇总授权终态与运行时执行覆盖                                        | Approval service、Adapters、Metric service                   | 与策略 cohort 共用 snapshot/outcomes-as-of；deny/审批拒绝无回执时执行结果保持未知；只有 `not_invoked` 回执进入确认阻止统计                                    |
 | [ ]  | P1     | 在 GuardDecision 和 AuditEvent 中增加同构的 `risk_breakdown`                                             | Core merge、GuardDecision、Guard API                         | 每个检测因子及 max 聚合过程可追溯；最终分数和决定一致；旧决策不补造分解                                                                                       |
-| [~]  | P1     | 按 [详细实施要求](08_api/provenance_enrichment_backend_requirements.md) 扩展 provenance 写入的节点和关系 | Guard API provenance writer/query                            | Guard API 与共享 Memory 契约已完成；待 PostgreSQL 真实环境和 Dashboard API 模式验收后关闭                                                                     |
+| [x]  | P1     | 按 [详细实施要求](08_api/provenance_enrichment_backend_requirements.md) 扩展 provenance 写入的节点和关系 | Guard API provenance writer/query                            | Guard API、Memory/PostgreSQL 真实链与 Dashboard API 读链均已完成验收                                                                                          |
 | [x]  | P1     | 为 trace 查询增加明确的窗口完整性信息                                                                    | Trace service、Memory/PostgreSQL store                       | Dashboard 不再根据“恰好返回 1000 条”猜测截断；旧客户端可忽略新增字段                                                                                          |
 
 ### 运行时安全观测后续阶段
 
-- [~] **事实链实施**：LangGraph 代码已能产生唯一 `policy_evaluation`、审批终态、
-  `tool_call_started` 和 `runtime_outcome`，所有记录通过稳定 `action_id` 关联；未观察
-  start 时不产生 start 事件；policy override 产生的空审批资源由 Guard API 使用已规范化、
-  已脱敏的资源目标回退。真实主演示链与两种存储仍待联调。
+- [x] **事实链实施**：LangGraph 代码已能产生唯一 `policy_evaluation`、审批终态、
+      `tool_call_started` 和 `runtime_outcome`，所有记录通过稳定 `action_id` 关联；未观察
+      start 时不产生 start 事件；policy override 产生的空审批资源由 Guard API 使用已规范化、
+      已脱敏的资源目标回退。真实主演示链已分别通过 Memory 与 PostgreSQL 联调。
 - [x] **前端静态投影**：Dashboard 以 `action_id` 聚合多次策略检查、Approval 和 outcome，
       在证据链详情实现“执行轨迹 / 溯源关系 / 审计记录”，不新增一级页面。
 - [x] **视图联动**：执行动作、Provenance action node 和 AuditEvent 通过原始稳定 ID
       双向定位；图更新保留筛选、折叠、选择和视口锚点。
 - [x] **动态刷新**：Trace 与 Provenance 分别支持 ETag/304；Trace ETag 覆盖 approvals
       等全部可变响应内容；执行轨迹约 2 秒条件轮询，Provenance 按需校准。
-- [ ] **真实联调门禁**：共享 fixture 通过 Schema 和投影契约测试后，再用真实
-      LangGraph + Guard API + Memory/PostgreSQL 跑同一场景；真实链通过前不得把 fixture
-      或 Mock 录屏作为交付证据。
+- [x] **真实联调门禁**：共享 fixture 通过 Schema 和投影契约测试；真实 LangGraph +
+      Guard API 已在 Memory/PostgreSQL 跑通同一场景，Dashboard 已通过真实 PostgreSQL
+      API 验证两动作投影、健康状态和溯源定位。fixture 或 Mock 录屏仍不单独作为交付证据。
 - [ ] **OpenClaw 增强链**：稳定 `toolCallId`、0.4 outcome、审批释放和断线恢复通过后，
       再升级为等价跨运行时演示，不阻塞 LangGraph 主链交付。
 

@@ -50,8 +50,9 @@
   [`runtime_safety_trace_v04.json`](../../tests/fixtures/runtime_safety_trace_v04.json)。
 
 当前状态：场景、事实语义、AuditEvent `0.4` writer、独立 ETag 和动态 Dashboard 已完成
-代码实施与契约测试；仍须用真实 LangGraph + Guard API 分别连接 Memory 与 PostgreSQL
-跑通同一场景后，才能作为正式现场演示证据。
+代码实施与契约测试；真实 LangGraph + Guard API 主演示链已分别连接 Memory 与
+PostgreSQL 跑通，Dashboard 已通过真实 PostgreSQL API 完成两动作投影和溯源定位核验，
+可作为正式现场演示的预验收证据。
 
 ## 3. Demo 1：LangGraph 文件泄露攻击
 
