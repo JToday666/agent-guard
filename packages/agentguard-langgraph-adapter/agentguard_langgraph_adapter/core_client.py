@@ -144,10 +144,16 @@ def _guard_api_v03_event(event: dict[str, Any]) -> dict[str, Any]:
 def _decision_with_top_level_approval(
     decision: dict[str, Any], response: dict[str, Any]
 ) -> dict[str, Any]:
+    enriched = dict(decision)
     approval = response.get("approval")
-    if isinstance(approval, dict) and "approval" not in decision:
-        return {**decision, "approval": approval}
-    return decision
+    if isinstance(approval, dict) and "approval" not in enriched:
+        enriched["approval"] = approval
+    # evaluate 响应回显本次写入的 policy_evaluation 审计 ID（契约 §9.9），
+    # 透传到 PolicyDecision 供后续 runtime_outcome 回执关联。
+    policy_audit_id = response.get("policy_audit_id")
+    if isinstance(policy_audit_id, str) and policy_audit_id:
+        enriched["policy_audit_id"] = policy_audit_id
+    return enriched
 
 
 def _response_error_detail(response: httpx.Response) -> str:

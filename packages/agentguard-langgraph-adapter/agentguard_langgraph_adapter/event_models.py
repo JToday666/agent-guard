@@ -9,9 +9,16 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 Decision = Literal["allow", "deny", "ask"]
+AuditRecordType = Literal[
+    "policy_evaluation",
+    "runtime_outcome",
+    "runtime_observation",
+    "config_audit",
+]
 AttackType = Literal[
     "agent_abuse",
     "file_exfiltration",
+    "jailbreak",
     "memory_poisoning",
     "prompt_injection",
     "tool_hijacking",
@@ -123,6 +130,9 @@ class PolicyDecision(BaseModel):
     safe_message: str | None = None
     approval: dict[str, Any] | None = None
     latency_ms: int | None = None
+    # evaluate 响应回显的策略审计 ID（契约 §9.9 links.policy_audit_id），
+    # 供后续 runtime_outcome 回执建立关联；当前仅透传保留。
+    policy_audit_id: str | None = None
 
     @property
     def blocked(self) -> bool:
@@ -130,24 +140,36 @@ class PolicyDecision(BaseModel):
 
 
 class AuditEvent(BaseModel):
+    """AuditEvent 0.4 契约形态（契约 §8）。
+
+    Guard API 模式下 policy_evaluation 由 Guard API evaluate writer 唯一写入，
+    adapter 不得重复提交（§12.1/§22.1）；本模型用于 legacy Core 路径与本地
+    结果载体，runtime_outcome / runtime_observation 回写由后续阶段接入。
+    """
+
     audit_id: str = Field(default_factory=lambda: new_id("audit"))
-    schema_version: str = "0.3"
+    schema_version: str = "0.4"
+    record_type: AuditRecordType = "policy_evaluation"
     trace_id: str
     case_id: str | None = None
     runtime: str = "langgraph"
     timestamp: str = Field(default_factory=utc_now_iso)
     stage: str = "before_tool_call"
     event_type: str = "tool_call_proposed"
+    attack_type: str | None = None
+    is_malicious: bool | None = None
     summary: str
-    decision: Decision
-    risk_score: int = Field(ge=0, le=100)
-    severity: str
-    blocked: bool
+    decision: Decision | None = None
+    risk_score: int | None = Field(default=None, ge=0, le=100)
+    severity: str | None = None
+    blocked: bool | None = None
     resource_targets: list[str] = Field(default_factory=list)
     rule_hits: list[str] = Field(default_factory=list)
     reason: str
     links: dict[str, str] = Field(default_factory=dict)
+    latency_ms: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolExecutionResult(BaseModel):

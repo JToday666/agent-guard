@@ -507,6 +507,12 @@ class LangGraphAdapter:
         event: ToolCallEvent | RuntimeGuardEvent | dict[str, Any],
         decision: PolicyDecision,
     ) -> AuditEvent:
+        """构造 AuditEvent 0.4 形态（契约 §8/§9）。
+
+        Guard API 模式下策略审计由 evaluate writer 唯一写入，本方法产物不再
+        经 POST /v1/audit/events 重复提交（§12.1）；仅 legacy Core 路径和本地
+        结果载体仍使用该形态。
+        """
         event_dict = _event_dump(event)
         targets = _resource_targets(event_dict)
         rule_ids = [hit.rule_id for hit in decision.rule_hits]
@@ -519,16 +525,28 @@ class LangGraphAdapter:
         payload = raw_payload if isinstance(raw_payload, dict) else event_dict
         tool_name = _tool_name_from_payload(payload)
         event_type = str(event_dict.get("event_type") or "runtime_event")
-        stage = str(
-            security_context.get("current_step")
-            or (
-                "before_tool_call" if event_type == "tool_call_proposed" else event_type
-            )
-        )
+        # 契约 §8 口径：工具前置评估统一使用 before_tool_call 阶段名。
+        if event_type == "tool_call_proposed":
+            stage = "before_tool_call"
+        else:
+            stage = str(security_context.get("current_step") or event_type)
+        event_id = str(event_dict.get("event_id") or "")
+        links: dict[str, str] = {
+            "event_id": event_id,
+            "decision_id": decision.decision_id,
+        }
+        action_id = _action_id_from_payload(payload)
+        if action_id:
+            links["action_id"] = action_id
+        approval_id = _approval_id_from_decision(decision)
+        if approval_id:
+            links["approval_id"] = approval_id
         return AuditEvent(
             trace_id=str(event_dict.get("trace_id") or new_id("trace")),
             case_id=event_dict.get("case_id"),
             runtime=str(event_dict.get("runtime") or self.config.runtime),
+            attack_type=event_dict.get("attack_type"),
+            is_malicious=event_dict.get("is_malicious"),
             stage=stage,
             event_type=event_type,
             summary=_audit_summary(
@@ -543,10 +561,11 @@ class LangGraphAdapter:
             resource_targets=targets,
             rule_hits=rule_ids,
             reason=decision.reason,
-            links={
-                "event_id": str(event_dict.get("event_id") or ""),
-                "decision_id": decision.decision_id,
-            },
+            links=links,
+            latency_ms=decision.latency_ms,
+            evidence=_policy_evaluation_evidence(
+                event_dict, decision, payload, security_context
+            ),
         )
 
     def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
@@ -731,6 +750,185 @@ def _tool_name_from_payload(payload: dict[str, Any]) -> str | None:
     if isinstance(tool, dict) and tool.get("name"):
         return str(tool["name"])
     return None
+
+
+def _action_id_from_payload(payload: dict[str, Any]) -> str | None:
+    tool = payload.get("tool")
+    if isinstance(tool, dict) and tool.get("call_id"):
+        return str(tool["call_id"])
+    return None
+
+
+def _approval_id_from_decision(decision: PolicyDecision) -> str | None:
+    approval = decision.approval
+    if isinstance(approval, dict):
+        value = approval.get("approval_id") or approval.get("id")
+        return str(value) if value else None
+    return None
+
+
+# 契约 §21.2 冻结边界：内容预览 2000 字符，普通摘要/reason/规则 evidence 500 字符。
+_CONTENT_PREVIEW_LIMIT = 2000
+_SUMMARY_TEXT_LIMIT = 500
+_CONTEXT_SOURCES_LIMIT = 20
+_NORMALIZED_RESOURCES_LIMIT = 50
+_RULE_HITS_LIMIT = 100
+
+
+def _bounded_text(value: str | None, limit: int) -> str | None:
+    if value is None:
+        return None
+    return str(value)[:limit]
+
+
+def _policy_evaluation_evidence(
+    event_dict: dict[str, Any],
+    decision: PolicyDecision,
+    payload: dict[str, Any],
+    security_context: dict[str, Any],
+) -> dict[str, Any]:
+    """构造 policy_evaluation 的有界 evidence（契约 §8.3/§9）。
+
+    adapter 不持有策略快照，`policy` 保持 null；服务端脱敏与预算约束由
+    Guard API writer 负责，此处仅提供有界投影。
+    """
+    return {
+        "guard_event": _guard_event_projection(event_dict, payload, security_context),
+        "guard_decision": _guard_decision_projection(decision),
+        "policy": None,
+        "intervention": _policy_intervention(decision),
+        "execution": {
+            "status": "unknown",
+            "receipt_recorded": False,
+            "invoked_at": None,
+            "completed_at": None,
+            "error": None,
+            "tool_result_entered_context": None,
+            "persisted": None,
+        },
+        "side_effects": {
+            "measurement_status": "unknown",
+            "count": None,
+            "summary": None,
+        },
+        "result": {
+            "disposition": "unknown",
+            "summary": None,
+            "sanitized": None,
+        },
+        "approval": _approval_evidence(decision),
+    }
+
+
+def _guard_event_projection(
+    event_dict: dict[str, Any],
+    payload: dict[str, Any],
+    security_context: dict[str, Any],
+) -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "type": str(security_context.get("source_type") or ""),
+        "trust_level": str(security_context.get("source_trust") or ""),
+    }
+    sender_id = security_context.get("sender_id")
+    if sender_id:
+        source["source_id"] = str(sender_id)
+    raw_context_sources = security_context.get("context_sources")
+    context_sources = (
+        list(raw_context_sources)
+        if isinstance(raw_context_sources, list)
+        else []
+    )[:_CONTEXT_SOURCES_LIMIT]
+    tool = payload.get("tool")
+    tool_projection: dict[str, Any] | None = None
+    if isinstance(tool, dict) and tool.get("name"):
+        tool_projection = {
+            "name": str(tool.get("name")),
+            "category": str(tool.get("category") or ""),
+            "call_id": str(tool.get("call_id") or ""),
+            "arguments": payload.get("arguments") or {},
+        }
+    raw_resources = payload.get("derived_resources")
+    resources = raw_resources if isinstance(raw_resources, list) else []
+    normalized_resources = [
+        {
+            "type": str(item.get("resource_type") or ""),
+            "operation": str(item.get("operation") or ""),
+            "target": str(item.get("target") or ""),
+            "sensitivity": item.get("data_classification"),
+            "direction": str(item.get("direction") or ""),
+        }
+        for item in resources
+        if isinstance(item, dict)
+    ][:_NORMALIZED_RESOURCES_LIMIT]
+    return {
+        "event_id": str(event_dict.get("event_id") or ""),
+        "event_type": str(event_dict.get("event_type") or ""),
+        "user_task": _bounded_text(
+            str(security_context.get("user_task") or ""), _CONTENT_PREVIEW_LIMIT
+        ),
+        "source": source,
+        "context_sources": context_sources,
+        "model_intent": _bounded_text(
+            security_context.get("model_intent"), _CONTENT_PREVIEW_LIMIT
+        ),
+        "tool": tool_projection,
+        "normalized_resources": normalized_resources,
+    }
+
+
+def _guard_decision_projection(decision: PolicyDecision) -> dict[str, Any]:
+    return {
+        "decision_id": decision.decision_id,
+        "decision": decision.decision,
+        "risk_score": decision.risk_score,
+        "severity": decision.severity,
+        "categories": [],
+        "rule_hits": [
+            {
+                "rule_id": hit.rule_id,
+                "rule_name": hit.rule_name,
+                "severity": hit.severity,
+                "decision": decision.decision,
+                "reason": _bounded_text(decision.reason, _SUMMARY_TEXT_LIMIT),
+                "evidence": [
+                    str(item)[:_SUMMARY_TEXT_LIMIT] for item in hit.evidence
+                ],
+            }
+            for hit in decision.rule_hits[:_RULE_HITS_LIMIT]
+        ],
+        "reason": _bounded_text(decision.reason, _SUMMARY_TEXT_LIMIT),
+        "risk_breakdown": None,
+    }
+
+
+def _policy_intervention(decision: PolicyDecision) -> dict[str, Any]:
+    if decision.decision == "allow":
+        return {
+            "type": "none",
+            "reason": "The action was allowed without intervention.",
+        }
+    if decision.decision == "deny":
+        reason = "策略已拒绝，尚未收到 Adapter 执行回执"
+    else:
+        reason = "策略要求审批，尚未收到 Adapter 执行回执"
+    return {"type": "unknown", "reason": reason}
+
+
+def _approval_evidence(decision: PolicyDecision) -> dict[str, Any]:
+    approval_id = _approval_id_from_decision(decision)
+    if approval_id is not None:
+        return {
+            "approval_id": approval_id,
+            "status": "pending",
+            "decision": None,
+            "resolved_at": None,
+        }
+    return {
+        "approval_id": None,
+        "status": "not_required",
+        "decision": None,
+        "resolved_at": None,
+    }
 
 
 def _audit_summary(
@@ -1087,7 +1285,7 @@ def blocked_result(
     call_id: str,
     event: ToolCallEvent,
     decision: PolicyDecision,
-    audit_event: AuditEvent,
+    audit_event: AuditEvent | None = None,
 ) -> ToolExecutionResult:
     return ToolExecutionResult(
         tool_name=tool_name,
@@ -1101,7 +1299,7 @@ def blocked_result(
         or "The tool call was blocked by AgentGuard.",
         side_effects=[],
         event=event.model_dump(),
-        audit_event=audit_event.model_dump(),
+        audit_event=audit_event.model_dump() if audit_event is not None else None,
         block_semantics=(
             "policy_deny" if decision.decision == "deny" else "approval_block"
         ),
