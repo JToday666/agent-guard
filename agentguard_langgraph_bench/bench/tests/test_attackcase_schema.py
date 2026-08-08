@@ -45,6 +45,7 @@ def test_attackcase_schema_loads_all_jsonl_files():
     assert {case.attack_type for case in cases} == {
         "agent_abuse",
         "file_exfiltration",
+        "jailbreak",
         "memory_poisoning",
         "prompt_injection",
         "tool_hijacking",
@@ -53,6 +54,7 @@ def test_attackcase_schema_loads_all_jsonl_files():
     malicious_counts = Counter(case.attack_type for case in cases if case.is_malicious)
     assert malicious_counts["agent_abuse"] >= 10
     assert malicious_counts["file_exfiltration"] >= 10
+    assert malicious_counts["jailbreak"] >= 10
     assert malicious_counts["memory_poisoning"] >= 10
     assert malicious_counts["prompt_injection"] >= 10
     assert malicious_counts["tool_hijacking"] >= 10
@@ -80,6 +82,49 @@ def test_attackcase_directory_load_uses_primary_memory_poisoning_file_only():
     assert len(memory_cases) == 10
     assert {case.metadata["dataset_file"] for case in memory_cases} == {"memory_poisoning.jsonl"}
     assert {case.metadata.get("source_group") for case in memory_cases} == {"poisonedrag_qa"}
+
+
+def test_jailbreak_cases_cover_main_techniques_and_oracle_structure():
+    dataset_dir = Path(__file__).resolve().parents[1] / "datasets" / "attack_cases"
+    cases = load_attack_cases(dataset_dir / "jailbreak.jsonl")
+
+    assert len(cases) == 10
+    assert [case.case_id for case in cases] == [f"JB-{index:03d}" for index in range(1, 11)]
+    techniques = {case.metadata.get("jb_technique") for case in cases}
+    assert techniques >= {
+        "dan_persona_roleplay",
+        "multi_turn_crescendo",
+        "encoding_obfuscation",
+        "false_authority_claim",
+        "system_prompt_override",
+    }
+    assert {case.target_behavior.tool for case in cases} == {
+        "send_email",
+        "call_api",
+        "code_exec",
+        "write_file",
+    }
+
+    for case in cases:
+        assert case.attack_type == "jailbreak"
+        assert case.is_malicious
+        assert case.expected_decision == "deny"
+        assert "langgraph" in case.runtime_targets
+        assert case.metadata.get("source_group") == "jailbreak_redteam_v1"
+        assert case.metadata.get("jb_schema_version") == "jailbreak_oracle_v1"
+        assert case.metadata.get("attack_delivery") == "direct_user_chat"
+        assert case.metadata.get("attacker_goal")
+        assert case.metadata.get("expected_safe_behavior")
+        harm_oracle = case.metadata.get("harm_oracle")
+        assert harm_oracle
+        assert all(isinstance(step, dict) and step.get("event_type") for step in harm_oracle)
+        success_oracle = case.metadata.get("success_oracle")
+        assert success_oracle
+        assert all(isinstance(step, dict) and step.get("event_type") for step in success_oracle)
+        assert case.success_condition.type == "tool_executed"
+        payload = case.input.payload.lower()
+        for marker in case.metadata.get("jb_marker_hits", []):
+            assert marker.lower() in payload, (case.case_id, marker)
 
 
 def test_mcpsafety_tool_hijacking_cases_cover_main_modes():
