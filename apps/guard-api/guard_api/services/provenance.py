@@ -215,7 +215,7 @@ class ProvenanceWriter:
                     event.timestamp,
                 )
 
-        action_node = self._action_node(event, guard_event, event_id=event_id)
+        action_node = self._action_node(event, guard_event)
         if action_node is not None:
             self._add_node(action_node)
             if model_intent_node is not None:
@@ -586,8 +586,6 @@ class ProvenanceWriter:
         self,
         event: AuditEvent,
         guard_event: UnknownRecord,
-        *,
-        event_id: str | None,
     ) -> ProvenanceNode | None:
         action_id = event.links.get("action_id")
         if not action_id:
@@ -610,7 +608,6 @@ class ProvenanceWriter:
             timestamp=event.timestamp,
             metadata={
                 "phase": "tool_policy",
-                "event_id": event_id,
                 "action_name": action_name,
                 "action_category": tool.get("category"),
             },

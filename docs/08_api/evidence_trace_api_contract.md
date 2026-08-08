@@ -550,6 +550,12 @@ unknown
 
 `links` 的值保持 string；不得在同一 key 中混用 string 和 array。
 
+`event_id` 不能因“事件存在”而自动复制为 `action_id`。`context_assembled` 与
+`model_input_prepared` 默认只属于审计和溯源事实，不声明可执行动作；若该事件实际创建审批，
+可使用其稳定 `event_id` 作为受控审批主体。`tool_result_produced` 必须复用来源
+ToolDescriptor 的原始 `call_id`，从而与工具提议和运行时回执聚合为同一动作。消息发送、
+记忆写入和模型输出可在没有独立动作 ID 时使用自身稳定 `event_id`。
+
 ### 9.10 审计完整性
 
 完整性元数据由 Guard API 存储层生成，Adapter 不得提交：
@@ -1531,21 +1537,21 @@ config_audit
 
 ### 20.3 稳定 ID 建议
 
-| kind           | 建议 ID                                         |
-| -------------- | ----------------------------------------------- |
-| task           | `task:{trace_id}`                               |
-| source         | `source:{trace_id}:{source_id-or-hash}`         |
-| context        | `context:{event_id}`                            |
-| model_intent   | `model_intent:{event_id}`                       |
-| action         | `action:{action_id}`                            |
-| resource       | `resource:{trace_id}:{canonical-resource-hash}` |
-| rule           | `rule:{decision_id}:{rule_id}`                  |
+| kind           | 建议 ID                                               |
+| -------------- | ----------------------------------------------------- |
+| task           | `task:{trace_id}`                                     |
+| source         | `source:{trace_id}:{source_id-or-hash}`               |
+| context        | `context:{event_id}`                                  |
+| model_intent   | `model_intent:{event_id}`                             |
+| action         | `action:{action_id}`                                  |
+| resource       | `resource:{trace_id}:{canonical-resource-hash}`       |
+| rule           | `rule:{decision_id}:{rule_id}`                        |
 | policy         | `policy:{trace_id}:{bundle_id}:{revision-or-version}` |
-| decision       | `decision:{decision_id}`                        |
-| approval       | `approval:{approval_id}`                        |
-| runtime_result | `runtime_result:{audit_id}`                     |
-| audit          | `audit:{audit_id}`                              |
-| review         | `review:{review_id}`                            |
+| decision       | `decision:{decision_id}`                              |
+| approval       | `approval:{approval_id}`                              |
+| runtime_result | `runtime_result:{audit_id}`                           |
+| audit          | `audit:{audit_id}`                                    |
+| review         | `review:{review_id}`                                  |
 
 敏感路径、收件人或内容不得直接拼入 node ID；使用规范化值的摘要。
 

@@ -12,8 +12,12 @@ from agentguard_core import (
     GuardDecision,
     GuardEvent,
     MemoryGuardChange,
+    MemoryEventPayload,
+    MessageSendPayload,
+    ModelCallPayload,
     PolicyBundle,
     ToolCallPayload,
+    ToolResultPayload,
 )
 from agentguard_core.resources import derive_resources
 
@@ -42,6 +46,7 @@ class EventDescription:
     subject_type: str
     action_id: str
     action_name: str
+    is_action: bool
     resource_targets: list[str]
     summary: str
     metadata: dict[str, object]
@@ -66,8 +71,9 @@ def build_audit_event(
     links: dict[str, str] = {
         "event_id": event.event_id,
         "decision_id": decision.decision_id,
-        "action_id": description.action_id,
     }
+    if description.is_action or approval_id is not None:
+        links["action_id"] = description.action_id
     if approval_id is not None:
         links["approval_id"] = approval_id
     if critic_review_id is not None:
@@ -437,6 +443,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
             subject_type="tool_call",
             action_id=action_id,
             action_name=action_name,
+            is_action=True,
             resource_targets=resource_targets,
             summary=f"Agent attempted to call {action_name}",
             metadata={
@@ -450,15 +457,42 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
             },
         )
 
+    if isinstance(payload, ToolResultPayload):
+        action_id = payload.tool.call_id
+        action_name = payload.tool.name
+        return EventDescription(
+            subject_id=action_id,
+            subject_type="tool_result",
+            action_id=action_id,
+            action_name=action_name,
+            is_action=True,
+            resource_targets=resource_targets,
+            summary=f"Agent evaluated the result from {action_name}",
+            metadata={
+                "event_type": event.event_type,
+                "subject_id": action_id,
+                "subject_type": "tool_result",
+                "action_id": action_id,
+                "action_name": action_name,
+                "source_tool": payload.tool.name,
+                "source_tool_call_id": payload.tool.call_id,
+            },
+        )
+
     action_id = event.event_id
     action_name = event.event_type
+    is_action = isinstance(
+        payload,
+        (MemoryEventPayload, MessageSendPayload),
+    ) or (isinstance(payload, ModelCallPayload) and payload.phase == "output")
     metadata: dict[str, object] = {
         "event_type": event.event_type,
         "subject_id": action_id,
         "subject_type": event.event_type,
-        "action_id": action_id,
-        "action_name": action_name,
     }
+    if is_action:
+        metadata["action_id"] = action_id
+        metadata["action_name"] = action_name
     payload_tool = getattr(payload, "tool", None)
     if payload_tool is not None:
         metadata["source_tool"] = payload_tool.name
@@ -488,6 +522,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
         subject_type=event.event_type,
         action_id=action_id,
         action_name=action_name,
+        is_action=is_action,
         resource_targets=resource_targets,
         summary=f"Agent evaluated {action_name}",
         metadata=metadata,

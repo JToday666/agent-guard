@@ -58,10 +58,12 @@ def _materialize_fixture(
     return fixture, {node.node_id: node for node in nodes}
 
 
-def _policy_event(trace_id: str, suffix: str) -> AuditEvent:
+def _policy_event(
+    trace_id: str, suffix: str, *, action_id: str | None = None
+) -> AuditEvent:
     event_id = f"event-{suffix}"
     decision_id = f"decision-{suffix}"
-    action_id = f"action-{suffix}"
+    action_id = action_id or f"action-{suffix}"
     return AuditEvent(
         audit_id=f"audit-{suffix}",
         schema_version="0.4",
@@ -164,6 +166,28 @@ def test_policy_nodes_are_scoped_to_each_trace() -> None:
 
     assert store.get_provenance_node("policy:trace-a:shared-policy:7") is not None
     assert store.get_provenance_node("policy:trace-b:shared-policy:7") is not None
+
+
+def test_action_node_accepts_multiple_policy_checks_for_one_action() -> None:
+    store = MemoryControlPlaneStore()
+    writer = ProvenanceWriter(store=store)
+
+    for suffix in ("check-a", "check-b"):
+        event = _policy_event("trace-action-checks", suffix, action_id="shared-action")
+        store.add_audit_event(event)
+        persisted = store.get_audit_event(event.audit_id)
+        assert persisted is not None
+        writer.record_audit_event(persisted)
+
+    action = store.get_provenance_node("action:shared-action")
+    assert action is not None
+    assert "event_id" not in action.metadata
+    _, edges = store.list_provenance("trace-action-checks")
+    assert {
+        edge.target_node_id
+        for edge in edges
+        if edge.source_node_id == action.node_id and edge.relation == "evaluated_to"
+    } == {"decision:decision-check-a", "decision:decision-check-b"}
 
 
 def test_node_upsert_fills_unknowns_without_degrading_known_facts() -> None:

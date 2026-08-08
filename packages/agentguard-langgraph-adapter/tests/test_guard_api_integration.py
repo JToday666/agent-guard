@@ -288,7 +288,7 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
     assert adapter.wait_for_approval(approval_id)["decision"] == "allow_once"
 
 
-def test_guard_api_v03_gateway_skips_audit_submission(
+def test_guard_api_v03_gateway_skips_policy_audit_submission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """G-02：gateway 完整流程不得经 POST /v1/audit/events 重复提交策略审计。"""
@@ -351,9 +351,14 @@ def test_guard_api_v03_gateway_skips_audit_submission(
 
     assert result.executed is True
     assert result.blocked is False
-    # Guard API 模式下 adapter 不再自行提交审计：审计由 evaluate writer 写入。
-    assert "/v1/audit/events" not in request_paths
+    # Guard API 模式下策略审计只由 evaluate writer 写入；adapter 仍通过
+    # audit/events 回写其权威生产的运行时结果。
+    assert request_paths.count("/v1/audit/events") == 1
     assert result.audit_event is None
     stored = store.list_audit_events()
-    assert len(stored) >= 2
-    assert {item.record_type for item in stored} == {"policy_evaluation"}
+    assert len(stored) >= 3
+    assert {item.record_type for item in stored} == {
+        "policy_evaluation",
+        "runtime_outcome",
+    }
+    assert sum(item.record_type == "runtime_outcome" for item in stored) == 1

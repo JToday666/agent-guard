@@ -93,6 +93,7 @@ def _guard_event_payload(
     derived_resources: list[dict] | None = None,
     user_task: str = "Complete the visible web form only",
     source_trust: str = "untrusted",
+    call_id: str = "call_api",
 ) -> dict:
     arguments = arguments or {
         "to": "exfiltration-intake@red-team.agentguard.local",
@@ -120,7 +121,7 @@ def _guard_event_payload(
                 "name": tool_name,
                 "category": tool_category,
                 "kind": tool_kind,
-                "call_id": "call_api",
+                "call_id": call_id,
             },
             "arguments": arguments,
             "derived_resources": derived_resources or [],
@@ -1427,8 +1428,27 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert audit_event["resource_targets"] == expected_resource_targets
     assert audit_event["rule_hits"] == expected_rule_ids
     assert audit_event["links"]["event_id"] == event["event_id"]
-    assert audit_event["metadata"]["action_id"] == event["event_id"]
-    assert audit_event["metadata"]["action_name"] == expected_action_name
+    payload_tool = event["payload"].get("tool")
+    expected_action_id = (
+        payload_tool["call_id"] if event["event_type"] == "tool_result_produced" else event["event_id"]
+    )
+    expected_display_action_name = (
+        payload_tool["name"] if event["event_type"] == "tool_result_produced" else expected_action_name
+    )
+    intrinsic_action = event["event_type"] not in {
+        "context_assembled",
+        "model_input_prepared",
+    }
+    if intrinsic_action or approval_id is not None:
+        assert audit_event["links"]["action_id"] == expected_action_id
+    else:
+        assert "action_id" not in audit_event["links"]
+    if intrinsic_action:
+        assert audit_event["metadata"]["action_id"] == expected_action_id
+        assert audit_event["metadata"]["action_name"] == expected_display_action_name
+    else:
+        assert "action_id" not in audit_event["metadata"]
+        assert "action_name" not in audit_event["metadata"]
     assert audit_event["metadata"]["user_task"] == event["security_context"]["user_task"]
     assert audit_event["metadata"]["source_type"] == event["security_context"]["source_type"]
     assert audit_event["metadata"]["source_trust"] == event["security_context"]["source_trust"]
@@ -1437,8 +1457,8 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
         pending_response = client.get("/v1/approvals/pending")
         pending = pending_response.json()
         approval = next(item for item in pending if item["approval_id"] == approval_id)
-        assert approval["tool_call_id"] == event["event_id"]
-        assert approval["tool"] == expected_action_name
+        assert approval["tool_call_id"] == expected_action_id
+        assert approval["tool"] == expected_display_action_name
 
     assert metrics_response.status_code == 200
     metrics = metrics_response.json()
@@ -2294,6 +2314,7 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
         headers={"Authorization": "Bearer adapter-secret"},
         json=_guard_event_payload(
             trace_id="trace_deny_smoke",
+            call_id="call_deny_smoke",
             tool_name="read_file",
             tool_category="file",
             tool_kind="file_read",
@@ -2308,7 +2329,11 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
     ask_response = client.post(
         "/v1/guard/evaluate",
         headers={"Authorization": "Bearer adapter-secret"},
-        json=_guard_event_payload(event_id="evt_smoke_ask", trace_id="trace_ask_smoke"),
+        json=_guard_event_payload(
+            event_id="evt_smoke_ask",
+            trace_id="trace_ask_smoke",
+            call_id="call_ask_smoke",
+        ),
     )
     assert ask_response.status_code == 200
     approval_id = ask_response.json()["approval"]["approval_id"]

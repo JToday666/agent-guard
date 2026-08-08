@@ -88,22 +88,26 @@ Action Critic 结果和已经持久化的 AuditEvent。
 
 只有来源字段存在且通过脱敏、大小限制时才创建可选节点。
 
-| kind             | 稳定 `node_id`                             | 原始 `ref_id`         | 事实来源                                          | 必需 metadata                                             |
-| ---------------- | ------------------------------------------ | --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
-| `task`           | `task:{trace_id}`                          | `trace_id`            | `GuardEvent.security_context.user_task`           | `phase=input_trust`、有界摘要                             |
-| `source`         | `source:{trace_id}:{source-id-or-hash}`    | source ID 或摘要 ID   | security context 或结构化 context source          | `source_type`、`source_trust`、`phase=input_trust`        |
-| `context`        | `context:{event_id}`                       | `event_id`            | `context_assembled` 或明确的 context sources      | `phase=context_intent`、来源数量                          |
-| `model_intent`   | `model_intent:{event_id}`                  | `event_id`            | 显式 `model_intent` 或有界 tool plan 摘要         | `phase=context_intent`                                    |
-| `action`         | `action:{action_id}`                       | `action_id`           | ToolDescriptor `call_id` 或稳定 `links.action_id` | `event_id`、动作名、`phase=tool_policy`                   |
-| `resource`       | `resource:{trace_id}:sha256:{digest}`      | `sha256:{digest}`     | `derive_resources(event)` 的规范资源              | 类型、操作、方向、脱敏目标摘要                            |
-| `rule`           | `rule:{decision_id}:{rule_id}`             | `rule_id`             | `GuardDecision.rule_hits`                         | `decision_id`、severity、原因摘要                         |
+| kind             | 稳定 `node_id`                                        | 原始 `ref_id`         | 事实来源                                          | 必需 metadata                                             |
+| ---------------- | ----------------------------------------------------- | --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
+| `task`           | `task:{trace_id}`                                     | `trace_id`            | `GuardEvent.security_context.user_task`           | `phase=input_trust`、有界摘要                             |
+| `source`         | `source:{trace_id}:{source-id-or-hash}`               | source ID 或摘要 ID   | security context 或结构化 context source          | `source_type`、`source_trust`、`phase=input_trust`        |
+| `context`        | `context:{event_id}`                                  | `event_id`            | `context_assembled` 或明确的 context sources      | `phase=context_intent`、来源数量                          |
+| `model_intent`   | `model_intent:{event_id}`                             | `event_id`            | 显式 `model_intent` 或有界 tool plan 摘要         | `phase=context_intent`                                    |
+| `action`         | `action:{action_id}`                                  | `action_id`           | ToolDescriptor `call_id` 或稳定 `links.action_id` | 动作名、`phase=tool_policy`                               |
+| `resource`       | `resource:{trace_id}:sha256:{digest}`                 | `sha256:{digest}`     | `derive_resources(event)` 的规范资源              | 类型、操作、方向、脱敏目标摘要                            |
+| `rule`           | `rule:{decision_id}:{rule_id}`                        | `rule_id`             | `GuardDecision.rule_hits`                         | `decision_id`、severity、原因摘要                         |
 | `policy`         | `policy:{trace_id}:{bundle_id}:{revision-or-version}` | bundle/revision 引用  | 实际参与判定的策略快照                            | bundle、version、revision、digest                         |
-| `decision`       | `decision:{decision_id}`                   | `decision_id`         | GuardDecision                                     | `risk_score`、severity、decision、`phase=tool_policy`     |
-| `approval`       | `approval:{approval_id}`                   | `approval_id`         | ApprovalRequest / 终态记录                        | status、创建/过期/解决时间、`phase=outcome_audit`         |
-| `runtime_result` | `runtime_result:{audit_id}`                | `audit_id`            | `runtime_outcome` AuditEvent                      | execution、intervention、result disposition、side effects |
-| `audit`          | `audit:{audit_id}`                         | `audit_id`            | 每条已持久化 AuditEvent                           | record type、runtime、stage、integrity sequence           |
-| `review`         | `review:{review_id}`                       | `review_id`           | Action Critic 等明确复核记录                      | reviewer、verdict、confidence、degraded                   |
-| `config_audit`   | `config_audit:{event_id}`                  | config audit event ID | `config_audit` AuditEvent                         | target type、finding count、severity 摘要                 |
+| `decision`       | `decision:{decision_id}`                              | `decision_id`         | GuardDecision                                     | `risk_score`、severity、decision、`phase=tool_policy`     |
+| `approval`       | `approval:{approval_id}`                              | `approval_id`         | ApprovalRequest / 终态记录                        | status、创建/过期/解决时间、`phase=outcome_audit`         |
+| `runtime_result` | `runtime_result:{audit_id}`                           | `audit_id`            | `runtime_outcome` AuditEvent                      | execution、intervention、result disposition、side effects |
+| `audit`          | `audit:{audit_id}`                                    | `audit_id`            | 每条已持久化 AuditEvent                           | record type、runtime、stage、integrity sequence           |
+| `review`         | `review:{review_id}`                                  | `review_id`           | Action Critic 等明确复核记录                      | reviewer、verdict、confidence、degraded                   |
+| `config_audit`   | `config_audit:{event_id}`                             | config audit event ID | `config_audit` AuditEvent                         | target type、finding count、severity 摘要                 |
+
+Policy evaluation 并不天然产生 action 节点。Writer 只在 `links.action_id` 存在时物化
+action；常规上下文组装和模型输入不得通过复制 `event_id` 补造动作，工具结果则必须沿用来源
+工具调用的稳定 `call_id`。
 
 当前已持久化的通用 `event` 节点属于兼容节点：
 
