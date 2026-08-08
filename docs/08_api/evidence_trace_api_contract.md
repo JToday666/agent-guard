@@ -1886,13 +1886,16 @@ Adapter / Plugin
 - [x] Guard API 已有 AuditEvent `0.4` 基础写入、读取和完整性测试。
 - [ ] 更新 `schemas/guard_decision.schema.json`。
 - [x] 完成 Guard API evaluate writer 与跨存储语义的 `0.4` 迁移（policy_evaluation 写入、幂等与指标口径）。
-- [ ] 完成 LangGraph 和 Dashboard 的完整 `0.4` 迁移。
+- [x] 完成 LangGraph `0.4` 运行时主链写入与 Dashboard `0.3 | 0.4` 双读主链迁移。
 - [x] 完成 OpenClaw Plugin 的 `0.4` 迁移：observation 输出 `runtime_observation` 0.4 形态（策略字段置空），
       新增 `runtime_outcome` 回执（执行前拒绝、审批拒绝/超时、审批放行、工具结果隔离/改写），
       回执经 `links.policy_audit_id` 关联策略审计并复用 `POST /v1/audit/events` 幂等提交。
 - [x] 增加
       [运行时安全主演示链共享 JSON fixture](../../tests/fixtures/runtime_safety_trace_v04.json)。
 - [x] Memory 和 PostgreSQL store 运行相同幂等与指标 contract tests。
-- [ ] Dashboard API 模式运行真实目标 AuditEvent fixtures。
+- [x] Dashboard API 模式在四档桌面运行目标 AuditEvent fixtures，并通过真实 PostgreSQL
+      Guard API 读链核验。
 - [ ] 更新 CLI 输出兼容性测试。
-- [ ] 完成跨组件实现评审并验证迁移结果。
+- [x] 完成当前 LangGraph / Guard API / Dashboard 主链的跨组件实现评审与迁移验证；
+      GuardDecision risk breakdown、动作 cohort 指标、CLI 和 OpenClaw 完整执行确证继续按
+      各自未完成项推进。

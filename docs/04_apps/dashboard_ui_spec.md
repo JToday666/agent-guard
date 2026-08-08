@@ -565,7 +565,8 @@ Trace ID
 
 2026-08-07 已冻结、2026-08-08 已完成 Dashboard 实施，详见
 [Agent 运行时安全可观测与动态治理设计](runtime_safety_observability_design.md)。真实
-LangGraph 与 PostgreSQL 演示链仍受独立联调门禁约束。
+LangGraph 的 Memory/PostgreSQL 演示链与 Dashboard PostgreSQL API 读链已经通过独立联调
+门禁。
 
 不新增一级页面，`/evidence/:trace_id` 在事实摘要之后提供三个联动视图：
 

@@ -1,8 +1,10 @@
 # Provenance 丰富化后端实施要求
 
-> 状态：Guard API 写入实现已完成，跨存储真实联调与 Dashboard 验收进行中
+> 状态：Guard API 写入、Memory/PostgreSQL 真实联调与 Dashboard API 读链验收已完成
 >
 > 确认日期：2026-08-07
+>
+> 验收复核：2026-08-08
 >
 > 适用组件：AgentGuard Core、Guard API / Control Plane、LangGraph Adapter、OpenClaw Plugin、Dashboard
 
@@ -39,8 +41,8 @@ Provenance 目标拆成可直接实施的后端要求。Guard API 已按本文�
 
 完整生命周期图开始写入前，必须满足：
 
-1. Guard API 能够读取并返回 AuditEvent `0.3 | 0.4`；基础双读已经具备，仍需完成跨存储
-   共享契约测试。
+1. Guard API 能够读取并返回 AuditEvent `0.3 | 0.4`；基础双读与跨存储共享契约测试均已
+   完成。
 2. 新策略评估由 Guard API 唯一写入 `policy_evaluation`。
 3. AuditEvent `0.4` 提供稳定的 `links` 和有界、脱敏的 `evidence`。
 4. Adapter / Plugin 通过现有 `POST /v1/audit/events` 写入结构化
@@ -48,8 +50,8 @@ Provenance 目标拆成可直接实施的后端要求。Guard API 已按本文�
 5. `audit_id`、Guard evaluate 请求和 provenance upsert 具有可重试的幂等语义。
 6. 事件时策略快照提供 bundle、version、revision 和 digest 中实际可用的字段。
 
-基础的 `event → decision → audit` 关系继续服务当前 AuditEvent `0.3`。完整丰富化按照冻结
-契约的发布顺序，在上述前置条件完成后启用。
+基础的 `event → decision → audit` 关系继续服务当前 AuditEvent `0.3`。完整丰富化已经按照
+冻结契约的发布顺序为新事件启用；历史 Trace 仍遵守不自动回填的边界。
 
 ## 4. 写入原则
 
