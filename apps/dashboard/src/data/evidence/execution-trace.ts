@@ -1,22 +1,60 @@
 import type {
   ApprovalRequest,
   DecisionStatus,
-  ExecutionActionViewModel,
   ExecutionApprovalStatus,
   ExecutionPolicyCheck,
+  ExecutionReceiptExpectation,
+  ExecutionStepCategory,
+  ExecutionStepEvent,
+  ExecutionStepViewModel,
   ExecutionTraceViewModel,
   NormalizedAuditEvidence,
   TraceLifecycleState,
 } from "../../types/dashboard";
+import { getEventTypeLabel } from "../../utils/dashboard-formatters.ts";
 
 const ACTION_LABELS: Readonly<Record<string, string>> = {
+  browser_click: "点击页面元素",
+  browser_extract_text: "提取页面内容",
+  browser_input: "填写页面内容",
+  browser_inspect: "检查页面状态",
+  browser_navigate: "打开页面",
+  browser_start: "启动浏览器",
+  call_api: "调用外部接口",
   code_exec: "执行代码",
+  mcp_call: "调用 MCP 工具",
   memory_read: "读取记忆",
+  memory_search: "搜索记忆",
   memory_write: "写入记忆",
+  memory_write_proposed: "写入记忆",
+  rag_answer: "生成检索回答",
+  rag_retrieve: "检索知识",
   read_file: "读取文件",
   search: "搜索信息",
   send_email: "发送邮件",
+  send_message: "发送消息",
+  message_send_proposed: "发送消息",
   write_file: "写入文件",
+};
+
+const RECEIPT_REQUIRED_CATEGORIES = new Set<ExecutionStepCategory>(["memory", "message", "tool"]);
+
+const CHECKPOINT_CATEGORIES = new Set<ExecutionStepCategory>([
+  "context",
+  "model_input",
+  "model_output",
+  "tool_result",
+]);
+
+const CATEGORY_ORDER: Readonly<Record<ExecutionStepCategory, number>> = {
+  tool: 0,
+  memory: 1,
+  message: 2,
+  model_output: 3,
+  context: 4,
+  model_input: 5,
+  tool_result: 6,
+  unknown: 7,
 };
 
 function compareEvents(
@@ -41,20 +79,22 @@ function uniqueAuditEvents(events: readonly NormalizedAuditEvidence[]): Normaliz
   return [...unique.values()];
 }
 
-function uniquePolicyChecks(events: readonly NormalizedAuditEvidence[]): NormalizedAuditEvidence[] {
-  const seen = new Set<string>();
-  const checks: NormalizedAuditEvidence[] = [];
-  for (const event of events) {
-    if (event.recordType !== "policy_evaluation") continue;
-    const logicalKey =
+function logicalStepEvents(events: readonly NormalizedAuditEvidence[]): NormalizedAuditEvidence[] {
+  const seenPolicyChecks = new Set<string>();
+  return uniqueAuditEvents(events).filter((event) => {
+    if (event.recordType !== "policy_evaluation") return true;
+    const key =
       event.eventId && event.decisionId
         ? `${event.eventId}\u0000${event.decisionId}`
         : `audit:${event.auditId}`;
-    if (seen.has(logicalKey)) continue;
-    seen.add(logicalKey);
-    checks.push(event);
-  }
-  return checks;
+    if (seenPolicyChecks.has(key)) return false;
+    seenPolicyChecks.add(key);
+    return true;
+  });
+}
+
+function uniquePolicyChecks(events: readonly NormalizedAuditEvidence[]): NormalizedAuditEvidence[] {
+  return logicalStepEvents(events).filter((event) => event.recordType === "policy_evaluation");
 }
 
 function approvalStatus(approval: ApprovalRequest): ExecutionApprovalStatus {
@@ -85,7 +125,7 @@ interface ApprovalSelection {
 }
 
 function selectApproval(
-  actionId: string,
+  subjectId: string | null,
   events: readonly NormalizedAuditEvidence[],
   approvals: readonly ApprovalRequest[],
 ): ApprovalSelection {
@@ -94,14 +134,18 @@ function selectApproval(
   );
   if (linkedIds.size > 1) return { conflicted: true, id: null, status: "unknown" };
 
-  const actionApprovals = approvals.filter((approval) => approval.actionId === actionId);
+  const subjectApprovals = subjectId
+    ? approvals.filter(
+        (approval) => approval.actionId === subjectId || approval.subjectId === subjectId,
+      )
+    : [];
   const linkedId = [...linkedIds][0] ?? null;
-  if (!linkedId && actionApprovals.length > 1) {
+  if (!linkedId && subjectApprovals.length > 1) {
     return { conflicted: true, id: null, status: "unknown" };
   }
   const selected = linkedId
     ? approvals.find((approval) => approval.id === linkedId)
-    : actionApprovals[0];
+    : subjectApprovals[0];
   const fallbackEvent = [...events]
     .reverse()
     .find((event) => !linkedId || event.approval.approvalId === linkedId);
@@ -148,48 +192,101 @@ function isExplicitStart(event: NormalizedAuditEvidence): boolean {
   );
 }
 
-function isExecutionActionEvidence(event: NormalizedAuditEvidence): boolean {
-  if (event.recordType === "runtime_outcome" || isExplicitStart(event)) return true;
-  if (event.approval.approvalId) return true;
-  if (event.eventType === "context_assembled" || event.eventType === "model_input_prepared") {
-    return false;
-  }
-  if (event.eventType === "model_output_produced") {
-    return event.decision !== "allow" || event.intervention === "model_output_revision";
-  }
-  return true;
+function isTraceLifecycle(event: NormalizedAuditEvidence): boolean {
+  const value = event.eventType || event.stage;
+  return ["trace_started", "trace_completed", "trace_failed", "trace_cancelled"].includes(value);
 }
 
-function actionStatus(
-  action: Pick<ExecutionActionViewModel, "approval" | "decision" | "execution" | "phase">,
-  hasOutcome: boolean,
-): string {
-  if (action.phase === "terminal") {
-    if (action.execution === "executed") return "已执行";
-    if (action.execution === "failed") return "执行失败";
-    return "已确认未执行";
-  }
-  if (action.phase === "waiting_receipt") return "正在执行";
-  if (action.phase === "waiting_approval") return "等待审批";
-  if (action.phase === "approval_released") return "已放行，等待运行";
-  if (action.approval === "denied") return "审批已拒绝，执行状态待确认";
-  if (action.approval === "expired") return "审批已过期，执行状态待确认";
-  if (hasOutcome) return "已收到运行结果，状态未记录";
-  if (action.phase === "evaluated") return "已完成安全判断，等待运行时回执";
-  return "已提出动作";
+function isExecutionStepEvidence(event: NormalizedAuditEvidence): boolean {
+  if (event.recordType === "config_audit" || isTraceLifecycle(event)) return false;
+  if (event.recordType === "policy_evaluation") return Boolean(event.actionId || event.eventId);
+  if (event.recordType === "runtime_outcome") return Boolean(event.actionId || event.eventId);
+  if (event.recordType === "runtime_observation") return Boolean(event.actionId);
+  return Boolean(
+    event.actionId &&
+    (event.decision !== "unknown" || event.approval.approvalId || event.execution.receiptRecorded),
+  );
 }
 
-function actionPhase(
-  execution: ExecutionActionViewModel["execution"],
+function eventCategory(event: NormalizedAuditEvidence): ExecutionStepCategory {
+  if (event.eventType === "context_assembled") return "context";
+  if (event.eventType === "model_input_prepared") return "model_input";
+  if (event.eventType === "model_output_produced" || event.eventType === "model_output_proposed") {
+    return "model_output";
+  }
+  if (event.eventType === "tool_call_proposed") return "tool";
+  if (event.eventType === "tool_result_produced") return "tool_result";
+  if (event.eventType === "memory_write_proposed") return "memory";
+  if (event.eventType === "message_send_proposed") return "message";
+  return "unknown";
+}
+
+function selectCategory(events: readonly NormalizedAuditEvidence[]): ExecutionStepCategory {
+  return (
+    events
+      .map(eventCategory)
+      .sort((left, right) => CATEGORY_ORDER[left] - CATEGORY_ORDER[right])[0] ?? "unknown"
+  );
+}
+
+function receiptExpectation(
+  category: ExecutionStepCategory,
+  events: readonly NormalizedAuditEvidence[],
+): ExecutionReceiptExpectation {
+  if (RECEIPT_REQUIRED_CATEGORIES.has(category)) return "required";
+  if (CHECKPOINT_CATEGORIES.has(category)) return "not_required";
+  if (events.some((event) => isExplicitStart(event) || event.recordType === "runtime_outcome")) {
+    return "required";
+  }
+  return "unknown";
+}
+
+function stepPhase(
+  execution: ExecutionStepViewModel["execution"],
   approval: ExecutionApprovalStatus,
+  expectation: ExecutionReceiptExpectation,
   hasStart: boolean,
   hasPolicyCheck: boolean,
-): ExecutionActionViewModel["phase"] {
+): ExecutionStepViewModel["phase"] {
   if (execution !== "unknown") return "terminal";
   if (hasStart) return "waiting_receipt";
   if (approval === "pending") return "waiting_approval";
+  if (expectation === "not_required" && hasPolicyCheck) return "checked";
   if (approval === "allowed_once") return "approval_released";
   return hasPolicyCheck ? "evaluated" : "proposed";
+}
+
+function stepStatus(
+  step: Pick<
+    ExecutionStepViewModel,
+    "approval" | "decision" | "execution" | "intervention" | "phase" | "receiptExpectation"
+  >,
+  hasOutcome: boolean,
+): string {
+  if (step.phase === "terminal") {
+    if (step.execution === "executed") return "已执行";
+    if (step.execution === "failed") return "执行失败";
+    return "已确认未执行";
+  }
+  if (step.phase === "waiting_receipt") return "正在执行";
+  if (step.phase === "waiting_approval") return "等待审批";
+  if (step.phase === "approval_released") return "已放行，等待运行";
+  if (step.phase === "checked") {
+    if (step.intervention === "model_output_revision") return "模型输出已修订";
+    if (step.intervention === "tool_result_quarantine") return "工具结果已隔离";
+    if (step.approval === "denied") return "审批已拒绝";
+    if (step.approval === "expired") return "审批已过期";
+    if (step.decision === "deny") return "安全检查已拒绝继续";
+    return "安全检查已完成";
+  }
+  if (step.approval === "denied") return "审批已拒绝，运行结果未确认";
+  if (step.approval === "expired") return "审批已过期，运行结果未确认";
+  if (hasOutcome) return "已收到运行结果，状态未记录";
+  if (step.phase === "evaluated" && step.receiptExpectation === "required") {
+    return "已完成安全判断，等待运行时回执";
+  }
+  if (step.phase === "evaluated") return "已完成安全判断";
+  return "已记录运行步骤";
 }
 
 function toPolicyCheck(event: NormalizedAuditEvidence): ExecutionPolicyCheck {
@@ -205,16 +302,100 @@ function toPolicyCheck(event: NormalizedAuditEvidence): ExecutionPolicyCheck {
   };
 }
 
-function buildAction(
-  actionId: string,
+function stepEventLabel(event: NormalizedAuditEvidence): string {
+  const runtimeLabels: Readonly<Record<string, string>> = {
+    tool_call_completed: "执行完成",
+    tool_call_failed: "执行失败",
+    tool_call_not_invoked: "确认未调用",
+    tool_call_started: "开始执行",
+  };
+  return runtimeLabels[event.eventType] ?? getEventTypeLabel(event.eventType || event.stage);
+}
+
+function toStepEvent(event: NormalizedAuditEvidence): ExecutionStepEvent {
+  return {
+    auditId: event.auditId,
+    decision: event.decision,
+    eventId: event.eventId,
+    eventType: event.eventType,
+    execution: event.execution.status,
+    intervention: event.intervention,
+    label: stepEventLabel(event),
+    occurredAt: event.occurredAt,
+    recordType: event.recordType,
+  };
+}
+
+function actionName(
+  category: ExecutionStepCategory,
   events: readonly NormalizedAuditEvidence[],
   approvals: readonly ApprovalRequest[],
-): ExecutionActionViewModel {
-  const actionEvents = uniqueAuditEvents(events);
-  const checks = uniquePolicyChecks(actionEvents);
-  const outcomes = actionEvents.filter((event) => event.recordType === "runtime_outcome");
-  const observations = actionEvents.filter((event) => event.recordType === "runtime_observation");
-  const approval = selectApproval(actionId, actionEvents, approvals);
+  actionId: string | null,
+): string | null {
+  const preferredType =
+    category === "tool"
+      ? "tool_call_proposed"
+      : category === "memory"
+        ? "memory_write_proposed"
+        : category === "message"
+          ? "message_send_proposed"
+          : category === "model_output"
+            ? "model_output_produced"
+            : category === "context"
+              ? "context_assembled"
+              : category === "model_input"
+                ? "model_input_prepared"
+                : category === "tool_result"
+                  ? "tool_result_produced"
+                  : null;
+  const preferred = preferredType
+    ? events.find((event) => event.eventType === preferredType && event.toolName)?.toolName
+    : null;
+  return (
+    preferred ??
+    [...events].reverse().find((event) => event.toolName)?.toolName ??
+    (actionId ? approvals.find((item) => item.actionId === actionId)?.actionName : null) ??
+    null
+  );
+}
+
+function displayName(
+  category: ExecutionStepCategory,
+  name: string | null,
+  events: readonly NormalizedAuditEvidence[],
+): string {
+  if (category === "context") return "检查输入上下文";
+  if (category === "model_input") return "检查模型输入";
+  if (category === "model_output") return "检查模型输出";
+  if (category === "tool_result") {
+    const toolLabel = name ? (ACTION_LABELS[name] ?? name) : "工具";
+    return `检查${toolLabel}返回内容`;
+  }
+  if (category === "memory") return ACTION_LABELS[name ?? "memory_write"] ?? "写入记忆";
+  if (category === "message") return ACTION_LABELS[name ?? "send_message"] ?? "发送消息";
+  if (name) return ACTION_LABELS[name] ?? name;
+  const eventType = events.find((event) => event.eventType)?.eventType;
+  return eventType ? getEventTypeLabel(eventType) : "未命名运行步骤";
+}
+
+function buildStep(
+  stepId: string,
+  events: readonly NormalizedAuditEvidence[],
+  approvals: readonly ApprovalRequest[],
+): ExecutionStepViewModel {
+  const stepEvents = logicalStepEvents(events);
+  const checks = uniquePolicyChecks(stepEvents);
+  const outcomes = stepEvents.filter((event) => event.recordType === "runtime_outcome");
+  const observations = stepEvents.filter((event) => event.recordType === "runtime_observation");
+  const actionIds = [
+    ...new Set(stepEvents.flatMap((event) => (event.actionId ? [event.actionId] : []))),
+  ];
+  const actionId = actionIds.length === 1 ? actionIds[0]! : null;
+  const eventIds = [
+    ...new Set(stepEvents.flatMap((event) => (event.eventId ? [event.eventId] : []))),
+  ];
+  const subjectId = actionId ?? eventIds[0] ?? null;
+  const approval = selectApproval(subjectId, stepEvents, approvals);
   const policy = selectPrimaryPolicyCheck(checks, outcomes, approval);
   const outcome =
     [...outcomes]
@@ -223,64 +404,79 @@ function buildAction(
     outcomes.at(-1);
   const execution = outcome?.execution.status ?? "unknown";
   const hasStart = observations.some(isExplicitStart);
-  const phase = actionPhase(execution, approval.status, hasStart, checks.length > 0);
+  const category = selectCategory(stepEvents);
+  const expectation = receiptExpectation(category, stepEvents);
+  const phase = stepPhase(execution, approval.status, expectation, hasStart, checks.length > 0);
   const primary = policy.check;
-  const actionName =
-    [...actionEvents].reverse().find((event) => event.toolName)?.toolName ??
-    approvals.find((item) => item.actionId === actionId)?.actionName ??
-    null;
+  const name = actionName(category, stepEvents, approvals, actionId);
   const resources = primary?.resources.length
     ? primary.resources
-    : ([...actionEvents].reverse().find((event) => event.resources.length)?.resources ?? []);
+    : ([...stepEvents].reverse().find((event) => event.resources.length)?.resources ?? []);
   const decision: DecisionStatus = policy.conflicted ? "unknown" : (primary?.decision ?? "unknown");
+  const intervention =
+    [...stepEvents].reverse().find((event) => event.intervention !== "unknown")?.intervention ??
+    "unknown";
+  const kind =
+    RECEIPT_REQUIRED_CATEGORIES.has(category) || (category === "unknown" && Boolean(actionId))
+      ? "action"
+      : "checkpoint";
   const partial = {
     approval: approval.status,
     decision,
     execution,
+    intervention,
     phase,
+    receiptExpectation: expectation,
   };
 
   return {
     actionId,
-    actionName,
+    actionName: name,
     approval: approval.status,
     approvalId: approval.id,
-    auditIds: actionEvents.map((event) => event.auditId),
+    auditIds: stepEvents.map((event) => event.auditId),
+    category,
     decision,
+    decisionId: primary?.decisionId ?? null,
     decisionReason: primary?.decisionReason ?? null,
-    displayName: actionName ? (ACTION_LABELS[actionName] ?? actionName) : "未命名动作",
+    displayName: displayName(category, name, stepEvents),
+    eventId: primary?.eventId ?? eventIds[0] ?? null,
+    eventIds,
+    events: stepEvents.map(toStepEvent),
     execution,
-    firstSeenAt: actionEvents[0]!.occurredAt,
-    lastUpdatedAt: actionEvents.at(-1)!.occurredAt,
+    firstSeenAt: stepEvents[0]!.occurredAt,
+    intervention,
+    kind,
+    lastUpdatedAt: stepEvents.at(-1)!.occurredAt,
     observationAuditIds: observations.map((event) => event.auditId),
     outcomeAuditIds: outcomes.map((event) => event.auditId),
     phase,
     policyChecks: checks.map(toPolicyCheck),
-    primaryAuditId: primary?.auditId ?? null,
+    primaryAuditId: primary?.auditId ?? stepEvents[0]?.auditId ?? null,
+    receiptExpectation: expectation,
     resourceSummary: resources[0]?.value ?? null,
     riskScore: primary?.risk.finalScore ?? null,
+    settled: phase === "checked" || phase === "terminal",
     severity: primary?.severity ?? "unknown",
-    statusLabel: actionStatus(partial, outcomes.length > 0),
+    statusLabel: stepStatus(partial, outcomes.length > 0),
+    stepId,
   };
 }
 
 function lifecycleState(
   events: readonly NormalizedAuditEvidence[],
-  actions: readonly ExecutionActionViewModel[],
+  steps: readonly ExecutionStepViewModel[],
 ): Pick<ExecutionTraceViewModel, "lifecycleAuditId" | "lifecycleLabel" | "lifecycleState"> {
   const lifecycle = [...events].reverse().find((event) => {
     if (event.recordType !== "runtime_observation") return false;
-    return (
-      ["trace_completed", "trace_failed", "trace_cancelled"].includes(event.eventType) ||
-      ["trace_completed", "trace_failed", "trace_cancelled"].includes(event.stage)
-    );
+    return isTraceLifecycle(event) && event.eventType !== "trace_started";
   });
   const value = lifecycle?.eventType || lifecycle?.stage;
   let state: TraceLifecycleState;
   if (value === "trace_completed") state = "completed";
   else if (value === "trace_failed") state = "failed";
   else if (value === "trace_cancelled") state = "cancelled";
-  else if (actions.some((action) => action.approval === "pending")) {
+  else if (steps.some((step) => step.approval === "pending")) {
     state = "waiting_approval";
   } else state = "observing";
   const labels: Record<TraceLifecycleState, string> = {
@@ -297,36 +493,35 @@ function lifecycleState(
   };
 }
 
+function groupKey(event: NormalizedAuditEvidence): string | null {
+  if (event.actionId) return `action:${event.actionId}`;
+  if (event.eventId) return `event:${event.eventId}`;
+  return null;
+}
+
 export function buildExecutionTrace(
   events: readonly NormalizedAuditEvidence[],
   approvals: readonly ApprovalRequest[] = [],
 ): ExecutionTraceViewModel {
   const sorted = uniqueAuditEvents(events);
+  const logical = logicalStepEvents(sorted);
   const grouped = new Map<string, NormalizedAuditEvidence[]>();
-  for (const event of sorted) {
-    if (!event.actionId) continue;
-    const group = grouped.get(event.actionId) ?? [];
+  for (const event of logical) {
+    if (!isExecutionStepEvidence(event)) continue;
+    const key = groupKey(event);
+    if (!key) continue;
+    const group = grouped.get(key) ?? [];
     group.push(event);
-    grouped.set(event.actionId, group);
+    grouped.set(key, group);
   }
-  const actions = [...grouped.entries()]
-    .filter(([, actionEvents]) => actionEvents.some(isExecutionActionEvidence))
-    .map(([actionId, actionEvents]) => buildAction(actionId, actionEvents, approvals))
-    .sort(
-      (left, right) =>
-        Date.parse(left.firstSeenAt) - Date.parse(right.firstSeenAt) ||
-        left.actionId.localeCompare(right.actionId),
-    );
-  return { actions, ...lifecycleState(sorted, actions) };
+  const steps = [...grouped.entries()].map(([stepId, stepEvents]) =>
+    buildStep(stepId, stepEvents, approvals),
+  );
+  return { steps, ...lifecycleState(sorted, steps) };
 }
 
 export function shouldContinueTracePolling(trace: ExecutionTraceViewModel): boolean {
-  const isTerminal =
-    trace.lifecycleState === "completed" ||
-    trace.lifecycleState === "failed" ||
-    trace.lifecycleState === "cancelled";
-  if (!isTerminal) return true;
-  return trace.actions.some((action) => action.phase !== "terminal");
+  return !["completed", "failed", "cancelled"].includes(trace.lifecycleState);
 }
 
 export function getExecutionApprovalLabel(status: ExecutionApprovalStatus): string {
@@ -339,4 +534,18 @@ export function getExecutionApprovalLabel(status: ExecutionApprovalStatus): stri
     unknown: "审批未记录",
   };
   return labels[status];
+}
+
+export function getExecutionCategoryLabel(category: ExecutionStepCategory): string {
+  const labels: Record<ExecutionStepCategory, string> = {
+    context: "上下文",
+    memory: "记忆",
+    message: "消息",
+    model_input: "模型输入",
+    model_output: "模型输出",
+    tool: "工具动作",
+    tool_result: "工具结果",
+    unknown: "运行步骤",
+  };
+  return labels[category];
 }

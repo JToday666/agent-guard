@@ -136,7 +136,9 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   await expect(action).toContainText("需审批");
   await expect(action).toContainText("单次放行");
   await expect(action).toContainText("已执行");
+  await expect(action).not.toContainText("当前");
 
+  await action.locator(".execution-action__summary").click();
   await action.getByRole("button", { name: "查看安全依据" }).click();
   await expect(page).toHaveURL(/view=provenance/);
   await expect(page).toHaveURL(/action_id=action_trace_002/);

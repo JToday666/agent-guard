@@ -323,7 +323,7 @@ const phaseDefinitions = [
 ] as const;
 
 const kindDefinitions: Record<string, { icon: Component; label: string; miniMapColor: string }> = {
-  action: { icon: Wrench, label: "工具动作", miniMapColor: "var(--color-chart-warning)" },
+  action: { icon: Wrench, label: "受控动作", miniMapColor: "var(--color-chart-warning)" },
   action_critic: {
     icon: FileSearch,
     label: "复核",

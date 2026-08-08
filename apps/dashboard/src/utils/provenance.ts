@@ -1,4 +1,9 @@
-import type { AuditEventRow, ProvenanceNode } from "../types/dashboard";
+import type {
+  ExecutionStepCategory,
+  ExecutionStepViewModel,
+  NormalizedAuditEvidence,
+  ProvenanceNode,
+} from "../types/dashboard";
 
 const RELATION_LABELS: Readonly<Record<string, string>> = {
   assembled_into: "汇入上下文",
@@ -44,17 +49,30 @@ export function getProvenanceRiskScore(metadata: Record<string, unknown>): strin
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
-export function resolveProvenanceEventId(
+export function resolveProvenanceAuditId(
   node: ProvenanceNode | undefined,
-  events: readonly Pick<AuditEventRow, "id">[],
+  events: readonly NormalizedAuditEvidence[],
 ): string | undefined {
   if (!node) return undefined;
-  const eventIds = new Set(events.map((event) => event.id));
-  const metadataEventId = node.metadata.event_id;
-  if (typeof metadataEventId === "string" && eventIds.has(metadataEventId)) {
-    return metadataEventId;
+  if (node.kind === "audit" || node.kind === "runtime_result") {
+    const direct = events.find((event) => event.auditId === node.refId);
+    if (direct) return direct.auditId;
   }
-  return eventIds.has(node.refId) ? node.refId : undefined;
+  if (node.kind === "action") {
+    return events.find(
+      (event) => event.actionId === node.refId && event.recordType === "policy_evaluation",
+    )?.auditId;
+  }
+  if (node.kind === "decision") {
+    return events.find((event) => event.decisionId === node.refId)?.auditId;
+  }
+  if (node.kind === "approval") {
+    return events.find((event) => event.approval.approvalId === node.refId)?.auditId;
+  }
+  const metadataEventId = node.metadata.event_id;
+  const guardEventId =
+    typeof metadataEventId === "string" && metadataEventId ? metadataEventId : node.refId;
+  return events.find((event) => event.eventId === guardEventId)?.auditId;
 }
 
 export function findProvenanceNodeForEvent(
@@ -72,4 +90,46 @@ export function findProvenanceNodeForAction(
   actionId: string,
 ): ProvenanceNode | undefined {
   return nodes.find((node) => node.kind === "action" && node.refId === actionId);
+}
+
+const CATEGORY_NODE_KINDS: Readonly<Record<ExecutionStepCategory, readonly string[]>> = {
+  context: ["context", "event"],
+  memory: ["action", "event"],
+  message: ["action", "event"],
+  model_input: ["model_intent", "event", "context"],
+  model_output: ["model_intent", "event"],
+  tool: ["action", "event"],
+  tool_result: ["action", "event"],
+  unknown: ["event", "context", "model_intent"],
+};
+
+export function findProvenanceNodeForExecutionStep(
+  nodes: readonly ProvenanceNode[],
+  step: ExecutionStepViewModel,
+): ProvenanceNode | undefined {
+  if (step.actionId) {
+    const action = findProvenanceNodeForAction(nodes, step.actionId);
+    if (action) return action;
+  }
+
+  for (const kind of CATEGORY_NODE_KINDS[step.category]) {
+    for (const eventId of step.eventIds) {
+      const node = nodes.find((item) => item.kind === kind && item.refId === eventId);
+      if (node) return node;
+    }
+  }
+
+  if (step.decisionId) {
+    const decision = nodes.find(
+      (node) => node.kind === "decision" && node.refId === step.decisionId,
+    );
+    if (decision) return decision;
+  }
+
+  for (const auditId of [step.primaryAuditId, ...step.auditIds]) {
+    if (!auditId) continue;
+    const audit = nodes.find((node) => node.kind === "audit" && node.refId === auditId);
+    if (audit) return audit;
+  }
+  return undefined;
 }

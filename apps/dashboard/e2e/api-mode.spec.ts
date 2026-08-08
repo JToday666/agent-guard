@@ -532,6 +532,93 @@ test("API mode conditionally refreshes a running action until its terminal recei
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v2"');
 });
 
+test("API mode renders every supported guard stage once and groups one tool lifecycle", async ({
+  page,
+}) => {
+  const policyEvent = (
+    index: number,
+    eventType: string,
+    actionName: string,
+    actionId?: string,
+  ) => ({
+    ...eventDto,
+    audit_id: `audit_matrix_${index}`,
+    blocked: false,
+    decision: "allow",
+    event_type: eventType,
+    integrity: {
+      canonicalization: "json:v1",
+      event_hash: `hash_matrix_${index}`,
+      prev_hash: index === 1 ? null : `hash_matrix_${index - 1}`,
+      sequence: index,
+    },
+    links: {
+      ...(actionId ? { action_id: actionId } : {}),
+      decision_id: `decision_matrix_${index}`,
+      event_id: `event_matrix_${index}`,
+    },
+    metadata: { action_name: actionName, user_task: "整理运行记录" },
+    reason: "安全检查通过",
+    risk_score: 0,
+    severity: "low",
+    stage: eventType,
+    summary: `${eventType} recorded`,
+    timestamp: `2026-06-28T08:00:${String(index).padStart(2, "0")}Z`,
+  });
+  const events = [
+    policyEvent(1, "context_assembled", "context_assembled"),
+    policyEvent(2, "model_input_prepared", "model_input_prepared"),
+    policyEvent(3, "tool_call_proposed", "read_file", "call_matrix_read"),
+    policyEvent(4, "tool_result_produced", "read_file", "call_matrix_read"),
+    policyEvent(5, "model_output_produced", "model_output_produced", "event_matrix_5"),
+    policyEvent(6, "memory_write_proposed", "memory_write", "event_matrix_6"),
+    policyEvent(7, "message_send_proposed", "send_message", "event_matrix_7"),
+    {
+      ...eventDto,
+      audit_id: "audit_matrix_terminal",
+      blocked: null,
+      decision: null,
+      event_type: "trace_completed",
+      integrity: {
+        canonicalization: "json:v1",
+        event_hash: "hash_matrix_terminal",
+        prev_hash: "hash_matrix_7",
+        sequence: 8,
+      },
+      links: { event_id: "trace_api_001" },
+      reason: "本次运行已经结束",
+      record_type: "runtime_observation",
+      risk_score: null,
+      severity: null,
+      stage: "trace_completed",
+      summary: "本次运行已经结束",
+      timestamp: "2026-06-28T08:00:08Z",
+    },
+  ];
+  await installApiRoutes(page, { events });
+
+  await page.goto("/evidence/trace_api_001");
+  const steps = page.locator(".execution-action");
+  await expect(steps).toHaveCount(6);
+  await expect(steps).toContainText([
+    "检查输入上下文",
+    "检查模型输入",
+    "读取文件",
+    "检查模型输出",
+    "写入记忆",
+    "发送消息",
+  ]);
+
+  const summaries = page.locator(".execution-action__summary");
+  for (let index = 0; index < (await summaries.count()); index += 1) {
+    await summaries.nth(index).click();
+  }
+  await expect(page.locator(".execution-action__events li")).toHaveCount(7);
+  await expect(
+    steps.filter({ hasText: "读取文件" }).locator(".execution-action__events li"),
+  ).toHaveCount(2);
+});
+
 test("API mode keeps independent validators for trace and provenance snapshots", async ({
   page,
 }) => {

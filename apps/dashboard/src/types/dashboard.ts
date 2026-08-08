@@ -218,10 +218,25 @@ export type ExecutionApprovalStatus =
 export type ExecutionPhase =
   | "proposed"
   | "evaluated"
+  | "checked"
   | "waiting_approval"
   | "approval_released"
   | "waiting_receipt"
   | "terminal";
+
+export type ExecutionStepKind = "action" | "checkpoint";
+
+export type ExecutionStepCategory =
+  | "context"
+  | "model_input"
+  | "model_output"
+  | "tool"
+  | "tool_result"
+  | "memory"
+  | "message"
+  | "unknown";
+
+export type ExecutionReceiptExpectation = "required" | "not_required" | "unknown";
 
 export interface ExecutionPolicyCheck {
   auditId: string;
@@ -234,8 +249,28 @@ export interface ExecutionPolicyCheck {
   occurredAt: string;
 }
 
-export interface ExecutionActionViewModel {
-  actionId: string;
+export interface ExecutionStepEvent {
+  auditId: string;
+  eventId: string | null;
+  eventType: string;
+  label: string;
+  recordType: AuditRecordType;
+  occurredAt: string;
+  decision: DecisionStatus;
+  execution: ExecutionStatus;
+  intervention: InterventionType;
+}
+
+export interface ExecutionStepViewModel {
+  stepId: string;
+  kind: ExecutionStepKind;
+  category: ExecutionStepCategory;
+  receiptExpectation: ExecutionReceiptExpectation;
+  settled: boolean;
+  actionId: string | null;
+  eventId: string | null;
+  eventIds: string[];
+  decisionId: string | null;
   actionName: string | null;
   displayName: string;
   resourceSummary: string | null;
@@ -243,6 +278,7 @@ export interface ExecutionActionViewModel {
   approval: ExecutionApprovalStatus;
   approvalId: string | null;
   execution: ExecutionStatus;
+  intervention: InterventionType;
   phase: ExecutionPhase;
   statusLabel: string;
   decisionReason: string | null;
@@ -255,13 +291,14 @@ export interface ExecutionActionViewModel {
   auditIds: string[];
   observationAuditIds: string[];
   outcomeAuditIds: string[];
+  events: ExecutionStepEvent[];
 }
 
 export type TraceLifecycleState =
   "observing" | "waiting_approval" | "completed" | "failed" | "cancelled";
 
 export interface ExecutionTraceViewModel {
-  actions: ExecutionActionViewModel[];
+  steps: ExecutionStepViewModel[];
   lifecycleState: TraceLifecycleState;
   lifecycleLabel: string;
   lifecycleAuditId: string | null;

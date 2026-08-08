@@ -149,10 +149,13 @@
             aria-labelledby="trace-view-tab-execution"
           >
             <ExecutionTrace
+              :is-window-partial="isExecutionWindowPartial"
               :polling-state="tracePollingState"
               :selected-action-id="selectedActionId"
+              :selected-audit-id="selectedEventId"
               :trace="executionTrace"
-              @select-action="handleSelectAction"
+              :trace-id="traceId"
+              @select-step="handleSelectStep"
               @select-event="handleTimelineSelectEvent"
               @show-audit="handleViewChange('audit')"
               @show-provenance="handleShowProvenance"
@@ -194,7 +197,7 @@
                 @select-node="handleSelectProvenanceNode"
               />
               <ProvenanceInspector
-                :event-ids="traceEvents.map((event) => event.id)"
+                :events="evidenceModel.events"
                 :graph="provenance"
                 :node="selectedProvenanceNode"
                 @select-event="handleTimelineSelectEvent"
@@ -251,11 +254,19 @@
         :event="selectedEvent"
         :normalized="selectedNormalizedEvent"
       >
-        <div v-if="selectedActionId" class="event-link-actions" aria-label="关联运行视图">
-          <button type="button" class="page-action" @click="handleSelectAction(selectedActionId)">
-            查看执行动作
+        <div v-if="selectedExecutionStep" class="event-link-actions" aria-label="关联运行视图">
+          <button
+            type="button"
+            class="page-action"
+            @click="handleSelectStep(selectedExecutionStep)"
+          >
+            查看运行步骤
           </button>
-          <button type="button" class="page-action" @click="handleShowProvenance(selectedActionId)">
+          <button
+            type="button"
+            class="page-action"
+            @click="handleShowProvenance(selectedExecutionStep)"
+          >
             查看溯源位置
           </button>
         </div>
@@ -300,10 +311,10 @@ import { buildExecutionTrace, shouldContinueTracePolling } from "../data/evidenc
 import { buildTraceEvidenceViewModel } from "../data/evidence/trace-evidence";
 import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
-import type { ProvenanceNode, TracePollingState } from "../types/dashboard";
+import type { ExecutionStepViewModel, ProvenanceNode, TracePollingState } from "../types/dashboard";
 import { formatDashboardDateTime } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
-import { findProvenanceNodeForAction, resolveProvenanceEventId } from "../utils/provenance";
+import { findProvenanceNodeForExecutionStep, resolveProvenanceAuditId } from "../utils/provenance";
 import { ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EvidenceDetailPage" });
@@ -326,7 +337,8 @@ const router = useRouter();
 const store = useDashboardStore();
 const isPageActive = ref(false);
 const provenanceSyncMessage = ref("");
-const finalProvenanceTraceId = ref("");
+const finalTraceReconciledId = ref("");
+const terminalSyncTraceId = ref("");
 const traceId = computed(() => String(route.params.trace_id ?? ""));
 const traceDetail = computed(() => store.traceDetails[traceId.value]);
 const traceDetailError = computed(() => store.traceDetailErrors[traceId.value] ?? "");
@@ -352,6 +364,11 @@ const evidenceModel = computed(() =>
 );
 const executionTrace = computed(() =>
   buildExecutionTrace(evidenceModel.value.events, traceApprovals.value),
+);
+const isExecutionWindowPartial = computed(
+  () =>
+    evidenceModel.value.integrity.mayBeTruncated ||
+    evidenceModel.value.integrity.traceMetadataStatus === "partial",
 );
 const tracePollingState = computed(
   () => store.tracePollingStates[traceId.value] ?? idlePollingState,
@@ -391,6 +408,13 @@ const selectedEvent = computed(() =>
 );
 const selectedNormalizedEvent = computed(() =>
   evidenceModel.value.events.find((event) => event.auditId === selectedEventId.value),
+);
+const selectedExecutionStep = computed(() =>
+  executionTrace.value.steps.find(
+    (step) =>
+      (selectedActionId.value && step.actionId === selectedActionId.value) ||
+      (selectedEventId.value && step.auditIds.includes(selectedEventId.value)),
+  ),
 );
 const provenance = computed(() => store.provenanceByTrace[traceId.value]);
 const provenanceError = computed(() => store.provenanceErrors[traceId.value] ?? "");
@@ -433,9 +457,9 @@ async function handleViewChange(view: EvidenceDetailView): Promise<void> {
 
 async function handleTabKeydown(event: KeyboardEvent, index: number): Promise<void> {
   let nextIndex: number;
-  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+  if (event.key === "ArrowRight") {
     nextIndex = (index + 1) % viewOptions.length;
-  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+  } else if (event.key === "ArrowLeft") {
     nextIndex = (index - 1 + viewOptions.length) % viewOptions.length;
   } else if (event.key === "Home") {
     nextIndex = 0;
@@ -451,13 +475,13 @@ async function handleTabKeydown(event: KeyboardEvent, index: number): Promise<vo
   document.getElementById(`trace-view-tab-${nextView}`)?.focus();
 }
 
-function handleSelectAction(actionId: string) {
+function handleSelectStep(step: ExecutionStepViewModel) {
   void router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, {
-      action_id: actionId,
+      action_id: step.actionId ?? undefined,
       event_detail: undefined,
-      event_id: undefined,
+      event_id: step.actionId ? undefined : (step.primaryAuditId ?? undefined),
       node_id: undefined,
       view: "execution",
     }),
@@ -466,7 +490,7 @@ function handleSelectAction(actionId: string) {
 
 function handleSelectProvenanceNode(nodeId: string) {
   const node = provenance.value?.nodes.find((item) => item.nodeId === nodeId);
-  const eventId = resolveProvenanceEventId(node, traceEvents.value);
+  const eventId = resolveProvenanceAuditId(node, evidenceModel.value.events);
   const eventActionId = evidenceModel.value.events.find(
     (event) => event.auditId === eventId,
   )?.actionId;
@@ -497,21 +521,21 @@ function handleTimelineSelectEvent(eventId: string) {
   });
 }
 
-async function handleShowProvenance(actionId: string) {
+async function handleShowProvenance(step: ExecutionStepViewModel) {
   await store.loadTraceProvenance(traceId.value, true);
-  const node = findProvenanceNodeForAction(
+  const node = findProvenanceNodeForExecutionStep(
     store.provenanceByTrace[traceId.value]?.nodes ?? [],
-    actionId,
+    step,
   );
   provenanceSyncMessage.value = node
-    ? "已定位该动作的安全依据。"
-    : "最新溯源记录中尚未找到该动作节点，审计记录仍可继续查看。";
+    ? "已定位该运行步骤的安全依据。"
+    : "最新溯源记录中尚未找到该运行步骤，审计记录仍可继续查看。";
   await router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, {
-      action_id: actionId,
+      action_id: step.actionId ?? undefined,
       event_detail: undefined,
-      event_id: undefined,
+      event_id: step.primaryAuditId ?? undefined,
       node_id: node?.nodeId,
       view: "provenance",
     }),
@@ -553,12 +577,12 @@ watch(
 );
 
 watch(
-  [selectedActionId, activeView],
-  async ([actionId, view]) => {
-    if (!actionId || view !== "execution") return;
+  [selectedExecutionStep, activeView],
+  async ([step, view]) => {
+    if (!step || view !== "execution") return;
     await nextTick();
     document
-      .querySelector<HTMLElement>(`[data-action-id="${CSS.escape(actionId)}"]`)
+      .querySelector<HTMLElement>(`[data-step-id="${CSS.escape(step.stepId)}"]`)
       ?.scrollIntoView({ block: "center" });
   },
   { immediate: true },
@@ -570,10 +594,10 @@ watch(activeView, (view) => {
 });
 
 watch(
-  [activeView, selectedActionId, selectedProvenanceNodeId, provenance],
-  ([view, actionId, nodeId, graph]) => {
-    if (view !== "provenance" || !actionId || nodeId || !graph) return;
-    const node = findProvenanceNodeForAction(graph.nodes, actionId);
+  [activeView, selectedExecutionStep, selectedProvenanceNodeId, provenance],
+  ([view, step, nodeId, graph]) => {
+    if (view !== "provenance" || !step || nodeId || !graph) return;
+    const node = findProvenanceNodeForExecutionStep(graph.nodes, step);
     if (!node) return;
     void router.replace({
       path: `/evidence/${traceId.value}`,
@@ -585,7 +609,8 @@ watch(
 
 watch(traceId, (value, previous) => {
   provenanceSyncMessage.value = "";
-  finalProvenanceTraceId.value = "";
+  finalTraceReconciledId.value = "";
+  terminalSyncTraceId.value = "";
   if (!isPageActive.value || !value) return;
   if (previous && previous !== value) store.stopTracePolling();
   store.startTracePolling(value);
@@ -599,10 +624,7 @@ watch(
       store.startTracePolling(traceId.value);
       return;
     }
-    store.stopTracePolling();
-    if (finalProvenanceTraceId.value === traceId.value) return;
-    finalProvenanceTraceId.value = traceId.value;
-    void store.loadTraceProvenance(traceId.value, true);
+    void reconcileTerminalTrace(traceId.value);
   },
   { immediate: true },
 );
@@ -611,9 +633,8 @@ onActivated(() => {
   isPageActive.value = true;
   if (traceId.value && shouldContinueTracePolling(executionTrace.value)) {
     store.startTracePolling(traceId.value);
-  } else if (traceId.value && finalProvenanceTraceId.value !== traceId.value) {
-    finalProvenanceTraceId.value = traceId.value;
-    void store.loadTraceProvenance(traceId.value, true);
+  } else if (traceId.value) {
+    void reconcileTerminalTrace(traceId.value);
   }
   if (activeView.value === "provenance") void handleProvenanceRetry();
 });
@@ -626,6 +647,26 @@ onDeactivated(() => {
 onUnmounted(() => {
   store.stopTracePolling();
 });
+
+async function reconcileTerminalTrace(value: string): Promise<void> {
+  if (!value || terminalSyncTraceId.value === value || finalTraceReconciledId.value === value) {
+    return;
+  }
+  terminalSyncTraceId.value = value;
+  store.stopTracePolling();
+  try {
+    const traceResult = await store.loadTraceDetail(value, true);
+    if (traceResult === "skipped") {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await store.loadTraceDetail(value, true);
+    }
+    if (traceId.value !== value) return;
+    finalTraceReconciledId.value = value;
+    await store.loadTraceProvenance(value, true);
+  } finally {
+    if (terminalSyncTraceId.value === value) terminalSyncTraceId.value = "";
+  }
+}
 </script>
 
 <style scoped lang="scss">
