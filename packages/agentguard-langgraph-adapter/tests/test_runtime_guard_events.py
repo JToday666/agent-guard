@@ -410,6 +410,120 @@ def test_gateway_blocks_unverified_local_rag_answer_review_before_runtime_invoke
     assert client.tool_events[0]["security_context"]["source_trust"] == "local_reference"
 
 
+def test_gateway_does_not_submit_policy_audit_in_guard_api_mode() -> None:
+    client = _SelectiveCoreClient(deny_tool_names={"browser_click"})
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+    runtime = _Runtime(result={"ok": True})
+    gateway = GuardedToolGateway(guard_adapter=adapter, tool_runtime=runtime)
+
+    allowed = gateway.invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "docs/public.txt"},
+        security={"user_task": "Read a public document."},
+        trace_id="trace_no_audit_submit",
+        call_id="call_no_audit_submit",
+    )
+    denied = gateway.invoke_tool(
+        tool_name="browser_click",
+        arguments={"selector": "testid=submit"},
+        security={"user_task": "Click the button."},
+        trace_id="trace_no_audit_deny",
+        call_id="call_no_audit_deny",
+    )
+
+    assert allowed.executed is True
+    assert denied.blocked is True
+    # G-02：Guard API 模式下策略审计由 evaluate writer 唯一写入，
+    # gateway 全程（allow/deny/工具结果守卫）不得重复提交。
+    assert client.audit_events == []
+    assert allowed.audit_event is None
+    assert denied.audit_event is None
+
+
+def test_gateway_keeps_audit_submission_in_legacy_mode() -> None:
+    client = _SelectiveCoreClient()
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="legacy"),
+        core_client=client,
+    )
+    runtime = _Runtime(result={"ok": True})
+    gateway = GuardedToolGateway(guard_adapter=adapter, tool_runtime=runtime)
+
+    result = gateway.invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "docs/public.txt"},
+        security={"user_task": "Read a public document."},
+        trace_id="trace_legacy_audit",
+        call_id="call_legacy_audit",
+    )
+
+    assert result.executed is True
+    # legacy Core 没有 evaluate writer，保留 adapter 自提交（before_tool +
+    # tool_result 两条）。
+    assert len(client.audit_events) == 2
+    assert result.audit_event is not None
+    assert result.audit_event["schema_version"] == "0.4"
+    assert result.audit_event["record_type"] == "policy_evaluation"
+
+
+def test_build_audit_event_produces_04_policy_evaluation_shape() -> None:
+    adapter = LangGraphAdapter.with_fake_deny_core(
+        AgentGuardLangGraphConfig(defense_enabled=True)
+    )
+    event, decision = adapter.evaluate_before_tool(
+        tool_name="read_file",
+        arguments={"path": "/private/token.txt"},
+        security={
+            "case_id": "PI-001",
+            "attack_type": "prompt_injection",
+            "is_malicious": True,
+            "source_type": "email",
+            "source_trust": "untrusted",
+            "user_task": "summarize inbox",
+        },
+        trace_id="trace_04_shape",
+        call_id="call_04_shape",
+    )
+    audit = adapter.build_audit_event(event, decision)
+
+    assert audit.schema_version == "0.4"
+    assert audit.record_type == "policy_evaluation"
+    assert audit.stage == "before_tool_call"
+    assert audit.event_type == "tool_call_proposed"
+    assert audit.attack_type == "prompt_injection"
+    assert audit.is_malicious is True
+    assert audit.decision == "deny"
+    assert audit.blocked is True
+    assert audit.resource_targets == ["/private/token.txt"]
+    # §8.1：顶层 rule_hits 仍为 string[] 兼容列表。
+    assert audit.rule_hits == ["FAKE_CORE_ALWAYS_DENY"]
+    assert audit.links["event_id"] == event.event_id
+    assert audit.links["decision_id"] == decision.decision_id
+    assert audit.links["action_id"] == "call_04_shape"
+    evidence = audit.evidence
+    assert set(evidence) == {
+        "guard_event",
+        "guard_decision",
+        "policy",
+        "intervention",
+        "execution",
+        "side_effects",
+        "result",
+        "approval",
+    }
+    # adapter 不持有策略快照，policy 保持 null。
+    assert evidence["policy"] is None
+    # 对象化 rule_hits 在 evidence.guard_decision 内。
+    assert evidence["guard_decision"]["rule_hits"][0]["rule_id"] == (
+        "FAKE_CORE_ALWAYS_DENY"
+    )
+    assert evidence["guard_event"]["event_id"] == event.event_id
+    assert evidence["approval"]["status"] == "not_required"
+
+
 class _SelectiveCoreClient:
     def __init__(self, deny_event_types: set[str] | None = None, deny_tool_names: set[str] | None = None) -> None:
         self.deny_event_types = deny_event_types or set()

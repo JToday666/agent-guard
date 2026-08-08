@@ -23,8 +23,10 @@
 适配器默认连接 `http://127.0.0.1:8088`，并使用当前 Guard API `v0.3` 协议：
 
 - 事件评估：`POST /v1/guard/evaluate`
-- 审计写入：`POST /v1/audit/events`
 - 审批等待：`GET /v1/approvals/{approval_id}/wait`
+
+策略审计（`policy_evaluation`）由 Guard API 在 `POST /v1/guard/evaluate` 内部唯一
+写入，适配器在该模式下不再经 `POST /v1/audit/events` 重复提交（契约 §12.1/§22.1）。
 
 旧 Core 仍可通过 `api_mode="legacy"` 显式启用。该模式仅依赖
 `/v1/evaluate/tool-call` 和 `/v1/audit/event`，不提供 P1 运行时事件或审批等待能力，
