@@ -103,8 +103,9 @@ function isNavigationItemActive(path: string): boolean {
   align-self: start;
   background: color-mix(in srgb, var(--color-nav) 90%, transparent);
   border-right: 1px solid var(--color-border);
-  height: calc(100vh - var(--top-bar-height));
+  height: calc(100dvh - var(--top-bar-height));
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: var(--space-4) var(--space-3);
   position: sticky;
   top: var(--top-bar-height);

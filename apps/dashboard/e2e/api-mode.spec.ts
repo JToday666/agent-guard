@@ -1021,11 +1021,8 @@ test("API mode queues new events while the investigation list is scrolled", asyn
   await page.goto("/investigations");
   await expect(page.locator(".event-table tbody tr")).toHaveCount(20);
 
-  const mainPanel = page.locator(".investigations-page__main");
-  await mainPanel.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
-  await expect.poll(() => mainPanel.evaluate((element) => element.scrollTop)).toBeGreaterThan(40);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(40);
 
   events.push({
     ...eventDto,
@@ -1045,7 +1042,7 @@ test("API mode queues new events while the investigation list is scrolled", asyn
   await expect(page.locator(".event-table tbody")).not.toContainText("new_event_tool");
   await page.getByRole("button", { name: "查看新事件" }).click();
   await expect(page.locator(".event-table tbody tr").first()).toContainText("new_event_tool");
-  await expect.poll(() => mainPanel.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(1);
 });
 
 test("API mode shows a session error instead of a blank dashboard", async ({ page }) => {

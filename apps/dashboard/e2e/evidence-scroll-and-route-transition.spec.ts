@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-test("evidence dossier does not trap desktop wheel scrolling", async ({ page }) => {
+test("evidence detail uses document scrolling and the dossier does not trap the wheel", async ({
+  page,
+}) => {
   await page.goto("/evidence/trace_007?event_id=evt_20260607_007");
 
+  const workspace = page.locator(".dashboard-shell__workspace");
   const main = page.locator(".evidence-detail__main");
   const context = page.locator(".trace-dossier");
   const drawerBody = page.locator(".detail-drawer__body");
@@ -13,13 +16,13 @@ test("evidence dossier does not trap desktop wheel scrolling", async ({ page }) 
   await page.getByRole("button", { name: "关闭详情" }).click();
   await expect(page.locator(".detail-drawer")).toBeHidden();
 
-  await main.evaluate((element) => {
-    element.scrollTop = 0;
-  });
+  await expect(workspace).toHaveCSS("overflow-y", "visible");
+  await expect(main).toHaveCSS("overflow-y", "visible");
+  await page.evaluate(() => window.scrollTo(0, 0));
   await context.hover();
   await page.mouse.wheel(0, 700);
 
-  await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 });
 
 test("dashboard routes use the shell transition layer", async ({ page }) => {

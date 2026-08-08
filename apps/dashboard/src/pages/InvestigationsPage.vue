@@ -421,7 +421,7 @@ watch(
       return;
     }
 
-    const isAtTop = (mainPanel.value?.scrollTop ?? 0) <= 40;
+    const isAtTop = window.scrollY <= getMainPanelScrollTop() + 40;
     if (isAtTop && !pendingNewEventIds.value.size) {
       displayedEvents.value = events;
       highlightNewEvents(incomingIds);
@@ -456,7 +456,20 @@ async function handleShowNewEvents() {
   updateQuery({ page: 1 });
   highlightNewEvents(eventIds);
   await nextTick();
-  mainPanel.value?.scrollTo({ top: 0 });
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({
+    behavior: reduceMotion ? "auto" : "smooth",
+    top: getMainPanelScrollTop(),
+  });
+}
+
+function getMainPanelScrollTop(): number {
+  if (!mainPanel.value) return 0;
+  const panelTop = mainPanel.value.getBoundingClientRect().top + window.scrollY;
+  const topBarHeight = document
+    .querySelector<HTMLElement>(".top-bar")
+    ?.getBoundingClientRect().height;
+  return Math.max(0, panelTop - (topBarHeight ?? 0));
 }
 
 function clearTimers() {
@@ -537,14 +550,10 @@ function handleExport() {
 <style scoped lang="scss">
 .investigations-page {
   display: grid;
-  height: calc(100vh - var(--top-bar-height));
   grid-template-columns: minmax(0, 1fr);
-  overflow: hidden;
 }
 .investigations-page__main {
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
 }
 .investigation-tools {
   align-items: end;
@@ -662,7 +671,7 @@ function handleExport() {
 }
 .event-table-wrap {
   border-top: 1px solid var(--color-border-strong);
-  overflow: auto;
+  overflow-x: auto;
 }
 .event-table {
   border-collapse: collapse;

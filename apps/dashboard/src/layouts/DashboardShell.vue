@@ -178,13 +178,13 @@ onErrorCaptured(() => {
 .dashboard-shell {
   background: var(--color-page);
   color: var(--color-text);
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .dashboard-shell__body {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  min-height: calc(100vh - var(--top-bar-height));
+  min-height: calc(100dvh - var(--top-bar-height));
 }
 
 .dashboard-shell__body--collapsed {
@@ -194,8 +194,6 @@ onErrorCaptured(() => {
 .dashboard-shell__workspace {
   min-width: 0;
   outline: 0;
-  overflow-x: hidden;
-  overflow-y: visible;
 }
 .dashboard-shell__workspace:focus-visible {
   outline: 2px solid var(--color-focus);

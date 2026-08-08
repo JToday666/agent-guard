@@ -673,8 +673,6 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
 .evidence-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  height: calc(100vh - var(--top-bar-height));
-  overflow: hidden;
 }
 
 .evidence-detail__main {
@@ -682,9 +680,7 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
   display: grid;
   gap: var(--space-6);
   grid-auto-rows: max-content;
-  min-height: 0;
   min-width: 0;
-  overflow-y: auto;
 }
 
 .evidence-page-header {

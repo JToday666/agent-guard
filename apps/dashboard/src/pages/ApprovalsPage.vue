@@ -230,7 +230,7 @@ function formatRelativeExpiry(value?: string | null) {
   display: grid;
   gap: var(--space-5);
   grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - var(--top-bar-height));
+  height: calc(100dvh - var(--top-bar-height));
   overflow: hidden;
 }
 .approval-header-status {

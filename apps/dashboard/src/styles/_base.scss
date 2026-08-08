@@ -15,7 +15,8 @@ html {
   background: var(--color-page);
   color-scheme: light;
   min-width: 75rem;
-  scroll-behavior: smooth;
+  min-height: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -29,14 +30,14 @@ body {
   font-synthesis: none;
   line-height: var(--line-height-body);
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 #app {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -93,7 +94,6 @@ code {
 
 * {
   scrollbar-color: var(--color-border-strong) transparent;
-  scrollbar-width: thin;
 }
 
 @media (prefers-reduced-motion: reduce) {

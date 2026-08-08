@@ -18,3 +18,39 @@ test("desktop shell keeps the required navigation order", async ({ page }) => {
     "系统状态",
   ]);
 });
+
+test("standard routes leave vertical scrolling to the document", async ({ page }) => {
+  const routes = [
+    ["/overview", ".overview-page"],
+    ["/investigations", ".investigations-page__main"],
+    ["/evidence", ".evidence-page"],
+    ["/evidence/trace_002", ".evidence-detail__main"],
+    ["/evaluation", ".evaluation-page"],
+    ["/system", ".system-page"],
+  ] as const;
+
+  for (const [path, routeRoot] of routes) {
+    await page.goto(path);
+    await expect(page.locator(routeRoot)).toBeVisible();
+    if (path === "/evidence/trace_002") {
+      await expect(page.getByRole("tab", { name: "执行轨迹" })).toBeVisible();
+    }
+
+    const scrollState = await page.evaluate((selector) => {
+      const workspace = document.querySelector<HTMLElement>(".dashboard-shell__workspace");
+      const root = document.querySelector<HTMLElement>(selector);
+      return {
+        documentScrollable:
+          document.documentElement.scrollHeight > document.documentElement.clientHeight,
+        rootOverflowY: root ? getComputedStyle(root).overflowY : "missing",
+        workspaceOverflowY: workspace ? getComputedStyle(workspace).overflowY : "missing",
+      };
+    }, routeRoot);
+
+    expect(scrollState.workspaceOverflowY, path).toBe("visible");
+    expect(scrollState.rootOverflowY, path).toBe("visible");
+    if (path === "/evidence/trace_002") {
+      expect(scrollState.documentScrollable, path).toBe(true);
+    }
+  }
+});
