@@ -162,3 +162,103 @@ test("deduplicates policy checks and omits records without action_id", () => {
     false,
   );
 });
+
+test("keeps routine guard hooks in audit evidence instead of execution actions", () => {
+  const [source] = normalizedEvents();
+  assert.ok(source);
+  const routineHooks: NormalizedAuditEvidence[] = [
+    {
+      ...source,
+      actionId: "evt_context",
+      auditId: "audit_context",
+      decision: "allow",
+      eventId: "evt_context",
+      eventType: "context_assembled",
+      intervention: "none",
+      toolName: null,
+    },
+    {
+      ...source,
+      actionId: "evt_model_input",
+      auditId: "audit_model_input",
+      decision: "allow",
+      eventId: "evt_model_input",
+      eventType: "model_input_prepared",
+      intervention: "none",
+      toolName: null,
+    },
+    {
+      ...source,
+      actionId: "evt_model_output",
+      auditId: "audit_model_output",
+      decision: "allow",
+      eventId: "evt_model_output",
+      eventType: "model_output_produced",
+      intervention: "none",
+      toolName: null,
+    },
+  ];
+
+  const trace = buildExecutionTrace([...normalizedEvents(), ...routineHooks], currentApproval());
+
+  assert.deepEqual(
+    trace.actions.map((action) => action.actionId),
+    ["call_memory_read_001", "call_code_exec_001"],
+  );
+});
+
+test("keeps an intervened model output as an execution action", () => {
+  const [source] = normalizedEvents();
+  assert.ok(source);
+  const revisedOutput: NormalizedAuditEvidence = {
+    ...source,
+    actionId: "evt_model_output_revised",
+    auditId: "audit_model_output_revised",
+    decision: "deny",
+    eventId: "evt_model_output_revised",
+    eventType: "model_output_produced",
+    intervention: "model_output_revision",
+    toolName: null,
+  };
+
+  const trace = buildExecutionTrace([...normalizedEvents(), revisedOutput], currentApproval());
+
+  assert.equal(
+    trace.actions.some((action) => action.actionId === "evt_model_output_revised"),
+    true,
+  );
+});
+
+test("retains a routine model-output policy check when a runtime receipt makes it actionable", () => {
+  const [source] = normalizedEvents();
+  assert.ok(source);
+  const policy: NormalizedAuditEvidence = {
+    ...source,
+    actionId: "evt_model_output_receipt",
+    auditId: "audit_model_output_policy",
+    decision: "allow",
+    decisionId: "dec_model_output_receipt",
+    eventId: "evt_model_output_receipt",
+    eventType: "model_output_produced",
+    intervention: "none",
+    policyAuditId: null,
+    recordType: "policy_evaluation",
+    toolName: null,
+  };
+  const outcome: NormalizedAuditEvidence = {
+    ...policy,
+    auditId: "audit_model_output_outcome",
+    execution: { ...policy.execution, receiptRecorded: true, status: "executed" },
+    policyAuditId: policy.auditId,
+    recordType: "runtime_outcome",
+  };
+
+  const trace = buildExecutionTrace([...normalizedEvents(), policy, outcome], currentApproval());
+  const action = trace.actions.find((item) => item.actionId === "evt_model_output_receipt");
+
+  assert.equal(action?.decision, "allow");
+  assert.deepEqual(
+    action?.policyChecks.map((check) => check.auditId),
+    ["audit_model_output_policy"],
+  );
+});

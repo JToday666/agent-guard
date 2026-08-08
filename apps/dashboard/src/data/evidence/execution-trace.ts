@@ -148,6 +148,18 @@ function isExplicitStart(event: NormalizedAuditEvidence): boolean {
   );
 }
 
+function isExecutionActionEvidence(event: NormalizedAuditEvidence): boolean {
+  if (event.recordType === "runtime_outcome" || isExplicitStart(event)) return true;
+  if (event.approval.approvalId) return true;
+  if (event.eventType === "context_assembled" || event.eventType === "model_input_prepared") {
+    return false;
+  }
+  if (event.eventType === "model_output_produced") {
+    return event.decision !== "allow" || event.intervention === "model_output_revision";
+  }
+  return true;
+}
+
 function actionStatus(
   action: Pick<ExecutionActionViewModel, "approval" | "decision" | "execution" | "phase">,
   hasOutcome: boolean,
@@ -298,6 +310,7 @@ export function buildExecutionTrace(
     grouped.set(event.actionId, group);
   }
   const actions = [...grouped.entries()]
+    .filter(([, actionEvents]) => actionEvents.some(isExecutionActionEvidence))
     .map(([actionId, actionEvents]) => buildAction(actionId, actionEvents, approvals))
     .sort(
       (left, right) =>
