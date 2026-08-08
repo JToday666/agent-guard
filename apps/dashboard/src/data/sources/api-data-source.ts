@@ -11,7 +11,12 @@ import type {
   GuardProvenanceDto,
   GuardTraceDetailDto,
 } from "../../api/guard-api-types";
-import { ApiError, requestHealth, requestJson } from "../../api/guard-http-client";
+import {
+  ApiError,
+  requestConditionalJson,
+  requestHealth,
+  requestJson,
+} from "../../api/guard-http-client";
 import {
   emptyEvaluationRun,
   mapAdapterStatus,
@@ -33,9 +38,9 @@ import type {
   ApprovalResolution,
   AuditIntegrity,
   ConfigAuditFindingRecord,
-  ProvenanceGraph,
 } from "../../types/dashboard";
 import type {
+  ConditionalRequestOptions,
   ConfigAuditFindingFilters,
   DashboardDataSource,
   EventFilters,
@@ -145,13 +150,22 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     );
   }
 
-  async getTraceDetail(traceId: string, signal?: AbortSignal) {
-    const detail = mapTraceDetail(
-      await requestJson<GuardTraceDetailDto>(`/traces/${encodeURIComponent(traceId)}`, {}, signal),
+  async getTraceDetail(traceId: string, options: ConditionalRequestOptions = {}) {
+    const response = await requestConditionalJson<GuardTraceDetailDto>(
+      `/traces/${encodeURIComponent(traceId)}`,
+      options.etag,
+      {},
+      options.signal,
     );
+    if (response.status === "not_modified") return response;
+    const detail = mapTraceDetail(response.value);
     return {
-      ...detail,
-      approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
+      status: "modified" as const,
+      etag: response.etag,
+      value: {
+        ...detail,
+        approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
+      },
     };
   }
 
@@ -173,13 +187,19 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     );
   }
 
-  async getTraceProvenance(traceId: string, signal?: AbortSignal): Promise<ProvenanceGraph> {
-    return mapProvenance(
-      await requestJson<GuardProvenanceDto>(
-        `/traces/${encodeURIComponent(traceId)}/provenance`,
-        {},
-        signal,
-      ),
+  async getTraceProvenance(traceId: string, options: ConditionalRequestOptions = {}) {
+    const response = await requestConditionalJson<GuardProvenanceDto>(
+      `/traces/${encodeURIComponent(traceId)}/provenance`,
+      options.etag,
+      {},
+      options.signal,
     );
+    return response.status === "not_modified"
+      ? response
+      : {
+          status: "modified" as const,
+          etag: response.etag,
+          value: mapProvenance(response.value),
+        };
   }
 }

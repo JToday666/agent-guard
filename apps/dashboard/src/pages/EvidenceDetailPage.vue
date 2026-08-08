@@ -116,63 +116,121 @@
           />
         </section>
 
-        <section class="trace-provenance section-divider" aria-labelledby="provenance-title">
-          <header class="section-header">
+        <section class="trace-workspace section-divider" aria-labelledby="trace-workspace-title">
+          <header class="trace-workspace__header">
             <div>
-              <h2 id="provenance-title">攻击溯源关系</h2>
-              <p>查看任务、来源、动作、资源、安全规则与执行结果之间的关联。</p>
+              <h2 id="trace-workspace-title">运行与证据</h2>
+              <p>从执行动态、安全依据和审计原文三个视角调查同一次智能体运行。</p>
             </div>
-            <span v-if="provenance" class="trace-provenance__count">
-              {{ provenance.nodes.length }} 节点 · {{ provenance.edges.length }} 关系
-            </span>
+            <nav class="trace-view-tabs" role="tablist" aria-label="证据视图">
+              <button
+                v-for="(view, index) in viewOptions"
+                :id="`trace-view-tab-${view.id}`"
+                :key="view.id"
+                type="button"
+                role="tab"
+                :aria-controls="`trace-view-panel-${view.id}`"
+                :aria-selected="activeView === view.id"
+                :class="{ 'is-active': activeView === view.id }"
+                :tabindex="activeView === view.id ? 0 : -1"
+                @click="handleViewChange(view.id)"
+                @keydown="handleTabKeydown($event, index)"
+              >
+                {{ view.label }}
+              </button>
+            </nav>
           </header>
-          <InlineNotice v-if="provenanceError" title="溯源关系刷新未完成" tone="warning">
-            <p>{{ provenanceError }}</p>
-            <button class="inline-retry" type="button" @click="handleProvenanceRetry">
-              重新加载溯源关系
-            </button>
-          </InlineNotice>
-          <div v-if="provenance" class="provenance-layout">
-            <ProvenanceGraph
-              :key="traceId"
-              :graph="provenance"
-              :selected-node-id="selectedProvenanceNodeId"
-              @select-node="handleSelectProvenanceNode"
-            />
-            <ProvenanceInspector
-              :event-ids="traceEvents.map((event) => event.id)"
-              :graph="provenance"
-              :node="selectedProvenanceNode"
+
+          <div
+            v-show="activeView === 'execution'"
+            id="trace-view-panel-execution"
+            class="trace-view-panel"
+            role="tabpanel"
+            aria-labelledby="trace-view-tab-execution"
+          >
+            <ExecutionTrace
+              :polling-state="tracePollingState"
+              :selected-action-id="selectedActionId"
+              :trace="executionTrace"
+              @select-action="handleSelectAction"
               @select-event="handleTimelineSelectEvent"
+              @show-audit="handleViewChange('audit')"
+              @show-provenance="handleShowProvenance"
             />
           </div>
-          <p v-else-if="!provenanceError" class="provenance-placeholder">正在加载溯源关系…</p>
-        </section>
 
-        <section class="trace-records section-divider" aria-labelledby="trace-records-title">
-          <header class="section-header">
-            <div>
-              <h2 id="trace-records-title">事件时间线与详细证据</h2>
-              <p>按发生顺序查看全部审计记录；重复的策略记录只在结论汇总中合并。</p>
+          <div
+            v-show="activeView === 'provenance'"
+            id="trace-view-panel-provenance"
+            class="trace-view-panel trace-provenance"
+            role="tabpanel"
+            aria-labelledby="trace-view-tab-provenance"
+          >
+            <div class="trace-provenance__toolbar">
+              <div>
+                <strong>溯源关系</strong>
+                <span v-if="provenance" class="trace-provenance__count">
+                  {{ provenance.nodes.length }} 节点 · {{ provenance.edges.length }} 关系
+                </span>
+              </div>
+              <button type="button" class="inline-retry" @click="handleProvenanceRetry">
+                更新溯源关系
+              </button>
             </div>
-          </header>
-          <div class="trace-records__layout">
-            <section class="trace-events" aria-labelledby="trace-events-title">
-              <header>
-                <h3 id="trace-events-title">事件时间线</h3>
-                <span>{{ traceEvents.length }} 条审计记录</span>
-              </header>
-              <TraceTimeline
-                :events="traceEvents"
-                :normalized-events="evidenceModel.events"
-                :selected-event-id="selectedEventId"
-                :trace-id="traceId"
+            <p v-if="provenanceSyncMessage" class="trace-provenance__sync" role="status">
+              {{ provenanceSyncMessage }}
+            </p>
+            <InlineNotice v-if="provenanceError" title="溯源关系刷新未完成" tone="warning">
+              <p>{{ provenanceError }}</p>
+              <button class="inline-retry" type="button" @click="handleProvenanceRetry">
+                重新加载溯源关系
+              </button>
+            </InlineNotice>
+            <div v-if="provenance" class="provenance-layout">
+              <ProvenanceGraph
+                :key="traceId"
+                :graph="provenance"
+                :selected-node-id="selectedProvenanceNodeId"
+                @select-node="handleSelectProvenanceNode"
+              />
+              <ProvenanceInspector
+                :event-ids="traceEvents.map((event) => event.id)"
+                :graph="provenance"
+                :node="selectedProvenanceNode"
                 @select-event="handleTimelineSelectEvent"
               />
-            </section>
-            <aside class="trace-dossier" aria-label="规则、风险、策略和原始证据">
-              <EvidenceDossier :evidence="evidenceModel" />
-            </aside>
+            </div>
+            <p v-else-if="!provenanceError" class="provenance-placeholder">正在加载溯源关系…</p>
+          </div>
+
+          <div
+            v-show="activeView === 'audit'"
+            id="trace-view-panel-audit"
+            class="trace-view-panel trace-records"
+            role="tabpanel"
+            aria-labelledby="trace-view-tab-audit"
+          >
+            <div class="trace-records__layout">
+              <section class="trace-events" aria-labelledby="trace-events-title">
+                <header>
+                  <div>
+                    <h3 id="trace-events-title">审计记录</h3>
+                    <p>按发生顺序保留每一条系统记录。</p>
+                  </div>
+                  <span>{{ traceEvents.length }} 条</span>
+                </header>
+                <AuditTimeline
+                  :events="traceEvents"
+                  :normalized-events="evidenceModel.events"
+                  :selected-event-id="selectedEventId"
+                  :trace-id="traceId"
+                  @select-event="handleTimelineSelectEvent"
+                />
+              </section>
+              <aside class="trace-dossier" aria-label="规则、风险、策略和原始证据">
+                <EvidenceDossier :evidence="evidenceModel" />
+              </aside>
+            </div>
           </div>
         </section>
       </template>
@@ -192,7 +250,16 @@
         v-if="selectedEvent"
         :event="selectedEvent"
         :normalized="selectedNormalizedEvent"
-      />
+      >
+        <div v-if="selectedActionId" class="event-link-actions" aria-label="关联运行视图">
+          <button type="button" class="page-action" @click="handleSelectAction(selectedActionId)">
+            查看执行动作
+          </button>
+          <button type="button" class="page-action" @click="handleShowProvenance(selectedActionId)">
+            查看溯源位置
+          </button>
+        </div>
+      </EventEvidence>
       <EmptyState
         v-else
         title="未找到事件"
@@ -204,37 +271,62 @@
 
 <script setup lang="ts">
 import { ShieldAlert } from "@lucide/vue";
-import { computed, defineAsyncComponent, nextTick, watch } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onActivated,
+  onDeactivated,
+  onUnmounted,
+  ref,
+  watch,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import DataFreshness from "../components/common/DataFreshness.vue";
 import DetailDrawer from "../components/common/DetailDrawer.vue";
 import EmptyState from "../components/common/EmptyState.vue";
 import InlineNotice from "../components/common/InlineNotice.vue";
+import AuditTimeline from "../components/evidence/AuditTimeline.vue";
 import EvidenceDossier from "../components/evidence/EvidenceDossier.vue";
 import EvidenceFactStrip from "../components/evidence/EvidenceFactStrip.vue";
 import EvidenceStageFlow from "../components/evidence/EvidenceStageFlow.vue";
 import EventEvidence from "../components/evidence/EventEvidence.vue";
+import ExecutionTrace from "../components/evidence/ExecutionTrace.vue";
 import ProvenanceInspector from "../components/evidence/ProvenanceInspector.vue";
-import TraceTimeline from "../components/evidence/TraceTimeline.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
+import { buildExecutionTrace, shouldContinueTracePolling } from "../data/evidence/execution-trace";
 import { buildTraceEvidenceViewModel } from "../data/evidence/trace-evidence";
 import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
-import type { ProvenanceNode } from "../types/dashboard";
+import type { ProvenanceNode, TracePollingState } from "../types/dashboard";
 import { formatDashboardDateTime } from "../utils/dashboard-formatters";
 import { mergeInvestigationQuery } from "../utils/investigation-query";
-import { findProvenanceNodeForEvent, resolveProvenanceEventId } from "../utils/provenance";
+import { findProvenanceNodeForAction, resolveProvenanceEventId } from "../utils/provenance";
 import { ruleLabel } from "../utils/rule-display";
 
 defineOptions({ name: "EvidenceDetailPage" });
+type EvidenceDetailView = "execution" | "provenance" | "audit";
+const viewOptions = [
+  { id: "execution", label: "执行轨迹" },
+  { id: "provenance", label: "溯源关系" },
+  { id: "audit", label: "审计记录" },
+] as const;
+const idlePollingState: TracePollingState = {
+  lastCheckedAt: null,
+  retryInMs: null,
+  status: "idle",
+};
 const ProvenanceGraph = defineAsyncComponent(
   () => import("../components/evidence/ProvenanceGraph.vue"),
 );
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
+const isPageActive = ref(false);
+const provenanceSyncMessage = ref("");
+const finalProvenanceTraceId = ref("");
 const traceId = computed(() => String(route.params.trace_id ?? ""));
 const traceDetail = computed(() => store.traceDetails[traceId.value]);
 const traceDetailError = computed(() => store.traceDetailErrors[traceId.value] ?? "");
@@ -255,8 +347,38 @@ const evidenceModel = computed(() =>
     traceEvents.value,
     traceApprovals.value,
     store.auditIntegrity,
+    traceDetail.value?.auditWindow,
   ),
 );
+const executionTrace = computed(() =>
+  buildExecutionTrace(evidenceModel.value.events, traceApprovals.value),
+);
+const tracePollingState = computed(
+  () => store.tracePollingStates[traceId.value] ?? idlePollingState,
+);
+const selectedActionId = computed(() => {
+  if (typeof route.query.action_id === "string") return route.query.action_id;
+  if (typeof route.query.event_id !== "string") return "";
+  return (
+    evidenceModel.value.events.find((event) => event.auditId === route.query.event_id)?.actionId ??
+    ""
+  );
+});
+const requestedView = computed(() =>
+  typeof route.query.view === "string" ? route.query.view : "",
+);
+const activeView = computed<EvidenceDetailView>(() => {
+  if (
+    requestedView.value === "execution" ||
+    requestedView.value === "provenance" ||
+    requestedView.value === "audit"
+  ) {
+    return requestedView.value;
+  }
+  if (typeof route.query.node_id === "string") return "provenance";
+  if (typeof route.query.event_id === "string") return "audit";
+  return "execution";
+});
 const detailIndex = computed(() => buildInvestigationIndex(traceEvents.value));
 const selectedEventId = computed(() =>
   typeof route.query.event_id === "string" ? route.query.event_id : "",
@@ -273,14 +395,17 @@ const selectedNormalizedEvent = computed(() =>
 const provenance = computed(() => store.provenanceByTrace[traceId.value]);
 const provenanceError = computed(() => store.provenanceErrors[traceId.value] ?? "");
 const selectedProvenanceNodeId = computed<string | undefined>(() =>
-  typeof route.query.prov_node === "string" ? route.query.prov_node : undefined,
+  typeof route.query.node_id === "string" ? route.query.node_id : undefined,
 );
 const selectedProvenanceNode = computed<ProvenanceNode | undefined>(() =>
   provenance.value?.nodes.find((node) => node.nodeId === selectedProvenanceNodeId.value),
 );
 const eventDetailRequested = computed(() => route.query.event_detail === "1");
+const isLegacyEventDeepLink = computed(() =>
+  Boolean(selectedEventId.value && !requestedView.value),
+);
 const isEventDrawerOpen = computed(() =>
-  Boolean(selectedEventId.value && (eventDetailRequested.value || !selectedProvenanceNodeId.value)),
+  Boolean(selectedEventId.value && (eventDetailRequested.value || isLegacyEventDeepLink.value)),
 );
 const primaryRules = computed(() => evidenceModel.value.primary?.ruleHits.slice(0, 3) ?? []);
 const traceRange = computed(() => {
@@ -296,27 +421,99 @@ const conclusionConfidenceLabel = computed(() => {
   return "证据不足";
 });
 
-function handleSelectProvenanceNode(nodeId: string) {
-  const node = provenance.value?.nodes.find((item) => item.nodeId === nodeId);
-  const eventId = resolveProvenanceEventId(node, traceEvents.value);
-  void router.replace({
+async function handleViewChange(view: EvidenceDetailView): Promise<void> {
+  await router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, {
       event_detail: undefined,
+      view,
+    }),
+  });
+}
+
+async function handleTabKeydown(event: KeyboardEvent, index: number): Promise<void> {
+  let nextIndex: number;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    nextIndex = (index + 1) % viewOptions.length;
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    nextIndex = (index - 1 + viewOptions.length) % viewOptions.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = viewOptions.length - 1;
+  } else {
+    return;
+  }
+  event.preventDefault();
+  const nextView = viewOptions[nextIndex]!.id;
+  await handleViewChange(nextView);
+  await nextTick();
+  document.getElementById(`trace-view-tab-${nextView}`)?.focus();
+}
+
+function handleSelectAction(actionId: string) {
+  void router.replace({
+    path: `/evidence/${traceId.value}`,
+    query: mergeInvestigationQuery(route.query, {
+      action_id: actionId,
+      event_detail: undefined,
+      event_id: undefined,
+      node_id: undefined,
+      view: "execution",
+    }),
+  });
+}
+
+function handleSelectProvenanceNode(nodeId: string) {
+  const node = provenance.value?.nodes.find((item) => item.nodeId === nodeId);
+  const eventId = resolveProvenanceEventId(node, traceEvents.value);
+  const eventActionId = evidenceModel.value.events.find(
+    (event) => event.auditId === eventId,
+  )?.actionId;
+  const actionId = (node?.kind === "action" ? node.refId : eventActionId) ?? undefined;
+  void router.replace({
+    path: `/evidence/${traceId.value}`,
+    query: mergeInvestigationQuery(route.query, {
+      action_id: actionId,
+      event_detail: undefined,
       event_id: eventId,
-      prov_node: nodeId,
+      node_id: nodeId,
+      view: "provenance",
     }),
   });
 }
 
 function handleTimelineSelectEvent(eventId: string) {
-  const matchNode = findProvenanceNodeForEvent(provenance.value?.nodes ?? [], eventId);
+  const actionId = evidenceModel.value.events.find((event) => event.auditId === eventId)?.actionId;
   void router.replace({
     path: `/evidence/${traceId.value}`,
     query: mergeInvestigationQuery(route.query, {
+      action_id: actionId ?? undefined,
       event_detail: "1",
       event_id: eventId,
-      prov_node: matchNode?.nodeId,
+      node_id: undefined,
+      view: "audit",
+    }),
+  });
+}
+
+async function handleShowProvenance(actionId: string) {
+  await store.loadTraceProvenance(traceId.value, true);
+  const node = findProvenanceNodeForAction(
+    store.provenanceByTrace[traceId.value]?.nodes ?? [],
+    actionId,
+  );
+  provenanceSyncMessage.value = node
+    ? "已定位该动作的安全依据。"
+    : "最新溯源记录中尚未找到该动作节点，审计记录仍可继续查看。";
+  await router.replace({
+    path: `/evidence/${traceId.value}`,
+    query: mergeInvestigationQuery(route.query, {
+      action_id: actionId,
+      event_detail: undefined,
+      event_id: undefined,
+      node_id: node?.nodeId,
+      view: "provenance",
     }),
   });
 }
@@ -327,6 +524,7 @@ function handleCloseEvidence() {
     query: mergeInvestigationQuery(route.query, {
       event_detail: undefined,
       event_id: undefined,
+      view: activeView.value,
     }),
   });
 }
@@ -335,14 +533,17 @@ function handleTraceRetry() {
   void store.loadTraceDetail(traceId.value, true);
 }
 
-function handleProvenanceRetry() {
-  void store.loadTraceProvenance(traceId.value, true);
+async function handleProvenanceRetry() {
+  provenanceSyncMessage.value = "";
+  const result = await store.loadTraceProvenance(traceId.value, true);
+  if (result === "modified") provenanceSyncMessage.value = "已加载最新溯源证据。";
+  else if (result === "not_modified") provenanceSyncMessage.value = "当前已是最新溯源证据。";
 }
 
 watch(
-  [selectedEventId, traceEvents, selectedProvenanceNodeId, eventDetailRequested],
-  async ([eventId, , nodeId, detailRequested]) => {
-    if (!eventId || (nodeId && !detailRequested)) return;
+  [selectedEventId, traceEvents, activeView],
+  async ([eventId, , view]) => {
+    if (!eventId || view !== "audit") return;
     await nextTick();
     document
       .querySelector<HTMLElement>(`[data-event-id="${CSS.escape(eventId)}"]`)
@@ -351,28 +552,80 @@ watch(
   { immediate: true },
 );
 
-watch([selectedEventId, provenance, selectedProvenanceNodeId], ([eventId, graph, nodeId]) => {
-  if (!eventId || !graph || nodeId) return;
-  const node = findProvenanceNodeForEvent(graph.nodes, eventId);
-  if (!node) return;
-  void router.replace({
-    path: `/evidence/${traceId.value}`,
-    query: mergeInvestigationQuery(route.query, {
-      event_detail: "1",
-      prov_node: node.nodeId,
-    }),
-  });
-});
-
 watch(
-  traceId,
-  (value) => {
-    if (!value) return;
-    void store.loadTraceDetail(value);
-    void store.loadTraceProvenance(value);
+  [selectedActionId, activeView],
+  async ([actionId, view]) => {
+    if (!actionId || view !== "execution") return;
+    await nextTick();
+    document
+      .querySelector<HTMLElement>(`[data-action-id="${CSS.escape(actionId)}"]`)
+      ?.scrollIntoView({ block: "center" });
   },
   { immediate: true },
 );
+
+watch(activeView, (view) => {
+  if (!isPageActive.value || view !== "provenance" || !traceId.value) return;
+  void handleProvenanceRetry();
+});
+
+watch(
+  [activeView, selectedActionId, selectedProvenanceNodeId, provenance],
+  ([view, actionId, nodeId, graph]) => {
+    if (view !== "provenance" || !actionId || nodeId || !graph) return;
+    const node = findProvenanceNodeForAction(graph.nodes, actionId);
+    if (!node) return;
+    void router.replace({
+      path: `/evidence/${traceId.value}`,
+      query: mergeInvestigationQuery(route.query, { node_id: node.nodeId }),
+    });
+  },
+  { immediate: true },
+);
+
+watch(traceId, (value, previous) => {
+  provenanceSyncMessage.value = "";
+  finalProvenanceTraceId.value = "";
+  if (!isPageActive.value || !value) return;
+  if (previous && previous !== value) store.stopTracePolling();
+  store.startTracePolling(value);
+});
+
+watch(
+  executionTrace,
+  (trace) => {
+    if (!isPageActive.value || !traceId.value) return;
+    if (shouldContinueTracePolling(trace)) {
+      store.startTracePolling(traceId.value);
+      return;
+    }
+    store.stopTracePolling();
+    if (finalProvenanceTraceId.value === traceId.value) return;
+    finalProvenanceTraceId.value = traceId.value;
+    void store.loadTraceProvenance(traceId.value, true);
+  },
+  { immediate: true },
+);
+
+onActivated(() => {
+  isPageActive.value = true;
+  if (traceId.value && shouldContinueTracePolling(executionTrace.value)) {
+    store.startTracePolling(traceId.value);
+  } else if (traceId.value && finalProvenanceTraceId.value !== traceId.value) {
+    finalProvenanceTraceId.value = traceId.value;
+    void store.loadTraceProvenance(traceId.value, true);
+  }
+  if (activeView.value === "provenance") void handleProvenanceRetry();
+});
+
+onDeactivated(() => {
+  isPageActive.value = false;
+  store.stopTracePolling("paused");
+});
+
+onUnmounted(() => {
+  store.stopTracePolling();
+});
 </script>
 
 <style scoped lang="scss">
@@ -543,10 +796,114 @@ watch(
 }
 
 .evidence-stage-section,
+.trace-workspace,
 .trace-provenance,
 .trace-records {
   display: grid;
   gap: var(--space-4);
+}
+
+.event-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.trace-workspace {
+  min-width: 0;
+}
+
+.trace-workspace__header {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+
+.trace-workspace__header > div:first-child {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.trace-workspace__header h2,
+.trace-workspace__header p,
+.trace-provenance__toolbar strong,
+.trace-provenance__sync,
+.trace-events > header p {
+  margin: 0;
+}
+
+.trace-workspace__header p,
+.trace-events > header p {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-12);
+}
+
+.trace-view-tabs {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(7rem, auto));
+  max-width: 100%;
+  padding: 0.2rem;
+}
+
+.trace-view-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-2) - 2px);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-semibold);
+  min-height: 2.5rem;
+  padding: 0 var(--space-4);
+}
+
+.trace-view-tabs button:hover {
+  color: var(--color-link);
+}
+
+.trace-view-tabs button.is-active {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-subtle);
+  color: var(--color-text);
+}
+
+.trace-view-tabs button:focus-visible,
+.inline-retry:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.trace-view-panel {
+  min-width: 0;
+}
+
+.trace-provenance__toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.trace-provenance__toolbar > div {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.trace-provenance__sync {
+  background: var(--color-active-soft);
+  border-left: 3px solid var(--color-active);
+  color: var(--color-text-muted);
+  padding: var(--space-2) var(--space-3);
 }
 
 .trace-provenance__count {
@@ -601,6 +958,11 @@ watch(
 .trace-events h3 {
   font-size: var(--font-size-14);
   margin: 0;
+}
+
+.trace-events > header > div {
+  display: grid;
+  gap: var(--space-1);
 }
 
 .trace-events > header span {
@@ -675,6 +1037,19 @@ watch(
 
   .evidence-hero__outcome {
     grid-column: auto;
+  }
+
+  .trace-workspace__header {
+    align-items: stretch;
+  }
+
+  .trace-view-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .trace-view-tabs button {
+    padding-inline: var(--space-2);
   }
 }
 </style>

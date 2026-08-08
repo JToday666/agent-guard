@@ -145,6 +145,7 @@ test("reduced motion removes panel and dialog animations", async ({ page }) => {
 
 test("provenance graph keeps node text readable without label overlap", async ({ page }) => {
   await page.goto("/evidence/trace_002");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
 
   const graph = page.locator(".provenance-workbench");
   await expect(graph).toBeVisible();
@@ -153,7 +154,7 @@ test("provenance graph keeps node text readable without label overlap", async ({
   const contextNode = graph.locator(".prov-node--task").first();
   await contextNode.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/prov_node=/);
+  await expect(page).toHaveURL(/node_id=/);
   await expect(graph.locator(".vue-flow__edge-text").first()).toBeVisible();
 
   const layout = await graph.evaluate((root) => {
@@ -220,7 +221,7 @@ test("provenance graph keeps node text readable without label overlap", async ({
   expect(layout.edgeLabelOverlaps).toBe(0);
   expect(layout.unclippedText).toBe(0);
 
-  await expect(page).toHaveURL(/prov_node=/);
+  await expect(page).toHaveURL(/node_id=/);
   await expect(contextNode).toHaveAttribute("aria-pressed", "true");
   await expect(graph.locator(".prov-flow-node--dimmed").first()).toBeVisible();
 });

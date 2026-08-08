@@ -1,9 +1,20 @@
 import type { AuditEventRow, ProvenanceNode } from "../types/dashboard";
 
 const RELATION_LABELS: Readonly<Record<string, string>> = {
+  assembled_into: "汇入上下文",
+  detected_by: "触发检测",
   evaluated_to: "判定",
+  evaluated_under: "依据策略",
+  executed_as: "形成执行结果",
+  influenced: "影响",
+  produced: "产生结果",
+  proposed_action: "提出动作",
   recorded_as: "记录",
+  received_from: "接收来源",
+  released_by: "审批处置",
+  requested_approval: "请求审批",
   reviewed_by: "复核",
+  targets: "访问目标",
   生成审计: "审计",
   规则判断: "判断",
   风险复核: "复核",
@@ -54,4 +65,11 @@ export function findProvenanceNodeForEvent(
     const metadataEventId = node.metadata.event_id;
     return metadataEventId === eventId || node.refId === eventId;
   });
+}
+
+export function findProvenanceNodeForAction(
+  nodes: readonly ProvenanceNode[],
+  actionId: string,
+): ProvenanceNode | undefined {
+  return nodes.find((node) => node.kind === "action" && node.refId === actionId);
 }

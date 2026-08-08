@@ -1,7 +1,7 @@
-import { dashboardEnv } from "../config/dashboard-env";
-import type { GuardHealthDto } from "./guard-api-types";
-import { getPublicApiErrorMessage } from "./public-api-error";
-import { createTimedRequestSignal } from "./request-lifecycle";
+import { dashboardEnv } from "../config/dashboard-env.ts";
+import type { GuardHealthDto } from "./guard-api-types.ts";
+import { getPublicApiErrorMessage } from "./public-api-error.ts";
+import { createTimedRequestSignal } from "./request-lifecycle.ts";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -14,6 +14,10 @@ export class ApiError extends Error {
     this.code = code;
   }
 }
+
+export type ConditionalJsonResponse<T> =
+  | { status: "modified"; value: T; etag: string | null }
+  | { status: "not_modified"; etag: string | null };
 
 async function readErrorCode(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") ?? "";
@@ -90,6 +94,39 @@ export async function requestJson<T>(
   }
 
   return readJsonResponse<T>(response);
+}
+
+export async function requestConditionalJson<T>(
+  path: string,
+  etag?: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<ConditionalJsonResponse<T>> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  if (etag) headers.set("If-None-Match", etag);
+  const response = await request(
+    `${dashboardEnv.apiBaseUrl}${path}`,
+    {
+      ...init,
+      credentials: "include",
+      headers,
+    },
+    signal ?? init.signal,
+  );
+  const responseEtag = response.headers.get("etag");
+  if (response.status === 304) {
+    return { status: "not_modified", etag: responseEtag ?? etag ?? null };
+  }
+  if (!response.ok) {
+    const code = await readErrorCode(response);
+    throw new ApiError(response.status, code, getPublicApiErrorMessage(response.status, code));
+  }
+  return {
+    status: "modified",
+    value: await readJsonResponse<T>(response),
+    etag: responseEtag,
+  };
 }
 
 export async function requestHealth(signal?: AbortSignal): Promise<GuardHealthDto> {

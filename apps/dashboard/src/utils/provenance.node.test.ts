@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { ProvenanceNode } from "../types/dashboard.ts";
 import {
+  findProvenanceNodeForAction,
   findProvenanceNodeForEvent,
   getProvenanceRelationLabel,
   getProvenanceRiskScore,
@@ -23,10 +24,25 @@ function node(overrides: Partial<ProvenanceNode> = {}): ProvenanceNode {
 }
 
 test("maps canonical Guard API provenance relations to concise Chinese labels", () => {
+  assert.equal(getProvenanceRelationLabel("received_from"), "接收来源");
+  assert.equal(getProvenanceRelationLabel("proposed_action"), "提出动作");
+  assert.equal(getProvenanceRelationLabel("requested_approval"), "请求审批");
+  assert.equal(getProvenanceRelationLabel("executed_as"), "形成执行结果");
   assert.equal(getProvenanceRelationLabel("evaluated_to"), "判定");
   assert.equal(getProvenanceRelationLabel("recorded_as"), "记录");
   assert.equal(getProvenanceRelationLabel("reviewed_by"), "复核");
   assert.equal(getProvenanceRelationLabel("future_relation"), "");
+});
+
+test("locates actions only by exact kind and raw action reference", () => {
+  const nodes = [
+    node({ kind: "audit", refId: "call_1" }),
+    node({ kind: "action", nodeId: "action:call_1", refId: "call_1" }),
+    node({ kind: "action", nodeId: "action:action:call_2", refId: "action:call_2" }),
+  ];
+
+  assert.equal(findProvenanceNodeForAction(nodes, "call_1")?.nodeId, "action:call_1");
+  assert.equal(findProvenanceNodeForAction(nodes, "call_2"), undefined);
 });
 
 test("reads only canonical snake-case risk metadata", () => {

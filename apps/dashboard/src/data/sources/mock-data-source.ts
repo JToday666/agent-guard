@@ -33,6 +33,7 @@ import {
   OPENCLAW_REQUIRED_HOOKS,
 } from "../../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import type {
+  ConditionalRequestOptions,
   ConfigAuditFindingFilters,
   DashboardDataSource,
   EventFilters,
@@ -350,8 +351,23 @@ function createTraceDetail(traceId: string, approvalDtos: GuardApprovalDto[]): G
     trace_id: traceId,
     audit_events: events,
     approvals: approvalDtos.filter((approval) => approval.trace_id === traceId),
+    audit_window: {
+      limit: 1000,
+      returned_count: events.length,
+      has_more: false,
+    },
     metrics: createMetrics(events),
   };
+}
+
+function mockEtag(value: unknown): string {
+  const serialized = JSON.stringify(value);
+  let hash = 2_166_136_261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `"mock-${(hash >>> 0).toString(16)}"`;
 }
 
 function toProvenanceDto(graph: ProvenanceGraph): GuardProvenanceDto {
@@ -449,12 +465,19 @@ export class MockDashboardDataSource implements DashboardDataSource {
     return mapAdapterStatus(adapterId === "openclaw" ? mockOpenClawStatus : unknownAdapterStatus);
   }
 
-  async getTraceDetail(traceId: string, signal?: AbortSignal) {
-    await wait(this.delayMs, signal);
-    const detail = mapTraceDetail(createTraceDetail(traceId, this.approvalDtos));
+  async getTraceDetail(traceId: string, options: ConditionalRequestOptions = {}) {
+    await wait(this.delayMs, options.signal);
+    const dto = createTraceDetail(traceId, this.approvalDtos);
+    const etag = mockEtag(dto);
+    if (etag === options.etag) return { status: "not_modified" as const, etag };
+    const detail = mapTraceDetail(dto);
     return {
-      ...detail,
-      approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
+      status: "modified" as const,
+      etag,
+      value: {
+        ...detail,
+        approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
+      },
     };
   }
 
@@ -473,8 +496,8 @@ export class MockDashboardDataSource implements DashboardDataSource {
     return mapAuditIntegrity(mockAuditIntegrity);
   }
 
-  async getTraceProvenance(traceId: string, signal?: AbortSignal) {
-    await wait(this.delayMs, signal);
+  async getTraceProvenance(traceId: string, options: ConditionalRequestOptions = {}) {
+    await wait(this.delayMs, options.signal);
     const events = this.filteredAuditEvents({ traceId });
     const approvals = mergeApprovalsWithAuditEvidence(
       this.approvalDtos.filter((approval) => approval.trace_id === traceId).map(mapApproval),
@@ -486,6 +509,10 @@ export class MockDashboardDataSource implements DashboardDataSource {
       approvals,
       mapAuditIntegrity(mockAuditIntegrity),
     );
-    return mapProvenance(toProvenanceDto(buildProvenanceGraphFromEvidence(evidence)));
+    const dto = toProvenanceDto(buildProvenanceGraphFromEvidence(evidence));
+    const etag = mockEtag(dto);
+    return etag === options.etag
+      ? { status: "not_modified" as const, etag }
+      : { status: "modified" as const, etag, value: mapProvenance(dto) };
   }
 }

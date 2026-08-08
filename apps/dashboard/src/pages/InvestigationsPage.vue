@@ -231,7 +231,7 @@
             </div>
             <RouterLink :to="`/evidence/${selectedEvent.traceId}`">查看完整证据链</RouterLink>
           </header>
-          <TraceTimeline :events="selectedTraceEvents.slice(0, 4)" />
+          <AuditTimeline :events="selectedTraceEvents.slice(0, 4)" />
         </section>
       </EventEvidence>
       <EmptyState v-else title="未找到事件" message="事件可能已离开当前数据窗口。" />
@@ -284,8 +284,8 @@ defineOptions({ name: "InvestigationsPage" });
 const EventEvidence = defineAsyncComponent(
   () => import("../components/evidence/EventEvidence.vue"),
 );
-const TraceTimeline = defineAsyncComponent(
-  () => import("../components/evidence/TraceTimeline.vue"),
+const AuditTimeline = defineAsyncComponent(
+  () => import("../components/evidence/AuditTimeline.vue"),
 );
 const PAGE_SIZE = 20;
 const route = useRoute();

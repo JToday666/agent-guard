@@ -71,7 +71,7 @@ import {
 } from "../../utils/dashboard-formatters";
 import StatusBadge from "../common/StatusBadge.vue";
 
-defineOptions({ name: "TraceTimeline" });
+defineOptions({ name: "AuditTimeline" });
 const props = defineProps<{
   events: AuditEventRow[];
   normalizedEvents?: NormalizedAuditEvidence[];

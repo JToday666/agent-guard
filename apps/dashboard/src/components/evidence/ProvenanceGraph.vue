@@ -1,6 +1,7 @@
 <template>
   <div
     class="provenance-workbench"
+    :aria-busy="isLayouting"
     :class="[
       `provenance-workbench--${zoomBand}`,
       {
@@ -272,6 +273,13 @@ interface PositionedNode {
   y: number;
 }
 
+interface ViewportSnapshot {
+  anchorId: string | null;
+  anchorScreenX: number | null;
+  anchorScreenY: number | null;
+  viewport: ViewportTransform;
+}
+
 const LARGE_GRAPH_THRESHOLD = 24;
 const LAYOUT_CACHE_MAX_ENTRIES = 24;
 const NODE_WIDTH = 220;
@@ -282,7 +290,7 @@ const elk = new ELK({
   workerFactory: () => new ElkWorker(),
 });
 const flowId = `provenance-${props.graph.traceId}`;
-const { fitView, setCenter, updateNode, zoomTo } = useVueFlow(flowId);
+const { fitView, setCenter, setViewport, updateNode, zoomTo } = useVueFlow(flowId);
 const flowNodes = ref<Node<ProvenanceNodeData>[]>([]);
 const isCompact = ref(false);
 const isFullscreen = ref(false);
@@ -304,6 +312,8 @@ let layoutGeneration = 0;
 let positionByNodeId = new Map<string, PositionedNode>();
 let compactMedia: MediaQueryList | null = null;
 let motionMedia: MediaQueryList | null = null;
+let pendingViewportSnapshot: ViewportSnapshot | null = null;
+let latestViewport: ViewportTransform | null = null;
 
 const phaseDefinitions = [
   { id: "input_trust", index: "01", short: "输入", title: "输入与信任" },
@@ -640,6 +650,7 @@ async function runLayout(): Promise<void> {
   if (!visibleNodes.value.length) {
     flowNodes.value = [];
     isLayouting.value = false;
+    pendingViewportSnapshot = null;
     return;
   }
   const key = layoutKey();
@@ -734,12 +745,20 @@ async function runLayout(): Promise<void> {
     });
   }
   flowNodes.value = nextNodes;
-  isLayouting.value = false;
   await nextTick();
   await new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
   });
+  if (generation !== layoutGeneration) return;
+  const viewportSnapshot = pendingViewportSnapshot;
+  pendingViewportSnapshot = null;
+  if (viewportSnapshot) {
+    await restoreViewport(viewportSnapshot);
+    isLayouting.value = false;
+    return;
+  }
   await positionInitialCanvas();
+  isLayouting.value = false;
 }
 
 function relationType(edge: ProvenanceEdge): string {
@@ -842,6 +861,7 @@ function handleEdgeMouseLeave() {
 }
 
 function handleViewportChange(viewport: ViewportTransform) {
+  latestViewport = { ...viewport };
   viewportZoom.value = viewport.zoom;
 }
 
@@ -917,12 +937,74 @@ async function positionInitialCanvas() {
   await fitCanvas();
 }
 
+function captureViewportSnapshot(): ViewportSnapshot | null {
+  const viewport = latestViewport;
+  if (!viewport) return null;
+  const canvas = document.getElementById(flowId);
+  const graphCenter = canvas
+    ? {
+        x: (canvas.clientWidth / 2 - viewport.x) / viewport.zoom,
+        y: (canvas.clientHeight / 2 - viewport.y) / viewport.zoom,
+      }
+    : null;
+  const selectedPosition = props.selectedNodeId
+    ? positionByNodeId.get(props.selectedNodeId)
+    : undefined;
+  const anchor =
+    selectedPosition ??
+    (graphCenter
+      ? [...positionByNodeId.values()].sort((left, right) => {
+          const leftDistance =
+            (left.x + NODE_WIDTH / 2 - graphCenter.x) ** 2 +
+            (left.y + NODE_HEIGHT / 2 - graphCenter.y) ** 2;
+          const rightDistance =
+            (right.x + NODE_WIDTH / 2 - graphCenter.x) ** 2 +
+            (right.y + NODE_HEIGHT / 2 - graphCenter.y) ** 2;
+          return leftDistance - rightDistance || left.id.localeCompare(right.id);
+        })[0]
+      : undefined);
+  return {
+    anchorId: anchor?.id ?? null,
+    anchorScreenX: anchor ? (anchor.x + NODE_WIDTH / 2) * viewport.zoom + viewport.x : null,
+    anchorScreenY: anchor ? (anchor.y + NODE_HEIGHT / 2) * viewport.zoom + viewport.y : null,
+    viewport,
+  };
+}
+
+async function restoreViewport(snapshot: ViewportSnapshot): Promise<void> {
+  const anchor = snapshot.anchorId ? positionByNodeId.get(snapshot.anchorId) : undefined;
+  if (anchor && snapshot.anchorScreenX !== null && snapshot.anchorScreenY !== null) {
+    await setViewport(
+      {
+        x: snapshot.anchorScreenX - (anchor.x + NODE_WIDTH / 2) * snapshot.viewport.zoom,
+        y: snapshot.anchorScreenY - (anchor.y + NODE_HEIGHT / 2) * snapshot.viewport.zoom,
+        zoom: snapshot.viewport.zoom,
+      },
+      { duration: 0 },
+    );
+    return;
+  }
+  await setViewport(snapshot.viewport, { duration: 0 });
+}
+
 function updateNodeContextClasses() {
   const context = contextNodeIds.value;
   (flowNodes.value as unknown as Array<{ id: string }>).forEach((node) => {
     updateNode(node.id, {
       class:
         !context || context.has(node.id) ? "prov-flow-node--context" : "prov-flow-node--dimmed",
+    });
+  });
+}
+
+function syncFlowNodeData() {
+  const latestNodes = nodeById.value;
+  (flowNodes.value as unknown as Array<{ id: string }>).forEach((flowNode) => {
+    const node = latestNodes.get(flowNode.id);
+    if (!node) return;
+    updateNode(flowNode.id, {
+      ariaLabel: `${kindLabel(node.kind)}：${nodeLabel(node.label, node.kind)}`,
+      data: { ...node, phase: nodePhase(node) },
     });
   });
 }
@@ -965,12 +1047,9 @@ function updateMediaState() {
 }
 
 watch(
-  () => [
-    props.graph.traceId,
-    props.graph.nodes.map((node) => node.nodeId).join("|"),
-    props.graph.edges.map((edge) => edge.edgeId).join("|"),
-  ],
-  () => {
+  () => props.graph.traceId,
+  (traceId, previousTraceId) => {
+    if (!previousTraceId || traceId === previousTraceId) return;
     viewMode.value =
       props.graph.nodes.length > LARGE_GRAPH_THRESHOLD ||
       props.graph.nodes.some((node) => node.metadata.critical === false)
@@ -978,7 +1057,30 @@ watch(
         : "all";
     collapsedPhases.value = new Set();
     activeKind.value = "all";
+    pendingViewportSnapshot = null;
   },
+);
+
+watch(
+  () =>
+    `${props.graph.nodes.map((node) => node.nodeId).join("|")}\u0000${props.graph.edges
+      .map((edge) => edge.edgeId)
+      .join("|")}`,
+  (graphKey, previousGraphKey) => {
+    if (!previousGraphKey || graphKey === previousGraphKey) return;
+    pendingViewportSnapshot = captureViewportSnapshot();
+    if (
+      activeKind.value !== "all" &&
+      !props.graph.nodes.some((node) => node.kind === activeKind.value)
+    ) {
+      activeKind.value = "all";
+    }
+  },
+);
+
+watch(
+  () => props.graph.nodes,
+  () => syncFlowNodeData(),
 );
 
 watch(

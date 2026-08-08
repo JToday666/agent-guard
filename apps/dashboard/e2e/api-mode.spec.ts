@@ -65,19 +65,34 @@ async function installApiRoutes(
     authenticated?: boolean;
     dropApprovalAfterResolveFailure?: boolean;
     evaluation?: Record<string, unknown>;
-    events?: Array<typeof eventDto>;
+    events?: Record<string, unknown>[];
     failConfigAudit?: boolean;
     health?: { database?: string; status: string };
     healthStatus?: number;
     provenance?: Record<string, unknown>;
     provenanceFailuresBeforeSuccess?: number;
+    provenanceSnapshots?: Array<{
+      etag: string;
+      graph: Record<string, unknown>;
+    }>;
     resolveApprovalStatus?: number;
+    traceSnapshots?: Array<{
+      approvals: Record<string, unknown>[];
+      etag: string;
+      events: Record<string, unknown>[];
+    }>;
     traceStatus?: number;
   } = {},
 ) {
   const authenticated = options.authenticated ?? true;
   let provenanceFailuresRemaining = options.provenanceFailuresBeforeSuccess ?? 0;
+  let provenanceSnapshotIndex = 0;
   let resolutionAttempted = false;
+  let traceSnapshotIndex = 0;
+  const traceConditionalHeaders: Array<string | null> = [];
+  const provenanceConditionalHeaders: Array<string | null> = [];
+  const traceEtag = '"trace-api-v1"';
+  const provenanceEtag = '"provenance-api-v1"';
 
   await page.route("**/api/health?check_db=true", (route) =>
     route.fulfill({
@@ -199,22 +214,40 @@ async function installApiRoutes(
       });
     }
     if (path === "/traces/trace_api_001") {
+      traceConditionalHeaders.push(route.request().headers()["if-none-match"] ?? null);
       if (options.traceStatus) {
         return route.fulfill({
           status: options.traceStatus,
           json: { error: { code: "TRACE_NOT_FOUND" } },
         });
       }
+      const snapshot =
+        options.traceSnapshots?.[Math.min(traceSnapshotIndex, options.traceSnapshots.length - 1)];
+      const activeTraceEtag = snapshot?.etag ?? traceEtag;
+      if (options.traceSnapshots && traceSnapshotIndex < options.traceSnapshots.length - 1) {
+        traceSnapshotIndex += 1;
+      }
+      if (route.request().headers()["if-none-match"] === activeTraceEtag) {
+        return route.fulfill({ status: 304, headers: { ETag: activeTraceEtag } });
+      }
+      const traceEvents = snapshot?.events ?? options.events ?? [eventDto];
       return route.fulfill({
+        headers: { ETag: activeTraceEtag },
         json: {
           trace_id: "trace_api_001",
-          audit_events: options.events ?? [eventDto],
-          approvals: [],
+          audit_events: traceEvents,
+          approvals: snapshot?.approvals ?? options.approvals ?? [],
           metrics: metricsDto,
+          audit_window: {
+            limit: 500,
+            returned_count: traceEvents.length,
+            has_more: false,
+          },
         },
       });
     }
     if (path === "/traces/trace_api_001/provenance") {
+      provenanceConditionalHeaders.push(route.request().headers()["if-none-match"] ?? null);
       if (provenanceFailuresRemaining > 0) {
         provenanceFailuresRemaining -= 1;
         return route.fulfill({
@@ -223,13 +256,47 @@ async function installApiRoutes(
           body: "溯源关系接口暂不可用",
         });
       }
-      if (options.provenance) {
-        return route.fulfill({ json: options.provenance });
+      const snapshot =
+        options.provenanceSnapshots?.[
+          Math.min(provenanceSnapshotIndex, options.provenanceSnapshots.length - 1)
+        ];
+      const activeProvenanceEtag = snapshot?.etag ?? provenanceEtag;
+      if (
+        options.provenanceSnapshots &&
+        provenanceSnapshotIndex < options.provenanceSnapshots.length - 1
+      ) {
+        provenanceSnapshotIndex += 1;
+      }
+      const provenanceGraph = snapshot?.graph ?? options.provenance;
+      if (provenanceGraph) {
+        if (route.request().headers()["if-none-match"] === activeProvenanceEtag) {
+          return route.fulfill({
+            status: 304,
+            headers: { ETag: activeProvenanceEtag },
+          });
+        }
+        return route.fulfill({
+          headers: { ETag: activeProvenanceEtag },
+          json: provenanceGraph,
+        });
+      }
+      if (route.request().headers()["if-none-match"] === activeProvenanceEtag) {
+        return route.fulfill({ status: 304, headers: { ETag: activeProvenanceEtag } });
       }
       return route.fulfill({
+        headers: { ETag: activeProvenanceEtag },
         json: {
           trace_id: "trace_api_001",
           nodes: [
+            {
+              node_id: "action:action_api_001",
+              trace_id: "trace_api_001",
+              kind: "action",
+              ref_id: "action_api_001",
+              label: "send_email",
+              timestamp: "2026-06-28T08:00:00Z",
+              metadata: { event_id: "audit_api_001", phase: "tool_policy" },
+            },
             {
               node_id: "event:evt_api_001",
               trace_id: "trace_api_001",
@@ -260,6 +327,15 @@ async function installApiRoutes(
           ],
           edges: [
             {
+              edge_id: "edge:action_api_001:decision_api_001",
+              trace_id: "trace_api_001",
+              source_node_id: "action:action_api_001",
+              target_node_id: "decision:decision_api_001",
+              relation: "evaluated_to",
+              timestamp: "",
+              metadata: { relation_type: "policy" },
+            },
+            {
               edge_id: "edge:evt_api_001:decision_api_001",
               trace_id: "trace_api_001",
               source_node_id: "event:evt_api_001",
@@ -287,6 +363,8 @@ async function installApiRoutes(
       json: { error: { code: "NOT_FOUND" } },
     });
   });
+
+  return { provenanceConditionalHeaders, traceConditionalHeaders };
 }
 
 function uncertainApproval() {
@@ -312,6 +390,19 @@ function uncertainApproval() {
   };
 }
 
+function runtimeApproval(status: "pending" | "resolved", decision: "allow_once" | null) {
+  return {
+    ...uncertainApproval(),
+    approval_id: "approval_runtime",
+    action_id: "action_api_001",
+    action_name: "send_email",
+    tool_call_id: "action_api_001",
+    status,
+    decision,
+    resolved_at: status === "resolved" ? "2026-06-28T08:00:02Z" : null,
+  };
+}
+
 test("API mode preserves primary layouts across supported desktop workspaces", async ({ page }) => {
   await installApiRoutes(page, {
     evaluation: {
@@ -323,6 +414,278 @@ test("API mode preserves primary layouts across supported desktop workspaces", a
     },
   });
   await expectPrimaryRoutesLayout(page, "trace_api_001");
+});
+
+test("API mode conditionally refreshes a running action until its terminal receipt", async ({
+  page,
+}) => {
+  const startEvent = {
+    ...eventDto,
+    audit_id: "audit_start_api_001",
+    blocked: null,
+    decision: null,
+    event_type: "tool_call_started",
+    evidence: {},
+    integrity: {
+      ...eventDto.integrity,
+      sequence: 2,
+      prev_hash: "hash_api",
+      event_hash: "hash_start_api",
+    },
+    links: {
+      action_id: "action_api_001",
+      event_id: "evt_api_001",
+      parent_audit_id: "audit_api_001",
+    },
+    reason: "工具调用已经开始",
+    record_type: "runtime_observation",
+    risk_score: null,
+    severity: null,
+    stage: "tool_call_started",
+    summary: "工具调用已经开始",
+    timestamp: "2026-06-28T08:00:02Z",
+  };
+  const outcomeEvent = {
+    ...eventDto,
+    audit_id: "audit_outcome_api_001",
+    blocked: null,
+    decision: null,
+    event_type: "tool_call_completed",
+    evidence: {
+      execution: {
+        completed_at: "2026-06-28T08:00:03Z",
+        receipt_recorded: true,
+        status: "executed",
+      },
+    },
+    integrity: {
+      ...eventDto.integrity,
+      sequence: 3,
+      prev_hash: "hash_start_api",
+      event_hash: "hash_outcome_api",
+    },
+    links: {
+      action_id: "action_api_001",
+      approval_id: "approval_runtime",
+      event_id: "evt_api_001",
+      parent_audit_id: "audit_start_api_001",
+      policy_audit_id: "audit_api_001",
+    },
+    reason: "工具执行完成",
+    record_type: "runtime_outcome",
+    risk_score: null,
+    severity: null,
+    stage: "after_tool_call",
+    summary: "工具执行完成",
+    timestamp: "2026-06-28T08:00:03Z",
+  };
+  const completedEvent = {
+    ...eventDto,
+    audit_id: "audit_trace_completed_api_001",
+    blocked: null,
+    decision: null,
+    event_type: "trace_completed",
+    evidence: {},
+    integrity: {
+      ...eventDto.integrity,
+      sequence: 4,
+      prev_hash: "hash_outcome_api",
+      event_hash: "hash_trace_completed_api",
+    },
+    links: { event_id: "trace_api_001" },
+    reason: "本次运行已经结束",
+    record_type: "runtime_observation",
+    risk_score: null,
+    severity: null,
+    stage: "trace_completed",
+    summary: "本次运行已经结束",
+    timestamp: "2026-06-28T08:00:04Z",
+  };
+  const requests = await installApiRoutes(page, {
+    traceSnapshots: [
+      {
+        approvals: [runtimeApproval("pending", null)],
+        etag: '"trace-runtime-v1"',
+        events: [eventDto],
+      },
+      {
+        approvals: [runtimeApproval("resolved", "allow_once")],
+        etag: '"trace-runtime-v2"',
+        events: [eventDto, startEvent],
+      },
+      {
+        approvals: [runtimeApproval("resolved", "allow_once")],
+        etag: '"trace-runtime-v3"',
+        events: [eventDto, startEvent, outcomeEvent, completedEvent],
+      },
+    ],
+  });
+
+  await page.goto("/evidence/trace_api_001");
+  const action = page.locator(".execution-action").filter({ hasText: "发送邮件" });
+  await expect(action).toContainText("等待审批");
+  await expect(action).toContainText("正在执行", { timeout: 4_500 });
+  await expect(action).toContainText("已执行", { timeout: 5_000 });
+  await expect(page.locator(".execution-trace__state-line")).toContainText("运行已结束");
+  await expect(page.locator(".execution-trace__connection")).toContainText("运行结果已确认");
+  expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v1"');
+  expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v2"');
+});
+
+test("API mode keeps independent validators for trace and provenance snapshots", async ({
+  page,
+}) => {
+  const requests = await installApiRoutes(page);
+  await page.goto("/evidence/trace_api_001");
+
+  await expect
+    .poll(() => requests.traceConditionalHeaders, { timeout: 4_500 })
+    .toContain('"trace-api-v1"');
+  await page.getByRole("tab", { name: "溯源关系" }).click();
+  await expect(page.locator(".provenance-flow")).toBeVisible();
+  await page.getByRole("button", { name: "更新溯源关系" }).click();
+  await expect.poll(() => requests.provenanceConditionalHeaders).toContain('"provenance-api-v1"');
+  await expect(page.locator(".prov-node--action")).toContainText("send_email");
+});
+
+test("provenance updates preserve filters, collapsed stages and the selected node anchor", async ({
+  page,
+}) => {
+  const nodes = [
+    {
+      node_id: "action:action_api_001",
+      trace_id: "trace_api_001",
+      kind: "action",
+      ref_id: "action_api_001",
+      label: "send_email",
+      timestamp: "2026-06-28T08:00:00Z",
+      metadata: { critical: true, phase: "tool_policy", status: "pending" },
+    },
+    {
+      node_id: "decision:decision_api_001",
+      trace_id: "trace_api_001",
+      kind: "decision",
+      ref_id: "decision_api_001",
+      label: "ask",
+      timestamp: "2026-06-28T08:00:00Z",
+      metadata: { critical: true, phase: "tool_policy" },
+    },
+    {
+      node_id: "audit:audit_api_001",
+      trace_id: "trace_api_001",
+      kind: "audit",
+      ref_id: "audit_api_001",
+      label: "tool_call_proposed",
+      timestamp: "2026-06-28T08:00:00Z",
+      metadata: { critical: true, phase: "outcome_audit" },
+    },
+  ];
+  const edges = [
+    {
+      edge_id: "edge:action_api_001:decision_api_001",
+      trace_id: "trace_api_001",
+      source_node_id: "action:action_api_001",
+      target_node_id: "decision:decision_api_001",
+      relation: "evaluated_to",
+      timestamp: "2026-06-28T08:00:00Z",
+      metadata: { relation_type: "policy" },
+    },
+    {
+      edge_id: "edge:decision_api_001:audit_api_001",
+      trace_id: "trace_api_001",
+      source_node_id: "decision:decision_api_001",
+      target_node_id: "audit:audit_api_001",
+      relation: "recorded_as",
+      timestamp: "2026-06-28T08:00:00Z",
+      metadata: { relation_type: "audit" },
+    },
+  ];
+  await installApiRoutes(page, {
+    provenanceSnapshots: [
+      {
+        etag: '"provenance-anchor-v1"',
+        graph: { trace_id: "trace_api_001", nodes, edges },
+      },
+      {
+        etag: '"provenance-anchor-v2"',
+        graph: {
+          trace_id: "trace_api_001",
+          nodes: [
+            {
+              ...nodes[0],
+              metadata: { critical: true, phase: "tool_policy", status: "executed" },
+            },
+            ...nodes.slice(1),
+            {
+              ...nodes[0],
+              node_id: "action:action_api_002",
+              ref_id: "action_api_002",
+              label: "read_file",
+              timestamp: "2026-06-28T08:00:02Z",
+            },
+          ],
+          edges: [
+            ...edges,
+            {
+              ...edges[0],
+              edge_id: "edge:action_api_002:decision_api_001",
+              source_node_id: "action:action_api_002",
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  await page.goto("/evidence/trace_api_001");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
+  const graph = page.locator(".provenance-workbench");
+  await graph.locator(".prov-node--action").click();
+  await expect(graph.locator(".prov-node--selected")).toContainText("待审批");
+  const kindFilter = graph.getByRole("combobox", { name: "节点类型筛选" });
+  await kindFilter.selectOption("action");
+  const inputPhase = graph.locator(".provenance-phases button").filter({ hasText: "输入与信任" });
+  await inputPhase.click();
+  await expect(inputPhase).toHaveAttribute("aria-pressed", "false");
+
+  const selected = graph.locator(".prov-node--selected");
+  const selectedCenter = () =>
+    selected.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const canvasRect = element.closest(".provenance-canvas")?.getBoundingClientRect();
+      if (!canvasRect) throw new Error("Provenance canvas is missing");
+      return {
+        x: rect.x + rect.width / 2 - canvasRect.x,
+        y: rect.y + rect.height / 2 - canvasRect.y,
+      };
+    });
+  await expect
+    .poll(async () => {
+      const first = await selectedCenter();
+      await page.waitForTimeout(50);
+      const second = await selectedCenter();
+      return Math.abs(second.x - first.x) + Math.abs(second.y - first.y);
+    })
+    .toBeLessThanOrEqual(0.5);
+  const before = await selectedCenter();
+  await page.getByRole("button", { name: "更新溯源关系" }).click();
+  await expect(graph.locator(".prov-node--action")).toHaveCount(2);
+  await expect
+    .poll(async () => {
+      const first = await selectedCenter();
+      await page.waitForTimeout(50);
+      const second = await selectedCenter();
+      return Math.abs(second.x - first.x) + Math.abs(second.y - first.y);
+    })
+    .toBeLessThanOrEqual(0.5);
+
+  await expect(kindFilter).toHaveValue("action");
+  await expect(inputPhase).toHaveAttribute("aria-pressed", "false");
+  await expect(selected).toContainText("send_email");
+  await expect(selected).toContainText("已执行");
+  const after = await selectedCenter();
+  expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(2);
 });
 
 test("API mode renders authenticated dashboard and tolerates partial endpoint failure", async ({
@@ -361,10 +724,15 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   await expect(page.locator(".evidence-hero")).toContainText("策略决定：需审批");
   await expect(page.locator(".evidence-hero")).not.toContainText(/P\d{3}/);
   await expect(page.locator(".evidence-facts")).toContainText("当前返回事件均带完整性元数据");
+  await expect(page.locator(".execution-action")).toContainText("发送邮件");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
   await expect(page.locator(".prov-node--decision")).toContainText("需审批");
   await expect(page.locator(".prov-node--decision")).toContainText("风险 64");
   await page.locator(".prov-node--decision").click();
-  await expect(page.locator(".provenance-flow").getByText("判定", { exact: true })).toBeVisible();
+  await expect(
+    page.locator(".provenance-flow").getByText("判定", { exact: true }).first(),
+  ).toBeVisible();
+  await page.locator(".provenance-workbench").getByRole("button", { name: "适配" }).click();
   await page.locator(".prov-node--audit").click();
   await expect(page).toHaveURL(/event_id=audit_api_001/);
   await page.getByRole("button", { name: "查看关联事件" }).click();
@@ -424,6 +792,7 @@ test("provenance workbench controls a graph larger than 24 nodes", async ({ page
     },
   });
   await page.goto("/evidence/trace_api_001");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
 
   const graph = page.locator(".provenance-workbench");
   await expect(graph).toContainText("已收拢 18 个旁支或阶段节点");
@@ -439,7 +808,7 @@ test("provenance workbench controls a graph larger than 24 nodes", async ({ page
   const search = graph.getByRole("searchbox", { name: "搜索溯源节点" });
   await search.fill("证据节点 25");
   await search.press("Enter");
-  await expect(page).toHaveURL(/prov_node=node:25/);
+  await expect(page).toHaveURL(/node_id=node%3A25|node_id=node:25/);
   await expect(graph.locator(".prov-node--selected")).toContainText("证据节点 25");
 });
 
@@ -448,6 +817,7 @@ test("API mode retries provenance independently after a canonical endpoint failu
 }) => {
   await installApiRoutes(page, { provenanceFailuresBeforeSuccess: 1 });
   await page.goto("/evidence/trace_api_001");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
 
   await expect(page.getByText(guardedServerErrorMessage)).toBeVisible();
   await expect(page.locator(".trace-provenance")).not.toContainText("溯源关系接口暂不可用");

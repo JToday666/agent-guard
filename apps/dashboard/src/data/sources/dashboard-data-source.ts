@@ -30,6 +30,15 @@ export interface ConfigAuditFindingFilters {
   limit?: number;
 }
 
+export interface ConditionalRequestOptions {
+  etag?: string;
+  signal?: AbortSignal;
+}
+
+export type ConditionalResource<T> =
+  | { status: "modified"; value: T; etag: string | null }
+  | { status: "not_modified"; etag: string | null };
+
 export interface DashboardDataSource {
   getAuditWindow(filters?: EventFilters, signal?: AbortSignal): Promise<AuditWindow>;
   getPendingApprovals(signal?: AbortSignal): Promise<ApprovalRequest[]>;
@@ -45,9 +54,15 @@ export interface DashboardDataSource {
     signal?: AbortSignal,
   ): Promise<ConfigAuditFindingRecord[]>;
   getAdapterStatus(adapterId: string, signal?: AbortSignal): Promise<AdapterStatus>;
-  getTraceDetail(traceId: string, signal?: AbortSignal): Promise<TraceDetail>;
+  getTraceDetail(
+    traceId: string,
+    options?: ConditionalRequestOptions,
+  ): Promise<ConditionalResource<TraceDetail>>;
   getCurrentPolicy(signal?: AbortSignal): Promise<PolicySummary>;
   getPolicyHistory(signal?: AbortSignal): Promise<PolicyHistoryEntry[]>;
   getAuditIntegrity(signal?: AbortSignal): Promise<AuditIntegrity>;
-  getTraceProvenance(traceId: string, signal?: AbortSignal): Promise<ProvenanceGraph>;
+  getTraceProvenance(
+    traceId: string,
+    options?: ConditionalRequestOptions,
+  ): Promise<ConditionalResource<ProvenanceGraph>>;
 }

@@ -329,13 +329,24 @@ export function mapEvaluationRun(dto: GuardEvaluationRunDto): EvaluationRun {
 }
 
 export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
-  const events = readArray(dto.audit_events)
-    .map((row) => mapAuditEvent(row as GuardAuditEventDto))
-    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+  const auditWindow = readRecord(dto.audit_window);
+  const events = readArray(dto.audit_events).map((row) => mapAuditEvent(row as GuardAuditEventDto));
+  const useAuditSequence = events.every((event) => event.auditSequence !== null);
+  events.sort((left, right) => {
+    const primaryOrder = useAuditSequence
+      ? left.auditSequence! - right.auditSequence!
+      : Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+    return primaryOrder || left.id.localeCompare(right.id);
+  });
   return {
     id: readString(dto.trace_id) ?? "",
     events,
     approvals: readArray(dto.approvals).map((row) => mapApproval(row as GuardApprovalDto)),
+    auditWindow: {
+      hasMore: readNullableBoolean(auditWindow.has_more),
+      limit: readNumber(auditWindow.limit, events.length),
+      returnedCount: readNumber(auditWindow.returned_count, events.length),
+    },
     loadedAt: new Date().toISOString(),
   };
 }

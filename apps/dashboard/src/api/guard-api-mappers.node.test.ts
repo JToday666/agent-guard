@@ -354,6 +354,7 @@ test("maps trace detail response through existing event and approval mappers", (
       },
     ],
     approvals: [],
+    audit_window: { limit: 1000, returned_count: 2, has_more: true },
     metrics: {
       event_count: 1,
       allow_count: 0,
@@ -368,6 +369,7 @@ test("maps trace detail response through existing event and approval mappers", (
   });
 
   assert.equal(detail.id, "trace_1");
+  assert.deepEqual(detail.auditWindow, { limit: 1000, returnedCount: 2, hasMore: true });
   assert.deepEqual(
     detail.events.map((event) => event.id),
     ["audit_1", "audit_2"],
@@ -383,6 +385,7 @@ test("maps sparse trace detail responses without creating an unused metrics mode
   assert.equal(detail.id, "trace_sparse");
   assert.deepEqual(detail.events, []);
   assert.deepEqual(detail.approvals, []);
+  assert.deepEqual(detail.auditWindow, { limit: 0, returnedCount: 0, hasMore: null });
   assert.equal("aggregateMetrics" in detail, false);
 });
 

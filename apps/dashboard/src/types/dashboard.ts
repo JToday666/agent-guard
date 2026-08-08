@@ -181,7 +181,11 @@ export interface NormalizedAuditEvidence {
   eventId: string | null;
   decisionId: string | null;
   actionId: string | null;
+  policyAuditId: string | null;
+  parentAuditId: string | null;
   recordType: AuditRecordType;
+  stage: string;
+  eventType: string;
   occurredAt: string;
   originalTask: string | null;
   source: EvidenceSource;
@@ -194,6 +198,7 @@ export interface NormalizedAuditEvidence {
   risk: RiskBreakdownEvidence;
   policy: PolicyReferenceEvidence;
   decision: DecisionStatus;
+  severity: RiskSeverity;
   decisionReason: string | null;
   intervention: InterventionType;
   execution: ExecutionEvidence;
@@ -205,6 +210,61 @@ export interface NormalizedAuditEvidence {
   entryHash: string | null;
   previousHash: string | null;
   raw: unknown;
+}
+
+export type ExecutionApprovalStatus =
+  "not_required" | "pending" | "allowed_once" | "denied" | "expired" | "unknown";
+
+export type ExecutionPhase =
+  | "proposed"
+  | "evaluated"
+  | "waiting_approval"
+  | "approval_released"
+  | "waiting_receipt"
+  | "terminal";
+
+export interface ExecutionPolicyCheck {
+  auditId: string;
+  decisionId: string | null;
+  decision: DecisionStatus;
+  riskScore: number | null;
+  severity: RiskSeverity;
+  reason: string | null;
+  ruleHits: RuleHitEvidence[];
+  occurredAt: string;
+}
+
+export interface ExecutionActionViewModel {
+  actionId: string;
+  actionName: string | null;
+  displayName: string;
+  resourceSummary: string | null;
+  decision: DecisionStatus;
+  approval: ExecutionApprovalStatus;
+  approvalId: string | null;
+  execution: ExecutionStatus;
+  phase: ExecutionPhase;
+  statusLabel: string;
+  decisionReason: string | null;
+  riskScore: number | null;
+  severity: RiskSeverity;
+  firstSeenAt: string;
+  lastUpdatedAt: string;
+  primaryAuditId: string | null;
+  policyChecks: ExecutionPolicyCheck[];
+  auditIds: string[];
+  observationAuditIds: string[];
+  outcomeAuditIds: string[];
+}
+
+export type TraceLifecycleState =
+  "observing" | "waiting_approval" | "completed" | "failed" | "cancelled";
+
+export interface ExecutionTraceViewModel {
+  actions: ExecutionActionViewModel[];
+  lifecycleState: TraceLifecycleState;
+  lifecycleLabel: string;
+  lifecycleAuditId: string | null;
 }
 
 export interface EvidenceFact {
@@ -355,7 +415,20 @@ export interface TraceDetail {
   id: string;
   events: AuditEventRow[];
   approvals: ApprovalRequest[];
+  auditWindow: TraceAuditWindow;
   loadedAt: string;
+}
+
+export interface TraceAuditWindow {
+  limit: number;
+  returnedCount: number;
+  hasMore: boolean | null;
+}
+
+export interface TracePollingState {
+  status: "idle" | "checking" | "live" | "paused" | "backoff" | "stopped";
+  lastCheckedAt: string | null;
+  retryInMs: number | null;
 }
 
 export interface PolicyHistoryEntry {
