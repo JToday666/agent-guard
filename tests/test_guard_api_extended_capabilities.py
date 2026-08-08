@@ -13,6 +13,7 @@ from agentguard_core import (
     ProvenanceNode,
 )
 from guard_api.main import create_app
+from guard_api.services.audit import AuditService
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
@@ -209,39 +210,27 @@ def test_config_audit_endpoint_blocks_high_findings_for_adapter() -> None:
     assert any(edge["relation"] == "recorded_as" for edge in graph["edges"])
 
 
-def test_runtime_observation_audit_generates_event_to_audit_provenance() -> None:
-    app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/v1/audit/events",
-        headers={"Authorization": "Bearer adapter-secret"},
-        json={
-            "audit_id": "audit_runtime_obs",
-            "trace_id": "trace_runtime_obs",
-            "runtime": "openclaw",
-            "stage": "session_start",
-            "event_type": "runtime_observation",
-            "summary": "session started",
-            "decision": "allow",
-            "risk_score": 0,
-            "severity": "low",
-            "blocked": False,
-            "reason": "Observation only.",
-            "links": {"event_id": "obs_session_start"},
-        },
+def test_runtime_observation_without_typed_fact_only_materializes_audit() -> None:
+    store = MemoryControlPlaneStore()
+    event = AuditEvent(
+        audit_id="audit_runtime_obs",
+        schema_version="0.4",
+        record_type="runtime_observation",
+        trace_id="trace_runtime_obs",
+        runtime="openclaw",
+        stage="trace_started",
+        event_type="trace_started",
+        summary="Session started",
+        reason="Observation only.",
+        links={"event_id": "obs_session_start"},
     )
 
-    assert response.status_code == 200
-    _login(client)
-    provenance = client.get("/v1/traces/trace_runtime_obs/provenance")
-    assert provenance.status_code == 200
-    graph = provenance.json()
-    assert {node["kind"] for node in graph["nodes"]} >= {"event", "audit"}
-    assert any(edge["relation"] == "recorded_as" for edge in graph["edges"])
+    result = AuditService(store=store).submit(event)
+
+    assert result["created"] is True
+    nodes, edges = store.list_provenance(event.trace_id)
+    assert [(node.kind, node.ref_id) for node in nodes] == [("audit", event.audit_id)]
+    assert edges == []
 
 
 def test_memory_guard_change_lifecycle() -> None:

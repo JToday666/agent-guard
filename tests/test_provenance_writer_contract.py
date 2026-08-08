@@ -7,10 +7,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentguard_core import AuditEvent, ProvenanceEdge, ProvenanceNode
+from agentguard_core import (
+    ActionCriticReview,
+    AuditEvent,
+    ConfigAuditEvent,
+    ConfigAuditFinding,
+    ProvenanceEdge,
+    ProvenanceNode,
+)
 from guard_api.models import ApprovalRequest
 from guard_api.services.approval import ApprovalService
 from guard_api.services.audit import AuditService
+from guard_api.services.config_audit import ConfigAuditService
 from guard_api.services.provenance import ProvenanceWriter
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
@@ -504,3 +512,86 @@ def test_idempotent_audit_retry_repairs_partial_provenance() -> None:
     assert store.get_provenance_node("event:event-repair") is not None
     _, edges = store.list_provenance("trace-repair")
     assert [edge.relation for edge in edges] == ["recorded_as"]
+
+
+def test_config_audit_materializes_typed_fact_across_stores(
+    provenance_store: ControlPlaneStore,
+) -> None:
+    store = provenance_store
+    event = ConfigAuditEvent(
+        event_id="config-event-contract",
+        runtime="openclaw",
+        target_type="plugin_config",
+        target_id="third-party",
+        action="before_install",
+        metadata={"trace_id": "trace-config-contract"},
+        findings=[
+            ConfigAuditFinding(
+                severity="high",
+                category="openclaw.plugin",
+                title="Raw conversation access enabled",
+                subject="hooks.allowConversationAccess",
+                description="Plugin can read raw conversation content.",
+            )
+        ],
+    )
+
+    result = ConfigAuditService(store=store).evaluate(event)
+
+    assert result.decision == "block"
+    nodes, edges = store.list_provenance("trace-config-contract")
+    nodes_by_id = {node.node_id: node for node in nodes}
+    config_node = nodes_by_id["config_audit:config-event-contract"]
+    assert config_node.ref_id == "config-event-contract"
+    assert config_node.metadata["target_type"] == "plugin_config"
+    assert config_node.metadata["finding_count"] == 1
+    assert any(
+        edge.source_node_id == config_node.node_id
+        and edge.target_node_id.startswith("audit:")
+        and edge.relation == "recorded_as"
+        for edge in edges
+    )
+
+
+def test_action_critic_materializes_review_across_stores(
+    provenance_store: ControlPlaneStore,
+) -> None:
+    store = provenance_store
+    event = _policy_event("trace-review-contract", "review-contract")
+    review = store.add_action_critic_review(
+        ActionCriticReview(
+            review_id="critic-review-contract",
+            trace_id=event.trace_id,
+            event_id="event-review-contract",
+            reviewer="deterministic",
+            verdict="warn",
+            confidence=0.72,
+            reasons=["source_trust=untrusted"],
+        )
+    )
+    store.add_audit_event(event)
+    persisted = store.get_audit_event(event.audit_id)
+    assert persisted is not None
+
+    ProvenanceWriter(store=store).record_audit_event(
+        persisted,
+        critic_review=review,
+    )
+
+    nodes, edges = store.list_provenance(event.trace_id)
+    nodes_by_id = {node.node_id: node for node in nodes}
+    review_node = nodes_by_id["review:critic-review-contract"]
+    assert review_node.ref_id == "critic-review-contract"
+    assert review_node.metadata == {
+        "reviewer": "deterministic",
+        "verdict": "warn",
+        "confidence": 0.72,
+        "degraded": False,
+        "phase": "tool_policy",
+    }
+    assert any(
+        edge.source_node_id == "decision:decision-review-contract"
+        and edge.target_node_id == review_node.node_id
+        and edge.relation == "reviewed_by"
+        for edge in edges
+    )
