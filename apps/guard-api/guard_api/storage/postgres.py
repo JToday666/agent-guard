@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import itertools
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from alembic import command
 from alembic.config import Config
@@ -117,6 +119,7 @@ class PostgresControlPlaneStore:
                         )
                     ).scalar_one()
                     from guard_api.storage.integrity import _canonical_json_bytes
+
                     stored_content = _canonical_json_bytes(
                         {k: v for k, v in stored_payload.items() if k != "integrity"}
                     )
@@ -195,9 +198,7 @@ class PostgresControlPlaneStore:
             rows = session.execute(stmt).scalars().all()
         return [AuditEvent.model_validate(row) for row in rows]
 
-    def read_audit_events_bounded(
-        self, query: AuditWindowQuery
-    ) -> list[AuditEvent]:
+    def read_audit_events_bounded(self, query: AuditWindowQuery) -> list[AuditEvent]:
         # 上界读 audit_integrity_heads 链头；序列范围命中现有
         # ix_audit_events_chain_sequence；JSONB 过滤为残余谓词（契约 §7.3）。
         conditions: list[Any] = [audit_events.c.chain_id == _AUDIT_CHAIN_ID]
@@ -256,11 +257,33 @@ class PostgresControlPlaneStore:
             row = session.execute(stmt).scalars().first()
         return AuditEvent.model_validate(row) if row is not None else None
 
-    def reserve_policy_evaluation(self, event_id: str) -> bool:
-        # 真实唯一性约束由部分唯一索引 ux_audit_policy_evaluation_event_id
-        # （migration 0007）承担；并发冲突在写入时以 IntegrityError 暴露，
-        # 由调用方重读并回放或报 409。
-        return True
+    @contextmanager
+    def policy_evaluation_guard(self, event_id: str) -> Iterator[None]:
+        """Hold a crash-safe per-event PostgreSQL advisory lock.
+
+        Approval and other evaluation side effects happen before the unique
+        policy audit insert. Holding a session advisory lock across the service
+        operation prevents concurrent requests for one event from creating
+        orphan approvals while retaining the database unique index as the final
+        integrity guard.
+        """
+
+        lock_id = int.from_bytes(
+            hashlib.sha256(event_id.encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        with self._engine.connect() as connection:
+            connection.execute(
+                text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": lock_id}
+            )
+            try:
+                yield
+            finally:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (

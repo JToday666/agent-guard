@@ -588,6 +588,9 @@ export function sanitizeJson(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => sanitizeJson(item));
   }
+  if (typeof value === "string") {
+    return redactSensitiveCredentials(value, PREVIEW_LIMIT);
+  }
   if (typeof value !== "object" || value === null) {
     return value;
   }

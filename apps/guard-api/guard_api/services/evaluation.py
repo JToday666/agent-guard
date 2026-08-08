@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 from agentguard_core import (
     ActionCritic,
     AuditEvent,
@@ -26,10 +24,6 @@ from .approval import ApprovalService
 from .audit import AuditService
 from .memory import MemoryGuardService
 from .policy import PolicyService
-
-# memory store 下等待在途评估入链的最长时间（秒）。
-_RESERVATION_WAIT_SECONDS = 5.0
-_RESERVATION_POLL_INTERVAL = 0.02
 
 
 class EvaluationConflictError(ValueError):
@@ -76,20 +70,33 @@ class EvaluationService:
         self, event: GuardEvent, *, requesting_principal_id: str
     ) -> GuardEvaluationResponse:
         request_digest = canonical_sha256(event.model_dump(mode="json"))
-        # 快路径预检：已入链的评估零成本重放，不再调用 Core、不重复创建审批。
-        replayed = self._replay_or_conflict(
-            self.audit_service.store.get_policy_evaluation_by_event_id(
-                event.event_id
-            ),
-            request_digest,
-            event.event_id,
-        )
-        if replayed is not None:
-            return replayed
-        # 写入前占位：memory 在哈希链锁内原子判定；PostgreSQL 恒 True，
-        # 真实约束由部分唯一索引（migration 0007）在写入时承担。
-        if not self.audit_service.store.reserve_policy_evaluation(event.event_id):
-            return self._await_committed_replay(event.event_id, request_digest)
+        # 审批、memory change 和审计写入都属于一次评估的副作用。同 event_id
+        # 必须在副作用发生前串行化；Memory 使用进程锁，PostgreSQL 使用
+        # crash-safe session advisory lock。进入锁后重新读取，保证并发重试只
+        # 回放已经提交的权威结果，不创建孤立审批。
+        with self.audit_service.store.policy_evaluation_guard(event.event_id):
+            replayed = self._replay_or_conflict(
+                self.audit_service.store.get_policy_evaluation_by_event_id(
+                    event.event_id
+                ),
+                request_digest,
+                event.event_id,
+            )
+            if replayed is not None:
+                return replayed
+            return self._evaluate_once(
+                event,
+                request_digest=request_digest,
+                requesting_principal_id=requesting_principal_id,
+            )
+
+    def _evaluate_once(
+        self,
+        event: GuardEvent,
+        *,
+        request_digest: str,
+        requesting_principal_id: str,
+    ) -> GuardEvaluationResponse:
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
             bundle = snapshot_record.policy_bundle
@@ -154,24 +161,6 @@ class EvaluationService:
         if _stored_request_digest(existing) == request_digest:
             return self._rebuild_response(existing)
         raise EvaluationConflictError(event_id)
-
-    def _await_committed_replay(
-        self, event_id: str, request_digest: str
-    ) -> GuardEvaluationResponse:
-        # memory store 中在途评估持有占位直至入链；有界等待其落盘后
-        # 回放或报冲突，与 PostgreSQL “写入即权威”的索引语义对齐。
-        deadline = time.monotonic() + _RESERVATION_WAIT_SECONDS
-        while True:
-            existing = self.audit_service.store.get_policy_evaluation_by_event_id(
-                event_id
-            )
-            if existing is not None:
-                if _stored_request_digest(existing) == request_digest:
-                    return self._rebuild_response(existing)
-                raise EvaluationConflictError(event_id)
-            if time.monotonic() >= deadline:
-                raise EvaluationConflictError(event_id)
-            time.sleep(_RESERVATION_POLL_INTERVAL)
 
     def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
         raw_decision = _stored_decision_dump(audit)

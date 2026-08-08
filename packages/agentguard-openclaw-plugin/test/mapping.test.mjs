@@ -655,6 +655,22 @@ test("runtime observations carry AuditEvent 0.4 shape with null policy fields", 
   assert.equal(event.evidence.approval.status, "not_required");
 });
 
+test("runtime observations scrub credential values in ordinary metadata fields", () => {
+  const event = buildRuntimeObservationAuditEvent(
+    "session_start",
+    {
+      sessionId: "sess_redaction",
+      content: "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature sk-abcdefghijklmnop",
+    },
+    { sessionKey: "session-key" },
+  );
+
+  const serialized = JSON.stringify(event.metadata);
+  assert.equal(serialized.includes("eyJhbGciOiJSUzI1NiJ9"), false);
+  assert.equal(serialized.includes("sk-abcdefghijklmnop"), false);
+  assert.equal(serialized.includes("[redacted]"), true);
+});
+
 function outcomeFixture() {
   const guardEvent = buildToolCallGuardEvent(
     {

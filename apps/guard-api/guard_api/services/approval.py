@@ -12,6 +12,12 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .evidence import _approval_evidence, describe_guard_event
+from .redaction import (
+    SUMMARY_TEXT_LIMIT,
+    bound_redacted_value,
+    scrub_text,
+    truncate_text,
+)
 
 
 class ApprovalService:
@@ -36,19 +42,26 @@ class ApprovalService:
         if decision.decision != "ask" or decision.approval_intent is None:
             return None
         description = describe_guard_event(event)
+        resource = decision.approval_intent.resource.strip()
+        if not resource and description.resource_targets:
+            resource = description.resource_targets[0]
+        safe_resource = bound_redacted_value(resource, text_limit=SUMMARY_TEXT_LIMIT)
+        safe_action_name = truncate_text(
+            scrub_text(description.action_name), SUMMARY_TEXT_LIMIT
+        )
         approval = ApprovalRequest(
             trace_id=event.trace_id,
             subject_id=description.subject_id,
             subject_type=description.subject_type,
             action_id=description.action_id,
-            action_name=description.action_name,
+            action_name=safe_action_name,
             tool_call_id=description.subject_id,
             requesting_principal_id=requesting_principal_id,
             runtime=event.runtime,
             agent_id=event.security_context.agent_id,
-            tool=description.action_name,
-            resource=decision.approval_intent.resource,
-            reason=decision.reason,
+            tool=safe_action_name,
+            resource=safe_resource if isinstance(safe_resource, str) else "",
+            reason=truncate_text(scrub_text(decision.reason), SUMMARY_TEXT_LIMIT),
             risk_score=decision.risk_score,
             severity=decision.severity,
             evidence=_approval_evidence(event, decision, description),

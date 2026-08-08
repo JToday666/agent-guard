@@ -17,6 +17,7 @@ from agentguard_core import (
 from guard_api.storage.base import AuditEventFilters, ControlPlaneStore
 
 from .evidence import build_audit_event
+from .redaction import sanitize_audit_event
 
 
 class PolicyEvaluationWriteForbiddenError(ValueError):
@@ -36,6 +37,7 @@ class AuditService:
         # §12.1 守卫：仅拒显式声明 policy_evaluation 的入站记录。
         if event.record_type == "policy_evaluation":
             raise PolicyEvaluationWriteForbiddenError(event.audit_id)
+        event = sanitize_audit_event(event)
         is_new = self.store.add_audit_event(event)
         if is_new:
             self._record_audit_provenance(event)
@@ -76,6 +78,7 @@ class AuditService:
             extra_metadata=extra_metadata,
             decision_dump=decision_dump,
         )
+        audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)
         if critic_review is not None:
             self.store.add_action_critic_review(critic_review)

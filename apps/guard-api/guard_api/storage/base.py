@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import ContextManager, Protocol
 
 from agentguard_core import (
     AuditEvent,
@@ -126,9 +126,7 @@ def within_evaluated_range(
         evaluated_from
     ):
         return False
-    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(
-        evaluated_to
-    ):
+    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(evaluated_to):
         return False
     return True
 
@@ -162,7 +160,7 @@ class ControlPlaneStore(Protocol):
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
 
-    def reserve_policy_evaluation(self, event_id: str) -> bool: ...
+    def policy_evaluation_guard(self, event_id: str) -> ContextManager[None]: ...
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
 

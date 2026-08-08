@@ -96,9 +96,7 @@ def build_audit_event(
         metadata["policy_source"] = "default"
     # 幂等回放依赖完整 decision dump（先新后旧双读，见 evaluation.py）。
     dump = (
-        decision_dump
-        if decision_dump is not None
-        else decision.model_dump(mode="json")
+        decision_dump if decision_dump is not None else decision.model_dump(mode="json")
     )
     metadata["guard_decision"] = dump
     evidence = _policy_evaluation_evidence(
@@ -150,9 +148,7 @@ def _policy_evaluation_evidence(
             "version": policy_bundle.version,
             "revision": policy_revision,
             # §9.3：digest 必须来自同一次快照读取的 PolicyBundle。
-            "canonical_digest": canonical_sha256(
-                policy_bundle.model_dump(mode="json")
-            ),
+            "canonical_digest": canonical_sha256(policy_bundle.model_dump(mode="json")),
             "canonicalization": POLICY_CANONICALIZATION,
         },
         "intervention": _policy_intervention(decision),
@@ -298,7 +294,7 @@ def _approval_evidence(
     decision: GuardDecision,
     description: EventDescription,
 ) -> dict[str, object]:
-    return {
+    evidence = {
         "event": {
             "event_id": event.event_id,
             "event_type": event.event_type,
@@ -321,6 +317,12 @@ def _approval_evidence(
         },
         "payload": _approval_payload_preview(event.payload),
     }
+    bounded = bound_redacted_value(
+        evidence,
+        text_limit=CONTENT_PREVIEW_LIMIT,
+        array_limit=RULE_HITS_LIMIT,
+    )
+    return bounded if isinstance(bounded, dict) else {}
 
 
 def _approval_payload_preview(value: object) -> object:

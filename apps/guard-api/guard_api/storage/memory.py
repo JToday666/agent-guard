@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any
+from typing import Any, Iterator
 
 from agentguard_core import (
     ActionCriticReview,
@@ -65,9 +66,9 @@ class MemoryControlPlaneStore:
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
-    policy_evaluation_reservations: set[str] = field(default_factory=set)
 
     def initialize(self) -> None:
         return None
@@ -103,9 +104,7 @@ class MemoryControlPlaneStore:
         events = _filter_audit_events(list(reversed(self.audit_events)), filters)
         return events[: _bounded_limit(filters.limit)]
 
-    def read_audit_events_bounded(
-        self, query: AuditWindowQuery
-    ) -> list[AuditEvent]:
+    def read_audit_events_bounded(self, query: AuditWindowQuery) -> list[AuditEvent]:
         # 链内 sequence 即位序（sequence = index + 1），位序切片即上界读取：
         # sequence <= upper，且 after_sequence 存在时 sequence < after_sequence。
         with self.audit_integrity_lock:
@@ -134,20 +133,19 @@ class MemoryControlPlaneStore:
                     return event
         return None
 
-    def reserve_policy_evaluation(self, event_id: str) -> bool:
-        # 与 PostgreSQL 部分唯一索引（migration 0007）语义对齐：
-        # 单进程内在哈希链锁内原子判定，已入链或已在途的评估不得重复写入。
-        with self.audit_integrity_lock:
-            if any(
-                _is_policy_evaluation_for(event, event_id)
-                for event in self.audit_events
-            ):
-                self.policy_evaluation_reservations.discard(event_id)
-                return False
-            if event_id in self.policy_evaluation_reservations:
-                return False
-            self.policy_evaluation_reservations.add(event_id)
-            return True
+    @contextmanager
+    def policy_evaluation_guard(self, event_id: str) -> Iterator[None]:
+        """Serialize evaluation side effects before the policy audit is committed.
+
+        The in-memory backend deliberately uses one process-wide evaluation lock.
+        Evaluation throughput is not a local-test bottleneck, and the simple lock
+        keeps approval, memory-change and audit creation consistent with the
+        PostgreSQL per-event advisory lock.
+        """
+
+        del event_id
+        with self.policy_evaluation_lock:
+            yield
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
         # 按入链顺序传入，共享聚合器对重复逻辑键保留最早入链记录（§19.1）。
@@ -503,10 +501,10 @@ class MemoryControlPlaneStore:
 
 def _audit_content_matches(existing: AuditEvent, incoming: AuditEvent) -> bool:
     from guard_api.storage.integrity import _canonical_json_bytes
-    return (
-        _canonical_json_bytes(existing.model_dump(mode="json", exclude={"integrity"}))
-        == _canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
-    )
+
+    return _canonical_json_bytes(
+        existing.model_dump(mode="json", exclude={"integrity"})
+    ) == _canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
 
 
 def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:
