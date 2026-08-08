@@ -28,11 +28,14 @@ AttackBench 实现位于 `agentguard_langgraph_bench/`，负责攻击样本、�
 | 文件                                                    | 内容                         |
 | ------------------------------------------------------- | ---------------------------- |
 | `prompt_injection.jsonl`                                | 提示注入                     |
-| `tool_hijacking.jsonl` 与 `tool_hijacking_benign.jsonl` | 工具劫持及正常对照           |
+| `jailbreak.jsonl`                                       | 模型越狱                     |
+| `tool_hijacking.jsonl`                                  | 工具劫持                     |
 | `file_exfiltration.jsonl`                               | 文件泄露                     |
 | `agent_abuse.jsonl`                                     | Agent 滥用                   |
-| `memory_poisoning*.jsonl`                               | 记忆中毒、延迟触发和正常对照 |
+| `memory_poisoning.jsonl`                                | 记忆中毒                     |
 | `benign.jsonl`                                          | 通用正常任务                 |
+
+数据集加载器在目录级加载时会排除 `memory_poisoning_stateful.jsonl`（延迟触发变体，当前目录中不存在该文件）；正常对照样本统一放在 `benign.jsonl`。
 
 PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/poisonedrag/`、`bench/datasets/mcpsafety/` 和 `bench/datasets/instrumentation/`。需要外部源树的用例，只在对应资源可用时参与完整兼容性验证。
 
@@ -41,7 +44,7 @@ PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/
 ```json
 {
   "case_id": "PI-001",
-  "attack_type": "indirect_prompt_injection",
+  "attack_type": "prompt_injection",
   "is_malicious": true,
   "input": {
     "source_type": "email",

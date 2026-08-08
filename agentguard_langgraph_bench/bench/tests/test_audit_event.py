@@ -20,7 +20,8 @@ def test_audit_event_contains_dashboard_fields():
     )
     audit = adapter.build_audit_event(event, decision)
 
-    assert audit.schema_version == "0.3"
+    assert audit.schema_version == "0.4"
+    assert audit.record_type == "policy_evaluation"
     assert audit.stage == "before_tool_call"
     assert audit.event_type == "tool_call_proposed"
     assert audit.decision == "deny"

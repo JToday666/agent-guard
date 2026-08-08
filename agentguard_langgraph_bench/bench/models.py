@@ -12,6 +12,7 @@ from ..adapter.event_models import Decision
 AttackType = Literal[
     "agent_abuse",
     "file_exfiltration",
+    "jailbreak",
     "memory_poisoning",
     "prompt_injection",
     "tool_hijacking",
