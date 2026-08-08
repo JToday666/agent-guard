@@ -485,6 +485,7 @@ class LangGraphAdapter:
             pre_execution=True,
             security_context=context,
             payload={
+                "action_id": arguments.get("_source_tool_call_id"),
                 "memory": {
                     "namespace": namespace,
                     "key": key,
@@ -753,6 +754,8 @@ def _tool_name_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 def _action_id_from_payload(payload: dict[str, Any]) -> str | None:
+    if payload.get("action_id"):
+        return str(payload["action_id"])
     tool = payload.get("tool")
     if isinstance(tool, dict) and tool.get("call_id"):
         return str(tool["call_id"])
@@ -834,9 +837,7 @@ def _guard_event_projection(
         source["source_id"] = str(sender_id)
     raw_context_sources = security_context.get("context_sources")
     context_sources = (
-        list(raw_context_sources)
-        if isinstance(raw_context_sources, list)
-        else []
+        list(raw_context_sources) if isinstance(raw_context_sources, list) else []
     )[:_CONTEXT_SOURCES_LIMIT]
     tool = payload.get("tool")
     tool_projection: dict[str, Any] | None = None
@@ -890,9 +891,7 @@ def _guard_decision_projection(decision: PolicyDecision) -> dict[str, Any]:
                 "severity": hit.severity,
                 "decision": decision.decision,
                 "reason": _bounded_text(decision.reason, _SUMMARY_TEXT_LIMIT),
-                "evidence": [
-                    str(item)[:_SUMMARY_TEXT_LIMIT] for item in hit.evidence
-                ],
+                "evidence": [str(item)[:_SUMMARY_TEXT_LIMIT] for item in hit.evidence],
             }
             for hit in decision.rule_hits[:_RULE_HITS_LIMIT]
         ],

@@ -5,12 +5,29 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from agentguard_langgraph_bench.adapter.event_models import ToolExecutionResult, new_id
+from agentguard_langgraph_adapter.runtime_receipts import (
+    ExecutionStatus,
+    TraceLifecycleState,
+    build_runtime_outcome,
+    build_tool_started_observation,
+    build_trace_lifecycle_observation,
+    runtime_receipts_enabled,
+    submit_runtime_receipt,
+)
+from agentguard_langgraph_adapter.tool_gateway import adapter_submits_policy_audit
+from agentguard_langgraph_bench.adapter.event_models import (
+    ToolExecutionResult,
+    new_id,
+    utc_now_iso,
+)
 from agentguard_langgraph_bench.adapter.langgraph_adapter import blocked_result
-from agentguard_langgraph_bench.bench.mcpsafety import build_descriptor_diff, hijacking_config_from_metadata
+from agentguard_langgraph_bench.bench.mcpsafety import (
+    build_descriptor_diff,
+    hijacking_config_from_metadata,
+)
 
 
 @dataclass(slots=True)
@@ -19,6 +36,7 @@ class GuardedToolGateway:
     tool_runtime: Any
     approval_mode: str = "fail-closed"
     approval_timeout: float = 60.0
+    _last_receipt_by_trace: dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.approval_mode = str(self.approval_mode or "fail-closed").strip().lower()
@@ -65,12 +83,24 @@ class GuardedToolGateway:
         )
         if compatibility is not None:
             event.metadata["compatibility"] = dict(compatibility)
-        audit_event = self.guard_adapter.build_audit_event(event, decision)
-        if compatibility is not None:
-            audit_event.metadata["compatibility"] = dict(compatibility)
-        self.guard_adapter.submit_audit_event(audit_event)
+        # Guard API evaluate owns policy_evaluation. Share the reusable
+        # adapter's mode decision so the actual AttackBench path cannot submit
+        # the duplicate record that Guard API correctly rejects.
+        audit_event = None
+        if adapter_submits_policy_audit(self.guard_adapter):
+            audit_event = self.guard_adapter.build_audit_event(event, decision)
+            if compatibility is not None:
+                audit_event.metadata["compatibility"] = dict(compatibility)
+            self.guard_adapter.submit_audit_event(audit_event)
 
         if decision.decision == "deny":
+            receipt_error = self._record_outcome(
+                event,
+                decision,
+                execution_status="not_invoked",
+                intervention_type="policy_deny",
+                intervention_reason="Policy denied the action before the tool runtime was invoked.",
+            )
             return _annotate_result(
                 blocked_result(
                     tool_name=tool_name,
@@ -86,12 +116,26 @@ class GuardedToolGateway:
                 terminal_reason="policy_deny",
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
+                runtime_receipt_error=receipt_error,
             )
 
         if decision.decision == "ask":
             approval_id = _approval_id(getattr(decision, "approval", None))
             arguments_hash = _arguments_hash(arguments)
             if self.approval_mode == "fail-closed" or not approval_id:
+                approval_resolution = {
+                    "status": "not_waited",
+                    "decision": "deny",
+                    "reason": "approval_mode_fail_closed",
+                }
+                receipt_error = self._record_outcome(
+                    event,
+                    decision,
+                    execution_status="not_invoked",
+                    approval_resolution=approval_resolution,
+                    intervention_type="approval_not_obtained",
+                    intervention_reason="The configured fail-closed mode did not release the action for execution.",
+                )
                 return _annotate_result(
                     blocked_result(
                         tool_name=tool_name,
@@ -102,12 +146,13 @@ class GuardedToolGateway:
                     ),
                     approval_mode=self.approval_mode,
                     approval_id=approval_id,
-                    approval_resolution={"status": "not_waited", "decision": "deny", "reason": "approval_mode_fail_closed"},
+                    approval_resolution=approval_resolution,
                     approved_arguments_hash=arguments_hash,
                     block_semantics="ask_as_block",
                     counts_as_effective_block=False,
                     runtime_terminal=True,
                     terminal_reason="ask_as_block",
+                    runtime_receipt_error=receipt_error,
                 )
 
             approval_resolution, latency_ms = _wait_for_approval(
@@ -138,6 +183,14 @@ class GuardedToolGateway:
                     arguments_hash=arguments_hash,
                 )
                 if mismatch_reason:
+                    receipt_error = self._record_outcome(
+                        event,
+                        decision,
+                        execution_status="not_invoked",
+                        approval_resolution=approval_resolution,
+                        intervention_type="approval_binding_mismatch",
+                        intervention_reason=("The approval did not match the reviewed tool call, so the runtime was not invoked."),
+                    )
                     return _annotate_result(
                         blocked_result(
                             tool_name=tool_name,
@@ -152,6 +205,7 @@ class GuardedToolGateway:
                         runtime_terminal=True,
                         terminal_reason="approval_binding_mismatch",
                         safe_message=f"Approval did not match the reviewed tool call: {mismatch_reason}",
+                        runtime_receipt_error=receipt_error,
                     )
             else:
                 block_semantics = "approval_denied_before_harm"
@@ -162,6 +216,14 @@ class GuardedToolGateway:
                 elif approval_status == "expired" or approval_decision == "expired":
                     block_semantics = "approval_expired_block"
                     counts_as_effective_block = False
+                receipt_error = self._record_outcome(
+                    event,
+                    decision,
+                    execution_status="not_invoked",
+                    approval_resolution=approval_resolution,
+                    intervention_type=block_semantics,
+                    intervention_reason="The approval path ended before the tool runtime was invoked.",
+                )
                 return _annotate_result(
                     blocked_result(
                         tool_name=tool_name,
@@ -175,11 +237,58 @@ class GuardedToolGateway:
                     counts_as_effective_block=counts_as_effective_block,
                     runtime_terminal=True,
                     terminal_reason=block_semantics,
+                    runtime_receipt_error=receipt_error,
                 )
+
+        invoked_at = utc_now_iso()
+        start_audit_id: str | None = None
+        if decision.decision == "ask" and self._supports_action_receipts(decision):
+            started = build_tool_started_observation(
+                event,
+                decision,
+                approval_resolution=approval_resolution,
+                timestamp=invoked_at,
+            )
+            start_error = self._record_receipt(started)
+            if start_error is not None:
+                return _annotate_result(
+                    blocked_result(
+                        tool_name=tool_name,
+                        call_id=call_id,
+                        event=event,
+                        decision=decision,
+                        audit_event=audit_event,
+                    ),
+                    approval_mode=self.approval_mode,
+                    approval_id=approval_id,
+                    approval_consumed=True,
+                    approval_decision=approval_decision,
+                    approval_wait_latency_ms=latency_ms,
+                    approved_arguments_hash=approved_arguments_hash,
+                    approval_resolution=approval_resolution,
+                    block_semantics="runtime_receipt_failure",
+                    counts_as_effective_block=False,
+                    runtime_terminal=True,
+                    terminal_reason="runtime_receipt_failure",
+                    safe_message="The approved tool call was not executed because its start receipt could not be recorded.",
+                    runtime_receipt_error=start_error,
+                )
+            start_audit_id = started.audit_id
 
         before = self.tool_runtime.snapshot()
         try:
             result = self.tool_runtime.invoke(tool_name, arguments)
+            side_effects = self.tool_runtime.diff(before)
+            receipt_error = self._record_outcome(
+                event,
+                decision,
+                execution_status="executed",
+                approval_resolution=(approval_resolution if decision.decision == "ask" else None),
+                invoked_at=invoked_at,
+                side_effects=side_effects,
+                side_effects_measured=True,
+                parent_audit_id=start_audit_id,
+            )
             return ToolExecutionResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -189,9 +298,9 @@ class GuardedToolGateway:
                 status="executed",
                 result=result,
                 safe_message=None,
-                side_effects=self.tool_runtime.diff(before),
+                side_effects=side_effects,
                 event=event.model_dump(),
-                audit_event=audit_event.model_dump(),
+                audit_event=_dump_audit_event(audit_event),
                 approval_mode=self.approval_mode if decision.decision == "ask" else None,
                 approval_id=approval_id if decision.decision == "ask" else None,
                 approval_consumed=True if decision.decision == "ask" else False,
@@ -207,8 +316,21 @@ class GuardedToolGateway:
                 rag_answer_provenance=result.get("rag_answer_provenance") if tool_name == "rag_answer" and isinstance(result, dict) else None,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
+                runtime_receipt_error=receipt_error,
             )
         except Exception as exc:
+            side_effects = self.tool_runtime.diff(before)
+            receipt_error = self._record_outcome(
+                event,
+                decision,
+                execution_status="failed",
+                approval_resolution=(approval_resolution if decision.decision == "ask" else None),
+                invoked_at=invoked_at,
+                error=str(exc),
+                side_effects=side_effects,
+                side_effects_measured=True,
+                parent_audit_id=start_audit_id,
+            )
             return ToolExecutionResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -218,9 +340,9 @@ class GuardedToolGateway:
                 status="error",
                 result=None,
                 safe_message=None,
-                side_effects=self.tool_runtime.diff(before),
+                side_effects=side_effects,
                 event=event.model_dump(),
-                audit_event=audit_event.model_dump(),
+                audit_event=_dump_audit_event(audit_event),
                 error=str(exc),
                 approval_mode=self.approval_mode if decision.decision == "ask" else None,
                 approval_id=approval_id if decision.decision == "ask" else None,
@@ -234,7 +356,72 @@ class GuardedToolGateway:
                 counts_as_effective_block=False,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
+                runtime_receipt_error=receipt_error,
             )
+
+    def record_trace_lifecycle(
+        self,
+        *,
+        trace_id: str,
+        state: TraceLifecycleState,
+        runtime: str,
+        case_id: str | None = None,
+        reason: str | None = None,
+    ) -> str | None:
+        """Persist an explicit trace boundary and return a bounded diagnostic."""
+
+        if not runtime_receipts_enabled(self.guard_adapter):
+            return None
+        receipt = build_trace_lifecycle_observation(
+            trace_id=trace_id,
+            state=state,
+            runtime=runtime,
+            case_id=case_id,
+            parent_audit_id=self._last_receipt_by_trace.get(trace_id),
+            reason=reason,
+        )
+        return self._record_receipt(receipt)
+
+    def _supports_action_receipts(self, decision: Any) -> bool:
+        return bool(runtime_receipts_enabled(self.guard_adapter) and getattr(decision, "policy_audit_id", None))
+
+    def _record_outcome(
+        self,
+        event: Any,
+        decision: Any,
+        *,
+        execution_status: ExecutionStatus,
+        approval_resolution: dict[str, Any] | None = None,
+        invoked_at: str | None = None,
+        error: str | None = None,
+        side_effects: list[dict[str, Any]] | None = None,
+        side_effects_measured: bool = False,
+        parent_audit_id: str | None = None,
+        intervention_type: str | None = None,
+        intervention_reason: str | None = None,
+    ) -> str | None:
+        if not self._supports_action_receipts(decision):
+            return None
+        receipt = build_runtime_outcome(
+            event,
+            decision,
+            execution_status=execution_status,
+            approval_resolution=approval_resolution,
+            invoked_at=invoked_at,
+            error=error,
+            side_effects=side_effects,
+            side_effects_measured=side_effects_measured,
+            parent_audit_id=parent_audit_id,
+            intervention_type=intervention_type,
+            intervention_reason=intervention_reason,
+        )
+        return self._record_receipt(receipt)
+
+    def _record_receipt(self, receipt: Any) -> str | None:
+        error = submit_runtime_receipt(self.guard_adapter, receipt)
+        if error is None:
+            self._last_receipt_by_trace[receipt.trace_id] = receipt.audit_id
+        return error
 
     def _enrich_arguments(
         self,
@@ -245,7 +432,13 @@ class GuardedToolGateway:
         case_context: dict[str, Any] | None,
         call_id: str,
     ) -> dict[str, Any]:
-        if tool_name in {"memory_write", "memory_read", "memory_search", "rag_answer", "rag_retrieve"}:
+        if tool_name in {
+            "memory_write",
+            "memory_read",
+            "memory_search",
+            "rag_answer",
+            "rag_retrieve",
+        }:
             payload = dict(arguments)
             metadata = dict((case_context or {}).get("metadata") or security.get("metadata") or {})
             payload["_case_id"] = security.get("case_id") or (case_context or {}).get("case_id")
@@ -264,7 +457,10 @@ class GuardedToolGateway:
         hijacking = dict(context.get("hijacking") or metadata.get("hijacking") or {})
         if not hijacking:
             hijacking = hijacking_config_from_metadata(metadata).model_dump()
-        selected_catalog = _catalog_for_view(context, payload.get("catalog_view") or context.get("catalog_view") or "poisoned")
+        selected_catalog = _catalog_for_view(
+            context,
+            payload.get("catalog_view") or context.get("catalog_view") or "poisoned",
+        )
         clean_catalog = _catalog_from_context(context, "clean_tool_catalog")
         poisoned_catalog = _catalog_from_context(context, "poisoned_tool_catalog")
         descriptor = _select_descriptor(selected_catalog, payload, context, metadata)
@@ -275,7 +471,10 @@ class GuardedToolGateway:
             descriptor_diff = build_descriptor_diff(clean_catalog, poisoned_catalog)
         if descriptor:
             payload.setdefault("descriptor", descriptor)
-            payload.setdefault("catalog_view", payload.get("catalog_view") or context.get("catalog_view") or "poisoned")
+            payload.setdefault(
+                "catalog_view",
+                payload.get("catalog_view") or context.get("catalog_view") or "poisoned",
+            )
         if clean_descriptor:
             payload.setdefault("clean_descriptor", clean_descriptor)
         if poisoned_descriptor:
@@ -298,7 +497,12 @@ class GuardedToolGateway:
             return
         if not payload.get("contexts") and provenance.get("contexts"):
             payload["contexts"] = list(provenance.get("contexts") or [])
-        for key in ("context_docs", "source_trust", "answer_source", "rag_answer_provenance"):
+        for key in (
+            "context_docs",
+            "source_trust",
+            "answer_source",
+            "rag_answer_provenance",
+        ):
             if payload.get(key) in (None, "", []):
                 value = provenance.get(key)
                 if value not in (None, "", []):
@@ -350,6 +554,13 @@ def _annotate_result(result: ToolExecutionResult, **updates: Any) -> ToolExecuti
     return result.model_copy(update=clean_updates)
 
 
+def _dump_audit_event(audit_event: Any | None) -> dict[str, Any] | None:
+    if audit_event is None:
+        return None
+    dumped = audit_event.model_dump() if hasattr(audit_event, "model_dump") else audit_event
+    return dumped if isinstance(dumped, dict) else None
+
+
 def _approval_id(approval: Any) -> str | None:
     if not isinstance(approval, dict):
         return None
@@ -358,7 +569,13 @@ def _approval_id(approval: Any) -> str | None:
 
 
 def _arguments_hash(arguments: dict[str, Any]) -> str:
-    payload = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    payload = json.dumps(
+        arguments,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -385,7 +602,11 @@ def _wait_for_approval(guard_adapter: Any, *, approval_id: str, timeout_seconds:
         if isinstance(resolution, dict):
             last_resolution = dict(resolution)
         else:
-            last_resolution = {"status": "error", "decision": "deny", "error": "approval wait returned non-object"}
+            last_resolution = {
+                "status": "error",
+                "decision": "deny",
+                "error": "approval wait returned non-object",
+            }
         status = str(last_resolution.get("status") or "").strip().lower()
         if status != "pending":
             return last_resolution, int((time.monotonic() - started) * 1000)
@@ -400,11 +621,22 @@ def _wait_for_approval(guard_adapter: Any, *, approval_id: str, timeout_seconds:
 def _call_wait_for_approval(guard_adapter: Any, approval_id: str, timeout_seconds: float) -> dict[str, Any]:
     wait = getattr(guard_adapter, "wait_for_approval", None)
     if not callable(wait):
-        return {"status": "error", "decision": "deny", "error": "guard adapter does not support approval wait"}
+        return {
+            "status": "error",
+            "decision": "deny",
+            "error": "guard adapter does not support approval wait",
+        }
     try:
-        return wait(approval_id, timeout=timeout_seconds)
+        resolution = wait(approval_id, timeout=timeout_seconds)
     except TypeError:
-        return wait(approval_id)
+        resolution = wait(approval_id)
+    if isinstance(resolution, dict):
+        return dict(resolution)
+    return {
+        "status": "error",
+        "decision": "deny",
+        "error": "approval wait returned non-object",
+    }
 
 
 def _approval_binding_mismatch(

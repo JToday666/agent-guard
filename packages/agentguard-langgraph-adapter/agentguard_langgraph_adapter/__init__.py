@@ -25,6 +25,13 @@ from .langgraph_adapter import (
     create_guarded_tool_node,
 )
 from .secure_tool_node import GuardedToolNode, SecureToolNode
+from .runtime_receipts import (
+    build_runtime_outcome,
+    build_tool_started_observation,
+    build_trace_lifecycle_observation,
+    runtime_receipts_enabled,
+    submit_runtime_receipt,
+)
 from .tool_gateway import GuardedToolGateway
 from .tool_compat import (
     BROWSER_TOOLS,
@@ -49,6 +56,11 @@ __all__ = [
     "LangGraphAdapter",
     "PolicyDecision",
     "RuntimeGuardEvent",
+    "build_runtime_outcome",
+    "build_tool_started_observation",
+    "build_trace_lifecycle_observation",
+    "runtime_receipts_enabled",
+    "submit_runtime_receipt",
     "SecureToolNode",
     "ToolCallEvent",
     "ToolExecutionResult",

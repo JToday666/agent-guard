@@ -308,6 +308,9 @@ def test_gateway_blocks_memory_write_event_before_runtime_invoke() -> None:
     assert result.event is not None
     assert result.event["event_type"] == "memory_write_proposed"
     assert result.block_semantics == "policy_deny"
+    assert client.audit_events[-1]["record_type"] == "runtime_outcome"
+    assert client.audit_events[-1]["links"]["action_id"] == "call_memory_gate"
+    assert client.audit_events[-1]["evidence"]["execution"]["status"] == "not_invoked"
 
 
 def test_gateway_blocks_agent_abuse_tool_call_before_runtime_invoke() -> None:
@@ -335,6 +338,7 @@ def test_gateway_blocks_agent_abuse_tool_call_before_runtime_invoke() -> None:
     assert result.event["event_type"] == "tool_call_proposed"
     assert result.event["tool"]["name"] == "browser_click"
     assert result.block_semantics == "policy_deny"
+    assert client.audit_events[-1]["event_type"] == "tool_call_not_invoked"
 
 
 def test_gateway_quarantines_poisoned_tool_result_before_context_admission() -> None:
@@ -369,6 +373,10 @@ def test_gateway_quarantines_poisoned_tool_result_before_context_admission() -> 
     assert result.event is not None
     assert result.event["event_type"] == "tool_result_produced"
     assert result.counts_as_effective_block is True
+    assert client.audit_events[-1]["record_type"] == "runtime_outcome"
+    assert client.audit_events[-1]["links"]["action_id"] == "call_result_gate"
+    assert client.audit_events[-1]["evidence"]["execution"]["status"] == "executed"
+    assert client.audit_events[-1]["evidence"]["result"]["disposition"] == "quarantined"
 
 
 def test_gateway_blocks_unverified_local_rag_answer_review_before_runtime_invoke() -> None:
@@ -436,9 +444,10 @@ def test_gateway_does_not_submit_policy_audit_in_guard_api_mode() -> None:
 
     assert allowed.executed is True
     assert denied.blocked is True
-    # G-02：Guard API 模式下策略审计由 evaluate writer 唯一写入，
-    # gateway 全程（allow/deny/工具结果守卫）不得重复提交。
-    assert client.audit_events == []
+    # G-02：Guard API 模式下策略审计由 evaluate writer 唯一写入；gateway
+    # 只提交 Adapter 权威生产的 runtime_outcome。
+    assert client.audit_events
+    assert {event["record_type"] for event in client.audit_events} == {"runtime_outcome"}
     assert allowed.audit_event is None
     assert denied.audit_event is None
 
@@ -588,6 +597,7 @@ def _decision(decision: str) -> dict[str, Any]:
         "safe_message": None,
         "latency_ms": 0,
         "approval": None,
+        "policy_audit_id": f"audit_policy_{decision}",
     }
 
 
