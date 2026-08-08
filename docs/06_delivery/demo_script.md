@@ -49,8 +49,9 @@
 - 共享事实基线使用
   [`runtime_safety_trace_v04.json`](../../tests/fixtures/runtime_safety_trace_v04.json)。
 
-当前状态：场景、事实语义和运行时选择已冻结；端到端 AuditEvent `0.4` writer、动态
-Dashboard 和 ETag 尚未实施，完成后才能用于正式现场演示。
+当前状态：场景、事实语义、AuditEvent `0.4` writer、独立 ETag 和动态 Dashboard 已完成
+代码实施与契约测试；仍须用真实 LangGraph + Guard API 分别连接 Memory 与 PostgreSQL
+跑通同一场景后，才能作为正式现场演示证据。
 
 ## 3. Demo 1：LangGraph 文件泄露攻击
 

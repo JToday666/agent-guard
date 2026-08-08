@@ -1,8 +1,10 @@
 # Agent 运行时安全可观测与动态治理设计
 
-> 状态：阶段 0 设计已冻结，代码实施尚未开始
+> 状态：设计已冻结，后端与 Dashboard 代码已实施；真实跨存储演示链待验收
 >
 > 冻结日期：2026-08-07
+>
+> 实施更新：2026-08-08
 >
 > 主演示运行时：LangGraph / AttackBench
 >
@@ -11,17 +13,19 @@
 ## 1. 文档定位
 
 本文冻结“执行轨迹、溯源关系、审计记录”三种视图的产品边界、事实来源、关联 ID、
-真实演示链和动态刷新原则，作为后续分阶段实施的基线。
+真实演示链和动态刷新原则，并记录当前实施与剩余验收边界。
 
-本阶段只完成设计和共享契约样例，不表示下列能力已经交付：
+截至 2026-08-08，以下代码能力已经交付：
 
-- Adapter 已写入完整 AuditEvent `0.4` 运行时回执；
-- Adapter / Plugin 已持久化明确的 Trace start / terminal 生命周期 observation；
-- Trace API 已支持条件请求；
-- Provenance writer 已生成完整生命周期关系；
-- Dashboard 已提供执行轨迹或动态刷新。
+- Guard API 唯一写入 AuditEvent `0.4` 策略记录，并统一幂等、脱敏和有界证据；
+- LangGraph Adapter 写入运行时回执、`tool_call_started` 和 Trace 生命周期 observation；
+- Trace 与 Provenance 使用独立 ETag 和 `304`，Trace 响应包含窗口完整性；
+- Provenance writer 在写入时物化稳定节点与关系，并保护节点、边和审批状态冲突；
+- Dashboard 已提供三视图、确定性动作投影、约 2 秒条件轮询和按需溯源更新。
 
-后续实现不得用静态页面、Mock 数据或前端推断替代这些真实能力。
+尚未完成的是用真实 LangGraph 主演示链分别连接 Memory 与 PostgreSQL 跑通同一场景，
+以及在真实 PostgreSQL 环境关闭跨存储验收门禁。共享 fixture、单元测试、Mock E2E 和
+拦截式 API E2E 只能证明契约与前端行为，不能替代该真实联调。
 
 ## 2. 产品目标与非目标
 
@@ -69,13 +73,13 @@ OpenClaw 保留为跨运行时增强链，不作为本轮主演示链。只有�
 
 ### 3.2 选择依据
 
-| 维度         | LangGraph / AttackBench                               | OpenClaw                                        |
-| ------------ | ----------------------------------------------------- | ----------------------------------------------- |
-| 当前演示定位 | 已是 P0 主演示路径                                    | 当前演示脚本列为 P1                             |
-| 动作事实     | `memory_read`、`code_exec` 已有明确工具名和 `call_id` | 工具 Hook 有 `toolCallId`                       |
-| 资源事实     | Adapter 已能规范化 memory/code 资源                   | 依赖 Hook payload 和缓存恢复                    |
-| 执行结果     | 已有 `ToolExecutionResult`，但尚未统一写入 0.4 回执   | 目前主要写 0.3 observation，稳定 links 仍需迁移 |
-| 决赛风险     | 链路较短，行为和结果更容易确定性复现                  | Hook 版本和执行后语义带来额外联调面             |
+| 维度         | LangGraph / AttackBench                                     | OpenClaw                                                 |
+| ------------ | ----------------------------------------------------------- | -------------------------------------------------------- |
+| 当前演示定位 | 已是 P0 主演示路径                                          | 当前演示脚本列为 P1                                      |
+| 动作事实     | `memory_read`、`code_exec` 已有明确工具名和 `call_id`       | 工具 Hook 有 `toolCallId`                                |
+| 资源事实     | Adapter 已能规范化 memory/code 资源                         | 依赖 Hook payload 和缓存恢复                             |
+| 执行结果     | 已统一写入 0.4 outcome 与生命周期 observation，真实链待验收 | 已覆盖最小 0.4 outcome；allow 后执行确证仍非本期完整范围 |
+| 决赛风险     | 链路较短，行为和结果更容易确定性复现                        | Hook 版本和执行后语义带来额外联调面                      |
 
 选择 LangGraph 不代表 OpenClaw 能力被弱化，而是先保证一条可重复、可审计、可现场恢复的
 真实闭环，再用 OpenClaw 证明跨运行时扩展性。
@@ -117,10 +121,9 @@ ASK               原始策略决定
 Trace 外的环境预置只用于确定性准备 sandbox，不得出现在执行轨迹中冒充 Agent 动作；其
 来源和 trusted 标记仍由运行时数据记录。
 
-当前 `P108_agent_abuse` 经 policy override 变为 `ask` 时，Core 生成的
-`approval_intent.resource` 仍可能为空。主演示链进入实现前，Guard API 必须在创建审批时
-使用服务端已规范化、已脱敏的首个 resource target 作为空值回退；不得由 Dashboard 从
-原始命令补造。本 fixture 冻结的审批资源 `2 + 2` 是该目标形态，不是当前能力声明。
+`P108_agent_abuse` 经 policy override 变为 `ask` 且 Core 的
+`approval_intent.resource` 为空时，Guard API 现已使用服务端已规范化、已脱敏的首个
+resource target 回退，并由共享存储契约测试覆盖。Dashboard 不从原始命令补造资源。
 
 ## 4. 冻结的架构决策
 
@@ -174,9 +177,14 @@ Core 只回答“应该如何处理”；Adapter / Plugin 才能回答“后来�
 
 所有 ID 都是不透明字符串。消费者不得通过拆分前缀或内容推断事实。
 
+Provenance 策略节点使用 Trace 级内部键
+`policy:{trace_id}:{bundle_id}:{revision-or-version}`，避免不同 Trace 复用同一策略快照时发生
+节点归属冲突；`ref_id` 仍只保存原始 `bundle_id:revision-or-version`。该格式属于 writer
+的确定性物化规则，前端不得拼接或解析它。
+
 ### 5.3 Dashboard 投影
 
-后续 Dashboard 以 `action_id` 聚合 AuditEvent 与 Approval，形成可重建的
+Dashboard 以 `action_id` 聚合 AuditEvent 与 Approval，形成可重建的
 `ExecutionActionViewModel`。它至少包含：
 
 ```text
@@ -190,11 +198,13 @@ phase: proposed | evaluated | waiting_approval | approval_released | waiting_rec
 policy checks
 audit IDs
 timestamps
-provenance node ID
 ```
 
 `phase` 是展示投影，不进入 AuditEvent。聚合必须支持同一动作多次策略检查，不能用
 “最后一条记录覆盖前一条记录”。
+
+动作投影不保存或拼接 Provenance node ID。只有加载独立溯源快照后，才以
+`kind=action + ref_id=action_id` 精确定位节点。
 
 投影的确定性规则：
 
@@ -231,7 +241,7 @@ Trace 顶部的“运行中、等待审批、已结束”也只能由明确生�
 
 不新增一级页面。`/evidence/:trace_id` 继续承担一次 Trace 的调查和治理上下文。
 
-顶部保留 Trace 基本信息、最终安全结论、六维事实和紧凑阶段摘要；主体冻结为三个互补视图：
+顶部保留 Trace 基本信息、最终安全结论、六维事实和紧凑阶段摘要；主体已实现为三个互补视图：
 
 1. **执行轨迹**（默认）
    - 按动作而非按 AuditEvent 展示时间流卡片；
@@ -241,7 +251,7 @@ Trace 顶部的“运行中、等待审批、已结束”也只能由明确生�
 2. **溯源关系**
    - 继续回答“为什么发生、依据是什么、事实如何关联”；
    - 进入视图或用户确认更新时获取最新图；
-   - 新关系到达时提示数量，不自动复位筛选、折叠或视口；
+   - 更新后显示最新节点和关系数量，不自动复位筛选、折叠、选择或视口锚点；
    - Trace 明确终态后可执行一次最终布局。
 3. **审计记录**
    - 按 AuditEvent 展示完整时间顺序；
@@ -256,7 +266,7 @@ Trace 顶部的“运行中、等待审批、已结束”也只能由明确生�
 审计记录：系统实际记录了什么
 ```
 
-组件迁移冻结为：
+组件实现为：
 
 - 新增 `ExecutionTrace.vue`，只接收按 `action_id` 聚合的动作投影；
 - 现有 `TraceTimeline.vue` 在迁移时重命名为 `AuditTimeline.vue`，继续按 AuditEvent 展示，
@@ -283,7 +293,7 @@ event_id=<raw audit id>
 
 ### 7.1 Trace
 
-后续实现采用约 2 秒的条件轮询作为第一阶段实时机制：
+Dashboard 已采用约 2 秒的条件轮询作为第一阶段实时机制：
 
 ```text
 GET /v1/traces/{trace_id}
@@ -298,10 +308,9 @@ If-None-Match: <trace-etag>
 - 有待审批动作时不得因为其他动作终态而停止刷新。
 - 只有明确 Trace 终态且没有待审批、没有等待回执动作时才停止自动轮询。
 
-响应使用私有、需重新验证的缓存语义，不能被共享缓存复用。ETag 的具体计算和路由实现属于
-后续后端阶段，本阶段不修改接口。目标响应至少使用
-`Cache-Control: private, no-cache` 和 `Vary: Cookie, Authorization`；ETag 保持不透明，
-不得要求客户端解析 sequence 或状态。
+响应使用私有、需重新验证的缓存语义，不能被共享缓存复用。Guard API 已返回
+`Cache-Control: private, no-cache`、`Vary: Cookie, Authorization` 和不透明 ETag；
+Dashboard 不解析 sequence 或状态来推断版本。
 
 ### 7.2 Provenance
 
@@ -309,15 +318,15 @@ Provenance 使用独立条件请求和非对称刷新：
 
 - 默认不跟随每次 Trace 轮询触发布局；
 - 执行轨迹点击“查看安全依据”时刷新并定位；
-- 已知有新关系时展示“有新证据”提示，由用户更新；
+- 用户进入视图或主动更新后显示本次校准结果；
 - Trace 终态后自动校准一次；
 - 更新后保留用户筛选、折叠、选中节点和可恢复的视口锚点。
 
 若后端尚不能廉价判断是否有新 Provenance，前端不得从 Trace 新增记录数伪造“新增节点数”。
 
-## 8. 后续后端实施边界
+## 8. 后端实施状态与剩余边界
 
-本阶段不改后端。后续后端工作必须按以下顺序实施：
+下列代码步骤已经按顺序完成：
 
 1. Guard API 唯一写入 AuditEvent `0.4` `policy_evaluation`，保留实际策略快照。
 2. Guard API 为 `approval_intent.resource` 空值使用已规范化、已脱敏的资源目标回退，
@@ -328,7 +337,11 @@ Provenance 使用独立条件请求和非对称刷新：
 5. 使用稳定 `event_id/action_id/decision_id/approval_id/policy_audit_id` links。
 6. Provenance writer 在写入时确定性物化动作、决策、审批、结果和审计关系。
 7. 为 Trace 与 Provenance 分别实现完整响应 ETag 和 `304`。
-8. Memory 与 PostgreSQL 运行同一套幂等、关联和条件请求 contract tests。
+8. Memory 与 PostgreSQL 共用同一套幂等、关联和条件请求 contract tests。
+
+当前 Memory 契约测试已通过；PostgreSQL 实现已接入相同契约，但本地缺少真实数据库环境，
+仍需在可用 PostgreSQL 上执行完整测试。真实 LangGraph / AttackBench 演示链也仍需分别在
+两种存储上验收，不能由 TestClient、共享 fixture 或浏览器路由拦截测试代替。
 
 审批终态发生变化但 AuditEvent 未增加时，Trace ETag 也必须变化。禁止只使用最大
 `integrity.sequence` 计算 Trace ETag。
@@ -346,8 +359,9 @@ Provenance 使用独立条件请求和非对称刷新：
 ## 10. 共享契约 fixture
 
 [runtime_safety_trace_v04.json](../../tests/fixtures/runtime_safety_trace_v04.json)
-冻结本场景的源事实、最终 Provenance 和分阶段投影断言。fixture 是目标契约样例，不代表
-当前 Adapter、Guard API 或 Dashboard 已经端到端产出该结构。
+冻结本场景的源事实、最终 Provenance 和分阶段投影断言。Schema、存储、Provenance writer
+和 Dashboard 动作投影均已复用该 fixture；它仍是目标契约样例，不代表真实 Adapter、
+Guard API、数据库和 Dashboard 已经端到端跑通该结构。
 
 后续跨组件测试必须至少验证：
 
@@ -370,6 +384,7 @@ Provenance 使用独立条件请求和非对称刷新：
 - 页面位置、三视图职责和非对称刷新方案已冻结；
 - 后端后续边界、ETag 覆盖范围和禁止推断项已记录；
 - 共享 fixture 可通过 AuditEvent `0.4` Schema 和交叉引用检查；
-- TODO 清楚区分“设计完成”“基础兼容已存在”和“端到端实现未开始”。
+- TODO 清楚区分“设计完成”“代码已实施”和“真实端到端验收尚未完成”。
 
-任何代码实现都从下一阶段开始，不得把本文的目标描述为当前已交付能力。
+上述定义继续作为实施约束。当前代码状态以第 1、8 节为准；真实跨存储演示链通过前，
+不得把 fixture、Mock 或拦截式 API E2E 描述为端到端交付证据。
