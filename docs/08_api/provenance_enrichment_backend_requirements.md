@@ -94,6 +94,7 @@ Action Critic 结果和已经持久化的 AuditEvent。
 | `source`         | `source:{trace_id}:{source-id-or-hash}`               | source ID 或摘要 ID   | security context 或结构化 context source          | `source_type`、`source_trust`、`phase=input_trust`        |
 | `context`        | `context:{event_id}`                                  | `event_id`            | `context_assembled` 或明确的 context sources      | `phase=context_intent`、来源数量                          |
 | `model_intent`   | `model_intent:{event_id}`                             | `event_id`            | 显式 `model_intent` 或有界 tool plan 摘要         | `phase=context_intent`                                    |
+| `event`          | `event:{event_id}`                                    | `event_id`            | 没有更具体 typed fact 的 policy evaluation        | `event_type`、阶段                                        |
 | `action`         | `action:{action_id}`                                  | `action_id`           | ToolDescriptor `call_id` 或稳定 `links.action_id` | 动作名、`phase=tool_policy`                               |
 | `resource`       | `resource:{trace_id}:sha256:{digest}`                 | `sha256:{digest}`     | `derive_resources(event)` 的规范资源              | 类型、操作、方向、脱敏目标摘要                            |
 | `rule`           | `rule:{decision_id}:{rule_id}`                        | `rule_id`             | `GuardDecision.rule_hits`                         | `decision_id`、severity、原因摘要                         |
@@ -107,13 +108,16 @@ Action Critic 结果和已经持久化的 AuditEvent。
 
 Policy evaluation 并不天然产生 action 节点。Writer 只在 `links.action_id` 存在时物化
 action；常规上下文组装和模型输入不得通过复制 `event_id` 补造动作，工具结果则必须沿用来源
-工具调用的稳定 `call_id`。
+工具调用的稳定 `call_id`。每个可识别 `event_id + decision_id` 的策略判断都必须有真实评估
+主体：依次优先 action、`context_assembled` 的 context、显式 model intent、其他 context，
+最后使用 event 回退节点，并以 `evaluated_to` 连接 decision。
 
-当前已持久化的通用 `event` 节点属于兼容节点：
+已持久化的通用 `event` 节点同时承担兼容读取和 typed fact 缺失时的确定性回退：
 
 - 查询继续原样返回，不做破坏性删除。
 - 当前 `0.3` 写入可继续生成。
-- 完整生命周期 writer 有对应 typed node 时，不依赖通用 `event` 节点表达新增事实。
+- 完整生命周期 writer 有对应 typed node 时不重复生成 event；没有 typed node 时不得丢失
+  策略判断主体。
 
 节点 label 只使用脱敏、可读且有事实依据的短文本。完整参数、原始上下文和长正文不进入
 label 或 ID；有界详情进入 metadata 或关联 AuditEvent evidence。
@@ -136,7 +140,7 @@ Trace；不带 Trace 的策略 ID 会让同一策略快照在第二条 Trace 中
 | action → resource                            | `targets`            | `causal`        | 资源由该动作规范派生              |
 | resource → rule                              | `detected_by`        | `detection`     | 规则命中证据引用该资源            |
 | decision → policy                            | `evaluated_under`    | `policy`        | 使用的是该事件时策略快照          |
-| action/event → decision                      | `evaluated_to`       | `policy`        | Guard evaluate 的真实输入与输出   |
+| action/context/model_intent/event → decision | `evaluated_to`       | `policy`        | Guard evaluate 的真实输入与输出   |
 | decision → approval                          | `requested_approval` | `approval`      | 决策实际创建 approval             |
 | approval → runtime_result                    | `released_by`        | `approval`      | runtime outcome 明确引用 approval |
 | decision → runtime_result                    | `executed_as`        | `execution`     | outcome 明确引用 decision         |
@@ -162,8 +166,8 @@ edge:{relation}:{source_node_id}:{target_node_id}
 2. Core 生成 GuardDecision。
 3. 必要时创建 ApprovalRequest 和 Action Critic 记录。
 4. Guard API 唯一写入 `policy_evaluation` AuditEvent。
-5. writer 写入可用的 task、source、context、model intent、action、resource、rule、
-   policy、decision、approval、review、audit 节点及确定性边。
+5. writer 写入可用的 task、source、context、model intent、event fallback、action、
+   resource、rule、policy、decision、approval、review、audit 节点及确定性边。
 6. 返回 decision / approval。
 
 同一 evaluate 请求的幂等重试不得重复创建节点或边；如果审计已存在但 provenance 不完整，

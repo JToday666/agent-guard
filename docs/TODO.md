@@ -156,7 +156,8 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 `0.3 | 0.4`。Guard API writer、稳定 links、结构化 evidence、LangGraph 运行时回执、
 Trace 窗口与独立 ETag、丰富 Provenance writer 和 Dashboard 三视图均已进入代码；真实
 LangGraph 主演示链已通过 Uvicorn HTTP 服务分别连接 Memory/PostgreSQL，Dashboard 也已
-通过真实 PostgreSQL API 完成只读验收。单元或拦截式 E2E 仍只作为分层回归证据。
+通过真实 PostgreSQL API 完成只读验收。该两动作链是代表性闭环而非产品白名单；全
+GuardEvent 步骤覆盖由独立矩阵回归验证。单元或拦截式 E2E 仍只作为分层回归证据。
 
 ### 已完成
 
@@ -170,6 +171,9 @@ LangGraph 主演示链已通过 Uvicorn HTTP 服务分别连接 Memory/PostgreSQ
 - [x] 已建立 [Provenance 丰富化后端实施要求](08_api/provenance_enrichment_backend_requirements.md)，细化节点、关系、写入时机、幂等、历史数据和跨存储验收；Guard API 写入与真实跨存储整链验收均已完成。
 - [x] AuditEvent JSON Schema、Core 类型和 Guard API 基础写入/读取已支持 `0.3 | 0.4`；完整跨组件迁移继续列为待办。
 - [x] Dashboard 已分离 `AuditWindow` 与 `EvaluationRun`；旧 trace `metrics` 不再映射为未消费的前端领域对象，历史聚合待显式 cohort 接口上线后按需接入。
+- [x] Dashboard 执行轨迹已从“只按 action 展示”扩展为完整步骤投影：动作生命周期按
+      `action_id` 聚合，无动作 ID 的 policy evaluation 按 `event_id` 显示检查点；七类当前
+      GuardEvent 和未知未来事件回退均有无丢失、无重复回归。
 - [x] Dashboard API DTO 已允许 0.4 非策略记录的顶层策略字段为空，并以 `record_type` 和稳定 links 决定指标成员资格。
 - [x] 已建立指标作用域与原子审计窗口协作契约，后端目标接口已实现；当前前端仍使用旧事件数组兼容重建，待切换到原子窗口响应。
 - [x] 2026-08-07 完成
@@ -219,15 +223,16 @@ LangGraph 主演示链已通过 Uvicorn HTTP 服务分别连接 Memory/PostgreSQ
       `tool_call_started` 和 `runtime_outcome`，所有记录通过稳定 `action_id` 关联；未观察
       start 时不产生 start 事件；policy override 产生的空审批资源由 Guard API 使用已规范化、
       已脱敏的资源目标回退。真实主演示链已分别通过 Memory 与 PostgreSQL 联调。
-- [x] **前端静态投影**：Dashboard 以 `action_id` 聚合多次策略检查、Approval 和 outcome，
-      在证据链详情实现“执行轨迹 / 溯源关系 / 审计记录”，不新增一级页面。
-- [x] **视图联动**：执行动作、Provenance action node 和 AuditEvent 通过原始稳定 ID
-      双向定位；图更新保留筛选、折叠、选择和视口锚点。
+- [x] **前端静态投影**：Dashboard 以 `action_id` 聚合动作生命周期，以 `event_id` 保留
+      非动作安全检查点，在证据链详情实现“执行轨迹 / 溯源关系 / 审计记录”，不新增一级页面。
+- [x] **视图联动**：运行步骤、Provenance typed/action node 和 AuditEvent 通过原始稳定
+      ID 双向定位；图更新保留筛选、折叠、选择和视口锚点。
 - [x] **动态刷新**：Trace 与 Provenance 分别支持 ETag/304；Trace ETag 覆盖 approvals
       等全部可变响应内容；执行轨迹约 2 秒条件轮询，Provenance 按需校准。
 - [x] **真实联调门禁**：共享 fixture 通过 Schema 和投影契约测试；真实 LangGraph +
-      Guard API 已在 Memory/PostgreSQL 跑通同一场景，Dashboard 已通过真实 PostgreSQL
-      API 验证两动作投影、健康状态和溯源定位。fixture 或 Mock 录屏仍不单独作为交付证据。
+      Guard API 已在 Memory/PostgreSQL 跑通代表性闭环，Dashboard 已通过真实 PostgreSQL
+      API 验证动作投影、健康状态和溯源定位；全事件矩阵验证产品覆盖。fixture 或 Mock
+      录屏仍不单独作为交付证据。
 - [ ] **OpenClaw 增强链**：稳定 `toolCallId`、0.4 outcome、审批释放和断线恢复通过后，
       再升级为等价跨运行时演示，不阻塞 LangGraph 主链交付。
 

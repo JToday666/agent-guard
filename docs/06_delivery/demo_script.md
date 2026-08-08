@@ -17,7 +17,7 @@
 目标：用一条真实 LangGraph Trace 展示行为感知、风险决策、人工审批、运行结果和事后溯源
 组成的完整闭环。
 
-固定场景：
+代表性固定场景：
 
 1. 重置隔离 sandbox，并在 Trace 外预置一条 trusted 报告偏好。
 2. Agent 通过 `memory_read` 读取脱敏的本地报告偏好。
@@ -31,6 +31,10 @@
 9. Adapter 回写 `runtime_outcome=executed`；执行轨迹同时保留
    `ASK / 单次放行 / 已执行`。
 10. 点击“查看安全依据”，定位相同 `action_id` 的溯源节点和审计记录。
+
+上述 `memory_read + code_exec` 用于稳定复现 `allow → ask → 人工放行 → executed` 闭环，
+不是受支持动作清单。真实 Trace 中出现的上下文检查、模型输入/输出、其他工具、工具结果、
+记忆写入和消息发送仍按事实进入执行轨迹；动作生命周期聚合为一步，非动作阶段显示为检查点。
 
 演示约束：
 
@@ -51,8 +55,9 @@
 
 当前状态：场景、事实语义、AuditEvent `0.4` writer、独立 ETag 和动态 Dashboard 已完成
 代码实施与契约测试；真实 LangGraph + Guard API 主演示链已分别连接 Memory 与
-PostgreSQL 跑通，Dashboard 已通过真实 PostgreSQL API 完成两动作投影和溯源定位核验，
-可作为正式现场演示的预验收证据。
+PostgreSQL 跑通，Dashboard 已通过真实 PostgreSQL API 完成代表性动作投影和溯源定位
+核验；全 GuardEvent 步骤覆盖另由共享矩阵回归验证。两类证据共同作为正式现场演示的
+预验收依据，不能把两动作场景描述成产品白名单。
 
 ## 3. Demo 1：LangGraph 文件泄露攻击
 
