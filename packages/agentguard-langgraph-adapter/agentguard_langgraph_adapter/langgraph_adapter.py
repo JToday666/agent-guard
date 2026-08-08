@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -536,10 +537,18 @@ class LangGraphAdapter:
             "event_id": event_id,
             "decision_id": decision.decision_id,
         }
-        action_id = _action_id_from_payload(payload)
-        if action_id:
-            links["action_id"] = action_id
         approval_id = _approval_id_from_decision(decision)
+        action_id = _action_id_from_payload(payload)
+        if action_id or event_type in {
+            "memory_write_proposed",
+            "message_send_proposed",
+            "model_output_produced",
+        }:
+            links["action_id"] = action_id or event_id
+        elif approval_id:
+            # A normally non-executable guard stage becomes a controlled
+            # approval subject only when an approval was actually created.
+            links["action_id"] = event_id
         if approval_id:
             links["approval_id"] = approval_id
         return AuditEvent(
@@ -838,7 +847,11 @@ def _guard_event_projection(
     raw_context_sources = security_context.get("context_sources")
     context_sources = (
         list(raw_context_sources) if isinstance(raw_context_sources, list) else []
-    )[:_CONTEXT_SOURCES_LIMIT]
+    )
+    payload_sources = payload.get("sources")
+    if isinstance(payload_sources, list):
+        context_sources.extend(payload_sources)
+    context_sources = _unique_projection_items(context_sources)[:_CONTEXT_SOURCES_LIMIT]
     tool = payload.get("tool")
     tool_projection: dict[str, Any] | None = None
     if isinstance(tool, dict) and tool.get("name"):
@@ -875,6 +888,24 @@ def _guard_event_projection(
         "tool": tool_projection,
         "normalized_resources": normalized_resources,
     }
+
+
+def _unique_projection_items(items: list[Any]) -> list[Any]:
+    unique: list[Any] = []
+    fingerprints: set[str] = set()
+    for item in items:
+        fingerprint = json.dumps(
+            item,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+        if fingerprint in fingerprints:
+            continue
+        fingerprints.add(fingerprint)
+        unique.append(item)
+    return unique
 
 
 def _guard_decision_projection(decision: PolicyDecision) -> dict[str, Any]:
@@ -953,8 +984,6 @@ def _preview(value: Any, limit: int = 2000) -> str:
         text = value
     else:
         try:
-            import json
-
             text = json.dumps(value, ensure_ascii=False, sort_keys=True)
         except Exception:
             text = repr(value)

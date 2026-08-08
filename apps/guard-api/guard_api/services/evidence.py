@@ -9,6 +9,7 @@ from agentguard_core import (
     ConfigAuditEvent,
     ConfigAuditFinding,
     ConfigAuditResult,
+    ContextBuildPayload,
     GuardDecision,
     GuardEvent,
     MemoryGuardChange,
@@ -214,8 +215,14 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
     if context.sender_id:
         source["source_id"] = redact_structure(context.sender_id)
     projection["source"] = source
+    context_sources = list(context.context_sources)
+    payload = event.payload
+    if isinstance(payload, ContextBuildPayload):
+        context_sources.extend(
+            source.model_dump(mode="json") for source in payload.sources
+        )
     projection["context_sources"] = bound_value(
-        redact_structure(list(context.context_sources)),
+        redact_structure(_unique_context_sources(context_sources)),
         text_limit=SUMMARY_TEXT_LIMIT,
         array_limit=CONTEXT_SOURCES_LIMIT,
     )
@@ -224,15 +231,16 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
         if context.model_intent is not None
         else None
     )
-    payload = event.payload
-    if isinstance(payload, ToolCallPayload):
-        projection["tool"] = {
+    if isinstance(payload, (ToolCallPayload, ToolResultPayload)):
+        tool_projection: dict[str, object] = {
             "name": payload.tool.name,
             "category": payload.tool.category,
             "call_id": payload.tool.call_id,
-            # tool.arguments 必须服务端递归脱敏。
-            "arguments": bound_redacted_value(payload.arguments),
         }
+        if isinstance(payload, ToolCallPayload):
+            # tool.arguments 必须服务端递归脱敏。
+            tool_projection["arguments"] = bound_redacted_value(payload.arguments)
+        projection["tool"] = tool_projection
     else:
         projection["tool"] = None
     resources = [
@@ -251,6 +259,22 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
         array_limit=NORMALIZED_RESOURCES_LIMIT,
     )
     return projection
+
+
+def _unique_context_sources(items: list[object]) -> list[object]:
+    unique: list[object] = []
+    fingerprints: set[str] = set()
+    for item in items:
+        fingerprint = (
+            canonical_sha256(item)
+            if isinstance(item, dict)
+            else f"{type(item).__name__}:{item!s}"
+        )
+        if fingerprint in fingerprints:
+            continue
+        fingerprints.add(fingerprint)
+        unique.append(item)
+    return unique
 
 
 def _bounded_decision_dump(dump: dict[str, object]) -> dict[str, object]:
@@ -479,12 +503,16 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
             },
         )
 
-    action_id = event.event_id
+    explicit_action_id = getattr(payload, "action_id", None)
+    action_id = (
+        explicit_action_id.strip()
+        if isinstance(explicit_action_id, str) and explicit_action_id.strip()
+        else event.event_id
+    )
     action_name = event.event_type
-    is_action = isinstance(
-        payload,
-        (MemoryEventPayload, MessageSendPayload),
-    ) or (isinstance(payload, ModelCallPayload) and payload.phase == "output")
+    is_action = isinstance(payload, (MemoryEventPayload, MessageSendPayload)) or (
+        isinstance(payload, ModelCallPayload) and payload.phase == "output"
+    )
     metadata: dict[str, object] = {
         "event_type": event.event_type,
         "subject_id": action_id,

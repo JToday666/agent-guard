@@ -159,7 +159,9 @@ class ProvenanceWriter:
                 context_source_nodes.append(existing)
 
         context_node: ProvenanceNode | None = None
-        if event_id is not None and context_sources:
+        if event_id is not None and (
+            context_sources or event.event_type == "context_assembled"
+        ):
             context_node = ProvenanceNode(
                 node_id=f"context:{event_id}",
                 trace_id=event.trace_id,
@@ -262,10 +264,23 @@ class ProvenanceWriter:
         if decision_node is None:
             return
         self._add_node(decision_node)
-        if action_node is not None:
+        evaluation_subject = self._evaluation_subject_node(
+            event,
+            event_id=event_id,
+            action_node=action_node,
+            context_node=context_node,
+            model_intent_node=model_intent_node,
+        )
+        if evaluation_subject is not None:
+            if evaluation_subject.node_id not in {
+                node.node_id
+                for node in (action_node, context_node, model_intent_node)
+                if node is not None
+            }:
+                self._add_node(evaluation_subject)
             self._add_edge(
                 event.trace_id,
-                action_node.node_id,
+                evaluation_subject.node_id,
                 decision_node.node_id,
                 "evaluated_to",
                 "policy",
@@ -613,6 +628,38 @@ class ProvenanceWriter:
             },
         )
 
+    def _evaluation_subject_node(
+        self,
+        event: AuditEvent,
+        *,
+        event_id: str | None,
+        action_node: ProvenanceNode | None,
+        context_node: ProvenanceNode | None,
+        model_intent_node: ProvenanceNode | None,
+    ) -> ProvenanceNode | None:
+        if action_node is not None:
+            return action_node
+        if event.event_type == "context_assembled" and context_node is not None:
+            return context_node
+        if model_intent_node is not None:
+            return model_intent_node
+        if context_node is not None:
+            return context_node
+        if event_id is None:
+            return None
+        return ProvenanceNode(
+            node_id=f"event:{event_id}",
+            trace_id=event.trace_id,
+            kind="event",
+            ref_id=event_id,
+            label=event.event_type,
+            timestamp=event.timestamp,
+            metadata={
+                "phase": _event_phase(event.event_type),
+                "event_type": event.event_type,
+            },
+        )
+
     def _resource_nodes(
         self, event: AuditEvent, guard_event: UnknownRecord
     ) -> list[ProvenanceNode]:
@@ -810,6 +857,14 @@ class ProvenanceWriter:
 
 def _record(value: object) -> UnknownRecord:
     return value if isinstance(value, dict) else {}
+
+
+def _event_phase(event_type: str) -> str:
+    if event_type in {"context_assembled", "model_input_prepared"}:
+        return "context_intent"
+    if event_type == "model_output_produced":
+        return "outcome_audit"
+    return "tool_policy"
 
 
 def _array(value: object) -> list[object]:

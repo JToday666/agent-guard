@@ -115,6 +115,59 @@ def _policy_event(
     )
 
 
+def _checkpoint_event(
+    trace_id: str,
+    suffix: str,
+    *,
+    event_type: str,
+    context_sources: list[dict[str, Any]] | None = None,
+    model_intent: str | None = None,
+) -> AuditEvent:
+    event_id = f"event-{suffix}"
+    decision_id = f"decision-{suffix}"
+    return AuditEvent(
+        audit_id=f"audit-{suffix}",
+        schema_version="0.4",
+        record_type="policy_evaluation",
+        trace_id=trace_id,
+        timestamp="2026-08-08T00:00:00Z",
+        event_type=event_type,
+        summary="运行阶段已完成策略判断",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        blocked=False,
+        reason="允许继续",
+        links={"event_id": event_id, "decision_id": decision_id},
+        evidence={
+            "guard_event": {
+                "event_id": event_id,
+                "event_type": event_type,
+                "user_task": "整理报告",
+                "source": {"type": "user", "trust_level": "trusted"},
+                "context_sources": context_sources or [],
+                "model_intent": model_intent,
+                "tool": None,
+                "normalized_resources": [],
+            },
+            "guard_decision": {
+                "decision_id": decision_id,
+                "decision": "allow",
+                "risk_score": 0,
+                "severity": "low",
+                "rule_hits": [],
+                "reason": "允许继续",
+            },
+            "policy": {
+                "bundle_id": "shared-policy",
+                "version": "7",
+                "revision": None,
+                "canonical_digest": "sha256:abc",
+            },
+        },
+    )
+
+
 def test_writer_materializes_the_frozen_demo_graph_with_raw_refs(
     provenance_store: ControlPlaneStore,
 ) -> None:
@@ -188,6 +241,63 @@ def test_action_node_accepts_multiple_policy_checks_for_one_action() -> None:
         for edge in edges
         if edge.source_node_id == action.node_id and edge.relation == "evaluated_to"
     } == {"decision:decision-check-a", "decision:decision-check-b"}
+
+
+def test_context_checkpoint_connects_its_typed_node_to_the_decision() -> None:
+    store = MemoryControlPlaneStore()
+    writer = ProvenanceWriter(store=store)
+    event = _checkpoint_event(
+        "trace-context-checkpoint",
+        "context",
+        event_type="context_assembled",
+        context_sources=[
+            {
+                "source_id": "message-1",
+                "source_type": "conversation",
+                "source_trust": "untrusted",
+                "summary": "external message",
+            }
+        ],
+    )
+    store.add_audit_event(event)
+    writer.record_audit_event(event)
+
+    assert store.get_provenance_node("action:event-context") is None
+    context = store.get_provenance_node("context:event-context")
+    assert context is not None
+    _, edges = store.list_provenance("trace-context-checkpoint")
+    assert any(
+        edge.source_node_id == context.node_id
+        and edge.target_node_id == "decision:decision-context"
+        and edge.relation == "evaluated_to"
+        for edge in edges
+    )
+
+
+def test_model_input_checkpoint_uses_an_event_subject_when_no_typed_fact_exists() -> (
+    None
+):
+    store = MemoryControlPlaneStore()
+    writer = ProvenanceWriter(store=store)
+    event = _checkpoint_event(
+        "trace-model-input-checkpoint",
+        "model-input",
+        event_type="model_input_prepared",
+    )
+    store.add_audit_event(event)
+    writer.record_audit_event(event)
+
+    assert store.get_provenance_node("action:event-model-input") is None
+    subject = store.get_provenance_node("event:event-model-input")
+    assert subject is not None
+    assert subject.metadata["phase"] == "context_intent"
+    _, edges = store.list_provenance("trace-model-input-checkpoint")
+    assert any(
+        edge.source_node_id == subject.node_id
+        and edge.target_node_id == "decision:decision-model-input"
+        and edge.relation == "evaluated_to"
+        for edge in edges
+    )
 
 
 def test_node_upsert_fills_unknowns_without_degrading_known_facts() -> None:

@@ -85,6 +85,41 @@ def test_routine_guard_hooks_do_not_claim_an_execution_action(
     assert "action_name" not in audit.metadata
 
 
+def test_context_payload_sources_are_preserved_in_browser_safe_evidence() -> None:
+    audit = _audit(
+        _event(
+            "context_assembled",
+            {
+                "sources": [
+                    {
+                        "source_id": "message_001",
+                        "source_type": "conversation",
+                        "source_trust": "untrusted",
+                        "summary": "untrusted context",
+                        "contains_instruction_like_text": False,
+                        "contains_sensitive_data": False,
+                    }
+                ],
+                "will_enter_context": True,
+                "sanitized": False,
+            },
+        )
+    )
+
+    guard_event = audit.evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert guard_event["context_sources"] == [
+        {
+            "source_id": "message_001",
+            "source_type": "conversation",
+            "source_trust": "untrusted",
+            "summary": "untrusted context",
+            "contains_instruction_like_text": False,
+            "contains_sensitive_data": False,
+        }
+    ]
+
+
 def test_approval_gated_guard_hook_retains_a_stable_action_link() -> None:
     event = _event(
         "model_input_prepared",
@@ -125,6 +160,23 @@ def test_tool_result_reuses_the_original_tool_action_id() -> None:
 
     assert audit.links["action_id"] == "call_read_001"
     assert audit.metadata["source_tool_call_id"] == "call_read_001"
+    assert audit.metadata["action_name"] == "read_file"
+
+
+def test_tool_call_uses_the_original_tool_action_id() -> None:
+    audit = _audit(
+        _event(
+            "tool_call_proposed",
+            {
+                "tool": {"name": "read_file", "call_id": "call_read_002"},
+                "arguments": {"path": "/workspace/report.txt"},
+                "derived_resources": [],
+            },
+        )
+    )
+
+    assert audit.links["action_id"] == "call_read_002"
+    assert audit.metadata["action_id"] == "call_read_002"
     assert audit.metadata["action_name"] == "read_file"
 
 
@@ -177,3 +229,27 @@ def test_intrinsic_agent_actions_use_the_guard_event_id(
 
     assert audit.links["action_id"] == event.event_id
     assert audit.metadata["action_id"] == event.event_id
+
+
+def test_explicit_source_action_id_is_preserved_for_memory_write() -> None:
+    audit = _audit(
+        _event(
+            "memory_write_proposed",
+            {
+                "action_id": "call_memory_write_001",
+                "memory": {
+                    "namespace": "profile",
+                    "key": "summary",
+                    "value_preview": "concise",
+                    "source_trust": "trusted",
+                    "operation": "write",
+                },
+                "will_persist": True,
+                "requires_approval": False,
+            },
+        )
+    )
+
+    assert audit.links["action_id"] == "call_memory_write_001"
+    assert audit.metadata["action_id"] == "call_memory_write_001"
+    assert audit.metadata["action_name"] == "memory_write_proposed"
