@@ -159,6 +159,9 @@ class EvaluationService:
         if existing is None:
             return None
         if _stored_request_digest(existing) == request_digest:
+            # AuditEvent 已经是权威幂等结果；重试仍需执行确定性 provenance
+            # upsert，以修复此前 audit 成功而图写入失败的部分状态。
+            self.audit_service.repair_provenance(existing)
             return self._rebuild_response(existing)
         raise EvaluationConflictError(event_id)
 

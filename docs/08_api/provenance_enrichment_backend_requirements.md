@@ -1,6 +1,6 @@
 # Provenance 丰富化后端实施要求
 
-> 状态：实施要求已确认，后端代码尚未实现
+> 状态：Guard API 写入实现已完成，跨存储真实联调与 Dashboard 验收进行中
 >
 > 确认日期：2026-08-07
 >
@@ -9,8 +9,8 @@
 ## 1. 文档定位
 
 本文把[证据链与溯源 API 目标契约](evidence_trace_api_contract.md)中已经冻结的
-Provenance 目标拆成可直接实施的后端要求。本文不改变冻结契约，不表示代码、Schema、
-存储或生产数据已经完成迁移。
+Provenance 目标拆成可直接实施的后端要求。Guard API 已按本文实现新事件的确定性物化；
+本文不改变冻结契约，也不表示生产数据已迁移或历史 Trace 已回填。
 
 运行时安全观测的视图职责、主演示链和非对称刷新边界见
 [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)。
@@ -97,7 +97,7 @@ Action Critic 结果和已经持久化的 AuditEvent。
 | `action`         | `action:{action_id}`                       | `action_id`           | ToolDescriptor `call_id` 或稳定 `links.action_id` | `event_id`、动作名、`phase=tool_policy`                   |
 | `resource`       | `resource:{trace_id}:sha256:{digest}`      | `sha256:{digest}`     | `derive_resources(event)` 的规范资源              | 类型、操作、方向、脱敏目标摘要                            |
 | `rule`           | `rule:{decision_id}:{rule_id}`             | `rule_id`             | `GuardDecision.rule_hits`                         | `decision_id`、severity、原因摘要                         |
-| `policy`         | `policy:{bundle_id}:{revision-or-version}` | bundle/revision 引用  | 实际参与判定的策略快照                            | bundle、version、revision、digest                         |
+| `policy`         | `policy:{trace_id}:{bundle_id}:{revision-or-version}` | bundle/revision 引用  | 实际参与判定的策略快照                            | bundle、version、revision、digest                         |
 | `decision`       | `decision:{decision_id}`                   | `decision_id`         | GuardDecision                                     | `risk_score`、severity、decision、`phase=tool_policy`     |
 | `approval`       | `approval:{approval_id}`                   | `approval_id`         | ApprovalRequest / 终态记录                        | status、创建/过期/解决时间、`phase=outcome_audit`         |
 | `runtime_result` | `runtime_result:{audit_id}`                | `audit_id`            | `runtime_outcome` AuditEvent                      | execution、intervention、result disposition、side effects |
@@ -113,6 +113,10 @@ Action Critic 结果和已经持久化的 AuditEvent。
 
 节点 label 只使用脱敏、可读且有事实依据的短文本。完整参数、原始上下文和长正文不进入
 label 或 ID；有界详情进入 metadata 或关联 AuditEvent evidence。
+
+策略节点必须带 `trace_id` 命名空间。当前存储以 `node_id` 为全局主键、节点又只属于一个
+Trace；不带 Trace 的策略 ID 会让同一策略快照在第二条 Trace 中发生主键冲突或形成孤儿边。
+该命名不改变原始 `ref_id={bundle_id}:{revision-or-version}`，也不要求数据库迁移。
 
 ## 6. 关系写入矩阵
 
@@ -185,7 +189,7 @@ Memory 和 PostgreSQL 必须遵循相同规则：
 
 1. 先完成业务事实和 AuditEvent 的合法性校验。
 2. AuditEvent 成功持久化后，同步执行确定性 provenance upsert。
-3. provenance 写入失败时返回受控 5xx，不把不完整图声明为成功写入。
+3. 稳定 ID 冲突返回 `409 PROVENANCE_CONFLICT`，其他写入失败返回受控 5xx；不把不完整图声明为成功写入。
 4. 调用方重试同一幂等请求时，不重复延长审计哈希链，并修复缺失节点或边。
 5. 边写入前验证两个端点存在；禁止永久孤儿边。
 6. 相同 ID 对应不同 trace、kind、ref 或端点时记录受控冲突，禁止 last-write-wins。

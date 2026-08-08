@@ -12,6 +12,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .evidence import _approval_evidence, describe_guard_event
+from .provenance import ProvenanceWriter
 from .redaction import (
     SUMMARY_TEXT_LIMIT,
     bound_redacted_value,
@@ -27,10 +28,12 @@ class ApprovalService:
         store: ControlPlaneStore,
         settings: GuardApiSettings,
         llm_reviewer: LlmApprovalReviewer | None = None,
+        provenance_writer: ProvenanceWriter | None = None,
     ) -> None:
         self.store = store
         self.settings = settings
         self.llm_reviewer = llm_reviewer
+        self.provenance_writer = provenance_writer or ProvenanceWriter(store=store)
 
     def create_for_decision(
         self,
@@ -125,7 +128,8 @@ class ApprovalService:
         pending: list[ApprovalRequest] = []
         for approval in self.store.list_pending_approvals():
             if self._is_expired(approval):
-                self.store.expire_approval(approval.approval_id)
+                expired = self.store.expire_approval(approval.approval_id)
+                self.provenance_writer.update_approval(expired)
                 continue
             pending.append(approval)
         return pending
@@ -150,7 +154,7 @@ class ApprovalService:
         if approval is not None and approval.status == "expired":
             approval.decision = "deny"
             return approval
-        return self.store.resolve_approval(
+        resolved = self.store.resolve_approval(
             approval_id,
             decision,
             resolution_source=resolution_source,
@@ -158,16 +162,22 @@ class ApprovalService:
             resolution_reason=resolution_reason,
             llm_review=llm_review,
         )
+        self.provenance_writer.update_approval(resolved)
+        return resolved
 
     def _record_llm_review(
         self, approval: ApprovalRequest, review: LlmApprovalReview
     ) -> ApprovalRequest:
         updated = approval.model_copy(update={"llm_review": review})
-        return self.store.create_approval(updated)
+        stored = self.store.create_approval(updated)
+        self.provenance_writer.update_approval(stored)
+        return stored
 
     def _with_expired_status(self, approval: ApprovalRequest) -> ApprovalRequest:
         if self._is_expired(approval):
-            return self.store.expire_approval(approval.approval_id)
+            expired = self.store.expire_approval(approval.approval_id)
+            self.provenance_writer.update_approval(expired)
+            return expired
         return approval
 
     def _is_expired(self, approval: ApprovalRequest) -> bool:

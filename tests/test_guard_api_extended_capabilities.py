@@ -129,7 +129,17 @@ def test_evaluate_generates_provenance_graph_without_breaking_legacy_response() 
     assert provenance.status_code == 200
     graph = provenance.json()
     assert graph["trace_id"] == "trace_p2_api"
-    assert {node["kind"] for node in graph["nodes"]} >= {"event", "decision", "audit", "action_critic"}
+    assert {node["kind"] for node in graph["nodes"]} >= {
+        "task",
+        "source",
+        "action",
+        "resource",
+        "rule",
+        "policy",
+        "decision",
+        "audit",
+        "review",
+    }
     assert any(edge["relation"] == "evaluated_to" for edge in graph["edges"])
     assert any(edge["relation"] == "reviewed_by" for edge in graph["edges"])
 

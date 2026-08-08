@@ -35,9 +35,12 @@ from guard_api.storage.base import (
     EvalMetricFilters,
     EvalMetrics,
     PolicySnapshotRecord,
+    ProvenanceEndpointMissingError,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
+    merge_provenance_edge,
+    merge_provenance_node,
     within_evaluated_range,
 )
 from guard_api.storage.integrity import (
@@ -66,6 +69,7 @@ class MemoryControlPlaneStore:
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    provenance_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
@@ -96,6 +100,10 @@ class MemoryControlPlaneStore:
             self.audit_events.append(event_with_integrity)
             self.audit_events_by_id[event.audit_id] = event_with_integrity
             return True
+
+    def get_audit_event(self, audit_id: str) -> AuditEvent | None:
+        with self.audit_integrity_lock:
+            return self.audit_events_by_id.get(audit_id)
 
     def list_audit_events(
         self, filters: AuditEventFilters | None = None
@@ -155,22 +163,46 @@ class MemoryControlPlaneStore:
         return aggregate_policy_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
-        self.provenance_nodes[node.node_id] = node
-        return node
+        with self.provenance_lock:
+            existing = self.provenance_nodes.get(node.node_id)
+            merged = node if existing is None else merge_provenance_node(existing, node)
+            self.provenance_nodes[node.node_id] = merged
+            return merged
+
+    def get_provenance_node(self, node_id: str) -> ProvenanceNode | None:
+        with self.provenance_lock:
+            return self.provenance_nodes.get(node_id)
 
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge:
-        self.provenance_edges[edge.edge_id] = edge
-        return edge
+        with self.provenance_lock:
+            source = self.provenance_nodes.get(edge.source_node_id)
+            target = self.provenance_nodes.get(edge.target_node_id)
+            if (
+                source is None
+                or target is None
+                or source.trace_id != edge.trace_id
+                or target.trace_id != edge.trace_id
+            ):
+                raise ProvenanceEndpointMissingError(edge.edge_id)
+            existing = self.provenance_edges.get(edge.edge_id)
+            merged = edge if existing is None else merge_provenance_edge(existing, edge)
+            self.provenance_edges[edge.edge_id] = merged
+            return merged
 
     def list_provenance(
         self, trace_id: str
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
-        nodes = [
-            node for node in self.provenance_nodes.values() if node.trace_id == trace_id
-        ]
-        edges = [
-            edge for edge in self.provenance_edges.values() if edge.trace_id == trace_id
-        ]
+        with self.provenance_lock:
+            nodes = [
+                node
+                for node in self.provenance_nodes.values()
+                if node.trace_id == trace_id
+            ]
+            edges = [
+                edge
+                for edge in self.provenance_edges.values()
+                if edge.trace_id == trace_id
+            ]
         nodes.sort(key=lambda node: (node.timestamp, node.node_id))
         edges.sort(key=lambda edge: (edge.timestamp, edge.edge_id))
         return nodes, edges

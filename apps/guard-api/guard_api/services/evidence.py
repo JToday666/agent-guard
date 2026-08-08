@@ -336,6 +336,8 @@ def _config_audit_event(
     worst = _worst_finding_severity(result.findings)
     risk_score = {"low": 15, "medium": 45, "high": 80, "critical": 95}[worst]
     return AuditEvent(
+        schema_version="0.4",
+        record_type="config_audit",
         trace_id=str(event.metadata.get("trace_id") or event.event_id),
         runtime=event.runtime,
         stage=event.action,

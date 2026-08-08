@@ -2914,7 +2914,7 @@ def test_audit_events_post_returns_409_on_conflict() -> None:
     assert len(store.audit_events) == 1
 
 
-def test_audit_events_post_idempotent_hit_skips_provenance() -> None:
+def test_audit_events_post_idempotent_hit_repairs_without_duplicates() -> None:
     settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
     store = MemoryControlPlaneStore()
     app = create_app(store=store, settings=settings)
@@ -2943,4 +2943,4 @@ def test_audit_events_post_idempotent_hit_skips_provenance() -> None:
     assert second.status_code == 200
     assert second.json()["audit_id"] == "audit_api_idem"
     assert len(store.audit_events) == 1
-    assert len(store.provenance_nodes) == 1  # audit node only (no source link in payload), not doubled
+    assert len(store.provenance_nodes) == 1  # audit node only (no source link), not doubled
