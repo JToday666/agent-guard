@@ -7,16 +7,39 @@ from typing import Any
 from agentguard_core import AuditEvent
 
 from guard_api.auth import ApiAuthError
-from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
 from guard_api.errors import error_response
+from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
+from guard_api.services.trace import (
+    encode_conditional_document,
+    if_none_match_matches,
+)
 from guard_api.storage.base import AuditIdConflictError
 from fastapi import Cookie, FastAPI, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from guard_api.storage.base import AuditEventFilters
 
-from .common import bounded_limit, verify_browser_or_bearer_read, verify_browser_or_bearer_scopes
+from .common import (
+    bounded_limit,
+    verify_browser_or_bearer_read,
+    verify_browser_or_bearer_scopes,
+)
 from .context import ApiContext
+
+_TRACE_CACHE_HEADERS = {
+    "Cache-Control": "private, no-cache",
+    "Vary": "Cookie, Authorization",
+}
+
+
+def _conditional_json_response(
+    payload: dict[str, object], if_none_match: str | None
+) -> Response:
+    body, etag = encode_conditional_document(payload)
+    headers = {**_TRACE_CACHE_HEADERS, "ETag": etag}
+    if if_none_match_matches(if_none_match, etag):
+        return Response(status_code=304, headers=headers)
+    return Response(content=body, media_type="application/json", headers=headers)
 
 
 def register_routes(app: FastAPI, context: ApiContext) -> None:
@@ -119,27 +142,33 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     @app.get("/v1/traces/{trace_id}")
     def trace_detail(
         trace_id: str,
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
-    ) -> dict[str, Any]:
+    ) -> Response:
         verify_browser_or_bearer_read(
             auth,
             required_scope="trace:read",
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        return trace_service.get_trace(trace_id)
+        return _conditional_json_response(
+            trace_service.get_trace(trace_id), if_none_match
+        )
 
     @app.get("/v1/traces/{trace_id}/provenance")
     def trace_provenance(
         trace_id: str,
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
-    ) -> dict[str, object]:
+    ) -> Response:
         verify_browser_or_bearer_read(
             auth,
             required_scope="trace:read",
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        return trace_service.get_provenance(trace_id)
+        return _conditional_json_response(
+            trace_service.get_provenance(trace_id), if_none_match
+        )
