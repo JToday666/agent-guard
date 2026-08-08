@@ -117,6 +117,7 @@
           @edge-mouse-enter="handleEdgeMouseEnter"
           @edge-mouse-leave="handleEdgeMouseLeave"
           @node-click="handleNodeClick"
+          @pane-ready="handleFlowReady"
           @viewport-change="handleViewportChange"
         >
           <Background pattern-color="var(--color-chart-grid)" :gap="22" :size="1" />
@@ -291,10 +292,11 @@ const elk = new ELK({
   workerFactory: () => new ElkWorker(),
 });
 const flowId = `provenance-${props.graph.traceId}`;
-const { fitView, setCenter, setViewport, updateNode, zoomTo } = useVueFlow(flowId);
+const { updateNode, viewportHelper } = useVueFlow(flowId);
 const flowNodes = ref<Node<ProvenanceNodeData>[]>([]);
 const isCompact = ref(false);
 const isFullscreen = ref(false);
+const isFlowReady = ref(false);
 const isLayouting = ref(false);
 const prefersReducedMotion = ref(false);
 const viewportZoom = ref(1);
@@ -315,6 +317,7 @@ let compactMedia: MediaQueryList | null = null;
 let motionMedia: MediaQueryList | null = null;
 let pendingViewportSnapshot: ViewportSnapshot | null = null;
 let latestViewport: ViewportTransform | null = null;
+let previousBodyOverflow = "";
 
 const phaseDefinitions = [
   { id: "input_trust", index: "01", short: "输入", title: "输入与信任" },
@@ -752,8 +755,12 @@ async function runLayout(): Promise<void> {
   });
   if (generation !== layoutGeneration) return;
   const viewportSnapshot = pendingViewportSnapshot;
-  pendingViewportSnapshot = null;
   if (viewportSnapshot) {
+    if (!isFlowReady.value || !viewportHelper.value.viewportInitialized) {
+      isLayouting.value = false;
+      return;
+    }
+    pendingViewportSnapshot = null;
     await restoreViewport(viewportSnapshot);
     isLayouting.value = false;
     return;
@@ -866,6 +873,18 @@ function handleViewportChange(viewport: ViewportTransform) {
   viewportZoom.value = viewport.zoom;
 }
 
+async function handleFlowReady() {
+  isFlowReady.value = true;
+  await nextTick();
+  const viewportSnapshot = pendingViewportSnapshot;
+  if (viewportSnapshot) {
+    pendingViewportSnapshot = null;
+    await restoreViewport(viewportSnapshot);
+    return;
+  }
+  await positionInitialCanvas();
+}
+
 function miniMapNodeColor(node: GraphNode): string {
   const kind = (node.data as ProvenanceNodeData | undefined)?.kind ?? "";
   return kindDefinitions[kind]?.miniMapColor ?? "var(--color-node-audit)";
@@ -893,8 +912,9 @@ function resetFilters() {
 }
 
 async function fitCanvas() {
-  if (!flowNodes.value.length) return;
-  await fitView({
+  const viewport = viewportHelper.value;
+  if (!isFlowReady.value || !viewport.viewportInitialized || !flowNodes.value.length) return;
+  await viewport.fitView({
     duration: prefersReducedMotion.value ? 0 : 180,
     maxZoom: 1.05,
     minZoom: 0.28,
@@ -903,13 +923,16 @@ async function fitCanvas() {
 }
 
 async function resetZoom() {
-  await zoomTo(1, { duration: prefersReducedMotion.value ? 0 : 160 });
+  const viewport = viewportHelper.value;
+  if (!isFlowReady.value || !viewport.viewportInitialized) return;
+  await viewport.zoomTo(1, { duration: prefersReducedMotion.value ? 0 : 160 });
 }
 
 async function focusNode(nodeId: string) {
   const position = positionByNodeId.get(nodeId);
-  if (!position) return;
-  await setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, {
+  const viewport = viewportHelper.value;
+  if (!position || !isFlowReady.value || !viewport.viewportInitialized) return;
+  await viewport.setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, {
     duration: prefersReducedMotion.value ? 0 : 180,
     zoom: Math.max(1, viewportZoom.value),
   });
@@ -925,7 +948,9 @@ async function positionInitialCanvas() {
   const decisionPosition = decisionNode ? positionByNodeId.get(decisionNode.nodeId) : undefined;
   const resultPosition = resultNode ? positionByNodeId.get(resultNode.nodeId) : undefined;
   if (flowNodes.value.length > 18 && decisionPosition && resultPosition) {
-    await setCenter(
+    const viewport = viewportHelper.value;
+    if (!isFlowReady.value || !viewport.viewportInitialized) return;
+    await viewport.setCenter(
       (decisionPosition.x + resultPosition.x) / 2 + NODE_WIDTH / 2,
       (decisionPosition.y + resultPosition.y) / 2 + NODE_HEIGHT / 2,
       {
@@ -973,9 +998,11 @@ function captureViewportSnapshot(): ViewportSnapshot | null {
 }
 
 async function restoreViewport(snapshot: ViewportSnapshot): Promise<void> {
+  const viewport = viewportHelper.value;
+  if (!isFlowReady.value || !viewport.viewportInitialized) return;
   const anchor = snapshot.anchorId ? positionByNodeId.get(snapshot.anchorId) : undefined;
   if (anchor && snapshot.anchorScreenX !== null && snapshot.anchorScreenY !== null) {
-    await setViewport(
+    await viewport.setViewport(
       {
         x: snapshot.anchorScreenX - (anchor.x + NODE_WIDTH / 2) * snapshot.viewport.zoom,
         y: snapshot.anchorScreenY - (anchor.y + NODE_HEIGHT / 2) * snapshot.viewport.zoom,
@@ -985,7 +1012,7 @@ async function restoreViewport(snapshot: ViewportSnapshot): Promise<void> {
     );
     return;
   }
-  await setViewport(snapshot.viewport, { duration: 0 });
+  await viewport.setViewport(snapshot.viewport, { duration: 0 });
 }
 
 function updateNodeContextClasses() {
@@ -1110,6 +1137,15 @@ watch(searchQuery, () => {
   searchResultIndex.value = 0;
 });
 
+watch(isFullscreen, (fullscreen) => {
+  if (fullscreen) {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return;
+  }
+  document.body.style.overflow = previousBodyOverflow;
+});
+
 onMounted(() => {
   compactMedia = window.matchMedia("(max-width: 68rem)");
   motionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -1120,6 +1156,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (isFullscreen.value) document.body.style.overflow = previousBodyOverflow;
   compactMedia?.removeEventListener("change", updateMediaState);
   motionMedia?.removeEventListener("change", updateMediaState);
   window.removeEventListener("keydown", handleEscape);

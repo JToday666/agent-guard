@@ -522,7 +522,7 @@ test("API mode conditionally refreshes a running action until its terminal recei
   });
 
   await page.goto("/evidence/trace_api_001");
-  const action = page.locator(".execution-action").filter({ hasText: "发送邮件" });
+  const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
   await expect(action).toContainText("等待审批");
   await expect(action).toContainText("正在执行", { timeout: 4_500 });
   await expect(action).toContainText("已执行", { timeout: 5_000 });
@@ -530,6 +530,63 @@ test("API mode conditionally refreshes a running action until its terminal recei
   await expect(page.locator(".execution-trace__connection")).toContainText("运行结果已确认");
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v1"');
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v2"');
+});
+
+test("API mode appends a new execution node without moving existing graph positions", async ({
+  page,
+}) => {
+  const secondAction = {
+    ...eventDto,
+    audit_id: "audit_api_002",
+    blocked: false,
+    decision: "allow",
+    event_type: "tool_call_proposed",
+    integrity: {
+      ...eventDto.integrity,
+      event_hash: "hash_api_002",
+      prev_hash: "hash_api",
+      sequence: 2,
+    },
+    links: {
+      action_id: "action_api_002",
+      decision_id: "decision_api_002",
+      event_id: "evt_api_002",
+    },
+    metadata: {
+      action_name: "read_file",
+      path: "/workspace/report.txt",
+      user_task: "整理客户反馈摘要",
+    },
+    reason: "文件读取符合当前任务范围",
+    resource_targets: ["/workspace/report.txt"],
+    risk_score: 18,
+    rule_hits: [],
+    severity: "low",
+    summary: "Agent requested a second action",
+    timestamp: "2026-06-28T08:00:01Z",
+  };
+  await installApiRoutes(page, {
+    traceSnapshots: [
+      { approvals: [], etag: '"trace-append-v1"', events: [eventDto] },
+      { approvals: [], etag: '"trace-append-v2"', events: [eventDto, secondAction] },
+    ],
+  });
+
+  await page.goto("/evidence/trace_api_001");
+  const firstNode = page.locator(".execution-node").filter({ hasText: "发送邮件" });
+  await expect(firstNode).toBeVisible();
+  const firstPosition = await firstNode.evaluate(
+    (element) => element.parentElement?.getAttribute("style") ?? "",
+  );
+  const scrollY = await page.evaluate(() => window.scrollY);
+
+  await expect(page.locator(".execution-node")).toHaveCount(2, { timeout: 4_500 });
+  await expect(page.locator(".execution-node").filter({ hasText: "读取文件" })).toBeVisible();
+  await expect(page.locator(".execution-trace__updates")).toContainText("1 个新增或更新步骤");
+  expect(
+    await firstNode.evaluate((element) => element.parentElement?.getAttribute("style") ?? ""),
+  ).toBe(firstPosition);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
 });
 
 test("API mode renders every supported guard stage once and groups one tool lifecycle", async ({
@@ -598,7 +655,7 @@ test("API mode renders every supported guard stage once and groups one tool life
   await installApiRoutes(page, { events });
 
   await page.goto("/evidence/trace_api_001");
-  const steps = page.locator(".execution-action");
+  const steps = page.locator(".execution-node");
   await expect(steps).toHaveCount(6);
   await expect(steps).toContainText([
     "检查输入上下文",
@@ -609,14 +666,75 @@ test("API mode renders every supported guard stage once and groups one tool life
     "发送消息",
   ]);
 
-  const summaries = page.locator(".execution-action__summary");
-  for (let index = 0; index < (await summaries.count()); index += 1) {
-    await summaries.nth(index).click();
+  let visibleStepEventCount = 0;
+  for (let index = 0; index < (await steps.count()); index += 1) {
+    await steps.nth(index).focus();
+    await page.keyboard.press("Enter");
+    visibleStepEventCount += await page.locator(".execution-inspector__events li").count();
   }
-  await expect(page.locator(".execution-action__events li")).toHaveCount(7);
-  await expect(
-    steps.filter({ hasText: "读取文件" }).locator(".execution-action__events li"),
-  ).toHaveCount(2);
+  expect(visibleStepEventCount).toBe(7);
+  await steps.filter({ hasText: "读取文件" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".execution-inspector__events li")).toHaveCount(2);
+  await expect(page.locator(".execution-lane")).toHaveCount(2);
+  await expect(page.locator(".execution-lane")).toContainText(["智能体处理", "受控动作"]);
+
+  await page.getByRole("searchbox", { name: "搜索运行步骤" }).fill("写入记忆");
+  await expect(page.locator(".execution-node")).toHaveCount(6);
+  await expect(page.locator(".execution-flow-node--matched")).toHaveCount(1);
+  await expect(page.locator(".execution-flow-node--dimmed")).toHaveCount(5);
+});
+
+test("API mode keeps a large execution trace navigable without rendering every offscreen node", async ({
+  page,
+}) => {
+  const events = Array.from({ length: 85 }, (_, offset) => {
+    const index = offset + 1;
+    return {
+      ...eventDto,
+      audit_id: `audit_large_${index}`,
+      blocked: false,
+      decision: "allow",
+      integrity: {
+        canonicalization: "json:v1",
+        event_hash: `hash_large_${index}`,
+        prev_hash: index === 1 ? null : `hash_large_${index - 1}`,
+        sequence: index,
+      },
+      links: {
+        action_id: `action_large_${index}`,
+        decision_id: `decision_large_${index}`,
+        event_id: `event_large_${index}`,
+      },
+      metadata: {
+        action_name: "read_file",
+        path: `/workspace/report-${index}.txt`,
+        user_task: "检查批量文件",
+      },
+      reason: "文件读取符合当前任务范围",
+      resource_targets: [`/workspace/report-${index}.txt`],
+      risk_score: 8,
+      rule_hits: [],
+      severity: "low",
+      summary: `Agent requested file ${index}`,
+      timestamp: `2026-06-28T08:${String(Math.floor(offset / 60)).padStart(2, "0")}:${String(offset % 60).padStart(2, "0")}Z`,
+    };
+  });
+  await installApiRoutes(page, { events });
+
+  await page.goto("/evidence/trace_api_001");
+  const graph = page.locator(".execution-flow");
+  await expect(graph).toContainText("大轨迹已定位当前步骤");
+  await expect(graph.locator(".vue-flow__minimap")).toBeVisible();
+  await expect(graph.locator('[data-action-id="action_large_85"]')).toBeVisible();
+  const renderedNodeCount = await graph.locator(".execution-node").count();
+  expect(renderedNodeCount).toBeGreaterThan(0);
+  expect(renderedNodeCount).toBeLessThan(85);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
 });
 
 test("API mode keeps independent validators for trace and provenance snapshots", async ({
@@ -810,8 +928,9 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
   await page.goto("/evidence/trace_api_001");
   await expect(page.locator(".evidence-hero")).toContainText("策略决定：需审批");
   await expect(page.locator(".evidence-hero")).not.toContainText(/P\d{3}/);
+  await page.locator(".evidence-context > summary").click();
   await expect(page.locator(".evidence-facts")).toContainText("当前返回事件均带完整性元数据");
-  await expect(page.locator(".execution-action")).toContainText("发送邮件");
+  await expect(page.locator(".execution-node")).toContainText("发送邮件");
   await page.getByRole("tab", { name: "溯源关系" }).click();
   await expect(page.locator(".prov-node--decision")).toContainText("需审批");
   await expect(page.locator(".prov-node--decision")).toContainText("风险 64");

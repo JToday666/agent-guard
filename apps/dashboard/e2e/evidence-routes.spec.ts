@@ -130,16 +130,17 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
 
   const executionTab = page.getByRole("tab", { name: "执行轨迹" });
   await expect(executionTab).toHaveAttribute("aria-selected", "true");
-  const action = page.locator(".execution-action").filter({ hasText: "发送邮件" });
+  const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
   await expect(action).toBeVisible();
-  await expect(action).toHaveClass(/execution-action--ask/);
+  await expect(action).toHaveClass(/execution-node--ask/);
   await expect(action).toContainText("需审批");
-  await expect(action).toContainText("单次放行");
   await expect(action).toContainText("已执行");
   await expect(action).not.toContainText("当前");
 
-  await action.locator(".execution-action__summary").click();
-  await action.getByRole("button", { name: "查看安全依据" }).click();
+  await action.click();
+  const inspector = page.locator(".execution-inspector");
+  await expect(inspector).toContainText("单次放行");
+  await inspector.getByRole("button", { name: "查看安全依据" }).click();
   await expect(page).toHaveURL(/view=provenance/);
   await expect(page).toHaveURL(/action_id=action_trace_002/);
   await expect(page).toHaveURL(/node_id=/);
@@ -159,6 +160,30 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   await expect(page).toHaveURL(/action_id=action_trace_002/);
   await expect(page).toHaveURL(/node_id=/);
   await expect(page.locator(".prov-node--selected")).toContainText("send_email");
+});
+
+test("execution trace defaults to graph and keeps the list layout in the URL", async ({ page }) => {
+  await page.goto("/evidence/trace_002");
+
+  await expect(page.locator(".execution-flow")).toBeVisible();
+  await expect(page.getByRole("button", { name: "图形", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await expect(page).toHaveURL(/execution_layout=list/);
+  await expect(page.locator(".execution-list")).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator(".execution-list")).toBeVisible();
+  await expect(page.getByRole("button", { name: "列表", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await page.getByRole("button", { name: "图形", exact: true }).click();
+  await expect(page).not.toHaveURL(/execution_layout=/);
+  await expect(page.locator(".execution-flow")).toBeVisible();
 });
 
 test("evidence detail keeps five intervention outcomes distinct", async ({ page }) => {
@@ -193,6 +218,7 @@ test("evidence detail keeps five intervention outcomes distinct", async ({ page 
   for (const scenario of scenarios) {
     await page.goto(`/evidence/${scenario.traceId}`);
     await expect(page.locator(".evidence-hero")).toContainText(scenario.title);
+    await page.locator(".evidence-context > summary").click();
     await expect(
       page.locator(".evidence-facts__item").filter({ hasText: "实际执行" }),
     ).toContainText(scenario.execution);

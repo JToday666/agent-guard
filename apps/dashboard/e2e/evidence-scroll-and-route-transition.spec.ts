@@ -25,6 +25,46 @@ test("evidence detail uses document scrolling and the dossier does not trap the 
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 });
 
+test("embedded execution graph scrolls the page and fullscreen graph owns the wheel", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_002");
+
+  const graph = page.locator(".execution-flow");
+  const canvas = graph.locator(".execution-flow__canvas");
+  const viewport = graph.locator(".vue-flow__transformationpane");
+  await expect(graph).toBeVisible();
+  await expect(graph.locator(".execution-node")).toBeVisible();
+  await page.evaluate(() => {
+    const graphElement = document.querySelector<HTMLElement>(".execution-flow");
+    const graphTop = graphElement ? graphElement.getBoundingClientRect().top + window.scrollY : 0;
+    window.scrollTo(0, Math.max(0, graphTop - 180));
+  });
+  const embeddedScrollY = await page.evaluate(() => window.scrollY);
+  const embeddedTransform = await viewport.getAttribute("style");
+  await canvas.hover();
+  await page.mouse.wheel(0, 320);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(embeddedScrollY);
+  await expect(viewport).toHaveAttribute("style", embeddedTransform ?? "");
+
+  const topBarHeight = (await page.locator(".top-bar").boundingBox())?.height ?? 0;
+  const viewHeaderY = (await page.locator(".trace-workspace__header").boundingBox())?.y ?? -1;
+  expect(Math.abs(viewHeaderY - topBarHeight)).toBeLessThanOrEqual(1);
+
+  await graph.getByRole("button", { name: "全屏" }).click();
+  await expect(graph).toHaveClass(/execution-flow--fullscreen/);
+  await page.waitForTimeout(250);
+  const fullscreenScrollY = await page.evaluate(() => window.scrollY);
+  const fullscreenTransform = await viewport.getAttribute("style");
+  await canvas.hover();
+  await page.mouse.wheel(0, -260);
+  await expect.poll(() => viewport.getAttribute("style")).not.toBe(fullscreenTransform);
+  expect(await page.evaluate(() => window.scrollY)).toBe(fullscreenScrollY);
+
+  await page.keyboard.press("Escape");
+  await expect(graph).not.toHaveClass(/execution-flow--fullscreen/);
+});
+
 test("dashboard routes use the shell transition layer", async ({ page }) => {
   await page.goto("/overview");
 

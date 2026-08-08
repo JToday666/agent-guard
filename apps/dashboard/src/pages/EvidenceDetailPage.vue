@@ -63,16 +63,20 @@
           </div>
           <div class="evidence-hero__body">
             <div class="evidence-hero__signal" aria-hidden="true">
-              <ShieldAlert :size="28" stroke-width="1.6" />
+              <component
+                :is="isTraceTerminal ? ShieldAlert : Activity"
+                :size="24"
+                stroke-width="1.7"
+              />
             </div>
             <div>
-              <span>{{ conclusionConfidenceLabel }}</span>
-              <h2 id="evidence-conclusion-title">{{ evidenceModel.conclusion.title }}</h2>
-              <p>{{ evidenceModel.conclusion.reason }}</p>
+              <span>{{ traceSummaryLabel }}</span>
+              <h2 id="evidence-conclusion-title">{{ traceSummaryTitle }}</h2>
+              <p>{{ traceSummaryReason }}</p>
             </div>
             <div class="evidence-hero__outcome">
-              <span>最终结果</span>
-              <strong>{{ evidenceModel.conclusion.outcome }}</strong>
+              <span>{{ isTraceTerminal ? "最终结果" : "当前状态" }}</span>
+              <strong>{{ traceSummaryOutcome }}</strong>
             </div>
           </div>
           <footer>
@@ -101,26 +105,10 @@
           </footer>
         </section>
 
-        <EvidenceFactStrip :facts="evidenceModel.facts" />
-
-        <section class="evidence-stage-section" aria-labelledby="evidence-stage-title">
-          <header class="section-header">
-            <div>
-              <h2 id="evidence-stage-title">关键证据路径</h2>
-              <p>查看输入来源、任务意图、安全判断和执行结果；缺失信息明确标记为未记录。</p>
-            </div>
-          </header>
-          <EvidenceStageFlow
-            :stages="evidenceModel.stages"
-            @select-event="handleTimelineSelectEvent"
-          />
-        </section>
-
-        <section class="trace-workspace section-divider" aria-labelledby="trace-workspace-title">
+        <section class="trace-workspace" aria-labelledby="trace-workspace-title">
           <header class="trace-workspace__header">
             <div>
               <h2 id="trace-workspace-title">运行与证据</h2>
-              <p>从执行动态、安全依据和审计原文三个视角调查同一次智能体运行。</p>
             </div>
             <nav class="trace-view-tabs" role="tablist" aria-label="证据视图">
               <button
@@ -150,11 +138,13 @@
           >
             <ExecutionTrace
               :is-window-partial="isExecutionWindowPartial"
+              :layout="executionLayout"
               :polling-state="tracePollingState"
               :selected-action-id="selectedActionId"
               :selected-audit-id="selectedEventId"
               :trace="executionTrace"
               :trace-id="traceId"
+              @layout-change="handleExecutionLayoutChange"
               @select-step="handleSelectStep"
               @select-event="handleTimelineSelectEvent"
               @show-audit="handleViewChange('audit')"
@@ -189,7 +179,7 @@
                 重新加载溯源关系
               </button>
             </InlineNotice>
-            <div v-if="provenance" class="provenance-layout">
+            <div v-if="hasVisitedProvenance && provenance" class="provenance-layout">
               <ProvenanceGraph
                 :key="traceId"
                 :graph="provenance"
@@ -236,6 +226,37 @@
             </div>
           </div>
         </section>
+
+        <details class="evidence-context">
+          <summary>
+            <span>
+              <strong>调查摘要</strong>
+              <small>
+                {{ evidenceModel.facts.length }} 项关键事实 ·
+                {{ evidenceModel.stages.length }} 个证据阶段
+              </small>
+            </span>
+            <span>
+              展开查看
+              <ChevronDown :size="16" aria-hidden="true" />
+            </span>
+          </summary>
+          <div class="evidence-context__content">
+            <EvidenceFactStrip :facts="evidenceModel.facts" />
+            <section class="evidence-stage-section" aria-labelledby="evidence-stage-title">
+              <header class="section-header">
+                <div>
+                  <h2 id="evidence-stage-title">关键证据路径</h2>
+                  <p>查看输入来源、任务意图、安全判断和执行结果；缺失信息明确标记为未记录。</p>
+                </div>
+              </header>
+              <EvidenceStageFlow
+                :stages="evidenceModel.stages"
+                @select-event="handleTimelineSelectEvent"
+              />
+            </section>
+          </div>
+        </details>
       </template>
 
       <EmptyState v-else title="未找到证据链" message="该证据链不存在，或已经离开当前数据窗口。">
@@ -281,7 +302,7 @@
 </template>
 
 <script setup lang="ts">
-import { ShieldAlert } from "@lucide/vue";
+import { Activity, ChevronDown, ShieldAlert } from "@lucide/vue";
 import {
   computed,
   defineAsyncComponent,
@@ -308,6 +329,7 @@ import ProvenanceInspector from "../components/evidence/ProvenanceInspector.vue"
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { buildExecutionTrace, shouldContinueTracePolling } from "../data/evidence/execution-trace";
+import type { ExecutionTraceLayout } from "../data/evidence/execution-flow-layout";
 import { buildTraceEvidenceViewModel } from "../data/evidence/trace-evidence";
 import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigations";
 import { useDashboardStore } from "../stores/dashboardStore";
@@ -396,6 +418,10 @@ const activeView = computed<EvidenceDetailView>(() => {
   if (typeof route.query.event_id === "string") return "audit";
   return "execution";
 });
+const hasVisitedProvenance = ref(activeView.value === "provenance");
+const executionLayout = computed<ExecutionTraceLayout>(() =>
+  route.query.execution_layout === "list" ? "list" : "graph",
+);
 const detailIndex = computed(() => buildInvestigationIndex(traceEvents.value));
 const selectedEventId = computed(() =>
   typeof route.query.event_id === "string" ? route.query.event_id : "",
@@ -444,6 +470,17 @@ const conclusionConfidenceLabel = computed(() => {
   if (evidenceModel.value.conclusion.confidence === "partial") return "部分证据";
   return "证据不足";
 });
+const isTraceTerminal = computed(() =>
+  ["completed", "failed", "cancelled"].includes(executionTrace.value.lifecycleState),
+);
+const traceSummaryLabel = computed(() =>
+  isTraceTerminal.value
+    ? conclusionConfidenceLabel.value
+    : `${conclusionConfidenceLabel.value} · ${executionTrace.value.lifecycleLabel}`,
+);
+const traceSummaryTitle = computed(() => evidenceModel.value.conclusion.title);
+const traceSummaryReason = computed(() => evidenceModel.value.conclusion.reason);
+const traceSummaryOutcome = computed(() => evidenceModel.value.conclusion.outcome);
 
 async function handleViewChange(view: EvidenceDetailView): Promise<void> {
   await router.replace({
@@ -451,6 +488,16 @@ async function handleViewChange(view: EvidenceDetailView): Promise<void> {
     query: mergeInvestigationQuery(route.query, {
       event_detail: undefined,
       view,
+    }),
+  });
+}
+
+function handleExecutionLayoutChange(layout: ExecutionTraceLayout): void {
+  void router.replace({
+    path: `/evidence/${traceId.value}`,
+    query: mergeInvestigationQuery(route.query, {
+      execution_layout: layout === "list" ? "list" : undefined,
+      view: "execution",
     }),
   });
 }
@@ -577,9 +624,9 @@ watch(
 );
 
 watch(
-  [selectedExecutionStep, activeView],
-  async ([step, view]) => {
-    if (!step || view !== "execution") return;
+  [selectedExecutionStep, activeView, executionLayout],
+  async ([step, view, layout]) => {
+    if (!step || view !== "execution" || layout !== "list") return;
     await nextTick();
     document
       .querySelector<HTMLElement>(`[data-step-id="${CSS.escape(step.stepId)}"]`)
@@ -589,7 +636,9 @@ watch(
 );
 
 watch(activeView, (view) => {
-  if (!isPageActive.value || view !== "provenance" || !traceId.value) return;
+  if (view !== "provenance") return;
+  hasVisitedProvenance.value = true;
+  if (!isPageActive.value || !traceId.value) return;
   void handleProvenanceRetry();
 });
 
@@ -611,6 +660,7 @@ watch(traceId, (value, previous) => {
   provenanceSyncMessage.value = "";
   finalTraceReconciledId.value = "";
   terminalSyncTraceId.value = "";
+  hasVisitedProvenance.value = activeView.value === "provenance";
   if (!isPageActive.value || !value) return;
   if (previous && previous !== value) store.stopTracePolling();
   store.startTracePolling(value);
@@ -678,7 +728,7 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
 .evidence-detail__main {
   align-content: start;
   display: grid;
-  gap: var(--space-6);
+  gap: var(--space-4);
   grid-auto-rows: max-content;
   min-width: 0;
 }
@@ -747,8 +797,8 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
   align-items: center;
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: auto minmax(0, 1fr) minmax(18rem, 0.75fr);
-  padding: var(--space-5);
+  grid-template-columns: auto minmax(0, 1fr) minmax(15rem, 0.62fr);
+  padding: var(--space-3) var(--space-4);
 }
 
 .evidence-hero__signal {
@@ -758,9 +808,9 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
   border-radius: var(--radius-2);
   color: var(--hero-accent);
   display: flex;
-  height: 3.5rem;
+  height: 2.75rem;
   justify-content: center;
-  width: 3.5rem;
+  width: 2.75rem;
 }
 
 .evidence-hero__body > div:nth-child(2) {
@@ -783,18 +833,19 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
 
 .evidence-hero h2 {
   color: var(--color-text);
-  font-size: clamp(var(--font-size-20), 2vw, var(--font-size-24));
+  font-size: var(--font-size-20);
 }
 
 .evidence-hero p {
   color: var(--color-text-muted);
+  font-size: var(--font-size-12);
 }
 
 .evidence-hero__outcome {
   border-left: 1px solid var(--color-border);
   display: grid;
-  gap: var(--space-2);
-  padding-left: var(--space-5);
+  gap: var(--space-1);
+  padding-left: var(--space-4);
 }
 
 .evidence-hero__outcome strong {
@@ -809,7 +860,7 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
   flex-wrap: wrap;
   gap: var(--space-3);
   justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
 }
 
 .evidence-hero footer > div:first-child {
@@ -832,6 +883,64 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
   gap: var(--space-2);
 }
 
+.evidence-context {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+}
+
+.evidence-context > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+  list-style: none;
+  min-height: 3.25rem;
+  padding: var(--space-2) var(--space-4);
+}
+
+.evidence-context > summary::-webkit-details-marker {
+  display: none;
+}
+
+.evidence-context > summary > span:first-child {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.evidence-context > summary small {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+}
+
+.evidence-context > summary > span:last-child {
+  align-items: center;
+  color: var(--color-link);
+  display: inline-flex;
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-semibold);
+  gap: var(--space-2);
+}
+
+.evidence-context > summary svg {
+  transition: transform var(--transition-fast);
+}
+
+.evidence-context[open] > summary {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.evidence-context[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.evidence-context__content {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-4);
+}
+
 .evidence-stage-section,
 .trace-workspace,
 .trace-provenance,
@@ -851,16 +960,27 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
 }
 
 .trace-workspace__header {
-  align-items: end;
+  align-items: center;
+  background: color-mix(in srgb, var(--color-page) 94%, transparent);
+  border-block: 1px solid var(--color-border);
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   justify-content: space-between;
+  margin-inline: calc(-1 * var(--space-2));
+  padding: var(--space-2);
+  position: sticky;
+  top: var(--top-bar-height);
+  z-index: 20;
 }
 
 .trace-workspace__header > div:first-child {
   display: grid;
   gap: var(--space-1);
+}
+
+.trace-workspace__header h2 {
+  font-size: var(--font-size-18);
 }
 
 .trace-workspace__header h2,
@@ -919,6 +1039,7 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
 
 .trace-view-panel {
   min-width: 0;
+  scroll-margin-top: calc(var(--top-bar-height) + 5rem);
 }
 
 .trace-provenance__toolbar {
@@ -1087,6 +1208,12 @@ async function reconcileTerminalTrace(value: string): Promise<void> {
 
   .trace-view-tabs button {
     padding-inline: var(--space-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evidence-context > summary svg {
+    transition: none;
   }
 }
 </style>
