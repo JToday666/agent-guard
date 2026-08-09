@@ -28,8 +28,12 @@
           @retry="store.refresh"
         />
         <LoadingState v-else-if="store.status === 'loading' && !store.approvals.length" />
-        <div v-else-if="sortedApprovals.length" class="approvals-layout">
-          <aside class="approval-queue" aria-label="待审批队列">
+        <div
+          v-else-if="sortedApprovals.length"
+          class="approvals-layout"
+          :class="{ 'approvals-layout--detail-route': requestedId }"
+        >
+          <aside ref="approvalQueueRef" class="approval-queue" aria-label="待审批队列">
             <header>
               <div><strong>风险队列</strong><small>优先处理风险高或即将过期的请求</small></div>
             </header>
@@ -60,16 +64,18 @@
             </button>
           </aside>
 
-          <ApprovalDetail
-            v-if="selectedApproval"
-            :approval="selectedApproval"
-            :approval-routes="selectedApprovalRoutes"
-            :can-resolve="canResolveApproval"
-            :submitting-decision="isSubmitting ? pendingDecision : null"
-            :action-message="actionMessage"
-            :resolution-disabled-reason="resolutionDisabledReason"
-            @resolve="handleResolveApproval"
-          />
+          <div v-if="selectedApproval" class="approval-detail-pane">
+            <RouterLink class="approval-detail-back" to="/approvals">返回审批队列</RouterLink>
+            <ApprovalDetail
+              :approval="selectedApproval"
+              :approval-routes="selectedApprovalRoutes"
+              :can-resolve="canResolveApproval"
+              :submitting-decision="isSubmitting ? pendingDecision : null"
+              :action-message="actionMessage"
+              :resolution-disabled-reason="resolutionDisabledReason"
+              @resolve="handleResolveApproval"
+            />
+          </div>
         </div>
         <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的工具动作。">
           <RouterLink to="/investigations">查看调查事件</RouterLink>
@@ -80,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ApprovalDetail from "../components/approvals/ApprovalDetail.vue";
 import DataFreshness from "../components/common/DataFreshness.vue";
@@ -104,6 +110,7 @@ const router = useRouter();
 const actionMessage = ref("");
 const pageMessage = ref("");
 const pendingDecision = ref<"allow_once" | "deny" | null>(null);
+const approvalQueueRef = ref<HTMLElement | null>(null);
 const nowMs = ref(Date.now());
 let expiryClock: number | undefined;
 const sortedApprovals = computed(() =>
@@ -182,6 +189,19 @@ watch(
     if (!isSubmitting.value) actionMessage.value = "";
   },
 );
+watch(requestedId, async (approvalId, previousApprovalId) => {
+  if (approvalId === previousApprovalId || !window.matchMedia("(max-width: 56.25rem)").matches) {
+    return;
+  }
+  await nextTick();
+  if (approvalId) {
+    document.querySelector<HTMLElement>(".approval-detail-back")?.focus();
+    return;
+  }
+  approvalQueueRef.value
+    ?.querySelector<HTMLElement>(".approval-queue__item--active, button")
+    ?.focus();
+});
 
 function handleSelectApproval(approval: ApprovalRequest) {
   actionMessage.value = "";
@@ -230,7 +250,7 @@ function formatRelativeExpiry(value?: string | null) {
   display: grid;
   gap: var(--space-5);
   grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - var(--top-bar-height));
+  height: calc(100dvh - var(--top-bar-height));
   overflow: hidden;
 }
 .approval-header-status {
@@ -259,11 +279,21 @@ function formatRelativeExpiry(value?: string | null) {
   min-width: 0;
   overflow: hidden;
 }
+.approval-detail-pane {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+.approval-detail-back {
+  display: none;
+}
 .approval-queue {
   align-content: start;
   border-right: 1px solid var(--color-border);
   display: grid;
   gap: 0;
+  grid-auto-rows: max-content;
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -336,5 +366,40 @@ function formatRelativeExpiry(value?: string | null) {
 }
 .approval-queue__score--medium {
   color: var(--color-warning);
+}
+
+@media (max-width: 56.25rem) {
+  .approvals-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .approval-queue {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .approval-detail-pane {
+    display: none;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .approvals-layout--detail-route .approval-queue {
+    display: none;
+  }
+
+  .approvals-layout--detail-route .approval-detail-pane {
+    display: grid;
+  }
+
+  .approval-detail-back {
+    align-items: center;
+    color: var(--color-link);
+    display: inline-flex;
+    font-size: var(--font-size-13);
+    font-weight: var(--font-weight-semibold);
+    justify-self: start;
+    min-height: 2.25rem;
+    text-decoration: none;
+  }
 }
 </style>

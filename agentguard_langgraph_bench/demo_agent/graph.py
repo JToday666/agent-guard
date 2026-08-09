@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
 
+from agentguard_langgraph_adapter.tool_gateway import adapter_submits_policy_audit
+
 from ..adapter import LangGraphAdapter, create_guarded_tool_node
 from ..adapter.event_models import new_id
 from ..bench.browser_runtime import agent_visible_url_for_source, local_url_for_source
@@ -2575,8 +2577,9 @@ def _evaluate_runtime_guard(
     stage: str,
 ) -> DemoState:
     event, decision = evaluator()
-    audit_event = adapter.build_audit_event(event, decision)
-    adapter.submit_audit_event(audit_event)
+    if adapter_submits_policy_audit(adapter):
+        audit_event = adapter.build_audit_event(event, decision)
+        adapter.submit_audit_event(audit_event)
     if not _runtime_decision_blocks(adapter, decision):
         return state
     event_type = _event_type(event)

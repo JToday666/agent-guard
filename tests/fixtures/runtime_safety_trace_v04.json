@@ -695,7 +695,7 @@
         }
       },
       {
-        "node_id": "policy:demo-runtime-safety:1",
+        "node_id": "policy:trace_runtime_safety_demo_001:demo-runtime-safety:1",
         "trace_id": "trace_runtime_safety_demo_001",
         "kind": "policy",
         "ref_id": "demo-runtime-safety:1",
@@ -935,10 +935,10 @@
         }
       },
       {
-        "edge_id": "edge:evaluated_under:decision:decision_memory_read_001:policy:demo-runtime-safety:1",
+        "edge_id": "edge:evaluated_under:decision:decision_memory_read_001:policy:trace_runtime_safety_demo_001:demo-runtime-safety:1",
         "trace_id": "trace_runtime_safety_demo_001",
         "source_node_id": "decision:decision_memory_read_001",
-        "target_node_id": "policy:demo-runtime-safety:1",
+        "target_node_id": "policy:trace_runtime_safety_demo_001:demo-runtime-safety:1",
         "relation": "evaluated_under",
         "timestamp": "2026-08-07T02:00:00.100Z",
         "metadata": {
@@ -1023,10 +1023,10 @@
         }
       },
       {
-        "edge_id": "edge:evaluated_under:decision:decision_code_exec_001:policy:demo-runtime-safety:1",
+        "edge_id": "edge:evaluated_under:decision:decision_code_exec_001:policy:trace_runtime_safety_demo_001:demo-runtime-safety:1",
         "trace_id": "trace_runtime_safety_demo_001",
         "source_node_id": "decision:decision_code_exec_001",
-        "target_node_id": "policy:demo-runtime-safety:1",
+        "target_node_id": "policy:trace_runtime_safety_demo_001:demo-runtime-safety:1",
         "relation": "evaluated_under",
         "timestamp": "2026-08-07T02:00:00.300Z",
         "metadata": {

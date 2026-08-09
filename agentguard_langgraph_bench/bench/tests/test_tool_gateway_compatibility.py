@@ -54,3 +54,5 @@ def test_gateway_core_receives_normalized_arguments_and_audit_preserves_raw(tmp_
     assert core.events[0]["arguments"] == {"path": "docs/public.txt"}
     assert core.events[0]["metadata"]["compatibility"]["raw_arguments"] == {"file_path": "/docs/public.txt"}
     assert result.event["metadata"]["compatibility"]["repairs"] == ["read_file.file_path_to_path"]
+    assert core.audit_events == []
+    assert result.audit_event is None

@@ -138,6 +138,7 @@ function handleAfterLeave(): void {
   align-content: start;
   display: grid;
   gap: var(--space-5);
+  grid-auto-rows: max-content;
   overflow: auto;
   overscroll-behavior: contain;
   padding: var(--space-5) var(--space-5) var(--space-7);

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+from agentguard_core import AuditEvent
+
 from guard_api.services.redaction import (
     ARRAY_LIMIT,
     CONTENT_PREVIEW_LIMIT,
@@ -15,6 +19,7 @@ from guard_api.services.redaction import (
     evidence_serialized_size,
     looks_sensitive_key,
     redact_structure,
+    sanitize_audit_event,
     scrub_text,
     truncate_text,
 )
@@ -80,9 +85,9 @@ def test_truncate_text_boundary() -> None:
     assert truncate_text("x" * (SUMMARY_TEXT_LIMIT + 1), SUMMARY_TEXT_LIMIT) == (
         exact + "..."
     )
-    assert len(truncate_text("y" * CONTENT_PREVIEW_LIMIT * 2, CONTENT_PREVIEW_LIMIT)) == (
-        CONTENT_PREVIEW_LIMIT + 3
-    )
+    assert len(
+        truncate_text("y" * CONTENT_PREVIEW_LIMIT * 2, CONTENT_PREVIEW_LIMIT)
+    ) == (CONTENT_PREVIEW_LIMIT + 3)
 
 
 def test_bound_value_applies_array_and_depth_limits() -> None:
@@ -97,9 +102,7 @@ def test_bound_value_applies_array_and_depth_limits() -> None:
     bounded_deep = bound_value(deep)
 
     # 嵌套达到第 6 层时容器折叠为 "..."，不保留更深层内容。
-    assert bounded_deep == {
-        "a": {"b": {"c": {"d": {"e": "..."}}}}
-    }
+    assert bounded_deep == {"a": {"b": {"c": {"d": {"e": "..."}}}}}
     assert MAX_NESTING_DEPTH == 6
 
 
@@ -133,3 +136,34 @@ def test_enforce_evidence_budget_keeps_small_evidence_untouched() -> None:
     evidence: dict[str, object] = {"guard_event": {"user_task": "small"}}
 
     assert enforce_evidence_budget(evidence) == evidence
+
+
+def test_sanitize_audit_event_cleans_all_browser_readable_free_text() -> None:
+    provider_key = "sk-abcdefghijklmnop"
+    bearer = "Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature"
+    event = AuditEvent(
+        audit_id="audit_redaction_boundary",
+        schema_version="0.4",
+        record_type="runtime_observation",
+        trace_id="trace_redaction_boundary",
+        summary=f"Observed {provider_key}",
+        reason=bearer,
+        resource_targets=[provider_key],
+        rule_hits=[f"rule {bearer}"],
+        links={"action_id": "call_redaction_boundary"},
+        metadata={
+            "ordinary_note": provider_key,
+            "nested": {"content": bearer},
+        },
+        evidence={"guard_event": {"user_task": bearer, "note": provider_key}},
+    )
+
+    sanitized = sanitize_audit_event(event)
+    serialized = json.dumps(sanitized.model_dump(mode="json"), ensure_ascii=False)
+
+    assert provider_key not in serialized
+    assert "eyJhbGciOiJSUzI1NiJ9" not in serialized
+    assert REDACTED in serialized
+    assert sanitized.audit_id == event.audit_id
+    assert sanitized.trace_id == event.trace_id
+    assert sanitized.links == event.links

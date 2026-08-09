@@ -68,27 +68,31 @@
 import { MousePointer2 } from "@lucide/vue";
 import { computed } from "vue";
 
-import type { ProvenanceGraph, ProvenanceNode } from "../../types/dashboard";
+import type {
+  NormalizedAuditEvidence,
+  ProvenanceGraph,
+  ProvenanceNode,
+} from "../../types/dashboard";
 import { redactSensitiveData } from "../../utils/data-redaction";
 import {
   formatDashboardDateTime,
   getDecisionLabel,
   getEventTypeLabel,
 } from "../../utils/dashboard-formatters";
-import { resolveProvenanceEventId } from "../../utils/provenance";
+import { resolveProvenanceAuditId } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 import StructuredDataView from "../common/StructuredDataView.vue";
 
 defineOptions({ name: "ProvenanceInspector" });
 const props = defineProps<{
-  eventIds: string[];
+  events: NormalizedAuditEvidence[];
   graph: ProvenanceGraph;
   node?: ProvenanceNode;
 }>();
 const emit = defineEmits<{ "select-event": [eventId: string] }>();
 
 const kindLabels: Record<string, string> = {
-  action: "工具动作",
+  action: "受控动作",
   action_critic: "复核",
   approval: "人工审批",
   audit: "审计记录",
@@ -152,12 +156,7 @@ const incomingCount = computed(
 const outgoingCount = computed(
   () => props.graph.edges.filter((edge) => edge.sourceNodeId === props.node?.nodeId).length,
 );
-const eventId = computed(() =>
-  resolveProvenanceEventId(
-    props.node,
-    props.eventIds.map((id) => ({ id })),
-  ),
-);
+const eventId = computed(() => resolveProvenanceAuditId(props.node, props.events));
 const safeMetadata = computed(() => {
   const metadata = props.node?.metadata ?? {};
   const visibleMetadata = Object.fromEntries(

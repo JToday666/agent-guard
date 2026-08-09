@@ -124,6 +124,11 @@ export interface GuardTraceDetailDto {
   audit_events: GuardAuditEventDto[];
   approvals: GuardApprovalDto[];
   metrics: GuardEvalMetricsDto;
+  audit_window?: {
+    limit?: number;
+    returned_count?: number;
+    has_more?: boolean;
+  };
 }
 
 export interface GuardPolicyBundleDto {

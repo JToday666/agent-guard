@@ -17,6 +17,10 @@ const CREDENTIAL_ASSIGNMENT_PATTERN = new RegExp(
   "gi",
 );
 const PROVIDER_KEY_PATTERN = /\bsk-[A-Za-z0-9][A-Za-z0-9._-]{8,}\b/g;
+const AUTHORIZATION_VALUE_PATTERN = /(authorization\s*[:=]\s*)([^\s"'`,;]+(?:\s+[A-Za-z0-9._~+/=-]{8,})?)/gi;
+const BEARER_TOKEN_PATTERN = /(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi;
+const COOKIE_VALUE_PATTERN = /(cookie\s*[:=]\s*)([^\r\n"]+)/gi;
+const PRIVATE_KEY_PATTERN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 const EXEC_LIKE_NAMES = new Set(["code_exec", "exec", "shell", "command", "bash", "sh", "powershell", "terminal"]);
 const EXEC_LIKE_KINDS = new Set([
@@ -34,7 +38,12 @@ const EXEC_LIKE_KINDS = new Set([
 ]);
 
 export function containsCredentialValueText(value: string): boolean {
-  return providerKeyPattern().test(value) || credentialAssignmentPattern().test(value);
+  return (
+    providerKeyPattern().test(value) ||
+    credentialAssignmentPattern().test(value) ||
+    bearerTokenPattern().test(value) ||
+    privateKeyPattern().test(value)
+  );
 }
 
 export function containsCredentialCommandText(value: string): boolean {
@@ -51,9 +60,13 @@ export function containsSensitiveCredentialText(value: unknown): boolean {
 
 export function redactSensitiveCredentials(value: string, limit = 240): string {
   const redacted = value
+    .replace(privateKeyPattern(), "[redacted]")
     .replace(providerKeyPattern(), "sk-[redacted]")
     .replace(credentialAssignmentPattern(), (_match, key: string, sep: string) => `${key}${sep}[redacted]`)
-    .replace(sensitiveEnvExpansionPattern(), "$[redacted]");
+    .replace(sensitiveEnvExpansionPattern(), "$[redacted]")
+    .replace(authorizationValuePattern(), "$1[redacted]")
+    .replace(bearerTokenPattern(), "$1[redacted]")
+    .replace(cookieValuePattern(), "$1[redacted]");
   return redacted.length > limit ? `${redacted.slice(0, limit)}...` : redacted;
 }
 
@@ -190,4 +203,20 @@ function credentialAssignmentPattern(): RegExp {
 
 function sensitiveEnvExpansionPattern(): RegExp {
   return new RegExp(SENSITIVE_ENV_EXPANSION_PATTERN.source, "gi");
+}
+
+function authorizationValuePattern(): RegExp {
+  return new RegExp(AUTHORIZATION_VALUE_PATTERN.source, "gi");
+}
+
+function bearerTokenPattern(): RegExp {
+  return new RegExp(BEARER_TOKEN_PATTERN.source, "gi");
+}
+
+function cookieValuePattern(): RegExp {
+  return new RegExp(COOKIE_VALUE_PATTERN.source, "gi");
+}
+
+function privateKeyPattern(): RegExp {
+  return new RegExp(PRIVATE_KEY_PATTERN.source, "g");
 }

@@ -376,16 +376,50 @@ def _run_single_case(
     if preflight is not None:
         row = preflight
     else:
+        context: CaseContext | None = None
+        runtime_observation_errors: list[str] = []
         try:
             context = build_case_context(case, config, agent_adapter, tools, tool_gateway, tool_server)
             context.security["benchmark_run_id"] = run_id
             context.security["attempt_id"] = "1"
+            start_error = tool_gateway.record_trace_lifecycle(
+                trace_id=context.trace_id,
+                state="trace_started",
+                runtime=context.runtime,
+                case_id=case.case_id,
+            )
+            if start_error:
+                runtime_observation_errors.append(start_error)
             if tool_server is not None and hasattr(tool_server, "set_case_context"):
                 tool_server.set_case_context(case, context)
             result = agent_adapter.run_case(case, context)
+            terminal_state = "trace_failed" if result.error else "trace_completed"
+            terminal_error = tool_gateway.record_trace_lifecycle(
+                trace_id=context.trace_id,
+                state=terminal_state,
+                runtime=context.runtime,
+                case_id=case.case_id,
+                reason=result.error,
+            )
+            if terminal_error:
+                runtime_observation_errors.append(terminal_error)
             row = normalize_case_result(case, result, config, tools)
         except Exception as exc:
+            if context is not None:
+                terminal_error = tool_gateway.record_trace_lifecycle(
+                    trace_id=context.trace_id,
+                    state="trace_failed",
+                    runtime=context.runtime,
+                    case_id=case.case_id,
+                    reason=str(exc),
+                )
+                if terminal_error:
+                    runtime_observation_errors.append(terminal_error)
             row = _invalid_case_row(case, config, str(exc), benchmark_run_id=run_id)
+            if context is not None:
+                row["trace_id"] = context.trace_id
+        if runtime_observation_errors:
+            row["runtime_observation_errors"] = runtime_observation_errors
     row["benchmark_run_id"] = run_id
     row["attempt_id"] = "1"
     row["case_run_key"] = case_run_key

@@ -5,8 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .event_models import AuditEvent, ToolExecutionResult, new_id
+from .event_models import AuditEvent, ToolExecutionResult, new_id, utc_now_iso
 from .langgraph_adapter import blocked_result
+from .runtime_receipts import (
+    ExecutionStatus,
+    ResultDisposition,
+    build_runtime_outcome,
+    build_tool_started_observation,
+    runtime_receipts_enabled,
+    submit_runtime_receipt,
+)
 from .tool_compat import tool_result_with_compatibility
 
 
@@ -49,8 +57,9 @@ class GuardedToolGateway:
         # Guard API 模式下策略审计由 evaluate writer 唯一写入，adapter 不再
         # 重复提交（契约 §12.1/§22.1）；仅 legacy Core 保留自提交路径。
         audit_event: AuditEvent | None = None
-        if _adapter_submits_policy_audit(self.guard_adapter):
+        if adapter_submits_policy_audit(self.guard_adapter):
             audit_event = self.guard_adapter.build_audit_event(event, decision)
+            assert audit_event is not None
             if compatibility is not None:
                 audit_event.metadata["compatibility"] = dict(compatibility)
             audit_error = _submit_audit_event(self.guard_adapter, audit_event)
@@ -63,15 +72,33 @@ class GuardedToolGateway:
                     error=audit_error,
                 )
 
-        if decision.decision == "deny" or _ask_was_not_approved(
+        approval_blocked, approval_resolution = _resolve_approval(
             self.guard_adapter, decision
-        ):
+        )
+        if decision.decision == "deny" or approval_blocked:
             result = blocked_result(
                 tool_name=tool_name,
                 call_id=call_id,
                 event=event,
                 decision=decision,
                 audit_event=audit_event,
+            )
+            result.runtime_receipt_error = _submit_runtime_outcome(
+                self.guard_adapter,
+                event,
+                decision,
+                execution_status="not_invoked",
+                approval_resolution=approval_resolution,
+                intervention_type=(
+                    "policy_deny"
+                    if decision.decision == "deny"
+                    else "approval_not_obtained"
+                ),
+                intervention_reason=(
+                    "Policy denied the action before the tool runtime was invoked."
+                    if decision.decision == "deny"
+                    else "The action did not receive an approval that released it for execution."
+                ),
             )
             return ToolExecutionResult.model_validate(
                 tool_result_with_compatibility(
@@ -92,17 +119,52 @@ class GuardedToolGateway:
         if memory_gate is not None:
             return memory_gate
 
-        before = (
-            self.tool_runtime.snapshot()
-            if hasattr(self.tool_runtime, "snapshot")
-            else None
+        invoked_at = utc_now_iso()
+        start_audit_id: str | None = None
+        if decision.decision == "ask" and _supports_runtime_outcome(
+            self.guard_adapter, decision
+        ):
+            started = build_tool_started_observation(
+                event,
+                decision,
+                approval_resolution=approval_resolution,
+                timestamp=invoked_at,
+            )
+            start_error = submit_runtime_receipt(self.guard_adapter, started)
+            if start_error is not None:
+                result = blocked_result(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    event=event,
+                    decision=decision,
+                    audit_event=audit_event,
+                )
+                result.status = "audit_error"
+                result.safe_message = (
+                    "The approved tool call was not executed because its start "
+                    "receipt could not be recorded."
+                )
+                result.error = start_error
+                result.runtime_receipt_error = start_error
+                result.block_semantics = "runtime_receipt_failure"
+                result.counts_as_effective_block = False
+                return ToolExecutionResult.model_validate(
+                    tool_result_with_compatibility(
+                        result.model_dump(),
+                        compatibility or _compatibility_from_event(event),
+                    )
+                )
+            start_audit_id = started.audit_id
+
+        side_effects_measured = bool(
+            hasattr(self.tool_runtime, "snapshot")
+            and hasattr(self.tool_runtime, "diff")
         )
+        before = self.tool_runtime.snapshot() if side_effects_measured else None
         try:
             result = self.tool_runtime.invoke(tool_name, arguments)
             side_effects = (
-                self.tool_runtime.diff(before)
-                if before is not None and hasattr(self.tool_runtime, "diff")
-                else []
+                self.tool_runtime.diff(before) if side_effects_measured else []
             )
             payload = ToolExecutionResult(
                 tool_name=tool_name,
@@ -117,7 +179,7 @@ class GuardedToolGateway:
                 event=event.model_dump(),
                 audit_event=_dump_audit_event(audit_event),
             )
-            payload = _apply_tool_result_guard(
+            payload, result_outcome_attempted = _apply_tool_result_guard(
                 self.guard_adapter,
                 payload=payload,
                 tool_name=tool_name,
@@ -127,7 +189,21 @@ class GuardedToolGateway:
                 security=security_for_event,
                 trace_id=trace_id,
                 call_id=call_id,
+                invoked_at=invoked_at,
+                side_effects_measured=side_effects_measured,
             )
+            if not result_outcome_attempted:
+                payload.runtime_receipt_error = _submit_runtime_outcome(
+                    self.guard_adapter,
+                    event,
+                    decision,
+                    execution_status="executed",
+                    approval_resolution=approval_resolution,
+                    invoked_at=invoked_at,
+                    side_effects=side_effects,
+                    side_effects_measured=side_effects_measured,
+                    parent_audit_id=start_audit_id,
+                )
             return ToolExecutionResult.model_validate(
                 tool_result_with_compatibility(
                     payload.model_dump(),
@@ -136,9 +212,7 @@ class GuardedToolGateway:
             )
         except Exception as exc:
             side_effects = (
-                self.tool_runtime.diff(before)
-                if before is not None and hasattr(self.tool_runtime, "diff")
-                else []
+                self.tool_runtime.diff(before) if side_effects_measured else []
             )
             payload = ToolExecutionResult(
                 tool_name=tool_name,
@@ -153,6 +227,18 @@ class GuardedToolGateway:
                 event=event.model_dump(),
                 audit_event=_dump_audit_event(audit_event),
                 error=str(exc),
+                runtime_receipt_error=_submit_runtime_outcome(
+                    self.guard_adapter,
+                    event,
+                    decision,
+                    execution_status="failed",
+                    approval_resolution=approval_resolution,
+                    invoked_at=invoked_at,
+                    error=str(exc),
+                    side_effects=side_effects,
+                    side_effects_measured=side_effects_measured,
+                    parent_audit_id=start_audit_id,
+                ),
             )
             return ToolExecutionResult.model_validate(
                 tool_result_with_compatibility(
@@ -193,13 +279,14 @@ def _evaluate_memory_write_gate(
     ):
         return None
     event, decision = guard_adapter.evaluate_memory_write(
-        arguments=arguments,
+        arguments={**arguments, "_source_tool_call_id": call_id},
         security=security,
         trace_id=trace_id,
     )
     audit_event: AuditEvent | None = None
-    if _adapter_submits_policy_audit(guard_adapter):
+    if adapter_submits_policy_audit(guard_adapter):
         audit_event = guard_adapter.build_audit_event(event, decision)
+        assert audit_event is not None
         audit_error = _submit_audit_event(guard_adapter, audit_event)
         if audit_error is not None:
             return _audit_failure_result(
@@ -210,9 +297,8 @@ def _evaluate_memory_write_gate(
                 error=audit_error,
                 compatibility=compatibility,
             )
-    if decision.decision != "deny" and not _ask_was_not_approved(
-        guard_adapter, decision
-    ):
+    approval_blocked, approval_resolution = _resolve_approval(guard_adapter, decision)
+    if decision.decision != "deny" and not approval_blocked:
         return None
     payload = ToolExecutionResult(
         tool_name=tool_name,
@@ -229,6 +315,19 @@ def _evaluate_memory_write_gate(
         audit_event=_dump_audit_event(audit_event),
         block_semantics=_block_semantics(decision),
         counts_as_effective_block=decision.decision == "deny",
+        runtime_receipt_error=_submit_runtime_outcome(
+            guard_adapter,
+            event,
+            decision,
+            execution_status="not_invoked",
+            approval_resolution=approval_resolution,
+            intervention_type=(
+                "policy_deny"
+                if decision.decision == "deny"
+                else "approval_not_obtained"
+            ),
+            intervention_reason="The memory write gate stopped the action before the runtime was invoked.",
+        ),
     )
     return ToolExecutionResult.model_validate(
         tool_result_with_compatibility(payload.model_dump(), compatibility)
@@ -246,9 +345,11 @@ def _apply_tool_result_guard(
     security: dict[str, Any],
     trace_id: str,
     call_id: str,
-) -> ToolExecutionResult:
+    invoked_at: str,
+    side_effects_measured: bool,
+) -> tuple[ToolExecutionResult, bool]:
     if not hasattr(guard_adapter, "evaluate_tool_result"):
-        return payload
+        return payload, False
     event, decision = guard_adapter.evaluate_tool_result(
         tool_name=tool_name,
         arguments=arguments,
@@ -260,26 +361,35 @@ def _apply_tool_result_guard(
         will_persist=_tool_result_will_persist(tool_name, side_effects),
     )
     audit_event: AuditEvent | None = None
-    if _adapter_submits_policy_audit(guard_adapter):
+    if adapter_submits_policy_audit(guard_adapter):
         audit_event = guard_adapter.build_audit_event(event, decision)
+        assert audit_event is not None
         audit_error = _submit_audit_event(guard_adapter, audit_event)
         if audit_error is not None:
             payload.blocked = True
             payload.status = "audit_error"
             payload.result = None
-            payload.safe_message = (
-                "The tool result was withheld because AgentGuard audit submission failed."
-            )
+            payload.safe_message = "The tool result was withheld because AgentGuard audit submission failed."
             payload.error = audit_error
             payload.audit_event = audit_event.model_dump()
             payload.quarantine_applied = True
             payload.block_semantics = "audit_failure"
             payload.counts_as_effective_block = False
-            return payload
-    if decision.decision != "deny" and not _ask_was_not_approved(
-        guard_adapter, decision
-    ):
-        return payload
+            return payload, False
+    approval_blocked, approval_resolution = _resolve_approval(guard_adapter, decision)
+    outcome_attempted = _supports_runtime_outcome(guard_adapter, decision)
+    if decision.decision != "deny" and not approval_blocked:
+        payload.runtime_receipt_error = _submit_runtime_outcome(
+            guard_adapter,
+            event,
+            decision,
+            execution_status="executed",
+            approval_resolution=approval_resolution,
+            invoked_at=invoked_at,
+            side_effects=side_effects,
+            side_effects_measured=side_effects_measured,
+        )
+        return payload, outcome_attempted
     payload.blocked = True
     payload.decision = decision.decision
     payload.status = "quarantined"
@@ -293,7 +403,21 @@ def _apply_tool_result_guard(
     payload.quarantine_applied = True
     payload.counts_as_effective_block = decision.decision == "deny"
     payload.block_semantics = _block_semantics(decision)
-    return payload
+    payload.runtime_receipt_error = _submit_runtime_outcome(
+        guard_adapter,
+        event,
+        decision,
+        execution_status="executed",
+        approval_resolution=approval_resolution,
+        invoked_at=invoked_at,
+        side_effects=side_effects,
+        side_effects_measured=side_effects_measured,
+        result_disposition="quarantined",
+        result_sanitized=False,
+        intervention_type="tool_result_quarantine",
+        intervention_reason="The tool executed, but its result was withheld from Agent context.",
+    )
+    return payload, outcome_attempted
 
 
 def _tool_result_will_persist(
@@ -323,7 +447,7 @@ def _dump_audit_event(audit_event: AuditEvent | None) -> dict[str, Any] | None:
     return audit_event.model_dump()
 
 
-def _adapter_submits_policy_audit(guard_adapter: Any) -> bool:
+def adapter_submits_policy_audit(guard_adapter: Any) -> bool:
     """判断 adapter 是否仍需自行提交策略审计。
 
     Guard API v0.3 模式下 POST /v1/guard/evaluate 已在服务端唯一写入
@@ -344,20 +468,77 @@ def _block_semantics(decision: Any) -> str:
     )
 
 
-def _ask_was_not_approved(guard_adapter: Any, decision: Any) -> bool:
+def _resolve_approval(
+    guard_adapter: Any, decision: Any
+) -> tuple[bool, dict[str, Any] | None]:
     if getattr(decision, "decision", None) != "ask":
-        return False
+        return False, None
     approval_id = _approval_id(getattr(decision, "approval", None))
     if not approval_id or not hasattr(guard_adapter, "wait_for_approval"):
-        return True
+        return True, {
+            "status": "unavailable",
+            "decision": None,
+            "approval_id": approval_id,
+        }
     resolution = guard_adapter.wait_for_approval(approval_id)
-    if not isinstance(resolution, dict) or resolution.get("status") != "resolved":
-        return True
-    return str(resolution.get("decision") or "").lower() not in {
+    if not isinstance(resolution, dict):
+        return True, {
+            "status": "error",
+            "decision": None,
+            "approval_id": approval_id,
+        }
+    approved = resolution.get("status") == "resolved" and str(
+        resolution.get("decision") or ""
+    ).lower() in {
         "allow",
         "allow_once",
         "allow_session",
     }
+    return not approved, dict(resolution)
+
+
+def _supports_runtime_outcome(guard_adapter: Any, decision: Any) -> bool:
+    return bool(
+        runtime_receipts_enabled(guard_adapter)
+        and getattr(decision, "policy_audit_id", None)
+    )
+
+
+def _submit_runtime_outcome(
+    guard_adapter: Any,
+    event: Any,
+    decision: Any,
+    *,
+    execution_status: ExecutionStatus,
+    approval_resolution: dict[str, Any] | None = None,
+    invoked_at: str | None = None,
+    error: str | None = None,
+    side_effects: list[dict[str, Any]] | None = None,
+    side_effects_measured: bool = False,
+    result_disposition: ResultDisposition | None = None,
+    result_sanitized: bool | None = None,
+    parent_audit_id: str | None = None,
+    intervention_type: str | None = None,
+    intervention_reason: str | None = None,
+) -> str | None:
+    if not _supports_runtime_outcome(guard_adapter, decision):
+        return None
+    receipt = build_runtime_outcome(
+        event,
+        decision,
+        execution_status=execution_status,
+        approval_resolution=approval_resolution,
+        invoked_at=invoked_at,
+        error=error,
+        side_effects=side_effects,
+        side_effects_measured=side_effects_measured,
+        result_disposition=result_disposition,
+        result_sanitized=result_sanitized,
+        parent_audit_id=parent_audit_id,
+        intervention_type=intervention_type,
+        intervention_reason=intervention_reason,
+    )
+    return submit_runtime_receipt(guard_adapter, receipt)
 
 
 def _approval_id(approval: Any) -> str | None:

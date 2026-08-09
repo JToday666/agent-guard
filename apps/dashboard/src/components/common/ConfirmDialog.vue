@@ -178,6 +178,7 @@ function handleBackdropClick(): void {
   box-shadow: var(--shadow-raised);
   display: grid;
   gap: var(--space-5);
+  grid-auto-rows: max-content;
   max-height: calc(100vh - 2 * var(--space-7));
   overflow-y: auto;
   overscroll-behavior: contain;

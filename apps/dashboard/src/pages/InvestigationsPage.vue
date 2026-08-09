@@ -231,7 +231,7 @@
             </div>
             <RouterLink :to="`/evidence/${selectedEvent.traceId}`">查看完整证据链</RouterLink>
           </header>
-          <TraceTimeline :events="selectedTraceEvents.slice(0, 4)" />
+          <AuditTimeline :events="selectedTraceEvents.slice(0, 4)" />
         </section>
       </EventEvidence>
       <EmptyState v-else title="未找到事件" message="事件可能已离开当前数据窗口。" />
@@ -284,8 +284,8 @@ defineOptions({ name: "InvestigationsPage" });
 const EventEvidence = defineAsyncComponent(
   () => import("../components/evidence/EventEvidence.vue"),
 );
-const TraceTimeline = defineAsyncComponent(
-  () => import("../components/evidence/TraceTimeline.vue"),
+const AuditTimeline = defineAsyncComponent(
+  () => import("../components/evidence/AuditTimeline.vue"),
 );
 const PAGE_SIZE = 20;
 const route = useRoute();
@@ -421,7 +421,7 @@ watch(
       return;
     }
 
-    const isAtTop = (mainPanel.value?.scrollTop ?? 0) <= 40;
+    const isAtTop = window.scrollY <= getMainPanelScrollTop() + 40;
     if (isAtTop && !pendingNewEventIds.value.size) {
       displayedEvents.value = events;
       highlightNewEvents(incomingIds);
@@ -456,7 +456,20 @@ async function handleShowNewEvents() {
   updateQuery({ page: 1 });
   highlightNewEvents(eventIds);
   await nextTick();
-  mainPanel.value?.scrollTo({ top: 0 });
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({
+    behavior: reduceMotion ? "auto" : "smooth",
+    top: getMainPanelScrollTop(),
+  });
+}
+
+function getMainPanelScrollTop(): number {
+  if (!mainPanel.value) return 0;
+  const panelTop = mainPanel.value.getBoundingClientRect().top + window.scrollY;
+  const topBarHeight = document
+    .querySelector<HTMLElement>(".top-bar")
+    ?.getBoundingClientRect().height;
+  return Math.max(0, panelTop - (topBarHeight ?? 0));
 }
 
 function clearTimers() {
@@ -537,14 +550,10 @@ function handleExport() {
 <style scoped lang="scss">
 .investigations-page {
   display: grid;
-  height: calc(100vh - var(--top-bar-height));
   grid-template-columns: minmax(0, 1fr);
-  overflow: hidden;
 }
 .investigations-page__main {
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
 }
 .investigation-tools {
   align-items: end;
@@ -662,7 +671,7 @@ function handleExport() {
 }
 .event-table-wrap {
   border-top: 1px solid var(--color-border-strong);
-  overflow: auto;
+  overflow-x: auto;
 }
 .event-table {
   border-collapse: collapse;
@@ -800,6 +809,39 @@ function handleExport() {
   align-items: start;
   display: flex;
   justify-content: space-between;
+}
+
+@media (max-width: 74.9375rem) {
+  .investigation-tools {
+    grid-template-columns: repeat(3, minmax(10rem, 1fr));
+  }
+
+  .investigation-search {
+    grid-column: 1 / -1;
+  }
+
+  .event-table-wrap {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+  }
+}
+
+@media (max-width: 56.25rem) {
+  .investigation-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-header-actions,
+  .new-event-notice,
+  .pagination,
+  .result-summary {
+    flex-wrap: wrap;
+  }
+
+  .result-summary span:last-child {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 .trace-preview h3 {
   margin: 0;

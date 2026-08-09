@@ -9,6 +9,7 @@ from .evidence import EventDescription, build_audit_event, describe_guard_event
 from .memory import MemoryGuardService
 from .metrics import MetricService
 from .policy import PolicyService
+from .provenance import ProvenanceWriter
 from .trace import TraceService
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "MemoryGuardService",
     "MetricService",
     "PolicyService",
+    "ProvenanceWriter",
     "TraceService",
     "build_audit_event",
     "describe_guard_event",

@@ -12,6 +12,13 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .evidence import _approval_evidence, describe_guard_event
+from .provenance import ProvenanceWriter
+from .redaction import (
+    SUMMARY_TEXT_LIMIT,
+    bound_redacted_value,
+    scrub_text,
+    truncate_text,
+)
 
 
 class ApprovalService:
@@ -21,10 +28,12 @@ class ApprovalService:
         store: ControlPlaneStore,
         settings: GuardApiSettings,
         llm_reviewer: LlmApprovalReviewer | None = None,
+        provenance_writer: ProvenanceWriter | None = None,
     ) -> None:
         self.store = store
         self.settings = settings
         self.llm_reviewer = llm_reviewer
+        self.provenance_writer = provenance_writer or ProvenanceWriter(store=store)
 
     def create_for_decision(
         self,
@@ -36,19 +45,26 @@ class ApprovalService:
         if decision.decision != "ask" or decision.approval_intent is None:
             return None
         description = describe_guard_event(event)
+        resource = decision.approval_intent.resource.strip()
+        if not resource and description.resource_targets:
+            resource = description.resource_targets[0]
+        safe_resource = bound_redacted_value(resource, text_limit=SUMMARY_TEXT_LIMIT)
+        safe_action_name = truncate_text(
+            scrub_text(description.action_name), SUMMARY_TEXT_LIMIT
+        )
         approval = ApprovalRequest(
             trace_id=event.trace_id,
             subject_id=description.subject_id,
             subject_type=description.subject_type,
             action_id=description.action_id,
-            action_name=description.action_name,
+            action_name=safe_action_name,
             tool_call_id=description.subject_id,
             requesting_principal_id=requesting_principal_id,
             runtime=event.runtime,
             agent_id=event.security_context.agent_id,
-            tool=description.action_name,
-            resource=decision.approval_intent.resource,
-            reason=decision.reason,
+            tool=safe_action_name,
+            resource=safe_resource if isinstance(safe_resource, str) else "",
+            reason=truncate_text(scrub_text(decision.reason), SUMMARY_TEXT_LIMIT),
             risk_score=decision.risk_score,
             severity=decision.severity,
             evidence=_approval_evidence(event, decision, description),
@@ -112,7 +128,8 @@ class ApprovalService:
         pending: list[ApprovalRequest] = []
         for approval in self.store.list_pending_approvals():
             if self._is_expired(approval):
-                self.store.expire_approval(approval.approval_id)
+                expired = self.store.expire_approval(approval.approval_id)
+                self.provenance_writer.update_approval(expired)
                 continue
             pending.append(approval)
         return pending
@@ -137,7 +154,7 @@ class ApprovalService:
         if approval is not None and approval.status == "expired":
             approval.decision = "deny"
             return approval
-        return self.store.resolve_approval(
+        resolved = self.store.resolve_approval(
             approval_id,
             decision,
             resolution_source=resolution_source,
@@ -145,16 +162,22 @@ class ApprovalService:
             resolution_reason=resolution_reason,
             llm_review=llm_review,
         )
+        self.provenance_writer.update_approval(resolved)
+        return resolved
 
     def _record_llm_review(
         self, approval: ApprovalRequest, review: LlmApprovalReview
     ) -> ApprovalRequest:
         updated = approval.model_copy(update={"llm_review": review})
-        return self.store.create_approval(updated)
+        stored = self.store.create_approval(updated)
+        self.provenance_writer.update_approval(stored)
+        return stored
 
     def _with_expired_status(self, approval: ApprovalRequest) -> ApprovalRequest:
         if self._is_expired(approval):
-            return self.store.expire_approval(approval.approval_id)
+            expired = self.store.expire_approval(approval.approval_id)
+            self.provenance_writer.update_approval(expired)
+            return expired
         return approval
 
     def _is_expired(self, approval: ApprovalRequest) -> bool:

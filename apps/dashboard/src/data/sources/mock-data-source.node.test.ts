@@ -9,7 +9,10 @@ import { MockDashboardDataSource } from "./mock-data-source.ts";
 
 test("mock provenance graph contains evidence nodes and event references", async () => {
   const source = new MockDashboardDataSource(0);
-  const graph = await source.getTraceProvenance("trace_002");
+  const response = await source.getTraceProvenance("trace_002");
+  assert.equal(response.status, "modified");
+  if (response.status !== "modified") return;
+  const graph = response.value;
 
   assert.equal(graph.traceId, "trace_002");
   assert.ok(graph.nodes.length >= 10);
@@ -38,12 +41,33 @@ test("mock provenance graph contains evidence nodes and event references", async
   assert.ok(graph.nodes.some((node) => node.kind === "rule"));
   assert.ok(graph.nodes.some((node) => node.kind === "policy"));
   assert.ok(graph.nodes.some((node) => node.kind === "runtime_result"));
-  assert.ok(graph.nodes.some((node) => node.refId === "approval:ask_001"));
+  assert.ok(graph.nodes.some((node) => node.kind === "approval" && node.refId === "ask_001"));
+  assert.ok(
+    graph.nodes.some((node) => node.kind === "action" && node.refId === "action_trace_002"),
+  );
   assert.ok(
     graph.nodes.every((node) => node.metadata.source !== "mock" && node.metadata.source !== "api"),
   );
   assert.ok(graph.nodes.every((node) => !("eventId" in node.metadata)));
   assert.ok(graph.nodes.every((node) => !("riskScore" in node.metadata)));
+});
+
+test("mock trace resources honor independent conditional validators", async () => {
+  const source = new MockDashboardDataSource(0);
+  const trace = await source.getTraceDetail("trace_002");
+  const provenance = await source.getTraceProvenance("trace_002");
+  assert.equal(trace.status, "modified");
+  assert.equal(provenance.status, "modified");
+
+  const unchangedTrace = await source.getTraceDetail("trace_002", {
+    etag: trace.etag ?? undefined,
+  });
+  const unchangedProvenance = await source.getTraceProvenance("trace_002", {
+    etag: provenance.etag ?? undefined,
+  });
+  assert.equal(unchangedTrace.status, "not_modified");
+  assert.equal(unchangedProvenance.status, "not_modified");
+  assert.notEqual(trace.etag, provenance.etag);
 });
 
 test("mock read methods reject pre-aborted and in-flight requests", async () => {

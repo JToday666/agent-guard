@@ -1,10 +1,20 @@
 <template>
-  <nav class="sidebar" :class="{ 'sidebar--collapsed': isCollapsed }" aria-label="主导航">
+  <nav
+    class="sidebar"
+    :class="{
+      'sidebar--collapsed': isCollapsed,
+      'sidebar--tablet': isTablet,
+      'sidebar--tablet-expanded': isTablet && !isCollapsed,
+    }"
+    aria-label="主导航"
+  >
     <div class="sidebar__header">
       <span v-if="!isCollapsed" class="sidebar__title">安全工作台</span>
       <button
         class="sidebar__collapse"
         type="button"
+        aria-controls="sidebar-navigation-links"
+        :aria-expanded="!isCollapsed"
         :aria-label="isCollapsed ? '展开侧栏' : '收起侧栏'"
         :title="isCollapsed ? '展开侧栏' : '收起侧栏'"
         @click="emit('toggle-collapse')"
@@ -14,7 +24,7 @@
       </button>
     </div>
 
-    <div class="sidebar__links">
+    <div id="sidebar-navigation-links" class="sidebar__links">
       <section v-for="group in navigationGroups" :key="group.label" class="sidebar__group">
         <h2>{{ group.label }}</h2>
         <RouterLink
@@ -26,6 +36,7 @@
           :aria-current="isNavigationItemActive(item.to) ? 'page' : undefined"
           :aria-label="item.count ? `${item.label}，${item.count} 项待处理` : item.label"
           :title="isCollapsed ? item.label : undefined"
+          @click="emit('navigate')"
           @focus="preloadDashboardRoute(item.to)"
           @pointerenter="preloadDashboardRoute(item.to)"
         >
@@ -60,12 +71,14 @@ defineOptions({
 });
 
 const emit = defineEmits<{
+  navigate: [];
   "toggle-collapse": [];
 }>();
 
 const route = useRoute();
 const props = defineProps<{
   isCollapsed: boolean;
+  isTablet: boolean;
   pendingCount: number;
 }>();
 
@@ -103,8 +116,9 @@ function isNavigationItemActive(path: string): boolean {
   align-self: start;
   background: color-mix(in srgb, var(--color-nav) 90%, transparent);
   border-right: 1px solid var(--color-border);
-  height: calc(100vh - var(--top-bar-height));
+  height: calc(100dvh - var(--top-bar-height));
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: var(--space-4) var(--space-3);
   position: sticky;
   top: var(--top-bar-height);
@@ -281,5 +295,16 @@ function isNavigationItemActive(path: string): boolean {
     right: -0.1rem;
     top: -0.15rem;
   }
+}
+
+.sidebar--tablet {
+  width: var(--sidebar-collapsed-width);
+  z-index: 21;
+}
+
+.sidebar--tablet-expanded {
+  box-shadow: var(--shadow-raised);
+  width: var(--sidebar-width);
+  z-index: 25;
 }
 </style>

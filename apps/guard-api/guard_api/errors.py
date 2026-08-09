@@ -36,6 +36,7 @@ _ERROR_MESSAGES = {
     "POLICY_EVALUATION_WRITE_FORBIDDEN": (
         "policy_evaluation records can only be written by POST /v1/guard/evaluate."
     ),
+    "PROVENANCE_CONFLICT": "A stable provenance ID conflicts with persisted facts.",
     "CURSOR_EXPIRED": "The audit window cursor has expired or is invalid.",
     "CURSOR_SCOPE_MISMATCH": "Request filters do not match the audit window cursor scope.",
     "COHORT_RANGE_MISSING": "evaluated_from and evaluated_to are required for policy evaluation cohorts.",

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import itertools
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from alembic import command
 from alembic.config import Config
@@ -41,9 +43,12 @@ from guard_api.storage.base import (
     EvalMetricFilters,
     EvalMetrics,
     PolicySnapshotRecord,
+    ProvenanceEndpointMissingError,
     StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
+    merge_provenance_edge,
+    merge_provenance_node,
     within_evaluated_range,
 )
 from guard_api.storage.integrity import (
@@ -74,6 +79,17 @@ from guard_api.storage.sqlalchemy_models import (
 _POLICY_SNAPSHOT_ADVISORY_LOCK_ID = 427001030001
 _AUDIT_INTEGRITY_ADVISORY_LOCK_ID = 427001030002
 _AUDIT_CHAIN_ID = "default"
+
+
+def _lock_provenance_identity(session: Session, kind: str, stable_id: str) -> None:
+    lock_id = int.from_bytes(
+        hashlib.sha256(f"provenance:{kind}:{stable_id}".encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+    )
 
 
 @dataclass(slots=True)
@@ -117,6 +133,7 @@ class PostgresControlPlaneStore:
                         )
                     ).scalar_one()
                     from guard_api.storage.integrity import _canonical_json_bytes
+
                     stored_content = _canonical_json_bytes(
                         {k: v for k, v in stored_payload.items() if k != "integrity"}
                     )
@@ -181,6 +198,14 @@ class PostgresControlPlaneStore:
                 session.execute(head_stmt)
                 return True
 
+    def get_audit_event(self, audit_id: str) -> AuditEvent | None:
+        stmt = select(audit_events.c.payload_json).where(
+            audit_events.c.audit_id == audit_id
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalar_one_or_none()
+        return AuditEvent.model_validate(row) if row is not None else None
+
     def list_audit_events(
         self, filters: AuditEventFilters | None = None
     ) -> list[AuditEvent]:
@@ -195,9 +220,7 @@ class PostgresControlPlaneStore:
             rows = session.execute(stmt).scalars().all()
         return [AuditEvent.model_validate(row) for row in rows]
 
-    def read_audit_events_bounded(
-        self, query: AuditWindowQuery
-    ) -> list[AuditEvent]:
+    def read_audit_events_bounded(self, query: AuditWindowQuery) -> list[AuditEvent]:
         # 上界读 audit_integrity_heads 链头；序列范围命中现有
         # ix_audit_events_chain_sequence；JSONB 过滤为残余谓词（契约 §7.3）。
         conditions: list[Any] = [audit_events.c.chain_id == _AUDIT_CHAIN_ID]
@@ -256,11 +279,33 @@ class PostgresControlPlaneStore:
             row = session.execute(stmt).scalars().first()
         return AuditEvent.model_validate(row) if row is not None else None
 
-    def reserve_policy_evaluation(self, event_id: str) -> bool:
-        # 真实唯一性约束由部分唯一索引 ux_audit_policy_evaluation_event_id
-        # （migration 0007）承担；并发冲突在写入时以 IntegrityError 暴露，
-        # 由调用方重读并回放或报 409。
-        return True
+    @contextmanager
+    def policy_evaluation_guard(self, event_id: str) -> Iterator[None]:
+        """Hold a crash-safe per-event PostgreSQL advisory lock.
+
+        Approval and other evaluation side effects happen before the unique
+        policy audit insert. Holding a session advisory lock across the service
+        operation prevents concurrent requests for one event from creating
+        orphan approvals while retaining the database unique index as the final
+        integrity guard.
+        """
+
+        lock_id = int.from_bytes(
+            hashlib.sha256(event_id.encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        with self._engine.connect() as connection:
+            connection.execute(
+                text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": lock_id}
+            )
+            try:
+                yield
+            finally:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
@@ -288,56 +333,92 @@ class PostgresControlPlaneStore:
         return aggregate_policy_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
-        payload = node.model_dump(mode="json")
-        stmt = pg_insert(provenance_nodes).values(
-            node_id=node.node_id,
-            trace_id=node.trace_id,
-            kind=node.kind,
-            ref_id=node.ref_id,
-            payload_json=payload,
-            created_at=node.timestamp,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[provenance_nodes.c.node_id],
-            set_={
-                "trace_id": stmt.excluded.trace_id,
-                "kind": stmt.excluded.kind,
-                "ref_id": stmt.excluded.ref_id,
-                "payload_json": stmt.excluded.payload_json,
-                "created_at": stmt.excluded.created_at,
-            },
+        with self._session_factory() as session:
+            with session.begin():
+                _lock_provenance_identity(session, "node", node.node_id)
+                row = session.execute(
+                    select(provenance_nodes.c.payload_json).where(
+                        provenance_nodes.c.node_id == node.node_id
+                    )
+                ).scalar_one_or_none()
+                merged = (
+                    node
+                    if row is None
+                    else merge_provenance_node(ProvenanceNode.model_validate(row), node)
+                )
+                payload = merged.model_dump(mode="json")
+                stmt = pg_insert(provenance_nodes).values(
+                    node_id=merged.node_id,
+                    trace_id=merged.trace_id,
+                    kind=merged.kind,
+                    ref_id=merged.ref_id,
+                    payload_json=payload,
+                    created_at=merged.timestamp,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[provenance_nodes.c.node_id],
+                    set_={
+                        "payload_json": stmt.excluded.payload_json,
+                        "created_at": stmt.excluded.created_at,
+                    },
+                )
+                session.execute(stmt)
+        return merged
+
+    def get_provenance_node(self, node_id: str) -> ProvenanceNode | None:
+        stmt = select(provenance_nodes.c.payload_json).where(
+            provenance_nodes.c.node_id == node_id
         )
         with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return node
+            row = session.execute(stmt).scalar_one_or_none()
+        return ProvenanceNode.model_validate(row) if row is not None else None
 
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge:
-        payload = edge.model_dump(mode="json")
-        stmt = pg_insert(provenance_edges).values(
-            edge_id=edge.edge_id,
-            trace_id=edge.trace_id,
-            source_node_id=edge.source_node_id,
-            target_node_id=edge.target_node_id,
-            relation=edge.relation,
-            payload_json=payload,
-            created_at=edge.timestamp,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[provenance_edges.c.edge_id],
-            set_={
-                "trace_id": stmt.excluded.trace_id,
-                "source_node_id": stmt.excluded.source_node_id,
-                "target_node_id": stmt.excluded.target_node_id,
-                "relation": stmt.excluded.relation,
-                "payload_json": stmt.excluded.payload_json,
-                "created_at": stmt.excluded.created_at,
-            },
-        )
         with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return edge
+            with session.begin():
+                _lock_provenance_identity(session, "edge", edge.edge_id)
+                endpoint_count = session.execute(
+                    select(func.count())
+                    .select_from(provenance_nodes)
+                    .where(
+                        provenance_nodes.c.node_id.in_(
+                            [edge.source_node_id, edge.target_node_id]
+                        ),
+                        provenance_nodes.c.trace_id == edge.trace_id,
+                    )
+                ).scalar_one()
+                expected_count = 1 if edge.source_node_id == edge.target_node_id else 2
+                if int(endpoint_count) != expected_count:
+                    raise ProvenanceEndpointMissingError(edge.edge_id)
+                row = session.execute(
+                    select(provenance_edges.c.payload_json).where(
+                        provenance_edges.c.edge_id == edge.edge_id
+                    )
+                ).scalar_one_or_none()
+                merged = (
+                    edge
+                    if row is None
+                    else merge_provenance_edge(ProvenanceEdge.model_validate(row), edge)
+                )
+                payload = merged.model_dump(mode="json")
+                stmt = pg_insert(provenance_edges).values(
+                    edge_id=merged.edge_id,
+                    trace_id=merged.trace_id,
+                    source_node_id=merged.source_node_id,
+                    target_node_id=merged.target_node_id,
+                    relation=merged.relation,
+                    payload_json=payload,
+                    created_at=merged.timestamp,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[provenance_edges.c.edge_id],
+                    set_={
+                        "payload_json": stmt.excluded.payload_json,
+                        "created_at": stmt.excluded.created_at,
+                    },
+                )
+                session.execute(stmt)
+        return merged
 
     def list_provenance(
         self, trace_id: str

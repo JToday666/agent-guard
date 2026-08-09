@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -485,6 +486,7 @@ class LangGraphAdapter:
             pre_execution=True,
             security_context=context,
             payload={
+                "action_id": arguments.get("_source_tool_call_id"),
                 "memory": {
                     "namespace": namespace,
                     "key": key,
@@ -535,10 +537,18 @@ class LangGraphAdapter:
             "event_id": event_id,
             "decision_id": decision.decision_id,
         }
-        action_id = _action_id_from_payload(payload)
-        if action_id:
-            links["action_id"] = action_id
         approval_id = _approval_id_from_decision(decision)
+        action_id = _action_id_from_payload(payload)
+        if action_id or event_type in {
+            "memory_write_proposed",
+            "message_send_proposed",
+            "model_output_produced",
+        }:
+            links["action_id"] = action_id or event_id
+        elif approval_id:
+            # A normally non-executable guard stage becomes a controlled
+            # approval subject only when an approval was actually created.
+            links["action_id"] = event_id
         if approval_id:
             links["approval_id"] = approval_id
         return AuditEvent(
@@ -753,6 +763,8 @@ def _tool_name_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 def _action_id_from_payload(payload: dict[str, Any]) -> str | None:
+    if payload.get("action_id"):
+        return str(payload["action_id"])
     tool = payload.get("tool")
     if isinstance(tool, dict) and tool.get("call_id"):
         return str(tool["call_id"])
@@ -834,10 +846,12 @@ def _guard_event_projection(
         source["source_id"] = str(sender_id)
     raw_context_sources = security_context.get("context_sources")
     context_sources = (
-        list(raw_context_sources)
-        if isinstance(raw_context_sources, list)
-        else []
-    )[:_CONTEXT_SOURCES_LIMIT]
+        list(raw_context_sources) if isinstance(raw_context_sources, list) else []
+    )
+    payload_sources = payload.get("sources")
+    if isinstance(payload_sources, list):
+        context_sources.extend(payload_sources)
+    context_sources = _unique_projection_items(context_sources)[:_CONTEXT_SOURCES_LIMIT]
     tool = payload.get("tool")
     tool_projection: dict[str, Any] | None = None
     if isinstance(tool, dict) and tool.get("name"):
@@ -876,6 +890,24 @@ def _guard_event_projection(
     }
 
 
+def _unique_projection_items(items: list[Any]) -> list[Any]:
+    unique: list[Any] = []
+    fingerprints: set[str] = set()
+    for item in items:
+        fingerprint = json.dumps(
+            item,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+        if fingerprint in fingerprints:
+            continue
+        fingerprints.add(fingerprint)
+        unique.append(item)
+    return unique
+
+
 def _guard_decision_projection(decision: PolicyDecision) -> dict[str, Any]:
     return {
         "decision_id": decision.decision_id,
@@ -890,9 +922,7 @@ def _guard_decision_projection(decision: PolicyDecision) -> dict[str, Any]:
                 "severity": hit.severity,
                 "decision": decision.decision,
                 "reason": _bounded_text(decision.reason, _SUMMARY_TEXT_LIMIT),
-                "evidence": [
-                    str(item)[:_SUMMARY_TEXT_LIMIT] for item in hit.evidence
-                ],
+                "evidence": [str(item)[:_SUMMARY_TEXT_LIMIT] for item in hit.evidence],
             }
             for hit in decision.rule_hits[:_RULE_HITS_LIMIT]
         ],
@@ -954,8 +984,6 @@ def _preview(value: Any, limit: int = 2000) -> str:
         text = value
     else:
         try:
-            import json
-
             text = json.dumps(value, ensure_ascii=False, sort_keys=True)
         except Exception:
             text = repr(value)

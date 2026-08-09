@@ -24,6 +24,7 @@ import type {
   SideEffectMeasurementStatus,
   TraceEvidenceConclusion,
   TraceEvidenceViewModel,
+  TraceAuditWindow,
 } from "../../types/dashboard";
 import { maskSensitiveText, redactSensitiveData } from "../../utils/data-redaction.ts";
 import {
@@ -429,7 +430,8 @@ function normalizeApproval(
   const rawApproval = asRecord(evidence.approval);
   const approvalId = firstString(rawApproval.approval_id, links.approval_id);
   const matched = approvals.find((approval) => approval.id === approvalId);
-  const statusValue = rawApproval.status ?? matched?.status;
+  const statusValue = matched?.status ?? rawApproval.status;
+  const resolution = firstString(rawApproval.decision);
   const status: ApprovalEvidence["status"] =
     statusValue === "pending" ||
     statusValue === "allowed" ||
@@ -437,7 +439,12 @@ function normalizeApproval(
     statusValue === "expired" ||
     statusValue === "not_required"
       ? statusValue
-      : "unknown";
+      : statusValue === "allowed_once" ||
+          (statusValue === "resolved" && resolution === "allow_once")
+        ? "allowed"
+        : statusValue === "deny" || (statusValue === "resolved" && resolution === "deny")
+          ? "denied"
+          : "unknown";
   return {
     approvalId: approvalId ?? matched?.id ?? null,
     resolvedAt: firstString(rawApproval.resolved_at, matched?.resolvedAt),
@@ -503,6 +510,7 @@ function normalizeAuditEvent(
     decisionReason: firstString(guardDecision.reason, raw.reason, event.reason),
     entryHash: firstString(auditIntegrity.event_hash),
     eventId: firstString(links.event_id, metadata.event_id),
+    eventType: event.eventType,
     execution,
     intervention,
     modelIntent: firstString(guardEvent.model_intent, evidence.model_intent, metadata.model_intent),
@@ -514,6 +522,8 @@ function normalizeAuditEvent(
       event.userTask,
     ),
     policy: normalizePolicy(evidence, guardDecision),
+    policyAuditId: firstString(links.policy_audit_id),
+    parentAuditId: firstString(links.parent_audit_id),
     previousHash: firstString(auditIntegrity.prev_hash),
     raw: event.raw ?? event,
     recordType,
@@ -522,8 +532,10 @@ function normalizeAuditEvent(
     resultSummary: firstString(asRecord(evidence.result).summary, evidence.result_summary),
     risk,
     ruleHits,
+    severity: firstSeverity(guardDecision.severity, raw.severity, event.severity),
     sideEffects: normalizeSideEffects(evidence),
     source: normalizeSource(guardEvent, metadata),
+    stage: event.stage,
     toolArguments: normalizeArguments(guardEvent),
     toolName: firstString(tool.name, guardEvent.tool_name, metadata.action_name, event.tool),
   };
@@ -636,6 +648,7 @@ function combineTraceEvidence(
     resultSummary: pickLatest(events, (event) => event.resultSummary),
     risk: latestRisk,
     ruleHits: pickArray(events, (event) => event.ruleHits),
+    severity: decisionRecord?.severity ?? "unknown",
     sideEffects: latestSideEffects,
     source: latestSource,
     toolArguments: pickLatest(events, (event) => event.toolArguments),
@@ -763,6 +776,7 @@ function dispositionDetail(disposition: ResultDisposition, execution: ExecutionE
 function buildIntegrity(
   events: readonly NormalizedAuditEvidence[],
   integrity: AuditIntegrity | null | undefined,
+  auditWindow?: TraceAuditWindow,
 ) {
   const withMetadata = events.filter(
     (event) => event.chainIndex !== null && Boolean(event.entryHash),
@@ -785,9 +799,9 @@ function buildIntegrity(
     chainIndex: lastWithMetadata?.chainIndex ?? null,
     entryHash: lastWithMetadata?.entryHash ?? null,
     globalStatus,
-    mayBeTruncated: events.length >= 1000,
+    mayBeTruncated: auditWindow?.hasMore ?? events.length >= 1000,
     previousHash: lastWithMetadata?.previousHash ?? null,
-    returnedEventCount: events.length,
+    returnedEventCount: auditWindow?.returnedCount ?? events.length,
     traceMetadataStatus,
   };
 }
@@ -1238,14 +1252,19 @@ export function buildTraceEvidenceViewModel(
   events: readonly AuditEventRow[],
   approvals: readonly ApprovalRequest[] = [],
   auditIntegrity?: AuditIntegrity | null,
+  auditWindow?: TraceAuditWindow,
 ): TraceEvidenceViewModel {
-  const sortedEvents = [...events].sort(
-    (left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt),
-  );
+  const useAuditSequence = events.every((event) => event.auditSequence !== null);
+  const sortedEvents = [...events].sort((left, right) => {
+    const primaryOrder = useAuditSequence
+      ? left.auditSequence! - right.auditSequence!
+      : Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+    return primaryOrder || left.id.localeCompare(right.id);
+  });
   const normalized = sortedEvents.map((event) => normalizeAuditEvent(event, approvals));
   const { duplicates, logical } = dedupeLogicalEvents(normalized);
   const primary = combineTraceEvidence(logical);
-  const integrity = buildIntegrity(normalized, auditIntegrity);
+  const integrity = buildIntegrity(normalized, auditIntegrity, auditWindow);
   return {
     caseId: sortedEvents.find((event) => event.caseId)?.caseId ?? null,
     conclusion: buildConclusion(primary),

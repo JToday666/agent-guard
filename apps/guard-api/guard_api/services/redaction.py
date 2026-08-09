@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 
+from agentguard_core import AuditEvent
 from agentguard_core.credentials import (
     CREDENTIAL_ASSIGNMENT_RE,
     PROVIDER_KEY_RE,
@@ -160,6 +161,120 @@ def bound_redacted_value(
     )
 
 
+def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
+    """Return the canonical browser-safe event that is eligible for persistence.
+
+    Redaction must happen before audit integrity metadata is attached. This makes
+    the persisted hash chain authoritative for the safe representation and avoids
+    relying on every producer—or a later browser response mapper—to remember the
+    same security boundary.
+    """
+
+    raw_metadata = redact_structure(event.metadata)
+    metadata: dict[str, object]
+    if isinstance(raw_metadata, dict):
+        raw_decision = raw_metadata.pop("guard_decision", None)
+        bounded_metadata = bound_value(
+            raw_metadata,
+            text_limit=CONTENT_PREVIEW_LIMIT,
+            array_limit=ARRAY_LIMIT,
+        )
+        metadata = bounded_metadata if isinstance(bounded_metadata, dict) else {}
+        if raw_decision is not None:
+            # Replay needs the complete GuardDecision shape. Keep the dedicated
+            # rule/effect collection ceiling while preserving container types.
+            metadata["guard_decision"] = _bound_typed_value(
+                raw_decision,
+                text_limit=CONTENT_PREVIEW_LIMIT,
+                array_limit=RULE_HITS_LIMIT,
+            )
+    else:
+        metadata = {}
+
+    evidence: dict[str, object] | None = None
+    if event.evidence is not None:
+        raw_evidence = redact_structure(event.evidence)
+        replay_decision = (
+            raw_evidence.pop("guard_decision", None)
+            if isinstance(raw_evidence, dict)
+            else None
+        )
+        bounded_evidence = bound_value(
+            raw_evidence,
+            text_limit=CONTENT_PREVIEW_LIMIT,
+            array_limit=RULE_HITS_LIMIT,
+        )
+        if isinstance(bounded_evidence, dict) and replay_decision is not None:
+            bounded_evidence["guard_decision"] = _bound_typed_value(
+                replay_decision,
+                text_limit=CONTENT_PREVIEW_LIMIT,
+                array_limit=RULE_HITS_LIMIT,
+            )
+        evidence = (
+            enforce_evidence_budget(bounded_evidence)
+            if isinstance(bounded_evidence, dict)
+            else {}
+        )
+
+    return event.model_copy(
+        update={
+            "summary": truncate_text(scrub_text(event.summary), SUMMARY_TEXT_LIMIT),
+            "resource_targets": [
+                truncate_text(scrub_text(target), SUMMARY_TEXT_LIMIT)
+                for target in event.resource_targets[:NORMALIZED_RESOURCES_LIMIT]
+            ],
+            "rule_hits": [
+                truncate_text(scrub_text(rule_id), SUMMARY_TEXT_LIMIT)
+                for rule_id in event.rule_hits[:RULE_HITS_LIMIT]
+            ],
+            "reason": truncate_text(scrub_text(event.reason), CONTENT_PREVIEW_LIMIT),
+            "metadata": metadata,
+            "evidence": evidence,
+        }
+    )
+
+
+def _bound_typed_value(
+    value: object,
+    *,
+    text_limit: int,
+    array_limit: int,
+    max_depth: int = MAX_NESTING_DEPTH,
+    _depth: int = 1,
+) -> object:
+    """Bound replay data without replacing typed containers with strings."""
+
+    if isinstance(value, str):
+        return truncate_text(value, text_limit)
+    if isinstance(value, dict):
+        if _depth >= max_depth:
+            return {}
+        return {
+            str(key): _bound_typed_value(
+                nested,
+                text_limit=text_limit,
+                array_limit=array_limit,
+                max_depth=max_depth,
+                _depth=_depth + 1,
+            )
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        if _depth >= max_depth:
+            return []
+        return [
+            _bound_typed_value(
+                item,
+                text_limit=text_limit,
+                array_limit=array_limit,
+                max_depth=max_depth,
+                _depth=_depth + 1,
+            )
+            for item in value[:array_limit]
+        ]
+    return value
+
+
 def evidence_serialized_size(evidence: dict[str, object]) -> int:
     return len(
         json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -178,10 +293,11 @@ def enforce_evidence_budget(
     for text_limit in (500, 200, 64, 16):
         if evidence_serialized_size(current) <= max_bytes:
             return current
-        current = bound_value(
+        bounded = bound_value(
             current,
             text_limit=text_limit,
             array_limit=ARRAY_LIMIT,
             max_depth=MAX_NESTING_DEPTH,
         )
+        current = bounded if isinstance(bounded, dict) else {}
     return current

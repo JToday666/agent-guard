@@ -29,6 +29,7 @@ import type {
   PolicySummary,
   ProvenanceGraph,
   TraceDetail,
+  TracePollingState,
   TraceSummary,
 } from "../types/dashboard";
 import { getAuthErrorMessage, isSessionAuthError } from "../utils/auth-error-messages";
@@ -84,6 +85,8 @@ const POLL_INTERVAL_MS = 10_000;
 const TRACE_CACHE_MAX_ENTRIES = 8;
 const TRACE_DETAIL_TTL_MS = 60_000;
 const TRACE_PROVENANCE_TTL_MS = 120_000;
+const TRACE_POLL_INTERVAL_MS = 2_000;
+const TRACE_POLL_MAX_BACKOFF_MS = 16_000;
 
 interface ScopeRefreshState {
   error: string | null;
@@ -164,6 +167,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const auditIntegrityError = ref<string | null>(null);
   const provenanceCache = ref<TimedCache<ProvenanceGraph>>({});
   const provenanceErrors = ref<Record<string, string>>({});
+  const tracePollingStates = ref<Record<string, TracePollingState>>({});
   const provenanceLoadingIds = new Set<string>();
   const health = ref<HealthStatus>({
     api: "unknown",
@@ -189,6 +193,15 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const resourceUpdatedAt = new Map<DashboardRefreshResource, number>();
   let pollingActive = false;
   let visibilityHandler: (() => void) | null = null;
+  const traceEtags = new Map<string, string>();
+  const provenanceEtags = new Map<string, string>();
+  let activeTracePolling: {
+    controller: AbortController | null;
+    failureCount: number;
+    timer: number | null;
+    traceId: string;
+  } | null = null;
+  let traceVisibilityHandler: (() => void) | null = null;
 
   const status = computed(() => scopeStates.value[activeScope.value].status);
   const error = computed(() => scopeStates.value[activeScope.value].error);
@@ -220,6 +233,33 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (!isSessionAuthError(reason)) return;
     useAuthStore().invalidateSession(getAuthErrorMessage(reason));
     stopPolling();
+  }
+
+  function isAbortError(reason: unknown): boolean {
+    return reason instanceof Error && reason.name === "AbortError";
+  }
+
+  function rememberEtag(target: Map<string, string>, key: string, etag: string | null): void {
+    target.delete(key);
+    if (!etag) return;
+    target.set(key, etag);
+    while (target.size > TRACE_CACHE_MAX_ENTRIES) {
+      const oldest = target.keys().next().value;
+      if (typeof oldest !== "string") break;
+      target.delete(oldest);
+    }
+  }
+
+  function updateTracePollingState(traceId: string, patch: Partial<TracePollingState>): void {
+    const current = tracePollingStates.value[traceId] ?? {
+      lastCheckedAt: null,
+      retryInMs: null,
+      status: "idle",
+    };
+    tracePollingStates.value = {
+      ...tracePollingStates.value,
+      [traceId]: { ...current, ...patch },
+    };
   }
 
   async function refreshApprovals(): Promise<void> {
@@ -569,6 +609,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
       approvals.value = approvals.value.filter((item) => item.id !== approval.id);
       traceDetailCache.value = removeCacheValue(traceDetailCache.value, approval.traceId);
       provenanceCache.value = removeCacheValue(provenanceCache.value, approval.traceId);
+      traceEtags.delete(approval.traceId);
+      provenanceEtags.delete(approval.traceId);
+      void loadTraceDetail(approval.traceId, true);
       void refreshApprovals().catch(handleSessionError);
       return resolution;
     } catch (reason) {
@@ -586,21 +629,35 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
-  async function loadTraceDetail(traceId: string, force = false): Promise<void> {
-    if (!traceId || traceDetailLoadingId.value === traceId) return;
-    if (!force && getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) return;
+  async function loadTraceDetail(
+    traceId: string,
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<"modified" | "not_modified" | "skipped" | "failed" | "aborted"> {
+    if (!traceId || traceDetailLoadingId.value === traceId) return "skipped";
+    if (!force && getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) {
+      return "skipped";
+    }
     const cachedDetail = getCachedValue(traceDetailCache.value, traceId);
     traceDetailLoadingId.value = traceId;
     traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
     try {
-      const detail = await dashboardDataSource.getTraceDetail(traceId);
-      traceDetailCache.value = setBoundedCacheValue(
-        traceDetailCache.value,
-        traceId,
-        detail,
-        TRACE_CACHE_MAX_ENTRIES,
-      );
+      const response = await dashboardDataSource.getTraceDetail(traceId, {
+        etag: cachedDetail ? traceEtags.get(traceId) : undefined,
+        signal,
+      });
+      rememberEtag(traceEtags, traceId, response.etag);
+      if (response.status === "modified") {
+        traceDetailCache.value = setBoundedCacheValue(
+          traceDetailCache.value,
+          traceId,
+          response.value,
+          TRACE_CACHE_MAX_ENTRIES,
+        );
+      }
+      return response.status;
     } catch (reason) {
+      if (signal?.aborted || isAbortError(reason)) return "aborted";
       handleSessionError(reason);
       traceDetailErrors.value = {
         ...traceDetailErrors.value,
@@ -608,9 +665,99 @@ export const useDashboardStore = defineStore("dashboard", () => {
           ? "证据链刷新失败，当前显示上次成功加载的数据"
           : errorMessage(reason, "证据链数据加载失败"),
       };
+      return "failed";
     } finally {
       if (traceDetailLoadingId.value === traceId) traceDetailLoadingId.value = null;
     }
+  }
+
+  function clearTracePollTimer(): void {
+    if (activeTracePolling?.timer !== null && activeTracePolling?.timer !== undefined) {
+      window.clearTimeout(activeTracePolling.timer);
+      activeTracePolling.timer = null;
+    }
+  }
+
+  function scheduleTracePoll(delayMs: number): void {
+    if (!activeTracePolling || document.visibilityState !== "visible") return;
+    clearTracePollTimer();
+    const record = activeTracePolling;
+    record.timer = window.setTimeout(() => {
+      if (activeTracePolling !== record) return;
+      record.timer = null;
+      void pollTrace(record);
+    }, delayMs);
+  }
+
+  async function pollTrace(record: NonNullable<typeof activeTracePolling>): Promise<void> {
+    if (activeTracePolling !== record || document.visibilityState !== "visible") return;
+    record.controller?.abort();
+    const controller = new AbortController();
+    record.controller = controller;
+    updateTracePollingState(record.traceId, { retryInMs: null, status: "checking" });
+    const result = await loadTraceDetail(record.traceId, true, controller.signal);
+    if (activeTracePolling !== record || controller.signal.aborted) return;
+    record.controller = null;
+    if (result === "failed") {
+      record.failureCount += 1;
+      const retryInMs = Math.min(
+        TRACE_POLL_INTERVAL_MS * 2 ** record.failureCount,
+        TRACE_POLL_MAX_BACKOFF_MS,
+      );
+      updateTracePollingState(record.traceId, { retryInMs, status: "backoff" });
+      scheduleTracePoll(retryInMs);
+      return;
+    }
+    record.failureCount = 0;
+    updateTracePollingState(record.traceId, {
+      lastCheckedAt: new Date().toISOString(),
+      retryInMs: TRACE_POLL_INTERVAL_MS,
+      status: "live",
+    });
+    scheduleTracePoll(TRACE_POLL_INTERVAL_MS);
+  }
+
+  function startTracePolling(traceId: string): void {
+    if (!traceId) return;
+    if (activeTracePolling?.traceId === traceId) return;
+    stopTracePolling();
+    activeTracePolling = {
+      controller: null,
+      failureCount: 0,
+      timer: null,
+      traceId,
+    };
+    traceVisibilityHandler = () => {
+      if (!activeTracePolling) return;
+      clearTracePollTimer();
+      if (document.visibilityState === "visible") {
+        activeTracePolling.failureCount = 0;
+        scheduleTracePoll(0);
+      } else {
+        activeTracePolling.controller?.abort();
+        activeTracePolling.controller = null;
+        updateTracePollingState(activeTracePolling.traceId, {
+          retryInMs: null,
+          status: "paused",
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", traceVisibilityHandler);
+    if (document.visibilityState === "visible") scheduleTracePoll(0);
+    else updateTracePollingState(traceId, { status: "paused" });
+  }
+
+  function stopTracePolling(status: "paused" | "stopped" = "stopped"): void {
+    if (!activeTracePolling) return;
+    const traceId = activeTracePolling.traceId;
+    clearTracePollTimer();
+    activeTracePolling.controller?.abort();
+    activeTracePolling = null;
+    if (traceVisibilityHandler) {
+      document.removeEventListener("visibilitychange", traceVisibilityHandler);
+      traceVisibilityHandler = null;
+    }
+    updateTracePollingState(traceId, { retryInMs: null, status });
   }
 
   function startPolling(): void {
@@ -630,24 +777,37 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (visibilityHandler) document.removeEventListener("visibilitychange", visibilityHandler);
     visibilityHandler = null;
     activeRefresh?.controller.abort();
+    stopTracePolling();
   }
 
-  async function loadTraceProvenance(traceId: string, force = false): Promise<void> {
-    if (!traceId || provenanceLoadingIds.has(traceId)) return;
+  async function loadTraceProvenance(
+    traceId: string,
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<"modified" | "not_modified" | "skipped" | "failed" | "aborted"> {
+    if (!traceId || provenanceLoadingIds.has(traceId)) return "skipped";
     if (!force && getFreshCacheValue(provenanceCache.value, traceId, TRACE_PROVENANCE_TTL_MS))
-      return;
+      return "skipped";
     const cachedProvenance = getCachedValue(provenanceCache.value, traceId);
     provenanceLoadingIds.add(traceId);
     provenanceErrors.value = { ...provenanceErrors.value, [traceId]: "" };
     try {
-      const graph = await dashboardDataSource.getTraceProvenance(traceId);
-      provenanceCache.value = setBoundedCacheValue(
-        provenanceCache.value,
-        traceId,
-        graph,
-        TRACE_CACHE_MAX_ENTRIES,
-      );
+      const response = await dashboardDataSource.getTraceProvenance(traceId, {
+        etag: cachedProvenance ? provenanceEtags.get(traceId) : undefined,
+        signal,
+      });
+      rememberEtag(provenanceEtags, traceId, response.etag);
+      if (response.status === "modified") {
+        provenanceCache.value = setBoundedCacheValue(
+          provenanceCache.value,
+          traceId,
+          response.value,
+          TRACE_CACHE_MAX_ENTRIES,
+        );
+      }
+      return response.status;
     } catch (reason) {
+      if (signal?.aborted || isAbortError(reason)) return "aborted";
       handleSessionError(reason);
       provenanceErrors.value = {
         ...provenanceErrors.value,
@@ -655,6 +815,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
           ? "溯源关系刷新失败，当前显示上次成功加载的数据"
           : errorMessage(reason, "溯源图加载失败"),
       };
+      return "failed";
     } finally {
       provenanceLoadingIds.delete(traceId);
     }
@@ -681,6 +842,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     auditIntegrityError,
     provenanceByTrace,
     provenanceErrors,
+    tracePollingStates,
     health,
     status,
     error,
@@ -700,6 +862,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
     setActiveScope,
     loadTraceDetail,
     loadTraceProvenance,
+    startTracePolling,
+    stopTracePolling,
     resolveApproval,
     startPolling,
     stopPolling,

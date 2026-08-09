@@ -26,10 +26,11 @@ from guard_api.services import (
     MemoryGuardService,
     MetricService,
     PolicyService,
+    ProvenanceWriter,
     TraceService,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import ControlPlaneStore
+from guard_api.storage.base import ControlPlaneStore, ProvenanceConflictError
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
@@ -50,7 +51,8 @@ def create_app(
             store = PostgresControlPlaneStore(settings.database_url)
 
     auth = CapabilityAuthService(settings=settings, store=store)
-    audit_service = AuditService(store=store)
+    provenance_writer = ProvenanceWriter(store=store)
+    audit_service = AuditService(store=store, provenance_writer=provenance_writer)
     audit_window_service = AuditWindowService(store=store)
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
     memory_guard_service = MemoryGuardService(store=store)
@@ -59,6 +61,7 @@ def create_app(
         settings=settings,
         llm_reviewer=llm_approval_reviewer
         or HttpLlmApprovalReviewer.from_settings(settings),
+        provenance_writer=provenance_writer,
     )
     metric_service = MetricService(store=store)
     trace_service = TraceService(store=store)
@@ -91,6 +94,12 @@ def create_app(
         _: Request, exc: AuditWindowRequestError
     ) -> JSONResponse:
         return error_response(exc.code, status_code=exc.status_code)
+
+    @app.exception_handler(ProvenanceConflictError)
+    async def provenance_conflict_handler(
+        _: Request, __: ProvenanceConflictError
+    ) -> JSONResponse:
+        return error_response("PROVENANCE_CONFLICT", status_code=409)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(

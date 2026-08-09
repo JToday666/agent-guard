@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-test("evidence dossier does not trap desktop wheel scrolling", async ({ page }) => {
+test("evidence detail uses document scrolling and the dossier does not trap the wheel", async ({
+  page,
+}) => {
   await page.goto("/evidence/trace_007?event_id=evt_20260607_007");
 
+  const workspace = page.locator(".dashboard-shell__workspace");
   const main = page.locator(".evidence-detail__main");
   const context = page.locator(".trace-dossier");
   const drawerBody = page.locator(".detail-drawer__body");
@@ -13,13 +16,53 @@ test("evidence dossier does not trap desktop wheel scrolling", async ({ page }) 
   await page.getByRole("button", { name: "关闭详情" }).click();
   await expect(page.locator(".detail-drawer")).toBeHidden();
 
-  await main.evaluate((element) => {
-    element.scrollTop = 0;
-  });
+  await expect(workspace).toHaveCSS("overflow-y", "visible");
+  await expect(main).toHaveCSS("overflow-y", "visible");
+  await page.evaluate(() => window.scrollTo(0, 0));
   await context.hover();
   await page.mouse.wheel(0, 700);
 
-  await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+});
+
+test("embedded execution graph scrolls the page and fullscreen graph owns the wheel", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_002");
+
+  const graph = page.locator(".execution-flow");
+  const canvas = graph.locator(".execution-flow__canvas");
+  const viewport = graph.locator(".vue-flow__transformationpane");
+  await expect(graph).toBeVisible();
+  await expect(graph.locator(".execution-node")).toBeVisible();
+  await page.evaluate(() => {
+    const graphElement = document.querySelector<HTMLElement>(".execution-flow");
+    const graphTop = graphElement ? graphElement.getBoundingClientRect().top + window.scrollY : 0;
+    window.scrollTo(0, Math.max(0, graphTop - 180));
+  });
+  const embeddedScrollY = await page.evaluate(() => window.scrollY);
+  const embeddedTransform = await viewport.getAttribute("style");
+  await canvas.hover();
+  await page.mouse.wheel(0, 320);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(embeddedScrollY);
+  await expect(viewport).toHaveAttribute("style", embeddedTransform ?? "");
+
+  const topBarHeight = (await page.locator(".top-bar").boundingBox())?.height ?? 0;
+  const viewHeaderY = (await page.locator(".trace-workspace__header").boundingBox())?.y ?? -1;
+  expect(Math.abs(viewHeaderY - topBarHeight)).toBeLessThanOrEqual(1);
+
+  await graph.getByRole("button", { name: "全屏" }).click();
+  await expect(graph).toHaveClass(/execution-flow--fullscreen/);
+  await page.waitForTimeout(250);
+  const fullscreenScrollY = await page.evaluate(() => window.scrollY);
+  const fullscreenTransform = await viewport.getAttribute("style");
+  await canvas.hover();
+  await page.mouse.wheel(0, -260);
+  await expect.poll(() => viewport.getAttribute("style")).not.toBe(fullscreenTransform);
+  expect(await page.evaluate(() => window.scrollY)).toBe(fullscreenScrollY);
+
+  await page.keyboard.press("Escape");
+  await expect(graph).not.toHaveClass(/execution-flow--fullscreen/);
 });
 
 test("dashboard routes use the shell transition layer", async ({ page }) => {
@@ -145,6 +188,7 @@ test("reduced motion removes panel and dialog animations", async ({ page }) => {
 
 test("provenance graph keeps node text readable without label overlap", async ({ page }) => {
   await page.goto("/evidence/trace_002");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
 
   const graph = page.locator(".provenance-workbench");
   await expect(graph).toBeVisible();
@@ -153,7 +197,7 @@ test("provenance graph keeps node text readable without label overlap", async ({
   const contextNode = graph.locator(".prov-node--task").first();
   await contextNode.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/prov_node=/);
+  await expect(page).toHaveURL(/node_id=/);
   await expect(graph.locator(".vue-flow__edge-text").first()).toBeVisible();
 
   const layout = await graph.evaluate((root) => {
@@ -220,7 +264,7 @@ test("provenance graph keeps node text readable without label overlap", async ({
   expect(layout.edgeLabelOverlaps).toBe(0);
   expect(layout.unclippedText).toBe(0);
 
-  await expect(page).toHaveURL(/prov_node=/);
+  await expect(page).toHaveURL(/node_id=/);
   await expect(contextNode).toHaveAttribute("aria-pressed", "true");
   await expect(graph.locator(".prov-flow-node--dimmed").first()).toBeVisible();
 });

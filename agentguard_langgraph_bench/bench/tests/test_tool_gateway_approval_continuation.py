@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from agentguard_langgraph_bench.adapter.event_models import AuditEvent, PolicyDecision, ToolCallEvent, ToolDescriptor
@@ -183,6 +184,109 @@ def test_gateway_wait_mode_blocks_allow_once_binding_mismatch(tmp_path) -> None:
     assert not (tmp_path / "files" / "reports" / "mismatch.txt").exists()
 
 
+def test_gateway_records_approval_release_start_and_terminal_outcome(tmp_path) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _ReceiptAskApprovalGuard(
+        {
+            "status": "resolved",
+            "decision": "allow_once",
+            "resolved_at": "2026-08-08T08:00:00Z",
+        }
+    )
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+        approval_mode="wait",
+        approval_timeout=1.0,
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="write_file",
+        arguments={"path": "/reports/receipt.txt", "content": "approved"},
+        security={"case_id": "BN-RECEIPT", "attack_type": "benign", "is_malicious": False},
+        trace_id="trace_receipt",
+        call_id="call_receipt",
+    )
+
+    assert result.executed is True
+    assert result.runtime_receipt_error is None
+    assert [event["record_type"] for event in guard.submitted] == [
+        "runtime_observation",
+        "runtime_outcome",
+    ]
+    started, outcome = guard.submitted
+    assert started["stage"] == "tool_call_started"
+    assert started["links"]["action_id"] == "call_receipt"
+    assert started["links"]["policy_audit_id"] == "audit_policy_receipt"
+    assert started["evidence"]["approval"]["status"] == "allowed"
+    assert outcome["event_type"] == "tool_call_completed"
+    assert outcome["links"]["parent_audit_id"] == started["audit_id"]
+    assert outcome["evidence"]["execution"]["status"] == "executed"
+    assert outcome["evidence"]["side_effects"]["measurement_status"] == "measured"
+
+
+def test_gateway_records_not_invoked_for_approval_deny(tmp_path) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _ReceiptAskApprovalGuard(
+        {
+            "status": "resolved",
+            "decision": "deny",
+            "resolved_at": "2026-08-08T08:00:00Z",
+        }
+    )
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+        approval_mode="wait",
+        approval_timeout=1.0,
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="write_file",
+        arguments={"path": "/reports/receipt-denied.txt", "content": "denied"},
+        security={"case_id": "AA-RECEIPT", "attack_type": "agent_abuse", "is_malicious": True},
+        trace_id="trace_receipt_deny",
+        call_id="call_receipt_deny",
+    )
+
+    assert result.executed is False
+    assert len(guard.submitted) == 1
+    outcome = guard.submitted[0]
+    assert outcome["record_type"] == "runtime_outcome"
+    assert outcome["event_type"] == "tool_call_not_invoked"
+    assert outcome["evidence"]["execution"]["status"] == "not_invoked"
+    assert outcome["evidence"]["side_effects"]["count"] == 0
+    assert outcome["evidence"]["approval"]["status"] == "denied"
+
+
+def test_gateway_records_explicit_trace_lifecycle_with_parent_receipt(tmp_path) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _ReceiptAskApprovalGuard({"status": "pending", "decision": None})
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+    )
+
+    assert gateway.record_trace_lifecycle(
+        trace_id="trace_lifecycle",
+        state="trace_started",
+        runtime="langgraph",
+        case_id="BN-LIFECYCLE",
+    ) is None
+    assert gateway.record_trace_lifecycle(
+        trace_id="trace_lifecycle",
+        state="trace_completed",
+        runtime="langgraph",
+        case_id="BN-LIFECYCLE",
+    ) is None
+
+    started, completed = guard.submitted
+    assert started["stage"] == "trace_started"
+    assert "parent_audit_id" not in started["links"]
+    assert completed["stage"] == "trace_completed"
+    assert completed["links"]["parent_audit_id"] == started["audit_id"]
+
+
 class _AskApprovalGuard:
     def __init__(self, resolution: dict[str, Any]) -> None:
         self.resolution = resolution
@@ -235,3 +339,33 @@ class _AskApprovalGuard:
     def wait_for_approval(self, approval_id: str, timeout: float | None = None) -> dict[str, Any]:
         self.wait_calls.append((approval_id, timeout))
         return dict(self.resolution)
+
+class _ReceiptAskApprovalGuard(_AskApprovalGuard):
+    config = SimpleNamespace(core_api_mode="guard-api-v0.3", defense_enabled=True)
+
+    def __init__(self, resolution: dict[str, Any]) -> None:
+        super().__init__(resolution)
+        self.submitted: list[dict[str, Any]] = []
+
+    def evaluate_before_tool(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+    ) -> tuple[ToolCallEvent, PolicyDecision]:
+        event, decision = super().evaluate_before_tool(
+            tool_name=tool_name,
+            arguments=arguments,
+            security=security,
+            trace_id=trace_id,
+            call_id=call_id,
+        )
+        decision.policy_audit_id = "audit_policy_receipt"
+        return event, decision
+
+    def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
+        self.submitted.append(audit_event.model_dump(mode="json"))
+        return {"ok": True, "audit_id": audit_event.audit_id}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, ContextManager, Protocol
 
 from agentguard_core import (
     AuditEvent,
@@ -126,9 +126,7 @@ def within_evaluated_range(
         evaluated_from
     ):
         return False
-    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(
-        evaluated_to
-    ):
+    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(evaluated_to):
         return False
     return True
 
@@ -145,12 +143,161 @@ class AuditIdConflictError(ValueError):
     """Raised when the same audit_id is re-submitted with different content."""
 
 
+class ProvenanceConflictError(ValueError):
+    """Raised when a stable provenance ID is bound to conflicting facts."""
+
+
+class ProvenanceEndpointMissingError(ProvenanceConflictError):
+    """Raised when a provenance edge references a missing or foreign node."""
+
+
+def merge_provenance_node(
+    existing: ProvenanceNode, incoming: ProvenanceNode
+) -> ProvenanceNode:
+    """Merge a deterministic node without degrading or replacing known facts."""
+
+    identity = (existing.trace_id, existing.kind, existing.ref_id)
+    incoming_identity = (incoming.trace_id, incoming.kind, incoming.ref_id)
+    if identity != incoming_identity:
+        raise ProvenanceConflictError(existing.node_id)
+    approval_transition = existing.kind == "approval" and _approval_status_can_advance(
+        existing.metadata.get("status"), incoming.metadata.get("status")
+    )
+    mutable = frozenset({"status"}) if approval_transition else frozenset()
+    return existing.model_copy(
+        update={
+            "label": _merge_provenance_value(
+                existing.label,
+                incoming.label,
+                identity=existing.node_id,
+                path="label",
+                mutable=approval_transition,
+            ),
+            "timestamp": _earliest_timestamp(existing.timestamp, incoming.timestamp),
+            "metadata": _merge_provenance_mapping(
+                existing.metadata,
+                incoming.metadata,
+                identity=existing.node_id,
+                mutable_keys=mutable,
+            ),
+        }
+    )
+
+
+def _approval_status_can_advance(existing: Any, incoming: Any) -> bool:
+    """Allow only pending -> terminal approval state transitions."""
+
+    return existing == "pending" and incoming in {"resolved", "expired"}
+
+
+def merge_provenance_edge(
+    existing: ProvenanceEdge, incoming: ProvenanceEdge
+) -> ProvenanceEdge:
+    """Merge edge metadata while keeping endpoints and relation immutable."""
+
+    identity = (
+        existing.trace_id,
+        existing.source_node_id,
+        existing.target_node_id,
+        existing.relation,
+    )
+    incoming_identity = (
+        incoming.trace_id,
+        incoming.source_node_id,
+        incoming.target_node_id,
+        incoming.relation,
+    )
+    if identity != incoming_identity:
+        raise ProvenanceConflictError(existing.edge_id)
+    return existing.model_copy(
+        update={
+            "timestamp": _earliest_timestamp(existing.timestamp, incoming.timestamp),
+            "metadata": _merge_provenance_mapping(
+                existing.metadata,
+                incoming.metadata,
+                identity=existing.edge_id,
+                mutable_keys=frozenset(),
+            ),
+        }
+    )
+
+
+def _merge_provenance_mapping(
+    existing: dict[str, Any],
+    incoming: dict[str, Any],
+    *,
+    identity: str,
+    mutable_keys: frozenset[str],
+) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in incoming.items():
+        if key not in merged:
+            if not _is_unknown_provenance_value(value):
+                merged[key] = value
+            continue
+        current = merged[key]
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _merge_provenance_mapping(
+                current,
+                value,
+                identity=identity,
+                mutable_keys=frozenset(),
+            )
+            continue
+        merged[key] = _merge_provenance_value(
+            current,
+            value,
+            identity=identity,
+            path=f"metadata.{key}",
+            mutable=key in mutable_keys,
+        )
+    return merged
+
+
+def _merge_provenance_value(
+    existing: Any,
+    incoming: Any,
+    *,
+    identity: str,
+    path: str,
+    mutable: bool,
+) -> Any:
+    if _is_unknown_provenance_value(incoming):
+        return existing
+    if _is_unknown_provenance_value(existing) or existing == incoming or mutable:
+        return incoming
+    raise ProvenanceConflictError(f"{identity}:{path}")
+
+
+def _is_unknown_provenance_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip() or value.strip().lower() == "unknown"
+    if isinstance(value, (list, dict)):
+        return not value
+    return False
+
+
+def _earliest_timestamp(existing: str, incoming: str) -> str:
+    try:
+        existing_at = datetime.fromisoformat(existing.replace("Z", "+00:00"))
+        incoming_at = datetime.fromisoformat(incoming.replace("Z", "+00:00"))
+    except ValueError:
+        if existing == incoming:
+            return existing
+        raise ProvenanceConflictError("provenance timestamp") from None
+    return incoming if incoming_at < existing_at else existing
+
+
 class ControlPlaneStore(Protocol):
     def initialize(self) -> None: ...
 
     def health_check(self) -> bool: ...
 
     def add_audit_event(self, event: AuditEvent) -> bool: ...
+
+    def get_audit_event(self, audit_id: str) -> AuditEvent | None: ...
 
     def list_audit_events(
         self, filters: AuditEventFilters | None = None
@@ -162,13 +309,15 @@ class ControlPlaneStore(Protocol):
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
 
-    def reserve_policy_evaluation(self, event_id: str) -> bool: ...
+    def policy_evaluation_guard(self, event_id: str) -> ContextManager[None]: ...
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
 
     def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics: ...
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode: ...
+
+    def get_provenance_node(self, node_id: str) -> ProvenanceNode | None: ...
 
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge: ...
 

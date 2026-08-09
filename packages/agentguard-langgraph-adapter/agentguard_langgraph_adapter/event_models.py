@@ -203,3 +203,4 @@ class ToolExecutionResult(BaseModel):
     rag_answer_provenance: dict[str, Any] | None = None
     sanitize_applied: bool = False
     quarantine_applied: bool = False
+    runtime_receipt_error: str | None = None

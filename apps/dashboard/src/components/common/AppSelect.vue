@@ -313,6 +313,7 @@ function getOptionId(index: number): string {
   box-shadow: var(--shadow-raised);
   display: grid;
   gap: var(--space-1);
+  grid-auto-rows: max-content;
   left: 0;
   list-style: none;
   margin: var(--space-2) 0 0;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from agentguard_core import (
@@ -9,11 +10,16 @@ from agentguard_core import (
     ConfigAuditEvent,
     ConfigAuditFinding,
     ConfigAuditResult,
+    ContextBuildPayload,
     GuardDecision,
     GuardEvent,
     MemoryGuardChange,
+    MemoryEventPayload,
+    MessageSendPayload,
+    ModelCallPayload,
     PolicyBundle,
     ToolCallPayload,
+    ToolResultPayload,
 )
 from agentguard_core.resources import derive_resources
 
@@ -42,6 +48,7 @@ class EventDescription:
     subject_type: str
     action_id: str
     action_name: str
+    is_action: bool
     resource_targets: list[str]
     summary: str
     metadata: dict[str, object]
@@ -66,8 +73,9 @@ def build_audit_event(
     links: dict[str, str] = {
         "event_id": event.event_id,
         "decision_id": decision.decision_id,
-        "action_id": description.action_id,
     }
+    if description.is_action or approval_id is not None:
+        links["action_id"] = description.action_id
     if approval_id is not None:
         links["approval_id"] = approval_id
     if critic_review_id is not None:
@@ -96,9 +104,7 @@ def build_audit_event(
         metadata["policy_source"] = "default"
     # 幂等回放依赖完整 decision dump（先新后旧双读，见 evaluation.py）。
     dump = (
-        decision_dump
-        if decision_dump is not None
-        else decision.model_dump(mode="json")
+        decision_dump if decision_dump is not None else decision.model_dump(mode="json")
     )
     metadata["guard_decision"] = dump
     evidence = _policy_evaluation_evidence(
@@ -150,9 +156,7 @@ def _policy_evaluation_evidence(
             "version": policy_bundle.version,
             "revision": policy_revision,
             # §9.3：digest 必须来自同一次快照读取的 PolicyBundle。
-            "canonical_digest": canonical_sha256(
-                policy_bundle.model_dump(mode="json")
-            ),
+            "canonical_digest": canonical_sha256(policy_bundle.model_dump(mode="json")),
             "canonicalization": POLICY_CANONICALIZATION,
         },
         "intervention": _policy_intervention(decision),
@@ -212,8 +216,14 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
     if context.sender_id:
         source["source_id"] = redact_structure(context.sender_id)
     projection["source"] = source
+    context_sources = list(context.context_sources)
+    payload = event.payload
+    if isinstance(payload, ContextBuildPayload):
+        context_sources.extend(
+            source.model_dump(mode="json") for source in payload.sources
+        )
     projection["context_sources"] = bound_value(
-        redact_structure(list(context.context_sources)),
+        redact_structure(_unique_context_sources(context_sources)),
         text_limit=SUMMARY_TEXT_LIMIT,
         array_limit=CONTEXT_SOURCES_LIMIT,
     )
@@ -222,15 +232,16 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
         if context.model_intent is not None
         else None
     )
-    payload = event.payload
-    if isinstance(payload, ToolCallPayload):
-        projection["tool"] = {
+    if isinstance(payload, (ToolCallPayload, ToolResultPayload)):
+        tool_projection: dict[str, object] = {
             "name": payload.tool.name,
             "category": payload.tool.category,
             "call_id": payload.tool.call_id,
-            # tool.arguments 必须服务端递归脱敏。
-            "arguments": bound_redacted_value(payload.arguments),
         }
+        if isinstance(payload, ToolCallPayload):
+            # tool.arguments 必须服务端递归脱敏。
+            tool_projection["arguments"] = bound_redacted_value(payload.arguments)
+        projection["tool"] = tool_projection
     else:
         projection["tool"] = None
     resources = [
@@ -249,6 +260,22 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
         array_limit=NORMALIZED_RESOURCES_LIMIT,
     )
     return projection
+
+
+def _unique_context_sources(items: Sequence[object]) -> list[object]:
+    unique: list[object] = []
+    fingerprints: set[str] = set()
+    for item in items:
+        fingerprint = (
+            canonical_sha256(item)
+            if isinstance(item, dict)
+            else f"{type(item).__name__}:{item!s}"
+        )
+        if fingerprint in fingerprints:
+            continue
+        fingerprints.add(fingerprint)
+        unique.append(item)
+    return unique
 
 
 def _bounded_decision_dump(dump: dict[str, object]) -> dict[str, object]:
@@ -298,7 +325,7 @@ def _approval_evidence(
     decision: GuardDecision,
     description: EventDescription,
 ) -> dict[str, object]:
-    return {
+    evidence = {
         "event": {
             "event_id": event.event_id,
             "event_type": event.event_type,
@@ -321,6 +348,12 @@ def _approval_evidence(
         },
         "payload": _approval_payload_preview(event.payload),
     }
+    bounded = bound_redacted_value(
+        evidence,
+        text_limit=CONTENT_PREVIEW_LIMIT,
+        array_limit=RULE_HITS_LIMIT,
+    )
+    return bounded if isinstance(bounded, dict) else {}
 
 
 def _approval_payload_preview(value: object) -> object:
@@ -334,6 +367,8 @@ def _config_audit_event(
     worst = _worst_finding_severity(result.findings)
     risk_score = {"low": 15, "medium": 45, "high": 80, "critical": 95}[worst]
     return AuditEvent(
+        schema_version="0.4",
+        record_type="config_audit",
         trace_id=str(event.metadata.get("trace_id") or event.event_id),
         runtime=event.runtime,
         stage=event.action,
@@ -433,6 +468,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
             subject_type="tool_call",
             action_id=action_id,
             action_name=action_name,
+            is_action=True,
             resource_targets=resource_targets,
             summary=f"Agent attempted to call {action_name}",
             metadata={
@@ -446,15 +482,46 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
             },
         )
 
-    action_id = event.event_id
+    if isinstance(payload, ToolResultPayload):
+        action_id = payload.tool.call_id
+        action_name = payload.tool.name
+        return EventDescription(
+            subject_id=action_id,
+            subject_type="tool_result",
+            action_id=action_id,
+            action_name=action_name,
+            is_action=True,
+            resource_targets=resource_targets,
+            summary=f"Agent evaluated the result from {action_name}",
+            metadata={
+                "event_type": event.event_type,
+                "subject_id": action_id,
+                "subject_type": "tool_result",
+                "action_id": action_id,
+                "action_name": action_name,
+                "source_tool": payload.tool.name,
+                "source_tool_call_id": payload.tool.call_id,
+            },
+        )
+
+    explicit_action_id = getattr(payload, "action_id", None)
+    action_id = (
+        explicit_action_id.strip()
+        if isinstance(explicit_action_id, str) and explicit_action_id.strip()
+        else event.event_id
+    )
     action_name = event.event_type
+    is_action = isinstance(payload, (MemoryEventPayload, MessageSendPayload)) or (
+        isinstance(payload, ModelCallPayload) and payload.phase == "output"
+    )
     metadata: dict[str, object] = {
         "event_type": event.event_type,
         "subject_id": action_id,
         "subject_type": event.event_type,
-        "action_id": action_id,
-        "action_name": action_name,
     }
+    if is_action:
+        metadata["action_id"] = action_id
+        metadata["action_name"] = action_name
     payload_tool = getattr(payload, "tool", None)
     if payload_tool is not None:
         metadata["source_tool"] = payload_tool.name
@@ -484,6 +551,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
         subject_type=event.event_type,
         action_id=action_id,
         action_name=action_name,
+        is_action=is_action,
         resource_targets=resource_targets,
         summary=f"Agent evaluated {action_name}",
         metadata=metadata,

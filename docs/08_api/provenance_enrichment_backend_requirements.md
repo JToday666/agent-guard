@@ -1,16 +1,18 @@
 # Provenance 丰富化后端实施要求
 
-> 状态：实施要求已确认，后端代码尚未实现
+> 状态：Guard API 写入、Memory/PostgreSQL 真实联调与 Dashboard API 读链验收已完成
 >
 > 确认日期：2026-08-07
+>
+> 验收复核：2026-08-08
 >
 > 适用组件：AgentGuard Core、Guard API / Control Plane、LangGraph Adapter、OpenClaw Plugin、Dashboard
 
 ## 1. 文档定位
 
 本文把[证据链与溯源 API 目标契约](evidence_trace_api_contract.md)中已经冻结的
-Provenance 目标拆成可直接实施的后端要求。本文不改变冻结契约，不表示代码、Schema、
-存储或生产数据已经完成迁移。
+Provenance 目标拆成可直接实施的后端要求。Guard API 已按本文实现新事件的确定性物化；
+本文不改变冻结契约，也不表示生产数据已迁移或历史 Trace 已回填。
 
 运行时安全观测的视图职责、主演示链和非对称刷新边界见
 [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)。
@@ -39,8 +41,8 @@ Provenance 目标拆成可直接实施的后端要求。本文不改变冻结契
 
 完整生命周期图开始写入前，必须满足：
 
-1. Guard API 能够读取并返回 AuditEvent `0.3 | 0.4`；基础双读已经具备，仍需完成跨存储
-   共享契约测试。
+1. Guard API 能够读取并返回 AuditEvent `0.3 | 0.4`；基础双读与跨存储共享契约测试均已
+   完成。
 2. 新策略评估由 Guard API 唯一写入 `policy_evaluation`。
 3. AuditEvent `0.4` 提供稳定的 `links` 和有界、脱敏的 `evidence`。
 4. Adapter / Plugin 通过现有 `POST /v1/audit/events` 写入结构化
@@ -48,8 +50,8 @@ Provenance 目标拆成可直接实施的后端要求。本文不改变冻结契
 5. `audit_id`、Guard evaluate 请求和 provenance upsert 具有可重试的幂等语义。
 6. 事件时策略快照提供 bundle、version、revision 和 digest 中实际可用的字段。
 
-基础的 `event → decision → audit` 关系继续服务当前 AuditEvent `0.3`。完整丰富化按照冻结
-契约的发布顺序，在上述前置条件完成后启用。
+基础的 `event → decision → audit` 关系继续服务当前 AuditEvent `0.3`。完整丰富化已经按照
+冻结契约的发布顺序为新事件启用；历史 Trace 仍遵守不自动回填的边界。
 
 ## 4. 写入原则
 
@@ -88,31 +90,43 @@ Action Critic 结果和已经持久化的 AuditEvent。
 
 只有来源字段存在且通过脱敏、大小限制时才创建可选节点。
 
-| kind             | 稳定 `node_id`                             | 原始 `ref_id`         | 事实来源                                          | 必需 metadata                                             |
-| ---------------- | ------------------------------------------ | --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
-| `task`           | `task:{trace_id}`                          | `trace_id`            | `GuardEvent.security_context.user_task`           | `phase=input_trust`、有界摘要                             |
-| `source`         | `source:{trace_id}:{source-id-or-hash}`    | source ID 或摘要 ID   | security context 或结构化 context source          | `source_type`、`source_trust`、`phase=input_trust`        |
-| `context`        | `context:{event_id}`                       | `event_id`            | `context_assembled` 或明确的 context sources      | `phase=context_intent`、来源数量                          |
-| `model_intent`   | `model_intent:{event_id}`                  | `event_id`            | 显式 `model_intent` 或有界 tool plan 摘要         | `phase=context_intent`                                    |
-| `action`         | `action:{action_id}`                       | `action_id`           | ToolDescriptor `call_id` 或稳定 `links.action_id` | `event_id`、动作名、`phase=tool_policy`                   |
-| `resource`       | `resource:{trace_id}:sha256:{digest}`      | `sha256:{digest}`     | `derive_resources(event)` 的规范资源              | 类型、操作、方向、脱敏目标摘要                            |
-| `rule`           | `rule:{decision_id}:{rule_id}`             | `rule_id`             | `GuardDecision.rule_hits`                         | `decision_id`、severity、原因摘要                         |
-| `policy`         | `policy:{bundle_id}:{revision-or-version}` | bundle/revision 引用  | 实际参与判定的策略快照                            | bundle、version、revision、digest                         |
-| `decision`       | `decision:{decision_id}`                   | `decision_id`         | GuardDecision                                     | `risk_score`、severity、decision、`phase=tool_policy`     |
-| `approval`       | `approval:{approval_id}`                   | `approval_id`         | ApprovalRequest / 终态记录                        | status、创建/过期/解决时间、`phase=outcome_audit`         |
-| `runtime_result` | `runtime_result:{audit_id}`                | `audit_id`            | `runtime_outcome` AuditEvent                      | execution、intervention、result disposition、side effects |
-| `audit`          | `audit:{audit_id}`                         | `audit_id`            | 每条已持久化 AuditEvent                           | record type、runtime、stage、integrity sequence           |
-| `review`         | `review:{review_id}`                       | `review_id`           | Action Critic 等明确复核记录                      | reviewer、verdict、confidence、degraded                   |
-| `config_audit`   | `config_audit:{event_id}`                  | config audit event ID | `config_audit` AuditEvent                         | target type、finding count、severity 摘要                 |
+| kind             | 稳定 `node_id`                                        | 原始 `ref_id`         | 事实来源                                          | 必需 metadata                                             |
+| ---------------- | ----------------------------------------------------- | --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
+| `task`           | `task:{trace_id}`                                     | `trace_id`            | `GuardEvent.security_context.user_task`           | `phase=input_trust`、有界摘要                             |
+| `source`         | `source:{trace_id}:{source-id-or-hash}`               | source ID 或摘要 ID   | security context 或结构化 context source          | `source_type`、`source_trust`、`phase=input_trust`        |
+| `context`        | `context:{event_id}`                                  | `event_id`            | `context_assembled` 或明确的 context sources      | `phase=context_intent`、来源数量                          |
+| `model_intent`   | `model_intent:{event_id}`                             | `event_id`            | 显式 `model_intent` 或有界 tool plan 摘要         | `phase=context_intent`                                    |
+| `event`          | `event:{event_id}`                                    | `event_id`            | 没有更具体 typed fact 的 policy evaluation        | `event_type`、阶段                                        |
+| `action`         | `action:{action_id}`                                  | `action_id`           | ToolDescriptor `call_id` 或稳定 `links.action_id` | 动作名、`phase=tool_policy`                               |
+| `resource`       | `resource:{trace_id}:sha256:{digest}`                 | `sha256:{digest}`     | `derive_resources(event)` 的规范资源              | 类型、操作、方向、脱敏目标摘要                            |
+| `rule`           | `rule:{decision_id}:{rule_id}`                        | `rule_id`             | `GuardDecision.rule_hits`                         | `decision_id`、severity、原因摘要                         |
+| `policy`         | `policy:{trace_id}:{bundle_id}:{revision-or-version}` | bundle/revision 引用  | 实际参与判定的策略快照                            | bundle、version、revision、digest                         |
+| `decision`       | `decision:{decision_id}`                              | `decision_id`         | GuardDecision                                     | `risk_score`、severity、decision、`phase=tool_policy`     |
+| `approval`       | `approval:{approval_id}`                              | `approval_id`         | ApprovalRequest / 终态记录                        | status、创建/过期/解决时间、`phase=outcome_audit`         |
+| `runtime_result` | `runtime_result:{audit_id}`                           | `audit_id`            | `runtime_outcome` AuditEvent                      | execution、intervention、result disposition、side effects |
+| `audit`          | `audit:{audit_id}`                                    | `audit_id`            | 每条已持久化 AuditEvent                           | record type、runtime、stage、integrity sequence           |
+| `review`         | `review:{review_id}`                                  | `review_id`           | Action Critic 等明确复核记录                      | reviewer、verdict、confidence、degraded                   |
+| `config_audit`   | `config_audit:{event_id}`                             | config audit event ID | `config_audit` AuditEvent                         | target type、finding count、severity 摘要                 |
 
-当前已持久化的通用 `event` 节点属于兼容节点：
+Policy evaluation 并不天然产生 action 节点。Writer 只在 `links.action_id` 存在时物化
+action；常规上下文组装和模型输入不得通过复制 `event_id` 补造动作，工具结果则必须沿用来源
+工具调用的稳定 `call_id`。每个可识别 `event_id + decision_id` 的策略判断都必须有真实评估
+主体：依次优先 action、`context_assembled` 的 context、显式 model intent、其他 context，
+最后使用 event 回退节点，并以 `evaluated_to` 连接 decision。
+
+已持久化的通用 `event` 节点同时承担兼容读取和 typed fact 缺失时的确定性回退：
 
 - 查询继续原样返回，不做破坏性删除。
 - 当前 `0.3` 写入可继续生成。
-- 完整生命周期 writer 有对应 typed node 时，不依赖通用 `event` 节点表达新增事实。
+- 完整生命周期 writer 有对应 typed node 时不重复生成 event；没有 typed node 时不得丢失
+  策略判断主体。
 
 节点 label 只使用脱敏、可读且有事实依据的短文本。完整参数、原始上下文和长正文不进入
 label 或 ID；有界详情进入 metadata 或关联 AuditEvent evidence。
+
+策略节点必须带 `trace_id` 命名空间。当前存储以 `node_id` 为全局主键、节点又只属于一个
+Trace；不带 Trace 的策略 ID 会让同一策略快照在第二条 Trace 中发生主键冲突或形成孤儿边。
+该命名不改变原始 `ref_id={bundle_id}:{revision-or-version}`，也不要求数据库迁移。
 
 ## 6. 关系写入矩阵
 
@@ -128,7 +142,7 @@ label 或 ID；有界详情进入 metadata 或关联 AuditEvent evidence。
 | action → resource                            | `targets`            | `causal`        | 资源由该动作规范派生              |
 | resource → rule                              | `detected_by`        | `detection`     | 规则命中证据引用该资源            |
 | decision → policy                            | `evaluated_under`    | `policy`        | 使用的是该事件时策略快照          |
-| action/event → decision                      | `evaluated_to`       | `policy`        | Guard evaluate 的真实输入与输出   |
+| action/context/model_intent/event → decision | `evaluated_to`       | `policy`        | Guard evaluate 的真实输入与输出   |
 | decision → approval                          | `requested_approval` | `approval`      | 决策实际创建 approval             |
 | approval → runtime_result                    | `released_by`        | `approval`      | runtime outcome 明确引用 approval |
 | decision → runtime_result                    | `executed_as`        | `execution`     | outcome 明确引用 decision         |
@@ -154,8 +168,8 @@ edge:{relation}:{source_node_id}:{target_node_id}
 2. Core 生成 GuardDecision。
 3. 必要时创建 ApprovalRequest 和 Action Critic 记录。
 4. Guard API 唯一写入 `policy_evaluation` AuditEvent。
-5. writer 写入可用的 task、source、context、model intent、action、resource、rule、
-   policy、decision、approval、review、audit 节点及确定性边。
+5. writer 写入可用的 task、source、context、model intent、event fallback、action、
+   resource、rule、policy、decision、approval、review、audit 节点及确定性边。
 6. 返回 decision / approval。
 
 同一 evaluate 请求的幂等重试不得重复创建节点或边；如果审计已存在但 provenance 不完整，
@@ -185,7 +199,7 @@ Memory 和 PostgreSQL 必须遵循相同规则：
 
 1. 先完成业务事实和 AuditEvent 的合法性校验。
 2. AuditEvent 成功持久化后，同步执行确定性 provenance upsert。
-3. provenance 写入失败时返回受控 5xx，不把不完整图声明为成功写入。
+3. 稳定 ID 冲突返回 `409 PROVENANCE_CONFLICT`，其他写入失败返回受控 5xx；不把不完整图声明为成功写入。
 4. 调用方重试同一幂等请求时，不重复延长审计哈希链，并修复缺失节点或边。
 5. 边写入前验证两个端点存在；禁止永久孤儿边。
 6. 相同 ID 对应不同 trace、kind、ref 或端点时记录受控冲突，禁止 last-write-wins。

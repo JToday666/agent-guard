@@ -510,4 +510,44 @@ function handleRefresh() {
     gap: var(--space-6);
   }
 }
+
+@media (max-width: 74.9375rem) {
+  .overview-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 56.25rem) {
+  .overview-primary,
+  .overview-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .triage-queue__rows > a {
+    grid-template-areas:
+      "signal tool score"
+      "resource resource risk";
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .triage-queue__signal {
+    grid-area: signal;
+  }
+
+  .triage-queue__rows strong {
+    grid-area: tool;
+  }
+
+  .triage-queue__resource {
+    grid-area: resource;
+  }
+
+  .triage-queue__risk {
+    grid-area: risk;
+  }
+
+  .triage-queue__rows b {
+    grid-area: score;
+  }
+}
 </style>

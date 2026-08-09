@@ -12,6 +12,7 @@ test("approval exposes separate trace and event evidence destinations", async ({
   const evidenceNavigation = page.locator('.sidebar__link[href="/evidence"]');
   await expect(evidenceNavigation).toHaveClass(/sidebar__link--active/);
   await expect(evidenceNavigation).toHaveAttribute("aria-current", "page");
+  await page.getByRole("tab", { name: "审计记录" }).click();
   const evidenceButton = page
     .locator('[data-event-id="evt_20260607_005"]')
     .getByRole("button", { name: "定位证据" });
@@ -124,6 +125,67 @@ test("evidence detail surfaces the final security conclusion", async ({ page }) 
   await expect(page.getByText("旧版阻断标记", { exact: true })).toHaveCount(0);
 });
 
+test("execution trace keeps decision, approval and runtime facts distinct", async ({ page }) => {
+  await page.goto("/evidence/trace_002");
+
+  const executionTab = page.getByRole("tab", { name: "执行轨迹" });
+  await expect(executionTab).toHaveAttribute("aria-selected", "true");
+  const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
+  await expect(action).toBeVisible();
+  await expect(action).toHaveClass(/execution-node--ask/);
+  await expect(action).toContainText("需审批");
+  await expect(action).toContainText("已执行");
+  await expect(action).not.toContainText("当前");
+
+  await action.click();
+  const inspector = page.locator(".execution-inspector");
+  await expect(inspector).toContainText("单次放行");
+  await inspector.getByRole("button", { name: "查看安全依据" }).click();
+  await expect(page).toHaveURL(/view=provenance/);
+  await expect(page).toHaveURL(/action_id=action_trace_002/);
+  await expect(page).toHaveURL(/node_id=/);
+  await expect(page.getByRole("tab", { name: "溯源关系" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".prov-node--selected")).toContainText("send_email");
+
+  const auditTab = page.getByRole("tab", { name: "审计记录" });
+  await auditTab.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("tab", { name: "溯源关系" })).toBeFocused();
+
+  await page.goto("/evidence/trace_002?event_id=evt_20260607_002");
+  await page.getByRole("button", { name: "查看溯源位置" }).click();
+  await expect(page).toHaveURL(/action_id=action_trace_002/);
+  await expect(page).toHaveURL(/node_id=/);
+  await expect(page.locator(".prov-node--selected")).toContainText("send_email");
+});
+
+test("execution trace defaults to graph and keeps the list layout in the URL", async ({ page }) => {
+  await page.goto("/evidence/trace_002");
+
+  await expect(page.locator(".execution-flow")).toBeVisible();
+  await expect(page.getByRole("button", { name: "图形", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await expect(page).toHaveURL(/execution_layout=list/);
+  await expect(page.locator(".execution-list")).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator(".execution-list")).toBeVisible();
+  await expect(page.getByRole("button", { name: "列表", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await page.getByRole("button", { name: "图形", exact: true }).click();
+  await expect(page).not.toHaveURL(/execution_layout=/);
+  await expect(page.locator(".execution-flow")).toBeVisible();
+});
+
 test("evidence detail keeps five intervention outcomes distinct", async ({ page }) => {
   const scenarios = [
     {
@@ -156,6 +218,7 @@ test("evidence detail keeps five intervention outcomes distinct", async ({ page 
   for (const scenario of scenarios) {
     await page.goto(`/evidence/${scenario.traceId}`);
     await expect(page.locator(".evidence-hero")).toContainText(scenario.title);
+    await page.locator(".evidence-context > summary").click();
     await expect(
       page.locator(".evidence-facts__item").filter({ hasText: "实际执行" }),
     ).toContainText(scenario.execution);

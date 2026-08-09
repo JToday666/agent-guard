@@ -66,9 +66,7 @@ class AuditWindowService:
             # §5.2：客户端续页只提交 cursor；同时提交的 filters/limit
             # 必须与 cursor 绑定作用域一致，不得静默改变 cohort。
             if state["fingerprint"] != fingerprint or state["limit"] != limit:
-                raise AuditWindowRequestError(
-                    "CURSOR_SCOPE_MISMATCH", status_code=400
-                )
+                raise AuditWindowRequestError("CURSOR_SCOPE_MISMATCH", status_code=400)
             upper_sequence = int(state["upper_sequence"])
             after_sequence: int | None = int(state["after_sequence"])
         else:

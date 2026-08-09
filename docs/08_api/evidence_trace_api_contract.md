@@ -1,10 +1,11 @@
 # 证据链与溯源 API 目标契约
 
-> 状态：目标契约已冻结；Schema、Core 类型和 Guard API 基础双读已实现，跨组件迁移尚未完成
+> 状态：目标契约已冻结；主要 writer、存储、Provenance、Trace 与 Dashboard 读链已实现，
+> 风险分解、动作 cohort 指标和 OpenClaw 完整执行确证仍按本文边界推进
 >
 > 冻结日期：2026-08-05
 >
-> 状态复核：2026-08-07
+> 状态复核：2026-08-08
 >
 > 参与方：Dashboard、Guard API / Control Plane、AgentGuard Core、LangGraph Adapter、OpenClaw Plugin
 
@@ -12,12 +13,15 @@
 
 本文定义攻击证据展示所需的已冻结目标 API，包含请求、响应、字段语义、示例、兼容策略、写入归属和验收方式。
 
-现有生产者默认仍以 [接口契约与事件模型](../02_core/interface_contract.md) 中的 AuditEvent
-`0.3` 为兼容基线。JSON Schema、Core 类型和 Guard API 基础写入/读取已经接受 `0.4`，
-但 Guard API 策略 writer、Adapter / Plugin、完整存储语义、Provenance 和跨组件 contract
-tests 尚未完成。本文冻结的是完整目标，不得把基础双读描述为端到端交付。
+GuardEvent 继续使用 [接口契约与事件模型](../02_core/interface_contract.md) 中的 `0.3`；
+AuditEvent 保持 `0.3 | 0.4` 双读。Guard API 策略 writer、LangGraph 运行时回执、Memory /
+PostgreSQL 存储语义、Provenance 和 Dashboard 三视图已经按本文主要契约落地。仍未完成的
+风险分解、动作 cohort 指标和 OpenClaw 完整执行确证必须继续保持“未知”边界，不得从当前
+基础能力推断已交付。
 
-本文只覆盖证据链与溯源目标契约，不扩展登录、长期 token、策略回放或新的 Dashboard 管理能力。本轮不实施前端或 LangGraph 改造，也不包含时间图判定、QQ/微信真实消息渠道接入。运行时回执复用 `POST /v1/audit/events`，不新增 `/v1/runtime/outcomes`。
+本文只覆盖证据链与溯源契约，不扩展登录、长期 token、策略回放或新的 Dashboard 管理
+能力，也不包含时间图判定、QQ/微信真实消息渠道接入。运行时回执复用
+`POST /v1/audit/events`，不新增 `/v1/runtime/outcomes`。
 
 ## 2. 已确认的架构结论
 
@@ -34,18 +38,18 @@ tests 尚未完成。本文冻结的是完整目标，不得把基础双读描�
 
 ## 3. 当前实现与目标差异
 
-| 能力          | 当前实现                                                                        | 目标                                                                 |
-| ------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| GuardEvent    | `schema_version="0.3"`                                                          | 保持不变                                                             |
-| GuardDecision | 最终风险分、规则命中和原因                                                      | 可选增加结构化 `risk_breakdown`                                      |
-| AuditEvent    | Schema、Core 和 Guard API 基础双读支持 `0.3 \| 0.4`；现有 writer 主要仍为 `0.3` | 全部生产者写入明确的 `record_type`、结构化 `evidence` 和稳定 `links` |
-| 策略审计      | Guard API 已写入；LangGraph Guard API 模式已停止重复提交                        | Guard API 唯一写入一条逻辑策略审计                                   |
-| 运行时回执    | LangGraph 有本地结果对象，OpenClaw 有 Hook 观察，但未形成统一审计结构           | Adapter 通过现有审计写入接口回写                                     |
-| 幂等          | PostgreSQL 同 ID 直接忽略，未比较内容；内存存储行为不同                         | 两种存储具有相同的同内容重试和异内容冲突语义                         |
-| 完整性元数据  | 已由服务端写入 `integrity.sequence/prev_hash/event_hash/canonicalization`       | 直接复用，不新增第二套字段                                           |
-| Trace 窗口    | 最多返回 1000 条，无明确截断事实                                                | 增加向后兼容的窗口元数据                                             |
-| 指标          | 所有审计记录可能进入 allow/ask/deny 聚合                                        | 只统计逻辑唯一的策略评估                                             |
-| Provenance    | event、decision、audit、review 等基础节点                                       | 扩展完整生命周期节点与关系                                           |
+| 能力          | 当前实现                                                                       | 目标                                       |
+| ------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| GuardEvent    | `schema_version="0.3"`                                                         | 保持不变                                   |
+| GuardDecision | 最终风险分、规则命中和原因                                                     | 可选增加结构化 `risk_breakdown`            |
+| AuditEvent    | 双读 `0.3 \| 0.4`；Guard API 与已迁移生产者写明确 `record_type/evidence/links` | 未迁移历史生产者继续按兼容边界收敛         |
+| 策略审计      | Guard API 已写入；LangGraph Guard API 模式已停止重复提交                       | Guard API 唯一写入一条逻辑策略审计         |
+| 运行时回执    | LangGraph 已通过现有审计接口回写；OpenClaw 已覆盖最小路径                      | OpenClaw allow 后完整执行确证继续增强      |
+| 幂等          | Memory / PostgreSQL 已统一同内容重试和异内容冲突语义                           | 持续以共享契约防止回退                     |
+| 完整性元数据  | 已由服务端写入 `integrity.sequence/prev_hash/event_hash/canonicalization`      | 直接复用，不新增第二套字段                 |
+| Trace 窗口    | 已返回向后兼容的 `audit_window` 完整性元数据                                   | Dashboard 后续切换原子窗口读取             |
+| 指标          | 已只统计逻辑唯一的策略评估                                                     | 增加显式动作 cohort 授权终态与执行覆盖率   |
+| Provenance    | 已写入动作、非动作阶段、决策、审批、运行结果和审计关系                         | 后续新事实继续按稳定 ID 扩展，不读取时补造 |
 
 ## 4. 已冻结的共同决策
 
@@ -59,9 +63,9 @@ tests 尚未完成。本文冻结的是完整目标，不得把基础双读描�
 | D-06 | Dashboard 指标作用域       | 原子审计窗口、显式历史 cohort、独立 evaluation run                                                                                        | 已确认 |
 | D-07 | 实际阻止口径               | 仅运行时回执确认 `execution.status=not_invoked` 时统计                                                                                    | 已确认 |
 
-本文后续示例表示已冻结的目标形态：GuardEvent `0.3`、AuditEvent `0.4`，纯观察事件的策略字段为
-`null`。当前基础类型和接口能够接收该版本，但完整 writer、links、evidence、幂等和跨存储
-迁移完成前，示例不能作为当前端到端能力证明。
+本文后续示例表示已冻结形态：GuardEvent `0.3`、AuditEvent `0.4`，纯观察事件的策略字段为
+`null`。writer、links、evidence、幂等和跨存储主要路径已有真实链验收；单个示例或 Mock
+仍不能单独作为端到端能力证明。
 
 ### 4.1 运行时安全观测对齐
 
@@ -69,7 +73,9 @@ tests 尚未完成。本文冻结的是完整目标，不得把基础双读描�
 [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)：
 
 - 不新增 `AgentActionEvent` 或 Dashboard 专用 trace events 端点；
-- 执行轨迹只投影本文的 AuditEvent、Approval 和 Provenance 事实；
+- 执行轨迹只投影本文的 AuditEvent 与 Approval 事实，并通过 Provenance 稳定 ID 联动；
+- 所有逻辑唯一 policy evaluation 都进入一个运行步骤：有 `action_id` 时聚合动作生命
+  周期，无 `action_id` 时以 `event_id` 显示安全检查点；
 - 不扩展本文冻结的 `execution.status`；
 - 不增加含义不清的 `complete` 或 JSON `snapshot_version`；
 - 后续条件刷新使用分别覆盖完整 Trace 和 Provenance 响应的 HTTP ETag；
@@ -549,6 +555,12 @@ unknown
 | `memory_change_id` | Memory Guard change                           |
 
 `links` 的值保持 string；不得在同一 key 中混用 string 和 array。
+
+`event_id` 不能因“事件存在”而自动复制为 `action_id`。`context_assembled` 与
+`model_input_prepared` 默认只属于审计和溯源事实，不声明可执行动作；若该事件实际创建审批，
+可使用其稳定 `event_id` 作为受控审批主体。`tool_result_produced` 必须复用来源
+ToolDescriptor 的原始 `call_id`，从而与工具提议和运行时回执聚合为同一动作。消息发送、
+记忆写入和模型输出可在没有独立动作 ID 时使用自身稳定 `event_id`。
 
 ### 9.10 审计完整性
 
@@ -1517,6 +1529,7 @@ task
 source
 context
 model_intent
+event
 action
 resource
 rule
@@ -1531,23 +1544,29 @@ config_audit
 
 ### 20.3 稳定 ID 建议
 
-| kind           | 建议 ID                                         |
-| -------------- | ----------------------------------------------- |
-| task           | `task:{trace_id}`                               |
-| source         | `source:{trace_id}:{source_id-or-hash}`         |
-| context        | `context:{event_id}`                            |
-| model_intent   | `model_intent:{event_id}`                       |
-| action         | `action:{action_id}`                            |
-| resource       | `resource:{trace_id}:{canonical-resource-hash}` |
-| rule           | `rule:{decision_id}:{rule_id}`                  |
-| policy         | `policy:{bundle_id}:{revision-or-version}`      |
-| decision       | `decision:{decision_id}`                        |
-| approval       | `approval:{approval_id}`                        |
-| runtime_result | `runtime_result:{audit_id}`                     |
-| audit          | `audit:{audit_id}`                              |
-| review         | `review:{review_id}`                            |
+| kind           | 建议 ID                                               |
+| -------------- | ----------------------------------------------------- |
+| task           | `task:{trace_id}`                                     |
+| source         | `source:{trace_id}:{source_id-or-hash}`               |
+| context        | `context:{event_id}`                                  |
+| model_intent   | `model_intent:{event_id}`                             |
+| event          | `event:{event_id}`                                    |
+| action         | `action:{action_id}`                                  |
+| resource       | `resource:{trace_id}:{canonical-resource-hash}`       |
+| rule           | `rule:{decision_id}:{rule_id}`                        |
+| policy         | `policy:{trace_id}:{bundle_id}:{revision-or-version}` |
+| decision       | `decision:{decision_id}`                              |
+| approval       | `approval:{approval_id}`                              |
+| runtime_result | `runtime_result:{audit_id}`                           |
+| audit          | `audit:{audit_id}`                                    |
+| review         | `review:{review_id}`                                  |
 
 敏感路径、收件人或内容不得直接拼入 node ID；使用规范化值的摘要。
+
+`event` 是没有更具体 typed fact 时的安全回退节点，例如缺少结构化 model intent 的
+`model_input_prepared`。`context_assembled` 优先使用 context，显式 model intent 优先使用
+model_intent；存在 `links.action_id` 时仍优先使用 action。读取端不得从 node ID 前缀反推
+缺失事实。
 
 ### 20.4 关系
 
@@ -1867,13 +1886,16 @@ Adapter / Plugin
 - [x] Guard API 已有 AuditEvent `0.4` 基础写入、读取和完整性测试。
 - [ ] 更新 `schemas/guard_decision.schema.json`。
 - [x] 完成 Guard API evaluate writer 与跨存储语义的 `0.4` 迁移（policy_evaluation 写入、幂等与指标口径）。
-- [ ] 完成 LangGraph 和 Dashboard 的完整 `0.4` 迁移。
+- [x] 完成 LangGraph `0.4` 运行时主链写入与 Dashboard `0.3 | 0.4` 双读主链迁移。
 - [x] 完成 OpenClaw Plugin 的 `0.4` 迁移：observation 输出 `runtime_observation` 0.4 形态（策略字段置空），
       新增 `runtime_outcome` 回执（执行前拒绝、审批拒绝/超时、审批放行、工具结果隔离/改写），
       回执经 `links.policy_audit_id` 关联策略审计并复用 `POST /v1/audit/events` 幂等提交。
 - [x] 增加
       [运行时安全主演示链共享 JSON fixture](../../tests/fixtures/runtime_safety_trace_v04.json)。
 - [x] Memory 和 PostgreSQL store 运行相同幂等与指标 contract tests。
-- [ ] Dashboard API 模式运行真实目标 AuditEvent fixtures。
+- [x] Dashboard API 模式在四档桌面运行目标 AuditEvent fixtures，并通过真实 PostgreSQL
+      Guard API 读链核验。
 - [ ] 更新 CLI 输出兼容性测试。
-- [ ] 完成跨组件实现评审并验证迁移结果。
+- [x] 完成当前 LangGraph / Guard API / Dashboard 主链的跨组件实现评审与迁移验证；
+      GuardDecision risk breakdown、动作 cohort 指标、CLI 和 OpenClaw 完整执行确证继续按
+      各自未完成项推进。

@@ -14,8 +14,8 @@
 html {
   background: var(--color-page);
   color-scheme: light;
-  min-width: 75rem;
-  scroll-behavior: smooth;
+  min-height: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -29,14 +29,14 @@ body {
   font-synthesis: none;
   line-height: var(--line-height-body);
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 #app {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -44,6 +44,14 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--color-active) 18%, transparent);
+  touch-action: manipulation;
 }
 
 button,
@@ -93,7 +101,6 @@ code {
 
 * {
   scrollbar-color: var(--color-border-strong) transparent;
-  scrollbar-width: thin;
 }
 
 @media (prefers-reduced-motion: reduce) {

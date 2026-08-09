@@ -1,6 +1,8 @@
 <template>
   <div
+    ref="workbenchRef"
     class="provenance-workbench"
+    :aria-busy="isLayouting"
     :class="[
       `provenance-workbench--${zoomBand}`,
       {
@@ -109,12 +111,14 @@
           :only-render-visible-elements="flowNodes.length > 40"
           :min-zoom="0.2"
           :max-zoom="1.8"
-          :zoom-on-scroll="true"
+          :prevent-scrolling="isFullscreen"
+          :zoom-on-scroll="isFullscreen"
           :pan-on-drag="true"
           class="provenance-flow"
           @edge-mouse-enter="handleEdgeMouseEnter"
           @edge-mouse-leave="handleEdgeMouseLeave"
           @node-click="handleNodeClick"
+          @pane-ready="handleFlowReady"
           @viewport-change="handleViewportChange"
         >
           <Background pattern-color="var(--color-chart-grid)" :gap="22" :size="1" />
@@ -272,20 +276,30 @@ interface PositionedNode {
   y: number;
 }
 
+interface ViewportSnapshot {
+  anchorId: string | null;
+  anchorScreenX: number | null;
+  anchorScreenY: number | null;
+  viewport: ViewportTransform;
+}
+
 const LARGE_GRAPH_THRESHOLD = 24;
 const LAYOUT_CACHE_MAX_ENTRIES = 24;
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 108;
+const COMPACT_WORKBENCH_WIDTH = 960;
 const layoutCache = new Map<string, PositionedNode[]>();
 const elk = new ELK({
   algorithms: ["layered"],
   workerFactory: () => new ElkWorker(),
 });
 const flowId = `provenance-${props.graph.traceId}`;
-const { fitView, setCenter, updateNode, zoomTo } = useVueFlow(flowId);
+const { updateNode, viewportHelper } = useVueFlow(flowId);
 const flowNodes = ref<Node<ProvenanceNodeData>[]>([]);
+const workbenchRef = ref<HTMLElement | null>(null);
 const isCompact = ref(false);
 const isFullscreen = ref(false);
+const isFlowReady = ref(false);
 const isLayouting = ref(false);
 const prefersReducedMotion = ref(false);
 const viewportZoom = ref(1);
@@ -302,8 +316,12 @@ const viewMode = ref<"all" | "critical">(
 const hoveredEdgeId = ref<string | null>(null);
 let layoutGeneration = 0;
 let positionByNodeId = new Map<string, PositionedNode>();
-let compactMedia: MediaQueryList | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let resizeFrame = 0;
 let motionMedia: MediaQueryList | null = null;
+let pendingViewportSnapshot: ViewportSnapshot | null = null;
+let latestViewport: ViewportTransform | null = null;
+let previousBodyOverflow = "";
 
 const phaseDefinitions = [
   { id: "input_trust", index: "01", short: "输入", title: "输入与信任" },
@@ -313,7 +331,7 @@ const phaseDefinitions = [
 ] as const;
 
 const kindDefinitions: Record<string, { icon: Component; label: string; miniMapColor: string }> = {
-  action: { icon: Wrench, label: "工具动作", miniMapColor: "var(--color-chart-warning)" },
+  action: { icon: Wrench, label: "受控动作", miniMapColor: "var(--color-chart-warning)" },
   action_critic: {
     icon: FileSearch,
     label: "复核",
@@ -602,6 +620,15 @@ function cacheLayout(key: string, positioned: PositionedNode[]): void {
 function fallbackLayout(nodes: readonly ProvenanceNode[]): PositionedNode[] {
   const phaseIndexes = new Map(phaseDefinitions.map((phase, index) => [phase.id, index]));
   const phaseCounts = new Map<EvidenceStageId, number>();
+  const compactPhaseStartY = new Map<EvidenceStageId, number>();
+  let compactCursorY = 80;
+  for (const phase of phaseDefinitions) {
+    const phaseNodeCount = nodes.filter((node) => nodePhase(node) === phase.id).length;
+    if (!phaseNodeCount) continue;
+    compactPhaseStartY.set(phase.id, compactCursorY);
+    const rows = Math.ceil(phaseNodeCount / 2);
+    compactCursorY += rows * (NODE_HEIGHT + 46) + 104;
+  }
   return nodes.map((node) => {
     const phase = nodePhase(node);
     const phaseIndex = phaseIndexes.get(phase) ?? 0;
@@ -610,8 +637,10 @@ function fallbackLayout(nodes: readonly ProvenanceNode[]): PositionedNode[] {
     return isCompact.value
       ? {
           id: node.nodeId,
-          x: 150 + branchIndex * (NODE_WIDTH + 46),
-          y: 80 + phaseIndex * (NODE_HEIGHT + 150),
+          x: 80 + (branchIndex % 2) * (NODE_WIDTH + 46),
+          y:
+            (compactPhaseStartY.get(phase) ?? 80) +
+            Math.floor(branchIndex / 2) * (NODE_HEIGHT + 46),
         }
       : {
           id: node.nodeId,
@@ -640,6 +669,7 @@ async function runLayout(): Promise<void> {
   if (!visibleNodes.value.length) {
     flowNodes.value = [];
     isLayouting.value = false;
+    pendingViewportSnapshot = null;
     return;
   }
   const key = layoutKey();
@@ -647,62 +677,89 @@ async function runLayout(): Promise<void> {
   isLayouting.value = !cached;
   let positioned = cached;
   if (!positioned) {
-    const direction = isCompact.value ? "DOWN" : "RIGHT";
-    const innerDirection = isCompact.value ? "RIGHT" : "DOWN";
-    const phaseGroups = phaseDefinitions
-      .map((phase) => {
-        const nodes = visibleNodes.value.filter((node) => nodePhase(node) === phase.id);
-        const nodeIds = new Set(nodes.map((node) => node.nodeId));
-        return {
-          children: nodes.map((node) => ({
-            height: NODE_HEIGHT,
-            id: node.nodeId,
-            width: NODE_WIDTH,
-          })),
-          edges: visibleEdges.value
-            .filter((edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId))
-            .map((edge) => ({
-              id: `layout:${edge.edgeId}`,
-              sources: [edge.sourceNodeId],
-              targets: [edge.targetNodeId],
+    let graph: ElkNode;
+    if (isCompact.value) {
+      graph = {
+        children: visibleNodes.value.map((node) => ({
+          height: NODE_HEIGHT,
+          id: node.nodeId,
+          width: NODE_WIDTH,
+        })),
+        edges: visibleEdges.value.map((edge) => ({
+          id: `layout:${edge.edgeId}`,
+          sources: [edge.sourceNodeId],
+          targets: [edge.targetNodeId],
+        })),
+        id: "root",
+        layoutOptions: {
+          "elk.algorithm": "layered",
+          "elk.direction": "DOWN",
+          "elk.edgeRouting": "ORTHOGONAL",
+          "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+          "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+          "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "84",
+          "elk.padding": "[top=32,left=32,bottom=32,right=32]",
+          "elk.spacing.edgeNode": "36",
+          "elk.spacing.nodeNode": "48",
+        },
+      };
+    } else {
+      const phaseGroups = phaseDefinitions
+        .map((phase) => {
+          const nodes = visibleNodes.value.filter((node) => nodePhase(node) === phase.id);
+          const nodeIds = new Set(nodes.map((node) => node.nodeId));
+          return {
+            children: nodes.map((node) => ({
+              height: NODE_HEIGHT,
+              id: node.nodeId,
+              width: NODE_WIDTH,
             })),
-          id: `phase:${phase.id}`,
-          layoutOptions: {
-            "elk.algorithm": "layered",
-            "elk.direction": innerDirection,
-            "elk.edgeRouting": "ORTHOGONAL",
-            "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-            "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-            "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
-            "elk.layered.spacing.nodeNodeBetweenLayers": "44",
-            "elk.padding": "[top=24,left=20,bottom=24,right=20]",
-            "elk.spacing.edgeNode": "26",
-            "elk.spacing.nodeNode": "30",
-          },
-        } satisfies ElkNode;
-      })
-      .filter((group) => group.children.length);
-    const graph: ElkNode = {
-      children: phaseGroups,
-      edges: phaseGroups.slice(0, -1).map((group, index) => ({
-        id: `layout:phase:${index}`,
-        sources: [group.id],
-        targets: [phaseGroups[index + 1]!.id],
-      })),
-      id: "root",
-      layoutOptions: {
-        "elk.algorithm": "layered",
-        "elk.direction": direction,
-        "elk.edgeRouting": "ORTHOGONAL",
-        "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-        "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-        "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
-        "elk.layered.spacing.nodeNodeBetweenLayers": "64",
-        "elk.padding": "[top=32,left=32,bottom=32,right=32]",
-        "elk.spacing.edgeNode": "42",
-        "elk.spacing.nodeNode": "60",
-      },
-    };
+            edges: visibleEdges.value
+              .filter((edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId))
+              .map((edge) => ({
+                id: `layout:${edge.edgeId}`,
+                sources: [edge.sourceNodeId],
+                targets: [edge.targetNodeId],
+              })),
+            id: `phase:${phase.id}`,
+            layoutOptions: {
+              "elk.algorithm": "layered",
+              "elk.direction": "DOWN",
+              "elk.edgeRouting": "ORTHOGONAL",
+              "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+              "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+              "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+              "elk.layered.spacing.nodeNodeBetweenLayers": "44",
+              "elk.padding": "[top=24,left=20,bottom=24,right=20]",
+              "elk.spacing.edgeNode": "26",
+              "elk.spacing.nodeNode": "30",
+            },
+          } satisfies ElkNode;
+        })
+        .filter((group) => group.children.length);
+      graph = {
+        children: phaseGroups,
+        edges: phaseGroups.slice(0, -1).map((group, index) => ({
+          id: `layout:phase:${index}`,
+          sources: [group.id],
+          targets: [phaseGroups[index + 1]!.id],
+        })),
+        id: "root",
+        layoutOptions: {
+          "elk.algorithm": "layered",
+          "elk.direction": "RIGHT",
+          "elk.edgeRouting": "ORTHOGONAL",
+          "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+          "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+          "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "64",
+          "elk.padding": "[top=32,left=32,bottom=32,right=32]",
+          "elk.spacing.edgeNode": "42",
+          "elk.spacing.nodeNode": "60",
+        },
+      };
+    }
     try {
       const result = await elk.layout(graph);
       positioned = collectElkPositions(result.children ?? []);
@@ -734,12 +791,24 @@ async function runLayout(): Promise<void> {
     });
   }
   flowNodes.value = nextNodes;
-  isLayouting.value = false;
   await nextTick();
   await new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
   });
+  if (generation !== layoutGeneration) return;
+  const viewportSnapshot = pendingViewportSnapshot;
+  if (viewportSnapshot) {
+    if (!isFlowReady.value || !viewportHelper.value.viewportInitialized) {
+      isLayouting.value = false;
+      return;
+    }
+    pendingViewportSnapshot = null;
+    await restoreViewport(viewportSnapshot);
+    isLayouting.value = false;
+    return;
+  }
   await positionInitialCanvas();
+  isLayouting.value = false;
 }
 
 function relationType(edge: ProvenanceEdge): string {
@@ -842,7 +911,20 @@ function handleEdgeMouseLeave() {
 }
 
 function handleViewportChange(viewport: ViewportTransform) {
+  latestViewport = { ...viewport };
   viewportZoom.value = viewport.zoom;
+}
+
+async function handleFlowReady() {
+  isFlowReady.value = true;
+  await nextTick();
+  const viewportSnapshot = pendingViewportSnapshot;
+  if (viewportSnapshot) {
+    pendingViewportSnapshot = null;
+    await restoreViewport(viewportSnapshot);
+    return;
+  }
+  await positionInitialCanvas();
 }
 
 function miniMapNodeColor(node: GraphNode): string {
@@ -872,8 +954,9 @@ function resetFilters() {
 }
 
 async function fitCanvas() {
-  if (!flowNodes.value.length) return;
-  await fitView({
+  const viewport = viewportHelper.value;
+  if (!isFlowReady.value || !viewport.viewportInitialized || !flowNodes.value.length) return;
+  await viewport.fitView({
     duration: prefersReducedMotion.value ? 0 : 180,
     maxZoom: 1.05,
     minZoom: 0.28,
@@ -882,13 +965,16 @@ async function fitCanvas() {
 }
 
 async function resetZoom() {
-  await zoomTo(1, { duration: prefersReducedMotion.value ? 0 : 160 });
+  const viewport = viewportHelper.value;
+  if (!isFlowReady.value || !viewport.viewportInitialized) return;
+  await viewport.zoomTo(1, { duration: prefersReducedMotion.value ? 0 : 160 });
 }
 
 async function focusNode(nodeId: string) {
   const position = positionByNodeId.get(nodeId);
-  if (!position) return;
-  await setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, {
+  const viewport = viewportHelper.value;
+  if (!position || !isFlowReady.value || !viewport.viewportInitialized) return;
+  await viewport.setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, {
     duration: prefersReducedMotion.value ? 0 : 180,
     zoom: Math.max(1, viewportZoom.value),
   });
@@ -904,7 +990,9 @@ async function positionInitialCanvas() {
   const decisionPosition = decisionNode ? positionByNodeId.get(decisionNode.nodeId) : undefined;
   const resultPosition = resultNode ? positionByNodeId.get(resultNode.nodeId) : undefined;
   if (flowNodes.value.length > 18 && decisionPosition && resultPosition) {
-    await setCenter(
+    const viewport = viewportHelper.value;
+    if (!isFlowReady.value || !viewport.viewportInitialized) return;
+    await viewport.setCenter(
       (decisionPosition.x + resultPosition.x) / 2 + NODE_WIDTH / 2,
       (decisionPosition.y + resultPosition.y) / 2 + NODE_HEIGHT / 2,
       {
@@ -917,12 +1005,76 @@ async function positionInitialCanvas() {
   await fitCanvas();
 }
 
+function captureViewportSnapshot(): ViewportSnapshot | null {
+  const viewport = latestViewport;
+  if (!viewport) return null;
+  const canvas = document.getElementById(flowId);
+  const graphCenter = canvas
+    ? {
+        x: (canvas.clientWidth / 2 - viewport.x) / viewport.zoom,
+        y: (canvas.clientHeight / 2 - viewport.y) / viewport.zoom,
+      }
+    : null;
+  const selectedPosition = props.selectedNodeId
+    ? positionByNodeId.get(props.selectedNodeId)
+    : undefined;
+  const anchor =
+    selectedPosition ??
+    (graphCenter
+      ? [...positionByNodeId.values()].sort((left, right) => {
+          const leftDistance =
+            (left.x + NODE_WIDTH / 2 - graphCenter.x) ** 2 +
+            (left.y + NODE_HEIGHT / 2 - graphCenter.y) ** 2;
+          const rightDistance =
+            (right.x + NODE_WIDTH / 2 - graphCenter.x) ** 2 +
+            (right.y + NODE_HEIGHT / 2 - graphCenter.y) ** 2;
+          return leftDistance - rightDistance || left.id.localeCompare(right.id);
+        })[0]
+      : undefined);
+  return {
+    anchorId: anchor?.id ?? null,
+    anchorScreenX: anchor ? (anchor.x + NODE_WIDTH / 2) * viewport.zoom + viewport.x : null,
+    anchorScreenY: anchor ? (anchor.y + NODE_HEIGHT / 2) * viewport.zoom + viewport.y : null,
+    viewport,
+  };
+}
+
+async function restoreViewport(snapshot: ViewportSnapshot): Promise<void> {
+  const viewport = viewportHelper.value;
+  if (!isFlowReady.value || !viewport.viewportInitialized) return;
+  const anchor = snapshot.anchorId ? positionByNodeId.get(snapshot.anchorId) : undefined;
+  if (anchor && snapshot.anchorScreenX !== null && snapshot.anchorScreenY !== null) {
+    await viewport.setViewport(
+      {
+        x: snapshot.anchorScreenX - (anchor.x + NODE_WIDTH / 2) * snapshot.viewport.zoom,
+        y: snapshot.anchorScreenY - (anchor.y + NODE_HEIGHT / 2) * snapshot.viewport.zoom,
+        zoom: snapshot.viewport.zoom,
+      },
+      { duration: 0 },
+    );
+    return;
+  }
+  await viewport.setViewport(snapshot.viewport, { duration: 0 });
+}
+
 function updateNodeContextClasses() {
   const context = contextNodeIds.value;
   (flowNodes.value as unknown as Array<{ id: string }>).forEach((node) => {
     updateNode(node.id, {
       class:
         !context || context.has(node.id) ? "prov-flow-node--context" : "prov-flow-node--dimmed",
+    });
+  });
+}
+
+function syncFlowNodeData() {
+  const latestNodes = nodeById.value;
+  (flowNodes.value as unknown as Array<{ id: string }>).forEach((flowNode) => {
+    const node = latestNodes.get(flowNode.id);
+    if (!node) return;
+    updateNode(flowNode.id, {
+      ariaLabel: `${kindLabel(node.kind)}：${nodeLabel(node.label, node.kind)}`,
+      data: { ...node, phase: nodePhase(node) },
     });
   });
 }
@@ -959,18 +1111,14 @@ function handleEscape(event: KeyboardEvent) {
   }
 }
 
-function updateMediaState() {
-  isCompact.value = compactMedia?.matches ?? false;
+function updateMotionState() {
   prefersReducedMotion.value = motionMedia?.matches ?? false;
 }
 
 watch(
-  () => [
-    props.graph.traceId,
-    props.graph.nodes.map((node) => node.nodeId).join("|"),
-    props.graph.edges.map((edge) => edge.edgeId).join("|"),
-  ],
-  () => {
+  () => props.graph.traceId,
+  (traceId, previousTraceId) => {
+    if (!previousTraceId || traceId === previousTraceId) return;
     viewMode.value =
       props.graph.nodes.length > LARGE_GRAPH_THRESHOLD ||
       props.graph.nodes.some((node) => node.metadata.critical === false)
@@ -978,7 +1126,30 @@ watch(
         : "all";
     collapsedPhases.value = new Set();
     activeKind.value = "all";
+    pendingViewportSnapshot = null;
   },
+);
+
+watch(
+  () =>
+    `${props.graph.nodes.map((node) => node.nodeId).join("|")}\u0000${props.graph.edges
+      .map((edge) => edge.edgeId)
+      .join("|")}`,
+  (graphKey, previousGraphKey) => {
+    if (!previousGraphKey || graphKey === previousGraphKey) return;
+    pendingViewportSnapshot = captureViewportSnapshot();
+    if (
+      activeKind.value !== "all" &&
+      !props.graph.nodes.some((node) => node.kind === activeKind.value)
+    ) {
+      activeKind.value = "all";
+    }
+  },
+);
+
+watch(
+  () => props.graph.nodes,
+  () => syncFlowNodeData(),
 );
 
 watch(
@@ -1007,18 +1178,35 @@ watch(searchQuery, () => {
   searchResultIndex.value = 0;
 });
 
+watch(isFullscreen, (fullscreen) => {
+  if (fullscreen) {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return;
+  }
+  document.body.style.overflow = previousBodyOverflow;
+});
+
 onMounted(() => {
-  compactMedia = window.matchMedia("(max-width: 68rem)");
   motionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
-  updateMediaState();
-  compactMedia.addEventListener("change", updateMediaState);
-  motionMedia.addEventListener("change", updateMediaState);
+  resizeObserver = new ResizeObserver(([entry]) => {
+    const nextCompact = (entry?.contentRect.width ?? 0) < COMPACT_WORKBENCH_WIDTH;
+    window.cancelAnimationFrame(resizeFrame);
+    resizeFrame = window.requestAnimationFrame(() => {
+      if (isCompact.value !== nextCompact) isCompact.value = nextCompact;
+    });
+  });
+  if (workbenchRef.value) resizeObserver.observe(workbenchRef.value);
+  updateMotionState();
+  motionMedia.addEventListener("change", updateMotionState);
   window.addEventListener("keydown", handleEscape);
 });
 
 onBeforeUnmount(() => {
-  compactMedia?.removeEventListener("change", updateMediaState);
-  motionMedia?.removeEventListener("change", updateMediaState);
+  window.cancelAnimationFrame(resizeFrame);
+  if (isFullscreen.value) document.body.style.overflow = previousBodyOverflow;
+  resizeObserver?.disconnect();
+  motionMedia?.removeEventListener("change", updateMotionState);
   window.removeEventListener("keydown", handleEscape);
   elk.terminateWorker();
 });
@@ -1046,8 +1234,10 @@ onBeforeUnmount(() => {
 .provenance-workbench--fullscreen {
   border-radius: 0;
   grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100dvh;
   inset: 0;
   position: fixed;
+  width: 100vw;
   z-index: 100;
 }
 
@@ -1469,47 +1659,50 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 68rem) {
-  .provenance-workbench {
-    grid-template-rows: auto auto minmax(38rem, 72vh);
-  }
+.provenance-workbench--compact {
+  grid-template-rows: auto auto minmax(38rem, 72vh);
+}
 
-  .provenance-toolbar {
-    grid-template-columns: 1fr;
-  }
+.provenance-workbench--compact.provenance-workbench--fullscreen {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
 
-  .provenance-toolbar__search {
-    max-width: none;
-  }
+.provenance-workbench--compact .provenance-toolbar {
+  grid-template-columns: 1fr;
+}
 
-  .provenance-toolbar__select,
-  .provenance-toolbar__actions {
-    justify-self: stretch;
-  }
+.provenance-workbench--compact .provenance-toolbar__search {
+  max-width: none;
+}
 
-  .provenance-toolbar__select select {
-    flex: 1;
-  }
+.provenance-workbench--compact .provenance-toolbar__select,
+.provenance-workbench--compact .provenance-toolbar__actions {
+  justify-self: stretch;
+}
 
-  .provenance-toolbar__actions {
-    overflow-x: auto;
-  }
+.provenance-workbench--compact .provenance-toolbar__select select {
+  flex: 1;
+}
 
-  .provenance-toolbar__actions button {
-    flex: 1 0 auto;
-  }
+.provenance-workbench--compact .provenance-toolbar__actions {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
 
-  .provenance-phases {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.provenance-workbench--compact .provenance-toolbar__actions button {
+  flex: 1 0 auto;
+}
 
-  .provenance-phases button:nth-child(3) {
-    border-left: 0;
-  }
+.provenance-workbench--compact .provenance-phases {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 
-  .provenance-phases button:nth-child(n + 3) {
-    border-top: 1px solid var(--color-border);
-  }
+.provenance-workbench--compact .provenance-phases button:nth-child(3) {
+  border-left: 0;
+}
+
+.provenance-workbench--compact .provenance-phases button:nth-child(n + 3) {
+  border-top: 1px solid var(--color-border);
 }
 
 @media (prefers-reduced-motion: reduce) {

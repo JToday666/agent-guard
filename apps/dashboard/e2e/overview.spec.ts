@@ -135,9 +135,11 @@ test("browser theme and primary actions match the dashboard interaction contract
   await page.goto("/overview");
 
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#102724");
-  const actionHeights = await page
-    .locator(".chart-link, .page-action")
-    .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+  const primaryActions = page.locator(".chart-link, .page-action");
+  await expect(primaryActions.first()).toBeVisible();
+  const actionHeights = await primaryActions.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().height),
+  );
   expect(actionHeights.length).toBeGreaterThan(0);
   expect(actionHeights.every((height) => height >= 36)).toBe(true);
 
