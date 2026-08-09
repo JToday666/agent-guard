@@ -38,6 +38,7 @@ from .events import (
 from .ids import new_id, utc_now_iso
 from .memory_guard import MemoryGuardChange
 from .policies import (
+    SUPPORTED_POLICY_RULE_IDS,
     PolicyBundle,
     RuleOverride,
     ToolProfile,
@@ -75,6 +76,7 @@ __all__ = [
     "RuleOverride",
     "RuleHit",
     "SecurityContext",
+    "SUPPORTED_POLICY_RULE_IDS",
     "ToolCallPayload",
     "ToolDescriptor",
     "ToolProfile",

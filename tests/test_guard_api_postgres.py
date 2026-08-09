@@ -20,6 +20,7 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditWindowQuery,
+    PolicyRevisionConflictError,
 )
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.postgres import (
@@ -518,6 +519,7 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
                 allowed_email_domains=["pg.example"],
                 sensitive_text_markers=["pg-secret="],
             ),
+            expected_revision=0,
             updated_by="tester",
         )
         second_record = store.save_policy_snapshot(
@@ -526,6 +528,7 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
                 allowed_email_domains=["pg.example"],
                 sensitive_text_markers=["pg-secret="],
             ),
+            expected_revision=1,
             updated_by="tester",
         )
 
@@ -549,7 +552,7 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
         _cleanup_policy_snapshot(database_url)
 
 
-def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() -> None:
+def test_postgres_policy_snapshot_concurrent_writes_reject_stale_revisions() -> None:
     database_url = get_test_database_url()
 
     worker_count = 16
@@ -566,20 +569,27 @@ def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() 
                 )
                 for index in range(worker_count)
             ]
-            records = [future.result() for future in as_completed(futures)]
+            results = []
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result())
+                except PolicyRevisionConflictError as exc:
+                    results.append(exc)
 
         history = PostgresControlPlaneStore(database_url).list_policy_snapshot_history(
             limit=worker_count
         )
-        revisions = sorted(record.revision for record in records)
+        records = [
+            item for item in results if not isinstance(item, PolicyRevisionConflictError)
+        ]
+        conflicts = [
+            item for item in results if isinstance(item, PolicyRevisionConflictError)
+        ]
 
-        assert revisions == list(range(1, worker_count + 1))
-        assert [record.revision for record in history] == list(
-            range(worker_count, 0, -1)
-        )
-        assert (
-            len({record.policy_bundle.bundle_id for record in history}) == worker_count
-        )
+        assert [record.revision for record in records] == [1]
+        assert len(conflicts) == worker_count - 1
+        assert all(conflict.current_revision == 1 for conflict in conflicts)
+        assert [record.revision for record in history] == [1]
     finally:
         _cleanup_policy_snapshot(database_url)
 
@@ -866,6 +876,7 @@ def _cleanup_policy_snapshot(database_url: str) -> None:
 def _save_policy_snapshot(database_url: str, bundle_id: str):
     return PostgresControlPlaneStore(database_url).save_policy_snapshot(
         PolicyBundle(bundle_id=bundle_id),
+        expected_revision=0,
         updated_by="concurrent-tester",
     )
 

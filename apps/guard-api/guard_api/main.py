@@ -27,6 +27,7 @@ from guard_api.services import (
     MemoryGuardService,
     MetricService,
     PolicyService,
+    PolicyValidationError,
     ProvenanceWriter,
     TraceService,
 )
@@ -34,6 +35,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
     AuditTimestampError,
     ControlPlaneStore,
+    PolicyRevisionConflictError,
     ProvenanceConflictError,
 )
 from guard_api.storage.memory import MemoryControlPlaneStore
@@ -118,6 +120,29 @@ def create_app(
         _: Request, __: AuditTimestampError
     ) -> JSONResponse:
         return error_response("AUDIT_TIMESTAMP_INVALID", status_code=422)
+
+    @app.exception_handler(PolicyValidationError)
+    async def policy_validation_error_handler(
+        _: Request, exc: PolicyValidationError
+    ) -> JSONResponse:
+        return error_response(
+            "POLICY_INVALID",
+            status_code=422,
+            details=[issue.as_dict() for issue in exc.issues],
+        )
+
+    @app.exception_handler(PolicyRevisionConflictError)
+    async def policy_revision_conflict_handler(
+        _: Request, exc: PolicyRevisionConflictError
+    ) -> JSONResponse:
+        return error_response(
+            "POLICY_REVISION_CONFLICT",
+            status_code=412,
+            details={
+                "expected_revision": exc.expected_revision,
+                "current_revision": exc.current_revision,
+            },
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(

@@ -139,7 +139,11 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
     run_id = uuid4().hex
     trace_id = f"trace_contract_shape_{run_id}"
     bundle = PolicyBundle(disabled_rules=["P001_sensitive_file_access"])
-    PolicyService(store=store).save_snapshot(bundle, updated_by="contract-test")
+    PolicyService(store=store).save_snapshot(
+        bundle,
+        expected_revision=0,
+        updated_by="contract-test",
+    )
 
     response = _post_evaluate(
         client, _guard_event_payload(event_id=f"evt_shape_{run_id}", trace_id=trace_id)

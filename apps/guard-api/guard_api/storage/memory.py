@@ -34,6 +34,7 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
@@ -382,18 +383,26 @@ class MemoryControlPlaneStore:
             return None
         return self.policy_snapshot.policy_bundle
 
+    def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None:
+        return self.policy_snapshot
+
     def save_policy_snapshot(
         self,
         policy_bundle: PolicyBundle,
         *,
+        expected_revision: int,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord:
         with self.policy_snapshot_lock:
-            revision = (
-                (self.policy_snapshot.revision + 1)
-                if self.policy_snapshot is not None
-                else 1
+            current_revision = (
+                self.policy_snapshot.revision if self.policy_snapshot is not None else 0
             )
+            if expected_revision != current_revision:
+                raise PolicyRevisionConflictError(
+                    expected_revision=expected_revision,
+                    current_revision=current_revision,
+                )
+            revision = current_revision + 1
             record = PolicySnapshotRecord(
                 revision=revision,
                 policy_bundle=policy_bundle,

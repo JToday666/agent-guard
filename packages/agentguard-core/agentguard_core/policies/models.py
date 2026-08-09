@@ -6,17 +6,39 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..decisions import RuleOverrideDecision
+from ..decisions import EnforcementMode, RuleOverrideDecision
+
+SUPPORTED_POLICY_RULE_IDS = frozenset(
+    {
+        "P001_sensitive_file_access",
+        "P002_tool_identity_mismatch",
+        "P004_task_mismatch",
+        "P005_external_send",
+        "P006_outbound_api_review",
+        "P007_unprofiled_tool_resource_review",
+        "P101_prompt_injection",
+        "P102_jailbreak",
+        "P103_code_execution_abuse",
+        "P104_memory_poisoning",
+        "P105_environment_poisoning",
+        "P106_credential_exposure",
+        "P107_file_exfiltration",
+        "P108_agent_abuse",
+        "P109_mcp_tool_hijacking",
+    }
+)
 
 
 class RuleOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     decision: RuleOverrideDecision | None = None
     risk_score: int | None = Field(default=None, ge=0, le=100)
     severity: str | None = None
 
 
 class ToolProfile(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     categories: list[str]
     kinds: list[str]
@@ -82,7 +104,7 @@ def default_tool_profiles() -> dict[str, ToolProfile]:
 
 
 class PolicyBundle(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     bundle_id: str = "default"
     version: str = "p0"
@@ -333,7 +355,7 @@ class PolicyBundle(BaseModel):
             "entity_override",
         ]
     )
-    default_enforcement_mode: str = "enforce"
+    default_enforcement_mode: EnforcementMode = "enforce"
     allowed_email_domains: list[str] = Field(
         default_factory=lambda: ["agentguard.local"]
     )

@@ -31,7 +31,11 @@ from guard_api.models import (
 from guard_api.services import MetricService, PolicyService
 from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
-from guard_api.storage.base import ApprovalStateConflictError, AuditIdConflictError
+from guard_api.storage.base import (
+    ApprovalStateConflictError,
+    AuditIdConflictError,
+    PolicyRevisionConflictError,
+)
 from guard_api.storage.integrity import canonical_sha256
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
@@ -1969,7 +1973,8 @@ def test_policy_service_prefers_store_snapshot_over_static_bundle() -> None:
     assert service.current_snapshot().bundle_id == "static"
 
     service.save_snapshot(
-        PolicyBundle(bundle_id="stored", allowed_email_domains=["stored.example"])
+        PolicyBundle(bundle_id="stored", allowed_email_domains=["stored.example"]),
+        expected_revision=0,
     )
 
     assert service.current_snapshot().bundle_id == "stored"
@@ -2016,7 +2021,10 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
     initial_response = client.get("/v1/policies/current")
     update_response = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": initial_response.headers["etag"],
+        },
         json=PolicyBundle(
             bundle_id="runtime",
             allowed_email_domains=["example.com"],
@@ -2058,14 +2066,96 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
 
     assert initial_response.status_code == 200
     assert initial_response.json()["bundle_id"] == "injected"
+    assert initial_response.headers["etag"] == '"policy-revision:0"'
     assert update_response.status_code == 200
     assert update_response.json()["bundle_id"] == "runtime"
+    assert update_response.headers["etag"] == '"policy-revision:1"'
     assert refreshed_response.status_code == 200
     assert refreshed_response.json()["allowed_email_domains"] == ["example.com"]
     assert allowed_email_response.status_code == 200
     assert allowed_email_response.json()["decision"]["decision"] == "allow"
     assert sensitive_text_response.status_code == 200
     assert sensitive_text_response.json()["decision"]["decision"] == "deny"
+
+
+def test_policy_write_requires_current_etag_and_rejects_stale_update() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+    client = TestClient(app)
+    _login_dashboard(client, control_token="control-secret")
+    csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    initial_etag = client.get("/v1/policies/current").headers["etag"]
+    payload = PolicyBundle(bundle_id="etag-policy").model_dump(mode="json")
+
+    missing = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token},
+        json=payload,
+    )
+    first = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
+        json=payload,
+    )
+    stale = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
+        json=PolicyBundle(bundle_id="stale-policy").model_dump(mode="json"),
+    )
+
+    assert missing.status_code == 428
+    assert missing.json()["error"]["code"] == "POLICY_PRECONDITION_REQUIRED"
+    assert first.status_code == 200
+    assert first.headers["etag"] == '"policy-revision:1"'
+    assert stale.status_code == 412
+    assert stale.json()["error"]["code"] == "POLICY_REVISION_CONFLICT"
+    assert stale.json()["error"]["details"] == {
+        "expected_revision": 0,
+        "current_revision": 1,
+    }
+    assert client.get("/v1/policies/current").json()["bundle_id"] == "etag-policy"
+
+
+def test_policy_semantic_validation_blocks_ambiguous_configuration() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+    client = TestClient(app)
+    _login_dashboard(client, control_token="control-secret")
+    csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    current = client.get("/v1/policies/current")
+    candidate = PolicyBundle(
+        bundle_id="invalid-policy",
+        disabled_rules=["P999_unknown", "P001_sensitive_file_access"],
+        rule_overrides={"P001_sensitive_file_access": {"decision": "deny"}},
+        prompt_injection_markers=["duplicate", " Duplicate "],
+        allowed_api_hosts=["https://example.com/path"],
+    )
+
+    validation = client.post(
+        "/v1/policies/validate",
+        json=candidate.model_dump(mode="json"),
+    )
+    update = client.put(
+        "/v1/policies/current",
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": current.headers["etag"],
+        },
+        json=candidate.model_dump(mode="json"),
+    )
+
+    assert validation.status_code == 200
+    assert validation.json()["valid"] is False
+    issue_codes = {issue["code"] for issue in validation.json()["issues"]}
+    assert issue_codes == {
+        "HOST_INVALID",
+        "RULE_CONFIGURATION_CONFLICT",
+        "RULE_UNKNOWN",
+        "VALUE_DUPLICATE",
+    }
+    assert update.status_code == 422
+    assert update.json()["error"]["code"] == "POLICY_INVALID"
+    assert client.get("/v1/policies/current").headers["etag"] == current.headers["etag"]
 
 
 def test_generic_adapter_status_and_heartbeat_use_path_runtime_identity() -> None:
@@ -2327,19 +2417,26 @@ def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_en
     diff_response = client.post(
         "/v1/policies/diff", json=first_policy.model_dump(mode="json")
     )
+    initial_etag = client.get("/v1/policies/current").headers["etag"]
     first_update = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
         json=first_policy.model_dump(mode="json"),
     )
     second_update = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": first_update.headers["etag"],
+        },
         json=second_policy.model_dump(mode="json"),
     )
     rollback_response = client.post(
         "/v1/policies/rollback/1",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": second_update.headers["etag"],
+        },
     )
     current_response = client.get("/v1/policies/current")
 
@@ -2348,6 +2445,7 @@ def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_en
         "valid": True,
         "bundle_id": "first-policy",
         "version": "p0",
+        "issues": [],
     }
     assert diff_response.status_code == 200
     diff = diff_response.json()
@@ -2536,14 +2634,18 @@ def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
 
     _login_dashboard(client, control_token="control-secret")
     csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    initial_etag = client.get("/v1/policies/current").headers["etag"]
     first_response = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
         json=PolicyBundle(bundle_id="runtime-1", version="p1").model_dump(mode="json"),
     )
     second_response = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": first_response.headers["etag"],
+        },
         json=PolicyBundle(bundle_id="runtime-2", version="p1").model_dump(mode="json"),
     )
     current_response = client.get("/v1/policies/current")
@@ -2569,7 +2671,7 @@ def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
     assert all(item["updated_at"] for item in history)
 
 
-def test_memory_policy_snapshot_concurrent_writes_have_contiguous_revisions(
+def test_memory_policy_snapshot_concurrent_writes_reject_stale_revisions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = memory_store_with_adapter()
@@ -2581,24 +2683,27 @@ def test_memory_policy_snapshot_concurrent_writes_have_contiguous_revisions(
 
     monkeypatch.setattr(memory_store_module, "utc_now_iso", slow_timestamp)
 
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        records = list(
-            executor.map(
-                lambda index: store.save_policy_snapshot(
-                    PolicyBundle(bundle_id=f"runtime-concurrent-{index}"),
-                    updated_by="tester",
-                ),
-                range(worker_count),
+    def save(index: int):
+        try:
+            return store.save_policy_snapshot(
+                PolicyBundle(bundle_id=f"runtime-concurrent-{index}"),
+                expected_revision=0,
+                updated_by="tester",
             )
-        )
+        except PolicyRevisionConflictError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        results = list(executor.map(save, range(worker_count)))
 
     history = store.list_policy_snapshot_history(limit=worker_count)
+    records = [item for item in results if not isinstance(item, PolicyRevisionConflictError)]
+    conflicts = [item for item in results if isinstance(item, PolicyRevisionConflictError)]
 
-    assert sorted(record.revision for record in records) == list(
-        range(1, worker_count + 1)
-    )
-    assert [record.revision for record in history] == list(range(worker_count, 0, -1))
-    assert len({record.policy_bundle.bundle_id for record in history}) == worker_count
+    assert [record.revision for record in records] == [1]
+    assert len(conflicts) == worker_count - 1
+    assert all(conflict.current_revision == 1 for conflict in conflicts)
+    assert [record.revision for record in history] == [1]
 
 
 def test_policy_current_update_requires_csrf() -> None:
@@ -3059,7 +3164,9 @@ def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     PolicyService(store=store).save_snapshot(
-        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]),
+        expected_revision=0,
+        updated_by="test",
     )
 
     response = client.post(
@@ -3082,7 +3189,11 @@ def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     bundle = PolicyBundle(disabled_rules=["P001_sensitive_file_access"])
-    PolicyService(store=store).save_snapshot(bundle, updated_by="test")
+    PolicyService(store=store).save_snapshot(
+        bundle,
+        expected_revision=0,
+        updated_by="test",
+    )
 
     response = client.post(
         "/v1/guard/evaluate",
@@ -3152,9 +3263,11 @@ def test_build_audit_event_rejects_extra_links_collision() -> None:
 def test_policy_snapshot_history_returns_latest_record_first() -> None:
     store = memory_store_with_adapter()
     service = PolicyService(store=store)
-    service.save_snapshot(PolicyBundle(), updated_by="test")
+    service.save_snapshot(PolicyBundle(), expected_revision=0, updated_by="test")
     service.save_snapshot(
-        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]),
+        expected_revision=1,
+        updated_by="test",
     )
 
     history = store.list_policy_snapshot_history(limit=1)

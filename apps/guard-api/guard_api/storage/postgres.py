@@ -41,6 +41,7 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
@@ -832,6 +833,7 @@ class PostgresControlPlaneStore:
         self,
         policy_bundle: PolicyBundle,
         *,
+        expected_revision: int,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord:
         payload = policy_bundle.model_dump(mode="json")
@@ -847,9 +849,15 @@ class PostgresControlPlaneStore:
                         policy_snapshots.c.policy_id == "current"
                     )
                 ).scalar_one_or_none()
-                revision = (
-                    int(current_revision) + 1 if current_revision is not None else 1
+                normalized_current_revision = (
+                    int(current_revision) if current_revision is not None else 0
                 )
+                if expected_revision != normalized_current_revision:
+                    raise PolicyRevisionConflictError(
+                        expected_revision=expected_revision,
+                        current_revision=normalized_current_revision,
+                    )
+                revision = normalized_current_revision + 1
                 stmt = pg_insert(policy_snapshots).values(
                     policy_id="current",
                     payload_json=payload,

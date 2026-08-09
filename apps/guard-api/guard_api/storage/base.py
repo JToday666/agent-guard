@@ -165,6 +165,17 @@ class ProvenanceEndpointMissingError(ProvenanceConflictError):
     """Raised when a provenance edge references a missing or foreign node."""
 
 
+class PolicyRevisionConflictError(ValueError):
+    """Raised when a policy write targets a stale revision."""
+
+    def __init__(self, *, expected_revision: int, current_revision: int) -> None:
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
+        super().__init__(
+            f"expected policy revision {expected_revision}, current is {current_revision}"
+        )
+
+
 def merge_provenance_node(
     existing: ProvenanceNode, incoming: ProvenanceNode
 ) -> ProvenanceNode:
@@ -411,10 +422,13 @@ class ControlPlaneStore(Protocol):
 
     def get_policy_snapshot(self) -> PolicyBundle | None: ...
 
+    def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None: ...
+
     def save_policy_snapshot(
         self,
         policy_bundle: PolicyBundle,
         *,
+        expected_revision: int,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord: ...
 
