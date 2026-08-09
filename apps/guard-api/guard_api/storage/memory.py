@@ -205,7 +205,11 @@ class MemoryControlPlaneStore:
             return merged
 
     def list_provenance(
-        self, trace_id: str
+        self,
+        trace_id: str,
+        *,
+        node_limit: int | None = None,
+        edge_limit: int | None = None,
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
         with self.provenance_lock:
             nodes = [
@@ -220,6 +224,16 @@ class MemoryControlPlaneStore:
             ]
         nodes.sort(key=lambda node: (node.timestamp, node.node_id))
         edges.sort(key=lambda edge: (edge.timestamp, edge.edge_id))
+        if node_limit is not None:
+            nodes = nodes[: _bounded_collection_limit(node_limit)]
+            node_ids = {node.node_id for node in nodes}
+            edges = [
+                edge
+                for edge in edges
+                if edge.source_node_id in node_ids and edge.target_node_id in node_ids
+            ]
+        if edge_limit is not None:
+            edges = edges[: _bounded_collection_limit(edge_limit)]
         return nodes, edges
 
     def add_config_audit_finding(
@@ -431,7 +445,12 @@ class MemoryControlPlaneStore:
             key=lambda item: item.created_at,
         )
 
-    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
+    def list_approvals(
+        self,
+        trace_id: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[ApprovalRequest]:
         with self.approval_lock:
             approvals = [
                 _with_effective_approval_status(item)
@@ -439,7 +458,10 @@ class MemoryControlPlaneStore:
             ]
         if trace_id is not None:
             approvals = [item for item in approvals if item.trace_id == trace_id]
-        return sorted(approvals, key=lambda item: item.created_at)
+        ordered = sorted(approvals, key=lambda item: item.created_at)
+        if limit is not None:
+            return ordered[: _bounded_collection_limit(limit)]
+        return ordered
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
         with self.approval_lock:
@@ -584,6 +606,10 @@ def _matches_window_filters(
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _bounded_collection_limit(limit: int) -> int:
+    return max(1, min(limit, 5000))
 
 
 def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:

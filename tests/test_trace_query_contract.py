@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from agentguard_core import AuditEvent, ProvenanceNode
+from agentguard_core import AuditEvent, ProvenanceEdge, ProvenanceNode
+import guard_api.services.trace as trace_module
 from guard_api.models import ApprovalRequest
 from guard_api.routers.audit import _conditional_json_response
 from guard_api.services.trace import (
@@ -39,13 +40,24 @@ def test_trace_reports_a_bounded_window_without_guessing_from_result_length() ->
 
     assert isinstance(audit_events, list)
     assert len(audit_events) == TRACE_AUDIT_LIMIT
-    assert payload["audit_window"] == {
-        "limit": TRACE_AUDIT_LIMIT,
-        "returned_count": TRACE_AUDIT_LIMIT,
-        "has_more": True,
-    }
+    audit_window = payload["audit_window"]
+    assert audit_window["limit"] == TRACE_AUDIT_LIMIT
+    assert audit_window["returned_count"] == TRACE_AUDIT_LIMIT
+    assert audit_window["has_more"] is True
+    assert isinstance(audit_window["next_cursor"], str)
+    assert isinstance(audit_window["snapshot_id"], str)
     assert audit_events[0]["audit_id"] == "audit-trace-window-1000"
     assert audit_events[-1]["audit_id"] == "audit-trace-window-0001"
+
+    second_page = TraceService(store=store).get_trace(
+        "trace-window", cursor=audit_window["next_cursor"]
+    )
+    assert [event["audit_id"] for event in second_page["audit_events"]] == [
+        "audit-trace-window-0000"
+    ]
+    assert second_page["audit_window"]["has_more"] is False
+    assert second_page["audit_window"]["next_cursor"] is None
+    assert second_page["audit_window"]["snapshot_id"] == audit_window["snapshot_id"]
 
 
 def test_trace_reports_complete_windows_including_an_empty_trace() -> None:
@@ -53,16 +65,16 @@ def test_trace_reports_complete_windows_including_an_empty_trace() -> None:
     service = TraceService(store=store)
     store.add_audit_event(_audit(0))
 
-    assert service.get_trace("trace-window")["audit_window"] == {
-        "limit": TRACE_AUDIT_LIMIT,
-        "returned_count": 1,
-        "has_more": False,
-    }
-    assert service.get_trace("missing")["audit_window"] == {
-        "limit": TRACE_AUDIT_LIMIT,
-        "returned_count": 0,
-        "has_more": False,
-    }
+    complete_window = service.get_trace("trace-window")["audit_window"]
+    assert complete_window["limit"] == TRACE_AUDIT_LIMIT
+    assert complete_window["returned_count"] == 1
+    assert complete_window["has_more"] is False
+    assert complete_window["next_cursor"] is None
+    missing_window = service.get_trace("missing")["audit_window"]
+    assert missing_window["limit"] == TRACE_AUDIT_LIMIT
+    assert missing_window["returned_count"] == 0
+    assert missing_window["has_more"] is False
+    assert missing_window["next_cursor"] is None
 
 
 def test_trace_validator_changes_when_only_an_approval_changes() -> None:
@@ -159,6 +171,55 @@ def test_trace_and_provenance_have_independent_validators() -> None:
 
     assert unchanged_trace_etag == trace_etag
     assert provenance_etag != trace_etag
+
+
+def test_provenance_returns_a_bounded_graph_without_dangling_edges(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(trace_module, "PROVENANCE_NODE_LIMIT", 2)
+    monkeypatch.setattr(trace_module, "PROVENANCE_EDGE_LIMIT", 2)
+    store = MemoryControlPlaneStore()
+    for index in range(3):
+        store.add_provenance_node(
+            ProvenanceNode(
+                node_id=f"node-{index}",
+                trace_id="trace-bounded-graph",
+                kind="audit",
+                ref_id=f"audit-{index}",
+                label=f"node {index}",
+                timestamp=f"2026-08-08T00:00:0{index}+00:00",
+            )
+        )
+    store.add_provenance_edge(
+        ProvenanceEdge(
+            edge_id="edge-0-1",
+            trace_id="trace-bounded-graph",
+            source_node_id="node-0",
+            target_node_id="node-1",
+            relation="precedes",
+        )
+    )
+    store.add_provenance_edge(
+        ProvenanceEdge(
+            edge_id="edge-1-2",
+            trace_id="trace-bounded-graph",
+            source_node_id="node-1",
+            target_node_id="node-2",
+            relation="precedes",
+        )
+    )
+
+    graph = TraceService(store=store).get_provenance("trace-bounded-graph")
+
+    returned_node_ids = {node["node_id"] for node in graph["nodes"]}
+    assert returned_node_ids == {"node-0", "node-1"}
+    assert [edge["edge_id"] for edge in graph["edges"]] == ["edge-0-1"]
+    assert all(
+        edge["source_node_id"] in returned_node_ids
+        and edge["target_node_id"] in returned_node_ids
+        for edge in graph["edges"]
+    )
+    assert graph["provenance_window"]["has_more"] is True
 
 
 def test_conditional_response_supports_lists_wildcards_and_weak_tags() -> None:

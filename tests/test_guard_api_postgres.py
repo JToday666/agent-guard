@@ -677,7 +677,12 @@ def test_postgres_trace_route_aggregates_audit_approval_and_window_scope() -> No
         assert [approval["approval_id"] for approval in trace["approvals"]] == [
             approval_id
         ]
-        assert trace["audit_window"] == {
+        assert trace["audit_window"]["limit"] == 1000
+        assert trace["audit_window"]["returned_count"] == 1
+        assert trace["audit_window"]["has_more"] is False
+        assert trace["audit_window"]["next_cursor"] is None
+        assert isinstance(trace["audit_window"]["snapshot_id"], str)
+        assert trace["approval_window"] == {
             "limit": 1000,
             "returned_count": 1,
             "has_more": False,

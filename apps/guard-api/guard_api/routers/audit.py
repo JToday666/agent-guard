@@ -116,6 +116,8 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     @app.get("/v1/traces/{trace_id}")
     def trace_detail(
         trace_id: str,
+        limit: int | None = None,
+        cursor: str | None = None,
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
@@ -127,7 +129,12 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             agentguard_session=agentguard_session,
         )
         return _conditional_json_response(
-            trace_service.get_trace(trace_id), if_none_match
+            trace_service.get_trace(
+                trace_id,
+                limit=(bounded_limit(limit) if limit is not None else None),
+                cursor=cursor,
+            ),
+            if_none_match,
         )
 
     @app.get("/v1/traces/{trace_id}/provenance")

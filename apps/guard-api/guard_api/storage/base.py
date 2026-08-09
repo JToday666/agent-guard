@@ -336,7 +336,11 @@ class ControlPlaneStore(Protocol):
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge: ...
 
     def list_provenance(
-        self, trace_id: str
+        self,
+        trace_id: str,
+        *,
+        node_limit: int | None = None,
+        edge_limit: int | None = None,
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]: ...
 
     def add_config_audit_finding(
@@ -422,7 +426,12 @@ class ControlPlaneStore(Protocol):
 
     def list_pending_approvals(self) -> list[ApprovalRequest]: ...
 
-    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]: ...
+    def list_approvals(
+        self,
+        trace_id: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[ApprovalRequest]: ...
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None: ...
 

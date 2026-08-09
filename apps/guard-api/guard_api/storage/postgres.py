@@ -410,7 +410,11 @@ class PostgresControlPlaneStore:
         return merged
 
     def list_provenance(
-        self, trace_id: str
+        self,
+        trace_id: str,
+        *,
+        node_limit: int | None = None,
+        edge_limit: int | None = None,
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
         node_stmt = (
             select(provenance_nodes.c.payload_json)
@@ -426,11 +430,25 @@ class PostgresControlPlaneStore:
                 provenance_edges.c.created_at.asc(), provenance_edges.c.edge_id.asc()
             )
         )
+        if node_limit is not None:
+            node_stmt = node_stmt.limit(_bounded_collection_limit(node_limit))
         with self._session_factory() as session:
             node_rows = session.execute(node_stmt).scalars().all()
+        nodes = [ProvenanceNode.model_validate(row) for row in node_rows]
+        if node_limit is not None:
+            node_ids = [node.node_id for node in nodes]
+            if not node_ids:
+                return [], []
+            edge_stmt = edge_stmt.where(
+                provenance_edges.c.source_node_id.in_(node_ids),
+                provenance_edges.c.target_node_id.in_(node_ids),
+            )
+        if edge_limit is not None:
+            edge_stmt = edge_stmt.limit(_bounded_collection_limit(edge_limit))
+        with self._session_factory() as session:
             edge_rows = session.execute(edge_stmt).scalars().all()
         return (
-            [ProvenanceNode.model_validate(row) for row in node_rows],
+            nodes,
             [ProvenanceEdge.model_validate(row) for row in edge_rows],
         )
 
@@ -937,12 +955,19 @@ class PostgresControlPlaneStore:
             rows = session.execute(stmt).mappings().all()
         return [_approval_from_row(row) for row in rows]
 
-    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
+    def list_approvals(
+        self,
+        trace_id: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[ApprovalRequest]:
         stmt = _approval_select().order_by(approval_requests.c.created_at.asc())
         if trace_id is not None:
             stmt = stmt.where(
                 approval_requests.c.payload_json.op("->>")("trace_id") == trace_id
             )
+        if limit is not None:
+            stmt = stmt.limit(_bounded_collection_limit(limit))
         with self._session_factory() as session:
             rows = session.execute(stmt).mappings().all()
         return [_approval_from_row(row) for row in rows]
@@ -1145,6 +1170,10 @@ def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _bounded_collection_limit(limit: int) -> int:
+    return max(1, min(limit, 5000))
 
 
 def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:

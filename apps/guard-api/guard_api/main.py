@@ -69,7 +69,10 @@ def create_app(
         provenance_writer=provenance_writer,
     )
     metric_service = MetricService(store=store)
-    trace_service = TraceService(store=store)
+    trace_service = TraceService(
+        store=store,
+        audit_window_service=audit_window_service,
+    )
     policy_service = PolicyService(
         store=store,
         policy_bundle=policy_bundle,
