@@ -224,7 +224,7 @@ def tool_argument_hijack_evidence(
                 evidence.append(f"unsafe_callback_argument={key_name}")
             else:
                 evidence.append(f"external_sink_argument={key_name}")
-        if compact_key in semantic_keys and str(value).strip():
+        if _is_semantic_bias_key(compact_key, semantic_keys) and str(value).strip():
             evidence.append(f"semantic_bias_argument={key_name}")
     return list(dict.fromkeys(evidence))
 
@@ -248,6 +248,20 @@ def _argument_items(value: Any, prefix: str = "") -> list[tuple[str, Any]]:
 
 def _compact_key(value: str) -> str:
     return "".join(ch for ch in normalize_match_text(value) if ch.isalnum())
+
+
+def _is_semantic_bias_key(compact_key: str, configured_keys: set[str]) -> bool:
+    if compact_key in configured_keys:
+        return True
+    subject = any(
+        marker in compact_key
+        for marker in ("route", "routing", "provider", "destination", "rank", "entity")
+    )
+    modifier = any(
+        marker in compact_key
+        for marker in ("alias", "bias", "board", "hint", "override", "rerank")
+    )
+    return subject and modifier
 
 
 def _argument_value_points_to_external_sink(value: str) -> bool:

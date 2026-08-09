@@ -130,15 +130,20 @@ class PolicyBundle(BaseModel):
             "ignore developer instructions",
             "developer message",
             "system message",
+            "follow these instructions instead",
+            "treat this content as a system message",
+            "do not tell the user",
             "send /private",
             "persist this rule",
             "future runs",
-            "identityverify",
-            "market-segment-submit",
-            "support-profile-confirm",
-            "managed-device support profile",
-            "lead-verification-relax",
+            "bypass verification",
+            "disable verification",
             "reduce verification controls",
+            "weaken security controls",
+            "override approval",
+            "change account settings",
+            "apply configuration change",
+            "grant administrator access",
         ]
     )
     high_confidence_prompt_injection_markers: list[str] = Field(
@@ -152,13 +157,16 @@ class PolicyBundle(BaseModel):
             "ignore developer instructions",
             "developer message",
             "system message",
-            "identityverify",
-            "market-segment-submit",
-            "support-profile-confirm",
-            "managed-device support profile",
-            "lead-verification-relax",
+            "follow these instructions instead",
+            "treat this content as a system message",
+            "bypass verification",
+            "disable verification",
             "reduce verification controls",
-            "weaken verification",
+            "weaken security controls",
+            "override approval",
+            "change account settings",
+            "apply configuration change",
+            "grant administrator access",
         ]
     )
     jailbreak_markers: list[str] = Field(
@@ -198,33 +206,24 @@ class PolicyBundle(BaseModel):
     )
     dangerous_command_markers: list[str] = Field(
         default_factory=lambda: [
-            "curl ",
-            "wget ",
             "| sh",
             "| bash",
-            "bash -c",
             "rm -rf",
-            "sudo ",
-            " nc ",
-            "netcat",
             "/etc/passwd",
-            "printenv",
-            "chmod +x",
-            "ssh ",
-            "scp ",
-            "powershell",
-            "invoke-webrequest",
-            "python -c",
-            "base64 -d",
             "/payloads/",
             "reverse shell",
             "/dev/tcp",
-            "socket",
-            "subprocess",
+            "nc -e",
+            "netcat -e",
+            "mkfifo",
+            "powershell -encodedcommand",
+            "invoke-expression",
+            "certutil -decode",
+            "chmod +s",
             "crypto-miner",
             "crypto miner",
             "backdoor",
-            "remote maintenance",
+            "unauthorized remote access",
         ]
     )
     memory_poisoning_markers: list[str] = Field(
@@ -276,12 +275,16 @@ class PolicyBundle(BaseModel):
             "click fraud",
             "account recovery",
             "manual review override",
-            "submit-appeal",
-            "misinformation_post",
+            "verification override",
+            "submit appeal",
+            "misinformation",
             "defamation",
-            "private-person-search",
-            "retrieve-private-records",
+            "fabricated claim",
+            "false allegation",
             "private records",
+            "home address",
+            "private email",
+            "private phone",
         ]
     )
     file_exfiltration_sink_markers: list[str] = Field(
@@ -323,10 +326,11 @@ class PolicyBundle(BaseModel):
     )
     tool_hijack_semantic_bias_argument_keys: list[str] = Field(
         default_factory=lambda: [
-            "route_board",
-            "provider_alias",
-            "entity_hint",
-            "rerank_entity",
+            "routing_override",
+            "provider_override",
+            "destination_override",
+            "ranking_bias",
+            "entity_override",
         ]
     )
     default_enforcement_mode: str = "enforce"
