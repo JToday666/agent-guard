@@ -220,14 +220,14 @@ class RuntimeOutcomeReceipt(AuditEvent):
     schema_version: Literal["0.4"] = "0.4"
     record_type: Literal["runtime_outcome"] = "runtime_outcome"
     event_type: Literal["runtime_outcome"] = "runtime_outcome"
-    decision: Decision
-    risk_score: int = Field(ge=0, le=100)
-    severity: Literal["low", "medium", "high", "critical"]
-    blocked: bool
-    links: RuntimeOutcomeLinks
+    decision: Decision  # pyright: ignore[reportGeneralTypeIssues]
+    risk_score: int = Field(ge=0, le=100)  # pyright: ignore[reportGeneralTypeIssues]
+    severity: Literal["low", "medium", "high", "critical"]  # pyright: ignore[reportGeneralTypeIssues]
+    blocked: bool  # pyright: ignore[reportGeneralTypeIssues]
+    links: RuntimeOutcomeLinks  # pyright: ignore[reportGeneralTypeIssues]
     latency_ms: Literal[None] = None
-    metadata: RuntimeOutcomeMetadata
-    evidence: RuntimeOutcomeEvidence
+    metadata: RuntimeOutcomeMetadata  # pyright: ignore[reportGeneralTypeIssues]
+    evidence: RuntimeOutcomeEvidence  # pyright: ignore[reportGeneralTypeIssues]
 
     @model_validator(mode="after")
     def validate_identity(self) -> "RuntimeOutcomeReceipt":

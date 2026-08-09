@@ -293,11 +293,12 @@ def _assert_trace_facts(
     code_action_id: str,
 ) -> None:
     audits = trace["audit_events"]
-    assert trace["audit_window"] == {
-        "limit": 1000,
-        "returned_count": len(audits),
-        "has_more": False,
-    }
+    audit_window = trace["audit_window"]
+    assert audit_window["limit"] == 1000
+    assert audit_window["returned_count"] == len(audits)
+    assert audit_window["has_more"] is False
+    assert audit_window["next_cursor"] is None
+    assert audit_window["snapshot_id"].startswith("sha256:")
     assert any(item["event_type"] == "trace_started" for item in audits)
     assert any(item["event_type"] == "trace_completed" for item in audits)
     routine_guard_hooks = [

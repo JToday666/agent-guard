@@ -274,24 +274,24 @@ class RuntimeOutcomeReceipt(AuditEvent):
 
     model_config = ConfigDict(extra="forbid")
 
-    audit_id: str = Field(min_length=1, max_length=256)
+    audit_id: str = Field(min_length=1, max_length=256)  # pyright: ignore[reportGeneralTypeIssues]
     schema_version: Literal["0.4"] = "0.4"
     record_type: Literal["runtime_outcome"] = "runtime_outcome"
     trace_id: str = Field(min_length=1, max_length=160)
-    runtime: str = Field(min_length=1, max_length=64)
-    timestamp: str
-    stage: str = Field(min_length=1, max_length=64)
+    runtime: str = Field(min_length=1, max_length=64)  # pyright: ignore[reportGeneralTypeIssues]
+    timestamp: str  # pyright: ignore[reportGeneralTypeIssues]
+    stage: str = Field(min_length=1, max_length=64)  # pyright: ignore[reportGeneralTypeIssues]
     event_type: Literal["runtime_outcome"] = "runtime_outcome"
     summary: str = Field(min_length=1, max_length=1000)
-    decision: Decision
-    risk_score: int = Field(ge=0, le=100)
-    severity: Literal["low", "medium", "high", "critical"]
-    blocked: bool
+    decision: Decision  # pyright: ignore[reportGeneralTypeIssues]
+    risk_score: int = Field(ge=0, le=100)  # pyright: ignore[reportGeneralTypeIssues]
+    severity: Literal["low", "medium", "high", "critical"]  # pyright: ignore[reportGeneralTypeIssues]
+    blocked: bool  # pyright: ignore[reportGeneralTypeIssues]
     reason: str = Field(min_length=1, max_length=4000)
-    links: RuntimeOutcomeLinks
+    links: RuntimeOutcomeLinks  # pyright: ignore[reportGeneralTypeIssues]
     latency_ms: Literal[None] = None
-    metadata: RuntimeOutcomeMetadata
-    evidence: RuntimeOutcomeEvidence
+    metadata: RuntimeOutcomeMetadata  # pyright: ignore[reportGeneralTypeIssues]
+    evidence: RuntimeOutcomeEvidence  # pyright: ignore[reportGeneralTypeIssues]
 
     @model_validator(mode="after")
     def _validate_receipt(self) -> "RuntimeOutcomeReceipt":

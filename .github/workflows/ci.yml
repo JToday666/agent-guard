@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 3.12 / PostgreSQL 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_guard_test
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Lint
+        run: uv run ruff check apps/cli apps/guard-api packages/agentguard-core packages/agentguard-langgraph-adapter tests
+
+      - name: Type check
+        run: uv run pyright
+
+      - name: Test Python contracts and migrations
+        run: uv run pytest -q tests packages/agentguard-langgraph-adapter/tests
+
+      - name: Validate release version mapping
+        run: uv run python scripts/check-release-versions.py
+
+  node:
+    name: Node 24 / pnpm 11
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Dashboard
+        run: pnpm --filter @agentguard/dashboard check
+
+      - name: Test OpenClaw runtime plugin
+        run: pnpm --filter @agentguard-ai/openclaw-plugin test
+
+      - name: Test OpenClaw bench tools
+        run: pnpm --filter @agentguard/openclaw-bench-tools test
+
+      - name: Test OpenClaw local shims
+        run: pnpm openclaw:bench-shim:test

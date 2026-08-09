@@ -19,6 +19,7 @@
   `outcomes_as_of` 截止，并通过 keyset 分页完整聚合。
 - PostgreSQL 中完整 AuditEvent JSON 与哈希链是权威证据；typed 时间和高频查询列只是
   可重建投影。Memory/PostgreSQL 使用同一存储契约测试。
+- AuditEvent 与策略摘要统一使用 RFC 8785 JCS 规范化；生产部署必须把 HMAC 签名审计检查点写入 PostgreSQL 之外的受保护追加日志，Dashboard 分别显示链有效性和锚定覆盖。
 - Dashboard API 模式直接消费原子审计窗口，不从旧 500 条事件数组重算后端指标；
   Mock 与 API 共用领域类型，但 API 失败不回退到 Mock。
 - 审批只允许未过期 pending 状态原子转换一次；runtime credential 与
@@ -60,8 +61,7 @@
 
 ### 发布与供应链
 
-当前发布检查仍以本地脚本为主。容器公开发布、CI/CD、SBOM、制品签名、provenance 和
-可信发布需要作为独立交付任务实施和验收，不能从本地构建成功反推为已具备。
+基础 GitHub CI 已覆盖 Python 静态检查、类型检查、PostgreSQL migration/测试，以及 Dashboard、OpenClaw 插件和本地工具检查。容器公开发布、SBOM、制品签名、构建 provenance、可信发布和部署自动化仍需作为独立交付任务实施和验收，不能从基础 CI 通过反推为已具备。
 
 ## 维护原则
 

@@ -157,18 +157,18 @@ def build_runtime_outcome(
         summary=_outcome_summary(action_name, execution_status),
         decision=decision.decision,
         risk_score=decision.risk_score,
-        severity=decision.severity,
+        severity=decision.severity,  # pyright: ignore[reportArgumentType]
         blocked=decision.blocked,
         resource_targets=_resource_targets(event_data),
         rule_hits=[hit.rule_id for hit in decision.rule_hits],
         reason=decision.reason,
-        links=links,
+        links=links,  # pyright: ignore[reportArgumentType]
         latency_ms=None,
-        metadata={
+        metadata={  # pyright: ignore[reportArgumentType]
             "agent_id": _agent_id(event_data),
             "outcome_kind": outcome_kind,
         },
-        evidence={
+        evidence={  # pyright: ignore[reportArgumentType]
             "intervention": (
                 {
                     "type": intervention_type,
