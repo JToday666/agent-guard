@@ -30,7 +30,11 @@ from guard_api.services import (
     TraceService,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import ControlPlaneStore, ProvenanceConflictError
+from guard_api.storage.base import (
+    AuditTimestampError,
+    ControlPlaneStore,
+    ProvenanceConflictError,
+)
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
 
@@ -100,6 +104,12 @@ def create_app(
         _: Request, __: ProvenanceConflictError
     ) -> JSONResponse:
         return error_response("PROVENANCE_CONFLICT", status_code=409)
+
+    @app.exception_handler(AuditTimestampError)
+    async def audit_timestamp_error_handler(
+        _: Request, __: AuditTimestampError
+    ) -> JSONResponse:
+        return error_response("AUDIT_TIMESTAMP_INVALID", status_code=422)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(

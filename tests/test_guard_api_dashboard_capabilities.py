@@ -354,6 +354,10 @@ def test_audit_window_cursor_scope_mismatch_and_expired() -> None:
     second = client.get(f"/v1/audit/window?cursor={cursor}", headers=headers)
     assert second.status_code == 200
     assert second.json()["scope"]["snapshot_id"] == first.json()["scope"]["snapshot_id"]
+    assert (
+        second.json()["scope"]["outcomes_as_of"]
+        == first.json()["scope"]["outcomes_as_of"]
+    )
     assert second.json()["scope"]["filters"]["trace_id"] == "trace_http_window"
     assert second.json()["scope"]["has_more"] is False
 

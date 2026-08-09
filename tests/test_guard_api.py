@@ -206,6 +206,27 @@ def test_guard_evaluate_rejects_wrong_schema_version() -> None:
     assert {"loc", "msg", "type"}.issubset(body["error"]["details"][0])
 
 
+def test_guard_evaluate_rejects_timestamp_without_timezone_before_side_effects() -> (
+    None
+):
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=GuardApiSettings()))
+    payload = _guard_event_payload(event_id="evt_naive_timestamp")
+    payload["timestamp"] = "2026-06-11T00:00:00"
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "AUDIT_TIMESTAMP_INVALID"
+    assert store.audit_events == []
+    assert store.approvals == {}
+    assert store.memory_changes == {}
+
+
 def test_audit_events_reject_wrong_schema_version() -> None:
     app = create_app(
         store=memory_store_with_adapter(),
@@ -3295,6 +3316,34 @@ def test_audit_events_post_returns_409_on_conflict() -> None:
     assert second_response.status_code == 409
     assert second_response.json()["error"]["code"] == "AUDIT_ID_CONFLICT"
     assert len(store.audit_events) == 1
+
+
+def test_audit_events_post_rejects_timestamp_without_timezone() -> None:
+    store = memory_store_with_adapter()
+    client = TestClient(
+        create_app(
+            store=store,
+            settings=GuardApiSettings(control_token="control-secret"),
+        )
+    )
+    payload = _audit_event_payload(
+        audit_id="audit_api_naive_timestamp",
+        trace_id="trace_api_naive_timestamp",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    payload["timestamp"] = "2026-08-09T12:00:00"
+
+    response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "AUDIT_TIMESTAMP_INVALID"
+    assert store.audit_events == []
 
 
 def test_audit_events_post_idempotent_hit_repairs_without_duplicates() -> None:

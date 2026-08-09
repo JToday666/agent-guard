@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from agentguard_core import (
     ActionCriticReview,
@@ -38,8 +38,10 @@ from guard_api.storage.base import (
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
     StoredLaunchCode,
+    classify_audit_record_type,
     merge_provenance_edge,
     merge_provenance_node,
+    parse_audit_timestamp,
     within_evaluated_range,
 )
 from guard_api.storage.integrity import (
@@ -47,6 +49,10 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
+
+
+def _system_utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(slots=True)
@@ -65,12 +71,14 @@ class MemoryControlPlaneStore:
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
+    audit_clock: Callable[[], datetime] = field(default=_system_utc_now, repr=False)
     audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
     provenance_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     approval_lock: Any = field(default_factory=Lock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
+    audit_ingested_at_by_id: dict[str, datetime] = field(default_factory=dict)
 
     def initialize(self) -> None:
         return None
@@ -79,6 +87,10 @@ class MemoryControlPlaneStore:
         return True
 
     def add_audit_event(self, event: AuditEvent) -> bool:
+        parse_audit_timestamp(event.timestamp)
+        ingested_at = self.audit_clock()
+        if ingested_at.tzinfo is None:
+            raise ValueError("audit ingestion clock must include a timezone")
         with self.audit_integrity_lock:
             existing = self.audit_events_by_id.get(event.audit_id)
             if existing is not None:
@@ -97,6 +109,7 @@ class MemoryControlPlaneStore:
             )
             self.audit_events.append(event_with_integrity)
             self.audit_events_by_id[event.audit_id] = event_with_integrity
+            self.audit_ingested_at_by_id[event.audit_id] = ingested_at
             return True
 
     def get_audit_event(self, audit_id: str) -> AuditEvent | None:
@@ -124,9 +137,20 @@ class MemoryControlPlaneStore:
             events = [
                 event
                 for event in self.audit_events[: max(end, 0)]
-                if _matches_window_filters(event, query)
+                if _matches_window_filters(
+                    event,
+                    query,
+                    ingested_at=self.audit_ingested_at_by_id[event.audit_id],
+                )
             ]
         return list(reversed(events))[: query.limit]
+
+    def capture_audit_snapshot(self) -> tuple[int, datetime]:
+        with self.audit_integrity_lock:
+            captured_at = self.audit_clock()
+            if captured_at.tzinfo is None:
+                raise ValueError("audit ingestion clock must include a timezone")
+            return len(self.audit_events), captured_at
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         with self.audit_integrity_lock:
@@ -532,7 +556,19 @@ def _filter_audit_events(
     return events
 
 
-def _matches_window_filters(event: AuditEvent, query: AuditWindowQuery) -> bool:
+def _matches_window_filters(
+    event: AuditEvent,
+    query: AuditWindowQuery,
+    *,
+    ingested_at: datetime,
+) -> bool:
+    if (
+        query.record_type is not None
+        and classify_audit_record_type(event) != query.record_type
+    ):
+        return False
+    if query.ingested_as_of is not None and ingested_at > query.ingested_as_of:
+        return False
     if query.trace_id is not None and event.trace_id != query.trace_id:
         return False
     if query.case_id is not None and event.case_id != query.case_id:

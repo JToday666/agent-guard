@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -11,6 +13,8 @@ from sqlalchemy import (
     MetaData,
     Table,
     Text,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -21,21 +25,70 @@ audit_events = Table(
     metadata,
     Column("audit_id", Text, primary_key=True),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "ingested_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("record_type", Text, nullable=False),
+    Column("trace_id", Text, nullable=False),
+    Column("case_id", Text, nullable=True),
+    Column("runtime", Text, nullable=False),
+    Column("decision", Text, nullable=True),
+    Column("event_id", Text, nullable=True),
+    Column("decision_id", Text, nullable=True),
+    Column("is_malicious", Boolean, nullable=True),
+    Column("latency_ms", Integer, nullable=True),
     Column("chain_id", Text, nullable=False),
-    Column("sequence", Integer, nullable=False),
+    Column("sequence", BigInteger, nullable=False),
     Column("prev_hash", Text, nullable=True),
     Column("event_hash", Text, nullable=False),
-    Index("ix_audit_events_created_at", "created_at"),
-    Index("ix_audit_events_chain_sequence", "chain_id", "sequence"),
+    CheckConstraint("sequence > 0", name="ck_audit_events_sequence_positive"),
+    CheckConstraint(
+        "record_type IN ('policy_evaluation', 'runtime_outcome', "
+        "'runtime_observation', 'config_audit')",
+        name="ck_audit_events_record_type",
+    ),
+    CheckConstraint(
+        "decision IS NULL OR decision IN ('allow', 'ask', 'deny')",
+        name="ck_audit_events_decision",
+    ),
+    CheckConstraint(
+        "latency_ms IS NULL OR latency_ms >= 0",
+        name="ck_audit_events_latency_nonnegative",
+    ),
+    Index("ux_audit_events_chain_sequence", "chain_id", "sequence", unique=True),
     Index("ix_audit_events_event_hash", "event_hash"),
+    Index("ix_audit_events_trace_sequence", "trace_id", "sequence"),
+    Index("ix_audit_events_runtime_sequence", "runtime", "sequence"),
+    Index(
+        "ix_audit_events_case_sequence",
+        "case_id",
+        "sequence",
+        postgresql_where=text("case_id IS NOT NULL"),
+    ),
+    Index(
+        "ix_audit_events_decision_sequence",
+        "decision",
+        "sequence",
+        postgresql_where=text("decision IS NOT NULL"),
+    ),
+    Index(
+        "ix_audit_events_policy_occurred_sequence",
+        "occurred_at",
+        "sequence",
+        postgresql_where=text("record_type = 'policy_evaluation'"),
+    ),
+    Index("ix_audit_events_ingested_at", "ingested_at"),
 )
 
 audit_integrity_heads = Table(
     "audit_integrity_heads",
     metadata,
     Column("chain_id", Text, primary_key=True),
-    Column("sequence", Integer, nullable=False),
+    Column("sequence", BigInteger, nullable=False),
     Column("event_hash", Text, nullable=True),
     Column("updated_at", Text, nullable=False),
 )

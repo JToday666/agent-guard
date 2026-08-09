@@ -7,10 +7,10 @@ from typing import Any
 from guard_api.storage.base import (
     AuditEventFilters,
     ControlPlaneStore,
+    classify_audit_record_type,
 )
 
 from .evidence import _event_hook_name
-from .metric_rules import classify_record_type
 
 
 class MetricService:
@@ -41,7 +41,7 @@ class MetricService:
             )
             bucket["event_count"] = int(bucket["event_count"]) + 1
             # §19.2/§19.3：allow/ask/deny/blocked 只统计策略判定记录。
-            is_policy = classify_record_type(event) == "policy_evaluation"
+            is_policy = classify_audit_record_type(event) == "policy_evaluation"
             if is_policy and event.decision in {"allow", "deny", "ask"}:
                 bucket[f"{event.decision}_count"] = (
                     int(bucket[f"{event.decision}_count"]) + 1
@@ -71,7 +71,7 @@ class MetricService:
         policy_events = [
             event
             for event in events
-            if classify_record_type(event) == "policy_evaluation"
+            if classify_audit_record_type(event) == "policy_evaluation"
         ]
         blocked_count = sum(
             1 for event in policy_events if event.decision in {"deny", "ask"}

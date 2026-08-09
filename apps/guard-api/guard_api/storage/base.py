@@ -42,14 +42,17 @@ class AuditWindowQuery:
 
     upper_sequence 为 None 时以当前链头上界为准；after_sequence 用于
     cursor 续页，只读取 sequence 严格小于它的记录；evaluated_from/to
-    按 RFC 3339 规范化 UTC 字符串过滤记录 timestamp，范围语义为
-    [evaluated_from, evaluated_to)。窗口与 cohort 共用本查询。
+    使用带时区 datetime 过滤事实发生时间，范围语义为
+    [evaluated_from, evaluated_to)。ingested_as_of 限制查询只包含该时点
+    已进入审计链的事实。窗口与 cohort 共用本查询。
     """
 
     upper_sequence: int | None = None
     after_sequence: int | None = None
-    evaluated_from: str | None = None
-    evaluated_to: str | None = None
+    evaluated_from: datetime | None = None
+    evaluated_to: datetime | None = None
+    ingested_as_of: datetime | None = None
+    record_type: str | None = None
     trace_id: str | None = None
     case_id: str | None = None
     runtime: str | None = None
@@ -82,8 +85,8 @@ class PolicySnapshotRecord:
 
 def within_evaluated_range(
     timestamp: str,
-    evaluated_from: str | None,
-    evaluated_to: str | None,
+    evaluated_from: datetime | None,
+    evaluated_to: datetime | None,
 ) -> bool:
     """判断记录 timestamp 是否落入 [evaluated_from, evaluated_to) 区间。
 
@@ -95,18 +98,42 @@ def within_evaluated_range(
     if evaluated_from is None and evaluated_to is None:
         return True
     try:
-        occurred_at = datetime.fromisoformat(timestamp)
+        occurred_at = parse_audit_timestamp(timestamp)
     except ValueError:
         return False
-    if occurred_at.tzinfo is None:
+    if evaluated_from is not None and occurred_at < evaluated_from:
         return False
-    if evaluated_from is not None and occurred_at < datetime.fromisoformat(
-        evaluated_from
-    ):
-        return False
-    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(evaluated_to):
+    if evaluated_to is not None and occurred_at >= evaluated_to:
         return False
     return True
+
+
+class AuditTimestampError(ValueError):
+    """Raised when an audit fact timestamp is not an aware RFC 3339 value."""
+
+
+def parse_audit_timestamp(timestamp: str) -> datetime:
+    """Parse an audit fact timestamp and require an explicit timezone."""
+
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        raise AuditTimestampError("audit timestamp must be RFC 3339") from None
+    if parsed.tzinfo is None:
+        raise AuditTimestampError("audit timestamp must include a timezone")
+    return parsed
+
+
+def classify_audit_record_type(event: AuditEvent) -> str:
+    """Resolve the persisted record class for both 0.4 and frozen 0.3 input."""
+
+    if event.record_type:
+        return event.record_type
+    if event.event_type == "config_audit":
+        return "config_audit"
+    if event.event_type == "runtime_observation":
+        return "runtime_observation"
+    return "policy_evaluation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +320,8 @@ class ControlPlaneStore(Protocol):
     def read_audit_events_bounded(
         self, query: AuditWindowQuery
     ) -> list[AuditEvent]: ...
+
+    def capture_audit_snapshot(self) -> tuple[int, datetime]: ...
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
 

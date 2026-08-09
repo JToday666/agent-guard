@@ -18,6 +18,7 @@ from guard_api.models import (
     EvaluationApproval,
     GuardEvaluationResponse,
 )
+from guard_api.storage.base import parse_audit_timestamp
 from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
@@ -66,6 +67,9 @@ class EvaluationService:
     def evaluate(
         self, event: GuardEvent, *, requesting_principal_id: str
     ) -> GuardEvaluationResponse:
+        # Validate temporal identity before detectors or any approval/memory side
+        # effects run; persistence uses the same parser for defense in depth.
+        parse_audit_timestamp(event.timestamp)
         request_digest = canonical_sha256(event.model_dump(mode="json"))
         # 审批、memory change 和审计写入都属于一次评估的副作用。同 event_id
         # 必须在副作用发生前串行化；Memory 使用进程锁，PostgreSQL 使用

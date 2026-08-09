@@ -11,11 +11,12 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from datetime import datetime
 from typing import Any
 
 from guard_api.storage.integrity import canonical_sha256
 
-CURSOR_VERSION = 1
+CURSOR_VERSION = 2
 _CURSOR_PREFIX = "awc"
 _FILTER_KEYS = ("trace_id", "case_id", "runtime", "decision")
 
@@ -57,6 +58,7 @@ def encode_cursor(
     after_sequence: int,
     filters: dict[str, str | None],
     limit: int,
+    snapshot_at: str,
 ) -> str:
     payload = {
         "version": CURSOR_VERSION,
@@ -66,6 +68,7 @@ def encode_cursor(
         "filters": {key: filters.get(key) for key in _FILTER_KEYS},
         "fingerprint": filters_fingerprint(filters),
         "limit": limit,
+        "snapshot_at": snapshot_at,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii")
@@ -91,17 +94,25 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
     filters = payload.get("filters")
     fingerprint = payload.get("fingerprint")
     limit = payload.get("limit")
+    snapshot_at = payload.get("snapshot_at")
     if (
         type(upper_sequence) is not int
         or type(after_sequence) is not int
         or not isinstance(filters, dict)
         or not isinstance(fingerprint, str)
         or type(limit) is not int
+        or not isinstance(snapshot_at, str)
         or upper_sequence < 1
         or after_sequence < 1
         or after_sequence > upper_sequence
         or not 1 <= limit <= 1000
     ):
+        raise CursorExpiredError(cursor)
+    try:
+        parsed_snapshot_at = datetime.fromisoformat(snapshot_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise CursorExpiredError(cursor) from None
+    if parsed_snapshot_at.tzinfo is None:
         raise CursorExpiredError(cursor)
     normalized_filters: dict[str, str | None] = {}
     for key in _FILTER_KEYS:
@@ -119,4 +130,5 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
         "filters": normalized_filters,
         "fingerprint": fingerprint,
         "limit": limit,
+        "snapshot_at": snapshot_at,
     }

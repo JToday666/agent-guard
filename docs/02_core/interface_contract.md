@@ -137,7 +137,9 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 
 `GET /v1/metrics/policy-evaluations` 必须提交 `evaluated_from` 和
 `evaluated_to`，可选 `outcomes_as_of`、`runtime` 和 `case_id`。时间使用带时区
-RFC 3339，范围语义为 `[evaluated_from, evaluated_to)`。
+RFC 3339，范围语义为 `[evaluated_from, evaluated_to)`；记录还必须在
+`outcomes_as_of` 之前进入审计链。该截止时点缺省为固定 sequence 快照的捕获时刻，
+晚于快照的请求值以响应中可证明的有效截止时点为准。
 缺失范围返回 `COHORT_RANGE_MISSING`，格式、时区或顺序无效返回
 `COHORT_RANGE_INVALID`。
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from uuid import uuid4
@@ -31,10 +32,7 @@ from guard_api.services import (
 import guard_api.services.evaluation as evaluation_service_module
 from guard_api.services.audit_window import AuditWindowService
 from guard_api.services.evidence import build_audit_event
-from guard_api.services.metric_rules import (
-    aggregate_policy_metrics,
-    classify_record_type,
-)
+from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.services.redaction import (
     MAX_EVIDENCE_BYTES,
     evidence_serialized_size,
@@ -44,8 +42,10 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditWindowQuery,
+    classify_audit_record_type,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
+from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
@@ -349,7 +349,7 @@ def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
         )
 
     events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
-    classified = {event.audit_id: classify_record_type(event) for event in events}
+    classified = {event.audit_id: classify_audit_record_type(event) for event in events}
     assert classified == {
         f"audit_cfg_{run_id}": "config_audit",
         f"audit_obs_{run_id}": "runtime_observation",
@@ -378,7 +378,7 @@ def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
     policy_audit = next(
         event for event in events if event.audit_id == f"audit_policy_{run_id}"
     )
-    assert classify_record_type(policy_audit) == fixture_policy["record_type"]
+    assert classify_audit_record_type(policy_audit) == fixture_policy["record_type"]
 
 
 def test_contract_evidence_serialized_within_64kib() -> None:
@@ -779,6 +779,7 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
     assert page2["scope"]["next_cursor"] is None
     # cursor 固化快照：两页 snapshot 与上界一致，新写入未进入窗口。
     assert page2["scope"]["snapshot_id"] == page1["scope"]["snapshot_id"]
+    assert page2["scope"]["outcomes_as_of"] == page1["scope"]["outcomes_as_of"]
     assert page2["scope"]["sequence_to"] == 2
 
 
@@ -913,13 +914,59 @@ def test_contract_cohort_evaluated_range_selects_policy_records(store) -> None:
     rows = store.read_audit_events_bounded(
         AuditWindowQuery(
             upper_sequence=frozen_upper,
-            evaluated_from="2026-06-01T00:01:00+00:00",
-            evaluated_to="2026-06-01T00:04:00+00:00",
+            evaluated_from=datetime.fromisoformat("2026-06-01T00:01:00+00:00"),
+            evaluated_to=datetime.fromisoformat("2026-06-01T00:04:00+00:00"),
             limit=100,
         )
     )
     # [00:01, 00:04) 半开区间：命中 index 1/2/3，按 sequence 降序返回。
     assert [_event_sequence(event) for event in rows] == [4, 3, 2]
+
+
+def test_contract_cohort_reads_every_keyset_page() -> None:
+    store = MemoryControlPlaneStore()
+    run_id = uuid4().hex
+    for index in range(1001):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+
+    cohort = AuditWindowService(store=store).get_policy_cohort(
+        evaluated_from="2026-06-01T00:00:00+00:00",
+        evaluated_to="2026-06-02T00:00:00+00:00",
+    )
+
+    assert cohort["policy_metrics"]["evaluation_count"] == 1001
+
+
+def test_contract_cohort_applies_ingestion_time_as_of() -> None:
+    clock_values = iter(
+        [
+            datetime.fromisoformat("2026-06-02T00:00:00+00:00"),
+            datetime.fromisoformat("2026-06-03T00:00:00+00:00"),
+            datetime.fromisoformat("2026-06-04T00:00:00+00:00"),
+        ]
+    )
+    store = MemoryControlPlaneStore(audit_clock=lambda: next(clock_values))
+    run_id = uuid4().hex
+    store.add_audit_event(_window_audit_event(index=0, run_id=run_id))
+    store.add_audit_event(_window_audit_event(index=1, run_id=run_id))
+
+    cohort = AuditWindowService(store=store).get_policy_cohort(
+        evaluated_from="2026-06-01T00:00:00+00:00",
+        evaluated_to="2026-06-02T00:00:00+00:00",
+        outcomes_as_of="2026-06-02T12:00:00+00:00",
+    )
+
+    assert cohort["scope"]["outcomes_as_of"] == "2026-06-02T12:00:00Z"
+    assert cohort["policy_metrics"]["evaluation_count"] == 1
+
+
+def test_contract_rejects_audit_timestamp_without_timezone(store) -> None:
+    event = _window_audit_event(index=0, run_id=uuid4().hex).model_copy(
+        update={"timestamp": "2026-06-01T00:00:00"}
+    )
+
+    with pytest.raises(ValueError, match="include a timezone"):
+        store.add_audit_event(event)
 
 
 def test_contract_memory_and_postgres_window_parity() -> None:
@@ -969,6 +1016,8 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     postgres_scope = dict(postgres_window["scope"])
     memory_scope.pop("outcomes_as_of")
     postgres_scope.pop("outcomes_as_of")
+    assert memory_scope.pop("next_cursor")
+    assert postgres_scope.pop("next_cursor")
     assert memory_scope == postgres_scope
 
     memory_page2 = AuditWindowService(store=memory_store).get_window(
@@ -983,11 +1032,14 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     cohort_memory = AuditWindowService(store=memory_store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-01T00:05:00+00:00",
-        outcomes_as_of="2026-06-02T00:00:00+00:00",
     )
     cohort_postgres = AuditWindowService(store=postgres_store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-01T00:05:00+00:00",
-        outcomes_as_of="2026-06-02T00:00:00+00:00",
     )
-    assert cohort_memory == cohort_postgres
+    assert cohort_memory["policy_metrics"] == cohort_postgres["policy_metrics"]
+    memory_cohort_scope = dict(cohort_memory["scope"])
+    postgres_cohort_scope = dict(cohort_postgres["scope"])
+    memory_cohort_scope.pop("outcomes_as_of")
+    postgres_cohort_scope.pop("outcomes_as_of")
+    assert memory_cohort_scope == postgres_cohort_scope

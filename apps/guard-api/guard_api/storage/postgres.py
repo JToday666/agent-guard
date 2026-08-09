@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import itertools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -46,9 +45,10 @@ from guard_api.storage.base import (
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
     StoredLaunchCode,
+    classify_audit_record_type,
     merge_provenance_edge,
     merge_provenance_node,
-    within_evaluated_range,
+    parse_audit_timestamp,
 )
 from guard_api.storage.integrity import (
     attach_audit_integrity,
@@ -112,6 +112,7 @@ class PostgresControlPlaneStore:
             return False
 
     def add_audit_event(self, event: AuditEvent) -> bool:
+        occurred_at = parse_audit_timestamp(event.timestamp)
         with self._session_factory() as session:
             with session.begin():
                 session.execute(
@@ -171,7 +172,16 @@ class PostgresControlPlaneStore:
                     pg_insert(audit_events).values(
                         audit_id=event.audit_id,
                         payload_json=payload,
-                        created_at=event.timestamp,
+                        occurred_at=occurred_at,
+                        record_type=classify_audit_record_type(event),
+                        trace_id=event.trace_id,
+                        case_id=event.case_id,
+                        runtime=event.runtime,
+                        decision=event.decision,
+                        event_id=event.links.get("event_id"),
+                        decision_id=event.links.get("decision_id"),
+                        is_malicious=event.is_malicious,
+                        latency_ms=event.latency_ms,
                         chain_id=_AUDIT_CHAIN_ID,
                         sequence=integrity.sequence,
                         prev_hash=integrity.prev_hash,
@@ -210,7 +220,7 @@ class PostgresControlPlaneStore:
         stmt = (
             select(audit_events.c.payload_json)
             .where(*_audit_filter_conditions(filters))
-            .order_by(desc(audit_events.c.created_at), desc(audit_events.c.audit_id))
+            .order_by(desc(audit_events.c.sequence))
             .limit(_bounded_limit(filters.limit))
         )
         with self._session_factory() as session:
@@ -218,15 +228,12 @@ class PostgresControlPlaneStore:
         return [AuditEvent.model_validate(row) for row in rows]
 
     def read_audit_events_bounded(self, query: AuditWindowQuery) -> list[AuditEvent]:
-        # 上界读 audit_integrity_heads 链头；序列范围命中现有
-        # ix_audit_events_chain_sequence；JSONB 过滤为残余谓词（契约 §7.3）。
+        # sequence 固化一致性快照；正式列承载过滤条件，避免 JSONB 解包和
+        # Python 全表过滤。索引负责常用 trace/runtime/case/decision 与时间 cohort。
         conditions: list[Any] = [audit_events.c.chain_id == _AUDIT_CHAIN_ID]
         if query.after_sequence is not None:
             conditions.append(audit_events.c.sequence < query.after_sequence)
         conditions.extend(_window_filter_conditions(query))
-        time_range_present = (
-            query.evaluated_from is not None or query.evaluated_to is not None
-        )
         with self._session_factory() as session:
             with session.begin():
                 upper = query.upper_sequence
@@ -242,32 +249,32 @@ class PostgresControlPlaneStore:
                     select(audit_events.c.payload_json)
                     .where(audit_events.c.sequence <= upper, *conditions)
                     .order_by(desc(audit_events.c.sequence))
+                    .limit(query.limit)
                 )
-                # 时间 cohort 经由共享解析函数在 Python 层过滤以保证与
-                # Memory 端口径一致；无时间条件时 SQL LIMIT 直接限流。
-                if not time_range_present:
-                    stmt = stmt.limit(query.limit)
                 rows = session.execute(stmt).scalars().all()
-        events = (AuditEvent.model_validate(row) for row in rows)
-        if time_range_present:
-            events = (
-                event
-                for event in events
-                if within_evaluated_range(
-                    event.timestamp, query.evaluated_from, query.evaluated_to
-                )
-            )
-        return list(itertools.islice(events, query.limit))
+        return [AuditEvent.model_validate(row) for row in rows]
+
+    def capture_audit_snapshot(self) -> tuple[int, datetime]:
+        head_sequence = (
+            select(audit_integrity_heads.c.sequence)
+            .where(audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID)
+            .scalar_subquery()
+        )
+        stmt = select(
+            func.coalesce(head_sequence, 0),
+            func.statement_timestamp(),
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).one()
+        return int(row[0]), row[1]
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None:
-        links = audit_events.c.payload_json.op("->")("links")
-        record_type = audit_events.c.payload_json.op("->>")("record_type")
         stmt = (
             select(audit_events.c.payload_json)
             .where(
-                links.op("->>")("event_id") == event_id,
-                links.op("?")("decision_id"),
-                func.coalesce(record_type, "policy_evaluation") == "policy_evaluation",
+                audit_events.c.event_id == event_id,
+                audit_events.c.decision_id.is_not(None),
+                audit_events.c.record_type == "policy_evaluation",
             )
             .order_by(audit_events.c.sequence.asc(), audit_events.c.audit_id.asc())
             .limit(1)
@@ -1105,31 +1112,35 @@ class PostgresControlPlaneStore:
 def _audit_filter_conditions(filters: AuditEventFilters) -> list[Any]:
     conditions: list[Any] = []
     if filters.trace_id is not None:
-        conditions.append(_json_text("trace_id") == filters.trace_id)
+        conditions.append(audit_events.c.trace_id == filters.trace_id)
     if filters.case_id is not None:
-        conditions.append(_json_text("case_id") == filters.case_id)
+        conditions.append(audit_events.c.case_id == filters.case_id)
     if filters.runtime is not None:
-        conditions.append(_json_text("runtime") == filters.runtime)
+        conditions.append(audit_events.c.runtime == filters.runtime)
     if filters.decision is not None:
-        conditions.append(_json_text("decision") == filters.decision)
+        conditions.append(audit_events.c.decision == filters.decision)
     return conditions
 
 
 def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
     conditions: list[Any] = []
+    if query.evaluated_from is not None:
+        conditions.append(audit_events.c.occurred_at >= query.evaluated_from)
+    if query.evaluated_to is not None:
+        conditions.append(audit_events.c.occurred_at < query.evaluated_to)
+    if query.ingested_as_of is not None:
+        conditions.append(audit_events.c.ingested_at <= query.ingested_as_of)
+    if query.record_type is not None:
+        conditions.append(audit_events.c.record_type == query.record_type)
     if query.trace_id is not None:
-        conditions.append(_json_text("trace_id") == query.trace_id)
+        conditions.append(audit_events.c.trace_id == query.trace_id)
     if query.case_id is not None:
-        conditions.append(_json_text("case_id") == query.case_id)
+        conditions.append(audit_events.c.case_id == query.case_id)
     if query.runtime is not None:
-        conditions.append(_json_text("runtime") == query.runtime)
+        conditions.append(audit_events.c.runtime == query.runtime)
     if query.decision is not None:
-        conditions.append(_json_text("decision") == query.decision)
+        conditions.append(audit_events.c.decision == query.decision)
     return conditions
-
-
-def _json_text(key: str) -> Any:
-    return audit_events.c.payload_json.op("->>")(key)
 
 
 def _bounded_limit(limit: int) -> int:

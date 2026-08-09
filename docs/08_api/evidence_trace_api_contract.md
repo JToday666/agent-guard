@@ -136,6 +136,7 @@ PostgreSQL 存储语义、Provenance 和 Dashboard 三视图已经按本文主�
 | 400  | `UNSUPPORTED_AUDIT_SCHEMA`  | 不支持请求中的 AuditEvent 版本           |
 | 409  | `AUDIT_ID_CONFLICT`         | 相同 `audit_id` 已对应不同规范化内容     |
 | 413  | `EVIDENCE_TOO_LARGE`        | 脱敏后 evidence 仍超过服务端限制         |
+| 422  | `AUDIT_TIMESTAMP_INVALID`   | 事实时间不是带时区 RFC 3339              |
 | 422  | `EVIDENCE_VALIDATION_ERROR` | record type 与 evidence 字段不匹配       |
 | 422  | `OUTPUT_ONLY_FIELD`         | Adapter 尝试写入服务端生成的 `integrity` |
 
@@ -169,10 +170,18 @@ PostgreSQL 存储语义、Provenance 和 Dashboard 三视图已经按本文主�
 
 ### 7.3 存储
 
-当前 AuditEvent 和 provenance payload 使用 JSONB。审计链是权威事实；任何查询列、
-索引或投影都必须可由审计链重建，不得成为第二个写入事实源。
+AuditEvent 完整 payload 与 provenance payload 使用 JSONB，审计链始终是权威事实。
+`audit_events` 同次写入派生正式查询列：`occurred_at`、`ingested_at`、
+`record_type`、`trace_id`、`case_id`、`runtime`、`decision`、`event_id`、
+`decision_id`、`is_malicious` 和 `latency_ms`。这些列只用于类型约束、过滤和索引，
+不得承载另一套裁决；必须能够由权威 payload 重建。
 
-如果生产数据量使 `record_type` 查询成为瓶颈，可在测量后增加表达式索引；不得仅为本轮展示提前增加没有数据依据的索引。
+`occurred_at` 是生产者声明的事实时间，`ingested_at` 是服务端写入审计链的时间；
+历史查询同时使用二者实现发生时间 cohort 和知识时点截止。`sequence` 使用 bigint，
+`(chain_id, sequence)` 唯一，窗口与聚合使用 sequence keyset 分页。更重的事实投影或
+物化聚合只能在查询测量证明必要后增加，并继续满足可重建约束。
+迁移前记录没有独立入库时间，只能以原事实时间回填 `ingested_at`；精确的迟到事实
+as-of 语义从迁移后的新写入开始。
 
 ## 8. AuditEvent 0.4 目标结构
 

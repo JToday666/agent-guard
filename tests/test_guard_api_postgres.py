@@ -249,7 +249,38 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
             "expires_at": "2999-01-01T00:00:00+00:00",
             "resolved_at": None,
         }
+        audit_id = f"audit_pg_state_{run_id}"
+        audit_payload = _audit_event(
+            audit_id=audit_id,
+            trace_id=trace_id,
+            decision="ask",
+            runtime="langgraph",
+            blocked=True,
+            is_malicious=True,
+            latency_ms=17,
+            links={"event_id": f"evt_{run_id}", "decision_id": f"dec_{run_id}"},
+        ).model_dump(mode="json")
         with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO audit_events (
+                        audit_id, payload_json, created_at, chain_id,
+                        sequence, prev_hash, event_hash
+                    )
+                    VALUES (
+                        :audit_id, CAST(:payload_json AS jsonb), :created_at,
+                        'default', 1, NULL, :event_hash
+                    )
+                    """
+                ),
+                {
+                    "audit_id": audit_id,
+                    "payload_json": json.dumps(audit_payload),
+                    "created_at": audit_payload["timestamp"],
+                    "event_hash": "a" * 64,
+                },
+            )
             conn.execute(
                 text(
                     """
@@ -298,6 +329,45 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
                     )
                 ).all()
             )
+            audit_columns = dict(
+                conn.execute(
+                    text(
+                        """
+                        SELECT column_name, data_type
+                        FROM information_schema.columns
+                        WHERE table_name = 'audit_events'
+                        """
+                    )
+                ).all()
+            )
+            audit_indexes = set(
+                conn.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = current_schema()
+                          AND tablename = 'audit_events'
+                        """
+                    )
+                ).scalars()
+            )
+            audit_projection = (
+                conn.execute(
+                    text(
+                        """
+                        SELECT occurred_at, ingested_at, record_type, trace_id,
+                               runtime, decision, event_id, decision_id,
+                               is_malicious, latency_ms
+                        FROM audit_events
+                        WHERE audit_id = :audit_id
+                        """
+                    ),
+                    {"audit_id": audit_id},
+                )
+                .mappings()
+                .one()
+            )
             nonce_table = conn.execute(
                 text("SELECT to_regclass('public.approval_nonces')")
             ).scalar_one()
@@ -309,6 +379,24 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
         assert columns["created_at"] == "timestamp with time zone"
         assert columns["expires_at"] == "timestamp with time zone"
         assert columns["resolved_at"] == "timestamp with time zone"
+        assert "created_at" not in audit_columns
+        assert audit_columns["occurred_at"] == "timestamp with time zone"
+        assert audit_columns["ingested_at"] == "timestamp with time zone"
+        assert audit_columns["sequence"] == "bigint"
+        assert audit_columns["record_type"] == "text"
+        assert audit_columns["trace_id"] == "text"
+        assert audit_columns["event_id"] == "text"
+        assert "ux_audit_events_chain_sequence" in audit_indexes
+        assert "ix_audit_events_policy_occurred_sequence" in audit_indexes
+        assert audit_projection["ingested_at"] == audit_projection["occurred_at"]
+        assert audit_projection["record_type"] == "policy_evaluation"
+        assert audit_projection["trace_id"] == trace_id
+        assert audit_projection["runtime"] == "langgraph"
+        assert audit_projection["decision"] == "ask"
+        assert audit_projection["event_id"] == f"evt_{run_id}"
+        assert audit_projection["decision_id"] == f"dec_{run_id}"
+        assert audit_projection["is_malicious"] is True
+        assert audit_projection["latency_ms"] == 17
         assert nonce_table is None
         assert approval is not None
         assert approval.status == "pending"
@@ -365,6 +453,33 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
                 latency_ms=50,
             )
         )
+
+        with create_engine(store.database_url).connect() as conn:
+            projection = (
+                conn.execute(
+                    text(
+                        """
+                        SELECT occurred_at, ingested_at, record_type, trace_id,
+                               case_id, runtime, decision, is_malicious, latency_ms
+                        FROM audit_events
+                        WHERE audit_id = :audit_id
+                        """
+                    ),
+                    {"audit_id": f"audit_pg_allow_{run_id}"},
+                )
+                .mappings()
+                .one()
+            )
+
+        assert projection["occurred_at"].tzinfo is not None
+        assert projection["ingested_at"].tzinfo is not None
+        assert projection["record_type"] == "policy_evaluation"
+        assert projection["trace_id"] == trace_id
+        assert projection["case_id"] == "PG-METRIC"
+        assert projection["runtime"] == "langgraph"
+        assert projection["decision"] == "allow"
+        assert projection["is_malicious"] is False
+        assert projection["latency_ms"] == 10
 
         denied = store.list_audit_events(
             AuditEventFilters(trace_id=trace_id, decision="deny", limit=10)
@@ -702,9 +817,7 @@ def _cleanup_test_rows(
                     {"approval_id": approval_id},
                 )
             conn.execute(
-                text(
-                    "DELETE FROM audit_events WHERE payload_json ->> 'trace_id' = :trace_id"
-                ),
+                text("DELETE FROM audit_events WHERE trace_id = :trace_id"),
                 {"trace_id": trace_id},
             )
     except Exception:

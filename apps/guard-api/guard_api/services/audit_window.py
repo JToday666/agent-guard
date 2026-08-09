@@ -18,8 +18,8 @@ from .audit_window_cursor import (
 )
 from .metric_rules import aggregate_policy_metrics
 
-# cohort 一次性读取上限；历史接口不提供无范围“全部历史”（契约 §6.2）。
-_COHORT_READ_LIMIT = 10_000
+# 历史 cohort 通过 sequence keyset 分页完整读取，不以固定总量静默截断。
+_COHORT_PAGE_SIZE = 1000
 _DEDUPLICATION_LABEL = "logical_policy_evaluation"
 _DEFAULT_WINDOW_LIMIT = 500
 
@@ -75,11 +75,14 @@ class AuditWindowService:
             effective_limit = int(state["limit"])
             upper_sequence = int(state["upper_sequence"])
             after_sequence: int | None = int(state["after_sequence"])
+            snapshot_at = _parse_rfc3339_utc(
+                str(state["snapshot_at"]), field="cursor.snapshot_at"
+            )
         else:
             filters = requested_filters
-            effective_limit = limit or _DEFAULT_WINDOW_LIMIT
-            # 步骤 1：捕获当前审计链上界，快照固化后续读取。
-            upper_sequence = self._capture_upper_sequence()
+            effective_limit = _DEFAULT_WINDOW_LIMIT if limit is None else limit
+            # 单次存储快照同时捕获链上界与数据库/本地存储时钟。
+            upper_sequence, snapshot_at = self.store.capture_audit_snapshot()
             after_sequence = None
 
         rows = self.store.read_audit_events_bounded(
@@ -103,6 +106,7 @@ class AuditWindowService:
                 after_sequence=_event_sequence(page[-1]),
                 filters=filters,
                 limit=effective_limit,
+                snapshot_at=_utc_iso_z(snapshot_at),
             )
 
         sequences = [_event_sequence(event) for event in page]
@@ -110,7 +114,7 @@ class AuditWindowService:
             "scope": {
                 "kind": "audit_window",
                 "snapshot_id": snapshot_identifier(upper_sequence),
-                "outcomes_as_of": _utc_now_iso_z(),
+                "outcomes_as_of": _utc_iso_z(snapshot_at),
                 "order": "audit_sequence",
                 "limit": effective_limit,
                 "returned_record_count": len(page),
@@ -139,37 +143,34 @@ class AuditWindowService:
 
         if evaluated_from is None or evaluated_to is None:
             raise AuditWindowRequestError("COHORT_RANGE_MISSING", status_code=400)
-        normalized_from = _parse_rfc3339_utc(evaluated_from, field="evaluated_from")
-        normalized_to = _parse_rfc3339_utc(evaluated_to, field="evaluated_to")
-        if datetime.fromisoformat(normalized_from) >= datetime.fromisoformat(
-            normalized_to
-        ):
+        cohort_from = _parse_rfc3339_utc(evaluated_from, field="evaluated_from")
+        cohort_to = _parse_rfc3339_utc(evaluated_to, field="evaluated_to")
+        if cohort_from >= cohort_to:
             raise AuditWindowRequestError("COHORT_RANGE_INVALID", status_code=400)
+        upper_sequence, snapshot_at = self.store.capture_audit_snapshot()
         if outcomes_as_of is None:
-            normalized_as_of = _utc_now_iso_z()
+            effective_as_of = snapshot_at
         else:
-            normalized_as_of = _parse_rfc3339_utc(
-                outcomes_as_of, field="outcomes_as_of"
-            )
-        upper_sequence = self._capture_upper_sequence()
+            requested_as_of = _parse_rfc3339_utc(outcomes_as_of, field="outcomes_as_of")
+            # A sequence snapshot cannot make claims about future knowledge. Return
+            # the effective cutoff actually represented by this response.
+            effective_as_of = min(requested_as_of, snapshot_at)
         runtime_filter = _optional_value(runtime)
         case_filter = _optional_value(case_id)
-        events = self.store.read_audit_events_bounded(
-            AuditWindowQuery(
-                upper_sequence=upper_sequence,
-                evaluated_from=normalized_from,
-                evaluated_to=normalized_to,
-                runtime=runtime_filter,
-                case_id=case_filter,
-                limit=_COHORT_READ_LIMIT,
-            )
+        events = self._read_policy_cohort(
+            upper_sequence=upper_sequence,
+            evaluated_from=cohort_from,
+            evaluated_to=cohort_to,
+            ingested_as_of=effective_as_of,
+            runtime=runtime_filter,
+            case_id=case_filter,
         )
         return {
             "scope": {
                 "kind": "aggregate_history",
-                "evaluated_from": normalized_from,
-                "evaluated_to": normalized_to,
-                "outcomes_as_of": normalized_as_of,
+                "evaluated_from": _utc_iso_z(cohort_from),
+                "evaluated_to": _utc_iso_z(cohort_to),
+                "outcomes_as_of": _utc_iso_z(effective_as_of),
                 "snapshot_id": snapshot_identifier(upper_sequence),
                 "deduplication": _DEDUPLICATION_LABEL,
                 "filters": {"runtime": runtime_filter, "case_id": case_filter},
@@ -177,9 +178,42 @@ class AuditWindowService:
             "policy_metrics": aggregate_policy_metrics(events),
         }
 
-    def _capture_upper_sequence(self) -> int:
-        rows = self.store.read_audit_events_bounded(AuditWindowQuery(limit=1))
-        return _event_sequence(rows[0]) if rows else 0
+    def _read_policy_cohort(
+        self,
+        *,
+        upper_sequence: int,
+        evaluated_from: datetime,
+        evaluated_to: datetime,
+        ingested_as_of: datetime,
+        runtime: str | None,
+        case_id: str | None,
+    ) -> list[AuditEvent]:
+        events: list[AuditEvent] = []
+        after_sequence: int | None = None
+        while True:
+            page = self.store.read_audit_events_bounded(
+                AuditWindowQuery(
+                    upper_sequence=upper_sequence,
+                    after_sequence=after_sequence,
+                    evaluated_from=evaluated_from,
+                    evaluated_to=evaluated_to,
+                    ingested_as_of=ingested_as_of,
+                    record_type="policy_evaluation",
+                    runtime=runtime,
+                    case_id=case_id,
+                    limit=_COHORT_PAGE_SIZE,
+                )
+            )
+            if not page:
+                break
+            events.extend(page)
+            if len(page) < _COHORT_PAGE_SIZE:
+                break
+            next_after = _event_sequence(page[-1])
+            if next_after == after_sequence:
+                raise AuditWindowRequestError("INTERNAL_ERROR", status_code=500)
+            after_sequence = next_after
+        return events
 
 
 def snapshot_identifier(upper_sequence: int) -> str:
@@ -214,15 +248,15 @@ def _occurred_bound(events: list[AuditEvent], *, earliest: bool) -> str | None:
     return best_text
 
 
-def _parse_rfc3339_utc(value: str, *, field: str) -> str:
+def _parse_rfc3339_utc(value: str, *, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.strip())
     except ValueError:
         raise AuditWindowRequestError("COHORT_RANGE_INVALID", status_code=400) from None
     if parsed.tzinfo is None:
         raise AuditWindowRequestError("COHORT_RANGE_INVALID", status_code=400)
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(timezone.utc)
 
 
-def _utc_now_iso_z() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _utc_iso_z(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")

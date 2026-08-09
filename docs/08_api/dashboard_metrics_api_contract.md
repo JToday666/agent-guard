@@ -196,7 +196,7 @@ cohort。cursor 失效返回明确的 `410 CURSOR_EXPIRED`，作用域不一致�
 字段要求：
 
 - `snapshot_id` 和 cursor 是不可解释字符串；
-- `outcomes_as_of` 是该快照纳入授权与运行时结果的统计时点；
+- `outcomes_as_of` 是该快照的固定知识截止时点，并随 cursor 进入后续页，不能在翻页时漂移；
 - `has_more` 必须由 `limit + 1` 查询确定；
 - `has_more=false` 时 `next_cursor=null`；`has_more=true` 时必须返回可继续同一快照的 `next_cursor`；
 - `returned_record_count` 是原始审计记录数，不能替代 `evaluation_count`；
@@ -238,8 +238,9 @@ GET /v1/metrics/policy-evaluations
 
 - `evaluated_from`、`evaluated_to` 必填，且必须满足 `evaluated_from < evaluated_to`；
 - 时间使用带时区 RFC 3339，服务端规范化到 UTC；
-- cohort 以规范 `policy_evaluation.timestamp` 落入范围为准；
-- `outcomes_as_of` 缺省为请求快照时刻，响应必须回显；
+- cohort 以规范 `policy_evaluation.timestamp`（正式列 `occurred_at`）落入范围为准；
+- 记录还必须满足 `ingested_at <= outcomes_as_of`，因此迟到写入可按知识时点复现；
+- `outcomes_as_of` 缺省为请求快照时刻；若请求值晚于快照时刻，响应返回快照可证明的有效截止时点，不宣称未来事实；
 - 查询必须固定审计 sequence 快照，保证同一响应内一致。
 - 缺失范围返回 `400 COHORT_RANGE_MISSING`；格式、时区或顺序无效返回
   `400 COHORT_RANGE_INVALID`。
@@ -375,17 +376,21 @@ enforcement_coverage
 
 ### 当前实现
 
-- 使用 audit sequence 范围、record type 分类和 SQL 窗口函数完成查询；
+- 完整 `payload_json` 和哈希链仍是唯一权威证据，正式列只是同一次写入生成、可由 JSON 重建的查询投影；
+- `occurred_at` 表示生产者事实时间，`ingested_at` 表示服务端入链时间，均使用 PostgreSQL `timestamptz`；
+- 迁移前记录没有独立入库时间，迁移时以原事实时间回填 `ingested_at`；这只是不丢失存量数据的最佳可用近似，精确迟到事实语义从本迁移后的新写入开始；
+- `record_type`、`trace_id`、`case_id`、`runtime`、`decision`、`event_id`、`decision_id`、`is_malicious` 和 `latency_ms` 提升为正式查询列；
+- `sequence` 使用 `bigint`，`(chain_id, sequence)` 由唯一索引保证链位置不重复；
+- 当前窗口和历史 cohort 都使用 sequence keyset 分页；历史聚合会读完固定快照内的全部匹配页，不存在固定总量静默截断；
+- 时间、record type 和常用过滤条件在 SQL 中完成，PostgreSQL 不再先读取全表后由 Python 过滤；
+- trace/runtime/case/decision、策略发生时间和入库时间建立针对性索引；
 - Memory 与 PostgreSQL 共用语义 fixture；
-- 不因预估规模提前增加投影表；
-- 生产者时间写入前校验 RFC 3339 并规范化到 UTC。
+- 生产者时间在检测、审批或记忆副作用发生前校验为带时区 RFC 3339，持久化层再次校验。
 
 ### 测量后优化
 
-仅当真实数据量、`EXPLAIN ANALYZE` 或查询 p95 证明需要时，评估：
+仅当真实数据量、`EXPLAIN ANALYZE` 或查询 p95 证明需要时，进一步评估：
 
-- `record_type`、`decision_id`、`action_id` 表达式索引或生成列；
-- typed `timestamptz` 的 occurred/ingested 时间列；
 - `policy_evaluation_facts`、`action_outcome_facts` 投影；
 - 按时间 bucket 的增量物化。
 
@@ -418,6 +423,9 @@ enforcement_coverage
 - 存在第 `limit + 1` 条时 `has_more=true`；
 - 后续页 cursor 保持 snapshot 与 filters，不受并发新写入影响；
 - 查询期间新写入不改变已捕获窗口；
+- 翻页前后 `outcomes_as_of` 保持不变；
+- 历史 cohort 超过内部单页大小时仍完整聚合，不静默截断；
+- 指定 `outcomes_as_of` 时不纳入该时点之后才入链的记录；
 - 未标注评估不进入策略 FPR/FNR 分母；
 - policy latency 不混入 runtime latency；
 - Memory/PostgreSQL 在相同 fixture 上完全一致。

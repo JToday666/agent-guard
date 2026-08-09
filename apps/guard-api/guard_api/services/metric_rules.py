@@ -10,28 +10,12 @@ from typing import Any
 
 from agentguard_core import AuditEvent
 
+from guard_api.storage.base import classify_audit_record_type
 from guard_api.storage.integrity import read_audit_integrity
 
 _INTERVENTION_DECISIONS = ("ask", "deny")
 _METRIC_VERSION_V2 = "policy_evaluation.v2"
 _DEDUPLICATION_LABEL = "logical_policy_evaluation"
-
-
-def classify_record_type(event: AuditEvent) -> str:
-    """§19.2：record_type 缺失时的旧记录分类回退。
-
-    event_type=config_audit → config_audit；
-    event_type=runtime_observation → runtime_observation；
-    其余 → policy_evaluation。
-    """
-
-    if event.record_type:
-        return event.record_type
-    if event.event_type == "config_audit":
-        return "config_audit"
-    if event.event_type == "runtime_observation":
-        return "runtime_observation"
-    return "policy_evaluation"
 
 
 def logical_dedupe_key(event: AuditEvent) -> str:
@@ -65,7 +49,7 @@ def aggregate_policy_metrics(events: list[AuditEvent]) -> dict[str, Any]:
     duplicate_policy_record_count = 0
     unkeyed_policy_record_count = 0
     for event in ordered:
-        if classify_record_type(event) != "policy_evaluation":
+        if classify_audit_record_type(event) != "policy_evaluation":
             continue
         key = logical_dedupe_key(event)
         if key.startswith("audit:"):

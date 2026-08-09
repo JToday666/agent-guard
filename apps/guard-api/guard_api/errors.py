@@ -37,6 +37,7 @@ _ERROR_MESSAGES = {
     "APPROVAL_WAIT_DENIED": "Approval wait is not allowed for this principal.",
     "CREDENTIAL_NOT_FOUND": "Credential was not found.",
     "AUDIT_ID_CONFLICT": "The audit_id is already bound to different content.",
+    "AUDIT_TIMESTAMP_INVALID": "Audit timestamps must be RFC 3339 values with a timezone.",
     "POLICY_EVALUATION_WRITE_FORBIDDEN": (
         "policy_evaluation records can only be written by POST /v1/guard/evaluate."
     ),
