@@ -43,7 +43,7 @@ OpenClaw 插件安装脚本读取：
 - `AGENTGUARD_HOST`：可选，默认 `127.0.0.1`。
 - `AGENTGUARD_PORT`：可选，默认 `8088`。
 
-`AGENTGUARD_ADAPTER_TOKEN` 会写入本机 OpenClaw profile，用于插件调用 Guard API 的 `Authorization: Bearer <token>` header。token 不应写入仓库、审计事件、metadata、错误消息或日志。
+安装脚本把 `AGENTGUARD_ADAPTER_TOKEN` 写入 `.openclaw-dev/secrets/openclaw-adapter-token`，目录权限为 `0700`、文件权限为 `0600`；OpenClaw 主配置只保存 file SecretRef 和 provider 路径。token 用于插件调用 Guard API 的 `Authorization: Bearer <token>` header，不写入仓库、OpenClaw 主配置、审计事件、metadata、错误消息或日志。
 
 ## 4. Guard API 启动与检查
 
@@ -97,11 +97,11 @@ pnpm openclaw:plugin:install
 4. 备份当前 OpenClaw config 到 `.openclaw-dev/backups/`
 5. 尝试卸载旧的 `agentguard-security`
 6. 执行 `openclaw plugins install -l .openclaw-dev/agentguard-security`
-7. patch OpenClaw config，写入 enabled、Guard API URL、adapter token、短测试 timeout 和
-   `hooks.allowConversationAccess=true`
-8. 执行 `openclaw plugins registry --refresh`
-9. 执行 `openclaw gateway restart --safe`
-10. 轮询 `openclaw gateway status`，直到 runtime running 且 connectivity probe ok
+7. 把 adapter token 写入独立的 `0600` secret 文件，并 patch OpenClaw `secrets.providers` 与插件 `adapterToken` SecretRef
+8. patch 插件 enabled、Guard API URL、短测试 timeout 和 `hooks.allowConversationAccess=true`
+9. 执行 `openclaw plugins registry --refresh`
+10. 执行 `openclaw gateway restart --safe`
+11. 轮询 `openclaw gateway status`，直到 runtime running 且 connectivity probe ok
 
 不要直接从 `packages/agentguard-openclaw-plugin` 安装。pnpm workspace 包目录可能包含 `node_modules` symlink，会被 OpenClaw local install safety scan 拦截。
 
@@ -124,7 +124,7 @@ pnpm openclaw:plugin:verify
 该命令会执行 `openclaw plugins inspect agentguard-security --runtime --json` 并校验：
 
 - `plugin.status=loaded`
-- `plugin.hookCount=22`
+- `plugin.hookCount=23`
 - `plugin.source` 或 `plugin.rootDir` 指向 `.openclaw-dev/agentguard-security`
 - runtime diagnostics 不包含 `allowConversationAccess=true` 缺失导致的 hook block
 - Gateway `Runtime: running`
@@ -135,11 +135,15 @@ pnpm openclaw:plugin:verify
 ```text
 before_tool_call
 message_sending
+before_install
+message_received
 before_prompt_build
+before_agent_run
 llm_input
 llm_output
-before_install
 tool_result_persist
+before_message_write
+before_agent_finalize
 gateway_start
 gateway_stop
 session_start
@@ -177,8 +181,10 @@ pnpm openclaw:plugin:e2e
 - `before_tool_call`
 - `message_sending`
 - `before_prompt_build`
+- `before_agent_run`
 - `llm_input`
 - `llm_output`
+- `before_agent_finalize`
 - `before_install`
 - `tool_result_persist`
 - `session_start`
@@ -193,7 +199,7 @@ pnpm openclaw:plugin:e2e
 验收重点：
 
 - `ok=true`
-- OpenClaw audit events 包含 `tool_call_proposed`、`message_send_proposed`、`config_audit`、`tool_result_produced` 和 `runtime_observation`
+- OpenClaw audit events 包含 `tool_call_proposed`、`context_assembled`、`model_input_prepared`、`model_output_produced`、`message_send_proposed`、`config_audit`、`tool_result_produced` 和 `runtime_observation`
 - audit integrity `valid=true`
 - provenance 至少包含 `event`、`decision` 和 `audit` 节点
 
@@ -206,9 +212,8 @@ pnpm openclaw:plugin:reliability
 ```
 
 该命令会构建插件、重置测试库控制平面表、启动指向测试库的 Guard
-API、复核 OpenClaw runtime 插件加载状态，并触发 22 个 hook 各 50 次，
-共 1,100 条预期审计事件。若 `127.0.0.1:8088` 已有 Guard API 监听，runner
-会直接停止，避免误写开发库。
+API、复核 OpenClaw runtime 插件加载状态，并触发 23 个 hook 各 50 次，
+共 1,150 条预期主审计事件；干预回执 `runtime_outcome` 单独存在，不冒充或覆盖每个 hook 的主事件。若 `127.0.0.1:8088` 已有 Guard API 监听，runner 会直接停止，避免误写开发库。
 
 输出文件：
 
@@ -221,15 +226,16 @@ API、复核 OpenClaw runtime 插件加载状态，并触发 22 个 hook 各 50 
 
 - `ok=true`
 - `missing_traces=[]`、`duplicate_trace_ids=[]`、`non_openclaw_count=0`
-- 审计事件计数符合 `tool_call_proposed=50`、`context_assembled=50`、
+- 主审计事件计数符合 `tool_call_proposed=50`、
   `model_input_prepared=50`、`model_output_produced=50`、
   `message_send_proposed=50`、`config_audit=50`、
-  `tool_result_produced=50`、`runtime_observation=600`
-- adapter status 显示 `loaded=true`、`hook_count=22`、
-  `expected_hook_count=22`
+  `tool_result_produced=50`、`runtime_observation=850`
+- adapter status 显示 `loaded=true`、`hook_count=23`、
+  `expected_hook_count=23`
 - audit integrity `valid=true`
 - 阻断型 hook：`before_tool_call` 返回 `block=true`，
-  `message_sending` 返回 `cancel=true`，`before_install` 返回 `block=true`
+  `message_sending` 返回 `cancel=true`，`before_install` 返回 `block=true`，
+  `before_agent_run` 返回 `decision.outcome=block`
 
 `openclaw:plugin:e2e` 和 `openclaw:plugin:reliability` 会把摘要写入
 `/v1/adapters/openclaw/status` 的 `capabilities.release_gates`，用于后续发布前查询。
@@ -246,6 +252,7 @@ pnpm openclaw:plugin:uninstall
 
 - 备份当前 OpenClaw config 到 `.openclaw-dev/backups/`
 - 删除 `plugins.entries.agentguard-security`
+- 删除 `secrets.providers.agentguard_adapter` 和本地 adapter token secret 文件
 - 从 `plugins.load.paths` 移除 AgentGuard staging 路径和旧临时路径
 - 执行 `openclaw plugins uninstall agentguard-security --force`
 - 刷新 OpenClaw persisted plugin registry
@@ -284,9 +291,9 @@ pnpm openclaw:plugin:verify
 /home/today/dev/agent-guard/.openclaw-dev/agentguard-security/dist/index.js
 ```
 
-### llm hooks 被 runtime 拦截
+### conversation hooks 被 runtime 拦截
 
-`llm_input` 和 `llm_output` 读取 raw prompt/output。非 bundled 插件必须在 OpenClaw config 里显式配置：
+`before_agent_run`、`llm_input`、`llm_output` 和 `before_agent_finalize` 读取 conversation 内容。非 bundled 插件必须在 OpenClaw config 里显式配置：
 
 ```json
 {
@@ -303,7 +310,7 @@ pnpm openclaw:plugin:verify
 ```
 
 `pnpm openclaw:plugin:install` 会自动写入该配置。若 `pnpm openclaw:plugin:verify`
-仍显示缺少 `llm_input` / `llm_output`，先运行安装脚本刷新配置和 registry，再复查
+仍显示缺少上述 hooks，先运行安装脚本刷新配置和 registry，再复查
 `openclaw plugins inspect agentguard-security --runtime --json` 里的 diagnostics。
 
 ### install safety scan 拦截
@@ -342,4 +349,4 @@ plugin entry does not expose defineToolPlugin metadata
 <系统临时目录>/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
-该验收使用 OpenClaw 2026.6.6、Guard API、PostgreSQL 和 repo 内确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_prompt_build`、`llm_input`、`llm_output`、`before_install`、`tool_result_persist`、audit integrity 和 provenance。
+该验收使用 OpenClaw 2026.6.6、Guard API、PostgreSQL 和 repo 内确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_agent_run`、`before_agent_finalize`、`before_install`、`tool_result_persist`、观察型 hooks、audit integrity 和 provenance。

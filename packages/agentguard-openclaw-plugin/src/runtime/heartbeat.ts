@@ -1,5 +1,6 @@
 import {
   OPENCLAW_ENFORCEMENT_HOOKS,
+  OPENCLAW_FAIL_CLOSED_HOOKS,
   OPENCLAW_OBSERVATION_HOOKS,
   OPENCLAW_REQUIRED_HOOKS,
 } from "../../hook-contract.mjs";
@@ -9,6 +10,8 @@ import {
   logDiagnostic,
 } from "../guard-api-client.js";
 import { isDisabled } from "./enforcement.js";
+
+const HEARTBEAT_INTERVAL_MS = 60_000;
 
 export function scheduleHeartbeat(
   config: ReturnType<typeof buildPluginConfig>,
@@ -38,15 +41,18 @@ export function scheduleHeartbeat(
           observation_hooks: [
             ...OPENCLAW_OBSERVATION_HOOKS,
             "message_received",
+            "before_prompt_build",
+            "llm_input",
+            "llm_output",
           ],
           redaction_hooks: [
             "tool_result_persist",
             "before_message_write",
             "before_agent_finalize",
           ],
-          fail_closed_stages: config.failClosedStages,
+          fail_closed_stages: [...OPENCLAW_FAIL_CLOSED_HOOKS],
           enforcement_mode: config.enforcementMode,
-          redaction: config.redaction,
+          redaction: { enabled: true, preview_limit: 2_000 },
         },
       })
       .catch((error) => {
@@ -56,7 +62,7 @@ export function scheduleHeartbeat(
       });
   };
   unrefTimer(setTimeout(submit, 0));
-  unrefTimer(setInterval(submit, config.heartbeatIntervalMs));
+  unrefTimer(setInterval(submit, HEARTBEAT_INTERVAL_MS));
 }
 
 export function runtimeVersion(): string {

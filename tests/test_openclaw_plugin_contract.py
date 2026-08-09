@@ -10,7 +10,7 @@ import pytest
 from agentguard_core import AuditEvent, ConfigAuditEvent, GuardEvent
 
 PLUGIN_ROOT = Path("packages/agentguard-openclaw-plugin").resolve()
-MAPPING_MODULE_URI = (PLUGIN_ROOT / "dist" / "mapping.js").as_uri()
+MAPPING_MODULE_URI = (PLUGIN_ROOT / "dist" / "mapping" / "index.js").as_uri()
 FIXTURES_URI = (
     PLUGIN_ROOT / "test" / "fixtures" / "runtime-mapping-samples.json"
 ).as_uri()

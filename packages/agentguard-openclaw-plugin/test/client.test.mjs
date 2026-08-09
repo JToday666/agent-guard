@@ -12,56 +12,56 @@ import {
   decisionToToolResult,
 } from "../dist/guard-api-client.js";
 
-const allowDecision = { decision: { decision: "allow", reason: "ok", safe_message: null }, approval: null };
-const denyDecision = { decision: { decision: "deny", reason: "blocked", safe_message: "no" }, approval: null };
+const allowDecision = {
+  decision: { decision: "allow", reason: "ok", safe_message: null },
+  approval: null,
+};
+const denyDecision = {
+  decision: { decision: "deny", reason: "blocked", safe_message: "no" },
+  approval: null,
+};
 const askDecision = {
   decision: { decision: "ask", reason: "review", safe_message: "needs review" },
-  approval: { approval_id: "app_001", status: "pending", decision_options: ["allow_once", "deny"] },
+  approval: {
+    approval_id: "app_001",
+    status: "pending",
+    decision_options: ["allow_once", "deny"],
+  },
 };
 
-test("buildPluginConfig uses safe defaults and env token fallback", () => {
-  const config = buildPluginConfig({}, { AGENTGUARD_ADAPTER_TOKEN: "env-token" });
+test("buildPluginConfig uses safe defaults with a resolved SecretRef token", () => {
+  const config = buildPluginConfig({ adapterToken: "resolved-token" });
 
   assert.equal(config.guardApiBaseUrl, "http://127.0.0.1:8088");
-  assert.equal(config.adapterToken, "env-token");
+  assert.equal(config.adapterToken, "resolved-token");
   assert.equal(config.enforcementMode, "enforce");
   assert.equal(config.requestTimeoutMs, 5000);
   assert.equal(config.approvalPollIntervalMs, 1000);
-  assert.equal(config.approvalTimeoutMs, 120000);
-  assert.equal(config.approvalWaitBudgetMs, 25000);
+  assert.equal(config.approvalTimeoutMs, 25000);
   assert.equal(config.diagnosticLogging, false);
-  assert.deepEqual(config.failClosedStages, [
-    "before_tool_call",
-    "message_sending",
-    "before_install",
-    "before_prompt_build",
-    "llm_input",
-  ]);
+  assert.equal(config.agentId, "main");
 });
 
-test("buildPluginConfig accepts approval budget and diagnostic logging", () => {
-  const config = buildPluginConfig(
-    {
-      approvalWaitBudgetMs: 2500,
-      diagnosticLogging: true,
-      runtimeId: "openclaw-gateway",
-      agentId: "openclaw-main",
-      enforcementMode: "observe",
-      failClosedStages: ["before_tool_call"],
-      redaction: { enabled: true, previewLimit: 1200 },
-      heartbeatIntervalMs: 30000,
-    },
-    { AGENTGUARD_ADAPTER_TOKEN: "env-token" },
-  );
+test("buildPluginConfig accepts the canonical public options", () => {
+  const config = buildPluginConfig({
+    adapterToken: "resolved-token",
+    approvalTimeoutMs: 2500,
+    diagnosticLogging: true,
+    agentId: "openclaw-main",
+    enforcementMode: "observe",
+  });
 
-  assert.equal(config.approvalWaitBudgetMs, 2500);
+  assert.equal(config.approvalTimeoutMs, 2500);
   assert.equal(config.diagnosticLogging, true);
-  assert.equal(config.runtimeId, "openclaw-gateway");
   assert.equal(config.agentId, "openclaw-main");
   assert.equal(config.enforcementMode, "observe");
-  assert.deepEqual(config.failClosedStages, ["before_tool_call"]);
-  assert.deepEqual(config.redaction, { enabled: true, previewLimit: 1200 });
-  assert.equal(config.heartbeatIntervalMs, 30000);
+});
+
+test("buildPluginConfig rejects a missing resolved SecretRef", () => {
+  assert.throws(
+    () => buildPluginConfig({}),
+    /adapterToken must be configured through an OpenClaw SecretRef/,
+  );
 });
 
 test("GuardApiClient sends bearer token without exposing it in errors", async () => {
@@ -99,20 +99,22 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
       approvalTimeoutMs: 10,
-      approvalWaitBudgetMs: 10,
       diagnosticLogging: false,
-      runtimeId: "openclaw-gateway",
       agentId: "openclaw-main",
-      failClosedStages: ["before_tool_call"],
-      redaction: { enabled: true, previewLimit: 2000 },
-      heartbeatIntervalMs: 60000,
     },
     fetchImpl: async (url, init) => {
-      requests.push({ url: String(url), init, body: JSON.parse(String(init.body)) });
-      return new Response(JSON.stringify({ status: "loaded", loaded: true, runtime: "openclaw" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
+      requests.push({
+        url: String(url),
+        init,
+        body: JSON.parse(String(init.body)),
       });
+      return new Response(
+        JSON.stringify({ status: "loaded", loaded: true, runtime: "openclaw" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     },
   });
 
@@ -120,19 +122,38 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
     pluginVersion: "0.1.0-beta.1",
     runtimeVersion: "2026.6.6",
     hooks: ["before_tool_call", "message_sending"],
-    capabilities: { event_types: ["tool_call_proposed", "message_send_proposed"] },
+    capabilities: {
+      event_types: ["tool_call_proposed", "message_send_proposed"],
+    },
   });
 
-  assert.equal(requests[0].url, "http://guard.test/v1/adapters/openclaw/heartbeat");
+  assert.equal(
+    requests[0].url,
+    "http://guard.test/v1/adapters/openclaw/heartbeat",
+  );
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
   assert.equal("runtime" in requests[0].body, false);
-  assert.equal(requests[0].body.runtime_id, "openclaw-gateway");
+  assert.equal(requests[0].body.runtime_id, "openclaw");
   assert.equal(requests[0].body.agent_id, "openclaw-main");
   assert.equal(requests[0].body.plugin_version, "0.1.0-beta.1");
-  assert.deepEqual(requests[0].body.hooks, ["before_tool_call", "message_sending"]);
+  assert.deepEqual(requests[0].body.hooks, [
+    "before_tool_call",
+    "message_sending",
+  ]);
   assert.equal(requests[0].body.hook_count, 2);
-  assert.equal(requests[0].body.expected_hook_count, OPENCLAW_REQUIRED_HOOK_COUNT);
-  assert.deepEqual(requests[0].body.fail_closed_stages, ["before_tool_call"]);
+  assert.equal(
+    requests[0].body.expected_hook_count,
+    OPENCLAW_REQUIRED_HOOK_COUNT,
+  );
+  assert.deepEqual(requests[0].body.fail_closed_stages, [
+    "before_tool_call",
+    "message_sending",
+    "before_install",
+    "before_agent_run",
+    "before_agent_finalize",
+    "tool_result_persist",
+    "before_message_write",
+  ]);
   assert.deepEqual(requests[0].body.capabilities.event_types, [
     "tool_call_proposed",
     "message_send_proposed",
@@ -151,7 +172,10 @@ test("GuardApiClient falls back to the canonical hook contract for an empty hear
     },
     fetchImpl: async (_url, init) => {
       requests.push(JSON.parse(String(init.body)));
-      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     },
   });
 
@@ -175,7 +199,8 @@ test("GuardApiClient fail-closed errors do not include adapter token", async () 
       approvalPollIntervalMs: 10,
       approvalTimeoutMs: 10,
     },
-    fetchImpl: async () => new Response("secret-token leaked by server", { status: 500 }),
+    fetchImpl: async () =>
+      new Response("secret-token leaked by server", { status: 500 }),
   });
 
   await assert.rejects(
@@ -189,13 +214,13 @@ test("GuardApiClient fail-closed errors do not include adapter token", async () 
 });
 
 test("decision adapters enforce allow deny ask and fail-closed results", async () => {
-  assert.equal((await decisionToToolResult(allowDecision, {})), undefined);
+  assert.equal(await decisionToToolResult(allowDecision, {}), undefined);
   assert.deepEqual(await decisionToToolResult(denyDecision, {}), {
     block: true,
     blockReason: "no",
   });
 
-  assert.equal((await decisionToMessageResult(allowDecision, {})), undefined);
+  assert.equal(await decisionToMessageResult(allowDecision, {}), undefined);
   assert.deepEqual(await decisionToMessageResult(denyDecision, {}), {
     cancel: true,
     cancelReason: "no",
@@ -203,7 +228,10 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
 
   assert.equal(
     await decisionToToolResult(askDecision, {
-      waitForApproval: async () => ({ status: "resolved", decision: "allow_once" }),
+      waitForApproval: async () => ({
+        status: "resolved",
+        decision: "allow_once",
+      }),
     }),
     undefined,
   );
@@ -222,7 +250,7 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
   );
 });
 
-test("GuardApiClient caps approval polling by per-hook budget", async () => {
+test("GuardApiClient caps approval polling by the single approval timeout", async () => {
   let waitCalls = 0;
   const client = new GuardApiClient({
     config: {
@@ -230,20 +258,22 @@ test("GuardApiClient caps approval polling by per-hook budget", async () => {
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 50,
-      approvalTimeoutMs: 120000,
-      approvalWaitBudgetMs: 5,
+      approvalTimeoutMs: 5,
       diagnosticLogging: false,
     },
     fetchImpl: async () => {
       waitCalls += 1;
-      return new Response(JSON.stringify({ status: "pending", decision: null }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ status: "pending", decision: null }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     },
   });
 
-  const approval = await client.waitForApproval("app_budget", 5);
+  const approval = await client.waitForApproval("app_budget");
 
   assert.equal(approval.status, "timeout");
   assert.equal(approval.decision, "deny");
@@ -261,7 +291,6 @@ test("GuardApiClient diagnostic logging redacts adapter token", async () => {
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
       approvalTimeoutMs: 10,
-      approvalWaitBudgetMs: 10,
       diagnosticLogging: true,
     },
     fetchImpl: async () => {
@@ -359,7 +388,10 @@ test("submitRuntimeOutcome treats 409 conflict as diagnostics without throwing",
     severity: null,
     blocked: true,
     reason: "conflict",
-    links: { event_id: "evt_conflict", policy_audit_id: "audit_policy_conflict" },
+    links: {
+      event_id: "evt_conflict",
+      policy_audit_id: "audit_policy_conflict",
+    },
   });
 
   assert.equal(result.ok, false);
@@ -406,23 +438,31 @@ test("submitRuntimeOutcome still rejects on server errors", async () => {
 
 test("decisionToToolResult reports outcome receipts for confirmed interventions", async () => {
   const denyOutcomes = [];
-  await decisionToToolResult(
-    denyDecision,
-    {},
-    (outcome) => denyOutcomes.push(outcome),
+  await decisionToToolResult(denyDecision, {}, (outcome) =>
+    denyOutcomes.push(outcome),
   );
   assert.equal(denyOutcomes.length, 1);
   assert.equal(denyOutcomes[0].kind, "pre_execution_deny");
   assert.equal(denyOutcomes[0].approval, null);
 
   const allowDecisionOutcome = [];
-  assert.equal(await decisionToToolResult(allowDecision, {}, (outcome) => allowDecisionOutcome.push(outcome)), undefined);
+  assert.equal(
+    await decisionToToolResult(allowDecision, {}, (outcome) =>
+      allowDecisionOutcome.push(outcome),
+    ),
+    undefined,
+  );
   assert.equal(allowDecisionOutcome.length, 0);
 
   const releaseOutcomes = [];
   await decisionToToolResult(
     askDecision,
-    { waitForApproval: async () => ({ status: "resolved", decision: "allow_once" }) },
+    {
+      waitForApproval: async () => ({
+        status: "resolved",
+        decision: "allow_once",
+      }),
+    },
     (outcome) => releaseOutcomes.push(outcome),
   );
   assert.equal(releaseOutcomes.length, 1);
@@ -453,13 +493,17 @@ test("decisionToToolResult reports outcome receipts for confirmed interventions"
 
 test("decisionToMessageResult reports cancel outcomes for message sends", async () => {
   const outcomes = [];
-  await decisionToMessageResult(denyDecision, {}, (outcome) => outcomes.push(outcome));
+  await decisionToMessageResult(denyDecision, {}, (outcome) =>
+    outcomes.push(outcome),
+  );
   assert.equal(outcomes.length, 1);
   assert.equal(outcomes[0].kind, "pre_execution_deny");
 
   const allowOutcomes = [];
   assert.equal(
-    await decisionToMessageResult(allowDecision, {}, (outcome) => allowOutcomes.push(outcome)),
+    await decisionToMessageResult(allowDecision, {}, (outcome) =>
+      allowOutcomes.push(outcome),
+    ),
     undefined,
   );
   assert.equal(allowOutcomes.length, 0);

@@ -79,7 +79,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - FPR、FNR、Block Rate、Latency 已在安全评测页展示；混淆矩阵由 `is_malicious + blocked` 派生。
 - 评测结果导入与读取后端接口已实现：`POST /v1/evaluations`、`GET /v1/evaluations`、`GET /v1/evaluations/datasets`、`GET /v1/evaluations/latest`、`GET /v1/evaluations/{run_id}`；run 支持 dataset digest、版本锁定、per-case provenance 和 regression gate 摘要。
 - `GET /v1/metrics/runtime` 已提供最小运行时监控聚合：审计事件计数、阻断率、hook 活跃度和 adapter status。
-- OpenClaw `before_prompt_build`、`llm_input` 已升级为执行型前置阻断面；`llm_output` 通过 `before_agent_finalize` 承接最终输出 revise；`tool_result_persist` 已按 Guard 决策隔离原始工具结果。
+- OpenClaw `before_agent_run` 已作为模型读取前的正式输入阻断面；`before_prompt_build`、`llm_input`、`llm_output` 保持观察型，输出策略评估由 `before_agent_finalize` 承接 revise，最终外发由 `message_sending` 裁决；`tool_result_persist` 同步执行本地净化、异步上报远端评估，工具消息在下一次 `before_agent_run` 再接受阻断裁决。
 - LangGraph demo graph 已在 planner 前接入 `context_assembled` / `model_input_prepared` 阻断，并在 tool calls 落地前接入 `model_output_produced` 阻断。
 - Dashboard 运行时延迟对比（LangGraph / OpenClaw）由 `latency_ms` 字段前端派生。
 

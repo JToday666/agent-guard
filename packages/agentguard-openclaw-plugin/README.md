@@ -4,12 +4,13 @@
 
 ## Hook 覆盖
 
-默认启用 22 个 hook：
+默认启用 23 个 hook：
 
 ```text
 before_tool_call
 message_sending
 before_install
+before_agent_run
 before_prompt_build
 llm_input
 llm_output
@@ -31,17 +32,21 @@ cron_changed
 resolve_exec_env
 ```
 
-默认 fail-closed 阶段：
+固定执行与 fail-closed 阶段：
 
 ```text
 before_tool_call
 message_sending
 before_install
-before_prompt_build
-llm_input
+before_agent_run
+before_agent_finalize
+tool_result_persist
+before_message_write
 ```
 
-其他观察类 hook 以审计和证据记录为主，Guard API 不可用时不应阻断 OpenClaw 基础生命周期。
+`before_agent_run` 是 OpenClaw 正式支持的模型输入 gate；`before_prompt_build`、`llm_input` 和 `llm_output` 是观察 hook，不再返回 SDK 不支持的伪 `block`。`before_agent_finalize` 可要求安全重写，最终外发仍由 `message_sending` 取消。`tool_result_persist` 和 `before_message_write` 是同步 hook，只执行本地脱敏、清洗或隔离；远端结果评估异步写入证据，不伪装成同步远端裁决。工具消息在进入下一次模型调用前，会在 `before_agent_run` 作为不可信上下文再次评估。
+
+其他生命周期观察 hook 只记录审计；Guard API 不可用时不阻断 OpenClaw 基础生命周期。
 
 ## 配置
 
@@ -50,16 +55,23 @@ OpenClaw plugin config 示例：
 ```json
 {
   "guardApiBaseUrl": "http://127.0.0.1:8088",
-  "adapterToken": "<AGENTGUARD_ADAPTER_TOKEN>",
+  "adapterToken": {
+    "source": "file",
+    "provider": "agentguard_adapter",
+    "id": "value"
+  },
+  "agentId": "main",
+  "enforcementMode": "enforce",
   "requestTimeoutMs": 5000,
   "approvalPollIntervalMs": 1000,
-  "approvalTimeoutMs": 120000,
-  "approvalWaitBudgetMs": 25000,
+  "approvalTimeoutMs": 25000,
   "diagnosticLogging": false
 }
 ```
 
-`adapterToken` 也可以通过 `AGENTGUARD_ADAPTER_TOKEN` 提供。`llm_input` 和 `llm_output` 若需要访问对话内容，OpenClaw 配置中应允许对应 conversation access；仓库级开发安装脚本会写入所需设置。
+`adapterToken` 只接受 OpenClaw SecretRef，OpenClaw 在插件注册前把它解析为字符串；明文 token 和插件内环境变量回退均不再支持。SecretRef provider 需在 OpenClaw 的 `secrets.providers` 中配置。仓库开发安装脚本会把根 `.env` 中的 token 写入权限为 `0600` 的 `.openclaw-dev/secrets/openclaw-adapter-token`，并配置 file SecretRef，token 不进入 OpenClaw 主配置。
+
+`agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`approvalTimeoutMs` 是唯一审批等待上限；插件会把 Guard API 请求超时、审批超时和轮询间隔一并计入阻断 hook 的 SDK timeout。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
 
 ## 验证
 
@@ -92,7 +104,9 @@ pnpm openclaw:plugin:uninstall
 - `pnpm openclaw:plugin:verify` 成功。
 - OpenClaw runtime inspect 能看到 `agentguard-security` 已加载。
 - Guard API 收到 heartbeat、审计事件和 runtime adapter 状态。
-- `before_tool_call`、`message_sending`、`before_install`、`before_prompt_build`、`llm_input` 能按策略 fail closed。
+- `before_tool_call`、`message_sending`、`before_install` 和 `before_agent_run` 能返回 SDK 正式支持的阻断结果。
+- `before_agent_finalize` 在策略拒绝或 Guard API 不可用时请求一次安全重写，`message_sending` 作为最终外发阻断面。
+- 同步持久化 hook 能完成本地脱敏/隔离，工具结果远端评估及下一次模型输入 gate 均有审计证据。
 - Dashboard 或 CLI 能查询到 OpenClaw 相关 audit、trace 和 provenance 数据。
 
 ## 边界

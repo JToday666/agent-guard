@@ -116,25 +116,33 @@ export function containsSensitiveText(value: string): boolean {
 }
 
 export function contextSourceSummaries(event: PromptBuildEventInput): string[] {
-  if (!Array.isArray(event.messages)) {
-    return [];
-  }
-  return event.messages
-    .map((item) => {
-      const record = asRecord(item);
-      return stringPreview(record.content ?? record.text ?? item);
-    })
-    .filter((item) => item.length > 0);
+  const messages = Array.isArray(event.messages)
+    ? event.messages.map((item) => {
+        const record = asRecord(item);
+        return stringPreview(record.content ?? record.text ?? item);
+      })
+    : [];
+  return [
+    ...messages,
+    stringPreview(event.prompt),
+    stringPreview(event.context),
+  ].filter(
+    (item, index, values) => item.length > 0 && values.indexOf(item) === index,
+  );
 }
 
 export function modelContentPreview(
-  hookName: "llm_input" | "llm_output",
+  hookName: "before_agent_run" | "llm_input" | "llm_output",
   event: ModelHookEventInput,
 ): string {
-  if (hookName === "llm_input") {
-    return stringPreview(
-      event.prompt ?? event.input ?? event.content ?? event.messages,
-    );
+  if (hookName !== "llm_output") {
+    return [
+      stringPreview(event.systemPrompt),
+      stringPreview(event.prompt ?? event.input ?? event.content),
+      stringPreview(event.messages),
+    ]
+      .filter((item) => item.length > 0)
+      .join("\n");
   }
   return stringPreview(
     event.output ??

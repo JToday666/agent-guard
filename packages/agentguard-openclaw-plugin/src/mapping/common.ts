@@ -90,6 +90,7 @@ export type ToolResultPersistEventInput = RuntimeSecurityFields & {
 
 export type PromptBuildEventInput = RuntimeSecurityFields & {
   prompt?: unknown;
+  systemPrompt?: unknown;
   messages?: unknown;
   context?: unknown;
   sanitized?: boolean;
@@ -98,6 +99,7 @@ export type PromptBuildEventInput = RuntimeSecurityFields & {
 
 export type ModelHookEventInput = RuntimeSecurityFields & {
   prompt?: unknown;
+  systemPrompt?: unknown;
   input?: unknown;
   output?: unknown;
   response?: unknown;

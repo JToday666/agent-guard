@@ -7,21 +7,23 @@ export type AgentGuardPluginConfig = {
   requestTimeoutMs: number;
   approvalPollIntervalMs: number;
   approvalTimeoutMs: number;
-  approvalWaitBudgetMs: number;
   diagnosticLogging: boolean;
-  runtimeId: string;
   agentId: string;
-  failClosedStages: string[];
-  redaction: RedactionConfig;
-  heartbeatIntervalMs: number;
 };
 
-export type OpenClawPluginConfigInput = Partial<AgentGuardPluginConfig> | undefined;
-
-export type RedactionConfig = {
-  enabled: boolean;
-  previewLimit: number;
-};
+/** OpenClaw resolves adapterToken SecretRef to a string before registration. */
+export type OpenClawPluginConfigInput =
+  | {
+      guardApiBaseUrl?: string;
+      adapterToken?: string;
+      enforcementMode?: AgentGuardPluginConfig["enforcementMode"];
+      requestTimeoutMs?: number;
+      approvalPollIntervalMs?: number;
+      approvalTimeoutMs?: number;
+      diagnosticLogging?: boolean;
+      agentId?: string;
+    }
+  | undefined;
 
 export type GuardEventType =
   | "tool_call_proposed"

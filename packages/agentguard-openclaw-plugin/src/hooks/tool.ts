@@ -1,65 +1,35 @@
-import type { PluginHookName } from "openclaw/plugin-sdk/types";
-
-import { OPENCLAW_OBSERVATION_HOOKS } from "../../hook-contract.mjs";
 import {
-  decisionToMessageResult,
   decisionToToolResult,
-  failClosedMessageResult,
   failClosedToolResult,
   logDiagnostic,
-  type GuardApiClient,
 } from "../guard-api-client.js";
-import type { AgentGuardPluginConfig } from "../types.js";
 import {
-  buildBeforeInstallConfigAuditEvent,
-  buildContextGuardEvent,
-  buildMessageSendGuardEvent,
-  buildModelGuardEvent,
-  buildRuntimeObservationAuditEvent,
   buildToolCallGuardEvent,
+  buildToolResultGuardEvent,
 } from "../mapping/index.js";
 import {
-  containsSensitiveCredentialText,
   redactUnknownCredentials,
   sanitizePersistentInstructionPoisoning,
-  stringPreview,
 } from "../security.js";
 import {
   asRecord,
-  firstNonEmptyString,
   rememberSessionState,
   rememberToolCallState,
-  setLimited,
-  stringMaybe,
   withCachedRuntimeFields,
   withCachedToolContext,
 } from "../runtime/state.js";
 import { fireRuntimeOutcomeReceipt } from "../runtime/outcome-receipt.js";
-import type { PolicyOutcomeContext } from "./context.js";
 import {
   blockingApprovalHookTimeoutMs,
-  decisionToBlockResult,
-  failClosedBlockResult,
   isDisabled,
   isEnforcing,
   isObserve,
   quarantinedToolResultMessage,
-  safeDecisionMessage,
-  shouldFailClosedRuntimeStage,
-  shouldRuntimeBlock,
 } from "../runtime/enforcement.js";
 import type { HookContext } from "./context.js";
 
 export function registerBeforeToolCall(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    policyOutcomeState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState, toolCallState } = hookContext;
   api.on(
     "before_tool_call",
     async (event, context) => {
@@ -76,23 +46,13 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
         );
         rememberToolCallState(toolCallState, guardEvent);
         const decision = await client.evaluate(guardEvent);
-        // 缓存本次策略评估上下文，供 tool_result_persist 回写 runtime_outcome。
-        const toolPayload = guardEvent.payload as { tool?: { call_id?: string } };
-        const callId = toolPayload.tool?.call_id;
-        if (callId) {
-          setLimited(policyOutcomeState, callId, {
-            guardEvent,
-            evaluation: decision,
-          } satisfies PolicyOutcomeContext);
-        }
         if (isObserve(config)) {
           return undefined;
         }
         return await decisionToToolResult(
           decision,
           {
-            waitForApproval: (approvalId) =>
-              client.waitForApproval(approvalId, config.approvalWaitBudgetMs),
+            waitForApproval: (approvalId) => client.waitForApproval(approvalId),
           },
           (outcome) => {
             fireRuntimeOutcomeReceipt({
@@ -119,24 +79,15 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
 }
 
 export function registerToolResultPersist(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    policyOutcomeState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState, toolCallState } = hookContext;
   api.on(
     "tool_result_persist",
-    ((event: object, context: object) => {
+    (event, context) => {
       if (isDisabled(config)) {
         return undefined;
       }
       const client = makeClient();
-      let message: unknown;
-      let persistCallId: string | undefined;
+      let message: unknown = event.message;
       try {
         const cached = withCachedToolContext(
           sessionState,
@@ -144,49 +95,47 @@ export function registerToolResultPersist(hookContext: HookContext): void {
           event,
           context,
         );
-        persistCallId = stringMaybe(asRecord(cached.event).toolCallId);
-        message = asRecord(event).message;
-        const redacted = redactUnknownCredentials(message);
+        const eventRecord = asRecord(cached.event);
+        const resultValue = eventRecord.result ?? eventRecord.message;
+        message = eventRecord.message;
+        const redacted = redactUnknownCredentials(resultValue);
+        const guardEvent = buildToolResultGuardEvent(
+          withToolResultValue(eventRecord, redacted.value),
+          cached.context,
+        );
         const sanitized = sanitizePersistentInstructionPoisoning(
           redacted.value,
         );
+        const modified = redacted.changed || sanitized.changed;
         void client
-          .submitRuntimeObservation(
-            buildRuntimeObservationAuditEvent(
-              "tool_result_persist",
-              { ...cached.event, message: sanitized.value },
-              cached.context,
-            ),
-          )
+          .evaluate(guardEvent)
+          .then((evaluation) => {
+            if (isEnforcing(config) && modified) {
+              fireRuntimeOutcomeReceipt({
+                client,
+                config,
+                guardEvent,
+                evaluation,
+                kind: "tool_result_quarantine",
+                resultDisposition: "modified",
+                stage: "tool_result_persist",
+                logLabel: "tool_result_persist",
+              });
+            }
+          })
           .catch((error) => {
-            logDiagnostic(config, "tool_result_persist observation failed", {
+            logDiagnostic(config, "tool_result_persist evaluation failed", {
               error: error instanceof Error ? error.message : String(error),
             });
           });
-        if (isEnforcing(config) && (redacted.changed || sanitized.changed)) {
-          // 结果被改写后持久化：tool_result_quarantine 干预，disposition=modified。
-          fireToolResultPersistOutcome(
-            client,
-            config,
-            policyOutcomeState,
-            persistCallId,
-            "modified",
-          );
+        if (isEnforcing(config) && modified) {
           return { message: sanitized.value as never };
         }
       } catch (error) {
         logDiagnostic(config, "tool_result_persist enforcement failed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        if (shouldFailClosedRuntimeStage(config, "tool_result_persist")) {
-          // fail-closed 隔离：disposition=quarantined。
-          fireToolResultPersistOutcome(
-            client,
-            config,
-            policyOutcomeState,
-            persistCallId,
-            "quarantined",
-          );
+        if (isEnforcing(config)) {
           return {
             message: quarantinedToolResultMessage(
               message,
@@ -197,36 +146,16 @@ export function registerToolResultPersist(hookContext: HookContext): void {
         return undefined;
       }
       return undefined;
-    }) as never,
+    },
     { priority: 0, timeoutMs: 2000 },
   );
 }
 
-/** 用 before_tool_call 缓存的策略上下文回写 tool_result_persist 干预回执。 */
-function fireToolResultPersistOutcome(
-  client: GuardApiClient,
-  config: AgentGuardPluginConfig,
-  policyOutcomeState: Map<string, PolicyOutcomeContext>,
-  callId: string | undefined,
-  disposition: "modified" | "quarantined",
-): void {
-  const policyContext = callId ? policyOutcomeState.get(callId) : undefined;
-  if (!policyContext) {
-    logDiagnostic(
-      config,
-      "tool_result_persist outcome skipped (no cached policy context)",
-      { call_id: callId ?? null },
-    );
-    return;
-  }
-  fireRuntimeOutcomeReceipt({
-    client,
-    config,
-    guardEvent: policyContext.guardEvent,
-    evaluation: policyContext.evaluation,
-    kind: "tool_result_quarantine",
-    resultDisposition: disposition,
-    stage: "tool_result_persist",
-    logLabel: "tool_result_persist",
-  });
+function withToolResultValue(
+  event: Record<string, unknown>,
+  value: unknown,
+): Record<string, unknown> {
+  return event.result === undefined
+    ? { ...event, message: value }
+    : { ...event, result: value };
 }

@@ -35,7 +35,7 @@ AttackCase
 - 审计证据：Guard API 记录 AuditEvent、决策原因、规则命中、风险分、Trace ID、审计哈希链和 provenance graph。
 - Dashboard：提供总览、调查、证据链、审批、评测和系统状态页面。
 - 评测靶场：内置 LangGraph demo agent、OpenClaw 外部 Agent 适配、Mock Tools、浏览器和 MCP/RAG 沙箱。
-- OpenClaw 插件：hook-only security plugin，默认注册 22 个 hook，并对关键执行阶段 fail closed。
+- OpenClaw 插件：hook-only security plugin，默认注册 23 个 hook；模型输入使用正式 `before_agent_run` gate，关键执行和持久化边界固定 fail closed。
 
 ## 数据集规模
 

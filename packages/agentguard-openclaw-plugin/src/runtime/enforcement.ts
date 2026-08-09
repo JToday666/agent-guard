@@ -23,7 +23,18 @@ export function isEnforcing(
 export function blockingApprovalHookTimeoutMs(
   config: ReturnType<typeof buildPluginConfig>,
 ): number {
-  return Math.max(10_000, config.approvalWaitBudgetMs + 2_000);
+  return (
+    config.requestTimeoutMs +
+    config.approvalTimeoutMs +
+    config.approvalPollIntervalMs +
+    2_000
+  );
+}
+
+export function guardRequestHookTimeoutMs(
+  config: ReturnType<typeof buildPluginConfig>,
+): number {
+  return config.requestTimeoutMs + 2_000;
 }
 
 export function shouldRuntimeBlock(
@@ -33,27 +44,38 @@ export function shouldRuntimeBlock(
   return isEnforcing(config) && response.decision.decision !== "allow";
 }
 
-export function shouldFailClosedRuntimeStage(
-  config: ReturnType<typeof buildPluginConfig>,
-  stage: string,
-): boolean {
-  return isEnforcing(config) && config.failClosedStages.includes(stage);
-}
-
-export function decisionToBlockResult(response: GuardEvaluationResponse): {
-  block: true;
-  blockReason: string;
-} {
+export function decisionToInputGateResult(response: GuardEvaluationResponse):
+  | { outcome: "pass" }
+  | {
+      outcome: "block";
+      reason: string;
+      message: string;
+      category: string;
+    } {
+  if (response.decision.decision === "allow") {
+    return { outcome: "pass" };
+  }
   return {
-    block: true,
-    blockReason: safeDecisionMessage(response),
+    outcome: "block",
+    reason: safeDecisionMessage(response),
+    message:
+      response.decision.safe_message ||
+      "AgentGuard blocked this request before model execution.",
+    category: "agentguard_policy",
   };
 }
 
-export function failClosedBlockResult(): { block: true; blockReason: string } {
+export function failClosedInputGateResult(): {
+  outcome: "block";
+  reason: string;
+  message: string;
+  category: string;
+} {
   return {
-    block: true,
-    blockReason: "AgentGuard is unavailable; blocked by fail-closed policy.",
+    outcome: "block",
+    reason: "AgentGuard input evaluation was unavailable.",
+    message: "AgentGuard is unavailable; the request was blocked.",
+    category: "agentguard_unavailable",
   };
 }
 
