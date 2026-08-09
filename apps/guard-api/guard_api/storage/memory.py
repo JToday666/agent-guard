@@ -34,8 +34,6 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
-    EvalMetricFilters,
-    EvalMetrics,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
@@ -49,7 +47,6 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
-from guard_api.services.metric_rules import aggregate_policy_metrics
 
 
 @dataclass(slots=True)
@@ -155,13 +152,6 @@ class MemoryControlPlaneStore:
         del event_id
         with self.policy_evaluation_lock:
             yield
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        # 按入链顺序传入，共享聚合器对重复逻辑键保留最早入链记录（§19.1）。
-        events = _filter_audit_events(
-            list(self.audit_events), filters or EvalMetricFilters()
-        )
-        return aggregate_policy_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         with self.provenance_lock:
@@ -529,7 +519,7 @@ def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:
 
 def _filter_audit_events(
     events: list[AuditEvent],
-    filters: AuditEventFilters | EvalMetricFilters,
+    filters: AuditEventFilters,
 ) -> list[AuditEvent]:
     if filters.trace_id is not None:
         events = [event for event in events if event.trace_id == filters.trace_id]

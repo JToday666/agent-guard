@@ -7,7 +7,6 @@ from typing import Any
 from agentguard_core import AuditEvent
 
 from guard_api.auth import ApiAuthError
-from guard_api.errors import error_response
 from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
 from guard_api.services.trace import (
     encode_conditional_document,
@@ -15,9 +14,7 @@ from guard_api.services.trace import (
 )
 from guard_api.storage.base import AuditIdConflictError
 from fastapi import Cookie, FastAPI, Header
-from fastapi.responses import JSONResponse, Response
-
-from guard_api.storage.base import AuditEventFilters
+from fastapi.responses import Response
 
 from .common import (
     bounded_limit,
@@ -47,7 +44,6 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     audit_service = context.audit_service
     trace_service = context.trace_service
     audit_window_service = context.audit_window_service
-    settings = context.settings
 
     @app.post("/v1/audit/events")
     def audit_event(
@@ -78,37 +74,9 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 status_code=409,
             ) from None
 
-    @app.get("/v1/audit/events")
-    def audit_events(
-        trace_id: str | None = None,
-        case_id: str | None = None,
-        runtime: str | None = None,
-        decision: str | None = None,
-        limit: int = 500,
-        authorization: str | None = Header(default=None),
-        agentguard_session: str | None = Cookie(default=None),
-    ) -> list[dict[str, Any]]:
-        verify_browser_or_bearer_read(
-            auth,
-            required_scope="audit:read",
-            authorization=authorization,
-            agentguard_session=agentguard_session,
-        )
-        filters = AuditEventFilters(
-            trace_id=trace_id,
-            case_id=case_id,
-            runtime=runtime,
-            decision=decision,
-            limit=bounded_limit(limit),
-        )
-        return [
-            event.model_dump(mode="json")
-            for event in audit_service.list_events(filters)
-        ]
-
     @app.get("/v1/audit/window", response_model=None)
     def audit_window(
-        limit: int = 500,
+        limit: int | None = None,
         trace_id: str | None = None,
         case_id: str | None = None,
         runtime: str | None = None,
@@ -116,11 +84,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         cursor: str | None = None,
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
-    ) -> dict[str, Any] | JSONResponse:
-        # 契约 §14.1：feature flag 关闭时端点不存在。
-        if not settings.audit_window_enabled:
-            return error_response("NOT_FOUND", status_code=404)
-        # 契约 §5.1：bearer 需同时具备 audit:read 与 metrics:read。
+    ) -> dict[str, Any]:
         verify_browser_or_bearer_scopes(
             auth,
             required_scopes=("audit:read", "metrics:read"),
@@ -128,7 +92,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             agentguard_session=agentguard_session,
         )
         return audit_window_service.get_window(
-            limit=bounded_limit(limit),
+            limit=bounded_limit(limit) if limit is not None else None,
             trace_id=trace_id,
             case_id=case_id,
             runtime=runtime,

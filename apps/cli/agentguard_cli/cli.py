@@ -100,11 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--output", help="Write JSONL to this file instead of stdout")
     export.set_defaults(handler=_cmd_audit_export)
 
-    metrics = subcommands.add_parser("metrics", help="Read evaluation metrics")
-    metrics.add_argument("--trace-id")
+    metrics = subcommands.add_parser("metrics", help="Read policy evaluation metrics")
+    metrics.add_argument("--evaluated-from")
+    metrics.add_argument("--evaluated-to")
+    metrics.add_argument("--outcomes-as-of")
     metrics.add_argument("--case-id")
     metrics.add_argument("--runtime")
-    metrics.add_argument("--decision")
     metrics.add_argument("--json", action="store_true", help="Print JSON response")
     metrics.set_defaults(handler=_cmd_metrics)
 
@@ -236,19 +237,39 @@ def _cmd_audit_export(
             "limit": args.limit,
         }
     )
-    payload = _request_json(
-        "GET", "/v1/audit/events", env=env, transport=transport, params=params
-    )
-    if not isinstance(payload, list):
-        raise CliError("Guard API response for audit export was not a list")
+    events: list[Any] = []
+    cursor: str | None = None
+    if args.limit <= 0:
+        raise CliError("--limit must be greater than zero", exit_code=2)
+    page_limit = min(args.limit, 1000)
+    while len(events) < args.limit:
+        page_params = (
+            {**params, "limit": page_limit} if cursor is None else {"cursor": cursor}
+        )
+        payload = _request_json(
+            "GET", "/v1/audit/window", env=env, transport=transport, params=page_params
+        )
+        if not isinstance(payload, dict):
+            raise CliError("Guard API response for audit export was not an object")
+        page_events = payload.get("events")
+        scope = payload.get("scope")
+        if not isinstance(page_events, list) or not isinstance(scope, dict):
+            raise CliError("Guard API audit window response was incomplete")
+        events.extend(page_events[: args.limit - len(events)])
+        if scope.get("has_more") is not True:
+            break
+        next_cursor = scope.get("next_cursor")
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
+            raise CliError("Guard API audit window cursor was invalid")
+        cursor = next_cursor
     lines = "".join(
-        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in payload
+        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in events
     )
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(lines, encoding="utf-8")
-        stdout.write(f"Wrote {len(payload)} audit events to {output_path}\n")
+        stdout.write(f"Wrote {len(events)} audit events to {output_path}\n")
     else:
         stdout.write(lines)
     return 0
@@ -262,16 +283,23 @@ def _cmd_metrics(
     transport: httpx.BaseTransport | None,
     **_: Any,
 ) -> int:
+    if not args.evaluated_from or not args.evaluated_to:
+        raise CliError("--evaluated-from and --evaluated-to are required", exit_code=2)
     params = _filter_params(
         {
-            "trace_id": args.trace_id,
+            "evaluated_from": args.evaluated_from,
+            "evaluated_to": args.evaluated_to,
+            "outcomes_as_of": args.outcomes_as_of,
             "case_id": args.case_id,
             "runtime": args.runtime,
-            "decision": args.decision,
         }
     )
     payload = _request_json(
-        "GET", "/v1/metrics/eval", env=env, transport=transport, params=params
+        "GET",
+        "/v1/metrics/policy-evaluations",
+        env=env,
+        transport=transport,
+        params=params,
     )
     if args.json:
         _write_json(stdout, payload)
@@ -498,18 +526,22 @@ def _json_text(payload: Any) -> str:
 def _format_metrics(payload: Any) -> str:
     if not isinstance(payload, dict):
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    metrics = payload.get("policy_metrics")
+    if not isinstance(metrics, dict):
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
     keys = [
-        "event_count",
+        "evaluation_count",
         "allow_count",
         "deny_count",
         "ask_count",
-        "blocked_count",
-        "block_rate",
-        "fpr",
-        "fnr",
-        "average_latency_ms",
+        "intervention_rate",
+        "policy_deny_rate",
+        "approval_trigger_rate",
+        "policy_intervention_fpr",
+        "policy_intervention_fnr",
+        "average_decision_latency_ms",
     ]
-    parts = [f"{key}={payload[key]}" for key in keys if key in payload]
+    parts = [f"{key}={metrics[key]}" for key in keys if key in metrics]
     return (
         " ".join(parts)
         if parts

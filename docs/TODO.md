@@ -115,8 +115,8 @@ OpenClaw 状态不是每次 Dashboard 刷新实时 shell 探测，而是最近�
 {
   "status": "loaded",
   "loaded": true,
-  "hook_count": 22,
-  "expected_hook_count": 22,
+  "hook_count": 23,
+  "expected_hook_count": 23,
   "last_verified_at": "2026-06-28T00:00:00+00:00",
   "error": null,
   "source": "agentguardctl"
@@ -138,7 +138,7 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 
 - `EvaluationPage` 读取 `/v1/evaluations/latest`，展示 latest run、ASR before/after、per-attack ASR 和 cases 样本追踪。
 - `OverviewPage` 与 `EvaluationPage` 只展示当前审计窗口内逻辑唯一策略评估的决策、介入、标注和判定延迟。
-- 当前兼容路径读取 `/v1/audit/events` 并将窗口完整性保持为未知；不再自动请求 `/v1/metrics/eval`。
+- API 模式读取 `/v1/audit/window`，将服务端 scope、events 和 policy_metrics 作为一个原子窗口更新。
 - `SystemPage` 读取 `/v1/adapters/openclaw/status`，展示 OpenClaw verify/heartbeat、hook 覆盖、版本、来源和错误状态。
 - `SystemPage` 读取 `/v1/config-audit/findings`，展示配置审计 finding 明细、严重性分布、目标、建议和证据链入口。
 
@@ -150,8 +150,8 @@ E2E / reliability runner 会把门禁摘要写入 `capabilities.release_gates`�
 - `[~]` 目标契约已冻结，但代码或跨组件迁移尚未完成；
 - `[ ]` 尚未实现。
 
-详细请求、响应、字段、示例、兼容和验收目标见
-[证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)。该目标契约已于
+详细请求、响应、字段、示例和验收目标见
+[证据链与溯源 API 契约](08_api/evidence_trace_api_contract.md)。该契约已于
 2026-08-05 冻结。Schema、Core 类型和 Guard API 基础双读已经支持 AuditEvent
 `0.3 | 0.4`。Guard API writer、稳定 links、结构化 evidence、LangGraph 运行时回执、
 Trace 窗口与独立 ETag、丰富 Provenance writer 和 Dashboard 三视图均已进入代码；真实

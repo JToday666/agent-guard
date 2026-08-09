@@ -12,7 +12,7 @@ from agentguard_core import (
     PolicyBundle,
 )
 
-from guard_api.storage.base import AuditEventFilters, ControlPlaneStore
+from guard_api.storage.base import ControlPlaneStore
 
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
@@ -55,9 +55,6 @@ class AuditService:
             "created": is_new,
             "idempotent_replay": not is_new,
         }
-
-    def list_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
-        return self.store.list_audit_events(filters)
 
     def record_evaluation(
         self,

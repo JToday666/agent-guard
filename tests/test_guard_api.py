@@ -949,7 +949,10 @@ def test_http_llm_approval_reviewer_sends_evidence_only_request() -> None:
 
 def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
     settings = GuardApiSettings(control_token="control-secret")
-    app = create_app(store=memory_store_with_adapter(), settings=settings)
+    app = create_app(
+        store=memory_store_with_adapter(runtime="openclaw", agent_id="openclaw"),
+        settings=settings,
+    )
     client = TestClient(app)
     event = _p1_guard_event_payload(
         event_id="evt_rag_answer_approval",
@@ -1015,7 +1018,7 @@ def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
     )
 
 
-def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
+def test_guard_evaluate_writes_atomic_dashboard_audit_window() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
@@ -1028,11 +1031,10 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert decision_response.status_code == 200
     _login_dashboard(client, control_token="control-secret")
 
-    events_response = client.get("/v1/audit/events")
-    metrics_response = client.get("/v1/metrics/eval")
+    events_response = client.get("/v1/audit/window")
 
     assert events_response.status_code == 200
-    event = events_response.json()[0]
+    event = events_response.json()["events"][0]
     assert event["trace_id"] == "trace_api"
     assert event["case_id"] == "PI-API"
     assert event["decision"] == "ask"
@@ -1051,9 +1053,9 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert event["metadata"]["source_trust"] == "untrusted"
     assert event["metadata"]["agent_id"] == "main"
     assert event["metadata"]["current_step"] == "before_tool"
-    assert metrics_response.status_code == 200
-    assert metrics_response.json()["event_count"] == 1
-    assert metrics_response.json()["ask_count"] == 1
+    metrics = events_response.json()["policy_metrics"]
+    assert metrics["evaluation_count"] == 1
+    assert metrics["ask_count"] == 1
 
 
 def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() -> None:
@@ -1072,7 +1074,7 @@ def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() ->
     assert policy_audit_id
 
     _login_dashboard(client, control_token="control-secret")
-    events = client.get("/v1/audit/events").json()
+    events = client.get("/v1/audit/window").json()["events"]
     policy_events = [
         event for event in events if event.get("record_type") == "policy_evaluation"
     ]
@@ -1138,20 +1140,18 @@ def test_control_token_can_read_cli_endpoints_without_browser_session() -> None:
     assert decision_response.status_code == 200
 
     headers = {"Authorization": "Bearer control-secret"}
-    events_response = client.get("/v1/audit/events", headers=headers)
+    events_response = client.get("/v1/audit/window", headers=headers)
     integrity_response = client.get("/v1/audit/integrity", headers=headers)
-    metrics_response = client.get("/v1/metrics/eval", headers=headers)
     trace_response = client.get("/v1/traces/trace_api", headers=headers)
     provenance_response = client.get("/v1/traces/trace_api/provenance", headers=headers)
     policy_response = client.get("/v1/policies/current", headers=headers)
     history_response = client.get("/v1/policies/history", headers=headers)
 
     assert events_response.status_code == 200
-    assert events_response.json()[0]["trace_id"] == "trace_api"
+    assert events_response.json()["events"][0]["trace_id"] == "trace_api"
     assert integrity_response.status_code == 200
     assert integrity_response.json()["valid"] is True
-    assert metrics_response.status_code == 200
-    assert metrics_response.json()["event_count"] == 1
+    assert events_response.json()["policy_metrics"]["evaluation_count"] == 1
     assert trace_response.status_code == 200
     assert trace_response.json()["trace_id"] == "trace_api"
     assert provenance_response.status_code == 200
@@ -1168,8 +1168,12 @@ def test_adapter_token_cannot_read_cli_endpoints() -> None:
     client = TestClient(app)
     headers = {"Authorization": "Bearer adapter-secret"}
 
-    events_response = client.get("/v1/audit/events", headers=headers)
-    metrics_response = client.get("/v1/metrics/eval", headers=headers)
+    events_response = client.get("/v1/audit/window", headers=headers)
+    metrics_response = client.get(
+        "/v1/metrics/policy-evaluations"
+        "?evaluated_from=2026-01-01T00:00:00Z&evaluated_to=2027-01-01T00:00:00Z",
+        headers=headers,
+    )
     trace_response = client.get("/v1/traces/trace_api", headers=headers)
     policy_response = client.get("/v1/policies/current", headers=headers)
 
@@ -1215,10 +1219,10 @@ def test_guard_evaluate_records_canonical_resource_when_explicit_resources_are_w
     assert decision_response.json()["decision"]["decision"] == "deny"
     _login_dashboard(client, control_token="control-secret")
 
-    events_response = client.get("/v1/audit/events?trace_id=trace_wrong_resources")
+    events_response = client.get("/v1/audit/window?trace_id=trace_wrong_resources")
 
     assert events_response.status_code == 200
-    event = events_response.json()[0]
+    event = events_response.json()["events"][0]
     assert event["resource_targets"][0] == "/private/token.txt"
     assert "/docs/public.txt" in event["resource_targets"]
     assert event["rule_hits"] == ["P001_sensitive_file_access"]
@@ -1265,11 +1269,11 @@ def test_config_audit_evaluate_persists_dashboard_evidence_metadata() -> None:
     assert response.json()["decision"] == "block"
     _login_dashboard(client, control_token="control-secret")
     events_response = client.get(
-        "/v1/audit/events?trace_id=trace_config_audit_evidence"
+        "/v1/audit/window?trace_id=trace_config_audit_evidence"
     )
 
     assert events_response.status_code == 200
-    audit_event = events_response.json()[0]
+    audit_event = events_response.json()["events"][0]
     assert audit_event["event_type"] == "config_audit"
     assert audit_event["resource_targets"] == ["third-party-evidence"]
     assert audit_event["metadata"]["user_task"] == "Install reviewed plugins only"
@@ -1370,14 +1374,14 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
 
     _login_dashboard(client, control_token="control-secret")
     context_response = client.get(
-        "/v1/audit/events?trace_id=trace_openclaw_context_evidence"
+        "/v1/audit/window?trace_id=trace_openclaw_context_evidence"
     )
     result_response = client.get(
-        "/v1/audit/events?trace_id=trace_openclaw_result_evidence"
+        "/v1/audit/window?trace_id=trace_openclaw_result_evidence"
     )
 
     assert context_response.status_code == 200
-    context_audit = context_response.json()[0]
+    context_audit = context_response.json()["events"][0]
     assert (
         context_audit["metadata"]["user_task"]
         == "Summarize external documentation safely"
@@ -1385,7 +1389,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
     assert context_audit["resource_targets"] == ["https://docs.example.test/context"]
 
     assert result_response.status_code == 200
-    result_audit = result_response.json()[0]
+    result_audit = result_response.json()["events"][0]
     assert (
         result_audit["metadata"]["user_task"]
         == "Summarize external documentation safely"
@@ -1624,11 +1628,10 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
         approval_id = None
 
     _login_dashboard(client, control_token="control-secret")
-    events_response = client.get(f"/v1/audit/events?trace_id={event['trace_id']}")
-    metrics_response = client.get(f"/v1/metrics/eval?trace_id={event['trace_id']}")
+    events_response = client.get(f"/v1/audit/window?trace_id={event['trace_id']}")
 
     assert events_response.status_code == 200
-    audit_event = events_response.json()[0]
+    audit_event = events_response.json()["events"][0]
     assert audit_event["event_type"] == event["event_type"]
     assert audit_event["decision"] == expected_decision
     assert audit_event["resource_targets"] == expected_resource_targets
@@ -1678,9 +1681,8 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
         assert approval["action_id"] == expected_action_id
         assert approval["action_name"] == expected_display_action_name
 
-    assert metrics_response.status_code == 200
-    metrics = metrics_response.json()
-    assert metrics["event_count"] == 1
+    metrics = events_response.json()["policy_metrics"]
+    assert metrics["evaluation_count"] == 1
     assert metrics[f"{expected_decision}_count"] == 1
 
 
@@ -2096,7 +2098,7 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
         ),
     )
     _login_dashboard(client, control_token="control-secret")
-    events_response = client.get("/v1/audit/events?trace_id=trace_memory_runtime_link")
+    events_response = client.get("/v1/audit/window?trace_id=trace_memory_runtime_link")
 
     assert response.status_code == 200
     assert response.json()["decision"]["decision"] == "deny"
@@ -2107,7 +2109,7 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
     assert memory_change.status == "quarantined"
     assert memory_change.trace_id == "trace_memory_runtime_link"
     assert events_response.status_code == 200
-    audit_event = events_response.json()[0]
+    audit_event = events_response.json()["events"][0]
     assert audit_event["links"]["memory_change_id"] == memory_change.change_id
     assert audit_event["metadata"]["memory_namespace"] == "user_preferences"
 
@@ -2518,15 +2520,15 @@ def test_audit_events_plural_write_and_filter_for_dashboard() -> None:
     _login_dashboard(client)
 
     events_response = client.get(
-        "/v1/audit/events?trace_id=trace_keep&decision=deny&limit=5"
+        "/v1/audit/window?trace_id=trace_keep&decision=deny&limit=5"
     )
 
     assert events_response.status_code == 200
-    events = events_response.json()
+    events = events_response.json()["events"]
     assert [event["audit_id"] for event in events] == ["audit_keep"]
 
 
-def test_metrics_can_be_filtered_for_dashboard() -> None:
+def test_atomic_audit_window_metrics_can_be_filtered_for_dashboard() -> None:
     store = memory_store_with_adapter()
     store.add_audit_event(
         _audit_event_model(
@@ -2565,19 +2567,19 @@ def test_metrics_can_be_filtered_for_dashboard() -> None:
     client = TestClient(app)
     _login_dashboard(client)
 
-    metrics_response = client.get("/v1/metrics/eval?runtime=langgraph")
+    metrics_response = client.get("/v1/audit/window?runtime=langgraph")
 
     assert metrics_response.status_code == 200
-    metrics = metrics_response.json()
-    assert metrics["event_count"] == 2
+    metrics = metrics_response.json()["policy_metrics"]
+    assert metrics["evaluation_count"] == 2
     assert metrics["allow_count"] == 1
     assert metrics["deny_count"] == 1
     assert metrics["ask_count"] == 0
-    assert metrics["blocked_count"] == 1
-    assert metrics["block_rate"] == 0.5
-    assert metrics["fpr"] == 0.0
-    assert metrics["fnr"] == 0.0
-    assert metrics["average_latency_ms"] == 20.0
+    assert metrics["intervention_count"] == 1
+    assert metrics["intervention_rate"] == 0.5
+    assert metrics["policy_intervention_fpr"] == 0.0
+    assert metrics["policy_intervention_fnr"] == 0.0
+    assert metrics["average_decision_latency_ms"] == 20.0
 
 
 def test_trace_detail_requires_browser_session() -> None:
@@ -2590,7 +2592,7 @@ def test_trace_detail_requires_browser_session() -> None:
     assert response.json()["error"]["code"] == "SESSION_INVALID"
 
 
-def test_trace_detail_aggregates_audit_approval_and_metrics() -> None:
+def test_trace_detail_aggregates_audit_approval_and_window_scope() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
@@ -2611,8 +2613,11 @@ def test_trace_detail_aggregates_audit_approval_and_metrics() -> None:
     assert trace["trace_id"] == "trace_api"
     assert [event["trace_id"] for event in trace["audit_events"]] == ["trace_api"]
     assert [approval["approval_id"] for approval in trace["approvals"]] == [approval_id]
-    assert trace["metrics"]["event_count"] == 1
-    assert trace["metrics"]["ask_count"] == 1
+    assert trace["audit_window"] == {
+        "limit": 1000,
+        "returned_count": 1,
+        "has_more": False,
+    }
 
 
 def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
@@ -2765,10 +2770,10 @@ def test_guard_api_accepts_and_returns_audit_event_04() -> None:
 
     _login_dashboard(client, control_token="control-secret")
 
-    read_response = client.get("/v1/audit/events?trace_id=trace_v04_api")
+    read_response = client.get("/v1/audit/window?trace_id=trace_v04_api")
 
     assert read_response.status_code == 200
-    events = read_response.json()
+    events = read_response.json()["events"]
     assert len(events) == 1
     assert events[0]["schema_version"] == "0.4"
     assert events[0]["record_type"] == "runtime_observation"

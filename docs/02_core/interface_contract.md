@@ -43,9 +43,9 @@ Runtime Native Event
 | `GET /health?check_db=true` | P0 | Control Plane 数据库连接健康检查 |
 | `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
 | `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
-| `GET /v1/audit/events` | P0 | Dashboard/CLI 事件列表，可按 query 过滤 |
+| `GET /v1/audit/window` | P0 | Dashboard/CLI 原子审计窗口，同时返回 scope、事件和策略指标 |
 | `GET /v1/audit/integrity` | P0 | Dashboard/CLI 审计完整性状态 |
-| `GET /v1/metrics/eval` | P0 | 评测指标，可按 query 过滤 |
+| `GET /v1/metrics/policy-evaluations` | P0 | 按明确时间 cohort 聚合历史策略指标 |
 | `GET /v1/metrics/runtime` | P1 | 运行时监控指标，聚合审计事件、hook 活跃度和 adapter status |
 | `POST /v1/evaluations` | P1 | 导入并保存 AttackBench/Core matrix 等评测 run |
 | `GET /v1/evaluations` | P1 | 查询已保存评测 run，可按 dataset 过滤 |
@@ -72,7 +72,8 @@ Runtime Native Event
 
 目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
 历史文档中的 `POST /v1/eval/runs` 已统一为当前实现的 `/v1/evaluations` 系列接口。
-`GET /v1/metrics/eval` 面向评测统计；`GET /v1/metrics/runtime` 面向运行时健康和 hook 活跃度，不替代评测指标。
+`GET /v1/metrics/policy-evaluations` 面向历史策略统计；`GET /v1/metrics/runtime`
+面向运行时健康和 hook 活跃度，两者不共用分母或状态。
 
 ## 4. 鉴权与状态
 
@@ -99,7 +100,7 @@ Adapter credential 由 Control Plane 签发，原始 token 只返回一次，数
 Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/history` 接受 browser session 或 control token + `policy:read`，`PUT /v1/policies/current` 需要 browser session 和 `X-AgentGuard-CSRF`。Adapter token 不能读取或写入策略。
 `PUT /v1/policies/current` 替换单 current snapshot，并追加 history revision；Control Plane 必须保证并发写入时 revision 单调递增且 history 不丢失。
 
-除 `GET /health?check_db=true` 的数据库降级响应仍保持 `{"status":"degraded","database":"error"}` 外，Guard API 非 2xx 错误统一使用兼容 envelope：
+除 `GET /health?check_db=true` 的数据库降级响应使用 `{"status":"degraded","database":"error"}` 外，Guard API 非 2xx 错误统一使用以下 envelope：
 
 ```json
 {
@@ -117,11 +118,11 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 }
 ```
 
-既有客户端可以继续只读取 `error.code`；`message` 和 `details` 是向后兼容扩展字段。
+`error.code` 是程序分支依据；`message` 用于人类可读摘要，`details` 用于结构化诊断。
 
 ## 4.1 查询参数
 
-`GET /v1/audit/events` 支持以下可选 query 参数：
+`GET /v1/audit/window` 支持以下 query 参数：
 
 | 参数       | 含义                          |
 | ---------- | ----------------------------- |
@@ -129,9 +130,16 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 | `case_id`  | 只返回指定 case 的审计事件    |
 | `runtime`  | 只返回指定 runtime 的审计事件 |
 | `decision` | 只返回指定决策的审计事件      |
-| `limit`    | 返回条数，默认 500，最大 1000 |
+| `limit`    | 首页返回条数，默认 500，最大 1000 |
+| `cursor`   | 续页不透明指针；续页时只需提交该字段 |
 
-`GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
+`GET /v1/audit/window` 以审计链 sequence 固化快照。cursor 绑定快照、过滤条件、页大小和位置；新写入不得移动已返回页。
+
+`GET /v1/metrics/policy-evaluations` 必须提交 `evaluated_from` 和
+`evaluated_to`，可选 `outcomes_as_of`、`runtime` 和 `case_id`。时间使用带时区
+RFC 3339，范围语义为 `[evaluated_from, evaluated_to)`。
+缺失范围返回 `COHORT_RANGE_MISSING`，格式、时区或顺序无效返回
+`COHORT_RANGE_INVALID`。
 
 `GET /v1/metrics/runtime` 支持 `runtime` 和 `limit`。返回总体审计事件计数、阻断率、平均延迟、`by_runtime` 分组、`hook_activity` 计数、`adapters` 最近状态和 `active_adapter_count`。
 
@@ -157,16 +165,10 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
   "trace_id": "trace_001",
   "audit_events": [],
   "approvals": [],
-  "metrics": {
-    "event_count": 0,
-    "allow_count": 0,
-    "deny_count": 0,
-    "ask_count": 0,
-    "blocked_count": 0,
-    "block_rate": null,
-    "fpr": null,
-    "fnr": null,
-    "average_latency_ms": null
+  "audit_window": {
+    "limit": 1000,
+    "returned_count": 0,
+    "has_more": false
   }
 }
 ```

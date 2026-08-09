@@ -2,8 +2,8 @@ import type {
   GuardAdapterStatusDto,
   GuardApprovalDto,
   GuardApprovalResolutionDto,
-  GuardAuditEventDto,
   GuardAuditIntegrityDto,
+  GuardAuditWindowDto,
   GuardConfigAuditFindingRecordDto,
   GuardEvaluationRunDto,
   GuardPolicyBundleDto,
@@ -21,8 +21,8 @@ import {
   emptyEvaluationRun,
   mapAdapterStatus,
   mapApproval,
-  mapAuditEvent,
   mapAuditIntegrity,
+  mapAuditWindow,
   mapConfigAuditFindingRecord,
   mapEvaluationRun,
   mapHealth,
@@ -32,7 +32,6 @@ import {
   mapTraceDetail,
 } from "../../api/guard-api-mappers";
 import { mergeApprovalsWithAuditEvidence } from "../approvals/evidence";
-import { createAuditWindow } from "../dashboard/metrics";
 import type {
   ApprovalRequest,
   ApprovalResolution,
@@ -70,16 +69,12 @@ function buildConfigFindingQueryString(filters: ConfigAuditFindingFilters = {}):
 
 export class ApiDashboardDataSource implements DashboardDataSource {
   async getAuditWindow(filters?: EventFilters, signal?: AbortSignal) {
-    const rows = await requestJson<GuardAuditEventDto[]>(
-      `/audit/events${buildQueryString(filters, true)}`,
+    const response = await requestJson<GuardAuditWindowDto>(
+      `/audit/window${buildQueryString(filters, true)}`,
       {},
       signal,
     );
-    return createAuditWindow(rows.map(mapAuditEvent), {
-      limit: AUDIT_EVENT_WINDOW_LIMIT,
-      hasMore: null,
-      source: "legacy_audit_events",
-    });
+    return mapAuditWindow(response);
   }
 
   async getPendingApprovals(signal?: AbortSignal) {

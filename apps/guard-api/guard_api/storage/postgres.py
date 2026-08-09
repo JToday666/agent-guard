@@ -42,8 +42,6 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
-    EvalMetricFilters,
-    EvalMetrics,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
@@ -57,7 +55,6 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
-from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
     adapter_statuses,
@@ -316,21 +313,6 @@ class PostgresControlPlaneStore:
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
         return verify_audit_chain(AuditEvent.model_validate(row) for row in rows)
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        # 保留 where 下推取事件，聚合口径交由跨存储共享聚合器（§19）。
-        filters = filters or EvalMetricFilters()
-        where_sql, params = _metric_where_clause(filters)
-        stmt = text(f"""
-            SELECT payload_json
-            FROM audit_events
-            {where_sql}
-            ORDER BY sequence ASC, audit_id ASC
-            """)
-        with self._session_factory() as session:
-            rows = session.execute(stmt, params).scalars().all()
-        events = [AuditEvent.model_validate(row) for row in rows]
-        return aggregate_policy_metrics(events)
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         with self._session_factory() as session:
@@ -1144,19 +1126,6 @@ def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
     if query.decision is not None:
         conditions.append(_json_text("decision") == query.decision)
     return conditions
-
-
-def _metric_where_clause(filters: EvalMetricFilters) -> tuple[str, dict[str, str]]:
-    clauses: list[str] = []
-    params: dict[str, str] = {}
-    for key in ("trace_id", "case_id", "runtime", "decision"):
-        value = getattr(filters, key)
-        if value is not None:
-            clauses.append(f"payload_json ->> '{key}' = :{key}")
-            params[key] = value
-    if not clauses:
-        return "", params
-    return "WHERE " + " AND ".join(clauses), params
 
 
 def _json_text(key: str) -> Any:

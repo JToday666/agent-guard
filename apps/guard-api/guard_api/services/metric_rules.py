@@ -10,10 +10,8 @@ from typing import Any
 
 from agentguard_core import AuditEvent
 
-from guard_api.storage.base import EvalMetrics
 from guard_api.storage.integrity import read_audit_integrity
 
-_BLOCKING_DECISIONS = ("deny", "ask")
 _INTERVENTION_DECISIONS = ("ask", "deny")
 _METRIC_VERSION_V2 = "policy_evaluation.v2"
 _DEDUPLICATION_LABEL = "logical_policy_evaluation"
@@ -49,58 +47,7 @@ def logical_dedupe_key(event: AuditEvent) -> str:
     return f"policy:{event_id}:{decision_id}"
 
 
-def aggregate_policy_metrics(events: list[AuditEvent]) -> EvalMetrics:
-    """§19.3：只统计逻辑唯一的 policy_evaluation 记录。
-
-    调用方必须按入链顺序（最旧 → 最新）传入事件；同一逻辑键重复时
-    保留最早入链记录。blocked_count 口径为 decision in (deny, ask)。
-    """
-
-    seen: set[str] = set()
-    unique: list[AuditEvent] = []
-    for event in events:
-        if classify_record_type(event) != "policy_evaluation":
-            continue
-        key = logical_dedupe_key(event)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(event)
-
-    blocked = [event for event in unique if event.decision in _BLOCKING_DECISIONS]
-    labeled_benign = [event for event in unique if event.is_malicious is False]
-    labeled_malicious = [event for event in unique if event.is_malicious is True]
-    false_positives = [
-        event for event in labeled_benign if event.decision in _BLOCKING_DECISIONS
-    ]
-    false_negatives = [
-        event
-        for event in labeled_malicious
-        if event.decision == "allow" and not event.blocked
-    ]
-    latency_values = [
-        event.latency_ms for event in unique if event.latency_ms is not None
-    ]
-    return {
-        "event_count": len(unique),
-        "allow_count": sum(1 for event in unique if event.decision == "allow"),
-        "deny_count": sum(1 for event in unique if event.decision == "deny"),
-        "ask_count": sum(1 for event in unique if event.decision == "ask"),
-        "blocked_count": len(blocked),
-        "block_rate": (len(blocked) / len(unique)) if unique else None,
-        "fpr": (len(false_positives) / len(labeled_benign)) if labeled_benign else None,
-        "fnr": (
-            (len(false_negatives) / len(labeled_malicious))
-            if labeled_malicious
-            else None
-        ),
-        "average_latency_ms": (
-            (sum(latency_values) / len(latency_values)) if latency_values else None
-        ),
-    }
-
-
-def aggregate_policy_metrics_v2(events: list[AuditEvent]) -> dict[str, Any]:
+def aggregate_policy_metrics(events: list[AuditEvent]) -> dict[str, Any]:
     """契约 §4/§5.3：policy_evaluation.v2 策略指标聚合。
 
     与旧口径物理分离；调用方传入窗口或 cohort 内的审计记录即可，
@@ -109,20 +56,20 @@ def aggregate_policy_metrics_v2(events: list[AuditEvent]) -> dict[str, Any]:
 
     - decision=null 单独计入 unknown_decision_count，不并入 allow；
     - 同键异内容只计数上报（duplicate_policy_record_count），不静默合并；
-    - 缺失关联 ID 的 legacy 记录回退 audit_id 去重并累计 legacy_fallback_count；
+    - 缺失关联 ID 的记录使用 audit_id 去重并累计 unkeyed_policy_record_count；
     - 分母为零时率返回 null，不得返回 0（§4.3）。
     """
 
     ordered = sorted(events, key=_audit_sequence_key)
     canonical: dict[str, AuditEvent] = {}
     duplicate_policy_record_count = 0
-    legacy_fallback_count = 0
+    unkeyed_policy_record_count = 0
     for event in ordered:
         if classify_record_type(event) != "policy_evaluation":
             continue
         key = logical_dedupe_key(event)
         if key.startswith("audit:"):
-            legacy_fallback_count += 1
+            unkeyed_policy_record_count += 1
         if key in canonical:
             duplicate_policy_record_count += 1
             continue
@@ -170,7 +117,7 @@ def aggregate_policy_metrics_v2(events: list[AuditEvent]) -> dict[str, Any]:
         ),
         "latency_sample_count": len(latency_values),
         "duplicate_policy_record_count": duplicate_policy_record_count,
-        "legacy_fallback_count": legacy_fallback_count,
+        "unkeyed_policy_record_count": unkeyed_policy_record_count,
         "deduplication": _DEDUPLICATION_LABEL,
     }
 

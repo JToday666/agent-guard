@@ -62,16 +62,54 @@ export interface GuardApprovalDto {
   resolved_at: string | null;
 }
 
-export interface GuardEvalMetricsDto {
-  event_count: number;
+export interface GuardAuditWindowScopeDto {
+  kind: "audit_window";
+  snapshot_id: string;
+  outcomes_as_of: string;
+  order: "audit_sequence";
+  limit: number;
+  returned_record_count: number;
+  has_more: boolean;
+  next_cursor: string | null;
+  sequence_from: number | null;
+  sequence_to: number | null;
+  occurred_from: string | null;
+  occurred_to: string | null;
+  filters: {
+    trace_id: string | null;
+    case_id: string | null;
+    runtime: string | null;
+    decision: string | null;
+  };
+}
+
+export interface GuardPolicyMetricsDto {
+  metric_version: "policy_evaluation.v2";
+  evaluation_count: number;
+  unknown_decision_count: number;
   allow_count: number;
-  deny_count: number;
   ask_count: number;
-  blocked_count: number;
-  block_rate: number | null;
-  fpr: number | null;
-  fnr: number | null;
-  average_latency_ms: number | null;
+  deny_count: number;
+  intervention_count: number;
+  intervention_rate: number | null;
+  policy_deny_rate: number | null;
+  approval_trigger_rate: number | null;
+  policy_intervention_fpr: number | null;
+  policy_intervention_fnr: number | null;
+  benign_label_count: number;
+  malicious_label_count: number;
+  unlabeled_count: number;
+  average_decision_latency_ms: number | null;
+  latency_sample_count: number;
+  duplicate_policy_record_count: number;
+  unkeyed_policy_record_count: number;
+  deduplication: "logical_policy_evaluation";
+}
+
+export interface GuardAuditWindowDto {
+  scope: GuardAuditWindowScopeDto;
+  events: GuardAuditEventDto[];
+  policy_metrics: GuardPolicyMetricsDto;
 }
 
 export interface GuardEvaluationAttackSummaryDto {
@@ -120,7 +158,6 @@ export interface GuardTraceDetailDto {
   trace_id: string;
   audit_events: GuardAuditEventDto[];
   approvals: GuardApprovalDto[];
-  metrics: GuardEvalMetricsDto;
   audit_window?: {
     limit?: number;
     returned_count?: number;

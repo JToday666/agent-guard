@@ -14,14 +14,14 @@ from .audit_window_cursor import (
     CursorExpiredError,
     decode_cursor,
     encode_cursor,
-    filters_fingerprint,
     normalize_window_filters,
 )
-from .metric_rules import aggregate_policy_metrics_v2
+from .metric_rules import aggregate_policy_metrics
 
 # cohort 一次性读取上限；历史接口不提供无范围“全部历史”（契约 §6.2）。
 _COHORT_READ_LIMIT = 10_000
 _DEDUPLICATION_LABEL = "logical_policy_evaluation"
+_DEFAULT_WINDOW_LIMIT = 500
 
 
 class AuditWindowRequestError(Exception):
@@ -40,7 +40,7 @@ class AuditWindowService:
     def get_window(
         self,
         *,
-        limit: int,
+        limit: int | None = None,
         trace_id: str | None = None,
         case_id: str | None = None,
         runtime: str | None = None,
@@ -49,13 +49,12 @@ class AuditWindowService:
     ) -> dict[str, Any]:
         """契约 §5.2：捕获链头上界 → limit+1 读取 → scope/events/policy_metrics。"""
 
-        filters = normalize_window_filters(
+        requested_filters = normalize_window_filters(
             trace_id=trace_id,
             case_id=case_id,
             runtime=runtime,
             decision=decision,
         )
-        fingerprint = filters_fingerprint(filters)
         if cursor:
             try:
                 state = decode_cursor(cursor)
@@ -63,13 +62,22 @@ class AuditWindowService:
                 raise AuditWindowRequestError(
                     "CURSOR_EXPIRED", status_code=410
                 ) from None
-            # §5.2：客户端续页只提交 cursor；同时提交的 filters/limit
-            # 必须与 cursor 绑定作用域一致，不得静默改变 cohort。
-            if state["fingerprint"] != fingerprint or state["limit"] != limit:
+            filters = state["filters"]
+            supplied_filters = {
+                key: value
+                for key, value in requested_filters.items()
+                if value is not None
+            }
+            if any(filters[key] != value for key, value in supplied_filters.items()):
                 raise AuditWindowRequestError("CURSOR_SCOPE_MISMATCH", status_code=400)
+            if limit is not None and state["limit"] != limit:
+                raise AuditWindowRequestError("CURSOR_SCOPE_MISMATCH", status_code=400)
+            effective_limit = int(state["limit"])
             upper_sequence = int(state["upper_sequence"])
             after_sequence: int | None = int(state["after_sequence"])
         else:
+            filters = requested_filters
+            effective_limit = limit or _DEFAULT_WINDOW_LIMIT
             # 步骤 1：捕获当前审计链上界，快照固化后续读取。
             upper_sequence = self._capture_upper_sequence()
             after_sequence = None
@@ -82,11 +90,11 @@ class AuditWindowService:
                 case_id=filters["case_id"],
                 runtime=filters["runtime"],
                 decision=filters["decision"],
-                limit=limit + 1,
+                limit=effective_limit + 1,
             )
         )
-        has_more = len(rows) > limit
-        page = rows[:limit]
+        has_more = len(rows) > effective_limit
+        page = rows[:effective_limit]
 
         next_cursor: str | None = None
         if has_more and page:
@@ -94,7 +102,7 @@ class AuditWindowService:
                 upper_sequence=upper_sequence,
                 after_sequence=_event_sequence(page[-1]),
                 filters=filters,
-                limit=limit,
+                limit=effective_limit,
             )
 
         sequences = [_event_sequence(event) for event in page]
@@ -104,7 +112,7 @@ class AuditWindowService:
                 "snapshot_id": snapshot_identifier(upper_sequence),
                 "outcomes_as_of": _utc_now_iso_z(),
                 "order": "audit_sequence",
-                "limit": limit,
+                "limit": effective_limit,
                 "returned_record_count": len(page),
                 "has_more": has_more,
                 "next_cursor": next_cursor,
@@ -115,7 +123,7 @@ class AuditWindowService:
                 "filters": dict(filters),
             },
             "events": [event.model_dump(mode="json") for event in page],
-            "policy_metrics": aggregate_policy_metrics_v2(page),
+            "policy_metrics": aggregate_policy_metrics(page),
         }
 
     def get_policy_cohort(
@@ -133,6 +141,10 @@ class AuditWindowService:
             raise AuditWindowRequestError("COHORT_RANGE_MISSING", status_code=400)
         normalized_from = _parse_rfc3339_utc(evaluated_from, field="evaluated_from")
         normalized_to = _parse_rfc3339_utc(evaluated_to, field="evaluated_to")
+        if datetime.fromisoformat(normalized_from) >= datetime.fromisoformat(
+            normalized_to
+        ):
+            raise AuditWindowRequestError("COHORT_RANGE_INVALID", status_code=400)
         if outcomes_as_of is None:
             normalized_as_of = _utc_now_iso_z()
         else:
@@ -162,7 +174,7 @@ class AuditWindowService:
                 "deduplication": _DEDUPLICATION_LABEL,
                 "filters": {"runtime": runtime_filter, "case_id": case_filter},
             },
-            "policy_metrics": aggregate_policy_metrics_v2(events),
+            "policy_metrics": aggregate_policy_metrics(events),
         }
 
     def _capture_upper_sequence(self) -> int:
@@ -206,9 +218,9 @@ def _parse_rfc3339_utc(value: str, *, field: str) -> str:
     try:
         parsed = datetime.fromisoformat(value.strip())
     except ValueError:
-        raise AuditWindowRequestError("COHORT_RANGE_MISSING", status_code=400) from None
+        raise AuditWindowRequestError("COHORT_RANGE_INVALID", status_code=400) from None
     if parsed.tzinfo is None:
-        raise AuditWindowRequestError("COHORT_RANGE_MISSING", status_code=400)
+        raise AuditWindowRequestError("COHORT_RANGE_INVALID", status_code=400)
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 

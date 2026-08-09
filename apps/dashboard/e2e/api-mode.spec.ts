@@ -46,16 +46,27 @@ const eventDto = {
   },
 };
 
-const metricsDto = {
-  event_count: 1,
+const policyMetricsDto = {
+  metric_version: "policy_evaluation.v2",
+  evaluation_count: 1,
+  unknown_decision_count: 0,
   allow_count: 0,
   deny_count: 0,
   ask_count: 1,
-  blocked_count: 1,
-  block_rate: 1,
-  fpr: null,
-  fnr: 0,
-  average_latency_ms: 4,
+  intervention_count: 1,
+  intervention_rate: 1,
+  policy_deny_rate: 0,
+  approval_trigger_rate: 1,
+  policy_intervention_fpr: null,
+  policy_intervention_fnr: 0,
+  benign_label_count: 0,
+  malicious_label_count: 1,
+  unlabeled_count: 0,
+  average_decision_latency_ms: 4,
+  latency_sample_count: 1,
+  duplicate_policy_record_count: 0,
+  unkeyed_policy_record_count: 0,
+  deduplication: "logical_policy_evaluation",
 };
 
 async function installApiRoutes(
@@ -128,8 +139,34 @@ async function installApiRoutes(
       });
     }
 
-    if (path === "/audit/events") {
-      return route.fulfill({ json: options.events ?? [eventDto] });
+    if (path === "/audit/window") {
+      const events = options.events ?? [eventDto];
+      return route.fulfill({
+        json: {
+          scope: {
+            kind: "audit_window",
+            snapshot_id: "snapshot-api-mode",
+            outcomes_as_of: "2026-06-28T08:00:05Z",
+            order: "audit_sequence",
+            limit: 500,
+            returned_record_count: events.length,
+            has_more: false,
+            next_cursor: null,
+            sequence_from: events.length ? 1 : null,
+            sequence_to: events.length,
+            occurred_from: events.length ? "2026-06-28T08:00:00Z" : null,
+            occurred_to: events.length ? "2026-06-28T08:00:00Z" : null,
+            filters: {
+              trace_id: null,
+              case_id: null,
+              runtime: null,
+              decision: null,
+            },
+          },
+          events,
+          policy_metrics: policyMetricsDto,
+        },
+      });
     }
     if (path === "/approvals/pending") {
       return route.fulfill({
@@ -237,7 +274,6 @@ async function installApiRoutes(
           trace_id: "trace_api_001",
           audit_events: traceEvents,
           approvals: snapshot?.approvals ?? options.approvals ?? [],
-          metrics: metricsDto,
           audit_window: {
             limit: 500,
             returned_count: traceEvents.length,
@@ -902,7 +938,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
 
   await installApiRoutes(page, { failConfigAudit: true });
   const auditRequestPromise = page.waitForRequest((request) =>
-    request.url().includes("/api/v1/audit/events?"),
+    request.url().includes("/api/v1/audit/window?"),
   );
   await page.goto("/overview");
   const auditHeaders = (await auditRequestPromise).headers();
@@ -1188,7 +1224,7 @@ test("API polling requests only common data and the active page domain", async (
   await expect(page.locator(".freshness--ready").first()).toBeVisible();
 
   const overviewPaths = [...requestedPaths];
-  expect(overviewPaths).toContain("/api/v1/audit/events");
+  expect(overviewPaths).toContain("/api/v1/audit/window");
   expect(overviewPaths).not.toContain("/api/v1/metrics/eval");
   expect(overviewPaths).not.toContain("/api/v1/policies/current");
   expect(overviewPaths).not.toContain("/api/v1/config-audit/findings");
@@ -1199,7 +1235,7 @@ test("API polling requests only common data and the active page domain", async (
   await expect(page.getByRole("heading", { name: "安全评测" })).toBeVisible();
   await expect.poll(() => requestedPaths.includes("/api/v1/evaluations/latest")).toBe(true);
 
-  expect(requestedPaths).not.toContain("/api/v1/audit/events");
+  expect(requestedPaths).not.toContain("/api/v1/audit/window");
   expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
   expect(requestedPaths).not.toContain("/api/v1/policies/current");
 
@@ -1211,7 +1247,7 @@ test("API polling requests only common data and the active page domain", async (
   expect(requestedPaths).toContain("/api/v1/policies/history");
   expect(requestedPaths).toContain("/api/v1/config-audit/findings");
   expect(requestedPaths).toContain("/api/v1/adapters/openclaw/status");
-  expect(requestedPaths).not.toContain("/api/v1/audit/events");
+  expect(requestedPaths).not.toContain("/api/v1/audit/window");
 });
 
 test("manual refresh bypasses the shared-resource freshness window", async ({ page }) => {
@@ -1226,6 +1262,6 @@ test("manual refresh bypasses the shared-resource freshness window", async ({ pa
 
   requestedPaths.length = 0;
   await page.getByRole("button", { name: "刷新数据" }).click();
-  await expect.poll(() => requestedPaths.includes("/api/v1/audit/events")).toBe(true);
+  await expect.poll(() => requestedPaths.includes("/api/v1/audit/window")).toBe(true);
   expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
 });

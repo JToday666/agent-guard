@@ -14,11 +14,12 @@ from agentguard_core import AuditEvent, PolicyBundle
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
+from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
-    EvalMetricFilters,
+    AuditWindowQuery,
 )
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.postgres import (
@@ -368,18 +369,22 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
         denied = store.list_audit_events(
             AuditEventFilters(trace_id=trace_id, decision="deny", limit=10)
         )
-        metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
+        metrics = aggregate_policy_metrics(
+            store.read_audit_events_bounded(
+                AuditWindowQuery(trace_id=trace_id, limit=100)
+            )
+        )
 
         assert [event.audit_id for event in denied] == [f"audit_pg_deny_{run_id}"]
-        assert metrics["event_count"] == 2
+        assert metrics["evaluation_count"] == 2
         assert metrics["allow_count"] == 1
         assert metrics["deny_count"] == 1
         assert metrics["ask_count"] == 0
-        assert metrics["blocked_count"] == 1
-        assert metrics["block_rate"] == 0.5
-        assert metrics["fpr"] == 0.0
-        assert metrics["fnr"] == 0.0
-        assert metrics["average_latency_ms"] == 20.0
+        assert metrics["intervention_count"] == 1
+        assert metrics["intervention_rate"] == 0.5
+        assert metrics["policy_intervention_fpr"] == 0.0
+        assert metrics["policy_intervention_fnr"] == 0.0
+        assert metrics["average_decision_latency_ms"] == 20.0
     finally:
         _cleanup_test_rows(database_url, trace_id, None)
         _cleanup_test_rows(database_url, other_trace_id, None)
@@ -499,7 +504,7 @@ def test_postgres_migration_creates_policy_snapshots_table() -> None:
         _cleanup_policy_snapshot(database_url)
 
 
-def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
+def test_postgres_trace_route_aggregates_audit_approval_and_window_scope() -> None:
     database_url = get_test_database_url()
 
     run_id = uuid4().hex
@@ -557,8 +562,12 @@ def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
         assert [approval["approval_id"] for approval in trace["approvals"]] == [
             approval_id
         ]
-        assert trace["metrics"]["event_count"] == 1
-        assert trace["metrics"]["ask_count"] == 1
+        assert trace["audit_window"] == {
+            "limit": 1000,
+            "returned_count": 1,
+            "has_more": False,
+        }
+        assert "metrics" not in trace
     finally:
         _cleanup_test_rows(database_url, trace_id, approval_id)
 

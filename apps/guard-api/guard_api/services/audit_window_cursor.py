@@ -1,8 +1,8 @@
 """审计窗口 cursor 编解码（契约 §5.2）。
 
-cursor 是不可解释的 base64url 不透明串，绑定快照上界 upper_sequence、
-规范化 filters 指纹、limit 与当前位置 after_sequence；服务端不保存
-cursor 状态，快照由 upper_sequence 固化。指纹复用
+cursor 是 base64url 不透明串，自包含快照上界 upper_sequence、
+规范化 filters、limit 与当前位置 after_sequence；续页请求只需
+传 cursor，服务端不保存 cursor 状态。指纹复用
 storage/integrity.canonical_sha256 保证 Memory/PostgreSQL 一致。
 """
 
@@ -22,10 +22,6 @@ _FILTER_KEYS = ("trace_id", "case_id", "runtime", "decision")
 
 class CursorExpiredError(Exception):
     """cursor 无法解码或版本不受支持，对应 410 CURSOR_EXPIRED。"""
-
-
-class CursorScopeMismatchError(Exception):
-    """随 cursor 提交的 filters/limit 与 cursor 绑定的作用域不一致。"""
 
 
 def normalize_window_filters(
@@ -67,6 +63,7 @@ def encode_cursor(
         "kind": _CURSOR_PREFIX,
         "upper_sequence": upper_sequence,
         "after_sequence": after_sequence,
+        "filters": {key: filters.get(key) for key in _FILTER_KEYS},
         "fingerprint": filters_fingerprint(filters),
         "limit": limit,
     }
@@ -91,18 +88,35 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
         raise CursorExpiredError(cursor)
     upper_sequence = payload.get("upper_sequence")
     after_sequence = payload.get("after_sequence")
+    filters = payload.get("filters")
     fingerprint = payload.get("fingerprint")
     limit = payload.get("limit")
     if (
-        not isinstance(upper_sequence, int)
-        or not isinstance(after_sequence, int)
+        type(upper_sequence) is not int
+        or type(after_sequence) is not int
+        or not isinstance(filters, dict)
         or not isinstance(fingerprint, str)
-        or not isinstance(limit, int)
+        or type(limit) is not int
+        or upper_sequence < 1
+        or after_sequence < 1
+        or after_sequence > upper_sequence
+        or not 1 <= limit <= 1000
     ):
+        raise CursorExpiredError(cursor)
+    normalized_filters: dict[str, str | None] = {}
+    for key in _FILTER_KEYS:
+        value = filters.get(key)
+        if value is not None and not isinstance(value, str):
+            raise CursorExpiredError(cursor)
+        normalized_filters[key] = value
+    if set(filters) != set(_FILTER_KEYS):
+        raise CursorExpiredError(cursor)
+    if filters_fingerprint(normalized_filters) != fingerprint:
         raise CursorExpiredError(cursor)
     return {
         "upper_sequence": upper_sequence,
         "after_sequence": after_sequence,
+        "filters": normalized_filters,
         "fingerprint": fingerprint,
         "limit": limit,
     }

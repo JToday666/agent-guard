@@ -145,8 +145,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const auditWindow = ref<AuditWindow>(
     createAuditWindow([], {
       limit: AUDIT_EVENT_WINDOW_LIMIT,
-      hasMore: null,
-      source: "legacy_audit_events",
+      hasMore: false,
     }),
   );
   const approvals = ref<ApprovalRequest[]>([]);

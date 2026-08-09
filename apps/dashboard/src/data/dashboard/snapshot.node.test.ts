@@ -89,8 +89,7 @@ test("detects event type and malicious-label changes used by filters and metrics
 test("compares audit windows and their scoped metrics atomically", () => {
   const window = createAuditWindow([makeEvent()], {
     limit: 500,
-    hasMore: null,
-    source: "legacy_audit_events",
+    hasMore: false,
   });
   assert.equal(hasSameAuditWindow(window, createAuditWindow([makeEvent()], window.scope)), true);
   assert.equal(

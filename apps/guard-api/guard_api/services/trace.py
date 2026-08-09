@@ -11,7 +11,6 @@ from guard_api.models import ApprovalRequest
 from guard_api.storage.base import (
     AuditWindowQuery,
     ControlPlaneStore,
-    EvalMetricFilters,
 )
 
 TRACE_AUDIT_LIMIT = 1000
@@ -34,7 +33,6 @@ class TraceService:
                 approval.model_dump(mode="json")
                 for approval in self.store.list_approvals(trace_id=trace_id)
             ],
-            "metrics": self.store.eval_metrics(EvalMetricFilters(trace_id=trace_id)),
             "audit_window": {
                 "limit": TRACE_AUDIT_LIMIT,
                 "returned_count": len(audit_events),

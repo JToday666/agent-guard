@@ -65,9 +65,6 @@ class GuardApiSettings:
             "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0
         )
     )
-    audit_window_enabled: bool = field(
-        default_factory=lambda: _default_audit_window_enabled()
-    )
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
@@ -119,13 +116,3 @@ def _env_float(name: str, *, default: float) -> float:
         return float(value)
     except ValueError:
         return default
-
-
-def _default_audit_window_enabled() -> bool:
-    """契约 §14.1：非 production 默认开启，production 默认关闭。"""
-
-    explicit = os.getenv("AGENTGUARD_AUDIT_WINDOW_ENABLED")
-    if explicit is not None:
-        return explicit.strip().lower() in {"1", "true", "yes", "on"}
-    environment = os.getenv("AGENTGUARD_ENV", DEFAULT_ENVIRONMENT)
-    return environment.strip().lower() != "production"

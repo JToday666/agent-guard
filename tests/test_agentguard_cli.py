@@ -110,7 +110,14 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         seen_urls.append(str(request.url))
         assert request.headers["authorization"] == "Bearer control-secret"
-        return httpx.Response(200, json=events)
+        return httpx.Response(
+            200,
+            json={
+                "scope": {"has_more": False, "next_cursor": None},
+                "events": events,
+                "policy_metrics": {},
+            },
+        )
 
     stdout_code, stdout_output, stdout_error = _run_cli(
         ["audit", "export", "--trace-id", "trace_1", "--limit", "2"],
@@ -150,18 +157,38 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
         for line in output_path.read_text(encoding="utf-8").splitlines()
     ] == events
     assert seen_urls == [
-        "http://guard.local/v1/audit/events?trace_id=trace_1&limit=2",
-        "http://guard.local/v1/audit/events?trace_id=trace_1&limit=2",
+        "http://guard.local/v1/audit/window?trace_id=trace_1&limit=2",
+        "http://guard.local/v1/audit/window?trace_id=trace_1&limit=2",
     ]
 
 
-def test_metrics_outputs_stable_json() -> None:
+def test_audit_export_follows_one_snapshot_cursor() -> None:
+    seen_urls: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "http://guard.local/v1/metrics/eval?runtime=openclaw"
-        return httpx.Response(200, json={"event_count": 1, "deny_count": 1})
+        seen_urls.append(str(request.url))
+        cursor = request.url.params.get("cursor")
+        if cursor is None:
+            return httpx.Response(
+                200,
+                json={
+                    "scope": {"has_more": True, "next_cursor": "cursor-1"},
+                    "events": [{"audit_id": "audit_3"}, {"audit_id": "audit_2"}],
+                    "policy_metrics": {},
+                },
+            )
+        assert cursor == "cursor-1"
+        return httpx.Response(
+            200,
+            json={
+                "scope": {"has_more": False, "next_cursor": None},
+                "events": [{"audit_id": "audit_1"}],
+                "policy_metrics": {},
+            },
+        )
 
     exit_code, output, error = _run_cli(
-        ["metrics", "--runtime", "openclaw", "--json"],
+        ["audit", "export", "--runtime", "openclaw", "--limit", "3"],
         env={
             "AGENTGUARD_API_URL": "http://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
@@ -170,7 +197,56 @@ def test_metrics_outputs_stable_json() -> None:
     )
 
     assert exit_code == 0
-    assert output == '{\n  "deny_count": 1,\n  "event_count": 1\n}\n'
+    assert error == ""
+    assert [json.loads(line)["audit_id"] for line in output.splitlines()] == [
+        "audit_3",
+        "audit_2",
+        "audit_1",
+    ]
+    assert seen_urls == [
+        "http://guard.local/v1/audit/window?runtime=openclaw&limit=3",
+        "http://guard.local/v1/audit/window?cursor=cursor-1",
+    ]
+
+
+def test_metrics_outputs_stable_json() -> None:
+    payload = {
+        "scope": {
+            "kind": "aggregate_history",
+            "evaluated_from": "2026-08-01T00:00:00Z",
+            "evaluated_to": "2026-08-02T00:00:00Z",
+        },
+        "policy_metrics": {"evaluation_count": 1, "deny_count": 1},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == (
+            "http://guard.local/v1/metrics/policy-evaluations"
+            "?evaluated_from=2026-08-01T00%3A00%3A00Z"
+            "&evaluated_to=2026-08-02T00%3A00%3A00Z&runtime=openclaw"
+        )
+        return httpx.Response(200, json=payload)
+
+    exit_code, output, error = _run_cli(
+        [
+            "metrics",
+            "--evaluated-from",
+            "2026-08-01T00:00:00Z",
+            "--evaluated-to",
+            "2026-08-02T00:00:00Z",
+            "--runtime",
+            "openclaw",
+            "--json",
+        ],
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert exit_code == 0
+    assert json.loads(output) == payload
     assert error == ""
 
 
@@ -302,7 +378,13 @@ def test_credential_list_and_revoke_use_control_plane_endpoints() -> None:
 
 def test_http_error_and_connection_error_return_nonzero() -> None:
     http_code, _, http_error = _run_cli(
-        ["metrics"],
+        [
+            "metrics",
+            "--evaluated-from",
+            "2026-08-01T00:00:00Z",
+            "--evaluated-to",
+            "2026-08-02T00:00:00Z",
+        ],
         env={
             "AGENTGUARD_API_URL": "http://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "bad-token",

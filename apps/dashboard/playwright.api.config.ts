@@ -27,6 +27,7 @@ export default defineConfig({
   reporter: "list",
   testDir: "e2e",
   testMatch: /api-mode\.spec\.ts/,
+  workers: 1,
   use: {
     baseURL,
     screenshot: "only-on-failure",

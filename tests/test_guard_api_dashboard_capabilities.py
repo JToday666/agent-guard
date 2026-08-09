@@ -179,7 +179,7 @@ def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
 
     assert write_response.status_code == 200
     assert write_response.json()["status"] == "loaded"
-    assert write_response.json()["hook_count"] == 22
+    assert write_response.json()["hook_count"] == 23
     assert read_response.status_code == 200
     assert read_response.json() == write_response.json()
 
@@ -229,8 +229,8 @@ def _openclaw_status_payload() -> dict:
     return {
         "status": "loaded",
         "loaded": True,
-        "hook_count": 22,
-        "expected_hook_count": 22,
+        "hook_count": 23,
+        "expected_hook_count": 23,
         "last_verified_at": "2026-06-28T00:00:00+00:00",
         "error": None,
         "source": "agentguardctl",
@@ -239,7 +239,7 @@ def _openclaw_status_payload() -> dict:
     }
 
 
-# 契约 §5/§6/§14：原子审计窗口与 policy_evaluation cohort HTTP 层回归。
+# 原子审计窗口与 policy_evaluation cohort HTTP 层回归。
 
 
 def _window_app() -> tuple[MemoryControlPlaneStore, TestClient]:
@@ -304,13 +304,29 @@ def test_audit_window_requires_dual_scopes_for_bearer() -> None:
     assert browser_response.json()["scope"]["returned_record_count"] == 2
 
 
+def test_superseded_audit_and_metric_read_routes_are_absent() -> None:
+    _, client = _window_app()
+    headers = {"Authorization": "Bearer control-secret"}
+
+    # POST /v1/audit/events 仍是 runtime 写入面，GET 读入面已删除。
+    audit_read = client.get("/v1/audit/events", headers=headers)
+    metric_read = client.get("/v1/metrics/eval", headers=headers)
+
+    assert audit_read.status_code == 405
+    assert audit_read.json()["error"]["code"] == "METHOD_NOT_ALLOWED"
+    assert metric_read.status_code == 404
+    assert metric_read.json()["error"]["code"] == "NOT_FOUND"
+
+
 def test_audit_window_cursor_scope_mismatch_and_expired() -> None:
     store, client = _window_app()
     for index in range(4):
         store.add_audit_event(_window_policy_audit(index=index))
     headers = {"Authorization": "Bearer control-secret"}
 
-    first = client.get("/v1/audit/window?limit=2", headers=headers)
+    first = client.get(
+        "/v1/audit/window?limit=2&trace_id=trace_http_window", headers=headers
+    )
     assert first.status_code == 200
     cursor = first.json()["scope"]["next_cursor"]
     assert cursor
@@ -334,10 +350,11 @@ def test_audit_window_cursor_scope_mismatch_and_expired() -> None:
     assert expired.status_code == 410
     assert expired.json()["error"]["code"] == "CURSOR_EXPIRED"
 
-    # 同作用域续页成功且快照不变。
-    second = client.get(f"/v1/audit/window?limit=2&cursor={cursor}", headers=headers)
+    # cursor 自包含 filters/limit；续页只提交 cursor。
+    second = client.get(f"/v1/audit/window?cursor={cursor}", headers=headers)
     assert second.status_code == 200
     assert second.json()["scope"]["snapshot_id"] == first.json()["scope"]["snapshot_id"]
+    assert second.json()["scope"]["filters"]["trace_id"] == "trace_http_window"
     assert second.json()["scope"]["has_more"] is False
 
 
@@ -350,6 +367,15 @@ def test_policy_evaluation_cohort_range_required_and_utc_normalized() -> None:
     missing = client.get("/v1/metrics/policy-evaluations", headers=headers)
     assert missing.status_code == 400
     assert missing.json()["error"]["code"] == "COHORT_RANGE_MISSING"
+
+    invalid = client.get(
+        "/v1/metrics/policy-evaluations"
+        "?evaluated_from=2026-08-02T00:00:00Z"
+        "&evaluated_to=2026-08-01T00:00:00Z",
+        headers=headers,
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "COHORT_RANGE_INVALID"
 
     # +08:00 偏移规范化为 UTC；outcomes_as_of 缺省回显请求快照时刻。
     response = client.get(
@@ -386,39 +412,3 @@ def test_policy_evaluation_cohort_range_required_and_utc_normalized() -> None:
     )
     assert adapter_response.status_code == 403
     assert adapter_response.json()["error"]["code"] == "SCOPE_DENIED"
-
-
-def test_audit_window_flag_disabled_returns_404(monkeypatch) -> None:
-    monkeypatch.delenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", raising=False)
-    settings = GuardApiSettings(
-        control_token="control-secret",
-        audit_window_enabled=False,
-    )
-    client = TestClient(
-        create_app(store=memory_store_with_adapter(), settings=settings)
-    )
-    headers = {"Authorization": "Bearer control-secret"}
-
-    window_response = client.get("/v1/audit/window", headers=headers)
-    assert window_response.status_code == 404
-    assert window_response.json()["error"]["code"] == "NOT_FOUND"
-
-    cohort_response = client.get(
-        "/v1/metrics/policy-evaluations"
-        "?evaluated_from=2026-08-01T00:00:00Z&evaluated_to=2026-08-02T00:00:00Z",
-        headers=headers,
-    )
-    assert cohort_response.status_code == 404
-    assert cohort_response.json()["error"]["code"] == "NOT_FOUND"
-
-
-def test_audit_window_flag_defaults_follow_environment(monkeypatch) -> None:
-    monkeypatch.delenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", raising=False)
-    monkeypatch.setenv("AGENTGUARD_ENV", "development")
-    assert GuardApiSettings().audit_window_enabled is True
-    monkeypatch.setenv("AGENTGUARD_ENV", "production")
-    assert GuardApiSettings().audit_window_enabled is False
-    monkeypatch.setenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", "true")
-    assert GuardApiSettings().audit_window_enabled is True
-    monkeypatch.setenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", "0")
-    assert GuardApiSettings().audit_window_enabled is False

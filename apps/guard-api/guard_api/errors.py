@@ -44,6 +44,7 @@ _ERROR_MESSAGES = {
     "CURSOR_EXPIRED": "The audit window cursor has expired or is invalid.",
     "CURSOR_SCOPE_MISMATCH": "Request filters do not match the audit window cursor scope.",
     "COHORT_RANGE_MISSING": "evaluated_from and evaluated_to are required for policy evaluation cohorts.",
+    "COHORT_RANGE_INVALID": "The policy evaluation cohort range is invalid.",
     "EVALUATION_CONFLICT": "Evaluation conflicts with an existing result for the same event.",
     "VALIDATION_ERROR": "Request validation failed.",
     "NOT_FOUND": "Resource was not found.",

@@ -16,7 +16,6 @@ import type {
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
   GuardConfigAuditFindingRecordDto,
-  GuardEvalMetricsDto,
   GuardEvaluationRunDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
@@ -321,25 +320,6 @@ function createMockApprovalDtos(): GuardApprovalDto[] {
   });
 }
 
-function createMetrics(events: GuardAuditEventDto[]): GuardEvalMetricsDto {
-  const metrics = createAuditWindow(events.map(mapAuditEvent), {
-    limit: AUDIT_EVENT_WINDOW_LIMIT,
-    hasMore: null,
-    source: "legacy_audit_events",
-  }).metrics;
-  return {
-    event_count: metrics.evaluationCount,
-    allow_count: metrics.allowCount,
-    deny_count: metrics.denyCount,
-    ask_count: metrics.askCount,
-    blocked_count: metrics.interventionCount,
-    block_rate: metrics.interventionRate,
-    fpr: metrics.policyFpr,
-    fnr: metrics.policyFnr,
-    average_latency_ms: metrics.averageDecisionLatencyMs,
-  };
-}
-
 function createTraceDetail(traceId: string, approvalDtos: GuardApprovalDto[]): GuardTraceDetailDto {
   const events = mockAuditEvents.filter((event) => event.trace_id === traceId);
   return {
@@ -351,7 +331,6 @@ function createTraceDetail(traceId: string, approvalDtos: GuardApprovalDto[]): G
       returned_count: events.length,
       has_more: false,
     },
-    metrics: createMetrics(events),
   };
 }
 
@@ -410,8 +389,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
     await wait(this.delayMs, signal);
     return createAuditWindow(this.filteredAuditEvents(filters), {
       limit: AUDIT_EVENT_WINDOW_LIMIT,
-      hasMore: null,
-      source: "legacy_audit_events",
+      hasMore: false,
+      filters: {
+        traceId: filters.traceId ?? null,
+        caseId: filters.caseId ?? null,
+        runtime: filters.runtime ?? null,
+        decision: filters.decision ?? null,
+      },
     });
   }
 

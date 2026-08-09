@@ -1,14 +1,14 @@
-# Dashboard 指标作用域与审计窗口 API 协作契约
+# Dashboard 指标作用域与审计窗口 API 契约
 
 ## 1. 文档状态与边界
 
-本文定义 Dashboard 指标的已冻结目标后端契约、兼容路径和验收口径。目标契约于
-2026-08-05 冻结，但后端代码、Schema、存储和查询迁移尚未实施。
+本文定义 Dashboard 指标的唯一正式后端契约和验收口径。当前实现只提供
+`GET /v1/audit/window` 和 `GET /v1/metrics/policy-evaluations` 两个策略指标读入面；
+Dashboard 与 CLI 均直接消费这两个契约，不在客户端重建平行指标事实。
 
-- 前端三作用域隔离已经实施。
-- 新后端接口尚未实施，本文不表示当前 Guard API 已提供目标响应。
-- 当前 Dashboard 继续读取 `GET /v1/audit/events`，在已加载记录内按稳定关联 ID 重建窗口策略指标。
-- `GET /v1/metrics/eval` 只保留为历史兼容入口，不再参与当前窗口或独立评测展示。
+- 当前审计窗口、历史聚合和独立评测运行三个作用域相互隔离。
+- 审计窗口响应原子返回 scope、events 和 policy_metrics。
+- 历史指标必须有明确时间 cohort，不提供无边界“全部历史”。
 - AuditEvent 结构、运行时回执与证据语义继续以
   [证据链与溯源 API 目标契约](evidence_trace_api_contract.md) 为准。
 
@@ -21,12 +21,12 @@
 | M-01 | 指标作用域   | 当前审计窗口、历史聚合和独立评测运行完全分离                                 |
 | M-02 | 当前窗口交互 | 新增原子 `GET /v1/audit/window`，同一响应返回事件、窗口元数据和策略指标      |
 | M-03 | 窗口顺序     | 使用服务端审计链 `sequence` 捕获稳定快照，不使用生产者时间作为分页主键       |
-| M-04 | 策略评估单位 | 新数据以 `decision_id` 表示一次评估；迁移期按 `(event_id, decision_id)` 去重 |
+| M-04 | 策略评估单位 | `decision_id` 表示一次评估，聚合以 `(event_id, decision_id)` 作为逻辑去重键 |
 | M-05 | 动作结果单位 | 授权终态和执行事实以 `action_id` 聚合，不与策略评估数共用分母                |
 | M-06 | `deny` 语义  | 只表示策略不授权，不表示工具已确认未调用                                     |
 | M-07 | 确认阻止     | 只有运行时回执证明 `execution.status=not_invoked` 时才可统计                 |
 | M-08 | 历史查询     | 使用明确的评估时间 cohort，并返回结果统计时点与覆盖率                        |
-| M-09 | 兼容         | 现有数组型 `/audit/events` 和 `/metrics/eval` 在迁移期保持可用               |
+| M-09 | 单轨契约     | 不保留旧读接口、feature flag 或客户端聚合回退                  |
 | M-10 | 独立评测     | `/evaluations/latest` 只返回该次 run 自身保存的事实，不从审计指标补数        |
 
 ## 3. 统计对象
@@ -34,7 +34,7 @@
 | 对象     | 稳定标识                             | 含义                                           | 可进入的指标                                       |
 | -------- | ------------------------------------ | ---------------------------------------------- | -------------------------------------------------- |
 | 审计记录 | `audit_id`                           | 哈希链中的一条不可变事实                       | 返回记录数、记录类型分布                           |
-| 策略评估 | `decision_id`，迁移期联合 `event_id` | Core 对 GuardEvent 的一次策略判断              | allow、ask、deny、策略介入、策略 FPR/FNR、判定延迟 |
+| 策略评估 | `decision_id`，联合 `event_id` 去重 | Core 对 GuardEvent 的一次策略判断              | allow、ask、deny、策略介入、策略 FPR/FNR、判定延迟 |
 | 逻辑动作 | `action_id`                          | 一次工具调用、消息发送、记忆写入或模型输出动作 | 授权终态、执行回执、结果处置                       |
 | 审批请求 | `approval_id`                        | ask 产生的审批生命周期                         | pending、allow_once、deny、expired                 |
 | 独立评测 | `run_id`                             | 固定数据集上的一次已保存评测                   | ASR、per-attack、cases 和 run 自身指标             |
@@ -55,7 +55,7 @@ evaluation_count = 逻辑唯一 policy_evaluation 数
 allow_count      = decision=allow
 ask_count        = decision=ask
 deny_count       = decision=deny
-unknown_decision_count = 旧数据中无法恢复决定的 policy_evaluation
+unknown_decision_count = 缺少明确决定的 policy_evaluation
 ```
 
 新数据必须满足：
@@ -64,7 +64,7 @@ unknown_decision_count = 旧数据中无法恢复决定的 policy_evaluation
 allow_count + ask_count + deny_count = evaluation_count
 ```
 
-迁移期若存在未知决定，响应必须单独返回 `unknown_decision_count`，不得将其归入 allow。
+若输入边界中存在未知决定，响应必须单独返回 `unknown_decision_count`，不得将其归入 allow。
 
 ### 4.2 策略率
 
@@ -125,8 +125,6 @@ GET /v1/audit/window
 
 - browser session；
 - bearer 调用方同时具备 `audit:read` 与 `metrics:read`。
-
-旧 `GET /v1/audit/events` 继续返回数组，不修改响应外形。
 
 ### 5.2 窗口捕获
 
@@ -189,7 +187,7 @@ cohort。cursor 失效返回明确的 `410 CURSOR_EXPIRED`，作用域不一致�
     "average_decision_latency_ms": 18.4,
     "latency_sample_count": 420,
     "duplicate_policy_record_count": 12,
-    "legacy_fallback_count": 3,
+    "unkeyed_policy_record_count": 3,
     "deduplication": "logical_policy_evaluation"
   }
 }
@@ -216,11 +214,10 @@ cohort。cursor 失效返回明确的 `410 CURSOR_EXPIRED`，作用域不一致�
 
 重复记录的规范行是 sequence 最小的一条。指标窗口成员资格以规范行 sequence 是否落入窗口为准，避免较晚重试把旧评估重新带入实时窗口。
 
-迁移期：
+输入边界的数据质量规则：
 
-- 缺失任一关联 ID 时回退到唯一 `audit_id`；
-- 每条回退记录增加 `legacy_fallback_count`；
-- 旧数组兼容路径在 `integrity.sequence` 可用时同样优先 sequence 最小的记录；sequence 缺失时保持首次返回记录，并计入迁移诊断；
+- 缺失任一关联 ID 时以唯一 `audit_id` 作为去重键；
+- 每条这类记录增加 `unkeyed_policy_record_count`，使数据质量缺口可观测；
 - 相同逻辑键内容不一致时记录数据质量冲突，不静默合并；
 - `runtime_outcome`、`runtime_observation`、`config_audit` 不增加策略计数。
 
@@ -239,11 +236,13 @@ GET /v1/metrics/policy-evaluations
 
 要求：
 
-- `evaluated_from`、`evaluated_to` 必填，除非产品冻结了明确且可见的默认范围；
+- `evaluated_from`、`evaluated_to` 必填，且必须满足 `evaluated_from < evaluated_to`；
 - 时间使用带时区 RFC 3339，服务端规范化到 UTC；
 - cohort 以规范 `policy_evaluation.timestamp` 落入范围为准；
 - `outcomes_as_of` 缺省为请求快照时刻，响应必须回显；
 - 查询必须固定审计 sequence 快照，保证同一响应内一致。
+- 缺失范围返回 `400 COHORT_RANGE_MISSING`；格式、时区或顺序无效返回
+  `400 COHORT_RANGE_INVALID`。
 
 ### 6.2 响应作用域
 
@@ -355,33 +354,12 @@ enforcement_coverage
 要求：
 
 - run DTO 可以只包含 `run_id`、数据集、ASR、per-attack 和 cases；
-- 缺失的 run 指标保持缺失，不查询 `/metrics/eval` 补入；
+- 缺失的 run 指标保持缺失，不从审计聚合中补入；
 - 如需 run FPR/FNR 或延迟，必须在评测生成时计算并随 run 一起持久化；
 - `404 EVALUATION_NOT_FOUND` 只产生空评测状态，不影响当前审计窗口；
 - Dashboard mapper 的输入只能是该 run DTO。
 
-## 9. 旧接口兼容
-
-### 9.1 `GET /v1/audit/events`
-
-- 继续返回数组；
-- 现有 filters 与 limit 保持；
-- 新 AuditEvent 字段按存储内容返回；
-- Dashboard 在目标窗口接口上线前从该数组建立
-  `source=legacy_audit_events`、`has_more=null` 的客户端窗口；
-- 缺失 `record_type` 时，只有 GuardEvent 规范内的已知事件类型且策略决定已知才兼容分类为 `policy_evaluation`；显式 `unknown` 或其他扩展事件保持未知并排除出策略指标；
-- 客户端不得根据 `returned_count == limit` 推断截断。
-
-### 9.2 `GET /v1/metrics/eval`
-
-- 响应外形在迁移期保持；
-- 后端 P0 仍需修复为只统计逻辑唯一 `policy_evaluation`；
-- `blocked_count/block_rate` 只作为旧“策略介入”口径；
-- 新 Dashboard 不自动请求或展示该接口；
-- 新消费者使用 `/v1/metrics/policy-evaluations`；
-- 移除前至少保留一个稳定发布周期并记录弃用。
-
-## 10. 写入链路前置条件
+## 9. 写入链路前置条件
 
 指标正确性依赖以下写入约束：
 
@@ -393,16 +371,16 @@ enforcement_coverage
 6. `POST /v1/audit/events` 同 ID 同内容重试成功，同 ID 不同内容返回 `409 AUDIT_ID_CONFLICT`。
 7. 策略快照、审批创建和策略审计使用同一 unit-of-work，或提供可证明等价的幂等恢复机制。
 
-## 11. 存储与查询演进
+## 10. 存储与查询
 
-### P0：现有 JSONB
+### 当前实现
 
 - 使用 audit sequence 范围、record type 分类和 SQL 窗口函数完成查询；
 - Memory 与 PostgreSQL 共用语义 fixture；
 - 不因预估规模提前增加投影表；
 - 生产者时间写入前校验 RFC 3339 并规范化到 UTC。
 
-### P2：测量后优化
+### 测量后优化
 
 仅当真实数据量、`EXPLAIN ANALYZE` 或查询 p95 证明需要时，评估：
 
@@ -413,25 +391,24 @@ enforcement_coverage
 
 投影必须可从审计链重建，并保存投影版本和重建状态。
 
-## 12. 前端迁移状态
+## 11. 前端实现
 
-当前 Dashboard 已完成：
+当前 Dashboard：
 
 - `AuditWindow`、`WindowMetrics` 与 `EvaluationRun` 类型分离；
 - 当前窗口以事件、scope 和策略指标作为单一对象更新；
-- API 兼容模式从 `/audit/events` 客户端重建逻辑唯一策略指标；
-- 客户端重复评估在 `integrity.sequence` 可用时采用最早审计记录；
-- `/metrics/eval` 和 trace DTO 中的旧 `metrics` 不再映射为未消费的前端领域对象；
+- API data source 直接映射 `/audit/window` 的 scope、events 和 policy_metrics；
+- 不在客户端重新分类或聚合 API 策略指标；
+- trace DTO 不包含另一份指标对象；
 - evaluation run mapper 不接收外部指标；
 - 趋势、攻击类型、规则分布、混淆矩阵和判定延迟只读取逻辑唯一策略评估；
 - UI 使用“策略介入”“策略拒绝”“策略误报/漏报”，不声称实际阻断；
-- 历史聚合仅在后端提供明确范围、去重语义与显式查询入口后按需接入。
+- 历史聚合仅通过显式时间范围调用
+  `/metrics/policy-evaluations`，与当前窗口状态分离。
 
-后端目标接口上线后，只替换 data source 的窗口映射，不改变页面领域模型。
+## 12. 验收矩阵
 
-## 13. 验收矩阵
-
-### 13.1 后端
+### 12.1 后端
 
 - 同一 `(event_id, decision_id)` 多条审计只计一次；
 - 同 `event_id` 同请求重试返回同 `decision_id`；
@@ -445,7 +422,7 @@ enforcement_coverage
 - policy latency 不混入 runtime latency；
 - Memory/PostgreSQL 在相同 fixture 上完全一致。
 
-### 13.2 授权与执行
+### 12.2 授权与执行
 
 - `ask → allow_once` 计入策略介入，不计授权拒绝或确认未执行；
 - `ask → deny` 计入授权拒绝，无回执时执行结果为 unknown；
@@ -454,22 +431,19 @@ enforcement_coverage
 - pending 和 unknown 数量、分母及覆盖率可见。
 - `action_metrics` 与策略 cohort 使用同一 snapshot 和 `outcomes_as_of`。
 
-### 13.3 前端
+### 12.3 前端
 
 - 当前窗口、历史聚合和独立评测不共享一个指标对象；
-- Overview/Evaluation 不请求 `/metrics/eval`；
+- Overview/Evaluation 仅读取原子审计窗口中的策略指标；
 - evaluation 404 不回填历史指标；
 - outcome/observation 不重复出现在决策趋势和分布中；
 - API 与 Mock 使用相同领域类型和页面组件；
 - 窗口来源、范围、记录数、评估数和关键分母可见；
 - 单个资源失败只影响对应区块。
 
-## 14. 发布与回滚
+## 13. 运行与观测
 
-1. 后端先以 feature flag 提供 `/v1/audit/window` 和新历史接口。
-2. shadow 计算 legacy/v2，记录差异数量及原因，不记录敏感 payload。
-3. 观察去重数量、legacy fallback、查询延迟、错误率和标签覆盖。
-4. Dashboard API data source 切换目标窗口接口；领域模型与页面保持不变。
-5. 保留 legacy 回退一个稳定发布周期。
-6. 出现严重问题时仅回滚 data source 路由，不把历史聚合重新注入当前窗口或评测运行。
-7. 稳定后标记 `/metrics/eval` deprecated，再按版本策略移除。
+1. 监测窗口查询延迟、错误率、翻页数、去重数和标签覆盖率。
+2. 监测 `unkeyed_policy_record_count`；该值上升表示输入数据缺失稳定关联 ID，不应在客户端遮蔽。
+3. cursor 过期或作用域不一致时返回明确错误，不自动转为新快照。
+4. 发布验收同时覆盖 Memory/PostgreSQL 语义、Dashboard API 模式和 CLI 多页导出。

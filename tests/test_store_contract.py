@@ -31,7 +31,10 @@ from guard_api.services import (
 import guard_api.services.evaluation as evaluation_service_module
 from guard_api.services.audit_window import AuditWindowService
 from guard_api.services.evidence import build_audit_event
-from guard_api.services.metric_rules import classify_record_type
+from guard_api.services.metric_rules import (
+    aggregate_policy_metrics,
+    classify_record_type,
+)
 from guard_api.services.redaction import (
     MAX_EVIDENCE_BYTES,
     evidence_serialized_size,
@@ -41,11 +44,10 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditWindowQuery,
-    EvalMetricFilters,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
 from guard_api.storage.postgres import PostgresControlPlaneStore
-from tests.support.auth import memory_store_with_adapter
+from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "runtime_safety_trace_v04.json"
@@ -74,6 +76,7 @@ def store(request):
     reset_control_plane_schema(database_url)
     postgres_store = PostgresControlPlaneStore(database_url)
     postgres_store.initialize()
+    add_adapter_credential(postgres_store)
     return postgres_store
 
 
@@ -100,6 +103,7 @@ def _guard_event_payload(
             "user_task": "Complete the visible web form only",
             "source_type": "webpage",
             "source_trust": "untrusted",
+            "agent_id": "main",
         },
         "payload": {
             "tool": {
@@ -308,12 +312,15 @@ def test_contract_duplicate_policy_audits_counted_once(store) -> None:
             )
         )
 
-    metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
+    events = store.read_audit_events_bounded(
+        AuditWindowQuery(trace_id=trace_id, limit=100)
+    )
+    metrics = aggregate_policy_metrics(events)
 
     # §19.1：重复逻辑键只保留最早入链记录。
-    assert metrics["event_count"] == 1
+    assert metrics["evaluation_count"] == 1
     assert metrics["ask_count"] == 1
-    assert metrics["blocked_count"] == 1
+    assert metrics["intervention_count"] == 1
 
 
 def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
@@ -349,8 +356,8 @@ def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
         f"audit_policy_{run_id}": "policy_evaluation",
     }
     # 只有被分类为 policy_evaluation 的旧记录进入策略指标。
-    metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
-    assert metrics["event_count"] == 1
+    metrics = aggregate_policy_metrics(events)
+    assert metrics["evaluation_count"] == 1
     assert metrics["allow_count"] == 1
 
     fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -438,8 +445,8 @@ def test_contract_03_inbound_stored_verbatim_and_excluded_from_policy_metrics(
     assert len(events) == 1
     assert events[0].schema_version == "0.3"
     assert events[0].record_type is None
-    metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
-    assert metrics["event_count"] == 0
+    metrics = aggregate_policy_metrics(events)
+    assert metrics["evaluation_count"] == 0
 
 
 def _thread_client(store) -> TestClient:
@@ -460,12 +467,15 @@ def test_contract_concurrent_same_content_single_chain_entry(store) -> None:
     trace_id = f"trace_concurrent_{run_id}"
     payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
     worker_count = 8
+    clients = [_thread_client(store) for _ in range(worker_count)]
 
-    def worker(_: int):
-        return _post_evaluate(_thread_client(store), payload)
+    def worker(index: int):
+        return _post_evaluate(clients[index], payload)
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         responses = list(executor.map(worker, range(worker_count)))
+    for thread_client in clients:
+        thread_client.close()
 
     assert [response.status_code for response in responses] == [200] * worker_count
     decision_ids = {
@@ -547,12 +557,15 @@ def test_contract_concurrent_different_content_exactly_one_conflict(store) -> No
             arguments={"to": "other@red-team.agentguard.local"},
         ),
     ]
+    clients = [_thread_client(store) for _ in payloads]
 
     def worker(index: int):
-        return _post_evaluate(_thread_client(store), payloads[index])
+        return _post_evaluate(clients[index], payloads[index])
 
     with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
         responses = list(executor.map(worker, range(len(payloads))))
+    for thread_client in clients:
+        thread_client.close()
 
     statuses = sorted(response.status_code for response in responses)
     assert statuses == [200, 409]
@@ -755,7 +768,7 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
     for index in range(6, 9):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
 
-    page2 = service.get_window(limit=4, cursor=page1["scope"]["next_cursor"])
+    page2 = service.get_window(cursor=page1["scope"]["next_cursor"])
     page2_sequences = [
         _event_sequence(AuditEvent.model_validate(row)) for row in page2["events"]
     ]
@@ -792,7 +805,7 @@ def test_contract_window_duplicate_policy_records_counted_once(store) -> None:
     # legacy 重复记录经 §19.2 分类回退判为 policy_evaluation，读时只计一次。
     assert metrics["evaluation_count"] == 2
     assert metrics["duplicate_policy_record_count"] == 2
-    assert metrics["legacy_fallback_count"] == 0
+    assert metrics["unkeyed_policy_record_count"] == 0
     assert metrics["allow_count"] == 2
 
 
@@ -959,10 +972,10 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     assert memory_scope == postgres_scope
 
     memory_page2 = AuditWindowService(store=memory_store).get_window(
-        limit=3, cursor=memory_window["scope"]["next_cursor"]
+        cursor=memory_window["scope"]["next_cursor"]
     )
     postgres_page2 = AuditWindowService(store=postgres_store).get_window(
-        limit=3, cursor=postgres_window["scope"]["next_cursor"]
+        cursor=postgres_window["scope"]["next_cursor"]
     )
     assert memory_page2["events"] == postgres_page2["events"]
     assert memory_page2["policy_metrics"] == postgres_page2["policy_metrics"]

@@ -33,9 +33,9 @@ Dashboard 不做用户登录，不保存长期 token，不生成 launch code，�
 ## 3. 数据来源
 
 ```text
-GET  /v1/audit/events
+GET  /v1/audit/window
 GET  /v1/audit/integrity
-GET  /v1/metrics/eval
+GET  /v1/metrics/policy-evaluations?evaluated_from=&evaluated_to=&outcomes_as_of=
 GET  /v1/evaluations/latest
 GET  /v1/approvals/pending
 GET  /v1/traces/{trace_id}
@@ -48,21 +48,12 @@ GET  /health?check_db=true
 POST /v1/approvals/{id}/resolve
 ```
 
-当前页面自动刷新不再请求 `GET /v1/metrics/eval`。该接口仅作为历史兼容入口保留；后端提供明确时间范围、去重方式和分母前，Dashboard 不展示其结果。
+Dashboard 自动刷新只请求原子审计窗口。API data source 将后端返回的
+`scope + events + policy_metrics` 作为一个 `AuditWindow` 更新，不在客户端重算策略指标。
+历史聚合只在用户选定明确时间范围时请求
+`GET /v1/metrics/policy-evaluations`，并与当前窗口和独立 evaluation run 状态分离。
 
-目标新增接口：
-
-```text
-GET /v1/audit/window
-GET /v1/metrics/policy-evaluations?evaluated_from=&evaluated_to=&outcomes_as_of=
-```
-
-在目标窗口接口落地前，API data source 从 `GET /v1/audit/events` 建立
-`has_more=unknown` 的兼容窗口，并在当前返回记录内筛选、去重逻辑
-`policy_evaluation`。页面领域模型保持 `AuditWindow = scope + events + metrics`，
-后端上线后只替换数据源映射。
-
-Dashboard 不直接读取 LangGraph、OpenClaw、本地工具或 AttackBench runner 的内部状态。证据链页优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载的 `GET /v1/audit/events` 事件窗口按 `trace_id` 做局部回退，不补造链路事实。溯源图读取 `GET /v1/traces/{trace_id}/provenance`，失败时不影响审计时间线显示。
+Dashboard 不直接读取 LangGraph、OpenClaw、本地工具或 AttackBench runner 的内部状态。证据链页优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载审计窗口中的同 `trace_id` 事件做局部回退，不补造链路事实。溯源图读取 `GET /v1/traces/{trace_id}/provenance`，失败时不影响审计时间线显示。
 
 真实溯源响应沿用 Guard API 原始契约：`ref_id` 是未加展示前缀的实体 ID，审计节点通过原始 `audit_id` 与 Trace 时间线联动；关系值使用 `evaluated_to`、`recorded_as`、`reviewed_by`，风险元数据使用 `risk_score`。前端只在展示层映射中文标签，不以 Mock 字段形态替代真实接口。
 

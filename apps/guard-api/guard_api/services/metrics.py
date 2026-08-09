@@ -7,8 +7,6 @@ from typing import Any
 from guard_api.storage.base import (
     AuditEventFilters,
     ControlPlaneStore,
-    EvalMetricFilters,
-    EvalMetrics,
 )
 
 from .evidence import _event_hook_name
@@ -18,9 +16,6 @@ from .metric_rules import classify_record_type
 class MetricService:
     def __init__(self, *, store: ControlPlaneStore) -> None:
         self.store = store
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        return self.store.eval_metrics(filters)
 
     def runtime_metrics(
         self, *, runtime: str | None = None, limit: int = 1000

@@ -58,14 +58,6 @@ class AuditWindowQuery:
 
 
 @dataclass(frozen=True, slots=True)
-class EvalMetricFilters:
-    trace_id: str | None = None
-    case_id: str | None = None
-    runtime: str | None = None
-    decision: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class StoredLaunchCode:
     code_hash: str
     expires_at: str
@@ -86,9 +78,6 @@ class PolicySnapshotRecord:
     policy_bundle: PolicyBundle
     updated_at: str
     updated_by: str
-
-
-EvalMetrics = dict[str, int | float | None]
 
 
 def within_evaluated_range(
@@ -310,8 +299,6 @@ class ControlPlaneStore(Protocol):
     def policy_evaluation_guard(self, event_id: str) -> ContextManager[None]: ...
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics: ...
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode: ...
 

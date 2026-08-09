@@ -3,6 +3,7 @@ import type {
   GuardApprovalDto,
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
+  GuardAuditWindowDto,
   GuardConfigAuditFindingRecordDto,
   GuardEvaluationRunDto,
   GuardHealthDto,
@@ -18,6 +19,7 @@ import type {
   AuditEventRow,
   AuditIntegrity,
   AuditRecordType,
+  AuditWindow,
   ConfigAuditFindingRecord,
   EvaluationAttackMetric,
   EvaluationCase,
@@ -216,6 +218,57 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
     isMalicious: typeof dto.is_malicious === "boolean" ? dto.is_malicious : null,
     latencyMs: readNullableNumber(dto.latency_ms),
     raw: dto,
+  };
+}
+
+export function mapAuditWindow(dto: GuardAuditWindowDto): AuditWindow {
+  const scope = readRecord(dto.scope);
+  const filters = readRecord(scope.filters);
+  const metrics = readRecord(dto.policy_metrics);
+  return {
+    scope: {
+      kind: "audit_window",
+      snapshotId: readString(scope.snapshot_id) ?? "",
+      outcomesAsOf: readString(scope.outcomes_as_of) ?? "",
+      order: "audit_sequence",
+      limit: readNumber(scope.limit),
+      returnedRecordCount: readNumber(scope.returned_record_count),
+      hasMore: readBoolean(scope.has_more),
+      nextCursor: readString(scope.next_cursor),
+      sequenceFrom: readNullableNumber(scope.sequence_from),
+      sequenceTo: readNullableNumber(scope.sequence_to),
+      occurredFrom: readString(scope.occurred_from),
+      occurredTo: readString(scope.occurred_to),
+      filters: {
+        traceId: readString(filters.trace_id),
+        caseId: readString(filters.case_id),
+        runtime: readString(filters.runtime),
+        decision: readString(filters.decision),
+      },
+    },
+    events: readArray(dto.events).map((row) => mapAuditEvent(row as GuardAuditEventDto)),
+    metrics: {
+      metricVersion: "policy_evaluation.v2",
+      deduplication: "logical_policy_evaluation",
+      evaluationCount: readNumber(metrics.evaluation_count),
+      unknownDecisionCount: readNumber(metrics.unknown_decision_count),
+      allowCount: readNumber(metrics.allow_count),
+      denyCount: readNumber(metrics.deny_count),
+      askCount: readNumber(metrics.ask_count),
+      interventionCount: readNumber(metrics.intervention_count),
+      interventionRate: readNullableNumber(metrics.intervention_rate),
+      policyDenyRate: readNullableNumber(metrics.policy_deny_rate),
+      approvalTriggerRate: readNullableNumber(metrics.approval_trigger_rate),
+      policyFpr: readNullableNumber(metrics.policy_intervention_fpr),
+      policyFnr: readNullableNumber(metrics.policy_intervention_fnr),
+      benignLabelCount: readNumber(metrics.benign_label_count),
+      maliciousLabelCount: readNumber(metrics.malicious_label_count),
+      unlabeledCount: readNumber(metrics.unlabeled_count),
+      averageDecisionLatencyMs: readNullableNumber(metrics.average_decision_latency_ms),
+      latencySampleCount: readNumber(metrics.latency_sample_count),
+      duplicatePolicyRecordCount: readNumber(metrics.duplicate_policy_record_count),
+      unkeyedPolicyRecordCount: readNumber(metrics.unkeyed_policy_record_count),
+    },
   };
 }
 

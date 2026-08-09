@@ -421,10 +421,11 @@ async function waitForAuditEvents(cookie, traceIds, timeoutMs) {
   const startedAt = Date.now();
   let latest = [];
   while (Date.now() - startedAt < timeoutMs) {
-    latest = await authedGet(
-      "/v1/audit/events?runtime=openclaw&limit=1000",
+    const window = await authedGet(
+      "/v1/audit/window?runtime=openclaw&limit=1000",
       cookie,
     );
+    latest = Array.isArray(window?.events) ? window.events : [];
     const observed = new Set(latest.map((event) => event.trace_id));
     if ([...expected].every((traceId) => observed.has(traceId))) {
       return latest;
@@ -1479,7 +1480,11 @@ async function main() {
   ];
   const auditEvents = await waitForAuditEvents(cookie, expectedTraceIds, 7000);
   const integrity = await authedGet("/v1/audit/integrity", cookie);
-  const metrics = await authedGet("/v1/metrics/eval?runtime=openclaw", cookie);
+  const metricsWindow = await authedGet(
+    "/v1/audit/window?runtime=openclaw&limit=1000",
+    cookie,
+  );
+  const metrics = metricsWindow.policy_metrics;
   const toolProvenance = await authedGet(
     `/v1/traces/${encodeURIComponent(toolTraceId)}/provenance`,
     cookie,
@@ -1862,14 +1867,19 @@ async function waitForReliabilityEvents(plan, hookResults, timeoutMs) {
   let latestEvents = [];
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const latestPage = await controlGet("/v1/audit/events?limit=1000");
+    const latestWindow = await controlGet("/v1/audit/window?limit=1000");
+    const latestPage = Array.isArray(latestWindow?.events)
+      ? latestWindow.events
+      : [];
     latestEvents = await collectReliabilityEventsByTrace(
       plan,
       latestPage,
-      (traceId) =>
-        controlGet(
-          `/v1/audit/events?trace_id=${encodeURIComponent(traceId)}&limit=10`,
-        ),
+      async (traceId) => {
+        const window = await controlGet(
+          `/v1/audit/window?trace_id=${encodeURIComponent(traceId)}&limit=10`,
+        );
+        return Array.isArray(window?.events) ? window.events : [];
+      },
     );
     const now = Date.now();
     for (const event of latestEvents) {

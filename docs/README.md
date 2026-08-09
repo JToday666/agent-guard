@@ -108,8 +108,8 @@ docs/
 | [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                               | Capability Auth、control token、adapter token、browser session 与接口鉴权      |
 | [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                           | Adapter / Plugin token 使用边界和 scope                                        |
 | [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                               | Dashboard browser session、CSRF 和 launch code 边界                            |
-| [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 已冻结的证据链与溯源目标结构、示例、兼容策略和迁移清单                        |
-| [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort、兼容与验收契约                |
+| [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 已冻结的证据链与溯源结构、示例、写入归属和验收清单                            |
+| [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort 与验收契约                    |
 
 ## 4. 维护规则
 

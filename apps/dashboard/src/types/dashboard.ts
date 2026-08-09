@@ -362,16 +362,28 @@ export interface TraceEvidenceViewModel {
 
 export interface AuditWindowScope {
   kind: "audit_window";
-  source: "legacy_audit_events" | "audit_window_api";
+  snapshotId: string;
+  outcomesAsOf: string;
+  order: "audit_sequence";
   limit: number;
   returnedRecordCount: number;
-  hasMore: boolean | null;
-  from: string | null;
-  to: string | null;
-  deduplication: "logical_policy_evaluation";
+  hasMore: boolean;
+  nextCursor: string | null;
+  sequenceFrom: number | null;
+  sequenceTo: number | null;
+  occurredFrom: string | null;
+  occurredTo: string | null;
+  filters: {
+    traceId: string | null;
+    caseId: string | null;
+    runtime: string | null;
+    decision: string | null;
+  };
 }
 
 export interface WindowMetrics {
+  metricVersion: "policy_evaluation.v2";
+  deduplication: "logical_policy_evaluation";
   evaluationCount: number;
   unknownDecisionCount: number;
   allowCount: number;
@@ -389,7 +401,7 @@ export interface WindowMetrics {
   averageDecisionLatencyMs: number | null;
   latencySampleCount: number;
   duplicatePolicyRecordCount: number;
-  legacyFallbackCount: number;
+  unkeyedPolicyRecordCount: number;
 }
 
 export interface AuditWindow {
