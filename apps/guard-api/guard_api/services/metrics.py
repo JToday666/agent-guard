@@ -92,12 +92,8 @@ class MetricService:
             "allow_count": sum(
                 1 for event in policy_events if event.decision == "allow"
             ),
-            "deny_count": sum(
-                1 for event in policy_events if event.decision == "deny"
-            ),
-            "ask_count": sum(
-                1 for event in policy_events if event.decision == "ask"
-            ),
+            "deny_count": sum(1 for event in policy_events if event.decision == "deny"),
+            "ask_count": sum(1 for event in policy_events if event.decision == "ask"),
             "blocked_count": blocked_count,
             "block_rate": (blocked_count / event_count) if event_count else None,
             "average_latency_ms": (

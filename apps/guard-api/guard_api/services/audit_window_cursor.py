@@ -84,7 +84,10 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
         raise CursorExpiredError(cursor) from None
     if not isinstance(payload, dict):
         raise CursorExpiredError(cursor)
-    if payload.get("version") != CURSOR_VERSION or payload.get("kind") != _CURSOR_PREFIX:
+    if (
+        payload.get("version") != CURSOR_VERSION
+        or payload.get("kind") != _CURSOR_PREFIX
+    ):
         raise CursorExpiredError(cursor)
     upper_sequence = payload.get("upper_sequence")
     after_sequence = payload.get("after_sequence")

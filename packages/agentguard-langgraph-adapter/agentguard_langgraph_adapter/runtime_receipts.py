@@ -184,9 +184,11 @@ def build_runtime_outcome(
                 "tool_result_entered_context": (
                     True
                     if execution_status == "executed" and disposition != "quarantined"
-                    else False
-                    if execution_status in {"not_invoked", "executed"}
-                    else None
+                    else (
+                        False
+                        if execution_status in {"not_invoked", "executed"}
+                        else None
+                    )
                 ),
                 "persisted": False if execution_status == "not_invoked" else None,
             },

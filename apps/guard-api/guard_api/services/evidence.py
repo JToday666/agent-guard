@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from agentguard_core import (
@@ -261,7 +262,7 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
     return projection
 
 
-def _unique_context_sources(items: list[object]) -> list[object]:
+def _unique_context_sources(items: Sequence[object]) -> list[object]:
     unique: list[object] = []
     fingerprints: set[str] = set()
     for item in items:

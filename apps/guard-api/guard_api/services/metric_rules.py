@@ -137,12 +137,8 @@ def aggregate_policy_metrics_v2(events: list[AuditEvent]) -> dict[str, Any]:
     intervention_count = ask_count + deny_count
 
     known = [event for event in unique if event.decision is not None]
-    benign_known = [
-        event for event in known if event.is_malicious is False
-    ]
-    malicious_known = [
-        event for event in known if event.is_malicious is True
-    ]
+    benign_known = [event for event in known if event.is_malicious is False]
+    malicious_known = [event for event in known if event.is_malicious is True]
     fpr_hits = sum(
         1 for event in benign_known if event.decision in _INTERVENTION_DECISIONS
     )
