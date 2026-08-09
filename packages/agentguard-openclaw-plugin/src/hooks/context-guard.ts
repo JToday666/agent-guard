@@ -67,7 +67,8 @@ export function registerBeforePromptBuild(hookContext: HookContext): void {
 }
 
 export function registerBeforeAgentRun(hookContext: HookContext): void {
-  const { api, config, makeClient, sessionState } = hookContext;
+  const { api, config, makeClient, outcomeDelivery, sessionState } =
+    hookContext;
   api.on(
     "before_agent_run",
     async (event, context) => {
@@ -133,6 +134,7 @@ export function registerBeforeAgentRun(hookContext: HookContext): void {
             kind: "pre_execution_deny",
             stage: "before_agent_run",
             logLabel: "before_agent_run",
+            delivery: outcomeDelivery,
           });
         }
         return result;

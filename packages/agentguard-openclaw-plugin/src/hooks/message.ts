@@ -23,7 +23,8 @@ import { fireRuntimeOutcomeReceipt } from "../runtime/outcome-receipt.js";
 import type { HookContext } from "./context.js";
 
 export function registerMessageSending(hookContext: HookContext): void {
-  const { api, config, makeClient, sessionState } = hookContext;
+  const { api, config, makeClient, outcomeDelivery, sessionState } =
+    hookContext;
   api.on(
     "message_sending",
     async (event, context) => {
@@ -57,6 +58,7 @@ export function registerMessageSending(hookContext: HookContext): void {
               approval: outcome.approval,
               stage: "message_sending",
               logLabel: "message_sending",
+              delivery: outcomeDelivery,
             });
           },
         );

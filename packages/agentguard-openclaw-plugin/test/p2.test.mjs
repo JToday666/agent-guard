@@ -9,6 +9,11 @@ import {
   buildBeforeInstallConfigAuditEvent,
 } from "../dist/mapping/index.js";
 
+function registerPlugin(plugin, api) {
+  const register = plugin.register.bind(plugin);
+  register({ registerService() {}, ...api });
+}
+
 const config = {
   guardApiBaseUrl: "http://guard.test",
   adapterToken: "secret-token",
@@ -190,7 +195,7 @@ test("plugin entry registers P2 hooks and handles before_install fail-closed", a
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -235,7 +240,7 @@ test("plugin entry carries session user task into tool call evaluations", async 
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -294,7 +299,7 @@ test("plugin entry carries cached task evidence into runtime observations", asyn
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -362,7 +367,7 @@ test("plugin entry redacts sensitive tool results before persistence", async () 
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -413,7 +418,7 @@ test("plugin entry redacts ordinary values stored under sensitive keys", async (
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -466,7 +471,7 @@ test("plugin entry handles tool_result_persist redaction before returning", asyn
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -517,7 +522,7 @@ test("plugin entry sanitizes persistent instruction-like tool results before ret
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -574,7 +579,7 @@ test("plugin entry does not sanitize ordinary persistent tool results", async ()
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -624,7 +629,7 @@ test("plugin entry evaluates tool_result_persist deny decisions asynchronously w
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -683,7 +688,7 @@ test("plugin entry evaluates tool_result_persist ask decisions asynchronously wi
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -744,7 +749,7 @@ test("plugin entry asks the harness to revise final answers that expose credenti
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -789,7 +794,7 @@ test("finalization without runtime identifiers never shares an unknown retry key
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -832,7 +837,7 @@ test("plugin entry asks the harness to revise final answers on ask decisions", a
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -885,7 +890,7 @@ test("plugin entry requests a safe revision when final output evaluation is unav
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });
@@ -924,7 +929,7 @@ test("plugin entry preserves evidence across prompt, model, and tool result hook
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: config,
       on(name, handler, options) {
         registered.push({ name, handler, options });

@@ -5,6 +5,29 @@ import {
   OPENCLAW_REQUIRED_HOOKS,
 } from "../hook-contract.mjs";
 
+function registerPlugin(plugin, api) {
+  const register = plugin.register.bind(plugin);
+  register({ registerService() {}, ...api });
+}
+
+test("plugin background work is owned by the OpenClaw service lifecycle", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const services = [];
+
+  registerPlugin(plugin, {
+    pluginConfig: { adapterToken: "plugin-token", enforcementMode: "disabled" },
+    registerService(service) {
+      services.push(service);
+    },
+    on() {},
+  });
+
+  assert.equal(services.length, 1);
+  assert.equal(services[0].id, "agentguard-security-runtime");
+  await services[0].start({});
+  await services[0].stop({});
+});
+
 test("plugin entry evaluates hooks with OpenClaw api.pluginConfig", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
@@ -13,7 +36,7 @@ test("plugin entry evaluates hooks with OpenClaw api.pluginConfig", async () => 
   delete process.env.AGENTGUARD_ADAPTER_TOKEN;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -77,7 +100,7 @@ test("plugin entry disabled mode registers hooks without calling Guard API", asy
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -123,7 +146,7 @@ test("plugin entry gives approval hooks enough time for human review", async () 
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
 
-  plugin.register({
+  registerPlugin(plugin, {
     pluginConfig: {
       guardApiBaseUrl: "http://guard.local",
       adapterToken: "plugin-token",
@@ -153,7 +176,7 @@ test("plugin entry observe mode evaluates but does not block deny decisions", as
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -211,7 +234,7 @@ test("plugin entry enforces before_agent_run deny decisions", async () => {
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -277,7 +300,7 @@ test("before_agent_run isolates untrusted tool history from the trusted current 
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -351,7 +374,7 @@ test("plugin entry fails closed when before_agent_run cannot reach Guard API", a
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -400,7 +423,7 @@ test("plugin entry treats before_agent_run ask decisions as unapproved blocks", 
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -462,7 +485,7 @@ test("plugin entry ignores runtime policy embedded in prompt text", async () => 
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",
@@ -542,7 +565,7 @@ test("plugin entry carries trusted structured tool manifest provenance to tool c
   const previousFetch = globalThis.fetch;
 
   try {
-    plugin.register({
+    registerPlugin(plugin, {
       pluginConfig: {
         guardApiBaseUrl: "http://guard.local",
         adapterToken: "plugin-token",

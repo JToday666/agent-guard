@@ -17,9 +17,9 @@ export function scheduleHeartbeat(
   config: ReturnType<typeof buildPluginConfig>,
   makeClient: () => GuardApiClient,
   pluginVersion: string,
-): void {
+): () => void {
   if (!config.adapterToken || isDisabled(config)) {
-    return;
+    return () => undefined;
   }
   const submit = () => {
     void makeClient()
@@ -61,8 +61,14 @@ export function scheduleHeartbeat(
         });
       });
   };
-  unrefTimer(setTimeout(submit, 0));
-  unrefTimer(setInterval(submit, HEARTBEAT_INTERVAL_MS));
+  const initialTimer = setTimeout(submit, 0);
+  const intervalTimer = setInterval(submit, HEARTBEAT_INTERVAL_MS);
+  unrefTimer(initialTimer);
+  unrefTimer(intervalTimer);
+  return () => {
+    clearTimeout(initialTimer);
+    clearInterval(intervalTimer);
+  };
 }
 
 export function runtimeVersion(): string {

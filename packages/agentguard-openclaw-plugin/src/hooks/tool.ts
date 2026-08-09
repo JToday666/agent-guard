@@ -29,7 +29,14 @@ import {
 import type { HookContext } from "./context.js";
 
 export function registerBeforeToolCall(hookContext: HookContext): void {
-  const { api, config, makeClient, sessionState, toolCallState } = hookContext;
+  const {
+    api,
+    config,
+    makeClient,
+    outcomeDelivery,
+    sessionState,
+    toolCallState,
+  } = hookContext;
   api.on(
     "before_tool_call",
     async (event, context) => {
@@ -64,6 +71,7 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
               approval: outcome.approval,
               stage: "before_tool_call",
               logLabel: "before_tool_call",
+              delivery: outcomeDelivery,
             });
           },
         );
@@ -79,7 +87,14 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
 }
 
 export function registerToolResultPersist(hookContext: HookContext): void {
-  const { api, config, makeClient, sessionState, toolCallState } = hookContext;
+  const {
+    api,
+    config,
+    makeClient,
+    outcomeDelivery,
+    sessionState,
+    toolCallState,
+  } = hookContext;
   api.on(
     "tool_result_persist",
     (event, context) => {
@@ -120,6 +135,7 @@ export function registerToolResultPersist(hookContext: HookContext): void {
                 resultDisposition: "modified",
                 stage: "tool_result_persist",
                 logLabel: "tool_result_persist",
+                delivery: outcomeDelivery,
               });
             }
           })

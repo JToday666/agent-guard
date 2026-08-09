@@ -1,7 +1,4 @@
-import {
-  logDiagnostic,
-  type GuardApiClient,
-} from "../guard-api-client.js";
+import { logDiagnostic, type GuardApiClient } from "../guard-api-client.js";
 import {
   buildRuntimeOutcomeAuditEvent,
   type OutcomeApprovalEvidence,
@@ -12,6 +9,7 @@ import type {
   GuardEvaluationResponse,
   GuardEvent,
 } from "../types.js";
+import type { RuntimeOutcomeDelivery } from "./outcome-delivery.js";
 
 export type FireRuntimeOutcomeParams = {
   client: GuardApiClient;
@@ -23,12 +21,14 @@ export type FireRuntimeOutcomeParams = {
   resultDisposition?: "modified" | "quarantined";
   stage?: string;
   logLabel: string;
+  delivery: RuntimeOutcomeDelivery;
 };
 
 /**
- * fire-and-forget 提交 runtime_outcome 回执：
+ * 持久化后异步提交 runtime_outcome 回执：
  * - 缺少 policy_audit_id 时不构造（§8.3 必填，不臆造），仅记诊断；
- * - 构造/提交失败只记诊断，不影响主流程（不 fail-closed）。
+ * - 网络失败由本地队列补投，持久化失败时退化为直接提交；
+ * - 回执链路不改变已完成的运行时阻断结果。
  */
 export function fireRuntimeOutcomeReceipt(
   params: FireRuntimeOutcomeParams,
@@ -43,6 +43,7 @@ export function fireRuntimeOutcomeReceipt(
     resultDisposition,
     stage,
     logLabel,
+    delivery,
   } = params;
   if (!evaluation.policy_audit_id) {
     logDiagnostic(
@@ -53,16 +54,17 @@ export function fireRuntimeOutcomeReceipt(
     return;
   }
   try {
-    const receipt = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, kind, {
-      approval,
-      resultDisposition,
-      stage,
-    });
-    void client.submitRuntimeOutcome(receipt).catch((error) => {
-      logDiagnostic(config, `${logLabel}: runtime outcome receipt failed`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    const receipt = buildRuntimeOutcomeAuditEvent(
+      guardEvent,
+      evaluation,
+      kind,
+      {
+        approval,
+        resultDisposition,
+        stage,
+      },
+    );
+    delivery.submit(receipt, client, logLabel);
   } catch (error) {
     logDiagnostic(config, `${logLabel}: runtime outcome mapping failed`, {
       error: error instanceof Error ? error.message : String(error),
