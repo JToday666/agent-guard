@@ -418,4 +418,30 @@ function handleClearFilters(): void {
   cursor: default;
   opacity: 0.45;
 }
+
+@media (max-width: 56.25rem) {
+  .evidence-tools {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .evidence-tools > label {
+    grid-column: 1 / -1;
+  }
+
+  .evidence-summary,
+  .evidence-pagination {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .evidence-summary span:last-child {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .trace-table-wrap {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+  }
+}
 </style>

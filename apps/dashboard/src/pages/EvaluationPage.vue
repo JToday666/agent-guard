@@ -953,4 +953,26 @@ watch(
   cursor: default;
   opacity: 0.45;
 }
+
+@media (max-width: 56.25rem) {
+  .benchmark-layout,
+  .window-analysis {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmark-facts,
+  .window-data-details dl {
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  }
+
+  .case-pagination {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .case-table-wrap {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+  }
+}
 </style>

@@ -810,6 +810,39 @@ function handleExport() {
   display: flex;
   justify-content: space-between;
 }
+
+@media (max-width: 74.9375rem) {
+  .investigation-tools {
+    grid-template-columns: repeat(3, minmax(10rem, 1fr));
+  }
+
+  .investigation-search {
+    grid-column: 1 / -1;
+  }
+
+  .event-table-wrap {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+  }
+}
+
+@media (max-width: 56.25rem) {
+  .investigation-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-header-actions,
+  .new-event-notice,
+  .pagination,
+  .result-summary {
+    flex-wrap: wrap;
+  }
+
+  .result-summary span:last-child {
+    margin-left: 0;
+    width: 100%;
+  }
+}
 .trace-preview h3 {
   margin: 0;
 }

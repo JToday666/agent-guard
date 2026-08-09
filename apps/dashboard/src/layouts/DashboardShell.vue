@@ -10,13 +10,25 @@
     />
     <div
       class="dashboard-shell__body"
-      :class="{ 'dashboard-shell__body--collapsed': isSidebarCollapsed }"
+      :class="{
+        'dashboard-shell__body--collapsed': isTabletShell || isSidebarCollapsed,
+        'dashboard-shell__body--tablet': isTabletShell,
+      }"
     >
       <AppSidebar
-        :is-collapsed="isSidebarCollapsed"
+        :is-collapsed="effectiveSidebarCollapsed"
+        :is-tablet="isTabletShell"
         :pending-count="dashboardStore.pendingCount"
+        @navigate="handleTabletNavigation"
         @toggle-collapse="handleToggleSidebar"
       />
+      <button
+        v-if="isTabletShell && isTabletSidebarExpanded"
+        class="dashboard-shell__sidebar-backdrop"
+        type="button"
+        aria-label="收起侧栏"
+        @click="handleCloseTabletSidebar(true)"
+      ></button>
       <main
         id="main-content"
         class="dashboard-shell__workspace"
@@ -90,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { onErrorCaptured, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onErrorCaptured, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import InlineNotice from "../components/common/InlineNotice.vue";
@@ -108,11 +120,18 @@ defineOptions({
 });
 
 const isSidebarCollapsed = ref(false);
+const isTabletShell = ref(false);
+const isTabletSidebarExpanded = ref(false);
 const routeRenderFailed = ref(false);
 const authStore = useAuthStore();
 const dashboardStore = useDashboardStore();
 const route = useRoute();
 let cancelRoutePreload: (() => void) | null = null;
+let tabletShellMedia: MediaQueryList | null = null;
+
+const effectiveSidebarCollapsed = computed(() =>
+  isTabletShell.value ? !isTabletSidebarExpanded.value : isSidebarCollapsed.value,
+);
 
 async function handleInitializeDashboard(): Promise<void> {
   dashboardStore.setActiveScope(getDashboardRefreshScope(route.name));
@@ -126,13 +145,48 @@ async function handleInitializeDashboard(): Promise<void> {
 }
 
 onMounted(handleInitializeDashboard);
+onMounted(() => {
+  tabletShellMedia = window.matchMedia("(max-width: 74.9375rem)");
+  updateTabletShell(tabletShellMedia);
+  tabletShellMedia.addEventListener("change", updateTabletShell);
+  window.addEventListener("keydown", handleShellEscape);
+});
 onUnmounted(() => {
   cancelRoutePreload?.();
   dashboardStore.stopPolling();
+  tabletShellMedia?.removeEventListener("change", updateTabletShell);
+  window.removeEventListener("keydown", handleShellEscape);
 });
 
 function handleToggleSidebar(): void {
+  if (isTabletShell.value) {
+    isTabletSidebarExpanded.value = !isTabletSidebarExpanded.value;
+    return;
+  }
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
+}
+
+function updateTabletShell(media: MediaQueryList | MediaQueryListEvent): void {
+  isTabletShell.value = media.matches;
+  if (!media.matches) isTabletSidebarExpanded.value = false;
+}
+
+function handleTabletNavigation(): void {
+  if (isTabletShell.value) isTabletSidebarExpanded.value = false;
+}
+
+function handleCloseTabletSidebar(restoreFocus = false): void {
+  if (!isTabletSidebarExpanded.value) return;
+  isTabletSidebarExpanded.value = false;
+  if (restoreFocus) {
+    void nextTick().then(() => document.querySelector<HTMLElement>(".sidebar__collapse")?.focus());
+  }
+}
+
+function handleShellEscape(event: KeyboardEvent): void {
+  if (event.key === "Escape" && isTabletShell.value && isTabletSidebarExpanded.value) {
+    handleCloseTabletSidebar(true);
+  }
 }
 
 function handleSkipToMain(event: MouseEvent): void {
@@ -165,6 +219,7 @@ watch(
   () => route.fullPath,
   () => {
     routeRenderFailed.value = false;
+    handleTabletNavigation();
   },
 );
 
@@ -189,6 +244,10 @@ onErrorCaptured(() => {
 
 .dashboard-shell__body--collapsed {
   grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
+}
+
+.dashboard-shell__body--tablet {
+  position: relative;
 }
 
 .dashboard-shell__workspace {
@@ -255,6 +314,31 @@ onErrorCaptured(() => {
   right: var(--space-5);
   top: calc(var(--top-bar-height) + var(--space-4));
   z-index: 40;
+}
+
+.dashboard-shell__sidebar-backdrop {
+  background: color-mix(in srgb, var(--color-shell-strong) 28%, transparent);
+  border: 0;
+  bottom: 0;
+  cursor: default;
+  left: var(--sidebar-collapsed-width);
+  padding: 0;
+  position: fixed;
+  right: 0;
+  top: var(--top-bar-height);
+  z-index: 20;
+}
+
+@media (max-width: 74.9375rem) {
+  .dashboard-shell__body {
+    grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 56.25rem) {
+  .dashboard-shell {
+    --top-bar-height: 6.75rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

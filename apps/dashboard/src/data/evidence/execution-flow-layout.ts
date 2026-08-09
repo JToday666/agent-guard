@@ -10,6 +10,7 @@ export interface ExecutionFlowLane {
   label: string;
   description: string;
   count: number;
+  headerHeight: number;
   position: { x: number; y: number };
   width: number;
   height: number;
@@ -59,10 +60,17 @@ const LANE_DEFINITIONS: ReadonlyArray<Pick<ExecutionFlowLane, "id" | "label" | "
 
 export const EXECUTION_FLOW_NODE_WIDTH = 236;
 export const EXECUTION_FLOW_NODE_HEIGHT = 138;
+export const EXECUTION_FLOW_LANE_HEADER_HEIGHT = 64;
+export const EXECUTION_FLOW_COMPACT_WIDTH = 920;
 const HORIZONTAL_COLUMN_GAP = 52;
 const HORIZONTAL_LANE_GAP = 26;
+const HORIZONTAL_CONTENT_START_X = 72;
+const HORIZONTAL_CONTENT_END_PADDING = 24;
+const HORIZONTAL_LANE_BOTTOM_PADDING = 22;
 const VERTICAL_ROW_GAP = 38;
 const VERTICAL_LANE_GAP = 24;
+const VERTICAL_LANE_INLINE_PADDING = 17;
+const VERTICAL_LANE_BOTTOM_PADDING = 32;
 
 export function getExecutionFlowLane(step: ExecutionStepViewModel): ExecutionFlowLaneId {
   if (
@@ -95,19 +103,22 @@ export function buildExecutionFlowLayout(
     laneCounts.set(laneId, (laneCounts.get(laneId) ?? 0) + 1);
   }
 
-  const horizontalLaneHeight = EXECUTION_FLOW_NODE_HEIGHT + 64;
-  const verticalLaneWidth = EXECUTION_FLOW_NODE_WIDTH + 34;
+  const horizontalLaneHeight =
+    EXECUTION_FLOW_LANE_HEADER_HEIGHT + EXECUTION_FLOW_NODE_HEIGHT + HORIZONTAL_LANE_BOTTOM_PADDING;
+  const verticalLaneWidth = EXECUTION_FLOW_NODE_WIDTH + VERTICAL_LANE_INLINE_PADDING * 2;
   const contentWidth = Math.max(
     44 * 16,
-    96 +
+    HORIZONTAL_CONTENT_START_X +
       Math.max(0, steps.length - 1) * (EXECUTION_FLOW_NODE_WIDTH + HORIZONTAL_COLUMN_GAP) +
-      EXECUTION_FLOW_NODE_WIDTH,
+      EXECUTION_FLOW_NODE_WIDTH +
+      HORIZONTAL_CONTENT_END_PADDING,
   );
   const contentHeight = Math.max(
     31 * 16,
-    96 +
+    EXECUTION_FLOW_LANE_HEADER_HEIGHT +
       Math.max(0, steps.length - 1) * (EXECUTION_FLOW_NODE_HEIGHT + VERTICAL_ROW_GAP) +
-      EXECUTION_FLOW_NODE_HEIGHT,
+      EXECUTION_FLOW_NODE_HEIGHT +
+      VERTICAL_LANE_BOTTOM_PADDING,
   );
 
   const lanes = LANE_DEFINITIONS.filter((lane) => (laneCounts.get(lane.id) ?? 0) > 0).map(
@@ -116,6 +127,7 @@ export function buildExecutionFlowLayout(
       return {
         ...lane,
         count: laneCounts.get(lane.id) ?? 0,
+        headerHeight: EXECUTION_FLOW_LANE_HEADER_HEIGHT,
         height: orientation === "horizontal" ? horizontalLaneHeight : contentHeight,
         position:
           orientation === "horizontal"
@@ -136,12 +148,18 @@ export function buildExecutionFlowLayout(
       position:
         orientation === "horizontal"
           ? {
-              x: 72 + order * (EXECUTION_FLOW_NODE_WIDTH + HORIZONTAL_COLUMN_GAP),
-              y: laneIndex * (horizontalLaneHeight + HORIZONTAL_LANE_GAP) + 42,
+              x:
+                HORIZONTAL_CONTENT_START_X +
+                order * (EXECUTION_FLOW_NODE_WIDTH + HORIZONTAL_COLUMN_GAP),
+              y:
+                laneIndex * (horizontalLaneHeight + HORIZONTAL_LANE_GAP) +
+                EXECUTION_FLOW_LANE_HEADER_HEIGHT,
             }
           : {
-              x: laneIndex * (verticalLaneWidth + VERTICAL_LANE_GAP) + 17,
-              y: 64 + order * (EXECUTION_FLOW_NODE_HEIGHT + VERTICAL_ROW_GAP),
+              x: laneIndex * (verticalLaneWidth + VERTICAL_LANE_GAP) + VERTICAL_LANE_INLINE_PADDING,
+              y:
+                EXECUTION_FLOW_LANE_HEADER_HEIGHT +
+                order * (EXECUTION_FLOW_NODE_HEIGHT + VERTICAL_ROW_GAP),
             },
       step,
     };

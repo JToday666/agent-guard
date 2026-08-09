@@ -134,3 +134,31 @@
     padding: var(--space-6) var(--space-5);
   }
 }
+
+@media (max-width: 74.9375rem) {
+  .page-header,
+  .section-header {
+    flex-wrap: wrap;
+  }
+
+  .page-header > *,
+  .section-header > * {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 56.25rem) {
+  .workspace-panel {
+    padding: var(--space-5);
+  }
+
+  .page-header {
+    align-items: flex-start;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+  }
+
+  .section-header {
+    gap: var(--space-3);
+  }
+}

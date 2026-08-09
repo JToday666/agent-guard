@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 import { expectPrimaryRoutesLayout } from "./support/dashboard-layout";
+import {
+  expectExecutionFlowFullscreenLayout,
+  expectExecutionFlowGeometry,
+} from "./support/execution-flow-geometry";
 
 test("primary routes remain usable across supported desktop workspaces", async ({ page }) => {
   await expectPrimaryRoutesLayout(page, "trace_002");
@@ -53,4 +57,25 @@ test("standard routes leave vertical scrolling to the document", async ({ page }
       expect(scrollState.documentScrollable, path).toBe(true);
     }
   }
+});
+
+test("execution graph geometry remains separated across desktop widths and sidebar states", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_008");
+  const graph = page.locator(".execution-flow");
+  await expectExecutionFlowGeometry(graph);
+
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await expect(page.locator(".sidebar")).toHaveClass(/sidebar--collapsed/);
+  await expectExecutionFlowGeometry(graph);
+
+  await graph.getByRole("button", { name: "全屏" }).click();
+  await expectExecutionFlowFullscreenLayout(page, graph);
+  await expectExecutionFlowGeometry(graph);
+  await page.keyboard.press("Escape");
+  await expect(graph).not.toHaveClass(/execution-flow--fullscreen/);
+
+  await page.goto("/evidence/trace_002");
+  await expectExecutionFlowGeometry(page.locator(".execution-flow"));
 });

@@ -14,7 +14,6 @@
 html {
   background: var(--color-page);
   color-scheme: light;
-  min-width: 75rem;
   min-height: 100%;
   scrollbar-gutter: stable;
 }
@@ -45,6 +44,14 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--color-active) 18%, transparent);
+  touch-action: manipulation;
 }
 
 button,

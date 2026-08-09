@@ -329,4 +329,35 @@ function handleSearch(): void {
     display: none;
   }
 }
+
+@media (max-width: 56.25rem) {
+  .top-bar {
+    column-gap: var(--space-2);
+    grid-template-areas:
+      "brand status pending"
+      "search search search";
+    grid-template-columns: minmax(8.5rem, 1fr) auto auto;
+    grid-template-rows: minmax(2.25rem, auto) 2.5rem;
+    height: var(--top-bar-height);
+    padding: var(--space-2) var(--space-3);
+    row-gap: var(--space-2);
+  }
+
+  .top-bar__brand {
+    grid-area: brand;
+  }
+
+  .top-bar__status {
+    flex-wrap: nowrap;
+    grid-area: status;
+  }
+
+  .top-bar__search {
+    grid-area: search;
+  }
+
+  .top-bar__pending {
+    grid-area: pending;
+  }
+}
 </style>

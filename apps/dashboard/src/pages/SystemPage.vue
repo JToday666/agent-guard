@@ -722,4 +722,34 @@ function handleRefresh() {
   font-size: var(--font-size-12);
   overflow-wrap: anywhere;
 }
+
+@media (max-width: 56.25rem) {
+  .status-ledger > header,
+  .integrity-status {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .status-ledger__rows article {
+    grid-template-columns: 0.75rem minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+  }
+
+  .status-ledger__rows article > :nth-child(4) {
+    grid-column: 2 / -1;
+  }
+
+  .adapter-verify__headline {
+    grid-template-columns: 0.75rem minmax(0, 1fr);
+  }
+
+  .adapter-verify__headline b {
+    grid-column: 2;
+  }
+
+  .hook-coverage {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

@@ -307,6 +307,7 @@ function handleConfirm(): void {
   align-content: start;
   display: grid;
   gap: var(--space-5);
+  grid-auto-rows: max-content;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;

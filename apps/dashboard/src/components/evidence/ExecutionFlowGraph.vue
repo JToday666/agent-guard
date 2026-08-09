@@ -81,9 +81,11 @@
 
         <template #node-execution-lane="{ data }">
           <div class="execution-lane" aria-hidden="true">
-            <strong>{{ data.label }}</strong>
-            <span>{{ data.description }}</span>
-            <b>{{ data.count }}</b>
+            <div class="execution-lane__header" :style="{ height: `${data.headerHeight}px` }">
+              <strong :title="data.label">{{ data.label }}</strong>
+              <span :title="data.description">{{ data.description }}</span>
+              <b>{{ data.count }}</b>
+            </div>
           </div>
         </template>
 
@@ -199,6 +201,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 
 import {
   buildExecutionFlowLayout,
+  EXECUTION_FLOW_COMPACT_WIDTH,
   EXECUTION_FLOW_NODE_HEIGHT,
   EXECUTION_FLOW_NODE_WIDTH,
   type ExecutionFlowOrientation,
@@ -494,7 +497,7 @@ watch(isFullscreen, (fullscreen) => {
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(([entry]) => {
-    isCompact.value = (entry?.contentRect.width ?? 0) < 920;
+    isCompact.value = (entry?.contentRect.width ?? 0) < EXECUTION_FLOW_COMPACT_WIDTH;
     hasMeasured.value = true;
   });
   if (workbenchRef.value) resizeObserver.observe(workbenchRef.value);
@@ -533,10 +536,13 @@ defineExpose({ fitCanvas, focusStep });
   overflow: hidden;
 }
 
-.execution-flow--fullscreen {
+.execution-flow.execution-flow--fullscreen {
   border-radius: 0;
+  grid-template-rows: max-content minmax(0, 1fr);
+  height: 100dvh;
   inset: 0;
   position: fixed;
+  width: 100vw;
   z-index: 90;
 }
 
@@ -557,15 +563,20 @@ defineExpose({ fitCanvas, focusStep });
 .execution-flow__toolbar > div:first-child {
   display: grid;
   gap: 0.1rem;
+  min-width: 0;
 }
 
 .execution-flow__toolbar > div:first-child span {
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .execution-flow__toolbar > div:last-child {
   display: flex;
+  flex: 0 0 auto;
   gap: var(--space-1);
 }
 
@@ -629,26 +640,44 @@ defineExpose({ fitCanvas, focusStep });
 
 .execution-lane {
   background: color-mix(in srgb, var(--color-surface-muted) 76%, transparent);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
+  box-shadow: inset 0 0 0 1px var(--color-border);
   height: 100%;
-  padding: var(--space-3);
+  overflow: hidden;
   position: relative;
   width: 100%;
 }
 
-.execution-lane strong {
+.execution-lane__header {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: var(--space-3) 3.25rem var(--space-3) var(--space-3);
+  position: relative;
+}
+
+.execution-lane__header strong,
+.execution-lane__header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-lane__header strong {
   color: var(--color-active-strong);
   display: block;
   font-size: var(--font-size-12);
+  line-height: var(--line-height-tight);
 }
 
-.execution-lane span {
+.execution-lane__header span {
   color: var(--color-text-subtle);
   font-size: 0.625rem;
+  line-height: 1.35;
 }
 
-.execution-lane b {
+.execution-lane__header b {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);

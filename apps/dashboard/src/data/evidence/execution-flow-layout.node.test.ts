@@ -6,7 +6,14 @@ import type {
   ExecutionStepKind,
   ExecutionStepViewModel,
 } from "../../types/dashboard.ts";
-import { buildExecutionFlowLayout, getExecutionFlowLane } from "./execution-flow-layout.ts";
+import {
+  buildExecutionFlowLayout,
+  EXECUTION_FLOW_LANE_HEADER_HEIGHT,
+  EXECUTION_FLOW_NODE_HEIGHT,
+  EXECUTION_FLOW_NODE_WIDTH,
+  getExecutionFlowLane,
+  type ExecutionFlowOrientation,
+} from "./execution-flow-layout.ts";
 
 function step(
   stepId: string,
@@ -115,4 +122,54 @@ test("switches to top-to-bottom ordering without changing semantic lanes", () =>
     layout.nodes.map((node) => node.laneId),
     ["agent", "controlled", "outcome"],
   );
+});
+
+for (const orientation of ["horizontal", "vertical"] satisfies ExecutionFlowOrientation[]) {
+  test(`${orientation} layout keeps every step below its lane header and inside lane bounds`, () => {
+    const layout = buildExecutionFlowLayout(
+      [
+        step("context", "context"),
+        step("tool", "tool", "action"),
+        step("result", "tool_result"),
+        step("message", "message", "action"),
+      ],
+      orientation,
+    );
+
+    for (const node of layout.nodes) {
+      const lane = layout.lanes.find((candidate) => candidate.id === node.laneId);
+      assert.ok(lane, `missing lane for ${node.id}`);
+      assert.equal(lane.headerHeight, EXECUTION_FLOW_LANE_HEADER_HEIGHT);
+      assert.ok(node.position.x >= lane.position.x);
+      assert.ok(node.position.y >= lane.position.y + lane.headerHeight);
+      assert.ok(node.position.x + EXECUTION_FLOW_NODE_WIDTH <= lane.position.x + lane.width);
+      assert.ok(node.position.y + EXECUTION_FLOW_NODE_HEIGHT <= lane.position.y + lane.height);
+    }
+  });
+}
+
+test("keeps step rectangles separated in both orientations", () => {
+  const steps = [
+    step("context", "context"),
+    step("input", "model_input"),
+    step("tool", "tool", "action"),
+    step("message", "message", "action"),
+    step("result", "tool_result"),
+  ];
+
+  for (const orientation of ["horizontal", "vertical"] satisfies ExecutionFlowOrientation[]) {
+    const nodes = buildExecutionFlowLayout(steps, orientation).nodes;
+    for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+        const left = nodes[leftIndex]!;
+        const right = nodes[rightIndex]!;
+        const intersects =
+          left.position.x < right.position.x + EXECUTION_FLOW_NODE_WIDTH &&
+          left.position.x + EXECUTION_FLOW_NODE_WIDTH > right.position.x &&
+          left.position.y < right.position.y + EXECUTION_FLOW_NODE_HEIGHT &&
+          left.position.y + EXECUTION_FLOW_NODE_HEIGHT > right.position.y;
+        assert.equal(intersects, false, `${left.id} overlaps ${right.id} in ${orientation}`);
+      }
+    }
+  }
 });

@@ -163,6 +163,7 @@ function formatTime(value: string): string {
   border-radius: var(--radius-2);
   display: grid;
   gap: var(--space-4);
+  grid-auto-rows: max-content;
   max-height: 38rem;
   min-width: 0;
   overflow-y: auto;
