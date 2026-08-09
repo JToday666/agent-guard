@@ -603,11 +603,11 @@ class MemoryControlPlaneStore:
 
 
 def _audit_content_matches(existing: AuditEvent, incoming: AuditEvent) -> bool:
-    from guard_api.storage.integrity import _canonical_json_bytes
+    from guard_api.storage.integrity import canonical_json_bytes
 
-    return _canonical_json_bytes(
+    return canonical_json_bytes(
         existing.model_dump(mode="json", exclude={"integrity"})
-    ) == _canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
+    ) == canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
 
 
 def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:

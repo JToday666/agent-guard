@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import os
+import re
 from dataclasses import dataclass, field
 from ipaddress import ip_address
+from pathlib import Path
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
 DEFAULT_CONTROL_TOKEN = "demo-control-token"
@@ -17,6 +21,11 @@ SUPPORTED_STORAGE_BACKENDS = {"postgres", "memory"}
 SUPPORTED_ENVIRONMENTS = {"development", "test", "production"}
 DEFAULT_MAX_REQUEST_BODY_BYTES = 1024 * 1024
 MAX_CONFIGURABLE_REQUEST_BODY_BYTES = 8 * 1024 * 1024
+DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS = 300
+MAX_AUDIT_CHECKPOINT_INTERVAL_SECONDS = 86400
+
+_CHECKPOINT_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_CHECKPOINT_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
 
 
 class GuardApiConfigurationError(RuntimeError):
@@ -88,6 +97,22 @@ class GuardApiSettings:
             "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0
         )
     )
+    audit_checkpoint_path: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_PATH")
+    )
+    audit_checkpoint_key: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_KEY"),
+        repr=False,
+    )
+    audit_checkpoint_key_id: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID")
+    )
+    audit_checkpoint_interval_seconds: int = field(
+        default_factory=lambda: _env_int(
+            "AGENTGUARD_AUDIT_CHECKPOINT_INTERVAL_SECONDS",
+            default=DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS,
+        )
+    )
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
@@ -100,6 +125,18 @@ class GuardApiSettings:
             b"agentguard/audit-window-cursor/v3",
             hashlib.sha256,
         ).digest()
+
+    def audit_checkpoint_configured(self) -> bool:
+        return bool(
+            self.audit_checkpoint_path
+            and self.audit_checkpoint_key
+            and self.audit_checkpoint_key_id
+        )
+
+    def audit_checkpoint_signing_key(self) -> bytes | None:
+        if self.audit_checkpoint_key is None:
+            return None
+        return _decode_checkpoint_key(self.audit_checkpoint_key)
 
     def validate_for_startup(self) -> None:
         environment = self.environment.strip().lower()
@@ -133,6 +170,38 @@ class GuardApiSettings:
             raise GuardApiConfigurationError(
                 "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS must be greater than zero"
             )
+        if (
+            not 1
+            <= self.audit_checkpoint_interval_seconds
+            <= MAX_AUDIT_CHECKPOINT_INTERVAL_SECONDS
+        ):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_AUDIT_CHECKPOINT_INTERVAL_SECONDS must be between "
+                "1 and 86400"
+            )
+
+        checkpoint_values = (
+            self.audit_checkpoint_path,
+            self.audit_checkpoint_key,
+            self.audit_checkpoint_key_id,
+        )
+        if any(checkpoint_values) and not all(checkpoint_values):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_AUDIT_CHECKPOINT_PATH, AGENTGUARD_AUDIT_CHECKPOINT_KEY "
+                "and AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID must be configured together"
+            )
+        if self.audit_checkpoint_configured():
+            assert self.audit_checkpoint_path is not None
+            assert self.audit_checkpoint_key_id is not None
+            if not Path(self.audit_checkpoint_path).is_absolute():
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_AUDIT_CHECKPOINT_PATH must be an absolute path"
+                )
+            if not _CHECKPOINT_KEY_ID_PATTERN.fullmatch(self.audit_checkpoint_key_id):
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID must contain 1-64 safe characters"
+                )
+            self.audit_checkpoint_signing_key()
 
         externally_exposed = environment == "production" or not _is_loopback_host(
             self.host
@@ -161,6 +230,11 @@ class GuardApiSettings:
         if not self.browser_cookie_secure:
             raise GuardApiConfigurationError(
                 "Externally exposed startup requires AGENTGUARD_BROWSER_COOKIE_SECURE=true"
+            )
+        if not self.audit_checkpoint_configured():
+            raise GuardApiConfigurationError(
+                "Externally exposed startup requires an authenticated external audit "
+                "checkpoint"
             )
 
 
@@ -202,6 +276,30 @@ def _env_int(name: str, *, default: int) -> int:
         return int(value)
     except ValueError:
         raise GuardApiConfigurationError(f"{name} must be an integer") from None
+
+
+def _decode_checkpoint_key(value: str) -> bytes:
+    normalized = value.strip()
+    if not _CHECKPOINT_KEY_PATTERN.fullmatch(normalized):
+        raise GuardApiConfigurationError(
+            "AGENTGUARD_AUDIT_CHECKPOINT_KEY must be base64url encoded"
+        )
+    padding = "=" * (-len(normalized) % 4)
+    try:
+        decoded = base64.b64decode(
+            normalized + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+    except (binascii.Error, ValueError):
+        raise GuardApiConfigurationError(
+            "AGENTGUARD_AUDIT_CHECKPOINT_KEY must be base64url encoded"
+        ) from None
+    if len(decoded) < 32:
+        raise GuardApiConfigurationError(
+            "AGENTGUARD_AUDIT_CHECKPOINT_KEY must decode to at least 32 bytes"
+        )
+    return decoded
 
 
 def _is_loopback_host(host: str) -> bool:

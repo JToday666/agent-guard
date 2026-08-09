@@ -39,7 +39,7 @@ from .redaction import (
 )
 
 # §9.3 事件时策略 digest 规范化标识。
-POLICY_CANONICALIZATION = "json:sorted-keys:v1"
+POLICY_CANONICALIZATION = "jcs:rfc8785"
 
 
 @dataclass(frozen=True, slots=True)

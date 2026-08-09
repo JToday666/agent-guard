@@ -15,7 +15,12 @@ from agentguard_core import (
 from pydantic import ValidationError
 
 from guard_api.storage.base import ControlPlaneStore
+from guard_api.storage.integrity import CANONICALIZATION
 
+from .audit_checkpoint import (
+    AuditCheckpointService,
+    disabled_audit_anchor_status,
+)
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
 from .redaction import sanitize_audit_event
@@ -44,9 +49,11 @@ class AuditService:
         *,
         store: ControlPlaneStore,
         provenance_writer: ProvenanceWriter | None = None,
+        checkpoint_service: AuditCheckpointService | None = None,
     ) -> None:
         self.store = store
         self.provenance_writer = provenance_writer or ProvenanceWriter(store=store)
+        self.checkpoint_service = checkpoint_service
 
     def prepare_submission(
         self,
@@ -59,9 +66,7 @@ class AuditService:
         if event.record_type != "runtime_outcome":
             return event
         candidate = (
-            raw_payload
-            if raw_payload is not None
-            else event.model_dump(mode="json")
+            raw_payload if raw_payload is not None else event.model_dump(mode="json")
         )
         try:
             return RuntimeOutcomeReceipt.model_validate(candidate)
@@ -96,9 +101,7 @@ class AuditService:
             "idempotent_replay": not is_new,
         }
 
-    def _validate_runtime_outcome_parent(
-        self, receipt: RuntimeOutcomeReceipt
-    ) -> None:
+    def _validate_runtime_outcome_parent(self, receipt: RuntimeOutcomeReceipt) -> None:
         parent = self.store.get_audit_event(receipt.links.policy_audit_id)
         if parent is None or parent.record_type != "policy_evaluation":
             raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_NOT_FOUND")
@@ -199,4 +202,14 @@ class AuditService:
         )
 
     def integrity(self) -> dict[str, object]:
-        return asdict(self.store.verify_audit_integrity())
+        chain_status = self.store.verify_audit_integrity()
+        anchor_status = (
+            self.checkpoint_service.inspect(chain_status)
+            if self.checkpoint_service is not None
+            else disabled_audit_anchor_status()
+        )
+        return {
+            **asdict(chain_status),
+            "canonicalization": CANONICALIZATION,
+            "anchor": asdict(anchor_status),
+        }

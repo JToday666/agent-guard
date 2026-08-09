@@ -112,6 +112,10 @@ class AuditTimestampError(ValueError):
     """Raised when an audit fact timestamp is not an aware RFC 3339 value."""
 
 
+class AuditCanonicalizationError(ValueError):
+    """Raised when evidence is outside the RFC 8785 / I-JSON domain."""
+
+
 def parse_audit_timestamp(timestamp: str) -> datetime:
     """Parse an audit fact timestamp and require an explicit timezone."""
 

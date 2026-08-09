@@ -3,24 +3,30 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Iterable
+from typing import Any, cast
 
+import rfc8785
 from agentguard_core import AuditEvent, AuditIntegrityMetadata
 
-from guard_api.storage.base import AuditIntegrityStatus
+from guard_api.storage.base import AuditCanonicalizationError, AuditIntegrityStatus
 
-CANONICALIZATION = "json:v1"
-
-
-def _canonical_json_bytes(payload: dict[str, object]) -> bytes:
-    return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+CANONICALIZATION = "jcs:rfc8785"
 
 
-def canonical_sha256(payload: dict[str, object]) -> str:
-    encoded = _canonical_json_bytes(payload)
+def canonical_json_bytes(payload: object) -> bytes:
+    """Serialize an I-JSON value with RFC 8785 JCS canonicalization."""
+
+    try:
+        return rfc8785.dumps(cast(Any, payload))
+    except (rfc8785.CanonicalizationError, TypeError) as exc:
+        raise AuditCanonicalizationError(
+            "audit evidence is not valid RFC 8785 / I-JSON data"
+        ) from exc
+
+
+def canonical_sha256(payload: object) -> str:
+    encoded = canonical_json_bytes(payload)
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
@@ -52,7 +58,7 @@ def compute_audit_event_hash(
         "prev_hash": prev_hash,
         "event": event.model_dump(mode="json", exclude={"integrity"}),
     }
-    encoded = _canonical_json_bytes(payload)
+    encoded = canonical_json_bytes(payload)
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -75,7 +81,10 @@ def verify_audit_chain(events: Iterable[AuditEvent]) -> AuditIntegrityStatus:
     head_hash: str | None = None
     for event in ordered_events:
         count += 1
-        metadata = read_audit_integrity(event)
+        try:
+            metadata = read_audit_integrity(event)
+        except (TypeError, ValueError):
+            metadata = None
         if metadata is None:
             return AuditIntegrityStatus(
                 valid=False,
@@ -83,9 +92,17 @@ def verify_audit_chain(events: Iterable[AuditEvent]) -> AuditIntegrityStatus:
                 head_hash=head_hash,
                 first_broken_audit_id=event.audit_id,
             )
-        expected_hash = compute_audit_event_hash(
-            event, sequence=metadata.sequence, prev_hash=prev_hash
-        )
+        try:
+            expected_hash = compute_audit_event_hash(
+                event, sequence=metadata.sequence, prev_hash=prev_hash
+            )
+        except AuditCanonicalizationError:
+            return AuditIntegrityStatus(
+                valid=False,
+                event_count=total_count,
+                head_hash=head_hash,
+                first_broken_audit_id=event.audit_id,
+            )
         if (
             metadata.sequence != count
             or metadata.prev_hash != prev_hash

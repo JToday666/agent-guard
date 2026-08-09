@@ -41,6 +41,8 @@ import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.support.auth import memory_store_with_adapter
 
+_AUDIT_CHECKPOINT_TEST_KEY = "Y2hlY2twb2ludC10ZXN0LWtleS1tYXRlcmlhbC0zMmI"
+
 
 class FailingHealthStore(MemoryControlPlaneStore):
     def health_check(self) -> bool:
@@ -462,7 +464,29 @@ def test_production_configuration_requires_secure_cookie_and_strong_token() -> N
         settings.validate_for_startup()
 
     settings.browser_cookie_secure = True
+    with pytest.raises(GuardApiConfigurationError, match="external audit checkpoint"):
+        settings.validate_for_startup()
+
+    settings.audit_checkpoint_path = "/tmp/agentguard-audit-checkpoints.jsonl"
+    settings.audit_checkpoint_key = _AUDIT_CHECKPOINT_TEST_KEY
+    settings.audit_checkpoint_key_id = "test-key-2026"
     settings.validate_for_startup()
+
+
+def test_audit_checkpoint_configuration_is_complete_and_strong() -> None:
+    partial = GuardApiSettings(
+        audit_checkpoint_path="/tmp/agentguard-audit-checkpoints.jsonl"
+    )
+    with pytest.raises(GuardApiConfigurationError, match="configured together"):
+        partial.validate_for_startup()
+
+    weak = GuardApiSettings(
+        audit_checkpoint_path="/tmp/agentguard-audit-checkpoints.jsonl",
+        audit_checkpoint_key="dG9vLXNob3J0",
+        audit_checkpoint_key_id="test-key-2026",
+    )
+    with pytest.raises(GuardApiConfigurationError, match="at least 32 bytes"):
+        weak.validate_for_startup()
 
 
 def test_settings_reject_invalid_environment_and_empty_control_token() -> None:
@@ -706,7 +730,7 @@ def test_startup_fails_when_control_plane_initialize_fails() -> None:
             pass
 
 
-def test_browser_exchange_sets_secure_cookie_when_required() -> None:
+def test_browser_exchange_sets_secure_cookie_when_required(tmp_path) -> None:
     settings = GuardApiSettings(
         environment="production",
         database_url=(
@@ -714,6 +738,9 @@ def test_browser_exchange_sets_secure_cookie_when_required() -> None:
         ),
         control_token="c" * 32,
         browser_cookie_secure=True,
+        audit_checkpoint_path=str(tmp_path / "audit-checkpoints.jsonl"),
+        audit_checkpoint_key=_AUDIT_CHECKPOINT_TEST_KEY,
+        audit_checkpoint_key_id="test-key-2026",
     )
     app = create_app(store=memory_store_with_adapter(), settings=settings)
 
@@ -726,11 +753,15 @@ def test_browser_exchange_sets_secure_cookie_when_required() -> None:
             "/v1/auth/browser/exchange",
             json={"launch_code": launch.json()["launch_code"]},
         )
+        integrity = client.get("/v1/audit/integrity")
 
     cookie = exchange.headers["set-cookie"]
     assert "Secure" in cookie
     assert "HttpOnly" in cookie
     assert "SameSite=strict" in cookie
+    assert integrity.status_code == 200
+    assert integrity.json()["anchor"]["enabled"] is True
+    assert integrity.json()["anchor"]["status"] == "empty"
 
 
 def test_request_body_limit_rejects_payload_before_route_validation() -> None:
@@ -3791,6 +3822,34 @@ def test_audit_events_post_rejects_timestamp_without_timezone() -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "AUDIT_TIMESTAMP_INVALID"
+    assert store.audit_events == []
+
+
+def test_audit_events_post_rejects_values_outside_jcs_ijson_domain() -> None:
+    store = memory_store_with_adapter()
+    client = TestClient(
+        create_app(
+            store=store,
+            settings=GuardApiSettings(control_token="control-secret"),
+        )
+    )
+    payload = _audit_event_payload(
+        audit_id="audit_api_unsafe_integer",
+        trace_id="trace_api_unsafe_integer",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    payload["metadata"] = {"unsafe_integer": 2**60}
+
+    response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "AUDIT_CANONICALIZATION_INVALID"
     assert store.audit_events == []
 
 

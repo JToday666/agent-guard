@@ -2,6 +2,7 @@
 
 from .approval import ApprovalService
 from .audit import AuditService
+from .audit_checkpoint import AuditCheckpointService
 from .audit_window import AuditWindowRequestError, AuditWindowService
 from .config_audit import ConfigAuditService
 from .evaluation import EvaluationService
@@ -15,6 +16,7 @@ from .trace import TraceService
 __all__ = [
     "ApprovalService",
     "AuditService",
+    "AuditCheckpointService",
     "AuditWindowRequestError",
     "AuditWindowService",
     "ConfigAuditService",

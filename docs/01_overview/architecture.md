@@ -58,6 +58,8 @@ AgentGuard 采用四层目标架构：
 - Dashboard browser session、CSRF token、launch code；
 - PostgreSQL 中的 Control Plane 数据。
 
+审计检查点是唯一有意保存在 PostgreSQL 之外的完整性锚点：Guard API 把已验证链头写入受部署侧保护的 HMAC 签名追加日志，密钥由 secret manager 注入。它不承载业务查询或第二套审计事实，只用于发现数据库单侧重写、回滚和锚定滞后。
+
 当前不单独拆出 `guard-control-plane` 微服务。上述能力在代码上放入 `guard-api`
 内部 service layer，由 FastAPI route 统一暴露；部署上是一个 `guard-api` 后端应用。
 若以后引入消息队列、后台任务或推送，它们仍属于 Control Plane，但不能视为当前已实现。
@@ -89,8 +91,8 @@ Agent Runtime
 
 ## 5. 当前与后续边界
 
-当前主链已经具备统一 evaluate 入口、三态决策、策略快照、原子审批、审计哈希链、
-provenance、原子审计窗口、历史 cohort、Dashboard/CLI 和 OpenClaw runtime gate。
+当前主链已经具备统一 evaluate 入口、三态决策、策略快照、原子审批、RFC 8785 审计哈希链、
+数据库外签名检查点、provenance、原子审计窗口、历史 cohort、Dashboard/CLI 和 OpenClaw runtime gate。
 LangGraph SDK 与靶场逻辑按当前版本冻结。
 
 动作执行覆盖指标、`risk_breakdown`、结构化 `context_sources`、LLM 职责、记忆生命周期、

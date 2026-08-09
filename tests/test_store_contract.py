@@ -181,7 +181,7 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
         "version": bundle.version,
         "revision": 1,
         "canonical_digest": canonical_sha256(bundle.model_dump(mode="json")),
-        "canonicalization": "json:sorted-keys:v1",
+        "canonicalization": "jcs:rfc8785",
     }
     # §9.9：links 只保留稳定 ID；digest 移入 metadata。
     assert set(audit.links) <= _STABLE_LINK_KEYS

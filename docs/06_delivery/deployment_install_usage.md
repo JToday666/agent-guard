@@ -59,6 +59,10 @@ AGENTGUARD_ADAPTER_TOKEN=
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
 AGENTGUARD_HOST=127.0.0.1
 AGENTGUARD_PORT=8088
+AGENTGUARD_AUDIT_CHECKPOINT_PATH=
+AGENTGUARD_AUDIT_CHECKPOINT_KEY=
+AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID=
+AGENTGUARD_AUDIT_CHECKPOINT_INTERVAL_SECONDS=300
 AGENTGUARD_LLM_APPROVAL_ENABLED=false
 AGENTGUARD_LLM_APPROVAL_BASE_URL=https://api.openai.com/v1
 AGENTGUARD_LLM_APPROVAL_API_KEY=
@@ -68,9 +72,28 @@ AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS=3
 
 `.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。
 
+本地 loopback 开发可将三项外部检查点配置留空。生产环境或非 loopback 监听必须同时配置：
+
+```dotenv
+AGENTGUARD_AUDIT_CHECKPOINT_PATH=/var/lib/agentguard/audit-checkpoints.jsonl
+AGENTGUARD_AUDIT_CHECKPOINT_KEY=<至少 32 字节随机值的 base64url 编码>
+AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID=production-2026-08
+AGENTGUARD_AUDIT_CHECKPOINT_INTERVAL_SECONDS=300
+```
+
+可生成一枚 32 字节 base64url 密钥：
+
+```bash
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
+```
+
+密钥应由 secret manager 注入，不能写入镜像、仓库或检查点文件。检查点路径必须是绝对路径，父目录需预先存在且可由 Guard API 用户写入；目标不能是符号链接。该 JSONL 文件独立于 PostgreSQL，使用 RFC 8785 JCS、SHA-256 哈希链和 HMAC-SHA256 签名保存抽样链头。它能发现仅修改或回滚数据库的行为，但不能抵抗同时取得数据库、进程密钥和检查点存储写权限的攻击者，因此部署侧应把目录挂载到独立持久卷，并使用 append-only、WORM 或外部日志采集策略保护。
+
 `AGENTGUARD_LLM_APPROVAL_ENABLED=true` 后，Guard API 会对 Core 已创建的 `ask` approval 尝试同步 LLM 自动审批。LLM 只消费 approval evidence；`deny` 不进入 LLM。低/中风险 `ask` 可被自动 resolve 为 `allow_once`，高/严重风险不允许被 LLM 自动放行。LLM 配置缺失、超时或返回非法 JSON 时，approval 保持 `pending`，仍可由人工审批接管。
 
 Guard API 需要 PostgreSQL，并要求 `AGENTGUARD_DATABASE_URL` 指向的用户和数据库已存在。启动 API 时会执行当前 migration。
+
+从旧版本升级到 RFC 8785 链格式时必须停写：先停止全部旧版 Guard API 与 runtime 上报进程，再启动一个新版 Guard API 完成 migration，验证 `/v1/audit/integrity` 后再恢复其他实例。迁移会锁定审计表、先验证现有链与链头，再原子重算哈希；检测到旧链已损坏时会拒绝升级，不能通过迁移把异常证据重新标记为有效。新旧版本不得在迁移窗口内并行写入。
 
 PostgreSQL 集成测试要求 `AGENTGUARD_TEST_DATABASE_URL` 指向独立测试库，例如 `agent_guard_test`。不要把该变量指向开发库或生产库。
 
@@ -336,7 +359,7 @@ uv run agentguardctl eval import --help
 
 当前文档不是完整生产运维手册。当前实现适合本地开发、无头验收、演示复现和单机原型部署。
 
-当 `AGENTGUARD_ENV=production` 时，Guard API 会拒绝使用默认 token 或默认数据库 URL。生产化至少需要：
+当 `AGENTGUARD_ENV=production` 时，Guard API 会拒绝使用默认 token、默认数据库 URL，或缺少数据库外签名检查点的配置。生产化至少需要：
 
 - 更换 `AGENTGUARD_CONTROL_TOKEN`，并为每个 runtime/agent 单独签发 adapter credential。
 - 使用真实 PostgreSQL 账号、强密码和受限网络访问。
@@ -344,6 +367,12 @@ uv run agentguardctl eval import --help
 - 通过 TLS 或可信内网访问 Guard API 和 Dashboard。
 - 用 systemd、容器或进程管理器托管 Guard API 和 Dashboard。
 - 配置日志脱敏、数据库备份、恢复演练和 token 轮换流程。
+- 将 `AGENTGUARD_AUDIT_CHECKPOINT_PATH` 挂载到 PostgreSQL 之外的受保护持久存储，并从 secret manager 注入检查点密钥。
+- 监控 `GET /v1/audit/integrity` 的 `anchor.status`；`invalid` 表示签名或数据库绑定不一致，`error` 表示检查点存储不可验证，不能与普通的 `stale` 混为一谈。
+
+检查点密钥轮换使用停写交接，不在同一日志内混用多把密钥：停止 Guard API 和 runtime 写入，确认链与锚点均为 `current`，把旧 JSONL 只读归档，生成新密钥和 key ID，并改用新的空文件路径启动。新文件的首个检查点应与旧文件最后一个检查点锚定同一数据库链头；两份日志都需保留，才能证明轮换边界连续。
+
+容器镜像已预建 `/var/lib/agentguard`（权限 `0700`）。运行容器时仍需显式挂载持久卷并注入三项配置，不能依赖容器可写层保存检查点。
 
 当前 MVP 不提供：
 

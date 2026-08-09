@@ -44,7 +44,7 @@ Runtime Native Event
 | `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
 | `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
 | `GET /v1/audit/window` | P0 | Dashboard/CLI 原子审计窗口，同时返回 scope、事件和策略指标 |
-| `GET /v1/audit/integrity` | P0 | Dashboard/CLI 审计完整性状态 |
+| `GET /v1/audit/integrity` | P0 | Dashboard/CLI 数据库审计链状态与数据库外签名锚点状态 |
 | `GET /v1/metrics/policy-evaluations` | P0 | 按明确时间 cohort 聚合历史策略指标 |
 | `GET /v1/metrics/runtime` | P1 | 运行时监控指标，聚合审计事件、hook 活跃度和 adapter status |
 | `POST /v1/evaluations` | P1 | 导入并保存 AttackBench/Core matrix 等评测 run |

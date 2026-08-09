@@ -38,6 +38,9 @@ _ERROR_MESSAGES = {
     "CREDENTIAL_NOT_FOUND": "Credential was not found.",
     "AUDIT_ID_CONFLICT": "The audit_id is already bound to different content.",
     "AUDIT_TIMESTAMP_INVALID": "Audit timestamps must be RFC 3339 values with a timezone.",
+    "AUDIT_CANONICALIZATION_INVALID": (
+        "Audit evidence must be valid RFC 8785 / I-JSON data."
+    ),
     "POLICY_EVALUATION_WRITE_FORBIDDEN": (
         "policy_evaluation records can only be written by POST /v1/guard/evaluate."
     ),

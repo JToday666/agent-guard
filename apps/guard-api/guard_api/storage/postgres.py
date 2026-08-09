@@ -139,12 +139,12 @@ class PostgresControlPlaneStore:
                         audit_events.c.audit_id == event.audit_id
                     )
                 ).scalar_one()
-                from guard_api.storage.integrity import _canonical_json_bytes
+                from guard_api.storage.integrity import canonical_json_bytes
 
-                stored_content = _canonical_json_bytes(
+                stored_content = canonical_json_bytes(
                     {k: v for k, v in stored_payload.items() if k != "integrity"}
                 )
-                incoming_content = _canonical_json_bytes(
+                incoming_content = canonical_json_bytes(
                     event.model_dump(mode="json", exclude={"integrity"})
                 )
                 if stored_content == incoming_content:

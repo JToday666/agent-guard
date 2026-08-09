@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from agentguard_core import PolicyBundle
 from fastapi import FastAPI, Request
@@ -19,6 +22,7 @@ from guard_api.middleware import RequestBodyLimitMiddleware
 from guard_api.routers import ApiContext, register_routes
 from guard_api.services import (
     ApprovalService,
+    AuditCheckpointService,
     AuditService,
     AuditWindowRequestError,
     AuditWindowService,
@@ -33,6 +37,7 @@ from guard_api.services import (
 )
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
+    AuditCanonicalizationError,
     AuditTimestampError,
     ControlPlaneStore,
     EvaluationRunConflictError,
@@ -41,6 +46,8 @@ from guard_api.storage.base import (
 )
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -60,7 +67,23 @@ def create_app(
 
     auth = CapabilityAuthService(settings=settings, store=store)
     provenance_writer = ProvenanceWriter(store=store)
-    audit_service = AuditService(store=store, provenance_writer=provenance_writer)
+    audit_checkpoint_service: AuditCheckpointService | None = None
+    if settings.audit_checkpoint_configured():
+        checkpoint_key = settings.audit_checkpoint_signing_key()
+        assert checkpoint_key is not None
+        assert settings.audit_checkpoint_path is not None
+        assert settings.audit_checkpoint_key_id is not None
+        audit_checkpoint_service = AuditCheckpointService(
+            store=store,
+            path=Path(settings.audit_checkpoint_path),
+            signing_key=checkpoint_key,
+            key_id=settings.audit_checkpoint_key_id,
+        )
+    audit_service = AuditService(
+        store=store,
+        provenance_writer=provenance_writer,
+        checkpoint_service=audit_checkpoint_service,
+    )
     audit_window_service = AuditWindowService(
         store=store,
         cursor_signing_key=settings.audit_cursor_signing_key(),
@@ -95,7 +118,27 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         settings.validate_for_startup()
         store.initialize()
-        yield
+        checkpoint_task: asyncio.Task[None] | None = None
+        if audit_checkpoint_service is not None:
+            audit_checkpoint_service.initialize()
+            checkpoint_task = asyncio.create_task(
+                _run_audit_checkpoint_loop(
+                    audit_checkpoint_service,
+                    interval_seconds=settings.audit_checkpoint_interval_seconds,
+                ),
+                name="agentguard-audit-checkpoint",
+            )
+        try:
+            yield
+        finally:
+            if checkpoint_task is not None and audit_checkpoint_service is not None:
+                checkpoint_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await checkpoint_task
+                try:
+                    await asyncio.to_thread(audit_checkpoint_service.checkpoint)
+                except Exception:  # pragma: no cover - shutdown diagnostic path
+                    logger.exception("final audit checkpoint failed")
 
     app = FastAPI(title="AgentGuard Guard API", version=__version__, lifespan=lifespan)
     app.add_middleware(
@@ -124,6 +167,12 @@ def create_app(
         _: Request, __: AuditTimestampError
     ) -> JSONResponse:
         return error_response("AUDIT_TIMESTAMP_INVALID", status_code=422)
+
+    @app.exception_handler(AuditCanonicalizationError)
+    async def audit_canonicalization_error_handler(
+        _: Request, __: AuditCanonicalizationError
+    ) -> JSONResponse:
+        return error_response("AUDIT_CANONICALIZATION_INVALID", status_code=422)
 
     @app.exception_handler(PolicyValidationError)
     async def policy_validation_error_handler(
@@ -197,6 +246,21 @@ def create_app(
         ),
     )
     return app
+
+
+async def _run_audit_checkpoint_loop(
+    service: AuditCheckpointService,
+    *,
+    interval_seconds: int,
+) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(service.checkpoint)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - logged operational degradation
+            logger.exception("scheduled audit checkpoint failed")
 
 
 app = create_app()

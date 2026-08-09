@@ -106,6 +106,18 @@ def test_audit_integrity_endpoint_verifies_chain_and_detects_tampering() -> None
     assert ok.json()["valid"] is True
     assert ok.json()["event_count"] == 2
     assert ok.json()["head_hash"]
+    assert ok.json()["canonicalization"] == "jcs:rfc8785"
+    assert ok.json()["anchor"] == {
+        "enabled": False,
+        "status": "disabled",
+        "checkpoint_sequence": None,
+        "checkpoint_head_hash": None,
+        "checkpoint_hash": None,
+        "checkpointed_at": None,
+        "lag": None,
+        "key_id": None,
+        "error_code": None,
+    }
 
     store.audit_events[0].reason = "tampered"
     tampered = client.get("/v1/audit/integrity")

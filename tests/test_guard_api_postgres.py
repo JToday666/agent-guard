@@ -22,6 +22,7 @@ from guard_api.storage.base import (
     AuditWindowQuery,
     PolicyRevisionConflictError,
 )
+from guard_api.storage.integrity import CANONICALIZATION, read_audit_integrity
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.postgres import (
     get_test_database_url,
@@ -261,6 +262,25 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
             latency_ms=17,
             links={"event_id": f"evt_{run_id}", "decision_id": f"dec_{run_id}"},
         ).model_dump(mode="json")
+        audit_payload["metadata"] = {"canonicalization_probe": 1e-7}
+        legacy_event_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "sequence": 1,
+                    "prev_hash": None,
+                    "event": audit_payload,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        audit_payload["integrity"] = {
+            "sequence": 1,
+            "prev_hash": None,
+            "event_hash": legacy_event_hash,
+            "canonicalization": "json:v1",
+        }
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -279,7 +299,20 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
                     "audit_id": audit_id,
                     "payload_json": json.dumps(audit_payload),
                     "created_at": audit_payload["timestamp"],
-                    "event_hash": "a" * 64,
+                    "event_hash": legacy_event_hash,
+                },
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE audit_integrity_heads
+                    SET sequence = 1, event_hash = :event_hash, updated_at = :updated_at
+                    WHERE chain_id = 'default'
+                    """
+                ),
+                {
+                    "event_hash": legacy_event_hash,
+                    "updated_at": audit_payload["timestamp"],
                 },
             )
             conn.execute(
@@ -455,6 +488,7 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
 
         approval = store.get_approval(approval_id)
         adapter_status = store.get_adapter_status("openclaw")
+        migrated_audit = store.get_audit_event(audit_id)
 
         assert "status" not in columns
         assert columns["created_at"] == "timestamp with time zone"
@@ -518,6 +552,51 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
         assert adapter_status is not None
         assert adapter_status["runtime_id"] == "openclaw-gateway"
         assert "runtime" not in adapter_status
+        assert migrated_audit is not None
+        migrated_integrity = read_audit_integrity(migrated_audit)
+        assert migrated_integrity is not None
+        assert migrated_integrity.canonicalization == CANONICALIZATION
+        assert migrated_integrity.event_hash != legacy_event_hash
+        assert store.verify_audit_integrity().valid is True
+    finally:
+        reset_control_plane_schema(database_url)
+
+
+def test_jcs_migration_refuses_to_rehash_a_broken_existing_chain() -> None:
+    database_url = get_test_database_url()
+    store = PostgresControlPlaneStore(database_url)
+    engine = create_engine(store.database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        command.upgrade(store._alembic_config(), "0012_operational_columns")
+        event = _audit_event(
+            audit_id=f"audit_pg_broken_{uuid4().hex}",
+            trace_id="trace_pg_broken_migration",
+            decision="allow",
+            runtime="langgraph",
+            blocked=False,
+            is_malicious=False,
+            latency_ms=0,
+        )
+        store.add_audit_event(event)
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    UPDATE audit_events
+                    SET payload_json = jsonb_set(
+                        payload_json,
+                        '{reason}',
+                        '"rewritten"'::jsonb
+                    )
+                    WHERE audit_id = :audit_id
+                    """),
+                {"audit_id": event.audit_id},
+            )
+
+        with pytest.raises(
+            RuntimeError, match="refusing to rehash invalid audit chain"
+        ):
+            command.upgrade(store._alembic_config(), "head")
     finally:
         reset_control_plane_schema(database_url)
 

@@ -377,7 +377,7 @@ config_audit
     "version": "p1",
     "revision": 7,
     "canonical_digest": "sha256:8d715...",
-    "canonicalization": "json:sorted-keys:v1"
+    "canonicalization": "jcs:rfc8785"
   }
 }
 ```
@@ -385,8 +385,8 @@ config_audit
 推荐 digest 计算方式：
 
 1. 读取本次评估实际使用的 `PolicySnapshotRecord`。
-2. 对该 record 中的 `PolicyBundle` 做 JSON 序列化。
-3. UTF-8、键名排序、无多余空格、保留 Unicode。
+2. 对该 record 中的 `PolicyBundle` 按 RFC 8785 JSON Canonicalization Scheme（JCS）序列化。
+3. 输入必须属于 I-JSON 数据域；超出 IEEE 754 精确整数范围、NaN、Infinity 或不可规范化的值必须拒绝，不能降级到另一种序列化方式。
 4. 计算 SHA-256。
 5. 输出 `sha256:<lowercase hex>`。
 
@@ -574,7 +574,7 @@ ToolDescriptor 的原始 `call_id`，从而与工具提议和运行时回执聚�
     "sequence": 1842,
     "prev_hash": "46cd...",
     "event_hash": "8f31...",
-    "canonicalization": "json:v1"
+    "canonicalization": "jcs:rfc8785"
   }
 }
 ```
@@ -586,7 +586,9 @@ ToolDescriptor 的原始 `call_id`，从而与工具提议和运行时回执聚�
 | `sequence`         | 全局审计链序号，不是 trace 内序号   |
 | `prev_hash`        | 前一条全局审计的哈希；链首为 `null` |
 | `event_hash`       | 当前事件哈希                        |
-| `canonicalization` | 哈希规范化算法版本                  |
+| `canonicalization` | 固定为 `jcs:rfc8785`                |
+
+事件主体超出 RFC 8785 / I-JSON 可规范化数据域时，Guard API 返回 `422 AUDIT_CANONICALIZATION_INVALID`，且不得写入部分审计、链头或 provenance。
 
 禁止新增或继续生产以下平行字段：
 
@@ -710,7 +712,7 @@ metadata.previous_hash
       "version": "p1",
       "revision": 7,
       "canonical_digest": "sha256:8d715...",
-      "canonicalization": "json:sorted-keys:v1"
+      "canonicalization": "jcs:rfc8785"
     },
     "intervention": {
       "type": "unknown",
@@ -746,7 +748,7 @@ metadata.previous_hash
     "sequence": 1842,
     "prev_hash": "46cd...",
     "event_hash": "8f31...",
-    "canonicalization": "json:v1"
+    "canonicalization": "jcs:rfc8785"
   }
 }
 ```
@@ -1428,24 +1430,52 @@ Trace 响应不返回第二份 metrics。当前窗口策略指标只以
 
 ## 18. `GET /v1/audit/integrity`
 
-现有响应保持：
+响应同时报告数据库审计链与数据库外签名锚点；两者是独立状态维度：
 
 ```json
 {
   "valid": true,
   "event_count": 1843,
   "head_hash": "90d2...",
-  "first_broken_audit_id": null
+  "first_broken_audit_id": null,
+  "canonicalization": "jcs:rfc8785",
+  "anchor": {
+    "enabled": true,
+    "status": "current",
+    "checkpoint_sequence": 1843,
+    "checkpoint_head_hash": "90d2...",
+    "checkpoint_hash": "3f68...",
+    "checkpointed_at": "2026-08-10T08:30:00.000000Z",
+    "lag": 0,
+    "key_id": "production-2026-08",
+    "error_code": null
+  }
 }
 ```
+
+`valid` 只表示 PostgreSQL 中的全局审计链可按 sequence、前序哈希和 RFC 8785 事件哈希完整重算；它不隐含数据库外锚定成功。`anchor.status` 固定为：
+
+| 状态       | 含义 |
+| ---------- | ---- |
+| `disabled` | 当前部署没有配置外部检查点；仅允许本地 loopback 开发使用 |
+| `empty`    | 检查点已启用，但尚无已签名链头 |
+| `current`  | 最近签名检查点与当前数据库链头相同 |
+| `stale`    | 检查点仍与历史链头匹配，但其后已有 `lag` 条新审计 |
+| `invalid`  | 签名日志、检查点链或其数据库绑定不一致 |
+| `error`    | 检查点文件无法读取、规范化或持久验证 |
+
+`stale` 不得改写为 `valid=false`；它表示认证覆盖暂时落后，不表示数据库链已经断裂。`invalid` 和 `error` 也不得被前端隐藏成普通加载失败。检查点 HMAC 密钥不进入响应、数据库、日志或 Dashboard；`key_id` 只是非秘密轮换标识。
+
+检查点文件是数据库外的 JCS JSONL 追加日志，每条记录包含数据库链头、上一检查点哈希、本条检查点哈希和 HMAC-SHA256 签名。Guard API 启动时验证整个现有日志，运行中按配置周期只在链头前进后追加，并在写入后执行 `fsync`。该机制能检测数据库单侧重写与回滚；存储隔离和 append-only/WORM 约束由部署环境负责，不能把同机普通文件描述为外部可信时间戳服务。
 
 Dashboard 组合：
 
 - 全局接口的 `valid`；
+- 全局接口的 `anchor.status` 与 `lag`；
 - 每个返回 AuditEvent 的 `integrity`；
 - trace 的 `audit_window.has_more`。
 
-三者分别表示全局链校验、当前事件是否带链位置、当前 trace 查询是否完整，不得合并为一个未经证明的“绝对完整”结论。
+四者分别表示数据库链校验、数据库外认证覆盖、当前事件是否带链位置、当前 trace 查询是否完整，不得合并为一个未经证明的“绝对完整”结论。
 
 ## 19. 指标规则
 

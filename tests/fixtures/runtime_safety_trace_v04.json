@@ -44,7 +44,7 @@
       },
       "canonical_digest": "sha256:2aab5d9c0608cd1c60dc4c1cb20980aea24f057f0a3c4d082379b0fbf8efd427",
       "digest_scope": "full_policy_bundle",
-      "canonicalization": "json:sorted-keys:v1"
+      "canonicalization": "jcs:rfc8785"
     }
   },
   "source_facts": {
@@ -182,7 +182,7 @@
             "version": "1",
             "revision": null,
             "canonical_digest": "sha256:2aab5d9c0608cd1c60dc4c1cb20980aea24f057f0a3c4d082379b0fbf8efd427",
-            "canonicalization": "json:sorted-keys:v1"
+            "canonicalization": "jcs:rfc8785"
           },
           "intervention": {
             "type": "none",
@@ -391,7 +391,7 @@
             "version": "1",
             "revision": null,
             "canonical_digest": "sha256:2aab5d9c0608cd1c60dc4c1cb20980aea24f057f0a3c4d082379b0fbf8efd427",
-            "canonicalization": "json:sorted-keys:v1"
+            "canonicalization": "jcs:rfc8785"
           },
           "intervention": {
             "type": "unknown",

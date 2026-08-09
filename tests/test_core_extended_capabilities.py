@@ -53,7 +53,7 @@ def test_domain_modules_are_direct_public_import_paths() -> None:
         target_node_id="audit:audit",
         relation="recorded_as",
     ).relation == "recorded_as"
-    assert DirectAuditIntegrityMetadata(sequence=1, event_hash="abc").sequence == 1
+    assert DirectAuditIntegrityMetadata(sequence=1, event_hash="a" * 64).sequence == 1
     assert DirectMemoryGuardChange(trace_id="trace_direct", namespace="agent", key="k").status == "proposed"
     assert DirectActionCritic().review(
         _tool_event(trace_id="trace_direct"),
@@ -149,7 +149,7 @@ def test_domain_models_roundtrip() -> None:
         target_node_id="decision:dec_p2",
         relation="evaluated_to",
     )
-    integrity = AuditIntegrityMetadata(sequence=1, prev_hash=None, event_hash="abc123")
+    integrity = AuditIntegrityMetadata(sequence=1, prev_hash=None, event_hash="a" * 64)
     memory_change = MemoryGuardChange(
         trace_id="trace_p2",
         namespace="agent",
@@ -170,7 +170,7 @@ def test_domain_models_roundtrip() -> None:
 
     assert ConfigAuditEvent.model_validate(config_event.model_dump(mode="json")).findings[0].severity == "high"
     assert ProvenanceEdge.model_validate(edge.model_dump(mode="json")).relation == "evaluated_to"
-    assert AuditIntegrityMetadata.model_validate(integrity.model_dump(mode="json")).event_hash == "abc123"
+    assert AuditIntegrityMetadata.model_validate(integrity.model_dump(mode="json")).event_hash == "a" * 64
     assert MemoryGuardChange.model_validate(memory_change.model_dump(mode="json")).status == "quarantined"
     assert ActionCriticReview.model_validate(review.model_dump(mode="json")).verdict == "warn"
 
