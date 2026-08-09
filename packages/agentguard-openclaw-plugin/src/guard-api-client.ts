@@ -165,7 +165,6 @@ export class GuardApiClient {
       body: JSON.stringify({
         status: "loaded",
         loaded: true,
-        runtime: "openclaw",
         runtime_id: this.config.runtimeId,
         agent_id: this.config.agentId,
         plugin_version: input.pluginVersion,

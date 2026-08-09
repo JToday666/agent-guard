@@ -39,6 +39,6 @@ export function formatApprovalEvidenceFields(approval: ApprovalRequest): Approva
     eventId: approval.eventId || "未提供",
     traceId: approval.traceId || "未提供",
     subject: joinEvidenceParts([approval.subjectType, approval.subjectId]),
-    action: joinEvidenceParts([approval.actionName ?? approval.tool, approval.actionId]),
+    action: joinEvidenceParts([approval.actionName, approval.actionId]),
   };
 }

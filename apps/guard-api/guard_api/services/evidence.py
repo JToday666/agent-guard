@@ -102,11 +102,10 @@ def build_audit_event(
     if policy_revision is None:
         # §9.3：使用启动时默认策略时不得伪造 revision，只标记来源。
         metadata["policy_source"] = "default"
-    # 幂等回放依赖完整 decision dump（先新后旧双读，见 evaluation.py）。
+    # 幂等回放只依赖 evidence.guard_decision 这一处权威 decision 快照。
     dump = (
         decision_dump if decision_dump is not None else decision.model_dump(mode="json")
     )
-    metadata["guard_decision"] = dump
     evidence = _policy_evaluation_evidence(
         event,
         decision,

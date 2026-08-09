@@ -48,7 +48,6 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     id: "approval_1",
     createdAt: "2026-06-22T06:30:00Z",
     status: "pending",
-    tool: "send_email",
     resource: "external@example.com",
     riskScore: 70,
     severity: "high",

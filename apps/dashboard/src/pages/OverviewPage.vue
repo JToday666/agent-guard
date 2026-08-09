@@ -195,7 +195,7 @@ const triageItems = computed(() => {
       riskScore: approval.riskScore,
       severity: approval.severity,
       tone: "warning" as const,
-      tool: approval.tool,
+      tool: approval.actionName,
       to: `/approvals/${approval.id}`,
     }));
   const approvalEventIds = new Set(store.approvals.map((approval) => approval.eventId));

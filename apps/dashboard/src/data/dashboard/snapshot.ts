@@ -132,7 +132,6 @@ function hasSameApproval(left: ApprovalRequest, right: ApprovalRequest): boolean
     left.id === right.id &&
     left.createdAt === right.createdAt &&
     left.status === right.status &&
-    left.tool === right.tool &&
     left.resource === right.resource &&
     left.riskScore === right.riskScore &&
     left.severity === right.severity &&

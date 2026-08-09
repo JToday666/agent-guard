@@ -220,9 +220,8 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
 }
 
 export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
-  const tool = readString(dto.tool) ?? "未提供";
+  const actionName = readString(dto.action_name) ?? "未提供";
   const resource = readString(dto.resource) ?? "未提供";
-  const toolCallId = readString(dto.tool_call_id) ?? "未提供";
   const status: ApprovalRequest["status"] =
     dto.status === "expired"
       ? "expired"
@@ -236,19 +235,18 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
     id: readString(dto.approval_id) ?? "未提供",
     createdAt: readString(dto.created_at) ?? "",
     status,
-    tool,
     resource: maskSensitiveText(resource),
     riskScore: readNumber(dto.risk_score),
     severity: readSeverity(dto.severity),
     reason: readString(dto.reason) ?? "未提供",
     eventId: "",
     traceId: readString(dto.trace_id) ?? "",
-    subjectId: readString(dto.subject_id) ?? toolCallId,
-    subjectType: readString(dto.subject_type) ?? "tool_call",
-    actionId: readString(dto.action_id) ?? toolCallId,
-    actionName: readString(dto.action_name) ?? tool,
+    subjectId: readString(dto.subject_id) ?? "未提供",
+    subjectType: readString(dto.subject_type) ?? "未提供",
+    actionId: readString(dto.action_id) ?? "未提供",
+    actionName,
     userTask: "未提供",
-    agentAction: `${tool}(${maskSensitiveText(resource)})`,
+    agentAction: `${actionName}(${maskSensitiveText(resource)})`,
     consequence: approvalConsequence(status),
     ruleHits: [],
     expiresAt: readString(dto.expires_at),
@@ -440,7 +438,6 @@ export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
     lastHeartbeatAt: readString(dto.last_heartbeat_at),
     error: readString(dto.error),
     source: readString(dto.source),
-    runtime: readString(dto.runtime),
     runtimeId: readString(dto.runtime_id),
     agentId: readString(dto.agent_id),
     pluginVersion: readString(dto.plugin_version),

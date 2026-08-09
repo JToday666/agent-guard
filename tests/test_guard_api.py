@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from agentguard_core import (
     AuditEvent,
@@ -409,36 +410,33 @@ def test_unregistered_static_adapter_token_is_rejected() -> None:
     assert error.value.code == "TOKEN_INVALID"
 
 
-def test_approval_request_backfills_subject_fields_from_legacy_tool_call_id() -> None:
-    approval = ApprovalRequest(
-        trace_id="trace_legacy_approval",
-        tool_call_id="call_legacy",
-        requesting_principal_id="cred_adapter_main",
-        tool="send_email",
-        resource="external@example.com",
-        reason="approval required",
-        risk_score=62,
-        severity="medium",
-        expires_at="2099-01-01T00:00:00+00:00",
-    )
+def test_approval_request_rejects_removed_tool_aliases() -> None:
+    with pytest.raises(ValidationError):
+        ApprovalRequest(
+            trace_id="trace_removed_alias",
+            subject_id="call_removed_alias",
+            subject_type="tool_call",
+            action_id="call_removed_alias",
+            action_name="send_email",
+            tool_call_id="call_removed_alias",
+            tool="send_email",
+            requesting_principal_id="cred_adapter_main",
+            resource="external@example.com",
+            reason="approval required",
+            risk_score=62,
+            severity="medium",
+            expires_at="2099-01-01T00:00:00+00:00",
+        )
 
-    assert approval.subject_id == "call_legacy"
-    assert approval.subject_type == "tool_call"
-    assert approval.action_id == "call_legacy"
-    assert approval.action_name == "send_email"
-    assert approval.tool_call_id == "call_legacy"
 
-
-def test_approval_request_serializes_legacy_tool_call_alias_for_new_subject_fields() -> (
-    None
-):
+def test_approval_request_serializes_only_canonical_subject_and_action_fields() -> None:
     approval = ApprovalRequest(
         trace_id="trace_subject_approval",
         subject_id="evt_subject",
         subject_type="message_send_proposed",
+        action_id="evt_subject",
         action_name="message_send_proposed",
         requesting_principal_id="cred_adapter_main",
-        tool="message_send_proposed",
         resource="external@example.com",
         reason="approval required",
         risk_score=62,
@@ -448,12 +446,12 @@ def test_approval_request_serializes_legacy_tool_call_alias_for_new_subject_fiel
     payload = approval.model_dump(mode="json")
 
     assert approval.action_id == "evt_subject"
-    assert approval.tool_call_id == "evt_subject"
     assert payload["subject_id"] == "evt_subject"
     assert payload["subject_type"] == "message_send_proposed"
     assert payload["action_id"] == "evt_subject"
     assert payload["action_name"] == "message_send_proposed"
-    assert payload["tool_call_id"] == "evt_subject"
+    assert "tool_call_id" not in payload
+    assert "tool" not in payload
 
 
 def test_approval_expiry_is_derived_without_mutating_storage_on_read() -> None:
@@ -462,11 +460,10 @@ def test_approval_expiry_is_derived_without_mutating_storage_on_read() -> None:
         approval_id="app_expired",
         trace_id="trace_expired",
         subject_id="call_expired",
+        subject_type="tool_call",
         action_id="call_expired",
         action_name="send_email",
-        tool_call_id="call_expired",
         requesting_principal_id="cred_adapter_main",
-        tool="send_email",
         resource="external@example.com",
         reason="approval required",
         risk_score=62,
@@ -494,11 +491,10 @@ def test_approval_resolution_allows_exactly_one_concurrent_transition() -> None:
             approval_id="app_concurrent",
             trace_id="trace_concurrent",
             subject_id="call_concurrent",
+            subject_type="tool_call",
             action_id="call_concurrent",
             action_name="send_email",
-            tool_call_id="call_concurrent",
             requesting_principal_id="cred_adapter_main",
-            tool="send_email",
             resource="external@example.com",
             reason="approval required",
             risk_score=62,
@@ -608,7 +604,8 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     assert pending[0]["subject_type"] == "tool_call"
     assert pending[0]["action_id"] == "call_api"
     assert pending[0]["action_name"] == "send_email"
-    assert pending[0]["tool_call_id"] == "call_api"
+    assert "tool_call_id" not in pending[0]
+    assert "tool" not in pending[0]
     assert pending[0]["evidence"]["event"]["trace_id"] == "trace_api"
     assert (
         pending[0]["evidence"]["decision"]["rule_hits"][0]["rule_id"]
@@ -1005,7 +1002,7 @@ def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
     pending = client.get("/v1/approvals/pending").json()
     approval = next(item for item in pending if item["approval_id"] == approval_id)
 
-    assert approval["tool"] == "rag_answer"
+    assert approval["action_name"] == "rag_answer"
     assert approval["resource"] == "rag_answer:nq:test16"
     assert approval["evidence"]["payload"]["arguments"]["answer"] == "Big Man"
     assert (
@@ -1678,8 +1675,8 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
         pending_response = client.get("/v1/approvals/pending")
         pending = pending_response.json()
         approval = next(item for item in pending if item["approval_id"] == approval_id)
-        assert approval["tool_call_id"] == expected_action_id
-        assert approval["tool"] == expected_display_action_name
+        assert approval["action_id"] == expected_action_id
+        assert approval["action_name"] == expected_display_action_name
 
     assert metrics_response.status_code == 200
     metrics = metrics_response.json()
@@ -1927,13 +1924,24 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
     assert sensitive_text_response.json()["decision"]["decision"] == "deny"
 
 
-def test_generic_adapter_status_and_heartbeat_keep_openclaw_alias_compatible() -> None:
+def test_generic_adapter_status_and_heartbeat_use_path_runtime_identity() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(
         store=memory_store_with_adapter(runtime="openclaw"), settings=settings
     )
     client = TestClient(app)
 
+    duplicate_runtime_response = client.post(
+        "/v1/adapters/openclaw/heartbeat",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "status": "loaded",
+            "loaded": True,
+            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
+            "agent_id": "main",
+        },
+    )
     heartbeat_response = client.post(
         "/v1/adapters/openclaw/heartbeat",
         headers={"Authorization": "Bearer adapter-secret"},
@@ -1942,7 +1950,7 @@ def test_generic_adapter_status_and_heartbeat_keep_openclaw_alias_compatible() -
             "loaded": True,
             "hook_count": 16,
             "expected_hook_count": 16,
-            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
             "agent_id": "main",
             "plugin_version": "0.1.0",
             "runtime_version": "2026.6.6",
@@ -1953,28 +1961,26 @@ def test_generic_adapter_status_and_heartbeat_keep_openclaw_alias_compatible() -
             "hooks": ["before_tool_call", "message_sending"],
         },
     )
-    generic_response = client.get(
-        "/v1/adapters/openclaw/status",
-        headers={"Authorization": "Bearer control-secret"},
-    )
-    alias_response = client.get(
+    status_response = client.get(
         "/v1/adapters/openclaw/status",
         headers={"Authorization": "Bearer control-secret"},
     )
 
+    assert duplicate_runtime_response.status_code == 422
+    assert duplicate_runtime_response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert heartbeat_response.status_code == 200
     heartbeat = heartbeat_response.json()
-    assert heartbeat["runtime"] == "openclaw"
+    assert "runtime" not in heartbeat
+    assert heartbeat["runtime_id"] == "openclaw-gateway"
     assert heartbeat["agent_id"] == "main"
     assert heartbeat["plugin_version"] == "0.1.0"
     assert heartbeat["last_heartbeat_at"] is not None
-    assert generic_response.status_code == 200
-    assert generic_response.json()["capabilities"]["event_types"] == [
+    assert status_response.status_code == 200
+    assert status_response.json()["capabilities"]["event_types"] == [
         "tool_call_proposed",
         "message_send_proposed",
     ]
-    assert alias_response.status_code == 200
-    assert alias_response.json()["hooks"] == ["before_tool_call", "message_sending"]
+    assert status_response.json()["hooks"] == ["before_tool_call", "message_sending"]
 
 
 def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
@@ -1991,7 +1997,7 @@ def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
             "loaded": True,
             "hook_count": 22,
             "expected_hook_count": 22,
-            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
             "agent_id": "main",
             "plugin_version": "0.1.0",
             "runtime_version": "2026.6.6",
@@ -2296,7 +2302,7 @@ def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> Non
         json={
             "status": "loaded",
             "loaded": True,
-            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
             "agent_id": "main",
         },
     )
@@ -2310,7 +2316,7 @@ def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> Non
         json={
             "status": "loaded",
             "loaded": True,
-            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
             "agent_id": "main",
         },
     )
@@ -2462,7 +2468,8 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
     assert approval["subject_type"] == "message_send_proposed"
     assert approval["action_id"] == "evt_message_ask_flow"
     assert approval["action_name"] == "message_send_proposed"
-    assert approval["tool_call_id"] == "evt_message_ask_flow"
+    assert "tool_call_id" not in approval
+    assert "tool" not in approval
     resolve_response = client.post(
         f"/v1/approvals/{approval_id}/resolve",
         headers={"X-AgentGuard-CSRF": csrf_token},
@@ -2913,9 +2920,10 @@ def test_evaluate_audit_stores_full_decision_dump() -> None:
     )
 
     audit = store.audit_events[0]
-    dump = audit.metadata["guard_decision"]
+    dump = audit.evidence["guard_decision"]
 
     assert dump == response.json()["decision"]
+    assert "guard_decision" not in audit.metadata
 
 
 def test_build_audit_event_rejects_extra_links_collision() -> None:

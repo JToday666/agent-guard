@@ -27,7 +27,7 @@ packages/agentguard-openclaw-plugin/
 ├── src/
 │   ├── guard-api-client.ts
 │   ├── index.ts
-│   ├── mapping.ts
+│   ├── mapping/
 │   └── types.ts
 └── test/
     ├── client.test.mjs

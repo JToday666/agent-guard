@@ -15,7 +15,7 @@ import {
   buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
   buildToolCallGuardEvent,
-} from "../mapping.js";
+} from "../mapping/index.js";
 import {
   containsSensitiveCredentialText,
   redactUnknownCredentials,

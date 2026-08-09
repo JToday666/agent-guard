@@ -125,7 +125,7 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
 
   assert.equal(requests[0].url, "http://guard.test/v1/adapters/openclaw/heartbeat");
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
-  assert.equal(requests[0].body.runtime, "openclaw");
+  assert.equal("runtime" in requests[0].body, false);
   assert.equal(requests[0].body.runtime_id, "openclaw-gateway");
   assert.equal(requests[0].body.agent_id, "openclaw-main");
   assert.equal(requests[0].body.plugin_version, "0.1.0-beta.1");

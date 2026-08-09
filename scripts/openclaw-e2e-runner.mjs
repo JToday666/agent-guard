@@ -352,7 +352,6 @@ async function recordReleaseGateStatus(kind, report) {
     last_verified_at: report.generated_at ?? new Date().toISOString(),
     error: report.ok ? null : JSON.stringify(report.failures ?? []),
     source: "openclaw-plugin-dev",
-    runtime: "openclaw",
     runtime_id: "openclaw",
     agent_id: "main",
     runtime_version: report.scope?.openclaw ?? null,

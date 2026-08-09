@@ -442,53 +442,6 @@ def test_contract_03_inbound_stored_verbatim_and_excluded_from_policy_metrics(
     assert metrics["event_count"] == 0
 
 
-def test_contract_legacy_shape_record_replays_via_fallback_reads(store, client) -> None:
-    # PR #92/#93 旧形态：digest 在 links、decision dump 在 metadata。
-    run_id = uuid4().hex
-    event_id = f"evt_legacyshape_{run_id}"
-    trace_id = f"trace_legacyshape_{run_id}"
-    payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
-    decision = GuardDecision(
-        decision_id=f"dec_legacyshape_{run_id}",
-        decision="allow",
-        risk_score=0,
-        severity="low",
-        categories=[],
-        rule_hits=[],
-        reason="Legacy replay.",
-        safe_message=None,
-        approval_intent=None,
-        latency_ms=1,
-    )
-    legacy_audit = AuditEvent(
-        audit_id=f"audit_legacyshape_{run_id}",
-        schema_version="0.3",
-        trace_id=trace_id,
-        event_type="tool_call_proposed",
-        summary="Legacy shape audit",
-        decision="allow",
-        risk_score=0,
-        severity="low",
-        blocked=False,
-        reason="Legacy shape.",
-        links={
-            "event_id": event_id,
-            "decision_id": decision.decision_id,
-            "request_digest": canonical_sha256(
-                GuardEvent.model_validate(payload).model_dump(mode="json")
-            ),
-        },
-        metadata={"guard_decision": decision.model_dump(mode="json")},
-    )
-    store.add_audit_event(legacy_audit)
-
-    response = _post_evaluate(client, payload)
-
-    assert response.status_code == 200
-    assert response.json()["decision"]["decision_id"] == decision.decision_id
-    assert len(store.list_audit_events(AuditEventFilters(trace_id=trace_id))) == 1
-
-
 def _thread_client(store) -> TestClient:
     # PostgreSQL 下每线程独立 store 实例（独立 engine/session）；
     # memory 状态在进程内共享，多线程复用同一实例。
@@ -607,64 +560,6 @@ def test_contract_concurrent_different_content_exactly_one_conflict(store) -> No
     assert conflict.json()["error"]["code"] == "EVALUATION_CONFLICT"
     events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
     assert len(events) == 1
-    assert store.verify_audit_integrity().valid
-
-
-def test_contract_legacy_shape_record_replays_under_concurrency(store) -> None:
-    # 存量 legacy 形态记录（digest 在 links、decision dump 在 metadata）
-    # 在并发评估下仍被全部线程回放，不新增链上记录。
-    run_id = uuid4().hex
-    event_id = f"evt_legacyswarm_{run_id}"
-    trace_id = f"trace_legacyswarm_{run_id}"
-    payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
-    decision = GuardDecision(
-        decision_id=f"dec_legacyswarm_{run_id}",
-        decision="allow",
-        risk_score=0,
-        severity="low",
-        categories=[],
-        rule_hits=[],
-        reason="Legacy concurrent replay.",
-        safe_message=None,
-        approval_intent=None,
-        latency_ms=1,
-    )
-    store.add_audit_event(
-        AuditEvent(
-            audit_id=f"audit_legacyswarm_{run_id}",
-            schema_version="0.3",
-            trace_id=trace_id,
-            event_type="tool_call_proposed",
-            summary="Legacy shape audit under concurrency",
-            decision="allow",
-            risk_score=0,
-            severity="low",
-            blocked=False,
-            reason="Legacy shape.",
-            links={
-                "event_id": event_id,
-                "decision_id": decision.decision_id,
-                "request_digest": canonical_sha256(
-                    GuardEvent.model_validate(payload).model_dump(mode="json")
-                ),
-            },
-            metadata={"guard_decision": decision.model_dump(mode="json")},
-        )
-    )
-    worker_count = 4
-
-    def worker(_: int):
-        return _post_evaluate(_thread_client(store), payload)
-
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        responses = list(executor.map(worker, range(worker_count)))
-
-    assert [response.status_code for response in responses] == [200] * worker_count
-    assert all(
-        response.json()["decision"]["decision_id"] == decision.decision_id
-        for response in responses
-    )
-    assert len(store.list_audit_events(AuditEventFilters(trace_id=trace_id))) == 1
     assert store.verify_audit_integrity().valid
 
 

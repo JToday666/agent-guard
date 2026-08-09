@@ -250,14 +250,16 @@ test("maps a resolved allow_once approval to an allowed view state", () => {
   const approval = mapApproval({
     approval_id: "app_1",
     trace_id: "trace_1",
-    tool_call_id: "call_1",
+    subject_id: "call_1",
+    subject_type: "tool_call",
+    action_id: "call_1",
+    action_name: "send_email",
     requesting_principal_id: "adapter",
     runtime: "langgraph",
     agent_id: "main",
     status: "resolved",
     decision_options: ["allow_once", "deny"],
     decision: "allow_once",
-    tool: "send_email",
     resource: "external@example.com",
     reason: "External send",
     risk_score: 62,
@@ -270,7 +272,7 @@ test("maps a resolved allow_once approval to an allowed view state", () => {
   assert.equal(approval.status, "allowed");
 });
 
-test("preserves approval subject compatibility fields", () => {
+test("maps canonical approval subject and action fields", () => {
   const approval = mapApproval({
     approval_id: "app_2",
     trace_id: "trace_2",
@@ -278,14 +280,12 @@ test("preserves approval subject compatibility fields", () => {
     subject_type: "memory_write_proposed",
     action_id: "evt_p1",
     action_name: "memory_write_proposed",
-    tool_call_id: "evt_p1",
     requesting_principal_id: "adapter",
     runtime: "langgraph",
     agent_id: "main",
     status: "pending",
     decision_options: ["allow_once", "deny"],
     decision: null,
-    tool: "memory_write_proposed",
     resource: "memory:user_preferences/report_delivery_rule",
     reason: "Memory write requires review",
     risk_score: 66,
@@ -297,6 +297,7 @@ test("preserves approval subject compatibility fields", () => {
 
   assert.equal(approval.subjectId, "evt_p1");
   assert.equal(approval.subjectType, "memory_write_proposed");
+  assert.equal(approval.actionId, "evt_p1");
   assert.equal(approval.actionName, "memory_write_proposed");
 });
 

@@ -70,9 +70,7 @@ class MetricService:
         statuses = {
             adapter_id: status
             for adapter_id, status in self.store.list_adapter_statuses().items()
-            if runtime is None
-            or status.get("runtime") == runtime
-            or adapter_id == runtime
+            if runtime is None or adapter_id == runtime
         }
         event_count = len(events)
         policy_events = [

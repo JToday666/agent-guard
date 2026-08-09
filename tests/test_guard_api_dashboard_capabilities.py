@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from agentguard_core import AuditEvent
 from guard_api.main import create_app
+from guard_api.models import AdapterStatusRecord
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.support.auth import memory_store_with_adapter
@@ -158,15 +159,7 @@ def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
 
     unknown_response = client.get("/v1/adapters/openclaw/status")
     assert unknown_response.status_code == 200
-    assert unknown_response.json() == {
-        "status": "unknown",
-        "loaded": False,
-        "hook_count": None,
-        "expected_hook_count": 22,
-        "last_verified_at": None,
-        "error": None,
-        "source": None,
-    }
+    assert unknown_response.json() == AdapterStatusRecord().model_dump(mode="json")
 
     adapter_write = client.put(
         "/v1/adapters/openclaw/status",
@@ -174,7 +167,8 @@ def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
         json=_openclaw_status_payload(),
     )
     assert adapter_write.status_code == 200
-    assert adapter_write.json()["runtime"] == "openclaw"
+    assert adapter_write.json()["runtime_id"] == "openclaw-gateway"
+    assert "runtime" not in adapter_write.json()
 
     write_response = client.put(
         "/v1/adapters/openclaw/status",
@@ -240,6 +234,8 @@ def _openclaw_status_payload() -> dict:
         "last_verified_at": "2026-06-28T00:00:00+00:00",
         "error": None,
         "source": "agentguardctl",
+        "runtime_id": "openclaw-gateway",
+        "agent_id": "main",
     }
 
 

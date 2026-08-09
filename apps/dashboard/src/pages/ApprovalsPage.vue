@@ -53,7 +53,7 @@
                   formatRelativeExpiry(approval.expiresAt)
                 }}</time>
               </span>
-              <strong>{{ approval.tool }}</strong>
+              <strong>{{ approval.actionName }}</strong>
               <small>{{ approval.resource }}</small>
               <span
                 class="approval-queue__score"
@@ -77,7 +77,7 @@
             />
           </div>
         </div>
-        <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的工具动作。">
+        <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的动作。">
           <RouterLink to="/investigations">查看调查事件</RouterLink>
         </EmptyState>
       </div>

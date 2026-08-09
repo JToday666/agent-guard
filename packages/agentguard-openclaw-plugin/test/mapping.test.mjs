@@ -10,7 +10,7 @@ import {
   buildRuntimeOutcomeAuditEvent,
   buildToolCallGuardEvent,
   buildToolResultGuardEvent,
-} from "../dist/mapping.js";
+} from "../dist/mapping/index.js";
 
 const runtimeSamples = JSON.parse(
   readFileSync(new URL("./fixtures/runtime-mapping-samples.json", import.meta.url), "utf8"),

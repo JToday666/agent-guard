@@ -31,23 +31,20 @@ class EvaluationConflictError(ValueError):
 
 
 def _stored_request_digest(audit: AuditEvent) -> object:
-    """先新后旧双读：0.4 记录存 metadata，PR #92/#93 旧记录存 links。"""
+    """Return the canonical request digest from the 0.4 audit contract."""
 
-    digest = audit.metadata.get("request_digest")
-    if digest is None:
-        digest = audit.links.get("request_digest")
-    return digest
+    return audit.metadata.get("request_digest")
 
 
 def _stored_decision_dump(audit: AuditEvent) -> object:
-    """先新后旧双读：0.4 记录存 evidence，旧记录存 metadata。"""
+    """Return the canonical decision snapshot from the 0.4 audit contract."""
 
     evidence = audit.evidence
     if isinstance(evidence, dict):
         dump = evidence.get("guard_decision")
         if dump is not None:
             return dump
-    return audit.metadata.get("guard_decision")
+    return None
 
 
 class EvaluationService:

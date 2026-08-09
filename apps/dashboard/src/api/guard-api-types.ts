@@ -43,24 +43,22 @@ export interface GuardAuditIntegrityMetadataDto {
 export interface GuardApprovalDto {
   approval_id: string;
   trace_id: string;
-  subject_id?: string;
-  subject_type?: string;
-  action_id?: string;
-  action_name?: string;
-  tool_call_id: string;
+  subject_id: string;
+  subject_type: string;
+  action_id: string;
+  action_name: string;
   requesting_principal_id: string;
   runtime: Exclude<RuntimeName, "unknown">;
   agent_id: string;
   status: "pending" | "resolved" | "expired";
   decision_options: Array<"allow_once" | "deny">;
   decision: "allow_once" | "deny" | null;
-  tool: string;
   resource: string;
   reason: string;
   risk_score: number;
   severity: Exclude<RiskSeverity, "unknown">;
   created_at: string;
-  expires_at: string | null;
+  expires_at: string;
   resolved_at: string | null;
 }
 
@@ -179,12 +177,11 @@ export interface GuardAdapterStatusDto {
   status: "loaded" | "not_loaded" | "error" | "unknown";
   loaded: boolean;
   hook_count: number | null;
-  expected_hook_count: number;
+  expected_hook_count: number | null;
   last_verified_at: string | null;
   last_heartbeat_at?: string | null;
   error: string | null;
   source: string | null;
-  runtime?: string | null;
   runtime_id?: string | null;
   agent_id?: string | null;
   plugin_version?: string | null;

@@ -71,7 +71,6 @@ const unknownOpenClawStatus: AdapterStatus = {
   lastHeartbeatAt: null,
   error: null,
   source: null,
-  runtime: null,
   runtimeId: null,
   agentId: null,
   pluginVersion: null,

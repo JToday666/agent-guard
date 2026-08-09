@@ -66,9 +66,9 @@ Runtime Native Event
 | `GET /v1/policies/history` | P0 | 策略快照历史 |
 | `GET /v1/config-audit/findings` | P2 | 查询 Config Audit findings |
 | `POST /v1/config-audit/evaluate` | P2 | Adapter/Plugin 上报配置审计事件并得到阻断结果 |
-| `PUT /v1/adapters/{adapter_id}/status` | P2 | 写入 adapter 最近一次 verify/status 结果 |
-| `POST /v1/adapters/{adapter_id}/heartbeat` | P2 | Adapter/Plugin 上报 heartbeat 和能力信息 |
-| `GET /v1/adapters/{adapter_id}/status` | P2 | 查询 adapter 最近状态 |
+| `PUT /v1/adapters/{runtime}/status` | P2 | 写入 adapter 最近一次 verify/status 结果 |
+| `POST /v1/adapters/{runtime}/heartbeat` | P2 | Adapter/Plugin 上报 heartbeat 和能力信息 |
+| `GET /v1/adapters/{runtime}/status` | P2 | 查询 adapter 最近状态 |
 
 目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
 历史文档中的 `POST /v1/eval/runs` 已统一为当前实现的 `/v1/evaluations` 系列接口。
@@ -141,7 +141,7 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 `GET /v1/config-audit/findings` 接受 browser session 或 control token + `config-audit:read`，支持 `trace_id`、`target_id`、`target_type`、`severity`、`limit`。
 `POST /v1/config-audit/evaluate` 由 runtime credential + `event:evaluate` 写入配置审计结果，并校验载荷 runtime/agent 身份。
 
-`PUT /v1/adapters/{adapter_id}/status` 接受 control token 或绑定该 runtime/agent 的 credential + `adapter:status:write`；`POST /v1/adapters/{adapter_id}/heartbeat` 只接受身份与路径、载荷一致的 runtime credential；`GET /v1/adapters/{adapter_id}/status` 接受 browser session 或 control token + `adapter:read`。
+`PUT /v1/adapters/{runtime}/status` 接受 control token 或绑定该 runtime/agent 的 credential + `adapter:status:write`；`POST /v1/adapters/{runtime}/heartbeat` 只接受绑定身份与路径 runtime 一致、且载荷 `agent_id` 一致的 runtime credential；`GET /v1/adapters/{runtime}/status` 接受 browser session 或 control token + `adapter:read`。路径是 runtime 的唯一权威表示，载荷不重复传 `runtime`；`runtime_id` 仅表示具体运行实例。
 
 `GET /v1/policies/current` 和 `PUT /v1/policies/current` 只管理一个当前 `PolicyBundle`
 快照，请求和响应仍是裸 `PolicyBundle`，不包 envelope。Guard API 从存储读取该快照并传入 `agentguard-core.evaluate(event, policies)`；
@@ -335,8 +335,8 @@ P0 内置规则 ID：
 ```
 
 Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `approval_id` 返回给 Adapter。
-审批记录使用 `subject_id` 绑定受控动作和 resolve 操作。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。resolve 只允许从未过期的 pending 状态原子转换一次。
-审批响应同时包含 `subject_id`、`subject_type`、`action_id` 和 `action_name`。`tool_call_id` 是兼容别名，当前等于 `subject_id`，后续删除该字段必须单独做破坏性迁移。
+审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。resolve 只允许从未过期的 pending 状态原子转换一次。
+审批响应只使用 `subject_id`、`subject_type`、`action_id` 和 `action_name` 表达主体与动作；不接受或返回工具专用别名。
 
 ## 9. AuditEvent
 

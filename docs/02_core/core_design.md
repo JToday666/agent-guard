@@ -147,8 +147,7 @@ Core 只负责返回审批意图和必要证据，例如：
 ```
 
 Core 不创建 approval row，不处理浏览器鉴权，不等待审批结果。Guard API / Control Plane 根据 `ask` 决策创建审批记录、发布 Dashboard 待办，并向 Adapter 提供 wait 接口。
-审批记录使用 `subject_id` 绑定受控动作；resolve 由 browser session 与 CSRF 保护，并通过审批行的原子状态转换保证只能完成一次。P0 工具事件的 `subject_id` 是 tool call id，P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。
-`ApprovalRequest.tool_call_id` 仍保留为兼容别名，当前等于 `subject_id`；后续删除该字段应作为单独破坏性迁移处理。
+审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期；resolve 由 browser session 与 CSRF 保护，并通过审批行的原子状态转换保证只能完成一次。P0 工具事件的 `subject_id` 是 tool call id，P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。审批契约只包含 `subject_id`、`subject_type`、`action_id` 和 `action_name`，不保留工具专用别名。
 
 ## 7. 检测器
 

@@ -3,7 +3,7 @@
     <header class="approval-detail__header">
       <div>
         <p>审批请求</p>
-        <h2>{{ approval.tool }}</h2>
+        <h2>{{ approval.actionName }}</h2>
       </div>
       <div class="risk-score" :class="`risk-score--${approval.severity}`">
         <strong>{{ approval.riskScore }}</strong
@@ -26,9 +26,9 @@
 
       <dl class="evidence-grid">
         <div>
-          <dt>工具</dt>
+          <dt>动作名称</dt>
           <dd>
-            <code>{{ approval.tool }}</code>
+            <code>{{ approval.actionName }}</code>
           </dd>
         </div>
         <div>
@@ -136,9 +136,9 @@
       <p>{{ confirmationContent.description }}</p>
       <dl class="confirm-impact">
         <div>
-          <dt>工具</dt>
+          <dt>动作名称</dt>
           <dd>
-            <code>{{ approval.tool }}</code>
+            <code>{{ approval.actionName }}</code>
           </dd>
         </div>
         <div>

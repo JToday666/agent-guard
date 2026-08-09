@@ -7,7 +7,7 @@ import {
   buildRuntimeObservationAuditEvent,
   buildToolResultGuardEvent,
   buildBeforeInstallConfigAuditEvent,
-} from "../dist/mapping.js";
+} from "../dist/mapping/index.js";
 
 const config = {
   guardApiBaseUrl: "http://guard.test",

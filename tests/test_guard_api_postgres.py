@@ -66,11 +66,13 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
             ApprovalRequest(
                 approval_id=approval_id,
                 trace_id=trace_id,
-                tool_call_id=f"call_pg_{run_id}",
+                subject_id=f"call_pg_{run_id}",
+                subject_type="tool_call",
+                action_id=f"call_pg_{run_id}",
+                action_name="send_email",
                 requesting_principal_id="cred_adapter_main",
                 runtime="langgraph",
                 agent_id="main",
-                tool="send_email",
                 resource="external@example.com",
                 reason="approval required",
                 risk_score=62,
@@ -211,21 +213,25 @@ def test_postgres_store_roundtrips_dashboard_todo_state() -> None:
         reset_control_plane_schema(database_url)
 
 
-def test_postgres_migration_promotes_approval_state_and_drops_browser_nonces() -> None:
+def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() -> None:
     database_url = get_test_database_url()
 
     run_id = uuid4().hex
-    approval_id = f"app_pg_legacy_state_{run_id}"
-    trace_id = f"trace_pg_legacy_state_{run_id}"
-    subject_id = f"call_pg_legacy_state_{run_id}"
+    approval_id = f"app_pg_state_{run_id}"
+    trace_id = f"trace_pg_state_{run_id}"
+    subject_id = f"call_pg_state_{run_id}"
     store = PostgresControlPlaneStore(database_url)
     engine = create_engine(store.database_url)
     try:
         reset_control_plane_schema(database_url)
         command.upgrade(store._alembic_config(), "0007_policy_eval_unique_event")
-        legacy_payload = {
+        approval_payload = {
             "approval_id": approval_id,
             "trace_id": trace_id,
+            "subject_id": subject_id,
+            "subject_type": "tool_call",
+            "action_id": subject_id,
+            "action_name": "send_email",
             "tool_call_id": subject_id,
             "requesting_principal_id": "cred_adapter_main",
             "runtime": "langgraph",
@@ -235,7 +241,7 @@ def test_postgres_migration_promotes_approval_state_and_drops_browser_nonces() -
             "decision": None,
             "tool": "send_email",
             "resource": "external@example.com",
-            "reason": "legacy approval required",
+            "reason": "approval required",
             "risk_score": 62,
             "severity": "medium",
             "created_at": "2026-06-25T00:00:00+00:00",
@@ -252,8 +258,28 @@ def test_postgres_migration_promotes_approval_state_and_drops_browser_nonces() -
                 ),
                 {
                     "approval_id": approval_id,
-                    "payload_json": json.dumps(legacy_payload),
+                    "payload_json": json.dumps(approval_payload),
                     "created_at": "2026-06-25T00:00:00+00:00",
+                },
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO adapter_statuses (adapter_id, payload_json, updated_at)
+                    VALUES ('openclaw', CAST(:payload_json AS jsonb), :updated_at)
+                    """
+                ),
+                {
+                    "payload_json": json.dumps(
+                        {
+                            "status": "loaded",
+                            "loaded": True,
+                            "runtime": "openclaw",
+                            "runtime_id": "openclaw-gateway",
+                            "agent_id": "main",
+                        }
+                    ),
+                    "updated_at": "2026-06-25T00:00:00+00:00",
                 },
             )
 
@@ -276,6 +302,7 @@ def test_postgres_migration_promotes_approval_state_and_drops_browser_nonces() -
             ).scalar_one()
 
         approval = store.get_approval(approval_id)
+        adapter_status = store.get_adapter_status("openclaw")
 
         assert "status" not in columns
         assert columns["created_at"] == "timestamp with time zone"
@@ -285,6 +312,11 @@ def test_postgres_migration_promotes_approval_state_and_drops_browser_nonces() -
         assert approval is not None
         assert approval.status == "pending"
         assert approval.subject_id == subject_id
+        assert "tool_call_id" not in approval.model_dump(mode="json")
+        assert "tool" not in approval.model_dump(mode="json")
+        assert adapter_status is not None
+        assert adapter_status["runtime_id"] == "openclaw-gateway"
+        assert "runtime" not in adapter_status
     finally:
         reset_control_plane_schema(database_url)
 
@@ -492,11 +524,13 @@ def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
             ApprovalRequest(
                 approval_id=approval_id,
                 trace_id=trace_id,
-                tool_call_id=f"call_pg_route_{run_id}",
+                subject_id=f"call_pg_route_{run_id}",
+                subject_type="tool_call",
+                action_id=f"call_pg_route_{run_id}",
+                action_name="send_email",
                 requesting_principal_id="cred_adapter_main",
                 runtime="langgraph",
                 agent_id="main",
-                tool="send_email",
                 resource="external@example.com",
                 reason="approval required",
                 risk_score=62,
@@ -556,7 +590,7 @@ def test_postgres_store_persists_terminal_control_plane_registry_state() -> None
             {
                 "status": "loaded",
                 "loaded": True,
-                "runtime": "openclaw",
+                "runtime_id": "openclaw-gateway",
                 "agent_id": "main",
                 "plugin_version": "0.1.0",
                 "runtime_version": "2026.6.6",
