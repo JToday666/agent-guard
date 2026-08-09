@@ -41,6 +41,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             "agentguard_session",
             session.session_id,
             httponly=True,
+            secure=settings.browser_cookie_secure,
             samesite="strict",
             path="/",
             max_age=settings.browser_session_ttl_seconds,
@@ -61,5 +62,11 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         session = auth.verify_browser_session(agentguard_session)
         auth.logout_browser_session(session.session_id)
         response = JSONResponse({"authenticated": False})
-        response.delete_cookie("agentguard_session", path="/")
+        response.delete_cookie(
+            "agentguard_session",
+            path="/",
+            secure=settings.browser_cookie_secure,
+            httponly=True,
+            samesite="strict",
+        )
         return response

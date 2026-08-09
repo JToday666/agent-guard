@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -21,6 +22,7 @@ from agentguard_core import (
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.llm_approval import HttpLlmApprovalReviewer
 from guard_api.main import create_app
+from guard_api.middleware import RequestBodyLimitMiddleware
 from guard_api.models import (
     ApprovalRequest,
     CredentialCreateRequest,
@@ -358,6 +360,41 @@ def test_production_startup_rejects_default_database_and_control_token() -> None
     assert "AGENTGUARD_CONTROL_TOKEN" in message
 
 
+def test_external_bind_rejects_development_defaults() -> None:
+    settings = GuardApiSettings(host="0.0.0.0")
+
+    with pytest.raises(GuardApiConfigurationError, match="Externally exposed"):
+        settings.validate_for_startup()
+
+
+def test_production_configuration_requires_secure_cookie_and_strong_token() -> None:
+    settings = GuardApiSettings(
+        environment="production",
+        database_url=(
+            "postgresql+psycopg://agentguard:strong-password@db.internal:5432/agent_guard"
+        ),
+        control_token="short-token",
+        browser_cookie_secure=False,
+    )
+
+    with pytest.raises(GuardApiConfigurationError, match="at least 32 characters"):
+        settings.validate_for_startup()
+
+    settings.control_token = "a" * 32
+    with pytest.raises(GuardApiConfigurationError, match="COOKIE_SECURE"):
+        settings.validate_for_startup()
+
+    settings.browser_cookie_secure = True
+    settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_environment_and_empty_control_token() -> None:
+    with pytest.raises(GuardApiConfigurationError, match="AGENTGUARD_ENV"):
+        GuardApiSettings(environment="prod").validate_for_startup()
+    with pytest.raises(GuardApiConfigurationError, match="cannot be empty"):
+        GuardApiSettings(control_token="   ").validate_for_startup()
+
+
 def test_auth_state_survives_new_auth_service_instance() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     store = memory_store_with_adapter()
@@ -590,6 +627,90 @@ def test_startup_fails_when_control_plane_initialize_fails() -> None:
     with pytest.raises(RuntimeError, match="control plane initialize failed"):
         with TestClient(app):
             pass
+
+
+def test_browser_exchange_sets_secure_cookie_when_required() -> None:
+    settings = GuardApiSettings(
+        environment="production",
+        database_url=(
+            "postgresql+psycopg://agentguard:strong-password@db.internal:5432/agent_guard"
+        ),
+        control_token="c" * 32,
+        browser_cookie_secure=True,
+    )
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+
+    with TestClient(app, base_url="https://testserver") as client:
+        launch = client.post(
+            "/v1/auth/browser/launch",
+            headers={"Authorization": f"Bearer {settings.control_token}"},
+        )
+        exchange = client.post(
+            "/v1/auth/browser/exchange",
+            json={"launch_code": launch.json()["launch_code"]},
+        )
+
+    cookie = exchange.headers["set-cookie"]
+    assert "Secure" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=strict" in cookie
+
+
+def test_request_body_limit_rejects_payload_before_route_validation() -> None:
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(max_request_body_bytes=1024),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/auth/browser/exchange",
+        json={"launch_code": "x" * 2048},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"] == {
+        "code": "REQUEST_TOO_LARGE",
+        "message": "Request body exceeds the configured size limit.",
+        "details": {"max_body_bytes": 1024},
+    }
+
+
+def test_request_body_limit_counts_stream_chunks_without_content_length() -> None:
+    sent: list[dict] = []
+    chunks = iter(
+        [
+            {"type": "http.request", "body": b"x" * 700, "more_body": True},
+            {"type": "http.request", "body": b"y" * 700, "more_body": False},
+        ]
+    )
+
+    async def receive() -> dict:
+        return next(chunks)
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    async def downstream(scope: dict, receive_body, send_response) -> None:
+        del scope
+        while True:
+            message = await receive_body()
+            if not message.get("more_body", False):
+                break
+        await send_response({"type": "http.response.start", "status": 204})
+        await send_response({"type": "http.response.body", "body": b""})
+
+    middleware = RequestBodyLimitMiddleware(downstream, max_body_bytes=1024)
+    asyncio.run(
+        middleware(
+            {"type": "http", "method": "POST", "headers": []},
+            receive,
+            send,
+        )
+    )
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413
 
 
 def test_ask_approval_resolve_and_wait_flow() -> None:

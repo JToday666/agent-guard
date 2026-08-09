@@ -15,6 +15,7 @@ from guard_api import __version__
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.errors import error_response, http_error_code, validation_error_details
 from guard_api.llm_approval import HttpLlmApprovalReviewer, LlmApprovalReviewer
+from guard_api.middleware import RequestBodyLimitMiddleware
 from guard_api.routers import ApiContext, register_routes
 from guard_api.services import (
     ApprovalService,
@@ -88,6 +89,10 @@ def create_app(
         yield
 
     app = FastAPI(title="AgentGuard Guard API", version=__version__, lifespan=lifespan)
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=settings.max_request_body_bytes,
+    )
 
     @app.exception_handler(ApiAuthError)
     async def auth_exception_handler(_: Request, exc: ApiAuthError) -> JSONResponse:
