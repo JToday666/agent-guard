@@ -60,7 +60,10 @@ def create_app(
     auth = CapabilityAuthService(settings=settings, store=store)
     provenance_writer = ProvenanceWriter(store=store)
     audit_service = AuditService(store=store, provenance_writer=provenance_writer)
-    audit_window_service = AuditWindowService(store=store)
+    audit_window_service = AuditWindowService(
+        store=store,
+        cursor_signing_key=settings.audit_cursor_signing_key(),
+    )
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
     memory_guard_service = MemoryGuardService(store=store)
     approval_service = ApprovalService(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from dataclasses import dataclass, field
 from ipaddress import ip_address
@@ -89,6 +91,15 @@ class GuardApiSettings:
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
+
+    def audit_cursor_signing_key(self) -> bytes:
+        """从控制令牌域隔离派生 cursor HMAC 密钥，不暴露原始令牌。"""
+
+        return hmac.new(
+            self.control_token.encode("utf-8"),
+            b"agentguard/audit-window-cursor/v3",
+            hashlib.sha256,
+        ).digest()
 
     def validate_for_startup(self) -> None:
         environment = self.environment.strip().lower()

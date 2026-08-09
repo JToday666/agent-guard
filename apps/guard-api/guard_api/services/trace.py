@@ -25,12 +25,10 @@ class TraceService:
         self,
         *,
         store: ControlPlaneStore,
-        audit_window_service: AuditWindowService | None = None,
+        audit_window_service: AuditWindowService,
     ) -> None:
         self.store = store
-        self.audit_window_service = audit_window_service or AuditWindowService(
-            store=store
-        )
+        self.audit_window_service = audit_window_service
 
     def get_trace(
         self,

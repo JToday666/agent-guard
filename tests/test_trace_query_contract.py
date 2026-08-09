@@ -6,6 +6,7 @@ from agentguard_core import AuditEvent, ProvenanceEdge, ProvenanceNode
 import guard_api.services.trace as trace_module
 from guard_api.models import ApprovalRequest
 from guard_api.routers.audit import _conditional_json_response
+from guard_api.services.audit_window import AuditWindowService
 from guard_api.services.trace import (
     TRACE_AUDIT_LIMIT,
     TraceService,
@@ -13,6 +14,18 @@ from guard_api.services.trace import (
     if_none_match_matches,
 )
 from guard_api.storage.memory import MemoryControlPlaneStore
+
+_CURSOR_SIGNING_KEY = b"agentguard-test-cursor-signing-key-32-bytes"
+
+
+def _trace_service(store: MemoryControlPlaneStore) -> TraceService:
+    return TraceService(
+        store=store,
+        audit_window_service=AuditWindowService(
+            store=store,
+            cursor_signing_key=_CURSOR_SIGNING_KEY,
+        ),
+    )
 
 
 def _audit(index: int, *, trace_id: str = "trace-window") -> AuditEvent:
@@ -35,7 +48,7 @@ def test_trace_reports_a_bounded_window_without_guessing_from_result_length() ->
         store.add_audit_event(_audit(index))
     store.add_audit_event(_audit(0, trace_id="other-trace"))
 
-    payload = TraceService(store=store).get_trace("trace-window")
+    payload = _trace_service(store).get_trace("trace-window")
     audit_events = payload["audit_events"]
 
     assert isinstance(audit_events, list)
@@ -49,7 +62,7 @@ def test_trace_reports_a_bounded_window_without_guessing_from_result_length() ->
     assert audit_events[0]["audit_id"] == "audit-trace-window-1000"
     assert audit_events[-1]["audit_id"] == "audit-trace-window-0001"
 
-    second_page = TraceService(store=store).get_trace(
+    second_page = _trace_service(store).get_trace(
         "trace-window", cursor=audit_window["next_cursor"]
     )
     assert [event["audit_id"] for event in second_page["audit_events"]] == [
@@ -62,7 +75,7 @@ def test_trace_reports_a_bounded_window_without_guessing_from_result_length() ->
 
 def test_trace_reports_complete_windows_including_an_empty_trace() -> None:
     store = MemoryControlPlaneStore()
-    service = TraceService(store=store)
+    service = _trace_service(store)
     store.add_audit_event(_audit(0))
 
     complete_window = service.get_trace("trace-window")["audit_window"]
@@ -79,7 +92,7 @@ def test_trace_reports_complete_windows_including_an_empty_trace() -> None:
 
 def test_trace_validator_changes_when_only_an_approval_changes() -> None:
     store = MemoryControlPlaneStore()
-    service = TraceService(store=store)
+    service = _trace_service(store)
     store.create_approval(
         ApprovalRequest(
             approval_id="approval-1",
@@ -106,7 +119,7 @@ def test_trace_validator_changes_when_only_an_approval_changes() -> None:
 
 def test_provenance_projects_expired_approval_without_mutating_stored_node() -> None:
     store = MemoryControlPlaneStore()
-    service = TraceService(store=store)
+    service = _trace_service(store)
     approval = store.create_approval(
         ApprovalRequest(
             approval_id="approval-expired",
@@ -149,7 +162,7 @@ def test_provenance_projects_expired_approval_without_mutating_stored_node() -> 
 
 def test_trace_and_provenance_have_independent_validators() -> None:
     store = MemoryControlPlaneStore()
-    service = TraceService(store=store)
+    service = _trace_service(store)
     trace_payload = service.get_trace("trace-independent")
     _, trace_etag = encode_conditional_document(trace_payload)
 
@@ -209,7 +222,7 @@ def test_provenance_returns_a_bounded_graph_without_dangling_edges(
         )
     )
 
-    graph = TraceService(store=store).get_provenance("trace-bounded-graph")
+    graph = _trace_service(store).get_provenance("trace-bounded-graph")
 
     returned_node_ids = {node["node_id"] for node in graph["nodes"]}
     assert returned_node_ids == {"node-0", "node-1"}

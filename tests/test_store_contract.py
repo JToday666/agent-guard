@@ -53,6 +53,7 @@ from tests.support.postgres import get_test_database_url, reset_control_plane_sc
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "runtime_safety_trace_v04.json"
 
 ADAPTER_HEADERS = {"Authorization": "Bearer adapter-secret"}
+_CURSOR_SIGNING_KEY = b"agentguard-test-cursor-signing-key-32-bytes"
 
 _STABLE_LINK_KEYS = {
     "event_id",
@@ -66,6 +67,13 @@ _STABLE_LINK_KEYS = {
 
 def _settings() -> GuardApiSettings:
     return GuardApiSettings(control_token="control-secret")
+
+
+def _audit_window_service(store) -> AuditWindowService:
+    return AuditWindowService(
+        store=store,
+        cursor_signing_key=_CURSOR_SIGNING_KEY,
+    )
 
 
 @pytest.fixture(params=["memory", "postgres"])
@@ -741,7 +749,7 @@ def test_contract_window_has_more_boundary(store) -> None:
     run_id = uuid4().hex
     for index in range(5):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
-    service = AuditWindowService(store=store)
+    service = _audit_window_service(store)
 
     exact = service.get_window(limit=5)
     assert exact["scope"]["returned_record_count"] == 5
@@ -760,7 +768,7 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
     run_id = uuid4().hex
     for index in range(6):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
-    service = AuditWindowService(store=store)
+    service = _audit_window_service(store)
 
     page1 = service.get_window(limit=4)
     page1_sequences = [
@@ -804,7 +812,7 @@ def test_contract_window_duplicate_policy_records_counted_once(store) -> None:
         )
     store.add_audit_event(_window_audit_event(index=3, run_id=run_id))
 
-    window = AuditWindowService(store=store).get_window(limit=10)
+    window = _audit_window_service(store).get_window(limit=10)
     metrics = window["policy_metrics"]
 
     # legacy 重复记录经 §19.2 分类回退判为 policy_evaluation，读时只计一次。
@@ -835,7 +843,7 @@ def test_contract_window_non_policy_records_excluded_from_metrics(store) -> None
         _window_audit_event(index=3, run_id=run_id, record_type="config_audit")
     )
 
-    window = AuditWindowService(store=store).get_window(limit=10)
+    window = _audit_window_service(store).get_window(limit=10)
     metrics = window["policy_metrics"]
 
     assert window["scope"]["returned_record_count"] == 4
@@ -860,7 +868,7 @@ def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
         _window_audit_event(index=2, run_id=run_id, decision="deny", is_malicious=None)
     )
 
-    metrics = AuditWindowService(store=store).get_window(limit=10)["policy_metrics"]
+    metrics = _audit_window_service(store).get_window(limit=10)["policy_metrics"]
     assert metrics["unknown_decision_count"] == 0
     assert metrics["unlabeled_count"] == 1
     assert metrics["benign_label_count"] == 1
@@ -877,7 +885,7 @@ def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
             is_malicious=False,
         )
     )
-    metrics = AuditWindowService(store=store).get_window(limit=10)["policy_metrics"]
+    metrics = _audit_window_service(store).get_window(limit=10)["policy_metrics"]
     assert metrics["unknown_decision_count"] == 0
     assert metrics["allow_count"] == 1
     assert metrics["policy_intervention_fpr"] == 1.0
@@ -890,7 +898,7 @@ def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
             index=0, run_id=empty_run, record_type="runtime_observation", decision=None
         )
     )
-    empty_metrics = AuditWindowService(store=store).get_window(
+    empty_metrics = _audit_window_service(store).get_window(
         limit=10, trace_id=f"trace_win_{empty_run}"
     )["policy_metrics"]
     assert empty_metrics["evaluation_count"] == 0
@@ -933,7 +941,7 @@ def test_contract_cohort_reads_every_keyset_page() -> None:
     for index in range(1001):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
 
-    cohort = AuditWindowService(store=store).get_policy_cohort(
+    cohort = _audit_window_service(store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-02T00:00:00+00:00",
     )
@@ -954,7 +962,7 @@ def test_contract_cohort_applies_ingestion_time_as_of() -> None:
     store.add_audit_event(_window_audit_event(index=0, run_id=run_id))
     store.add_audit_event(_window_audit_event(index=1, run_id=run_id))
 
-    cohort = AuditWindowService(store=store).get_policy_cohort(
+    cohort = _audit_window_service(store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-02T00:00:00+00:00",
         outcomes_as_of="2026-06-02T12:00:00+00:00",
@@ -1010,8 +1018,8 @@ def test_contract_memory_and_postgres_window_parity() -> None:
         for event in events:
             target.add_audit_event(event)
 
-    memory_window = AuditWindowService(store=memory_store).get_window(limit=3)
-    postgres_window = AuditWindowService(store=postgres_store).get_window(limit=3)
+    memory_window = _audit_window_service(memory_store).get_window(limit=3)
+    postgres_window = _audit_window_service(postgres_store).get_window(limit=3)
 
     # Memory/PostgreSQL 在相同 fixture 上完全一致（outcomes_as_of 为请求时刻）。
     assert memory_window["events"] == postgres_window["events"]
@@ -1024,20 +1032,20 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     assert postgres_scope.pop("next_cursor")
     assert memory_scope == postgres_scope
 
-    memory_page2 = AuditWindowService(store=memory_store).get_window(
+    memory_page2 = _audit_window_service(memory_store).get_window(
         cursor=memory_window["scope"]["next_cursor"]
     )
-    postgres_page2 = AuditWindowService(store=postgres_store).get_window(
+    postgres_page2 = _audit_window_service(postgres_store).get_window(
         cursor=postgres_window["scope"]["next_cursor"]
     )
     assert memory_page2["events"] == postgres_page2["events"]
     assert memory_page2["policy_metrics"] == postgres_page2["policy_metrics"]
 
-    cohort_memory = AuditWindowService(store=memory_store).get_policy_cohort(
+    cohort_memory = _audit_window_service(memory_store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-01T00:05:00+00:00",
     )
-    cohort_postgres = AuditWindowService(store=postgres_store).get_policy_cohort(
+    cohort_postgres = _audit_window_service(postgres_store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-01T00:05:00+00:00",
     )

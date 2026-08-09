@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from collections.abc import Callable
 from typing import Any
 
 from agentguard_core import AuditEvent
@@ -34,8 +35,18 @@ class AuditWindowRequestError(Exception):
 
 
 class AuditWindowService:
-    def __init__(self, *, store: ControlPlaneStore) -> None:
+    def __init__(
+        self,
+        *,
+        store: ControlPlaneStore,
+        cursor_signing_key: bytes,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if len(cursor_signing_key) < 32:
+            raise ValueError("cursor_signing_key must contain at least 32 bytes")
         self.store = store
+        self.cursor_signing_key = cursor_signing_key
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def get_window(
         self,
@@ -57,7 +68,11 @@ class AuditWindowService:
         )
         if cursor:
             try:
-                state = decode_cursor(cursor)
+                state = decode_cursor(
+                    cursor,
+                    signing_key=self.cursor_signing_key,
+                    now=self.clock(),
+                )
             except CursorExpiredError:
                 raise AuditWindowRequestError(
                     "CURSOR_EXPIRED", status_code=410
@@ -107,6 +122,8 @@ class AuditWindowService:
                 filters=filters,
                 limit=effective_limit,
                 snapshot_at=_utc_iso_z(snapshot_at),
+                signing_key=self.cursor_signing_key,
+                issued_at=self.clock(),
             )
 
         sequences = [_event_sequence(event) for event in page]
