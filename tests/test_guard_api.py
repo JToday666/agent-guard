@@ -26,7 +26,7 @@ from guard_api.models import (
     CredentialCreateRequest,
     LlmApprovalReviewInput,
 )
-from guard_api.services import PolicyService
+from guard_api.services import MetricService, PolicyService
 from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ApprovalStateConflictError, AuditIdConflictError
@@ -1334,9 +1334,9 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         },
     )
     context_event["runtime"] = "openclaw"
-    context_event["security_context"]["user_task"] = (
-        "Summarize external documentation safely"
-    )
+    context_event["security_context"][
+        "user_task"
+    ] = "Summarize external documentation safely"
     context_event["security_context"]["derived_paths"] = [
         "https://docs.example.test/context"
     ]
@@ -1377,9 +1377,9 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         },
     )
     result_event["runtime"] = "openclaw"
-    result_event["security_context"]["user_task"] = (
-        "Summarize external documentation safely"
-    )
+    result_event["security_context"][
+        "user_task"
+    ] = "Summarize external documentation safely"
     result_event["metadata"] = {
         "openclaw_hook": "tool_result_persist",
         "source_type": "",
@@ -2084,12 +2084,56 @@ def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
     assert model_response.status_code == 200
     assert metrics_response.status_code == 200
     metrics = metrics_response.json()
-    assert metrics["event_count"] == 2
-    assert metrics["blocked_count"] == 2
-    assert metrics["by_runtime"]["openclaw"]["event_count"] == 2
+    assert metrics["metric_version"] == "runtime_activity.v2"
+    assert metrics["record_count"] == 2
+    assert metrics["policy_evaluation_count"] == 2
+    assert metrics["intervention_count"] == 2
+    assert metrics["intervention_rate"] == 1.0
+    assert "blocked_count" not in metrics
+    assert "block_rate" not in metrics
+    assert metrics["by_runtime"]["openclaw"]["record_count"] == 2
     assert metrics["hook_activity"] == {"before_tool_call": 1, "llm_input": 1}
     assert metrics["adapters"]["openclaw"]["loaded"] is True
     assert metrics["adapters"]["openclaw"]["hook_count"] == 22
+
+
+def test_runtime_metrics_keep_outcomes_out_of_policy_rates_and_latency() -> None:
+    store = MemoryControlPlaneStore()
+    store.add_audit_event(
+        AuditEvent(
+            schema_version="0.4",
+            record_type="policy_evaluation",
+            trace_id="trace_runtime_metric_semantics",
+            runtime="openclaw",
+            summary="policy evaluation",
+            decision="ask",
+            risk_score=70,
+            severity="high",
+            blocked=True,
+            reason="approval required",
+            latency_ms=12,
+        )
+    )
+    store.add_audit_event(
+        AuditEvent(
+            schema_version="0.4",
+            record_type="runtime_outcome",
+            trace_id="trace_runtime_metric_semantics",
+            runtime="openclaw",
+            summary="runtime outcome",
+            reason="not invoked",
+            latency_ms=900,
+        )
+    )
+
+    metrics = MetricService(store=store).runtime_metrics(runtime="openclaw")
+
+    assert metrics["record_count"] == 2
+    assert metrics["policy_evaluation_count"] == 1
+    assert metrics["intervention_count"] == 1
+    assert metrics["intervention_rate"] == 1.0
+    assert metrics["average_decision_latency_ms"] == 12
+    assert metrics["latency_sample_count"] == 1
 
 
 def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
