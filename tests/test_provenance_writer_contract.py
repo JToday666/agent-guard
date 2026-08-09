@@ -410,6 +410,7 @@ def test_approval_service_updates_the_existing_provenance_node() -> None:
             risk_score=72,
             severity="high",
             evidence={"decision": {"decision_id": "approval-decision"}},
+            expires_at="2099-01-01T00:00:00+00:00",
         )
     )
     writer.update_approval(approval)
@@ -457,6 +458,7 @@ def test_approval_update_rejects_a_decision_from_another_trace() -> None:
         risk_score=72,
         severity="high",
         evidence={"decision": {"decision_id": "foreign"}},
+        expires_at="2099-01-01T00:00:00+00:00",
     )
 
     with pytest.raises(ProvenanceConflictError):

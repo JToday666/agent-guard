@@ -71,7 +71,7 @@ class ApprovalService:
             decision_options=decision.approval_intent.options,
             expires_at=(
                 datetime.now(timezone.utc)
-                + timedelta(seconds=self.settings.approval_nonce_ttl_seconds)
+                + timedelta(seconds=self.settings.approval_ttl_seconds)
             ).isoformat(),
         )
         return self.store.create_approval(approval)
@@ -125,20 +125,10 @@ class ApprovalService:
         )
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
-        pending: list[ApprovalRequest] = []
-        for approval in self.store.list_pending_approvals():
-            if self._is_expired(approval):
-                expired = self.store.expire_approval(approval.approval_id)
-                self.provenance_writer.update_approval(expired)
-                continue
-            pending.append(approval)
-        return pending
+        return self.store.list_pending_approvals()
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        approval = self.store.get_approval(approval_id)
-        if approval is None:
-            return None
-        return self._with_expired_status(approval)
+        return self.store.get_approval(approval_id)
 
     def resolve_approval(
         self,
@@ -150,10 +140,6 @@ class ApprovalService:
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest:
-        approval = self.get_approval(approval_id)
-        if approval is not None and approval.status == "expired":
-            approval.decision = "deny"
-            return approval
         resolved = self.store.resolve_approval(
             approval_id,
             decision,
@@ -172,24 +158,6 @@ class ApprovalService:
         stored = self.store.create_approval(updated)
         self.provenance_writer.update_approval(stored)
         return stored
-
-    def _with_expired_status(self, approval: ApprovalRequest) -> ApprovalRequest:
-        if self._is_expired(approval):
-            expired = self.store.expire_approval(approval.approval_id)
-            self.provenance_writer.update_approval(expired)
-            return expired
-        return approval
-
-    def _is_expired(self, approval: ApprovalRequest) -> bool:
-        if approval.status != "pending" or approval.expires_at is None:
-            return False
-        try:
-            expires_at = datetime.fromisoformat(approval.expires_at)
-        except ValueError:
-            return False
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        return expires_at < datetime.now(timezone.utc)
 
 
 def _llm_can_allow_once(approval: ApprovalRequest) -> bool:

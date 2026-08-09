@@ -44,8 +44,8 @@ from guard_api.storage.base import (
     EvalMetricFilters,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
-from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from tests.support.auth import memory_store_with_adapter
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "runtime_safety_trace_v04.json"
@@ -63,15 +63,13 @@ _STABLE_LINK_KEYS = {
 
 
 def _settings() -> GuardApiSettings:
-    return GuardApiSettings(
-        adapter_token="adapter-secret", control_token="control-secret"
-    )
+    return GuardApiSettings(control_token="control-secret")
 
 
 @pytest.fixture(params=["memory", "postgres"])
 def store(request):
     if request.param == "memory":
-        return MemoryControlPlaneStore()
+        return memory_store_with_adapter()
     database_url = get_test_database_url()
     reset_control_plane_schema(database_url)
     postgres_store = PostgresControlPlaneStore(database_url)
@@ -822,7 +820,7 @@ def test_contract_bounded_read_is_descending_within_snapshot(store) -> None:
 
     # 空查询不抛错。
     assert (
-        MemoryControlPlaneStore().read_audit_events_bounded(AuditWindowQuery(limit=1))
+        memory_store_with_adapter().read_audit_events_bounded(AuditWindowQuery(limit=1))
         == []
     )
 
@@ -1021,7 +1019,7 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     reset_control_plane_schema(database_url)
     postgres_store = PostgresControlPlaneStore(database_url)
     postgres_store.initialize()
-    memory_store = MemoryControlPlaneStore()
+    memory_store = memory_store_with_adapter()
     run_id = uuid4().hex
     events = [
         _window_audit_event(

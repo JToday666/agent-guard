@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_iso
-from agentguard_core.models import ApprovalResolution
+from agentguard_core.decisions import ApprovalResolution
+
+ADAPTER_CREDENTIAL_SCOPES = (
+    "event:evaluate",
+    "event:audit:write",
+    "approval:wait",
+    "adapter:status:write",
+)
 
 
 class LlmApprovalReview(BaseModel):
@@ -52,7 +60,7 @@ class ApprovalRequest(BaseModel):
     resolved_by: str | None = None
     resolution_reason: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
-    expires_at: str | None = None
+    expires_at: str
     resolved_at: str | None = None
 
     @model_validator(mode="before")
@@ -71,6 +79,24 @@ class ApprovalRequest(BaseModel):
             values.get("action_name") or values.get("tool") or values["subject_type"]
         )
         return values
+
+    @model_validator(mode="after")
+    def validate_lifecycle(self) -> Self:
+        created_at = _approval_timestamp(self.created_at, "created_at")
+        expires_at = _approval_timestamp(self.expires_at, "expires_at")
+        if expires_at <= created_at:
+            raise ValueError("expires_at must be later than created_at")
+        if self.status == "resolved":
+            if self.decision is None or self.resolved_at is None:
+                raise ValueError("resolved approvals require decision and resolved_at")
+            _approval_timestamp(self.resolved_at, "resolved_at")
+        elif self.resolved_at is not None:
+            raise ValueError("only resolved approvals may include resolved_at")
+        if self.status == "pending" and self.decision is not None:
+            raise ValueError("pending approvals cannot include a decision")
+        if self.status == "expired" and self.decision not in {None, "deny"}:
+            raise ValueError("expired approvals may only derive a deny decision")
+        return self
 
 
 class LlmApprovalReviewInput(BaseModel):
@@ -219,17 +245,55 @@ class CredentialRecord(BaseModel):
     expires_at: str | None = None
     revoked_at: str | None = None
 
+    @model_validator(mode="after")
+    def validate_active_adapter_identity(self) -> Self:
+        if self.revoked_at is not None:
+            return self
+        if (
+            self.principal_type != "component"
+            or self.role != "adapter"
+            or not self.runtime
+            or not self.agent_id
+            or set(self.scopes) != set(ADAPTER_CREDENTIAL_SCOPES)
+        ):
+            raise ValueError(
+                "active credentials must use the runtime-bound adapter profile"
+            )
+        return self
+
     def public_dump(self) -> dict[str, Any]:
-        payload = self.model_dump(mode="json")
-        payload["token_hash"] = "[redacted]"
-        return payload
+        return self.model_dump(mode="json", exclude={"token_hash"})
 
 
 class CredentialCreateRequest(BaseModel):
-    principal_type: str
-    principal_id: str
-    role: str
-    scopes: list[str] = Field(default_factory=list)
-    runtime: str | None = None
-    agent_id: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    principal_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    runtime: str = Field(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    agent_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
     expires_at: str | None = None
+
+    @model_validator(mode="after")
+    def validate_expiry(self) -> Self:
+        if self.expires_at is None:
+            return self
+        expires_at = _approval_timestamp(self.expires_at, "expires_at")
+        if expires_at <= datetime.now(timezone.utc):
+            raise ValueError("expires_at must be in the future")
+        return self
+
+
+def _approval_timestamp(value: str, field_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{field_name} must be an RFC 3339 timestamp") from None
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name} must include a timezone")
+    return parsed

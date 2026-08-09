@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from guard_api.auth import ApiAuthError, CapabilityAuthService
+from guard_api.auth import ApiAuthError, AuthContext, CapabilityAuthService
 
 
 def bounded_limit(limit: int) -> int:
@@ -44,13 +44,8 @@ def verify_browser_or_bearer_scopes(
 
 def verify_adapter_heartbeat_write(
     auth: CapabilityAuthService, authorization: str | None
-) -> None:
-    try:
-        auth.verify_bearer(authorization, "adapter:status:write")
-    except ApiAuthError as error:
-        if error.code != "SCOPE_DENIED":
-            raise
-        auth.verify_bearer(authorization, "event:evaluate")
+) -> AuthContext:
+    return auth.verify_bearer(authorization, "adapter:status:write")
 
 
 def legacy_unknown_adapter_status() -> dict[str, Any]:

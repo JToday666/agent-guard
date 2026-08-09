@@ -160,9 +160,5 @@ export function reconcileApprovals(
     current.length === incoming.length &&
     current.every((approval, index) => hasSameApproval(approval, incoming[index]!));
   if (!hasSameVisibleData) return incoming;
-
-  current.forEach((approval, index) => {
-    approval.approvalNonce = incoming[index]!.approvalNonce;
-  });
   return current;
 }

@@ -114,9 +114,10 @@ adapter token 的最小 scopes：
 event:evaluate
 event:audit:write
 approval:wait
+adapter:status:write
 ```
 
-OpenClaw 插件不拥有 `approval:resolve`，不创建 browser session，不读取 Dashboard 数据。
+该 token 必须由 `agentguardctl credential issue --runtime openclaw --agent-id main` 签发；Guard API 不接受 `.env` 中任意填写的未注册静态 token。OpenClaw 插件不拥有 `approval:resolve`，不创建 browser session，不读取 Dashboard 数据。
 
 ## 8. 本机验收记录
 

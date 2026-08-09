@@ -99,7 +99,7 @@ PostgreSQL 存储语义、Provenance 和 Dashboard 三视图已经按本文主�
 | `GET /v1/metrics/runtime`                  | Dashboard / CLI  | browser session 或 `metrics:read`                | 是                   | 决策统计排除运行时结果和观察记录                             |
 | `GET /v1/approvals/pending`                | Dashboard / CLI  | browser session 或审批读取 scope                 | 是                   | 无字段要求变更                                               |
 | `GET /v1/approvals/{approval_id}/wait`     | Adapter / Plugin | adapter token，`approval:wait`                   | 是                   | 无字段要求变更                                               |
-| `POST /v1/approvals/{approval_id}/resolve` | Dashboard        | browser session、CSRF、approval nonce            | 是                   | 无字段要求变更                                               |
+| `POST /v1/approvals/{approval_id}/resolve` | Dashboard        | browser session、CSRF                            | 是                   | 只提交 decision；服务端原子终结                              |
 
 ## 6. 通用 HTTP 规范
 

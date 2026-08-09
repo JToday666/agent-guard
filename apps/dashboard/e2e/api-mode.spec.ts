@@ -386,7 +386,6 @@ function uncertainApproval() {
     created_at: "2026-06-28T08:00:00Z",
     expires_at: "2099-06-28T08:05:00Z",
     resolved_at: null,
-    approval_nonce: "nonce_uncertain",
   };
 }
 
@@ -1115,7 +1114,6 @@ test("API mode disables an approval when its expiry passes without another poll"
         created_at: new Date(now.getTime() - 60_000).toISOString(),
         expires_at: new Date(now.getTime() + 60_000).toISOString(),
         resolved_at: null,
-        approval_nonce: "nonce_expiring",
       },
     ],
   });

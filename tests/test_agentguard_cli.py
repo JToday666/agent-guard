@@ -199,6 +199,107 @@ def test_trace_get_writes_provenance_json(tmp_path: Path) -> None:
     }
 
 
+def test_credential_issue_posts_runtime_binding_and_shows_token_once() -> None:
+    seen: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            {
+                "method": request.method,
+                "url": str(request.url),
+                "authorization": request.headers.get("authorization"),
+                "body": json.loads(request.content.decode("utf-8")),
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "token": "agt_tok_once",
+                "credential": {
+                    "credential_id": "cred_1",
+                    "principal_id": "openclaw:agent-a",
+                    "runtime": "openclaw",
+                    "agent_id": "agent-a",
+                },
+            },
+        )
+
+    exit_code, output, error = _run_cli(
+        ["credential", "issue", "--runtime", "openclaw", "--agent-id", "agent-a"],
+        env={
+            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+        },
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert exit_code == 0
+    assert error == ""
+    assert output == (
+        "Credential: cred_1\n"
+        "Runtime: openclaw\n"
+        "Agent: agent-a\n"
+        "Token (shown once): agt_tok_once\n"
+    )
+    assert seen == [
+        {
+            "method": "POST",
+            "url": "http://guard.local/v1/credentials",
+            "authorization": "Bearer control-secret",
+            "body": {
+                "principal_id": "openclaw:agent-a",
+                "runtime": "openclaw",
+                "agent_id": "agent-a",
+            },
+        }
+    ]
+
+
+def test_credential_list_and_revoke_use_control_plane_endpoints() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url)))
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "credential_id": "cred_1",
+                        "principal_id": "openclaw:agent-a",
+                        "runtime": "openclaw",
+                        "agent_id": "agent-a",
+                        "revoked_at": None,
+                    }
+                ],
+            )
+        return httpx.Response(
+            200, json={"credential_id": "cred_1", "revoked_at": "now"}
+        )
+
+    env = {
+        "AGENTGUARD_API_URL": "http://guard.local",
+        "AGENTGUARD_CONTROL_TOKEN": "control-secret",
+    }
+    list_code, list_output, list_error = _run_cli(
+        ["credential", "list"], env=env, transport=httpx.MockTransport(handler)
+    )
+    revoke_code, revoke_output, revoke_error = _run_cli(
+        ["credential", "revoke", "cred_1"],
+        env=env,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert list_code == revoke_code == 0
+    assert list_error == revoke_error == ""
+    assert list_output == "cred_1  openclaw/agent-a  openclaw:agent-a  active\n"
+    assert revoke_output == "Revoked credential cred_1\n"
+    assert seen == [
+        ("GET", "http://guard.local/v1/credentials"),
+        ("POST", "http://guard.local/v1/credentials/cred_1/revoke"),
+    ]
+
+
 def test_http_error_and_connection_error_return_nonzero() -> None:
     http_code, _, http_error = _run_cli(
         ["metrics"],

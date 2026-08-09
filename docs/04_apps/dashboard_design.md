@@ -72,7 +72,7 @@ Dashboard 只轮询当前页面所需的数据域。页面切换时复用最近 
 
 ## 4. 鉴权边界
 
-Dashboard 使用 HttpOnly browser session 访问 Guard API。状态改变请求必须带 CSRF token，审批 resolve 必须额外提交 approval nonce。
+Dashboard 使用 HttpOnly browser session 访问 Guard API。状态改变请求必须带 CSRF token，审批 resolve 的唯一性由服务端原子状态转换保证。
 
 长期凭证不得进入前端：
 
@@ -112,7 +112,7 @@ P0、P1 关键路径和部分 P2 功能均已交付：
 5. 指标页能展示最新评测的攻击成功率、按攻击类型统计和评测样本，以及当前审计窗口中逻辑唯一策略评估的介入率、策略误报率、策略漏报率和判定延迟；runtime outcome/observation 不重复计数。
 6. 系统页能展示只读策略快照、最近历史、OpenClaw 验证与心跳状态和配置审计发现项明细。
 7. Dashboard 不直接访问运行时内部数据。
-8. Dashboard 不保存长期 token，审批 resolve 使用 browser session、CSRF token 和 approval nonce，Adapter 能通过 wait 接口收到审批结果。
+8. Dashboard 不保存长期 token，审批 resolve 使用 browser session 和 CSRF token，Adapter 能通过 wait 接口收到审批结果。
 9. API 模式回归使用真实溯源字段和关系值，验证风险标签、关系文案以及审计节点与时间线的双向联动。
 10. 调查页轮询到新事件时，用户位于旧滚动位置则保留当前列表并提供“有新事件”入口；用户主动查看后再定位到最新事件。
 11. 封笔验证包含 `pnpm --filter @agentguard/dashboard typecheck`、`pnpm --filter @agentguard/dashboard build`、`pnpm --filter @agentguard/dashboard test:unit`、`pnpm --filter @agentguard/dashboard test:e2e` 和 `pnpm --filter @agentguard/dashboard test:e2e:api`。

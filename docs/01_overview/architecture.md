@@ -55,7 +55,7 @@ AgentGuard 采用四层目标架构：
 - 人工审批、approval wait 状态、审批结果；
 - 指标聚合、评测任务、AttackBench 运行结果；
 - Agent 注册、API Key、adapter token、control token；
-- Dashboard browser session、CSRF token、launch code、approval nonce；
+- Dashboard browser session、CSRF token、launch code；
 - PostgreSQL、Redis、WebSocket pub/sub、队列和后台任务。
 
 MVP 阶段不单独拆出 `guard-control-plane` 微服务。上述能力在代码上放入 `guard-api` 内部 service layer，由 FastAPI route 统一暴露接口；部署上仍然是一个 `guard-api` 后端应用。
@@ -79,7 +79,7 @@ Agent Runtime
 
 关键约束：
 
-- `agentguard-core` 不读写数据库，不创建审批记录，不管理 session / nonce，不暴露 HTTP API。
+- `agentguard-core` 不读写数据库，不创建审批记录，不管理会话或 CSRF，不暴露 HTTP API。
 - `guard-api` 是 Control Plane 的唯一对外入口，负责所有状态副作用和 Dashboard 查询。
 - Adapter 只做运行时映射和执行控制，不持久化状态，不生成最终安全结论。
 - Dashboard 只调用 `guard-api`，不直接连接数据库、不直接调用 `agentguard-core`、不接触 Agent runtime。
@@ -99,7 +99,7 @@ Agent Runtime
 
 1. Adapter 在工具执行前调用 `guard-api`，而不是直接访问数据库或 Dashboard。
 2. `guard-api` 调用无状态 `agentguard-core.evaluate(...)` 得到 `GuardDecision`。
-3. `ask` 只由 core 表示“需要审批”的决策意图，审批记录和 nonce 由 Control Plane 创建。
+3. `ask` 只由 core 表示“需要审批”的决策意图，审批记录和原子状态转换由 Control Plane 管理。
 4. 危险工具调用被 Adapter 阻断，审计日志由 `guard-api` 写入。
 5. Dashboard 只通过 `guard-api` 展示 trace、风险分数、命中规则、阻断原因和审批状态。
 6. AttackBench 可同时支持直接调用 core 的无状态评测和走 `guard-api` 的完整链路评测。

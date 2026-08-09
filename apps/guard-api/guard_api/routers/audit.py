@@ -53,7 +53,17 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     def audit_event(
         payload: AuditEvent, authorization: str | None = Header(default=None)
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "event:audit:write")
+        auth_context = auth.verify_bearer(authorization, "event:audit:write")
+        metadata_agent_id = payload.metadata.get("agent_id")
+        auth.verify_runtime_identity(
+            auth_context,
+            runtime=payload.runtime,
+            agent_id=(
+                metadata_agent_id
+                if isinstance(metadata_agent_id, str) and metadata_agent_id
+                else None
+            ),
+        )
         try:
             return audit_service.submit(payload)
         except PolicyEvaluationWriteForbiddenError:

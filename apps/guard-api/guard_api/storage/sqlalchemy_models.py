@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Index, Integer, MetaData, Table, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    MetaData,
+    Table,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 
 metadata = MetaData()
@@ -136,7 +145,13 @@ credentials = Table(
     Column("created_at", Text, nullable=False),
     Column("expires_at", Text, nullable=True),
     Column("revoked_at", Text, nullable=True),
-    Index("ix_credentials_token_hash", "token_hash"),
+    CheckConstraint(
+        "revoked_at IS NOT NULL OR "
+        "(principal_type = 'component' AND role = 'adapter' "
+        "AND runtime IS NOT NULL AND agent_id IS NOT NULL)",
+        name="ck_credentials_active_adapter_identity",
+    ),
+    Index("ix_credentials_token_hash", "token_hash", unique=True),
     Index("ix_credentials_principal", "principal_type", "principal_id"),
     Index("ix_credentials_runtime_agent", "runtime", "agent_id"),
     Index("ix_credentials_revoked_at", "revoked_at"),
@@ -147,9 +162,33 @@ approval_requests = Table(
     metadata,
     Column("approval_id", Text, primary_key=True),
     Column("payload_json", JSONB, nullable=False),
-    Column("status", Text, nullable=False),
-    Column("created_at", Text, nullable=False),
-    Index("ix_approval_requests_status_created_at", "status", "created_at"),
+    Column("decision", Text, nullable=True),
+    Column("resolution_source", Text, nullable=True),
+    Column("resolved_by", Text, nullable=True),
+    Column("resolution_reason", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("resolved_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "decision IS NULL OR decision IN ('allow_once', 'deny')",
+        name="ck_approval_requests_decision",
+    ),
+    CheckConstraint(
+        "resolution_source IS NULL OR resolution_source IN ('human', 'llm', 'system')",
+        name="ck_approval_requests_resolution_source",
+    ),
+    CheckConstraint(
+        "(resolved_at IS NULL AND decision IS NULL) OR "
+        "(resolved_at IS NOT NULL AND decision IS NOT NULL)",
+        name="ck_approval_requests_resolution_state",
+    ),
+    CheckConstraint("expires_at > created_at", name="ck_approval_requests_expiry"),
+    Index(
+        "ix_approval_requests_pending_created_at",
+        "resolved_at",
+        "expires_at",
+        "created_at",
+    ),
 )
 
 policy_snapshots = Table(
@@ -192,21 +231,4 @@ browser_sessions = Table(
     Column("revoked_at", Text, nullable=True),
     Index("ix_browser_sessions_expires_at", "expires_at"),
     Index("ix_browser_sessions_revoked_at", "revoked_at"),
-)
-
-approval_nonces = Table(
-    "approval_nonces",
-    metadata,
-    Column("nonce_hash", Text, primary_key=True),
-    Column("approval_id", Text, nullable=False),
-    Column("session_hash", Text, nullable=False),
-    Column("subject_id", Text, nullable=False),
-    Column("tool_call_id", Text, nullable=False),
-    Column("expires_at", Text, nullable=False),
-    Column("used_at", Text, nullable=True),
-    Index("ix_approval_nonces_approval_id", "approval_id"),
-    Index("ix_approval_nonces_session_hash", "session_hash"),
-    Index("ix_approval_nonces_subject_id", "subject_id"),
-    Index("ix_approval_nonces_expires_at", "expires_at"),
-    Index("ix_approval_nonces_used_at", "used_at"),
 )

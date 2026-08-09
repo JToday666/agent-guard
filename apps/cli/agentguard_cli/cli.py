@@ -118,6 +118,38 @@ def build_parser() -> argparse.ArgumentParser:
     trace_get.add_argument("--output", help="Write JSON to this file instead of stdout")
     trace_get.set_defaults(handler=_cmd_trace_get)
 
+    credential = subcommands.add_parser(
+        "credential", help="Manage runtime adapter credentials"
+    )
+    credential_subcommands = credential.add_subparsers(
+        dest="credential_command", required=True
+    )
+    credential_issue = credential_subcommands.add_parser(
+        "issue", help="Issue a runtime-bound adapter token"
+    )
+    credential_issue.add_argument("--runtime", required=True)
+    credential_issue.add_argument("--agent-id", required=True)
+    credential_issue.add_argument(
+        "--principal-id",
+        help="Stable adapter principal; defaults to <runtime>:<agent-id>",
+    )
+    credential_issue.add_argument("--expires-at", help="RFC 3339 expiry timestamp")
+    credential_issue.add_argument("--json", action="store_true")
+    credential_issue.set_defaults(handler=_cmd_credential_issue)
+
+    credential_list = credential_subcommands.add_parser(
+        "list", help="List issued adapter credentials"
+    )
+    credential_list.add_argument("--json", action="store_true")
+    credential_list.set_defaults(handler=_cmd_credential_list)
+
+    credential_revoke = credential_subcommands.add_parser(
+        "revoke", help="Revoke an adapter credential"
+    )
+    credential_revoke.add_argument("credential_id")
+    credential_revoke.add_argument("--json", action="store_true")
+    credential_revoke.set_defaults(handler=_cmd_credential_revoke)
+
     openclaw = subcommands.add_parser("openclaw", help="OpenClaw helper commands")
     openclaw_subcommands = openclaw.add_subparsers(
         dest="openclaw_command", required=True
@@ -267,6 +299,100 @@ def _cmd_trace_get(
         stdout.write(f"Wrote trace {args.trace_id} to {output_path}\n")
     else:
         _write_json(stdout, payload)
+    return 0
+
+
+def _cmd_credential_issue(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    principal_id = args.principal_id or f"{args.runtime}:{args.agent_id}"
+    response = _request_json(
+        "POST",
+        "/v1/credentials",
+        env=env,
+        transport=transport,
+        json_body=_filter_params(
+            {
+                "principal_id": principal_id,
+                "runtime": args.runtime,
+                "agent_id": args.agent_id,
+                "expires_at": args.expires_at,
+            }
+        ),
+    )
+    if not isinstance(response, dict):
+        raise CliError("Guard API credential response was not an object")
+    token = response.get("token")
+    credential = response.get("credential")
+    if not isinstance(token, str) or not isinstance(credential, dict):
+        raise CliError("Guard API credential response was incomplete")
+    if args.json:
+        _write_json(stdout, response)
+        return 0
+    stdout.write(f"Credential: {credential.get('credential_id', '<unknown>')}\n")
+    stdout.write(f"Runtime: {args.runtime}\n")
+    stdout.write(f"Agent: {args.agent_id}\n")
+    stdout.write(f"Token (shown once): {token}\n")
+    return 0
+
+
+def _cmd_credential_list(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    response = _request_json("GET", "/v1/credentials", env=env, transport=transport)
+    if not isinstance(response, list):
+        raise CliError("Guard API credential list was not an array")
+    if args.json:
+        _write_json(stdout, response)
+        return 0
+    if not response:
+        stdout.write("No adapter credentials.\n")
+        return 0
+    for credential in response:
+        if not isinstance(credential, dict):
+            raise CliError("Guard API credential list contained an invalid row")
+        stdout.write(
+            "{credential_id}  {runtime}/{agent_id}  {principal_id}  {state}\n".format(
+                credential_id=credential.get("credential_id", "<unknown>"),
+                runtime=credential.get("runtime", "<unknown>"),
+                agent_id=credential.get("agent_id", "<unknown>"),
+                principal_id=credential.get("principal_id", "<unknown>"),
+                state="revoked" if credential.get("revoked_at") else "active",
+            )
+        )
+    return 0
+
+
+def _cmd_credential_revoke(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    response = _request_json(
+        "POST",
+        f"/v1/credentials/{args.credential_id}/revoke",
+        env=env,
+        transport=transport,
+    )
+    if not isinstance(response, dict):
+        raise CliError("Guard API revoke response was not an object")
+    if args.json:
+        _write_json(stdout, response)
+    else:
+        stdout.write(f"Revoked credential {args.credential_id}\n")
     return 0
 
 

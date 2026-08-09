@@ -22,6 +22,17 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         payload: GuardEvent, authorization: str | None = Header(default=None)
     ) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "event:evaluate")
+        event_agent_id = (
+            payload.security_context.agent_id
+            if "agent_id" in payload.security_context.model_fields_set
+            else None
+        )
+        auth.verify_runtime_identity(
+            context,
+            runtime=payload.runtime,
+            agent_id=event_agent_id,
+            require_agent_id=True,
+        )
         try:
             response = evaluation_service.evaluate(
                 payload, requesting_principal_id=context.principal_id

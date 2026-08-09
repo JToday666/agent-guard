@@ -321,7 +321,6 @@ function createMockApprovalDtos(): GuardApprovalDto[] {
       created_at: approval.createdAt,
       expires_at: approval.expiresAt ?? fallbackExpiry,
       resolved_at: approval.resolvedAt ?? null,
-      approval_nonce: `mock_${approval.id}`,
     };
   });
 }

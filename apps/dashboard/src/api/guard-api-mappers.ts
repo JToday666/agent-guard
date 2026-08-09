@@ -251,7 +251,6 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
     agentAction: `${tool}(${maskSensitiveText(resource)})`,
     consequence: approvalConsequence(status),
     ruleHits: [],
-    approvalNonce: readString(dto.approval_nonce) ?? undefined,
     expiresAt: readString(dto.expires_at),
     resolvedAt: readString(dto.resolved_at),
   };

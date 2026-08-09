@@ -265,11 +265,9 @@ test("maps a resolved allow_once approval to an allowed view state", () => {
     created_at: "2026-06-22T06:30:00Z",
     expires_at: "2026-06-22T06:45:00Z",
     resolved_at: "2026-06-22T06:31:00Z",
-    approval_nonce: "nonce_1",
   });
 
   assert.equal(approval.status, "allowed");
-  assert.equal(approval.approvalNonce, "nonce_1");
 });
 
 test("preserves approval subject compatibility fields", () => {

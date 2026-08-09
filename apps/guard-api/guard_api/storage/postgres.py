@@ -6,6 +6,7 @@ import hashlib
 import itertools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -36,6 +37,7 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.storage.base import (
+    ApprovalStateConflictError,
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
@@ -44,7 +46,6 @@ from guard_api.storage.base import (
     EvalMetrics,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
-    StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
     merge_provenance_edge,
@@ -60,7 +61,6 @@ from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
     adapter_statuses,
-    approval_nonces,
     approval_requests,
     audit_integrity_heads,
     audit_events,
@@ -901,56 +901,70 @@ class PostgresControlPlaneStore:
         ]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
-        payload = approval.model_dump(mode="json")
+        created_at = _approval_datetime(approval.created_at)
+        expires_at = _approval_datetime(approval.expires_at)
+        resolved_at = (
+            _approval_datetime(approval.resolved_at)
+            if approval.status == "resolved" and approval.resolved_at is not None
+            else None
+        )
         stmt = pg_insert(approval_requests).values(
             approval_id=approval.approval_id,
-            payload_json=payload,
-            status=approval.status,
-            created_at=approval.created_at,
+            payload_json=_approval_payload(approval),
+            decision=approval.decision if resolved_at is not None else None,
+            resolution_source=(
+                approval.resolution_source if resolved_at is not None else None
+            ),
+            resolved_by=approval.resolved_by if resolved_at is not None else None,
+            resolution_reason=(
+                approval.resolution_reason if resolved_at is not None else None
+            ),
+            created_at=created_at,
+            expires_at=expires_at,
+            resolved_at=resolved_at,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[approval_requests.c.approval_id],
-            set_={
-                "payload_json": stmt.excluded.payload_json,
-                "status": stmt.excluded.status,
-            },
+            set_={"payload_json": stmt.excluded.payload_json},
         )
         with self._session_factory() as session:
             session.execute(stmt)
             session.commit()
-        return approval
+        stored = self.get_approval(approval.approval_id)
+        if stored is None:  # pragma: no cover - insert/read invariant
+            raise KeyError(approval.approval_id)
+        return stored
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         stmt = (
-            select(approval_requests.c.payload_json)
-            .where(approval_requests.c.status == "pending")
+            _approval_select()
+            .where(
+                approval_requests.c.resolved_at.is_(None),
+                approval_requests.c.expires_at > func.now(),
+            )
             .order_by(approval_requests.c.created_at.asc())
         )
         with self._session_factory() as session:
-            rows = session.execute(stmt).scalars().all()
-        return [ApprovalRequest.model_validate(row) for row in rows]
+            rows = session.execute(stmt).mappings().all()
+        return [_approval_from_row(row) for row in rows]
 
     def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
-        stmt = select(approval_requests.c.payload_json).order_by(
-            approval_requests.c.created_at.asc()
-        )
+        stmt = _approval_select().order_by(approval_requests.c.created_at.asc())
         if trace_id is not None:
             stmt = stmt.where(
                 approval_requests.c.payload_json.op("->>")("trace_id") == trace_id
             )
         with self._session_factory() as session:
-            rows = session.execute(stmt).scalars().all()
-        return [ApprovalRequest.model_validate(row) for row in rows]
+            rows = session.execute(stmt).mappings().all()
+        return [_approval_from_row(row) for row in rows]
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        stmt = select(approval_requests.c.payload_json).where(
-            approval_requests.c.approval_id == approval_id
-        )
+        stmt = _approval_select().where(approval_requests.c.approval_id == approval_id)
         with self._session_factory() as session:
-            row = session.execute(stmt).scalar_one_or_none()
+            row = session.execute(stmt).mappings().one_or_none()
         if row is None:
             return None
-        return ApprovalRequest.model_validate(row)
+        return _approval_from_row(row)
 
     def resolve_approval(
         self,
@@ -962,31 +976,46 @@ class PostgresControlPlaneStore:
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest:
-        approval = self.get_approval(approval_id)
-        if approval is None:
-            raise KeyError(approval_id)
-        approval.status = "resolved"
-        approval.decision = decision  # type: ignore[assignment]
-        approval.resolved_at = utc_now_iso()
-        if resolution_source is not None:
-            approval.resolution_source = resolution_source  # type: ignore[assignment]
-        if resolved_by is not None:
-            approval.resolved_by = resolved_by
-        if resolution_reason is not None:
-            approval.resolution_reason = resolution_reason
-        if llm_review is not None:
-            approval.llm_review = llm_review  # type: ignore[assignment]
-        self._update_approval(approval)
-        return approval
-
-    def expire_approval(self, approval_id: str) -> ApprovalRequest:
-        approval = self.get_approval(approval_id)
-        if approval is None:
-            raise KeyError(approval_id)
-        approval.status = "expired"
-        approval.decision = "deny"
-        self._update_approval(approval)
-        return approval
+        stmt = (
+            _approval_select()
+            .where(approval_requests.c.approval_id == approval_id)
+            .with_for_update()
+        )
+        with self._session_factory.begin() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+            if row is None:
+                raise KeyError(approval_id)
+            approval = _approval_from_row(row)
+            if approval.status != "pending":
+                raise ApprovalStateConflictError(approval_id, approval.status)
+            resolved_at = row["_database_now"]
+            updates: dict[str, Any] = {
+                "status": "resolved",
+                "decision": decision,
+                "resolved_at": _approval_datetime_iso(resolved_at),
+            }
+            if resolution_source is not None:
+                updates["resolution_source"] = resolution_source
+            if resolved_by is not None:
+                updates["resolved_by"] = resolved_by
+            if resolution_reason is not None:
+                updates["resolution_reason"] = resolution_reason
+            if llm_review is not None:
+                updates["llm_review"] = llm_review
+            resolved = approval.model_copy(update=updates)
+            session.execute(
+                update(approval_requests)
+                .where(approval_requests.c.approval_id == approval_id)
+                .values(
+                    payload_json=_approval_payload(resolved),
+                    decision=decision,
+                    resolution_source=resolved.resolution_source,
+                    resolved_by=resolved.resolved_by,
+                    resolution_reason=resolved.resolution_reason,
+                    resolved_at=resolved_at,
+                )
+            )
+        return resolved
 
     def create_launch_code(self, code_hash: str, expires_at: str) -> StoredLaunchCode:
         stmt = pg_insert(launch_codes).values(
@@ -1083,111 +1112,6 @@ class PostgresControlPlaneStore:
             session.execute(stmt)
             session.commit()
 
-    def create_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        expires_at: str,
-    ) -> StoredApprovalNonce:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        stmt = pg_insert(approval_nonces).values(
-            nonce_hash=nonce_hash,
-            approval_id=approval_id,
-            session_hash=session_hash,
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at,
-            used_at=None,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[approval_nonces.c.nonce_hash],
-            set_={
-                "approval_id": stmt.excluded.approval_id,
-                "session_hash": stmt.excluded.session_hash,
-                "subject_id": stmt.excluded.subject_id,
-                "tool_call_id": stmt.excluded.tool_call_id,
-                "expires_at": stmt.excluded.expires_at,
-                "used_at": None,
-            },
-        )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return StoredApprovalNonce(
-            nonce_hash=nonce_hash,
-            approval_id=approval_id,
-            session_hash=session_hash,
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at,
-        )
-
-    def consume_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        used_at: str,
-    ) -> StoredApprovalNonce | None:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        stmt = (
-            update(approval_nonces)
-            .where(
-                approval_nonces.c.nonce_hash == nonce_hash,
-                approval_nonces.c.used_at.is_(None),
-                approval_nonces.c.approval_id == approval_id,
-                approval_nonces.c.session_hash == session_hash,
-                approval_nonces.c.subject_id == approval_subject_id,
-            )
-            .values(used_at=used_at)
-            .returning(
-                approval_nonces.c.nonce_hash,
-                approval_nonces.c.approval_id,
-                approval_nonces.c.session_hash,
-                approval_nonces.c.subject_id,
-                approval_nonces.c.tool_call_id,
-                approval_nonces.c.expires_at,
-                approval_nonces.c.used_at,
-            )
-        )
-        with self._session_factory() as session:
-            row = session.execute(stmt).mappings().one_or_none()
-            session.commit()
-        if row is None:
-            return None
-        return StoredApprovalNonce(
-            nonce_hash=row["nonce_hash"],
-            approval_id=row["approval_id"],
-            session_hash=row["session_hash"],
-            subject_id=row["subject_id"],
-            tool_call_id=row["tool_call_id"],
-            expires_at=row["expires_at"],
-            used_at=row["used_at"],
-        )
-
-    def _update_approval(self, approval: ApprovalRequest) -> None:
-        stmt = (
-            update(approval_requests)
-            .where(approval_requests.c.approval_id == approval.approval_id)
-            .values(
-                payload_json=approval.model_dump(mode="json"), status=approval.status
-            )
-        )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-
     def _alembic_config(self) -> Config:
         migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
         config = Config()
@@ -1257,11 +1181,71 @@ def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
     )
 
 
-def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
-    approval_subject_id = subject_id or tool_call_id
-    if approval_subject_id is None:
-        raise ValueError("approval nonce requires subject_id or tool_call_id")
-    return approval_subject_id
+_APPROVAL_FORMAL_FIELDS = {
+    "status",
+    "decision",
+    "resolution_source",
+    "resolved_by",
+    "resolution_reason",
+    "created_at",
+    "expires_at",
+    "resolved_at",
+}
+
+
+def _approval_select() -> Any:
+    return select(*approval_requests.c, func.now().label("_database_now"))
+
+
+def _approval_payload(approval: ApprovalRequest) -> dict[str, Any]:
+    return approval.model_dump(mode="json", exclude=_APPROVAL_FORMAL_FIELDS)
+
+
+def _approval_from_row(row: Any) -> ApprovalRequest:
+    created_at = _approval_datetime(row["created_at"])
+    expires_at = _approval_datetime(row["expires_at"])
+    database_now = _approval_datetime(row["_database_now"])
+    resolved_at = (
+        _approval_datetime(row["resolved_at"])
+        if row["resolved_at"] is not None
+        else None
+    )
+    if resolved_at is not None:
+        status = "resolved"
+        decision = row["decision"]
+    elif expires_at <= database_now:
+        status = "expired"
+        decision = "deny"
+    else:
+        status = "pending"
+        decision = None
+    payload = dict(row["payload_json"])
+    payload.update(
+        {
+            "status": status,
+            "decision": decision,
+            "resolution_source": row["resolution_source"],
+            "resolved_by": row["resolved_by"],
+            "resolution_reason": row["resolution_reason"],
+            "created_at": _approval_datetime_iso(created_at),
+            "expires_at": _approval_datetime_iso(expires_at),
+            "resolved_at": (
+                _approval_datetime_iso(resolved_at) if resolved_at is not None else None
+            ),
+        }
+    )
+    return ApprovalRequest.model_validate(payload)
+
+
+def _approval_datetime(value: str | datetime) -> datetime:
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _approval_datetime_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _normalize_database_url(database_url: str) -> str:

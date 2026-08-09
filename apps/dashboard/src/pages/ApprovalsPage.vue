@@ -140,7 +140,6 @@ const isExpired = computed(() => {
 const resolutionDisabledReason = computed(() => {
   if (isSubmitting.value) return "审批正在提交";
   if (!authStore.csrfToken) return "浏览器会话尚未就绪，请刷新页面后重试";
-  if (!selectedApproval.value?.approvalNonce) return "审批凭证缺失，请刷新队列";
   if (isExpired.value) return "审批已过期，不能继续处理";
   return "";
 });

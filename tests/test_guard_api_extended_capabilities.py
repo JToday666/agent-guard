@@ -15,8 +15,8 @@ from agentguard_core import (
 from guard_api.main import create_app
 from guard_api.services.audit import AuditService
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from tests.support.auth import memory_store_with_adapter
 from tests.support.postgres import (
     get_test_database_url,
     reset_control_plane_schema,
@@ -24,9 +24,13 @@ from tests.support.postgres import (
 
 
 def _login(client: TestClient, *, control_token: str = "control-secret") -> None:
-    launch = client.post("/v1/auth/browser/launch", headers={"Authorization": f"Bearer {control_token}"})
+    launch = client.post(
+        "/v1/auth/browser/launch", headers={"Authorization": f"Bearer {control_token}"}
+    )
     assert launch.status_code == 200
-    exchange = client.post("/v1/auth/browser/exchange", json={"launch_code": launch.json()["launch_code"]})
+    exchange = client.post(
+        "/v1/auth/browser/exchange", json={"launch_code": launch.json()["launch_code"]}
+    )
     assert exchange.status_code == 200
 
 
@@ -43,6 +47,7 @@ def _tool_event(trace_id: str = "trace_p2_api") -> dict:
             "user_task": "Summarize public report",
             "source_type": "webpage",
             "source_trust": "untrusted",
+            "agent_id": "main",
         },
         "payload": {
             "tool": {
@@ -66,8 +71,10 @@ def _tool_event(trace_id: str = "trace_p2_api") -> dict:
 
 
 def test_audit_integrity_endpoint_verifies_chain_and_detects_tampering() -> None:
-    store = MemoryControlPlaneStore()
-    app = create_app(store=store, settings=GuardApiSettings(control_token="control-secret"))
+    store = memory_store_with_adapter()
+    app = create_app(
+        store=store, settings=GuardApiSettings(control_token="control-secret")
+    )
     client = TestClient(app)
     _login(client)
 
@@ -110,8 +117,8 @@ def test_audit_integrity_endpoint_verifies_chain_and_detects_tampering() -> None
 
 def test_evaluate_generates_provenance_graph_without_breaking_legacy_response() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
+        store=memory_store_with_adapter(runtime="openclaw"),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
 
@@ -145,11 +152,13 @@ def test_evaluate_generates_provenance_graph_without_breaking_legacy_response() 
     assert any(edge["relation"] == "reviewed_by" for edge in graph["edges"])
 
 
-def test_evaluate_persists_action_critic_review_without_changing_legacy_decision() -> None:
-    store = MemoryControlPlaneStore()
+def test_evaluate_persists_action_critic_review_without_changing_legacy_decision() -> (
+    None
+):
+    store = memory_store_with_adapter(runtime="openclaw")
     app = create_app(
         store=store,
-        settings=GuardApiSettings(adapter_token="adapter-secret"),
+        settings=GuardApiSettings(),
     )
     client = TestClient(app)
 
@@ -170,8 +179,8 @@ def test_evaluate_persists_action_critic_review_without_changing_legacy_decision
 
 def test_config_audit_endpoint_blocks_high_findings_for_adapter() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
+        store=memory_store_with_adapter(runtime="openclaw"),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
 
@@ -184,7 +193,7 @@ def test_config_audit_endpoint_blocks_high_findings_for_adapter() -> None:
             "target_type": "plugin_config",
             "target_id": "third-party",
             "action": "before_install",
-            "metadata": {"trace_id": "trace_cfg_api"},
+            "metadata": {"trace_id": "trace_cfg_api", "agent_id": "main"},
             "findings": [
                 {
                     "severity": "high",
@@ -211,7 +220,7 @@ def test_config_audit_endpoint_blocks_high_findings_for_adapter() -> None:
 
 
 def test_runtime_observation_without_typed_fact_only_materializes_audit() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     event = AuditEvent(
         audit_id="audit_runtime_obs",
         schema_version="0.4",
@@ -235,8 +244,8 @@ def test_runtime_observation_without_typed_fact_only_materializes_audit() -> Non
 
 def test_memory_guard_change_lifecycle() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
 
@@ -336,7 +345,9 @@ def test_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> N
             confidence=0.9,
         )
     )
-    assert [item.review_id for item in store.list_action_critic_reviews("trace_p2_pg")] == [review.review_id]
+    assert [
+        item.review_id for item in store.list_action_critic_reviews("trace_p2_pg")
+    ] == [review.review_id]
 
     change = store.create_memory_change(
         MemoryGuardChange(
@@ -348,15 +359,22 @@ def test_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> N
         )
     )
     assert change.status == "proposed"
-    assert store.update_memory_change_status(change.change_id, "committed").status == "committed"
+    assert (
+        store.update_memory_change_status(change.change_id, "committed").status
+        == "committed"
+    )
 
     engine = create_engine(store.database_url)
     with engine.begin() as conn:
         conn.execute(
-            text("UPDATE audit_events SET payload_json = jsonb_set(payload_json, '{reason}', '\"tampered\"') "
-                 "WHERE audit_id = 'audit_p2_pg_1'")
+            text(
+                "UPDATE audit_events SET payload_json = jsonb_set(payload_json, '{reason}', '\"tampered\"') "
+                "WHERE audit_id = 'audit_p2_pg_1'"
+            )
         )
-        finding_count = conn.execute(text("SELECT COUNT(*) FROM config_audit_findings")).scalar_one()
+        finding_count = conn.execute(
+            text("SELECT COUNT(*) FROM config_audit_findings")
+        ).scalar_one()
     assert finding_count == 1
     tampered = store.verify_audit_integrity()
     try:

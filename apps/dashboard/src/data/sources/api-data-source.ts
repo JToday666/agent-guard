@@ -92,16 +92,12 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     decision: "allow_once" | "deny",
     csrfToken: string,
   ): Promise<ApprovalResolution> {
-    if (!approval.approvalNonce) throw new Error("审批凭证缺失，请刷新审批队列");
     const result = await requestJson<GuardApprovalResolutionDto>(
       `/approvals/${approval.id}/resolve`,
       {
         method: "POST",
         headers: { "X-AgentGuard-CSRF": csrfToken },
-        body: JSON.stringify({
-          decision,
-          approval_nonce: approval.approvalNonce,
-        }),
+        body: JSON.stringify({ decision }),
       },
     );
     return {

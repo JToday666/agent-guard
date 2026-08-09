@@ -80,6 +80,15 @@ cp .env.example .env
 pnpm guard-api:dev
 ```
 
+首次接入某个运行时，在加载 `.env` 后签发与其身份绑定的凭证；完整 token 只显示一次，把它配置到对应 Adapter 的 `AGENTGUARD_ADAPTER_TOKEN`，不要配置成 Guard API 的静态密码：
+
+```bash
+set -a
+. ./.env
+set +a
+uv run agentguardctl credential issue --runtime openclaw --agent-id main
+```
+
 第二个终端启动 Dashboard：
 
 ```bash
@@ -116,6 +125,9 @@ uv run agentguardctl health --check-db
 uv run agentguardctl audit export --limit 10
 uv run agentguardctl metrics --json
 uv run agentguardctl trace get <trace_id> --provenance
+uv run agentguardctl credential list
+uv run agentguardctl credential issue --runtime openclaw --agent-id main
+uv run agentguardctl credential revoke <credential_id>
 uv run agentguardctl openclaw verify
 uv run agentguardctl eval import --help
 ```

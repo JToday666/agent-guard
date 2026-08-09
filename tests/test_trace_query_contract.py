@@ -82,6 +82,7 @@ def test_trace_validator_changes_when_only_an_approval_changes() -> None:
             reason="approval required",
             risk_score=72,
             severity="high",
+            expires_at="2099-01-01T00:00:00+00:00",
         )
     )
     _, pending_etag = encode_conditional_document(service.get_trace("trace-etag"))
@@ -90,6 +91,49 @@ def test_trace_validator_changes_when_only_an_approval_changes() -> None:
     _, resolved_etag = encode_conditional_document(service.get_trace("trace-etag"))
 
     assert resolved_etag != pending_etag
+
+
+def test_provenance_projects_expired_approval_without_mutating_stored_node() -> None:
+    store = MemoryControlPlaneStore()
+    service = TraceService(store=store)
+    approval = store.create_approval(
+        ApprovalRequest(
+            approval_id="approval-expired",
+            trace_id="trace-expired",
+            subject_id="call-expired",
+            action_id="call-expired",
+            action_name="code_exec",
+            requesting_principal_id="adapter",
+            tool="code_exec",
+            resource="2 + 2",
+            reason="approval required",
+            risk_score=72,
+            severity="high",
+            created_at="2020-01-01T00:00:00+00:00",
+            expires_at="2020-01-01T00:15:00+00:00",
+        )
+    )
+    store.add_provenance_node(
+        ProvenanceNode(
+            node_id="approval:approval-expired",
+            trace_id="trace-expired",
+            kind="approval",
+            ref_id="approval-expired",
+            label="pending",
+            metadata={"status": "pending"},
+        )
+    )
+
+    graph = service.get_provenance("trace-expired")
+
+    assert approval.status == "expired"
+    assert graph["nodes"][0]["label"] == "expired"
+    assert graph["nodes"][0]["metadata"]["status"] == "expired"
+    assert graph["nodes"][0]["metadata"]["decision"] == "deny"
+    stored = store.get_provenance_node("approval:approval-expired")
+    assert stored is not None
+    assert stored.label == "pending"
+    assert stored.metadata["status"] == "pending"
 
 
 def test_trace_and_provenance_have_independent_validators() -> None:

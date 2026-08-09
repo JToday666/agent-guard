@@ -81,17 +81,6 @@ class StoredBrowserSession:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredApprovalNonce:
-    nonce_hash: str
-    approval_id: str
-    session_hash: str
-    subject_id: str
-    tool_call_id: str
-    expires_at: str
-    used_at: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class PolicySnapshotRecord:
     revision: int
     policy_bundle: PolicyBundle
@@ -141,6 +130,15 @@ class AuditIntegrityStatus:
 
 class AuditIdConflictError(ValueError):
     """Raised when the same audit_id is re-submitted with different content."""
+
+
+class ApprovalStateConflictError(ValueError):
+    """Raised when an approval can no longer transition from pending."""
+
+    def __init__(self, approval_id: str, status: str) -> None:
+        self.approval_id = approval_id
+        self.status = status
+        super().__init__(f"{approval_id}: {status}")
 
 
 class ProvenanceConflictError(ValueError):
@@ -423,8 +421,6 @@ class ControlPlaneStore(Protocol):
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest: ...
 
-    def expire_approval(self, approval_id: str) -> ApprovalRequest: ...
-
     def create_launch_code(
         self, code_hash: str, expires_at: str
     ) -> StoredLaunchCode: ...
@@ -444,25 +440,3 @@ class ControlPlaneStore(Protocol):
     def get_browser_session(self, session_hash: str) -> StoredBrowserSession | None: ...
 
     def revoke_browser_session(self, session_hash: str, revoked_at: str) -> None: ...
-
-    def create_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        expires_at: str,
-    ) -> StoredApprovalNonce: ...
-
-    def consume_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        used_at: str,
-    ) -> StoredApprovalNonce | None: ...

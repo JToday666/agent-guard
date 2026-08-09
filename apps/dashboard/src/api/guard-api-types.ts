@@ -62,7 +62,6 @@ export interface GuardApprovalDto {
   created_at: string;
   expires_at: string | null;
   resolved_at: string | null;
-  approval_nonce?: string;
 }
 
 export interface GuardEvalMetricsDto {

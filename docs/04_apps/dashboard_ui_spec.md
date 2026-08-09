@@ -8,7 +8,7 @@
 
 - [Dashboard 与审批流](dashboard_design.md) 定义页面职责、数据来源、鉴权边界和交付范围。
 - [接口契约与事件模型](../02_core/interface_contract.md) 定义接口、字段和状态含义。
-- [AgentGuard Vue Dashboard 鉴权方案](../07_auth/前端鉴权建议.md) 定义 browser session、CSRF token、approval nonce 和启动链路。
+- [AgentGuard Vue Dashboard 鉴权方案](../07_auth/前端鉴权建议.md) 定义 browser session、CSRF token 和启动链路。
 - 本规范定义信息架构、视觉层级、交互模式、内容表达和前端实现要求。
 
 本规范中的“必须”“不得”是强制要求，“应”“优先”是默认选择。若现有实现与本规范不一致，后续相关修改应向本规范收敛，但不得借机改动任务范围外的代码。
@@ -379,7 +379,7 @@ event_id
 
 证据链列表使用 `search`、`status`、`page`；评测样本定位和分页使用 `case_id`、`case_page`。
 
-URL 中不得写入工具参数、approval nonce、用户任务全文或其他敏感内容。
+URL 中不得写入工具参数、用户任务全文或其他敏感内容。
 
 ### 8.3 分页
 
@@ -394,7 +394,7 @@ URL 中不得写入工具参数、approval nonce、用户任务全文或其他�
 - 操作名称必须说明范围，例如“导出当前筛选结果”。
 - 导出内容与当前筛选和排序保持一致。
 - 页面未加载全量结果时，不得让用户误认为导出了全部历史数据。
-- 导出保持后端脱敏结果，不包含 approval nonce、CSRF token、长期凭证或内部规则编号。
+- 导出保持后端脱敏结果，不包含 CSRF token、长期凭证或内部规则编号。
 - 前端生成 CSV 时必须处理公式注入风险。
 
 ## 9. 详情面板、长文本与结构化数据
@@ -515,9 +515,9 @@ Agent 请求执行的动作
 - “仅本次放行”必须二次确认，并重复工具、资源目标和影响。
 - “拒绝授权”与“仅本次放行”使用清晰、完整的动词文案；授权拒绝后的实际执行状态仍以运行时回执为准。
 - 提交中禁用两个决策入口，防止重复提交。
-- 已过期、已处理、审批凭证缺失或会话失效时不得继续提交。
+- 已过期、已处理或会话失效时不得继续提交。
 - 服务端返回请求已终结时，显示终态并刷新队列，不自动重试状态改变请求。
-- approval nonce、CSRF token 和原始错误堆栈不得出现在页面、Toast 或复制内容中。
+- CSRF token 和原始错误堆栈不得出现在页面、Toast 或复制内容中。
 - 不提供永久放行、记住选择或策略编辑入口。
 
 ### 10.4 证据链列表与详情
@@ -841,9 +841,9 @@ failed
 
 鉴权实现以 [AgentGuard Vue Dashboard 鉴权方案](../07_auth/前端鉴权建议.md) 为准。本规范只约束对应的 UI 行为。
 
-- Dashboard 只处理 HttpOnly browser session、内存中的 CSRF token 和当前审批的 approval nonce。
+- Dashboard 只处理 HttpOnly browser session 和内存中的 CSRF token。
 - `launch_code` 换取会话后立即从地址栏移除，不写入日志或持久化存储。
-- 长期凭证、session id、CSRF token 和 approval nonce 不得显示、复制或写入浏览器持久化存储。
+- 长期凭证、session id 和 CSRF token 不得显示、复制或写入浏览器持久化存储。
 - 工具参数、用户任务、日志、路径、错误和后端文本一律按不可信文本渲染。
 - 不使用 `v-html` 渲染事件、日志、报告或错误信息。
 - URL 和路径默认显示为文本，只有经过明确校验的产品内路由才能生成链接。
@@ -928,6 +928,6 @@ failed
 ### 安全与工程
 
 - 用户可见内容按不可信文本处理。
-- 页面、日志和导出不包含长期凭证、CSRF token、approval nonce 或内部规则编号。
+- 页面、日志和导出不包含长期凭证、CSRF token 或内部规则编号。
 - 组件、类型、formatter 和 token 得到复用。
 - 验证范围按仓库根目录 [AGENTS.md](../../AGENTS.md) 的 Dashboard 检查流程执行。

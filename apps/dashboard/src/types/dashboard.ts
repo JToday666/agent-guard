@@ -61,7 +61,6 @@ export interface ApprovalRequest {
   agentAction: string;
   consequence: string;
   ruleHits: string[];
-  approvalNonce?: string;
   expiresAt?: string | null;
   resolvedAt?: string | null;
 }

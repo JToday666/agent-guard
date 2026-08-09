@@ -60,7 +60,7 @@ cp .env.example .env
 AGENTGUARD_ENV=development
 AGENTGUARD_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/agent_guard
 AGENTGUARD_TEST_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/agent_guard_test
-AGENTGUARD_ADAPTER_TOKEN=ag_adapter_xxx
+AGENTGUARD_ADAPTER_TOKEN=
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
 AGENTGUARD_HOST=127.0.0.1
 AGENTGUARD_PORT=8088
@@ -71,13 +71,25 @@ AGENTGUARD_LLM_APPROVAL_MODEL=
 AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS=3
 ```
 
-`.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、launch code、CSRF token、approval nonce 或 browser session。
+`.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。
 
 `AGENTGUARD_LLM_APPROVAL_ENABLED=true` 后，Guard API 会对 Core 已创建的 `ask` approval 尝试同步 LLM 自动审批。LLM 只消费 approval evidence；`deny` 不进入 LLM。低/中风险 `ask` 可被自动 resolve 为 `allow_once`，高/严重风险不允许被 LLM 自动放行。LLM 配置缺失、超时或返回非法 JSON 时，approval 保持 `pending`，仍可由人工审批接管。
 
 Guard API 需要 PostgreSQL，并要求 `AGENTGUARD_DATABASE_URL` 指向的用户和数据库已存在。启动 API 时会执行当前 migration。
 
 PostgreSQL 集成测试要求 `AGENTGUARD_TEST_DATABASE_URL` 指向独立测试库，例如 `agent_guard_test`。不要把该变量指向开发库或生产库。
+
+`AGENTGUARD_ADAPTER_TOKEN` 不是 Guard API 的启动凭证。API 启动后，通过 control token 签发每个 runtime/agent 独立的 credential，再把返回 token 配置到对应消费端：
+
+```bash
+set -a
+. ./.env
+set +a
+uv run agentguardctl credential issue --runtime openclaw --agent-id main
+uv run agentguardctl credential issue --runtime langgraph --agent-id langgraph-demo
+```
+
+完整 token 只在签发时显示一次；Guard API 仅持久化 hash。可用 `credential list` 查看元数据，用 `credential revoke <credential_id>` 撤销。
 
 ## 3. Core 使用与验证
 
@@ -98,7 +110,7 @@ uv run pytest tests/test_core_engine.py tests/test_schemas.py -q
 Core 边界：
 
 - 不读取 `.env`。
-- 不管理 token、browser session、CSRF 或 approval nonce。
+- 不管理 token、browser session 或 CSRF。
 - 不直接写数据库。
 - 不调用 Dashboard、OpenClaw 或 LangGraph。
 
@@ -331,7 +343,7 @@ uv run agentguardctl eval import --help
 
 当 `AGENTGUARD_ENV=production` 时，Guard API 会拒绝使用默认 token 或默认数据库 URL。生产化至少需要：
 
-- 更换 `AGENTGUARD_CONTROL_TOKEN` 和 `AGENTGUARD_ADAPTER_TOKEN`。
+- 更换 `AGENTGUARD_CONTROL_TOKEN`，并为每个 runtime/agent 单独签发 adapter credential。
 - 使用真实 PostgreSQL 账号、强密码和受限网络访问。
 - 不把 control token 注入浏览器、Dashboard env、前端构建产物或日志。
 - 通过 TLS 或可信内网访问 Guard API 和 Dashboard。
@@ -344,7 +356,6 @@ uv run agentguardctl eval import --help
 多租户
 用户登录
 OAuth / SSO
-token 生成、轮换、撤销 CLI
 数据库备份自动化
 OpenClaw install/uninstall 的 agentguardctl 子命令
 CLI 审批 resolve
@@ -395,6 +406,8 @@ set +a
 ### HTTP `401` 或 `403`
 
 `401` 通常表示 token 缺失或无效。`403 SCOPE_DENIED` 通常表示用了错误 token，例如把 adapter token 用在 CLI 只读接口上。CLI 读审计、指标、Trace 和策略使用 control token；OpenClaw/LangGraph adapter 使用 adapter token。
+
+未通过 `agentguardctl credential issue` 注册的任意静态 adapter token 都会返回 `401 TOKEN_INVALID`。`403 RUNTIME_IDENTITY_MISMATCH` 表示 token 绑定的 runtime/agent 与请求事件不一致，应签发正确身份的凭证，而不是复用其他 Adapter 的 token。
 
 ### Dashboard `ERR_CONNECTION_REFUSED localhost:5173`
 

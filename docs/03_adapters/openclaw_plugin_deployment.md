@@ -31,7 +31,7 @@ openclaw gateway status
 
 ```dotenv
 AGENTGUARD_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/agent_guard
-AGENTGUARD_ADAPTER_TOKEN=ag_adapter_xxx
+AGENTGUARD_ADAPTER_TOKEN=agt_xxx
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
 AGENTGUARD_HOST=127.0.0.1
 AGENTGUARD_PORT=8088
@@ -52,6 +52,14 @@ OpenClaw 插件安装脚本读取：
 ```bash
 pnpm guard-api:dev
 ```
+
+首次安装前，在另一个已加载 `.env` 的终端为 OpenClaw `main` agent 签发凭证，并把只显示一次的 `agt_...` token 写入本机 `.env`：
+
+```bash
+uv run agentguardctl credential issue --runtime openclaw --agent-id main
+```
+
+Guard API 只保存 token hash；不要复用 LangGraph 或其他 OpenClaw agent 的 token。
 
 或直接运行：
 

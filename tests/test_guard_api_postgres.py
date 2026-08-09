@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
 
 import pytest
+from alembic import command
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -14,7 +15,11 @@ from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.main import create_app
 from guard_api.models import ApprovalRequest
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import AuditEventFilters, AuditIdConflictError, EvalMetricFilters
+from guard_api.storage.base import (
+    AuditEventFilters,
+    AuditIdConflictError,
+    EvalMetricFilters,
+)
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.postgres import (
     get_test_database_url,
@@ -23,12 +28,17 @@ from tests.support.postgres import (
 
 
 def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
-    store = PostgresControlPlaneStore("postgresql://postgres:123456@127.0.0.1:5432/agent_guard")
+    store = PostgresControlPlaneStore(
+        "postgresql://postgres:123456@127.0.0.1:5432/agent_guard"
+    )
 
     assert callable(store.initialize)
     assert callable(store.health_check)
-    assert callable(store.expire_approval)
-    assert store.database_url == "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
+    assert callable(store.resolve_approval)
+    assert (
+        store.database_url
+        == "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
+    )
 
 
 def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
@@ -65,6 +75,7 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
                 reason="approval required",
                 risk_score=62,
                 severity="medium",
+                expires_at="2099-01-01T00:00:00+00:00",
             )
         )
 
@@ -84,9 +95,6 @@ def test_postgres_store_persists_audit_and_approval_across_instances() -> None:
 def test_postgres_store_persists_auth_state_across_instances() -> None:
     database_url = get_test_database_url()
 
-    run_id = uuid4().hex
-    approval_id = f"app_pg_auth_{run_id}"
-    tool_call_id = f"call_pg_auth_{run_id}"
     launch_code: str | None = None
     session_id: str | None = None
     store = PostgresControlPlaneStore(database_url)
@@ -96,40 +104,24 @@ def test_postgres_store_persists_auth_state_across_instances() -> None:
         settings = GuardApiSettings(control_token="control-secret")
         first_auth = CapabilityAuthService(settings=settings, store=store)
         launch_code = first_auth.create_launch_code()
-        second_auth = CapabilityAuthService(settings=settings, store=PostgresControlPlaneStore(database_url))
+        second_auth = CapabilityAuthService(
+            settings=settings, store=PostgresControlPlaneStore(database_url)
+        )
         session = second_auth.exchange_launch_code(launch_code)
         session_id = session.session_id
-        third_auth = CapabilityAuthService(settings=settings, store=PostgresControlPlaneStore(database_url))
+        third_auth = CapabilityAuthService(
+            settings=settings, store=PostgresControlPlaneStore(database_url)
+        )
 
         restored = third_auth.verify_browser_session(session.session_id)
-        nonce = third_auth.issue_approval_nonce(
-            approval_id=approval_id,
-            session_id=session.session_id,
-            tool_call_id=tool_call_id,
-        )
-        fourth_auth = CapabilityAuthService(settings=settings, store=PostgresControlPlaneStore(database_url))
-        fourth_auth.consume_approval_nonce(
-            nonce=nonce,
-            approval_id=approval_id,
-            session_id=session.session_id,
-            tool_call_id=tool_call_id,
-        )
 
         assert restored.session_id == session.session_id
         assert restored.csrf_token == session.csrf_token
         with pytest.raises(ApiAuthError) as launch_error:
             first_auth.exchange_launch_code(launch_code)
         assert launch_error.value.code == "LAUNCH_CODE_INVALID"
-        with pytest.raises(ApiAuthError) as nonce_error:
-            third_auth.consume_approval_nonce(
-                nonce=nonce,
-                approval_id=approval_id,
-                session_id=session.session_id,
-                tool_call_id=tool_call_id,
-            )
-        assert nonce_error.value.code == "APPROVAL_NONCE_INVALID"
     finally:
-        _cleanup_auth_rows(database_url, approval_id, launch_code, session_id)
+        _cleanup_auth_rows(database_url, launch_code, session_id)
 
 
 def test_postgres_store_roundtrips_dashboard_todo_state() -> None:
@@ -144,7 +136,9 @@ def test_postgres_store_roundtrips_dashboard_todo_state() -> None:
                 "run_at": "2026-06-28T00:00:00+00:00",
                 "asr_before": 0.75,
                 "asr_after": 0.05,
-                "per_attack": {"prompt_injection": {"asr_before": 0.8, "asr_after": 0.1}},
+                "per_attack": {
+                    "prompt_injection": {"asr_before": 0.8, "asr_after": 0.1}
+                },
                 "cases": [
                     {
                         "case_id": "PI-PG",
@@ -217,18 +211,18 @@ def test_postgres_store_roundtrips_dashboard_todo_state() -> None:
         reset_control_plane_schema(database_url)
 
 
-def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_payload() -> None:
+def test_postgres_migration_promotes_approval_state_and_drops_browser_nonces() -> None:
     database_url = get_test_database_url()
 
     run_id = uuid4().hex
-    approval_id = f"app_pg_legacy_subject_{run_id}"
-    trace_id = f"trace_pg_legacy_subject_{run_id}"
-    nonce = f"nonce_pg_legacy_subject_{run_id}"
-    session_id = f"sess_pg_legacy_subject_{run_id}"
-    subject_id = f"call_pg_legacy_subject_{run_id}"
-    engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
+    approval_id = f"app_pg_legacy_state_{run_id}"
+    trace_id = f"trace_pg_legacy_state_{run_id}"
+    subject_id = f"call_pg_legacy_state_{run_id}"
+    store = PostgresControlPlaneStore(database_url)
+    engine = create_engine(store.database_url)
     try:
         reset_control_plane_schema(database_url)
+        command.upgrade(store._alembic_config(), "0007_policy_eval_unique_event")
         legacy_payload = {
             "approval_id": approval_id,
             "trace_id": trace_id,
@@ -252,51 +246,6 @@ def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_p
             conn.execute(
                 text(
                     """
-                    CREATE TABLE approval_nonces (
-                        nonce_hash TEXT PRIMARY KEY,
-                        approval_id TEXT NOT NULL,
-                        session_hash TEXT NOT NULL,
-                        tool_call_id TEXT NOT NULL,
-                        expires_at TEXT NOT NULL,
-                        used_at TEXT NULL
-                    )
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    CREATE TABLE approval_requests (
-                        approval_id TEXT PRIMARY KEY,
-                        payload_json JSONB NOT NULL,
-                        status TEXT NOT NULL,
-                        created_at TEXT NOT NULL
-                    )
-                    """
-                )
-            )
-            conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
-            conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0002_policy_snapshots')"))
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO approval_nonces (
-                        nonce_hash, approval_id, session_hash, tool_call_id, expires_at, used_at
-                    )
-                    VALUES (:nonce_hash, :approval_id, :session_hash, :tool_call_id, :expires_at, NULL)
-                    """
-                ),
-                {
-                    "nonce_hash": _token_hash(nonce),
-                    "approval_id": approval_id,
-                    "session_hash": _token_hash(session_id),
-                    "tool_call_id": subject_id,
-                    "expires_at": "2999-01-01T00:00:00+00:00",
-                },
-            )
-            conn.execute(
-                text(
-                    """
                     INSERT INTO approval_requests (approval_id, payload_json, status, created_at)
                     VALUES (:approval_id, CAST(:payload_json AS jsonb), 'pending', :created_at)
                     """
@@ -308,51 +257,34 @@ def test_postgres_migration_backfills_subject_id_for_legacy_approval_nonce_and_p
                 },
             )
 
-        store = PostgresControlPlaneStore(database_url)
-        store.initialize()
+        command.upgrade(store._alembic_config(), "head")
 
         with engine.begin() as conn:
-            columns = {
-                row[0]
-                for row in conn.execute(
+            columns = dict(
+                conn.execute(
                     text(
                         """
-                        SELECT column_name
+                        SELECT column_name, data_type
                         FROM information_schema.columns
-                        WHERE table_name = 'approval_nonces'
+                        WHERE table_name = 'approval_requests'
                         """
                     )
-                )
-            }
-            nonce_row = conn.execute(
-                text(
-                    """
-                    SELECT subject_id, tool_call_id
-                    FROM approval_nonces
-                    WHERE approval_id = :approval_id
-                    """
-                ),
-                {"approval_id": approval_id},
-            ).mappings().one()
+                ).all()
+            )
+            nonce_table = conn.execute(
+                text("SELECT to_regclass('public.approval_nonces')")
+            ).scalar_one()
 
         approval = store.get_approval(approval_id)
-        auth = CapabilityAuthService(settings=GuardApiSettings(), store=store)
-        auth.consume_approval_nonce(
-            nonce=nonce,
-            approval_id=approval_id,
-            session_id=session_id,
-            subject_id=subject_id,
-        )
 
-        assert "subject_id" in columns
-        assert nonce_row["subject_id"] == subject_id
-        assert nonce_row["tool_call_id"] == subject_id
+        assert "status" not in columns
+        assert columns["created_at"] == "timestamp with time zone"
+        assert columns["expires_at"] == "timestamp with time zone"
+        assert columns["resolved_at"] == "timestamp with time zone"
+        assert nonce_table is None
         assert approval is not None
+        assert approval.status == "pending"
         assert approval.subject_id == subject_id
-        assert approval.subject_type == "tool_call"
-        assert approval.action_id == subject_id
-        assert approval.action_name == "send_email"
-        assert approval.tool_call_id == subject_id
     finally:
         reset_control_plane_schema(database_url)
 
@@ -401,7 +333,9 @@ def test_postgres_store_filters_audit_and_aggregates_metrics() -> None:
             )
         )
 
-        denied = store.list_audit_events(AuditEventFilters(trace_id=trace_id, decision="deny", limit=10))
+        denied = store.list_audit_events(
+            AuditEventFilters(trace_id=trace_id, decision="deny", limit=10)
+        )
         metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
 
         assert [event.audit_id for event in denied] == [f"audit_pg_deny_{run_id}"]
@@ -454,7 +388,10 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
         assert snapshot.allowed_email_domains == ["pg.example"]
         assert snapshot.sensitive_text_markers == ["pg-secret="]
         assert [record.revision for record in history] == [2, 1]
-        assert [record.policy_bundle.bundle_id for record in history] == ["pg-policy-2", "pg-policy-1"]
+        assert [record.policy_bundle.bundle_id for record in history] == [
+            "pg-policy-2",
+            "pg-policy-1",
+        ]
         assert {record.updated_by for record in history} == {"tester"}
     finally:
         _cleanup_policy_snapshot(database_url)
@@ -479,12 +416,18 @@ def test_postgres_policy_snapshot_concurrent_writes_have_contiguous_revisions() 
             ]
             records = [future.result() for future in as_completed(futures)]
 
-        history = PostgresControlPlaneStore(database_url).list_policy_snapshot_history(limit=worker_count)
+        history = PostgresControlPlaneStore(database_url).list_policy_snapshot_history(
+            limit=worker_count
+        )
         revisions = sorted(record.revision for record in records)
 
         assert revisions == list(range(1, worker_count + 1))
-        assert [record.revision for record in history] == list(range(worker_count, 0, -1))
-        assert len({record.policy_bundle.bundle_id for record in history}) == worker_count
+        assert [record.revision for record in history] == list(
+            range(worker_count, 0, -1)
+        )
+        assert (
+            len({record.policy_bundle.bundle_id for record in history}) == worker_count
+        )
     finally:
         _cleanup_policy_snapshot(database_url)
 
@@ -498,7 +441,9 @@ def test_postgres_migration_creates_policy_snapshots_table() -> None:
         store.initialize()
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
-            exists = conn.execute(text("SELECT to_regclass('public.policy_snapshots')")).scalar_one()
+            exists = conn.execute(
+                text("SELECT to_regclass('public.policy_snapshots')")
+            ).scalar_one()
             history_exists = conn.execute(
                 text("SELECT to_regclass('public.policy_snapshot_history')")
             ).scalar_one()
@@ -556,6 +501,7 @@ def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
                 reason="approval required",
                 risk_score=62,
                 severity="medium",
+                expires_at="2099-01-01T00:00:00+00:00",
             )
         )
         client = TestClient(
@@ -571,8 +517,12 @@ def test_postgres_trace_route_aggregates_audit_approval_and_metrics() -> None:
         assert trace_response.status_code == 200
         trace = trace_response.json()
         assert trace["trace_id"] == trace_id
-        assert [event["audit_id"] for event in trace["audit_events"]] == [f"audit_pg_route_{run_id}"]
-        assert [approval["approval_id"] for approval in trace["approvals"]] == [approval_id]
+        assert [event["audit_id"] for event in trace["audit_events"]] == [
+            f"audit_pg_route_{run_id}"
+        ]
+        assert [approval["approval_id"] for approval in trace["approvals"]] == [
+            approval_id
+        ]
         assert trace["metrics"]["event_count"] == 1
         assert trace["metrics"]["ask_count"] == 1
     finally:
@@ -591,7 +541,12 @@ def test_postgres_store_persists_terminal_control_plane_registry_state() -> None
             "principal_type": "component",
             "principal_id": "openclaw-main",
             "role": "adapter",
-            "scopes": ["adapter:status:write"],
+            "scopes": [
+                "event:evaluate",
+                "event:audit:write",
+                "approval:wait",
+                "adapter:status:write",
+            ],
             "runtime": "openclaw",
             "agent_id": "main",
         }
@@ -623,16 +578,24 @@ def test_postgres_store_persists_terminal_control_plane_registry_state() -> None
         )
 
         restarted = PostgresControlPlaneStore(database_url)
-        stored_credential = restarted.get_credential_by_token_hash(_token_hash("pg-generated-token"))
+        stored_credential = restarted.get_credential_by_token_hash(
+            _token_hash("pg-generated-token")
+        )
         listed_credentials = restarted.list_credentials()
         status = restarted.get_adapter_status("openclaw")
-        runs = restarted.list_evaluation_runs(dataset_id="attackbench", dataset_version="v1")
+        runs = restarted.list_evaluation_runs(
+            dataset_id="attackbench", dataset_version="v1"
+        )
         run = restarted.get_evaluation_run("eval_pg_terminal")
-        revoked = restarted.revoke_credential("cred_pg_openclaw", revoked_at="2026-06-28T00:05:00+00:00")
+        revoked = restarted.revoke_credential(
+            "cred_pg_openclaw", revoked_at="2026-06-28T00:05:00+00:00"
+        )
 
         assert stored_credential is not None
         assert stored_credential.principal_id == "openclaw-main"
-        assert [item.credential_id for item in listed_credentials] == ["cred_pg_openclaw"]
+        assert [item.credential_id for item in listed_credentials] == [
+            "cred_pg_openclaw"
+        ]
         assert status is not None
         assert status["last_heartbeat_at"] == "2026-06-28T00:03:00+00:00"
         assert status["capabilities"]["event_types"] == ["tool_call_proposed"]
@@ -640,7 +603,10 @@ def test_postgres_store_persists_terminal_control_plane_registry_state() -> None
         assert run is not None
         assert run["per_rule"]["P101_prompt_injection"]["hit_count"] == 1
         assert revoked.revoked_at == "2026-06-28T00:05:00+00:00"
-        assert restarted.get_credential_by_token_hash(_token_hash("pg-generated-token")) is None
+        assert (
+            restarted.get_credential_by_token_hash(_token_hash("pg-generated-token"))
+            is None
+        )
     finally:
         reset_control_plane_schema(database_url)
 
@@ -679,17 +645,23 @@ def test_postgres_store_looks_up_policy_evaluation_by_event_id() -> None:
         _cleanup_test_rows(database_url, trace_id, None)
 
 
-def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None) -> None:
+def _cleanup_test_rows(
+    database_url: str, trace_id: str, approval_id: str | None
+) -> None:
     try:
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
             if approval_id is not None:
                 conn.execute(
-                    text("DELETE FROM approval_requests WHERE approval_id = :approval_id"),
+                    text(
+                        "DELETE FROM approval_requests WHERE approval_id = :approval_id"
+                    ),
                     {"approval_id": approval_id},
                 )
             conn.execute(
-                text("DELETE FROM audit_events WHERE payload_json ->> 'trace_id' = :trace_id"),
+                text(
+                    "DELETE FROM audit_events WHERE payload_json ->> 'trace_id' = :trace_id"
+                ),
                 {"trace_id": trace_id},
             )
     except Exception:
@@ -698,17 +670,12 @@ def _cleanup_test_rows(database_url: str, trace_id: str, approval_id: str | None
 
 def _cleanup_auth_rows(
     database_url: str,
-    approval_id: str,
     launch_code: str | None,
     session_id: str | None,
 ) -> None:
     try:
         engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
         with engine.begin() as conn:
-            conn.execute(
-                text("DELETE FROM approval_nonces WHERE approval_id = :approval_id"),
-                {"approval_id": approval_id},
-            )
             if launch_code is not None:
                 conn.execute(
                     text("DELETE FROM launch_codes WHERE code_hash = :code_hash"),
@@ -716,7 +683,9 @@ def _cleanup_auth_rows(
                 )
             if session_id is not None:
                 conn.execute(
-                    text("DELETE FROM browser_sessions WHERE session_hash = :session_hash"),
+                    text(
+                        "DELETE FROM browser_sessions WHERE session_hash = :session_hash"
+                    ),
                     {"session_hash": _token_hash(session_id)},
                 )
     except Exception:
@@ -783,6 +752,7 @@ def _login_dashboard(client: TestClient, *, control_token: str) -> None:
         json={"launch_code": launch_response.json()["launch_code"]},
     )
     assert exchange_response.status_code == 200
+
 
 def test_postgres_store_audit_id_idempotent_and_conflict() -> None:
     database_url = get_test_database_url()

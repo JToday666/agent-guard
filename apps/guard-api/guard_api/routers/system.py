@@ -8,6 +8,7 @@ from agentguard_core import utc_now_iso
 from fastapi import Cookie, FastAPI, Header
 from fastapi.responses import JSONResponse
 
+from guard_api.auth import ApiAuthError
 from guard_api.models import AdapterStatusRecord
 
 from .common import (
@@ -38,7 +39,16 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         payload: AdapterStatusRecord,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "adapter:status:write")
+        auth_context = auth.verify_bearer(authorization, "adapter:status:write")
+        if auth_context.role == "adapter":
+            auth.verify_runtime_identity(
+                auth_context,
+                runtime=payload.runtime or adapter_id,
+                agent_id=payload.agent_id,
+                require_agent_id=True,
+            )
+            if auth_context.runtime != adapter_id:
+                raise ApiAuthError("RUNTIME_IDENTITY_MISMATCH", status_code=403)
         return store.save_adapter_status(adapter_id, payload)
 
     @app.post("/v1/adapters/{adapter_id}/heartbeat")
@@ -47,7 +57,15 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         payload: AdapterStatusRecord,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        verify_adapter_heartbeat_write(auth, authorization)
+        auth_context = verify_adapter_heartbeat_write(auth, authorization)
+        auth.verify_runtime_identity(
+            auth_context,
+            runtime=payload.runtime or adapter_id,
+            agent_id=payload.agent_id,
+            require_agent_id=True,
+        )
+        if auth_context.runtime != adapter_id:
+            raise ApiAuthError("RUNTIME_IDENTITY_MISMATCH", status_code=403)
         heartbeat = payload.model_copy(
             update={
                 "last_heartbeat_at": payload.last_heartbeat_at or utc_now_iso(),

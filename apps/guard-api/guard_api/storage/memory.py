@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Iterator
 
@@ -28,6 +29,7 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.storage.base import (
+    ApprovalStateConflictError,
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
@@ -36,7 +38,6 @@ from guard_api.storage.base import (
     EvalMetrics,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
-    StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
     merge_provenance_edge,
@@ -65,13 +66,13 @@ class MemoryControlPlaneStore:
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
     launch_codes: dict[str, StoredLaunchCode] = field(default_factory=dict)
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
-    approval_nonces: dict[str, StoredApprovalNonce] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
     provenance_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    approval_lock: Any = field(default_factory=Lock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
 
     def initialize(self) -> None:
@@ -381,20 +382,57 @@ class MemoryControlPlaneStore:
         return list(reversed(self.policy_snapshot_history))[: _bounded_limit(limit)]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
-        self.approvals[approval.approval_id] = approval
-        return approval
+        with self.approval_lock:
+            existing = self.approvals.get(approval.approval_id)
+            if existing is not None:
+                current = _with_effective_approval_status(existing)
+                if current.status != "pending":
+                    return current.model_copy(deep=True)
+                stored = approval.model_copy(
+                    update={
+                        "status": current.status,
+                        "decision": current.decision,
+                        "resolution_source": current.resolution_source,
+                        "resolved_by": current.resolved_by,
+                        "resolution_reason": current.resolution_reason,
+                        "created_at": current.created_at,
+                        "expires_at": current.expires_at,
+                        "resolved_at": current.resolved_at,
+                    },
+                    deep=True,
+                )
+            else:
+                stored = approval.model_copy(deep=True)
+            self.approvals[approval.approval_id] = stored
+            return _with_effective_approval_status(stored)
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
-        return [item for item in self.approvals.values() if item.status == "pending"]
+        with self.approval_lock:
+            approvals = [
+                _with_effective_approval_status(item)
+                for item in self.approvals.values()
+            ]
+        return sorted(
+            (item for item in approvals if item.status == "pending"),
+            key=lambda item: item.created_at,
+        )
 
     def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
-        approvals = list(self.approvals.values())
+        with self.approval_lock:
+            approvals = [
+                _with_effective_approval_status(item)
+                for item in self.approvals.values()
+            ]
         if trace_id is not None:
             approvals = [item for item in approvals if item.trace_id == trace_id]
         return sorted(approvals, key=lambda item: item.created_at)
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        return self.approvals.get(approval_id)
+        with self.approval_lock:
+            approval = self.approvals.get(approval_id)
+            if approval is None:
+                return None
+            return _with_effective_approval_status(approval)
 
     def resolve_approval(
         self,
@@ -406,27 +444,27 @@ class MemoryControlPlaneStore:
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest:
-        approval = self.approvals[approval_id]
-        approval.status = "resolved"
-        approval.decision = decision  # type: ignore[assignment]
-        approval.resolved_at = utc_now_iso()
-        if resolution_source is not None:
-            approval.resolution_source = resolution_source  # type: ignore[assignment]
-        if resolved_by is not None:
-            approval.resolved_by = resolved_by
-        if resolution_reason is not None:
-            approval.resolution_reason = resolution_reason
-        if llm_review is not None:
-            approval.llm_review = llm_review  # type: ignore[assignment]
-        self.approvals[approval_id] = approval
-        return approval
-
-    def expire_approval(self, approval_id: str) -> ApprovalRequest:
-        approval = self.approvals[approval_id]
-        approval.status = "expired"
-        approval.decision = "deny"
-        self.approvals[approval_id] = approval
-        return approval
+        with self.approval_lock:
+            approval = self.approvals[approval_id]
+            current = _with_effective_approval_status(approval)
+            if current.status != "pending":
+                raise ApprovalStateConflictError(approval_id, current.status)
+            updates: dict[str, Any] = {
+                "status": "resolved",
+                "decision": decision,
+                "resolved_at": utc_now_iso(),
+            }
+            if resolution_source is not None:
+                updates["resolution_source"] = resolution_source
+            if resolved_by is not None:
+                updates["resolved_by"] = resolved_by
+            if resolution_reason is not None:
+                updates["resolution_reason"] = resolution_reason
+            if llm_review is not None:
+                updates["llm_review"] = llm_review
+            resolved = current.model_copy(update=updates, deep=True)
+            self.approvals[approval_id] = resolved
+            return resolved.model_copy(deep=True)
 
     def create_launch_code(self, code_hash: str, expires_at: str) -> StoredLaunchCode:
         launch_code = StoredLaunchCode(code_hash=code_hash, expires_at=expires_at)
@@ -471,64 +509,6 @@ class MemoryControlPlaneStore:
             expires_at=session.expires_at,
             revoked_at=revoked_at,
         )
-
-    def create_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        expires_at: str,
-    ) -> StoredApprovalNonce:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        nonce = StoredApprovalNonce(
-            nonce_hash=nonce_hash,
-            approval_id=approval_id,
-            session_hash=session_hash,
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at,
-        )
-        self.approval_nonces[nonce_hash] = nonce
-        return nonce
-
-    def consume_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        used_at: str,
-    ) -> StoredApprovalNonce | None:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        nonce = self.approval_nonces.get(nonce_hash)
-        if (
-            nonce is None
-            or nonce.used_at is not None
-            or nonce.approval_id != approval_id
-            or nonce.session_hash != session_hash
-            or nonce.subject_id != approval_subject_id
-        ):
-            return None
-        consumed = StoredApprovalNonce(
-            nonce_hash=nonce.nonce_hash,
-            approval_id=nonce.approval_id,
-            session_hash=nonce.session_hash,
-            subject_id=nonce.subject_id,
-            tool_call_id=nonce.tool_call_id,
-            expires_at=nonce.expires_at,
-            used_at=used_at,
-        )
-        self.approval_nonces[nonce_hash] = consumed
-        return consumed
 
 
 def _audit_content_matches(existing: AuditEvent, incoming: AuditEvent) -> bool:
@@ -594,8 +574,18 @@ def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
     )
 
 
-def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
-    approval_subject_id = subject_id or tool_call_id
-    if approval_subject_id is None:
-        raise ValueError("approval nonce requires subject_id or tool_call_id")
-    return approval_subject_id
+def _with_effective_approval_status(
+    approval: ApprovalRequest, *, now: datetime | None = None
+) -> ApprovalRequest:
+    current = approval.model_copy(deep=True)
+    if current.status != "pending" or current.expires_at is None:
+        return current
+    try:
+        expires_at = datetime.fromisoformat(current.expires_at)
+    except ValueError:
+        return current
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= (now or datetime.now(timezone.utc)):
+        return current.model_copy(update={"status": "expired", "decision": "deny"})
+    return current

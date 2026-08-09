@@ -63,7 +63,6 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     subjectType: "tool_call",
     actionId: "call_1",
     actionName: "send_email",
-    approvalNonce: "nonce_1",
     expiresAt: "2026-06-22T06:45:00Z",
     resolvedAt: null,
     ...overrides,
@@ -147,15 +146,14 @@ test("compares evaluation runs without inheriting audit metrics", () => {
   );
 });
 
-test("updates approval nonce without replacing unchanged visible data", () => {
+test("reuses approvals when visible data is unchanged", () => {
   const current = [makeApproval()];
-  const incoming = [makeApproval({ approvalNonce: "nonce_2" })];
+  const incoming = [makeApproval()];
 
   const reconciled = reconcileApprovals(current, incoming);
 
   assert.equal(reconciled, current);
   assert.equal(reconciled[0], current[0]);
-  assert.equal(reconciled[0]?.approvalNonce, "nonce_2");
 });
 
 test("replaces approvals when visible data changes", () => {

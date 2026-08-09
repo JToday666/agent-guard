@@ -31,7 +31,7 @@ Core 不负责：
 - 创建、查询或更新审计日志；
 - 创建、查询或更新审批记录；
 - 聚合指标、生成报表或维护评测任务状态；
-- 管理 browser session、CSRF token、launch code、approval nonce、API Key；
+- 管理 browser session、CSRF token、launch code、API Key；
 - 调用或执行 Agent 工具；
 - 读取 Agent runtime 私有状态；
 - 渲染 Dashboard 页面或推送 WebSocket；
@@ -102,7 +102,7 @@ packages/agentguard-core/
 - `storage/`；
 - `migrations/`；
 - FastAPI route；
-- Dashboard session / nonce；
+- Dashboard session / CSRF；
 - 审批状态机；
 - 指标查询服务。
 
@@ -146,8 +146,8 @@ Core 只负责返回审批意图和必要证据，例如：
 }
 ```
 
-Core 不创建 approval row，不生成 approval nonce，不等待审批结果。Guard API / Control Plane 根据 `ask` 决策创建审批记录、发布 Dashboard 待办，并向 Adapter 提供 wait 接口。
-审批记录使用 `subject_id` 绑定 nonce 和 resolve：P0 工具事件的 `subject_id` 是 tool call id，P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。
+Core 不创建 approval row，不处理浏览器鉴权，不等待审批结果。Guard API / Control Plane 根据 `ask` 决策创建审批记录、发布 Dashboard 待办，并向 Adapter 提供 wait 接口。
+审批记录使用 `subject_id` 绑定受控动作；resolve 由 browser session 与 CSRF 保护，并通过审批行的原子状态转换保证只能完成一次。P0 工具事件的 `subject_id` 是 tool call id，P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。
 `ApprovalRequest.tool_call_id` 仍保留为兼容别名，当前等于 `subject_id`；后续删除该字段应作为单独破坏性迁移处理。
 
 ## 7. 检测器

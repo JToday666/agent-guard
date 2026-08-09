@@ -66,7 +66,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
    - 在总览、调查、调查详情、审批、评测和系统状态页消费 Guard API 数据。
    - 展示阻断原因、命中规则、风险分数、资源目标。
    - 展示 pending approval，并支持 `allow_once` / `deny`。
-   - 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
+   - 审批 resolve 使用 browser session、CSRF token 和服务端原子状态转换。
 
 ## 4. P1 已完成 / 部分完成项
 
@@ -127,7 +127,7 @@ P0 完成必须同时满足：
 4. 被拒绝的工具没有执行副作用。
 5. `ask` 决策能由 Guard API 创建 pending approval。
 6. Dashboard resolve 后，Adapter wait 能返回 `allow_once` 或 `deny`。
-7. 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
+7. 审批 resolve 使用 browser session、CSRF token，并拒绝重复或过期转换。
 8. AuditEvent 被 Dashboard 展示。
 9. runner 输出 ASR before、ASR after、Block Rate、FPR。
 10. `schemas/` 中至少存在 `guard_event.schema.json`、`guard_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。
