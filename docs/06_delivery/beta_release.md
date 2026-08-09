@@ -19,7 +19,7 @@ GHCR:                    未发布
 
 | 注册表 | 包 | 版本 | 状态 |
 | ------ | -- | ---- | ---- |
-| PyPI | [`aegis-agentguard`](https://pypi.org/project/aegis-agentguard/)、[`aegis-agentguard-core`](https://pypi.org/project/aegis-agentguard-core/)、[`aegis-agentguard-api`](https://pypi.org/project/aegis-agentguard-api/)、[`aegis-agentguard-cli`](https://pypi.org/project/aegis-agentguard-cli/) | `0.1.0b1` | 2026-08-05 已发布；每个项目均包含 wheel 和 sdist |
+| PyPI | [`aegis-agentguard-core`](https://pypi.org/project/aegis-agentguard-core/)、[`aegis-agentguard-api`](https://pypi.org/project/aegis-agentguard-api/)、[`aegis-agentguard-cli`](https://pypi.org/project/aegis-agentguard-cli/) | `0.1.0b1` | 2026-08-05 已发布；每个项目均包含 wheel 和 sdist |
 | npm | [`@agentguard-ai/openclaw-plugin`](https://www.npmjs.com/package/@agentguard-ai/openclaw-plugin) | `0.1.0-beta.1` | 2026-08-05 已发布；`latest` 与 `beta` 均指向该版本 |
 
 上述日期使用注册表记录的 UTC 上传日期，不记录容易产生时区歧义的本地时刻。
@@ -27,11 +27,6 @@ GHCR:                    未发布
 公开安装入口：
 
 ```bash
-pip install --pre aegis-agentguard
-pip install "aegis-agentguard[api]==0.1.0b1"
-pip install "aegis-agentguard[cli]==0.1.0b1"
-pip install "aegis-agentguard[all]==0.1.0b1"
-
 pip install aegis-agentguard-core==0.1.0b1
 pip install aegis-agentguard-api==0.1.0b1
 pip install aegis-agentguard-cli==0.1.0b1
@@ -40,13 +35,14 @@ npm install @agentguard-ai/openclaw-plugin@beta
 openclaw plugins install @agentguard-ai/openclaw-plugin@beta
 ```
 
-`aegis-agentguard` 是安装入口包，默认只依赖 `aegis-agentguard-core`，并提供稳定门面：
+Core 的唯一正式 Python 导入入口是：
 
 ```python
-from aegis_agentguard import GuardDecision, GuardEngine, GuardEvent, PolicyBundle, evaluate
+from agentguard_core import GuardDecision, GuardEngine, GuardEvent, PolicyBundle, evaluate
 ```
 
-为避免与第三方项目冲突，本项目不提供顶层 `agentguard` Python 模块。组件级 import 保持为：
+为避免同一 API 维护两层包与两套版本，当前源码不再构建早期 Beta 发布过的
+`aegis-agentguard` 元包；该注册表项目只属于历史发布记录。组件 import 固定为：
 
 ```python
 import agentguard_core
@@ -80,10 +76,10 @@ uv run python scripts/check-release-versions.py --tag v0.1.0-beta.1
 运行发布范围的静态检查和测试：
 
 ```bash
-uv run ruff check apps/cli apps/guard-api packages/agentguard-core packages/agentguard-meta scripts/check-release-artifacts.py scripts/check-release-versions.py scripts/verify-wheel-install.py tests/test_agentguard_cli.py tests/test_core_engine.py tests/test_core_extended_capabilities.py tests/test_core_rule_matrix.py tests/test_guard_api.py tests/test_guard_api_extended_capabilities.py tests/test_openclaw_plugin_contract.py tests/test_package_facade.py tests/test_release_versions.py tests/test_schemas.py
-uv run black --check apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core packages/agentguard-meta/aegis_agentguard scripts/check-release-artifacts.py scripts/check-release-versions.py scripts/verify-wheel-install.py tests/test_agentguard_cli.py tests/test_core_rule_matrix.py tests/test_openclaw_plugin_contract.py tests/test_package_facade.py tests/test_release_versions.py
-uv run pyright apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core packages/agentguard-meta/aegis_agentguard
-uv run pytest tests/test_core_engine.py tests/test_core_extended_capabilities.py tests/test_core_rule_matrix.py tests/test_guard_api.py tests/test_guard_api_dashboard_capabilities.py tests/test_guard_api_extended_capabilities.py tests/test_agentguard_cli.py tests/test_schemas.py tests/test_package_facade.py tests/test_release_versions.py tests/test_openclaw_plugin_contract.py
+uv run ruff check apps/cli apps/guard-api packages/agentguard-core scripts/check-release-artifacts.py scripts/check-release-versions.py scripts/verify-wheel-install.py tests/test_agentguard_cli.py tests/test_core_engine.py tests/test_core_extended_capabilities.py tests/test_core_rule_matrix.py tests/test_guard_api.py tests/test_guard_api_extended_capabilities.py tests/test_openclaw_plugin_contract.py tests/test_release_versions.py tests/test_schemas.py
+uv run black --check apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core scripts/check-release-artifacts.py scripts/check-release-versions.py scripts/verify-wheel-install.py tests/test_agentguard_cli.py tests/test_core_rule_matrix.py tests/test_openclaw_plugin_contract.py tests/test_release_versions.py
+uv run pyright apps/cli/agentguard_cli apps/guard-api/guard_api packages/agentguard-core/agentguard_core
+uv run pytest tests/test_core_engine.py tests/test_core_extended_capabilities.py tests/test_core_rule_matrix.py tests/test_guard_api.py tests/test_guard_api_dashboard_capabilities.py tests/test_guard_api_extended_capabilities.py tests/test_agentguard_cli.py tests/test_schemas.py tests/test_release_versions.py tests/test_openclaw_plugin_contract.py
 pnpm --filter @agentguard-ai/openclaw-plugin build
 pnpm --filter @agentguard-ai/openclaw-plugin test
 ```
@@ -97,13 +93,12 @@ uv run pytest tests/test_postgres_test_utils.py tests/test_guard_api_postgres.py
 
 ## 本地制品验证
 
-构建四个 Python 包：
+构建三个 Python 包：
 
 ```bash
 uv build packages/agentguard-core --out-dir release-dist/aegis-agentguard-core
 uv build apps/guard-api --out-dir release-dist/aegis-agentguard-api
 uv build apps/cli --out-dir release-dist/aegis-agentguard-cli
-uv build packages/agentguard-meta --out-dir release-dist/aegis-agentguard
 uvx twine check release-dist/*/*
 uv run python scripts/verify-wheel-install.py release-dist
 ```
@@ -118,8 +113,8 @@ uv run python scripts/check-release-artifacts.py release-dist
 
 检查结果必须满足：
 
-- 四个 Python wheel 和 sdist 都能通过 metadata 检查并从空环境安装。
-- `aegis-agentguard` 提供 `aegis_agentguard` 稳定门面，但不提供顶层 `agentguard` import package。
+- 三个 Python wheel 和 sdist 都能通过 metadata 检查并从空环境安装。
+- Core 只提供 `agentguard_core` 导入，不再提供平行的元包门面。
 - npm tarball 可在空目录安装并加载插件。
 - 制品不包含 `.env`、凭证、Dashboard、LangGraph、benchmark、测试结果或本地路径。
 
@@ -132,9 +127,10 @@ healthcheck，但完整镜像构建、PostgreSQL 迁移、公开 manifest 读取
 
 ## 已完成发布记录与后续要求
 
-本次发布已按 Core → API → CLI → 主包 → npm 的顺序完成：
+本次历史 Beta 发布曾包含一个安装元包；当前发布流程已收敛为
+Core → API → CLI → npm：
 
-- PyPI 四个项目均已存在，版本为 `0.1.0b1`。
+- 当前源码维护的三个 PyPI 组件均已存在，版本为 `0.1.0b1`。
 - npm 包已存在，版本为 `0.1.0-beta.1`。
 - Git tag `v0.1.0-beta.1` 已存在并指向本次 Beta 源码。
 

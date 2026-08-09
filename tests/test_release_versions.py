@@ -19,7 +19,6 @@ def test_release_versions_are_consistent() -> None:
     assert versions.validate() == []
     assert versions.validate(versions.GIT_TAG) == []
     assert set(versions.PYTHON_PROJECTS) == {
-        "aegis-agentguard",
         "aegis-agentguard-api",
         "aegis-agentguard-cli",
         "aegis-agentguard-core",

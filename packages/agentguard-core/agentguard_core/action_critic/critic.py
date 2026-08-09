@@ -6,8 +6,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from ..decisions import GuardDecision
-from ..events import GuardEvent
-from ..resources import derive_resources
+from ..events import GuardEvent, derive_resources
 from .models import ActionCriticReview
 
 

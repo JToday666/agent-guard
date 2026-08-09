@@ -19,7 +19,7 @@ from agentguard_core import (
     ToolResultPayload,
     evaluate,
 )
-from agentguard_core.resources import derive_resources
+from agentguard_core.events import derive_resources
 
 
 def _event(

@@ -3,24 +3,6 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "aegis-agentguard"
-version = "0.1.0b1"
-source = { editable = "packages/agentguard-meta" }
-dependencies = [
-    { name = "aegis-agentguard-core" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aegis-agentguard-api", marker = "extra == 'all'", specifier = "==0.1.0b1" },
-    { name = "aegis-agentguard-api", marker = "extra == 'api'", specifier = "==0.1.0b1" },
-    { name = "aegis-agentguard-cli", marker = "extra == 'all'", specifier = "==0.1.0b1" },
-    { name = "aegis-agentguard-cli", marker = "extra == 'cli'", specifier = "==0.1.0b1" },
-    { name = "aegis-agentguard-core", specifier = "==0.1.0b1" },
-]
-provides-extras = ["api", "cli", "all"]
-
-[[package]]
 name = "aegis-agentguard-api"
 version = "0.1.0b1"
 source = { editable = "apps/guard-api" }
@@ -72,7 +54,6 @@ name = "agent-guard"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "aegis-agentguard" },
     { name = "aegis-agentguard-api" },
     { name = "aegis-agentguard-cli" },
     { name = "aegis-agentguard-core" },
@@ -95,7 +76,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aegis-agentguard", editable = "packages/agentguard-meta" },
     { name = "aegis-agentguard-api", editable = "apps/guard-api" },
     { name = "aegis-agentguard-cli", editable = "apps/cli" },
     { name = "aegis-agentguard-core", editable = "packages/agentguard-core" },

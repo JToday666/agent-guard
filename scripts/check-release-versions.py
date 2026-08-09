@@ -21,7 +21,6 @@ PYTHON_PROJECTS = {
     "aegis-agentguard-core": ROOT / "packages/agentguard-core/pyproject.toml",
     "aegis-agentguard-api": ROOT / "apps/guard-api/pyproject.toml",
     "aegis-agentguard-cli": ROOT / "apps/cli/pyproject.toml",
-    "aegis-agentguard": ROOT / "packages/agentguard-meta/pyproject.toml",
 }
 
 

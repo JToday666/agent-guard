@@ -21,7 +21,7 @@ from agentguard_core import (
     ToolCallPayload,
     ToolResultPayload,
 )
-from agentguard_core.resources import derive_resources
+from agentguard_core.events import derive_resources
 
 from guard_api.storage.integrity import canonical_sha256
 

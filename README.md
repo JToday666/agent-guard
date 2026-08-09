@@ -123,7 +123,10 @@ pnpm dashboard:dev:mock
 ```bash
 uv run agentguardctl health --check-db
 uv run agentguardctl audit export --limit 10
-uv run agentguardctl metrics --json
+uv run agentguardctl metrics \
+  --evaluated-from 2026-08-01T00:00:00Z \
+  --evaluated-to 2026-08-02T00:00:00Z \
+  --json
 uv run agentguardctl trace get <trace_id> --provenance
 uv run agentguardctl credential list
 uv run agentguardctl credential issue --runtime openclaw --agent-id main

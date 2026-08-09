@@ -26,7 +26,8 @@ from agentguard_core import (
     ToolResult,
     ToolResultPayload,
 )
-from agentguard_core.models import Decision, GuardEventType, guard_event_raw_payload_contracts
+from agentguard_core.decisions import Decision
+from agentguard_core.events import GuardEventType, guard_event_raw_payload_contracts
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,12 +37,10 @@ def _load_schema(name: str) -> dict:
     return json.loads((ROOT / "schemas" / name).read_text(encoding="utf-8"))
 
 
-def test_core_package_imports_preserve_compatibility() -> None:
+def test_core_package_exports_match_canonical_subpackages() -> None:
     from agentguard_core import GuardEvent as TopLevelGuardEvent
     from agentguard_core import PolicyBundle as TopLevelPolicyBundle
-    from agentguard_core.detectors import OutboundDetector as LegacyOutboundDetector
-    from agentguard_core.models import GuardEvent as LegacyGuardEvent
-    from agentguard_core.models import PolicyBundle as LegacyPolicyBundle
+    from agentguard_core.detectors import OutboundDetector
 
     from agentguard_core.decisions import GuardDecision as PackagedGuardDecision
     from agentguard_core.detectors.outbound import OutboundDetector as PackagedOutboundDetector
@@ -49,10 +48,10 @@ def test_core_package_imports_preserve_compatibility() -> None:
     from agentguard_core.policies import PolicyBundle as PackagedPolicyBundle
 
     assert agentguard_core.GuardEvent is TopLevelGuardEvent
-    assert TopLevelGuardEvent is LegacyGuardEvent is PackagedGuardEvent
-    assert TopLevelPolicyBundle is LegacyPolicyBundle is PackagedPolicyBundle
+    assert TopLevelGuardEvent is PackagedGuardEvent
+    assert TopLevelPolicyBundle is PackagedPolicyBundle
     assert PackagedGuardDecision is GuardDecision
-    assert LegacyOutboundDetector is PackagedOutboundDetector
+    assert OutboundDetector is PackagedOutboundDetector
 
 
 def test_public_schemas_validate_target_models() -> None:

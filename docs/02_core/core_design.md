@@ -90,10 +90,6 @@ packages/agentguard-core/
     │   └── environment.py
     ├── engine.py
     ├── matchers.py
-    ├── models.py              # legacy facade
-    ├── policy.py              # legacy facade
-    ├── resources.py           # legacy facade
-    ├── results.py             # legacy facade
     └── __init__.py
 ```
 
@@ -106,7 +102,8 @@ packages/agentguard-core/
 - 审批状态机；
 - 指标查询服务。
 
-如果为了兼容历史实现短期保留这些文件，应在文档和代码命名中标记为迁移遗留，不作为目标态架构边界。
+领域实现只保留 `events/`、`decisions/`、`policies/` 等规范子包；包根
+`agentguard_core` 负责导出稳定的常用公共类型，不再维护同名 legacy facade 文件。
 
 ## 5. 决策流程
 

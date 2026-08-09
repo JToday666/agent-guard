@@ -107,7 +107,8 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - 多渠道审批。
 - 消融实验。
 - OpenClaw verify / E2E / reliability 报告已能写入 adapter status；后续需接入 CI 或发布脚本作为强制门禁。
-- Dashboard 新增后端能力的接入状态统一记录在 [`docs/TODO.md`](../TODO.md)；本文件只保留阶段路线和验收口径。
+- 当前已落地边界、明确冻结项和需要另行决策的后续工作统一记录在
+  [`docs/TODO.md`](../TODO.md)；本文件只保留阶段路线和验收口径。
 
 ## 8. 分工建议
 

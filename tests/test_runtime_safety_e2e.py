@@ -273,7 +273,7 @@ def _allow_code_execution_once(base_url: str) -> dict[str, Any]:
             pending_response = client.get("/v1/approvals/pending")
             pending_response.raise_for_status()
             for approval in pending_response.json():
-                if approval.get("tool") != "code_exec":
+                if approval.get("action_name") != "code_exec":
                     continue
                 response = client.post(
                     f"/v1/approvals/{approval['approval_id']}/resolve",

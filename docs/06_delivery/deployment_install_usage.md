@@ -26,27 +26,22 @@ pnpm install
 
 当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.9.0`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `aegis-agentguard-core`、`aegis-agentguard-api` 和 `aegis-agentguard-cli`。
 
-Beta 1 已于 2026-08-05 发布，可以从 PyPI 安装统一入口或独立组件：
+Beta 1 已于 2026-08-05 发布。按需要安装 Core、API 和 CLI 三个正式组件：
 
 ```bash
-pip install --pre aegis-agentguard
-pip install "aegis-agentguard[api]==0.1.0b1"
-pip install "aegis-agentguard[cli]==0.1.0b1"
-pip install "aegis-agentguard[all]==0.1.0b1"
-
 pip install aegis-agentguard-core==0.1.0b1
 pip install aegis-agentguard-api==0.1.0b1
 pip install aegis-agentguard-cli==0.1.0b1
 ```
 
-主包提供稳定门面：
+Core 的正式导入入口是：
 
 ```python
-from aegis_agentguard import GuardDecision, GuardEngine, GuardEvent, PolicyBundle, evaluate
+from agentguard_core import GuardDecision, GuardEngine, GuardEvent, PolicyBundle, evaluate
 ```
 
-组件级 import 保持为 `agentguard_core`、`guard_api` 和 `agentguard_cli`；console script 保持为
-`agentguard-api` 和 `agentguardctl`。本项目不提供顶层 `agentguard` Python 模块。
+组件 import 固定为 `agentguard_core`、`guard_api` 和 `agentguard_cli`；console script 保持为
+`agentguard-api` 和 `agentguardctl`。不再维护平行的安装元包或 Python 门面。
 
 准备本地配置：
 
