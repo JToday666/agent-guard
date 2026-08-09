@@ -11,8 +11,6 @@ from agentguard_core import (
     MemoryGuardChange,
     evaluate as core_evaluate,
 )
-from sqlalchemy.exc import IntegrityError
-
 from guard_api.models import (
     ApprovalRequest,
     EvaluationApproval,
@@ -71,11 +69,9 @@ class EvaluationService:
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
         request_digest = canonical_sha256(event.model_dump(mode="json"))
-        # 审批、memory change 和审计写入都属于一次评估的副作用。同 event_id
-        # 必须在副作用发生前串行化；Memory 使用进程锁，PostgreSQL 使用
-        # crash-safe session advisory lock。进入锁后重新读取，保证并发重试只
-        # 回放已经提交的权威结果，不创建孤立审批。
-        with self.audit_service.store.policy_evaluation_guard(event.event_id):
+        # 审批、memory change、审计与 provenance 是一次评估的原子结果。
+        # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
+        with self.audit_service.store.evaluation_transaction(event.event_id):
             replayed = self._replay_or_conflict(
                 self.audit_service.store.get_policy_evaluation_by_event_id(
                     event.event_id
@@ -113,38 +109,24 @@ class EvaluationService:
         approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(event, decision)
         # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
-        try:
-            audit_event = self.audit_service.record_evaluation(
-                event,
-                decision,
-                policy_bundle=bundle,
-                policy_revision=(
-                    snapshot_record.revision if snapshot_record is not None else None
-                ),
-                approval_id=approval.approval_id if approval is not None else None,
-                critic_review=critic_review,
-                memory_change_id=(
-                    memory_change.change_id if memory_change is not None else None
-                ),
-                extra_metadata={
-                    "request_digest": request_digest,
-                    "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
-                },
-                decision_dump=decision.model_dump(mode="json"),
-            )
-        except IntegrityError:
-            # 并发下同 event_id 的写入先入链（部分唯一索引冲突）：
-            # 重读并比较规范化请求摘要，同内容回放、异内容 409。
-            replayed = self._replay_or_conflict(
-                self.audit_service.store.get_policy_evaluation_by_event_id(
-                    event.event_id
-                ),
-                request_digest,
-                event.event_id,
-            )
-            if replayed is not None:
-                return replayed
-            raise
+        audit_event = self.audit_service.record_evaluation(
+            event,
+            decision,
+            policy_bundle=bundle,
+            policy_revision=(
+                snapshot_record.revision if snapshot_record is not None else None
+            ),
+            approval_id=approval.approval_id if approval is not None else None,
+            critic_review=critic_review,
+            memory_change_id=(
+                memory_change.change_id if memory_change is not None else None
+            ),
+            extra_metadata={
+                "request_digest": request_digest,
+                "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+            },
+            decision_dump=decision.model_dump(mode="json"),
+        )
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),

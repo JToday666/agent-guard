@@ -51,6 +51,9 @@ _ERROR_MESSAGES = {
     "COHORT_RANGE_INVALID": "The policy evaluation cohort range is invalid.",
     "REQUEST_TOO_LARGE": "Request body exceeds the configured size limit.",
     "EVALUATION_CONFLICT": "Evaluation conflicts with an existing result for the same event.",
+    "EVALUATION_RUN_CONFLICT": (
+        "Evaluation run ID is already bound to different immutable content."
+    ),
     "VALIDATION_ERROR": "Request validation failed.",
     "NOT_FOUND": "Resource was not found.",
     "METHOD_NOT_ALLOWED": "HTTP method is not allowed.",

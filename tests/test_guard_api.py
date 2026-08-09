@@ -2553,6 +2553,42 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
     ]
 
 
+def test_evaluation_runs_are_immutable_and_idempotent() -> None:
+    client = TestClient(
+        create_app(
+            store=memory_store_with_adapter(),
+            settings=GuardApiSettings(control_token="control-secret"),
+        )
+    )
+    headers = {"Authorization": "Bearer control-secret"}
+    original = {
+        "run_id": "eval_immutable",
+        "run_at": "2026-06-28T08:00:00+08:00",
+        "dataset_id": "attackbench",
+        "dataset_version": "v1",
+        "cases": [],
+    }
+
+    created = client.post("/v1/evaluations", headers=headers, json=original)
+    replayed = client.post("/v1/evaluations", headers=headers, json=original)
+    changed = client.post(
+        "/v1/evaluations",
+        headers=headers,
+        json={**original, "dataset_version": "v2"},
+    )
+
+    assert created.status_code == 200
+    assert replayed.status_code == 200
+    assert created.json() == replayed.json()
+    assert created.json()["run_at"] == "2026-06-28T00:00:00+00:00"
+    assert changed.status_code == 409
+    assert changed.json()["error"] == {
+        "code": "EVALUATION_RUN_CONFLICT",
+        "message": "Evaluation run ID is already bound to different immutable content.",
+        "details": {"run_id": "eval_immutable"},
+    }
+
+
 def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(store=MemoryControlPlaneStore(), settings=settings)

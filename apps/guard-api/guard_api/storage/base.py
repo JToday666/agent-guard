@@ -176,6 +176,14 @@ class PolicyRevisionConflictError(ValueError):
         )
 
 
+class EvaluationRunConflictError(ValueError):
+    """Raised when an immutable evaluation run ID is reused for new content."""
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+        super().__init__(run_id)
+
+
 def merge_provenance_node(
     existing: ProvenanceNode, incoming: ProvenanceNode
 ) -> ProvenanceNode:
@@ -336,7 +344,7 @@ class ControlPlaneStore(Protocol):
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
 
-    def policy_evaluation_guard(self, event_id: str) -> ContextManager[None]: ...
+    def evaluation_transaction(self, event_id: str) -> ContextManager[None]: ...
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
 

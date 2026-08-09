@@ -28,6 +28,7 @@ from agentguard_core import (
 )
 from agentguard_core.decisions import Decision
 from agentguard_core.events import GuardEventType, guard_event_raw_payload_contracts
+from guard_api.models import AdapterStatusRecord, EvaluationRun
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,6 +107,33 @@ def test_public_schemas_validate_target_models() -> None:
         },
         _load_schema("attack_case.schema.json"),
     )
+
+
+def test_operational_models_normalize_aware_timestamps_to_utc() -> None:
+    run = EvaluationRun(
+        run_id="eval_timezone",
+        run_at="2026-06-28T08:00:00+08:00",
+    )
+    status = AdapterStatusRecord(
+        last_verified_at="2026-06-28T08:01:00+08:00",
+        last_heartbeat_at="2026-06-28T08:02:00+08:00",
+    )
+
+    assert run.run_at == "2026-06-28T00:00:00+00:00"
+    assert status.last_verified_at == "2026-06-28T00:01:00+00:00"
+    assert status.last_heartbeat_at == "2026-06-28T00:02:00+00:00"
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (EvaluationRun, {"run_id": "eval_naive", "run_at": "2026-06-28T00:00:00"}),
+        (AdapterStatusRecord, {"last_heartbeat_at": "2026-06-28T00:00:00"}),
+    ],
+)
+def test_operational_models_reject_naive_timestamps(model, payload) -> None:
+    with pytest.raises(PydanticValidationError):
+        model.model_validate(payload)
 
 
 def test_core_models_reject_wrong_schema_version() -> None:

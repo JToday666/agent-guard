@@ -42,6 +42,7 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditWindowQuery,
+    EvaluationRunConflictError,
     classify_audit_record_type,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
@@ -472,6 +473,26 @@ def _thread_client(store) -> TestClient:
     return TestClient(create_app(store=thread_store, settings=_settings()))
 
 
+def test_contract_evaluation_run_is_immutable_and_idempotent(store) -> None:
+    run_id = f"eval_contract_{uuid4().hex}"
+    original = {
+        "run_id": run_id,
+        "run_at": "2026-06-28T08:00:00+08:00",
+        "dataset_id": "attackbench",
+        "dataset_version": "v1",
+        "cases": [],
+    }
+
+    created = store.save_evaluation_run(original)
+    replayed = store.save_evaluation_run(original)
+
+    assert created == replayed
+    assert created["run_at"] == "2026-06-28T00:00:00+00:00"
+    with pytest.raises(EvaluationRunConflictError):
+        store.save_evaluation_run({**original, "dataset_version": "v2"})
+    assert store.get_evaluation_run(run_id) == created
+
+
 def test_contract_concurrent_same_content_single_chain_entry(store) -> None:
     # 并发同 event_id 同内容：仅一条入链且全部响应回放同一 decision_id。
     run_id = uuid4().hex
@@ -554,6 +575,56 @@ def test_contract_concurrent_ask_creates_one_audit_and_one_approval(
     assert len(approvals) == 1
     assert approvals[0].resource == "sink@red-team.agentguard.local"
     assert audits[0].links["approval_id"] == approvals[0].approval_id
+
+
+def test_contract_failed_evaluation_rolls_back_all_persisted_facts(
+    store, monkeypatch
+) -> None:
+    run_id = uuid4().hex
+    event = GuardEvent.model_validate(
+        _guard_event_payload(
+            event_id=f"evt_rollback_{run_id}",
+            trace_id=f"trace_rollback_{run_id}",
+        )
+    )
+
+    def ask_decision(_event: GuardEvent, _bundle: PolicyBundle) -> GuardDecision:
+        return GuardDecision(
+            decision_id=f"dec_rollback_{run_id}",
+            decision="ask",
+            risk_score=72,
+            severity="high",
+            categories=["task_mismatch"],
+            rule_hits=[],
+            reason="Human approval is required.",
+            approval_intent=ApprovalIntent(options=["allow_once", "deny"], resource=""),
+        )
+
+    monkeypatch.setattr(evaluation_service_module, "core_evaluate", ask_decision)
+    audit_service = AuditService(store=store)
+    original_record = audit_service.record_evaluation
+
+    def fail_after_record(*args, **kwargs):
+        original_record(*args, **kwargs)
+        raise RuntimeError("injected failure after evidence materialization")
+
+    monkeypatch.setattr(audit_service, "record_evaluation", fail_after_record)
+    service = EvaluationService(
+        policy_service=PolicyService(store=store),
+        audit_service=audit_service,
+        approval_service=ApprovalService(store=store, settings=_settings()),
+    )
+
+    with pytest.raises(
+        RuntimeError, match="injected failure after evidence materialization"
+    ):
+        service.evaluate(event, requesting_principal_id="contract-adapter")
+
+    assert store.list_audit_events(AuditEventFilters(trace_id=event.trace_id)) == []
+    assert store.list_approvals(trace_id=event.trace_id) == []
+    assert store.list_action_critic_reviews(event.trace_id) == []
+    assert store.list_provenance(event.trace_id) == ([], [])
+    assert store.verify_audit_integrity().valid
 
 
 def test_contract_concurrent_different_content_exactly_one_conflict(store) -> None:

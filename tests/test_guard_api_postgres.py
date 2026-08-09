@@ -330,6 +330,44 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
                     )
                 ).all()
             )
+            adapter_columns = dict(
+                conn.execute(
+                    text(
+                        """
+                        SELECT column_name, data_type
+                        FROM information_schema.columns
+                        WHERE table_name = 'adapter_statuses'
+                        """
+                    )
+                ).all()
+            )
+            evaluation_columns = dict(
+                conn.execute(
+                    text(
+                        """
+                        SELECT column_name, data_type
+                        FROM information_schema.columns
+                        WHERE table_name = 'evaluation_runs'
+                        """
+                    )
+                ).all()
+            )
+            evidence_timestamp_types = dict(
+                conn.execute(
+                    text(
+                        """
+                        SELECT table_name, data_type
+                        FROM information_schema.columns
+                        WHERE column_name IN ('created_at', 'updated_at')
+                          AND table_name IN (
+                              'audit_integrity_heads', 'provenance_nodes',
+                              'provenance_edges', 'config_audit_findings',
+                              'action_critic_reviews'
+                          )
+                        """
+                    )
+                ).all()
+            )
             audit_columns = dict(
                 conn.execute(
                     text(
@@ -369,6 +407,48 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
                 .mappings()
                 .one()
             )
+            approval_projection = (
+                conn.execute(
+                    text(
+                        """
+                        SELECT trace_id, runtime, agent_id, subject_id, action_id
+                        FROM approval_requests
+                        WHERE approval_id = :approval_id
+                        """
+                    ),
+                    {"approval_id": approval_id},
+                )
+                .mappings()
+                .one()
+            )
+            adapter_projection = (
+                conn.execute(
+                    text(
+                        """
+                        SELECT status, loaded, runtime_id, agent_id
+                        FROM adapter_statuses
+                        WHERE adapter_id = 'openclaw'
+                        """
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            operational_indexes = set(
+                conn.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = current_schema()
+                          AND tablename IN (
+                              'approval_requests', 'adapter_statuses',
+                              'evaluation_runs', 'config_audit_findings'
+                          )
+                        """
+                    )
+                ).scalars()
+            )
             nonce_table = conn.execute(
                 text("SELECT to_regclass('public.approval_nonces')")
             ).scalar_one()
@@ -380,6 +460,20 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
         assert columns["created_at"] == "timestamp with time zone"
         assert columns["expires_at"] == "timestamp with time zone"
         assert columns["resolved_at"] == "timestamp with time zone"
+        assert columns["trace_id"] == "text"
+        assert columns["runtime"] == "text"
+        assert columns["agent_id"] == "text"
+        assert columns["subject_id"] == "text"
+        assert columns["action_id"] == "text"
+        assert adapter_columns["updated_at"] == "timestamp with time zone"
+        assert adapter_columns["last_heartbeat_at"] == "timestamp with time zone"
+        assert adapter_columns["loaded"] == "boolean"
+        assert evaluation_columns["run_at"] == "timestamp with time zone"
+        assert evaluation_columns["created_at"] == "timestamp with time zone"
+        assert evaluation_columns["dataset_id"] == "text"
+        assert evaluation_columns["dataset_version"] == "text"
+        assert evaluation_columns["regression_status"] == "text"
+        assert set(evidence_timestamp_types.values()) == {"timestamp with time zone"}
         assert "created_at" not in audit_columns
         assert audit_columns["occurred_at"] == "timestamp with time zone"
         assert audit_columns["ingested_at"] == "timestamp with time zone"
@@ -398,6 +492,23 @@ def test_postgres_migration_promotes_state_and_canonicalizes_json_contracts() ->
         assert audit_projection["decision_id"] == f"dec_{run_id}"
         assert audit_projection["is_malicious"] is True
         assert audit_projection["latency_ms"] == 17
+        assert dict(approval_projection) == {
+            "trace_id": trace_id,
+            "runtime": "langgraph",
+            "agent_id": "main",
+            "subject_id": subject_id,
+            "action_id": subject_id,
+        }
+        assert dict(adapter_projection) == {
+            "status": "loaded",
+            "loaded": True,
+            "runtime_id": "openclaw-gateway",
+            "agent_id": "main",
+        }
+        assert "ix_approval_requests_trace_created_at" in operational_indexes
+        assert "ix_adapter_statuses_runtime_agent" in operational_indexes
+        assert "ix_evaluation_runs_dataset_run_at" in operational_indexes
+        assert "ix_config_audit_findings_trace_id" in operational_indexes
         assert nonce_table is None
         assert approval is not None
         assert approval.status == "pending"

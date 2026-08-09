@@ -35,6 +35,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
     AuditTimestampError,
     ControlPlaneStore,
+    EvaluationRunConflictError,
     PolicyRevisionConflictError,
     ProvenanceConflictError,
 )
@@ -145,6 +146,16 @@ def create_app(
                 "expected_revision": exc.expected_revision,
                 "current_revision": exc.current_revision,
             },
+        )
+
+    @app.exception_handler(EvaluationRunConflictError)
+    async def evaluation_run_conflict_handler(
+        _: Request, exc: EvaluationRunConflictError
+    ) -> JSONResponse:
+        return error_response(
+            "EVALUATION_RUN_CONFLICT",
+            status_code=409,
+            details={"run_id": exc.run_id},
         )
 
     @app.exception_handler(RequestValidationError)

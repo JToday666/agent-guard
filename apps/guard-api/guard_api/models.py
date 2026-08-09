@@ -65,20 +65,23 @@ class ApprovalRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_lifecycle(self) -> Self:
-        created_at = _approval_timestamp(self.created_at, "created_at")
-        expires_at = _approval_timestamp(self.expires_at, "expires_at")
+        created_at = _rfc3339_timestamp(self.created_at, "created_at")
+        expires_at = _rfc3339_timestamp(self.expires_at, "expires_at")
         if expires_at <= created_at:
             raise ValueError("expires_at must be later than created_at")
         if self.status == "resolved":
             if self.decision is None or self.resolved_at is None:
                 raise ValueError("resolved approvals require decision and resolved_at")
-            _approval_timestamp(self.resolved_at, "resolved_at")
+            resolved_at = _rfc3339_timestamp(self.resolved_at, "resolved_at")
+            self.resolved_at = resolved_at.astimezone(timezone.utc).isoformat()
         elif self.resolved_at is not None:
             raise ValueError("only resolved approvals may include resolved_at")
         if self.status == "pending" and self.decision is not None:
             raise ValueError("pending approvals cannot include a decision")
         if self.status == "expired" and self.decision not in {None, "deny"}:
             raise ValueError("expired approvals may only derive a deny decision")
+        self.created_at = created_at.astimezone(timezone.utc).isoformat()
+        self.expires_at = expires_at.astimezone(timezone.utc).isoformat()
         return self
 
 
@@ -168,6 +171,7 @@ class EvaluationRun(BaseModel):
 
     @model_validator(mode="after")
     def fill_case_dataset_metadata(self) -> Self:
+        self.run_at = _utc_timestamp(self.run_at, "run_at")
         filled_cases: list[EvaluationCase] = []
         for case in self.cases:
             updates: dict[str, Any] = {}
@@ -212,6 +216,18 @@ class AdapterStatusRecord(BaseModel):
     hooks: list[str] = Field(default_factory=list)
     fail_closed_stages: list[str] = Field(default_factory=list)
     enforcement_mode: Literal["enforce", "observe", "disabled"] | None = None
+
+    @model_validator(mode="after")
+    def normalize_timestamps(self) -> Self:
+        if self.last_verified_at is not None:
+            self.last_verified_at = _utc_timestamp(
+                self.last_verified_at, "last_verified_at"
+            )
+        if self.last_heartbeat_at is not None:
+            self.last_heartbeat_at = _utc_timestamp(
+                self.last_heartbeat_at, "last_heartbeat_at"
+            )
+        return self
 
 
 class CredentialRecord(BaseModel):
@@ -265,13 +281,14 @@ class CredentialCreateRequest(BaseModel):
     def validate_expiry(self) -> Self:
         if self.expires_at is None:
             return self
-        expires_at = _approval_timestamp(self.expires_at, "expires_at")
+        expires_at = _rfc3339_timestamp(self.expires_at, "expires_at")
         if expires_at <= datetime.now(timezone.utc):
             raise ValueError("expires_at must be in the future")
+        self.expires_at = expires_at.astimezone(timezone.utc).isoformat()
         return self
 
 
-def _approval_timestamp(value: str, field_name: str) -> datetime:
+def _rfc3339_timestamp(value: str, field_name: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
@@ -279,3 +296,7 @@ def _approval_timestamp(value: str, field_name: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError(f"{field_name} must include a timezone")
     return parsed
+
+
+def _utc_timestamp(value: str, field_name: str) -> str:
+    return _rfc3339_timestamp(value, field_name).astimezone(timezone.utc).isoformat()

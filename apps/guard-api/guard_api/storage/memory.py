@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any, Callable, Iterator
 
 from agentguard_core import (
@@ -34,6 +35,7 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    EvaluationRunConflictError,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
@@ -73,11 +75,14 @@ class MemoryControlPlaneStore:
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     audit_clock: Callable[[], datetime] = field(default=_system_utc_now, repr=False)
-    audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
-    provenance_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    audit_integrity_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    provenance_lock: Any = field(default_factory=RLock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    evaluation_run_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
-    approval_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    approval_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    memory_change_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    action_critic_lock: Any = field(default_factory=RLock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
     audit_ingested_at_by_id: dict[str, datetime] = field(default_factory=dict)
 
@@ -165,18 +170,47 @@ class MemoryControlPlaneStore:
         return None
 
     @contextmanager
-    def policy_evaluation_guard(self, event_id: str) -> Iterator[None]:
-        """Serialize evaluation side effects before the policy audit is committed.
-
-        The in-memory backend deliberately uses one process-wide evaluation lock.
-        Evaluation throughput is not a local-test bottleneck, and the simple lock
-        keeps approval, memory-change and audit creation consistent with the
-        PostgreSQL per-event advisory lock.
-        """
+    def evaluation_transaction(self, event_id: str) -> Iterator[None]:
+        """Atomically apply one evaluation to the in-memory reference store."""
 
         del event_id
-        with self.policy_evaluation_lock:
-            yield
+        with (
+            self.policy_evaluation_lock,
+            self.audit_integrity_lock,
+            self.provenance_lock,
+            self.approval_lock,
+            self.memory_change_lock,
+            self.action_critic_lock,
+        ):
+            snapshot = {
+                "audit_events": deepcopy(self.audit_events),
+                "audit_events_by_id": deepcopy(self.audit_events_by_id),
+                "audit_ingested_at_by_id": deepcopy(self.audit_ingested_at_by_id),
+                "provenance_nodes": deepcopy(self.provenance_nodes),
+                "provenance_edges": deepcopy(self.provenance_edges),
+                "approvals": deepcopy(self.approvals),
+                "memory_changes": deepcopy(self.memory_changes),
+                "action_critic_reviews": deepcopy(self.action_critic_reviews),
+            }
+            try:
+                yield
+            except BaseException:
+                self.audit_events[:] = snapshot["audit_events"]
+                self.audit_events_by_id.clear()
+                self.audit_events_by_id.update(snapshot["audit_events_by_id"])
+                self.audit_ingested_at_by_id.clear()
+                self.audit_ingested_at_by_id.update(snapshot["audit_ingested_at_by_id"])
+                self.provenance_nodes.clear()
+                self.provenance_nodes.update(snapshot["provenance_nodes"])
+                self.provenance_edges.clear()
+                self.provenance_edges.update(snapshot["provenance_edges"])
+                self.approvals.clear()
+                self.approvals.update(snapshot["approvals"])
+                self.memory_changes.clear()
+                self.memory_changes.update(snapshot["memory_changes"])
+                self.action_critic_reviews.clear()
+                self.action_critic_reviews.update(snapshot["action_critic_reviews"])
+                raise
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         with self.provenance_lock:
@@ -275,8 +309,15 @@ class MemoryControlPlaneStore:
         self, run: EvaluationRun | dict[str, Any]
     ) -> dict[str, Any]:
         payload = EvaluationRun.model_validate(run).model_dump(mode="json")
-        self.evaluation_runs[payload["run_id"]] = payload
-        return payload
+        run_id = payload["run_id"]
+        with self.evaluation_run_lock:
+            existing = self.evaluation_runs.get(run_id)
+            if existing is not None:
+                if existing == payload:
+                    return dict(existing)
+                raise EvaluationRunConflictError(run_id)
+            self.evaluation_runs[run_id] = payload
+        return dict(payload)
 
     def get_latest_evaluation_run(self) -> dict[str, Any] | None:
         if not self.evaluation_runs:
@@ -350,33 +391,38 @@ class MemoryControlPlaneStore:
     def add_action_critic_review(
         self, review: ActionCriticReview
     ) -> ActionCriticReview:
-        self.action_critic_reviews[review.review_id] = review
-        return review
+        with self.action_critic_lock:
+            self.action_critic_reviews[review.review_id] = review
+            return review
 
     def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]:
-        reviews = [
-            review
-            for review in self.action_critic_reviews.values()
-            if review.trace_id == trace_id
-        ]
+        with self.action_critic_lock:
+            reviews = [
+                review
+                for review in self.action_critic_reviews.values()
+                if review.trace_id == trace_id
+            ]
         return sorted(reviews, key=lambda review: (review.created_at, review.review_id))
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
-        self.memory_changes[change.change_id] = change
-        return change
+        with self.memory_change_lock:
+            self.memory_changes[change.change_id] = change
+            return change
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
-        return self.memory_changes.get(change_id)
+        with self.memory_change_lock:
+            return self.memory_changes.get(change_id)
 
     def update_memory_change_status(
         self, change_id: str, status: str
     ) -> MemoryGuardChange:
-        current = self.memory_changes[change_id]
-        updated = current.model_copy(
-            update={"status": status, "updated_at": utc_now_iso()}
-        )
-        self.memory_changes[change_id] = updated
-        return updated
+        with self.memory_change_lock:
+            current = self.memory_changes[change_id]
+            updated = current.model_copy(
+                update={"status": status, "updated_at": utc_now_iso()}
+            )
+            self.memory_changes[change_id] = updated
+            return updated
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         if self.policy_snapshot is None:
