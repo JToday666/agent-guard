@@ -329,6 +329,9 @@ Dashboard 必须帮助用户快速回答：
 
 - `valid: true` 显示“审计链有效”。
 - `valid: false` 显示“审计链异常”，并在可用时定位首个异常审计。
+- 数据库链状态与外部锚点状态必须分行表达，不能合并成一个 badge。外部锚点 `current` 显示“已同步”，`stale` 显示未锚定事件数，`invalid` 与 `error` 使用异常状态；`disabled` 必须明确显示“未配置”，不能伪装为成功。
+- `stale` 只表示签名检查点落后于当前链头，不得改写为审计链异常；`invalid` 表示签名、检查点链或数据库绑定不一致，必须持续可见。
+- 系统状态页可展示 JCS 规范化方法、检查点序号、签名检查点哈希、最近锚定时间和非秘密 key ID；不得展示 HMAC 密钥或原始签名材料。
 - 尚无结果显示“未验证”或“暂无完整性数据”，不得显示为有效。
 - 溯源图可用性不等同于审计链完整性。
 - 单条事件的链位置只读取 `AuditEvent.integrity.sequence`、`prev_hash`、`event_hash` 和 `canonicalization`；不得在前端维护 `evidence.audit`、`chain_index`、`entry_hash` 或 `previous_hash` 等平行字段。

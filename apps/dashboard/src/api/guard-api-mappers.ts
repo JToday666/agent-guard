@@ -439,12 +439,39 @@ export function mapPolicySummary(
 
 export function mapAuditIntegrity(dto: GuardAuditIntegrityDto): AuditIntegrity {
   const integrity = readRecord(dto);
+  const anchor = readRecord(integrity.anchor);
   return {
     valid: readBoolean(integrity.valid),
     eventCount: readNumber(integrity.event_count),
     headHash: readString(integrity.head_hash),
     firstBrokenAuditId: readString(integrity.first_broken_audit_id),
+    canonicalization: dto.canonicalization,
+    anchor: {
+      enabled: readBoolean(anchor.enabled),
+      status: readAuditAnchorStatus(anchor.status),
+      checkpointSequence: readNullableNumber(anchor.checkpoint_sequence),
+      checkpointHeadHash: readString(anchor.checkpoint_head_hash),
+      checkpointHash: readString(anchor.checkpoint_hash),
+      checkpointedAt: readString(anchor.checkpointed_at),
+      lag: readNullableNumber(anchor.lag),
+      keyId: readString(anchor.key_id),
+      errorCode: readString(anchor.error_code),
+    },
   };
+}
+
+function readAuditAnchorStatus(value: unknown): AuditIntegrity["anchor"]["status"] {
+  if (
+    value === "disabled" ||
+    value === "empty" ||
+    value === "current" ||
+    value === "stale" ||
+    value === "invalid" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return "error";
 }
 
 export function mapConfigAuditFindingRecord(

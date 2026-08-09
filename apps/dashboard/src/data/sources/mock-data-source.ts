@@ -281,8 +281,20 @@ const mockPolicyHistory: GuardPolicyHistoryDto[] = [
 const mockAuditIntegrity: GuardAuditIntegrityDto = {
   valid: true,
   event_count: fixtureEvents.length,
-  head_hash: "a3f9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+  head_hash: "a".repeat(64),
   first_broken_audit_id: null,
+  canonicalization: "jcs:rfc8785",
+  anchor: {
+    enabled: true,
+    status: "current",
+    checkpoint_sequence: fixtureEvents.length,
+    checkpoint_head_hash: "a".repeat(64),
+    checkpoint_hash: "b".repeat(64),
+    checkpointed_at: "2026-06-28T08:30:00Z",
+    lag: 0,
+    key_id: "dashboard-demo-2026",
+    error_code: null,
+  },
 };
 
 function createMockApprovalDtos(): GuardApprovalDto[] {

@@ -187,6 +187,20 @@ export interface GuardAuditIntegrityDto {
   event_count: number;
   head_hash: string | null;
   first_broken_audit_id: string | null;
+  canonicalization: "jcs:rfc8785";
+  anchor: GuardAuditAnchorDto;
+}
+
+export interface GuardAuditAnchorDto {
+  enabled: boolean;
+  status: "disabled" | "empty" | "current" | "stale" | "invalid" | "error";
+  checkpoint_sequence: number | null;
+  checkpoint_head_hash: string | null;
+  checkpoint_hash: string | null;
+  checkpointed_at: string | null;
+  lag: number | null;
+  key_id: string | null;
+  error_code: string | null;
 }
 
 export interface GuardConfigAuditFindingDto {

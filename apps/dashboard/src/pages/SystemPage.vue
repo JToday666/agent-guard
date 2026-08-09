@@ -106,17 +106,31 @@
         </div>
       </header>
       <template v-if="store.auditIntegrity">
-        <div class="integrity-status">
-          <span
-            class="status-dot"
-            :class="`status-dot--${store.auditIntegrity.valid ? 'success' : 'danger'}`"
-            aria-hidden="true"
-          ></span>
-          <StatusBadge
-            :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'"
-            :tone="store.auditIntegrity.valid ? 'success' : 'danger'"
-          />
-          <span class="integrity-count">{{ store.auditIntegrity.eventCount }} 条审计事件</span>
+        <div class="integrity-statuses">
+          <div class="integrity-status">
+            <span
+              class="status-dot"
+              :class="`status-dot--${store.auditIntegrity.valid ? 'success' : 'danger'}`"
+              aria-hidden="true"
+            ></span>
+            <StatusBadge
+              :label="store.auditIntegrity.valid ? '审计链有效' : '审计链异常'"
+              :tone="store.auditIntegrity.valid ? 'success' : 'danger'"
+            />
+            <span class="integrity-count">{{ store.auditIntegrity.eventCount }} 条审计事件</span>
+          </div>
+          <div class="integrity-status">
+            <span
+              class="status-dot"
+              :class="`status-dot--${auditAnchorPresentation.tone}`"
+              aria-hidden="true"
+            ></span>
+            <StatusBadge
+              :label="auditAnchorPresentation.label"
+              :tone="auditAnchorPresentation.tone"
+            />
+            <span class="integrity-count">{{ auditAnchorPresentation.detail }}</span>
+          </div>
         </div>
         <dl class="integrity-detail">
           <div>
@@ -126,6 +140,30 @@
                 formatAuditHeadHash(store.auditIntegrity.headHash)
               }}</code>
             </dd>
+          </div>
+          <div>
+            <dt>规范化方法</dt>
+            <dd>JCS（RFC 8785）</dd>
+          </div>
+          <div v-if="store.auditIntegrity.anchor.checkpointSequence !== null">
+            <dt>外部检查点序号</dt>
+            <dd>{{ store.auditIntegrity.anchor.checkpointSequence }}</dd>
+          </div>
+          <div v-if="store.auditIntegrity.anchor.checkpointHash">
+            <dt>签名检查点哈希</dt>
+            <dd>
+              <code class="hash-short">{{
+                formatAuditHeadHash(store.auditIntegrity.anchor.checkpointHash)
+              }}</code>
+            </dd>
+          </div>
+          <div v-if="store.auditIntegrity.anchor.checkpointedAt">
+            <dt>最近锚定</dt>
+            <dd>{{ formatTime(store.auditIntegrity.anchor.checkpointedAt) }}</dd>
+          </div>
+          <div v-if="store.auditIntegrity.anchor.keyId">
+            <dt>签名密钥标识</dt>
+            <dd>{{ store.auditIntegrity.anchor.keyId }}</dd>
           </div>
           <div v-if="store.auditIntegrity.firstBrokenAuditId">
             <dt>首个异常审计</dt>
@@ -363,6 +401,54 @@ const statusItems = computed(() => [
   },
 ]);
 
+const auditAnchorPresentation = computed<{
+  detail: string;
+  label: string;
+  tone: StatusBadgeTone;
+}>(() => {
+  const anchor = store.auditIntegrity?.anchor;
+  if (!anchor || anchor.status === "disabled") {
+    return {
+      detail: "未启用数据库外检查点",
+      label: "外部锚点未配置",
+      tone: "neutral",
+    };
+  }
+  if (anchor.status === "empty") {
+    return {
+      detail: anchor.lag ? `等待锚定 ${anchor.lag} 条审计事件` : "尚无可锚定的审计事件",
+      label: "等待首个检查点",
+      tone: "warning",
+    };
+  }
+  if (anchor.status === "current") {
+    return {
+      detail: "已认证当前审计链头",
+      label: "外部锚点已同步",
+      tone: "success",
+    };
+  }
+  if (anchor.status === "stale") {
+    return {
+      detail: `还有 ${anchor.lag ?? 0} 条审计事件未锚定`,
+      label: "存在未锚定尾部",
+      tone: "warning",
+    };
+  }
+  if (anchor.status === "invalid") {
+    return {
+      detail: "签名检查点与审计链不一致",
+      label: "外部锚点异常",
+      tone: "danger",
+    };
+  }
+  return {
+    detail: "检查点文件暂不可验证",
+    label: "外部锚点不可用",
+    tone: "danger",
+  };
+});
+
 const adapterStatusTone = computed<StatusBadgeTone>(() => {
   if (store.openclawStatus.status === "loaded" && store.openclawStatus.loaded) return "success";
   if (store.openclawStatus.status === "error") return "danger";
@@ -565,6 +651,10 @@ function handleRefresh() {
 .integrity-status {
   align-items: center;
   display: flex;
+  gap: var(--space-3);
+}
+.integrity-statuses {
+  display: grid;
   gap: var(--space-3);
 }
 .integrity-count {

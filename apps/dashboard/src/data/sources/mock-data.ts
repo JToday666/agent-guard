@@ -727,7 +727,7 @@ function buildRawAudit(
           : undefined,
     },
     integrity: {
-      canonicalization: "json:v1",
+      canonicalization: "jcs:rfc8785",
       event_hash: auditHash(index + 1),
       prev_hash: index ? auditHash(index) : null,
       sequence: index + 1,

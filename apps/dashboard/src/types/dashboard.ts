@@ -502,6 +502,20 @@ export interface AuditIntegrity {
   eventCount: number;
   headHash: string | null;
   firstBrokenAuditId: string | null;
+  canonicalization: "jcs:rfc8785";
+  anchor: AuditAnchor;
+}
+
+export interface AuditAnchor {
+  enabled: boolean;
+  status: "disabled" | "empty" | "current" | "stale" | "invalid" | "error";
+  checkpointSequence: number | null;
+  checkpointHeadHash: string | null;
+  checkpointHash: string | null;
+  checkpointedAt: string | null;
+  lag: number | null;
+  keyId: string | null;
+  errorCode: string | null;
 }
 
 export interface ConfigAuditFinding {

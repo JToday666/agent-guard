@@ -36,7 +36,7 @@ const eventDto = {
     sequence: 1,
     prev_hash: null,
     event_hash: "hash_api",
-    canonicalization: "json:v1",
+    canonicalization: "jcs:rfc8785",
   },
   metadata: {
     action_name: "send_email",
@@ -213,8 +213,20 @@ async function installApiRoutes(
         json: {
           valid: true,
           event_count: 1,
-          head_hash: "hash_api",
+          head_hash: "a".repeat(64),
           first_broken_audit_id: null,
+          canonicalization: "jcs:rfc8785",
+          anchor: {
+            enabled: true,
+            status: "current",
+            checkpoint_sequence: 1,
+            checkpoint_head_hash: "a".repeat(64),
+            checkpoint_hash: "b".repeat(64),
+            checkpointed_at: "2026-06-28T08:00:00Z",
+            lag: 0,
+            key_id: "api-test-2026",
+            error_code: null,
+          },
         },
       });
     }
@@ -641,7 +653,7 @@ test("API mode renders every supported guard stage once and groups one tool life
     decision: "allow",
     event_type: eventType,
     integrity: {
-      canonicalization: "json:v1",
+      canonicalization: "jcs:rfc8785",
       event_hash: `hash_matrix_${index}`,
       prev_hash: index === 1 ? null : `hash_matrix_${index - 1}`,
       sequence: index,
@@ -674,7 +686,7 @@ test("API mode renders every supported guard stage once and groups one tool life
       decision: null,
       event_type: "trace_completed",
       integrity: {
-        canonicalization: "json:v1",
+        canonicalization: "jcs:rfc8785",
         event_hash: "hash_matrix_terminal",
         prev_hash: "hash_matrix_7",
         sequence: 8,
@@ -733,7 +745,7 @@ test("API mode keeps a large execution trace navigable without rendering every o
       blocked: false,
       decision: "allow",
       integrity: {
-        canonicalization: "json:v1",
+        canonicalization: "jcs:rfc8785",
         event_hash: `hash_large_${index}`,
         prev_hash: index === 1 ? null : `hash_large_${index - 1}`,
         sequence: index,

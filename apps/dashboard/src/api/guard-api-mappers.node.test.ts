@@ -48,7 +48,7 @@ test("maps Guard API audit evidence without inventing missing fields", () => {
       event_id: "event_1",
     },
     integrity: {
-      canonicalization: "json:v1",
+      canonicalization: "jcs:rfc8785",
       event_hash: "hash_1",
       prev_hash: null,
       sequence: 41,
@@ -477,6 +477,18 @@ test("maps an empty audit integrity chain with a null head hash", () => {
     event_count: 0,
     head_hash: null,
     first_broken_audit_id: null,
+    canonicalization: "jcs:rfc8785",
+    anchor: {
+      enabled: false,
+      status: "disabled",
+      checkpoint_sequence: null,
+      checkpoint_head_hash: null,
+      checkpoint_hash: null,
+      checkpointed_at: null,
+      lag: null,
+      key_id: null,
+      error_code: null,
+    },
   };
 
   assert.deepEqual(mapAuditIntegrity(dto), {
@@ -484,6 +496,18 @@ test("maps an empty audit integrity chain with a null head hash", () => {
     eventCount: 0,
     headHash: null,
     firstBrokenAuditId: null,
+    canonicalization: "jcs:rfc8785",
+    anchor: {
+      enabled: false,
+      status: "disabled",
+      checkpointSequence: null,
+      checkpointHeadHash: null,
+      checkpointHash: null,
+      checkpointedAt: null,
+      lag: null,
+      keyId: null,
+      errorCode: null,
+    },
   });
 });
 

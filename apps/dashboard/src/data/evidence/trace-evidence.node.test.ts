@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { AuditEventRow } from "../../types/dashboard";
+import type { AuditEventRow, AuditIntegrity } from "../../types/dashboard";
 import { approvals, auditEvents } from "../sources/mock-data.ts";
 import { buildTraceEvidenceViewModel } from "./trace-evidence.ts";
 
-const integrity = {
+const integrity: AuditIntegrity = {
+  anchor: {
+    checkpointHash: "b".repeat(64),
+    checkpointHeadHash: "a".repeat(64),
+    checkpointSequence: auditEvents.length,
+    checkpointedAt: "2026-06-28T08:30:00Z",
+    enabled: true,
+    errorCode: null,
+    keyId: "test-key-2026",
+    lag: 0,
+    status: "current",
+  },
+  canonicalization: "jcs:rfc8785",
   eventCount: auditEvents.length,
   firstBrokenAuditId: null,
   headHash: "hash",
@@ -139,7 +151,7 @@ test("reads only the canonical AuditEvent integrity metadata", () => {
   raw.entry_hash = "deprecated-root-entry";
   raw.previous_hash = "deprecated-root-previous";
   raw.integrity = {
-    canonicalization: "json:v1",
+    canonicalization: "jcs:rfc8785",
     event_hash: "canonical-entry",
     prev_hash: "canonical-previous",
     sequence: 42,
