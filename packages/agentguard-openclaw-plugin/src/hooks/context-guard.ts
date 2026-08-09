@@ -160,13 +160,13 @@ function currentInputOnly(event: JsonObject): JsonObject {
         ? "trusted"
         : senderIsOwner === false
           ? "untrusted"
-          : (event.sourceTrust ?? event.source_trust ?? "trusted"),
+          : (event.sourceTrust ?? event.source_trust ?? "untrusted"),
     sourceType:
       senderIsOwner === true
         ? "user"
         : senderIsOwner === false
           ? "external_user"
-          : (event.sourceType ?? event.source_type ?? "user"),
+          : (event.sourceType ?? event.source_type ?? "unknown"),
   };
 }
 

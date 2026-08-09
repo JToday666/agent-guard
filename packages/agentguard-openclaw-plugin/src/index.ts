@@ -47,7 +47,6 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       makeClient,
       sessionState: new Map<string, SessionState>(),
       toolCallState: new Map<string, ToolCallState>(),
-      finalizeRevisionKeys: new Set<string>(),
     };
 
     scheduleHeartbeat(config, makeClient, PLUGIN_VERSION);

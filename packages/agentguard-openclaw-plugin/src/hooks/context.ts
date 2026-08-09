@@ -13,5 +13,4 @@ export type HookContext = {
   makeClient: () => GuardApiClient;
   sessionState: Map<string, SessionState>;
   toolCallState: Map<string, ToolCallState>;
-  finalizeRevisionKeys: Set<string>;
 };

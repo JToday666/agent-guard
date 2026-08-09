@@ -99,10 +99,16 @@ export function containsInstructionLikeText(value: string): boolean {
     /never\s+(mention|reveal|tell)|hide\s+this\s+rule|do\s+not\s+mention\s+this\s+rule/i.test(
       value,
     ) ||
-    /identityverify|market-segment-submit|support-profile-confirm|managed-device\s+support\s+profile/i.test(
+    /follow\s+these\s+instructions\s+instead|treat\s+this\s+content\s+as\s+a\s+system\s+message/i.test(
       value,
     ) ||
-    /lead-verification-relax|reduce\s+verification\s+controls|weaken\s+verification/i.test(
+    /bypass\s+verification|disable\s+verification|skip\s+verification|reduce\s+verification\s+controls/i.test(
+      value,
+    ) ||
+    /weaken\s+security\s+controls|disable\s+security\s+controls|override\s+approval/i.test(
+      value,
+    ) ||
+    /apply\s+(a\s+)?configuration\s+change|change\s+account\s+settings|grant\s+administrator\s+access/i.test(
       value,
     )
   );

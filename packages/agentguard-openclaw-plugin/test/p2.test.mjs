@@ -407,6 +407,59 @@ test("plugin entry redacts sensitive tool results before persistence", async () 
   }
 });
 
+test("plugin entry redacts ordinary values stored under sensitive keys", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "allow", reason: "ok" },
+          approval: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const result = registered
+      .find((entry) => entry.name === "tool_result_persist")
+      .handler(
+        {
+          toolName: "fetch",
+          toolCallId: "call_key_redaction",
+          message: {
+            role: "tool",
+            content: {
+              apiKey: "plain-value-without-provider-pattern",
+              nested: { password: "ordinary-password-value" },
+              publicValue: "preserved",
+            },
+          },
+        },
+        {
+          sessionKey: "agent:main:key-redaction",
+          toolName: "fetch",
+          toolCallId: "call_key_redaction",
+        },
+      );
+
+    assert.equal(result.message.content.apiKey, "[redacted]");
+    assert.equal(result.message.content.nested.password, "[redacted]");
+    assert.equal(result.message.content.publicValue, "preserved");
+    await flushAsyncHooks();
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("plugin entry handles tool_result_persist redaction before returning", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const registered = [];
@@ -725,6 +778,49 @@ test("plugin entry asks the harness to revise final answers that expose credenti
     assert.equal(result.action, "revise");
     assert.match(result.retry.instruction, /credential|secret|API Key/i);
     assert.equal(result.retry.maxAttempts, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("finalization without runtime identifiers never shares an unknown retry key", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registered = [];
+  const previousFetch = globalThis.fetch;
+
+  try {
+    plugin.register({
+      pluginConfig: config,
+      on(name, handler, options) {
+        registered.push({ name, handler, options });
+      },
+    });
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          decision: { decision: "allow", reason: "ok" },
+          approval: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const handler = registered.find(
+      (entry) => entry.name === "before_agent_finalize",
+    ).handler;
+    const first = await handler(
+      { lastAssistantMessage: "Key: sk-first-secret-value" },
+      {},
+    );
+    const second = await handler(
+      { lastAssistantMessage: "Key: sk-second-secret-value" },
+      {},
+    );
+
+    assert.equal(first.action, "revise");
+    assert.equal(second.action, "revise");
+    assert.equal(first.retry.idempotencyKey.includes("unknown"), false);
+    assert.equal(second.retry.idempotencyKey.includes("unknown"), false);
+    assert.notEqual(first.retry.idempotencyKey, second.retry.idempotencyKey);
   } finally {
     globalThis.fetch = previousFetch;
   }
