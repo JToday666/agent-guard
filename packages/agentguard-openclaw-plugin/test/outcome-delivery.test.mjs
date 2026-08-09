@@ -24,7 +24,7 @@ const config = {
   agentId: "main",
 };
 
-function receipt(auditId = "audit_outcome_001") {
+function receipt(auditId = "audit_outcome_event_001_pre_execution_deny") {
   return {
     audit_id: auditId,
     schema_version: "0.4",
@@ -36,13 +36,49 @@ function receipt(auditId = "audit_outcome_001") {
     event_type: "runtime_outcome",
     summary: "Tool execution blocked",
     decision: "deny",
-    risk_score: 0.9,
+    risk_score: 90,
     severity: "high",
     blocked: true,
+    resource_targets: [],
+    rule_hits: [],
     reason: "Blocked by policy",
     links: {
       event_id: "event_001",
+      decision_id: "decision_001",
       policy_audit_id: "audit_policy_001",
+    },
+    latency_ms: null,
+    metadata: {
+      agent_id: "main",
+      outcome_kind: "pre_execution_deny",
+    },
+    evidence: {
+      intervention: { type: "policy_deny", reason: "Blocked by policy" },
+      execution: {
+        status: "not_invoked",
+        receipt_recorded: true,
+        invoked_at: null,
+        completed_at: "2026-08-09T00:00:00.000Z",
+        error: null,
+        tool_result_entered_context: false,
+        persisted: false,
+      },
+      side_effects: {
+        measurement_status: "measured",
+        count: 0,
+        summary: "Tool was not invoked",
+      },
+      result: {
+        disposition: "not_applicable",
+        summary: null,
+        sanitized: false,
+      },
+      approval: {
+        approval_id: null,
+        status: "not_required",
+        decision: null,
+        resolved_at: null,
+      },
     },
   };
 }
@@ -69,7 +105,11 @@ test("runtime outcome delivery persists before submitting and removes on success
     const client = {
       async submitRuntimeOutcome() {
         pendingDuringSubmit = (await pendingFiles(spoolDirectory)).length;
-        return { ok: true, audit_id: "audit_outcome_001", created: true };
+        return {
+          ok: true,
+          audit_id: "audit_outcome_event_001_pre_execution_deny",
+          created: true,
+        };
       },
     };
     const delivery = new RuntimeOutcomeDelivery({
@@ -128,7 +168,10 @@ test("runtime outcome delivery retries a persisted receipt after restart", async
 
     await recoveredDelivery.drain();
 
-    assert.equal(deliveredAuditId, "audit_outcome_001");
+    assert.equal(
+      deliveredAuditId,
+      "audit_outcome_event_001_pre_execution_deny",
+    );
     assert.deepEqual(await pendingFiles(spoolDirectory), []);
   });
 });

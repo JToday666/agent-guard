@@ -15,6 +15,7 @@ from .decisions import (
     DecisionEffect,
     DecisionEnforcement,
     GuardDecision,
+    RuntimeOutcomeReceipt,
     RuleHit,
 )
 from .engine import GuardEngine, evaluate
@@ -64,6 +65,7 @@ __all__ = [
     "GuardDecision",
     "GuardEngine",
     "GuardEvent",
+    "RuntimeOutcomeReceipt",
     "MemoryEventPayload",
     "MemoryGuardChange",
     "MemoryRecord",

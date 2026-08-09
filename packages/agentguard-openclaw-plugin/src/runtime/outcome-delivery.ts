@@ -17,7 +17,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { logDiagnostic, type GuardApiClient } from "../guard-api-client.js";
-import type { AgentGuardPluginConfig, AuditEvent } from "../types.js";
+import type {
+  AgentGuardPluginConfig,
+  RuntimeOutcomeReceipt,
+} from "../types.js";
 import { unrefTimer } from "./heartbeat.js";
 
 const SPOOL_VERSION = 1;
@@ -32,7 +35,7 @@ const MAX_SPOOL_BYTES = 64 * 1024 * 1024;
 
 type OutcomeEnvelope = {
   version: typeof SPOOL_VERSION;
-  receipt: AuditEvent;
+  receipt: RuntimeOutcomeReceipt;
   createdAt: number;
   attempts: number;
   nextAttemptAt: number;
@@ -92,7 +95,7 @@ export class RuntimeOutcomeDelivery {
   }
 
   submit(
-    receipt: AuditEvent,
+    receipt: RuntimeOutcomeReceipt,
     client: GuardApiClient,
     logLabel: string,
   ): Promise<void> {
@@ -169,7 +172,7 @@ export class RuntimeOutcomeDelivery {
     }
   }
 
-  private persistNew(receipt: AuditEvent): string {
+  private persistNew(receipt: RuntimeOutcomeReceipt): string {
     ensureSpoolDirectory(this.spoolDirectory);
     const key = receiptKey(receipt.audit_id!);
     const path = join(this.spoolDirectory, key);
@@ -296,12 +299,18 @@ export class RuntimeOutcomeDelivery {
   }
 }
 
-function validateReceipt(receipt: AuditEvent): void {
+function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
+  const expectedAuditId = `audit_outcome_${receipt.links?.event_id}_${receipt.metadata?.outcome_kind}`;
   if (
     receipt.schema_version !== "0.4" ||
     receipt.record_type !== "runtime_outcome" ||
-    typeof receipt.audit_id !== "string" ||
-    receipt.audit_id.length === 0
+    receipt.event_type !== "runtime_outcome" ||
+    receipt.audit_id !== expectedAuditId ||
+    !receipt.links?.decision_id ||
+    !receipt.links?.policy_audit_id ||
+    !receipt.metadata?.agent_id ||
+    !receipt.metadata?.outcome_kind ||
+    receipt.evidence?.execution?.receipt_recorded !== true
   ) {
     throw new Error("runtime outcome receipt is missing its strict identity");
   }

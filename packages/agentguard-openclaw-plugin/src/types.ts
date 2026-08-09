@@ -257,6 +257,56 @@ export type AuditEvent = {
   evidence?: JsonObject;
 };
 
+export type RuntimeReceiptKind =
+  | "pre_execution_deny"
+  | "approval_release"
+  | "tool_result_modified"
+  | "tool_result_quarantined"
+  | "execution_completed"
+  | "execution_failed";
+
+export type RuntimeOutcomeReceipt = Omit<
+  AuditEvent,
+  | "record_type"
+  | "event_type"
+  | "decision"
+  | "risk_score"
+  | "severity"
+  | "blocked"
+  | "links"
+  | "latency_ms"
+  | "metadata"
+  | "evidence"
+> & {
+  audit_id: string;
+  record_type: "runtime_outcome";
+  event_type: "runtime_outcome";
+  decision: "allow" | "deny" | "ask";
+  risk_score: number;
+  severity: "low" | "medium" | "high" | "critical";
+  blocked: boolean;
+  links: {
+    event_id: string;
+    decision_id: string;
+    policy_audit_id: string;
+    action_id?: string;
+    approval_id?: string;
+    parent_audit_id?: string;
+  };
+  latency_ms: null;
+  metadata: {
+    agent_id: string;
+    outcome_kind: RuntimeReceiptKind;
+  };
+  evidence: {
+    intervention: JsonObject;
+    execution: JsonObject;
+    side_effects: JsonObject;
+    result: JsonObject;
+    approval: JsonObject;
+  };
+};
+
 export type ToolHookResult = {
   block?: boolean;
   blockReason?: string;

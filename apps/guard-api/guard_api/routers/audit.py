@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentguard_core import AuditEvent
+from agentguard_core import AuditEvent, RuntimeOutcomeReceipt
 
 from guard_api.auth import ApiAuthError
-from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
+from guard_api.services.audit import (
+    PolicyEvaluationWriteForbiddenError,
+    RuntimeOutcomeReceiptError,
+)
 from guard_api.services.trace import (
     encode_conditional_document,
     if_none_match_matches,
 )
 from guard_api.storage.base import AuditIdConflictError
-from fastapi import Cookie, FastAPI, Header
+from fastapi import Cookie, FastAPI, Header, Request
 from fastapi.responses import Response
 
 from .common import (
@@ -46,22 +49,36 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     audit_window_service = context.audit_window_service
 
     @app.post("/v1/audit/events")
-    def audit_event(
-        payload: AuditEvent, authorization: str | None = Header(default=None)
+    async def audit_event(
+        payload: AuditEvent,
+        request: Request,
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         auth_context = auth.verify_bearer(authorization, "event:audit:write")
-        metadata_agent_id = payload.metadata.get("agent_id")
+        try:
+            prepared = audit_service.prepare_submission(
+                payload,
+                raw_payload=await request.json(),
+            )
+        except RuntimeOutcomeReceiptError as exc:
+            raise ApiAuthError(exc.code, status_code=422) from None
+        metadata_agent_id = (
+            prepared.metadata.agent_id
+            if isinstance(prepared, RuntimeOutcomeReceipt)
+            else prepared.metadata.get("agent_id")
+        )
         auth.verify_runtime_identity(
             auth_context,
-            runtime=payload.runtime,
+            runtime=prepared.runtime,
             agent_id=(
                 metadata_agent_id
                 if isinstance(metadata_agent_id, str) and metadata_agent_id
                 else None
             ),
+            require_agent_id=isinstance(prepared, RuntimeOutcomeReceipt),
         )
         try:
-            return audit_service.submit(payload)
+            return audit_service.submit(prepared)
         except PolicyEvaluationWriteForbiddenError:
             # §12.1：policy_evaluation 只能由 POST /v1/guard/evaluate 写入。
             raise ApiAuthError(
@@ -73,6 +90,11 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 "AUDIT_ID_CONFLICT",
                 status_code=409,
             ) from None
+        except RuntimeOutcomeReceiptError as exc:
+            status_code = (
+                409 if exc.code == "RUNTIME_OUTCOME_PARENT_MISMATCH" else 422
+            )
+            raise ApiAuthError(exc.code, status_code=status_code) from None
 
     @app.get("/v1/audit/window", response_model=None)
     def audit_window(

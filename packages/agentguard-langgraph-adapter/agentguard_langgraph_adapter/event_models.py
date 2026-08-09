@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Decision = Literal["allow", "deny", "ask"]
 AuditRecordType = Literal[
@@ -32,6 +32,14 @@ GuardEventType = Literal[
     "tool_result_produced",
     "memory_write_proposed",
     "message_send_proposed",
+]
+RuntimeOutcomeKind = Literal[
+    "pre_execution_deny",
+    "approval_release",
+    "tool_result_modified",
+    "tool_result_quarantined",
+    "execution_completed",
+    "execution_failed",
 ]
 
 
@@ -71,7 +79,7 @@ class SecurityContext(BaseModel):
     session_key: str | None = None
     session_id: str | None = None
     run_id: str | None = None
-    agent_id: str = "langgraph_demo"
+    agent_id: str = "langgraph"
     current_step: str = "before_tool"
     model_intent: str | None = None
     context_sources: list[dict[str, Any]] = Field(default_factory=list)
@@ -131,7 +139,7 @@ class PolicyDecision(BaseModel):
     approval: dict[str, Any] | None = None
     latency_ms: int | None = None
     # evaluate 响应回显的策略审计 ID（契约 §9.9 links.policy_audit_id），
-    # 供后续 runtime_outcome 回执建立关联；当前仅透传保留。
+    # 供 runtime_outcome 回执建立不可变的父记录关联。
     policy_audit_id: str | None = None
 
     @property
@@ -143,8 +151,8 @@ class AuditEvent(BaseModel):
     """AuditEvent 0.4 契约形态（契约 §8）。
 
     Guard API 模式下 policy_evaluation 由 Guard API evaluate writer 唯一写入，
-    adapter 不得重复提交（§12.1/§22.1）；本模型用于 legacy Core 路径与本地
-    结果载体，runtime_outcome / runtime_observation 回写由后续阶段接入。
+    adapter 不得重复提交（§12.1/§22.1）；本模型用于 legacy Core 路径、
+    runtime_observation 与本地结果载体。runtime_outcome 使用严格专用模型。
     """
 
     audit_id: str = Field(default_factory=lambda: new_id("audit"))
@@ -170,6 +178,68 @@ class AuditEvent(BaseModel):
     latency_ms: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeOutcomeLinks(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    decision_id: str
+    policy_audit_id: str
+    action_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    approval_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    parent_audit_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+class RuntimeOutcomeMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    outcome_kind: RuntimeOutcomeKind
+
+
+class RuntimeOutcomeEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intervention: dict[str, Any]
+    execution: dict[str, Any]
+    side_effects: dict[str, Any]
+    result: dict[str, Any]
+    approval: dict[str, Any]
+
+
+class RuntimeOutcomeReceipt(AuditEvent):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.4"] = "0.4"
+    record_type: Literal["runtime_outcome"] = "runtime_outcome"
+    event_type: Literal["runtime_outcome"] = "runtime_outcome"
+    decision: Decision
+    risk_score: int = Field(ge=0, le=100)
+    severity: Literal["low", "medium", "high", "critical"]
+    blocked: bool
+    links: RuntimeOutcomeLinks
+    latency_ms: Literal[None] = None
+    metadata: RuntimeOutcomeMetadata
+    evidence: RuntimeOutcomeEvidence
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> "RuntimeOutcomeReceipt":
+        expected = f"audit_outcome_{self.links.event_id}_{self.metadata.outcome_kind}"
+        if self.audit_id != expected:
+            raise ValueError("runtime outcome audit_id does not match its identity")
+        completed_at = self.evidence.execution.get("completed_at")
+        if completed_at != self.timestamp:
+            raise ValueError("runtime outcome completed_at must equal timestamp")
+        if self.evidence.execution.get("receipt_recorded") is not True:
+            raise ValueError("runtime outcome must be marked as recorded")
+        return self
 
 
 class ToolExecutionResult(BaseModel):

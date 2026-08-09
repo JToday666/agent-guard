@@ -41,6 +41,13 @@ _ERROR_MESSAGES = {
     "POLICY_EVALUATION_WRITE_FORBIDDEN": (
         "policy_evaluation records can only be written by POST /v1/guard/evaluate."
     ),
+    "RUNTIME_OUTCOME_INVALID": "Runtime outcome receipt failed strict validation.",
+    "RUNTIME_OUTCOME_PARENT_NOT_FOUND": (
+        "Runtime outcome receipt does not reference a policy evaluation."
+    ),
+    "RUNTIME_OUTCOME_PARENT_MISMATCH": (
+        "Runtime outcome receipt conflicts with its policy evaluation."
+    ),
     "POLICY_INVALID": "Policy bundle failed semantic validation.",
     "POLICY_PRECONDITION_REQUIRED": "Policy writes require the current revision ETag.",
     "POLICY_REVISION_CONFLICT": "Policy revision is stale or invalid.",

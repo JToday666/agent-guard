@@ -61,19 +61,52 @@
         "metadata": { "type": "object" },
         "evidence": { "type": ["object", "null"] }
       },
-      "if": {
-        "properties": { "record_type": { "enum": ["policy_evaluation", "config_audit"] } },
-        "required": ["record_type"]
-      },
-      "then": {
-        "properties": {
-          "decision": { "enum": ["allow", "deny", "ask"] },
-          "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
-          "severity": { "type": "string" },
-          "blocked": { "type": "boolean" }
+      "allOf": [
+        {
+          "if": {
+            "properties": { "record_type": { "enum": ["policy_evaluation", "config_audit"] } },
+            "required": ["record_type"]
+          },
+          "then": {
+            "properties": {
+              "decision": { "enum": ["allow", "deny", "ask"] },
+              "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "severity": { "type": "string" },
+              "blocked": { "type": "boolean" }
+            },
+            "required": ["decision", "risk_score", "severity", "blocked"]
+          }
         },
-        "required": ["decision", "risk_score", "severity", "blocked"]
-      },
+        {
+          "if": {
+            "properties": { "record_type": { "const": "runtime_outcome" } },
+            "required": ["record_type"]
+          },
+          "then": {
+            "properties": {
+              "event_type": { "const": "runtime_outcome" },
+              "decision": { "enum": ["allow", "deny", "ask"] },
+              "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "severity": { "enum": ["low", "medium", "high", "critical"] },
+              "blocked": { "type": "boolean" },
+              "latency_ms": { "type": "null" },
+              "links": {
+                "type": "object",
+                "required": ["event_id", "decision_id", "policy_audit_id"]
+              },
+              "metadata": {
+                "type": "object",
+                "required": ["agent_id", "outcome_kind"]
+              },
+              "evidence": {
+                "type": "object",
+                "required": ["intervention", "execution", "side_effects", "result", "approval"]
+              }
+            },
+            "required": ["decision", "risk_score", "severity", "blocked", "links", "latency_ms", "metadata", "evidence"]
+          }
+        }
+      ],
       "additionalProperties": true
     }
   ]

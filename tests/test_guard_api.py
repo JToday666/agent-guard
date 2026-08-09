@@ -142,6 +142,79 @@ def _guard_event_payload(
     }
 
 
+def _runtime_outcome_payload(parent: AuditEvent) -> dict:
+    event_id = parent.links["event_id"]
+    approval_id = parent.links.get("approval_id")
+    links = {
+        "event_id": event_id,
+        "decision_id": parent.links["decision_id"],
+        "policy_audit_id": parent.audit_id,
+    }
+    if action_id := parent.links.get("action_id"):
+        links["action_id"] = action_id
+    if approval_id:
+        links["approval_id"] = approval_id
+    completed_at = "2026-06-11T00:00:01+00:00"
+    return {
+        "audit_id": f"audit_outcome_{event_id}_pre_execution_deny",
+        "schema_version": "0.4",
+        "record_type": "runtime_outcome",
+        "trace_id": parent.trace_id,
+        "case_id": parent.case_id,
+        "runtime": parent.runtime,
+        "timestamp": completed_at,
+        "stage": "after_guard_decision",
+        "event_type": "runtime_outcome",
+        "attack_type": parent.attack_type,
+        "is_malicious": parent.is_malicious,
+        "summary": "运行时确认动作未被调用",
+        "decision": parent.decision,
+        "risk_score": parent.risk_score,
+        "severity": parent.severity,
+        "blocked": parent.blocked,
+        "resource_targets": parent.resource_targets,
+        "rule_hits": parent.rule_hits,
+        "reason": "策略处理后未进入动作调用入口",
+        "links": links,
+        "latency_ms": None,
+        "metadata": {
+            "agent_id": parent.metadata["agent_id"],
+            "outcome_kind": "pre_execution_deny",
+        },
+        "evidence": {
+            "intervention": {
+                "type": "approval_not_obtained" if approval_id else "policy_deny",
+                "reason": "动作在执行前被终止",
+            },
+            "execution": {
+                "status": "not_invoked",
+                "receipt_recorded": True,
+                "invoked_at": None,
+                "completed_at": completed_at,
+                "error": None,
+                "tool_result_entered_context": False,
+                "persisted": False,
+            },
+            "side_effects": {
+                "measurement_status": "measured",
+                "count": 0,
+                "summary": "动作未进入运行时调用入口",
+            },
+            "result": {
+                "disposition": "not_applicable",
+                "summary": None,
+                "sanitized": False,
+            },
+            "approval": {
+                "approval_id": approval_id,
+                "status": "pending" if approval_id else "not_required",
+                "decision": None,
+                "resolved_at": None,
+            },
+        },
+    }
+
+
 def _p1_guard_event_payload(
     *,
     event_id: str,
@@ -1234,6 +1307,62 @@ def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() ->
     )
     assert replay_response.status_code == 200
     assert replay_response.json()["policy_audit_id"] == policy_audit_id
+
+
+def test_runtime_outcome_receipt_is_strict_parent_bound_and_idempotent() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=settings))
+    headers = {"Authorization": "Bearer adapter-secret"}
+    evaluation = client.post(
+        "/v1/guard/evaluate", headers=headers, json=_guard_event_payload()
+    )
+    parent = store.get_audit_event(evaluation.json()["policy_audit_id"])
+    assert parent is not None
+    receipt = _runtime_outcome_payload(parent)
+
+    first = client.post("/v1/audit/events", headers=headers, json=receipt)
+    replay = client.post("/v1/audit/events", headers=headers, json=receipt)
+    mismatch = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={**receipt, "risk_score": int(receipt["risk_score"]) - 1},
+    )
+    missing_parent = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={
+            **receipt,
+            "links": {**receipt["links"], "policy_audit_id": "audit_missing"},
+        },
+    )
+    invalid = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={**receipt, "metadata": {"outcome_kind": "pre_execution_deny"}},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["created"] is True
+    assert replay.status_code == 200
+    assert replay.json()["idempotent_replay"] is True
+    assert mismatch.status_code == 409
+    assert mismatch.json()["error"]["code"] == "RUNTIME_OUTCOME_PARENT_MISMATCH"
+    assert missing_parent.status_code == 422
+    assert (
+        missing_parent.json()["error"]["code"]
+        == "RUNTIME_OUTCOME_PARENT_NOT_FOUND"
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
+
+    extra_field = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={**receipt, "producer_extension": "must-not-be-ignored"},
+    )
+    assert extra_field.status_code == 422
+    assert extra_field.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
 
 
 def test_audit_events_submit_reports_created_and_idempotent_replay() -> None:

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from .event_models import AuditEvent, PolicyDecision, utc_now_iso
+from .event_models import (
+    AuditEvent,
+    PolicyDecision,
+    RuntimeOutcomeKind,
+    RuntimeOutcomeReceipt,
+    utc_now_iso,
+)
 
 ExecutionStatus = Literal["not_invoked", "executed", "failed", "unknown"]
 ResultDisposition = Literal[
@@ -26,7 +32,9 @@ def runtime_receipts_enabled(guard_adapter: Any) -> bool:
     )
 
 
-def submit_runtime_receipt(guard_adapter: Any, receipt: AuditEvent) -> str | None:
+def submit_runtime_receipt(
+    guard_adapter: Any, receipt: AuditEvent | RuntimeOutcomeReceipt
+) -> str | None:
     """Submit a receipt and return a bounded diagnostic instead of raising."""
 
     if not runtime_receipts_enabled(guard_adapter):
@@ -133,8 +141,9 @@ def build_runtime_outcome(
     measured_effects = list(side_effects or [])
     disposition = result_disposition or _default_disposition(execution_status)
     action_name = _action_name(event_data)
-    return AuditEvent(
-        audit_id=f"audit_outcome_{event_id}",
+    outcome_kind = _outcome_kind(execution_status, disposition, approval)
+    return RuntimeOutcomeReceipt(
+        audit_id=f"audit_outcome_{event_id}_{outcome_kind}",
         schema_version="0.4",
         record_type="runtime_outcome",
         trace_id=_trace_id(event_data),
@@ -142,7 +151,7 @@ def build_runtime_outcome(
         runtime=str(event_data.get("runtime") or "langgraph"),
         timestamp=completed,
         stage="after_tool_call",
-        event_type=_outcome_event_type(execution_status),
+        event_type="runtime_outcome",
         attack_type=event_data.get("attack_type"),
         is_malicious=event_data.get("is_malicious"),
         summary=_outcome_summary(action_name, execution_status),
@@ -156,16 +165,10 @@ def build_runtime_outcome(
         links=links,
         latency_ms=None,
         metadata={
-            "action_name": action_name,
-            "execution_status": execution_status,
+            "agent_id": _agent_id(event_data),
+            "outcome_kind": outcome_kind,
         },
         evidence={
-            "guard_decision": {
-                "decision_id": decision.decision_id,
-                "decision": decision.decision,
-                "risk_score": decision.risk_score,
-                "severity": decision.severity,
-            },
             "intervention": (
                 {
                     "type": intervention_type,
@@ -299,6 +302,14 @@ def _trace_id(event: dict[str, Any]) -> str:
     return value
 
 
+def _agent_id(event: dict[str, Any]) -> str:
+    security = event.get("security_context")
+    value = security.get("agent_id") if isinstance(security, dict) else None
+    if not isinstance(value, str) or not value:
+        raise ValueError("runtime receipt requires security_context.agent_id")
+    return value
+
+
 def _policy_links(
     event: dict[str, Any],
     decision: PolicyDecision,
@@ -417,7 +428,11 @@ def _approval_evidence(
     return {
         "approval_id": approval_id,
         "status": normalized_status,
-        "decision": resolution_decision or None,
+        "decision": (
+            "allow_once"
+            if resolution_decision in {"allow", "allow_once", "allow_session"}
+            else "deny" if resolution_decision == "deny" else None
+        ),
         "resolved_at": (resolution or {}).get("resolved_at"),
     }
 
@@ -490,6 +505,26 @@ def _default_disposition(status: ExecutionStatus) -> ResultDisposition:
     return "unknown"
 
 
+def _outcome_kind(
+    status: ExecutionStatus,
+    disposition: ResultDisposition,
+    approval: dict[str, object],
+) -> RuntimeOutcomeKind:
+    if status == "not_invoked":
+        return "pre_execution_deny"
+    if status == "failed":
+        return "execution_failed"
+    if disposition == "modified":
+        return "tool_result_modified"
+    if disposition == "quarantined":
+        return "tool_result_quarantined"
+    if status == "executed":
+        return "execution_completed"
+    if status == "unknown" and approval.get("status") == "allowed":
+        return "approval_release"
+    raise ValueError("runtime outcome requires an observable outcome kind")
+
+
 def _outcome_summary(action_name: str, status: ExecutionStatus) -> str:
     labels = {
         "not_invoked": "was not invoked",
@@ -498,15 +533,6 @@ def _outcome_summary(action_name: str, status: ExecutionStatus) -> str:
         "unknown": "has an unknown result",
     }
     return f"Runtime action {action_name} {labels[status]}"
-
-
-def _outcome_event_type(status: ExecutionStatus) -> str:
-    return {
-        "not_invoked": "tool_call_not_invoked",
-        "executed": "tool_call_completed",
-        "failed": "tool_call_failed",
-        "unknown": "runtime_outcome",
-    }[status]
 
 
 def _lifecycle_summary(state: TraceLifecycleState) -> str:

@@ -29,6 +29,65 @@ const askDecision = {
   },
 };
 
+function runtimeOutcomeReceipt(
+  eventId = "evt_001",
+  outcomeKind = "pre_execution_deny",
+) {
+  return {
+    audit_id: `audit_outcome_${eventId}_${outcomeKind}`,
+    schema_version: "0.4",
+    record_type: "runtime_outcome",
+    trace_id: "run_outcome",
+    runtime: "openclaw",
+    timestamp: "2026-08-09T00:00:00.000Z",
+    stage: "before_tool_call",
+    event_type: "runtime_outcome",
+    summary: "denied",
+    decision: "deny",
+    risk_score: 90,
+    severity: "high",
+    blocked: true,
+    resource_targets: [],
+    rule_hits: [],
+    reason: "deny",
+    links: {
+      event_id: eventId,
+      decision_id: `decision_${eventId}`,
+      policy_audit_id: `audit_policy_${eventId}`,
+    },
+    latency_ms: null,
+    metadata: { agent_id: "main", outcome_kind: outcomeKind },
+    evidence: {
+      intervention: { type: "policy_deny", reason: "deny" },
+      execution: {
+        status: "not_invoked",
+        receipt_recorded: true,
+        invoked_at: null,
+        completed_at: "2026-08-09T00:00:00.000Z",
+        error: null,
+        tool_result_entered_context: false,
+        persisted: false,
+      },
+      side_effects: {
+        measurement_status: "measured",
+        count: 0,
+        summary: "Tool was not invoked",
+      },
+      result: {
+        disposition: "not_applicable",
+        summary: null,
+        sanitized: false,
+      },
+      approval: {
+        approval_id: null,
+        status: "not_required",
+        decision: null,
+        resolved_at: null,
+      },
+    },
+  };
+}
+
 test("buildPluginConfig uses safe defaults with a resolved SecretRef token", () => {
   const config = buildPluginConfig({ adapterToken: "resolved-token" });
 
@@ -333,22 +392,7 @@ test("submitRuntimeOutcome posts to /v1/audit/events and surfaces created flags"
     },
   });
 
-  const result = await client.submitRuntimeOutcome({
-    audit_id: "audit_outcome_evt_001_pre_execution_deny",
-    schema_version: "0.4",
-    record_type: "runtime_outcome",
-    trace_id: "run_outcome",
-    runtime: "openclaw",
-    stage: "before_tool_call",
-    event_type: "runtime_outcome",
-    summary: "denied",
-    decision: "deny",
-    risk_score: 90,
-    severity: "high",
-    blocked: true,
-    reason: "deny",
-    links: { event_id: "evt_001", policy_audit_id: "audit_policy_001" },
-  });
+  const result = await client.submitRuntimeOutcome(runtimeOutcomeReceipt());
 
   assert.equal(requests[0].url, "http://guard.test/v1/audit/events");
   assert.equal(requests[0].init.method, "POST");
@@ -374,29 +418,45 @@ test("submitRuntimeOutcome treats 409 conflict as diagnostics without throwing",
       }),
   });
 
-  const result = await client.submitRuntimeOutcome({
-    audit_id: "audit_outcome_conflict",
-    schema_version: "0.4",
-    record_type: "runtime_outcome",
-    trace_id: "run_outcome",
-    runtime: "openclaw",
-    stage: "before_tool_call",
-    event_type: "runtime_outcome",
-    summary: "conflict",
-    decision: "deny",
-    risk_score: null,
-    severity: null,
-    blocked: true,
-    reason: "conflict",
-    links: {
-      event_id: "evt_conflict",
-      policy_audit_id: "audit_policy_conflict",
-    },
-  });
+  const result = await client.submitRuntimeOutcome(
+    runtimeOutcomeReceipt("evt_conflict"),
+  );
 
   assert.equal(result.ok, false);
   assert.equal(result.created, false);
-  assert.equal(result.audit_id, "audit_outcome_conflict");
+  assert.equal(
+    result.audit_id,
+    "audit_outcome_evt_conflict_pre_execution_deny",
+  );
+});
+
+test("submitRuntimeOutcome does not retry permanently invalid receipts", async () => {
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "http://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 1000,
+      approvalPollIntervalMs: 10,
+      approvalTimeoutMs: 10,
+      diagnosticLogging: false,
+    },
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ error: "RUNTIME_OUTCOME_INVALID" }), {
+        status: 422,
+        headers: { "content-type": "application/json" },
+      }),
+  });
+
+  const result = await client.submitRuntimeOutcome(
+    runtimeOutcomeReceipt("evt_invalid"),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.created, false);
+  assert.equal(
+    result.audit_id,
+    "audit_outcome_evt_invalid_pre_execution_deny",
+  );
 });
 
 test("submitRuntimeOutcome still rejects on server errors", async () => {
@@ -417,22 +477,7 @@ test("submitRuntimeOutcome still rejects on server errors", async () => {
   });
 
   await assert.rejects(() =>
-    client.submitRuntimeOutcome({
-      audit_id: "audit_outcome_err",
-      schema_version: "0.4",
-      record_type: "runtime_outcome",
-      trace_id: "run_outcome",
-      runtime: "openclaw",
-      stage: "before_tool_call",
-      event_type: "runtime_outcome",
-      summary: "error",
-      decision: "deny",
-      risk_score: null,
-      severity: null,
-      blocked: true,
-      reason: "error",
-      links: { event_id: "evt_err", policy_audit_id: "audit_policy_err" },
-    }),
+    client.submitRuntimeOutcome(runtimeOutcomeReceipt("evt_err")),
   );
 });
 

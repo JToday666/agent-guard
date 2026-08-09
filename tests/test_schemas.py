@@ -21,6 +21,7 @@ from agentguard_core import (
     MessageSendPayload,
     ModelCallPayload,
     PolicyBundle,
+    RuntimeOutcomeReceipt,
     ToolCallPayload,
     ToolDescriptor,
     ToolResult,
@@ -134,6 +135,81 @@ def test_operational_models_normalize_aware_timestamps_to_utc() -> None:
 def test_operational_models_reject_naive_timestamps(model, payload) -> None:
     with pytest.raises(PydanticValidationError):
         model.model_validate(payload)
+
+
+def test_runtime_outcome_receipt_has_one_strict_cross_runtime_schema() -> None:
+    payload = {
+        "audit_id": "audit_outcome_evt_schema_pre_execution_deny",
+        "schema_version": "0.4",
+        "record_type": "runtime_outcome",
+        "trace_id": "trace_schema_outcome",
+        "case_id": None,
+        "runtime": "langgraph",
+        "timestamp": "2026-08-10T08:00:01+08:00",
+        "stage": "after_guard_decision",
+        "event_type": "runtime_outcome",
+        "attack_type": None,
+        "is_malicious": None,
+        "summary": "Runtime did not invoke the action",
+        "decision": "deny",
+        "risk_score": 90,
+        "severity": "high",
+        "blocked": True,
+        "resource_targets": [],
+        "rule_hits": ["P001"],
+        "reason": "Policy denied the action",
+        "links": {
+            "event_id": "evt_schema",
+            "decision_id": "dec_schema",
+            "policy_audit_id": "audit_policy_schema",
+        },
+        "latency_ms": None,
+        "metadata": {
+            "agent_id": "main",
+            "outcome_kind": "pre_execution_deny",
+        },
+        "evidence": {
+            "intervention": {"type": "policy_deny", "reason": "Denied"},
+            "execution": {
+                "status": "not_invoked",
+                "receipt_recorded": True,
+                "invoked_at": None,
+                "completed_at": "2026-08-10T08:00:01+08:00",
+                "error": None,
+                "tool_result_entered_context": False,
+                "persisted": False,
+            },
+            "side_effects": {
+                "measurement_status": "measured",
+                "count": 0,
+                "summary": "No invocation",
+            },
+            "result": {
+                "disposition": "not_applicable",
+                "summary": None,
+                "sanitized": False,
+            },
+            "approval": {
+                "approval_id": None,
+                "status": "not_required",
+                "decision": None,
+                "resolved_at": None,
+            },
+        },
+    }
+
+    receipt = RuntimeOutcomeReceipt.model_validate(payload)
+
+    assert receipt.timestamp == "2026-08-10T00:00:01+00:00"
+    validate(
+        receipt.model_dump(mode="json"),
+        _load_schema("runtime_outcome_receipt.schema.json"),
+    )
+    validate(receipt.model_dump(mode="json"), _load_schema("audit_event.schema.json"))
+    with pytest.raises(PydanticValidationError):
+        RuntimeOutcomeReceipt.model_validate(
+            {**payload, "audit_id": "audit_outcome_wrong"}
+        )
 
 
 def test_core_models_reject_wrong_schema_version() -> None:

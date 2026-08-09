@@ -14,6 +14,7 @@ import type {
   GuardEvent,
   MessageHookResult,
   OpenClawPluginConfigInput,
+  RuntimeOutcomeReceipt,
   ToolHookResult,
 } from "./types.js";
 import type { OutcomeApprovalEvidence } from "./mapping/audit-outcomes.js";
@@ -55,6 +56,17 @@ export class GuardApiConflictError extends GuardApiError {
   constructor(message: string) {
     super(message);
     this.name = "GuardApiConflictError";
+  }
+}
+
+/** Non-retryable producer/authorization failures for durable receipt delivery. */
+export class GuardApiPermanentError extends GuardApiError {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Guard API request failed permanently with status ${status}`);
+    this.name = "GuardApiPermanentError";
+    this.status = status;
   }
 }
 
@@ -124,10 +136,12 @@ export class GuardApiClient {
 
   /**
    * 提交 runtime_outcome 回执（复用 POST /v1/audit/events，不新增端点）。
-   * 回执是 fire-and-forget：409 只记诊断（不重试、不 fail-closed），
-   * 其余错误继续抛给调用方的 .catch(logDiagnostic) 处理。
+   * 回执是 fire-and-forget：永久 4xx 只记诊断，网络、429 与 5xx
+   * 交给持久化投递队列重试，均不改变已经完成的运行时处置。
    */
-  async submitRuntimeOutcome(event: AuditEvent): Promise<AuditSubmitResponse> {
+  async submitRuntimeOutcome(
+    event: RuntimeOutcomeReceipt,
+  ): Promise<AuditSubmitResponse> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -139,11 +153,18 @@ export class GuardApiClient {
       });
       return (await response.json()) as AuditSubmitResponse;
     } catch (error) {
-      if (error instanceof GuardApiConflictError) {
+      if (
+        error instanceof GuardApiConflictError ||
+        error instanceof GuardApiPermanentError
+      ) {
         logDiagnostic(
           this.config,
-          "runtime outcome receipt rejected with 409 conflict",
-          { audit_id: event.audit_id ?? null },
+          "runtime outcome receipt was permanently rejected",
+          {
+            audit_id: event.audit_id ?? null,
+            status:
+              error instanceof GuardApiPermanentError ? error.status : 409,
+          },
         );
         return {
           ok: false,
@@ -252,6 +273,14 @@ export class GuardApiClient {
           throw new GuardApiConflictError(
             "Guard API request failed with status 409",
           );
+        }
+        if (
+          response.status >= 400 &&
+          response.status < 500 &&
+          response.status !== 408 &&
+          response.status !== 429
+        ) {
+          throw new GuardApiPermanentError(response.status);
         }
         throw new GuardApiError(
           `Guard API request failed with status ${response.status}`,

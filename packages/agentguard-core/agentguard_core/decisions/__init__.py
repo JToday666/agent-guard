@@ -10,6 +10,7 @@ from .models import (
     DecisionEnforcement,
     EnforcementMode,
     GuardDecision,
+    RuntimeOutcomeReceipt,
     RuleHit,
     RuleOverrideDecision,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "DetectionResult",
     "EnforcementMode",
     "GuardDecision",
+    "RuntimeOutcomeReceipt",
     "RuleHit",
     "RuleOverrideDecision",
     "build_guard_decision",

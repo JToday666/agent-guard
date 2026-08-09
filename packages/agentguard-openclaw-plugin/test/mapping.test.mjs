@@ -725,6 +725,12 @@ test("builds pre_execution_deny outcome receipts with required links", () => {
   assert.equal(event.decision, "deny");
   assert.equal(event.blocked, true);
   assert.deepEqual(event.rule_hits, ["rule_secret_path"]);
+  assert.deepEqual(event.metadata, {
+    agent_id: "agent-main",
+    outcome_kind: "pre_execution_deny",
+  });
+  assert.equal("guard_event" in event.evidence, false);
+  assert.equal("guard_decision" in event.evidence, false);
   assert.equal(event.evidence.intervention.type, "pre_execution_deny");
   assert.equal(event.evidence.execution.status, "not_invoked");
   assert.equal(event.evidence.execution.tool_result_entered_context, false);
@@ -750,6 +756,7 @@ test("approval_release receipts keep execution status unknown until observed", (
   assert.equal(event.evidence.result.disposition, "unknown");
   assert.equal(event.evidence.approval.status, "allowed");
   assert.equal(event.evidence.approval.decision, "allow_once");
+  assert.equal(event.metadata.outcome_kind, "approval_release");
 });
 
 test("tool_result_quarantine receipts distinguish modified and quarantined dispositions", () => {
@@ -765,6 +772,7 @@ test("tool_result_quarantine receipts distinguish modified and quarantined dispo
   assert.equal(quarantined.evidence.execution.persisted, false);
   assert.equal(quarantined.evidence.result.disposition, "quarantined");
   assert.equal(quarantined.evidence.result.sanitized, false);
+  assert.equal(quarantined.metadata.outcome_kind, "tool_result_quarantined");
 
   const modified = buildRuntimeOutcomeAuditEvent(guardEvent, evaluation, "tool_result_quarantine", {
     resultDisposition: "modified",
@@ -773,6 +781,7 @@ test("tool_result_quarantine receipts distinguish modified and quarantined dispo
   assert.equal(modified.evidence.result.disposition, "modified");
   assert.equal(modified.evidence.result.sanitized, true);
   assert.equal(modified.evidence.execution.tool_result_entered_context, null);
+  assert.equal(modified.metadata.outcome_kind, "tool_result_modified");
 });
 
 test("outcome receipts derive deterministic audit ids for idempotent retries", () => {

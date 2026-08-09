@@ -16,6 +16,7 @@ from .event_models import (
     AuditEvent,
     PolicyDecision,
     RuntimeGuardEvent,
+    RuntimeOutcomeReceipt,
     ToolCallEvent,
     ToolExecutionResult,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "LangGraphAdapter",
     "PolicyDecision",
     "RuntimeGuardEvent",
+    "RuntimeOutcomeReceipt",
     "build_runtime_outcome",
     "build_tool_started_observation",
     "build_trace_lifecycle_observation",
