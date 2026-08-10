@@ -1,62 +1,31 @@
-import type { PluginHookName } from "openclaw/plugin-sdk/types";
-
-import { OPENCLAW_OBSERVATION_HOOKS } from "../../hook-contract.mjs";
+import { logDiagnostic } from "../guard-api-client.js";
 import {
-  decisionToMessageResult,
-  decisionToToolResult,
-  failClosedMessageResult,
-  failClosedToolResult,
-  logDiagnostic,
-} from "../guard-api-client.js";
-import {
-  buildBeforeInstallConfigAuditEvent,
-  buildContextGuardEvent,
-  buildMessageSendGuardEvent,
   buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
-  buildToolCallGuardEvent,
-} from "../mapping.js";
-import {
-  containsSensitiveCredentialText,
-  redactUnknownCredentials,
-  sanitizePersistentInstructionPoisoning,
-  stringPreview,
-} from "../security.js";
+} from "../mapping/index.js";
+import { createLocalId } from "../mapping/common.js";
+import { containsSensitiveCredentialText, stringPreview } from "../security.js";
 import {
   asRecord,
   firstNonEmptyString,
   rememberSessionState,
-  rememberToolCallState,
   stringMaybe,
   withCachedRuntimeFields,
-  withCachedToolContext,
 } from "../runtime/state.js";
 import {
-  blockingApprovalHookTimeoutMs,
-  decisionToBlockResult,
-  failClosedBlockResult,
+  guardRequestHookTimeoutMs,
   isDisabled,
   isEnforcing,
-  isObserve,
-  quarantinedToolResultMessage,
   safeDecisionMessage,
-  shouldFailClosedRuntimeStage,
   shouldRuntimeBlock,
 } from "../runtime/enforcement.js";
 import type { HookContext } from "./context.js";
 
 export function registerLlmInput(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   api.on(
     "llm_input",
-    async (event, context) => {
+    (event, context) => {
       if (isDisabled(config)) {
         return undefined;
       }
@@ -66,19 +35,23 @@ export function registerLlmInput(hookContext: HookContext): void {
           promptFallback: true,
         });
         const cached = withCachedRuntimeFields(sessionState, event, context);
-        const decision = await client.evaluate(
-          buildModelGuardEvent("llm_input", cached.event, cached.context),
-        );
-        if (shouldRuntimeBlock(config, decision)) {
-          return decisionToBlockResult(decision) as never;
-        }
+        void client
+          .submitRuntimeObservation(
+            buildRuntimeObservationAuditEvent(
+              "llm_input",
+              cached.event,
+              cached.context,
+            ),
+          )
+          .catch((error) => {
+            logDiagnostic(config, "llm_input observation failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
       } catch (error) {
-        logDiagnostic(config, "llm_input enforcement failed", {
+        logDiagnostic(config, "llm_input observation mapping failed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        if (shouldFailClosedRuntimeStage(config, "llm_input")) {
-          return failClosedBlockResult() as never;
-        }
       }
       return undefined;
     },
@@ -87,17 +60,10 @@ export function registerLlmInput(hookContext: HookContext): void {
 }
 
 export function registerLlmOutput(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   api.on(
     "llm_output",
-    async (event, context) => {
+    (event, context) => {
       if (isDisabled(config)) {
         return undefined;
       }
@@ -105,11 +71,21 @@ export function registerLlmOutput(hookContext: HookContext): void {
       try {
         rememberSessionState(sessionState, event, context);
         const cached = withCachedRuntimeFields(sessionState, event, context);
-        await client.evaluate(
-          buildModelGuardEvent("llm_output", cached.event, cached.context),
-        );
+        void client
+          .submitRuntimeObservation(
+            buildRuntimeObservationAuditEvent(
+              "llm_output",
+              cached.event,
+              cached.context,
+            ),
+          )
+          .catch((error) => {
+            logDiagnostic(config, "llm_output observation failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
       } catch (error) {
-        logDiagnostic(config, "llm_output observation failed", {
+        logDiagnostic(config, "llm_output observation mapping failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -120,14 +96,7 @@ export function registerLlmOutput(hookContext: HookContext): void {
 }
 
 export function registerBeforeAgentFinalize(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   api.on(
     "before_agent_finalize",
     async (event, context) => {
@@ -170,20 +139,22 @@ export function registerBeforeAgentFinalize(hookContext: HookContext): void {
           logDiagnostic(config, "before_agent_finalize evaluation failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+          if (isEnforcing(config)) {
+            shouldRevise = true;
+            revisionReason =
+              "AgentGuard output evaluation was unavailable; finalization failed closed.";
+          }
         }
         if (!isEnforcing(config) || !shouldRevise) {
           return undefined;
         }
-        const revisionKey = firstNonEmptyString(
-          stringMaybe(eventRecord.turnId),
-          stringMaybe(eventRecord.runId),
-          stringMaybe(eventRecord.sessionKey),
-          stringMaybe(eventRecord.sessionId),
-        );
-        if (finalizeRevisionKeys.has(revisionKey)) {
-          return undefined;
-        }
-        finalizeRevisionKeys.add(revisionKey);
+        const revisionKey =
+          firstNonEmptyString(
+            stringMaybe(eventRecord.turnId),
+            stringMaybe(eventRecord.runId),
+            stringMaybe(eventRecord.sessionKey),
+            stringMaybe(eventRecord.sessionId),
+          ) ?? createLocalId("finalize");
         return {
           action: "revise",
           reason:
@@ -191,7 +162,7 @@ export function registerBeforeAgentFinalize(hookContext: HookContext): void {
             "AgentGuard detected unsafe content in the final assistant message.",
           retry: {
             instruction:
-              "Remove all credential, secret, token, and API Key values from the final answer. Replace any credential value with [redacted] and do not reveal environment variable contents.",
+              "Return a concise safe response. Remove credentials, secrets, hidden context, untrusted instructions, and disallowed external actions. Replace any credential value with [redacted].",
             idempotencyKey: `agentguard-credential-redaction:${revisionKey}`,
             maxAttempts: 1,
           },
@@ -200,9 +171,22 @@ export function registerBeforeAgentFinalize(hookContext: HookContext): void {
         logDiagnostic(config, "before_agent_finalize handling failed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        return undefined;
+        if (!isEnforcing(config)) {
+          return undefined;
+        }
+        return {
+          action: "revise",
+          reason:
+            "AgentGuard output handling was unavailable; finalization failed closed.",
+          retry: {
+            instruction:
+              "Return a concise safe response without credentials, secrets, hidden context, untrusted instructions, or external actions.",
+            idempotencyKey: `agentguard-fail-closed:${createLocalId("finalize")}`,
+            maxAttempts: 1,
+          },
+        };
       }
     },
-    { priority: 100, timeoutMs: 10_000 },
+    { priority: 100, timeoutMs: guardRequestHookTimeoutMs(config) },
   );
 }

@@ -487,11 +487,11 @@ export function stringMaybe(value: unknown): string | undefined {
 
 export function firstNonEmptyString(
   ...values: Array<string | undefined>
-): string {
+): string | undefined {
   for (const value of values) {
     if (value) {
       return value;
     }
   }
-  return "unknown";
+  return undefined;
 }

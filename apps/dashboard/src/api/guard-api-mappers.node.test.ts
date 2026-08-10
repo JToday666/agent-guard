@@ -10,6 +10,7 @@ import {
   mapAdapterStatus,
   mapAuditEvent,
   mapAuditIntegrity,
+  mapAuditWindow,
   mapConfigAuditFindingRecord,
   mapEvaluationRun,
   mapHealth,
@@ -47,7 +48,7 @@ test("maps Guard API audit evidence without inventing missing fields", () => {
       event_id: "event_1",
     },
     integrity: {
-      canonicalization: "json:v1",
+      canonicalization: "jcs:rfc8785",
       event_hash: "hash_1",
       prev_hash: null,
       sequence: 41,
@@ -250,14 +251,16 @@ test("maps a resolved allow_once approval to an allowed view state", () => {
   const approval = mapApproval({
     approval_id: "app_1",
     trace_id: "trace_1",
-    tool_call_id: "call_1",
+    subject_id: "call_1",
+    subject_type: "tool_call",
+    action_id: "call_1",
+    action_name: "send_email",
     requesting_principal_id: "adapter",
     runtime: "langgraph",
     agent_id: "main",
     status: "resolved",
     decision_options: ["allow_once", "deny"],
     decision: "allow_once",
-    tool: "send_email",
     resource: "external@example.com",
     reason: "External send",
     risk_score: 62,
@@ -265,14 +268,12 @@ test("maps a resolved allow_once approval to an allowed view state", () => {
     created_at: "2026-06-22T06:30:00Z",
     expires_at: "2026-06-22T06:45:00Z",
     resolved_at: "2026-06-22T06:31:00Z",
-    approval_nonce: "nonce_1",
   });
 
   assert.equal(approval.status, "allowed");
-  assert.equal(approval.approvalNonce, "nonce_1");
 });
 
-test("preserves approval subject compatibility fields", () => {
+test("maps canonical approval subject and action fields", () => {
   const approval = mapApproval({
     approval_id: "app_2",
     trace_id: "trace_2",
@@ -280,14 +281,12 @@ test("preserves approval subject compatibility fields", () => {
     subject_type: "memory_write_proposed",
     action_id: "evt_p1",
     action_name: "memory_write_proposed",
-    tool_call_id: "evt_p1",
     requesting_principal_id: "adapter",
     runtime: "langgraph",
     agent_id: "main",
     status: "pending",
     decision_options: ["allow_once", "deny"],
     decision: null,
-    tool: "memory_write_proposed",
     resource: "memory:user_preferences/report_delivery_rule",
     reason: "Memory write requires review",
     risk_score: 66,
@@ -299,6 +298,7 @@ test("preserves approval subject compatibility fields", () => {
 
   assert.equal(approval.subjectId, "evt_p1");
   assert.equal(approval.subjectType, "memory_write_proposed");
+  assert.equal(approval.actionId, "evt_p1");
   assert.equal(approval.actionName, "memory_write_proposed");
 });
 
@@ -355,17 +355,6 @@ test("maps trace detail response through existing event and approval mappers", (
     ],
     approvals: [],
     audit_window: { limit: 1000, returned_count: 2, has_more: true },
-    metrics: {
-      event_count: 1,
-      allow_count: 0,
-      deny_count: 1,
-      ask_count: 0,
-      blocked_count: 1,
-      block_rate: 1,
-      fpr: null,
-      fnr: 0.25,
-      average_latency_ms: 3,
-    },
   });
 
   assert.equal(detail.id, "trace_1");
@@ -375,6 +364,63 @@ test("maps trace detail response through existing event and approval mappers", (
     ["audit_1", "audit_2"],
   );
   assert.equal("aggregateMetrics" in detail, false);
+});
+
+test("maps the atomic audit window scope and server policy metrics", () => {
+  const window = mapAuditWindow({
+    scope: {
+      kind: "audit_window",
+      snapshot_id: "snapshot-42",
+      outcomes_as_of: "2026-08-09T08:00:00Z",
+      order: "audit_sequence",
+      limit: 500,
+      returned_record_count: 0,
+      has_more: true,
+      next_cursor: "cursor-42",
+      sequence_from: 10,
+      sequence_to: 42,
+      occurred_from: "2026-08-09T07:00:00Z",
+      occurred_to: "2026-08-09T08:00:00Z",
+      filters: {
+        trace_id: null,
+        case_id: null,
+        runtime: "openclaw",
+        decision: null,
+      },
+    },
+    events: [],
+    policy_metrics: {
+      metric_version: "policy_evaluation.v2",
+      evaluation_count: 7,
+      unknown_decision_count: 0,
+      allow_count: 4,
+      ask_count: 2,
+      deny_count: 1,
+      intervention_count: 3,
+      intervention_rate: 3 / 7,
+      policy_deny_rate: 1 / 7,
+      approval_trigger_rate: 2 / 7,
+      policy_intervention_fpr: null,
+      policy_intervention_fnr: 0.1,
+      benign_label_count: 0,
+      malicious_label_count: 5,
+      unlabeled_count: 2,
+      average_decision_latency_ms: 12.5,
+      latency_sample_count: 6,
+      duplicate_policy_record_count: 1,
+      unkeyed_policy_record_count: 0,
+      deduplication: "logical_policy_evaluation",
+    },
+  });
+
+  assert.equal(window.scope.snapshotId, "snapshot-42");
+  assert.equal(window.scope.hasMore, true);
+  assert.equal(window.scope.nextCursor, "cursor-42");
+  assert.equal(window.scope.filters.runtime, "openclaw");
+  assert.equal(window.metrics.evaluationCount, 7);
+  assert.equal(window.metrics.interventionCount, 3);
+  assert.equal(window.metrics.policyFnr, 0.1);
+  assert.equal(window.metrics.duplicatePolicyRecordCount, 1);
 });
 
 test("maps sparse trace detail responses without creating an unused metrics model", () => {
@@ -431,6 +477,18 @@ test("maps an empty audit integrity chain with a null head hash", () => {
     event_count: 0,
     head_hash: null,
     first_broken_audit_id: null,
+    canonicalization: "jcs:rfc8785",
+    anchor: {
+      enabled: false,
+      status: "disabled",
+      checkpoint_sequence: null,
+      checkpoint_head_hash: null,
+      checkpoint_hash: null,
+      checkpointed_at: null,
+      lag: null,
+      key_id: null,
+      error_code: null,
+    },
   };
 
   assert.deepEqual(mapAuditIntegrity(dto), {
@@ -438,6 +496,18 @@ test("maps an empty audit integrity chain with a null head hash", () => {
     eventCount: 0,
     headHash: null,
     firstBrokenAuditId: null,
+    canonicalization: "jcs:rfc8785",
+    anchor: {
+      enabled: false,
+      status: "disabled",
+      checkpointSequence: null,
+      checkpointHeadHash: null,
+      checkpointHash: null,
+      checkpointedAt: null,
+      lag: null,
+      keyId: null,
+      errorCode: null,
+    },
   });
 });
 

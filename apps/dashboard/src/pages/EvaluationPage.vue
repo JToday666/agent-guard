@@ -417,14 +417,12 @@ const labeledEvaluationCount = computed(
   () => store.windowMetrics.benignLabelCount + store.windowMetrics.maliciousLabelCount,
 );
 const windowRangeLabel = computed(() => {
-  const { from, to } = store.auditWindow.scope;
-  if (!from || !to) return "近期审计数据";
-  return `${formatDashboardDateTime(from)} 至 ${formatDashboardDateTime(to)}`;
+  const { occurredFrom, occurredTo } = store.auditWindow.scope;
+  if (!occurredFrom || !occurredTo) return "近期审计数据";
+  return `${formatDashboardDateTime(occurredFrom)} 至 ${formatDashboardDateTime(occurredTo)}`;
 });
 const windowCompletenessLabel = computed(() => {
-  if (store.auditWindow.scope.hasMore === true) return "仅显示部分记录";
-  if (store.auditWindow.scope.hasMore === false) return "近期记录完整";
-  return "是否截断未知";
+  return store.auditWindow.scope.hasMore ? "仅显示部分记录" : "当前快照记录完整";
 });
 const deduplicationLabel = computed(() =>
   store.windowMetrics.duplicatePolicyRecordCount
@@ -432,8 +430,8 @@ const deduplicationLabel = computed(() =>
     : "未发现重复策略记录",
 );
 const associationLabel = computed(() =>
-  store.windowMetrics.legacyFallbackCount
-    ? `${store.windowMetrics.legacyFallbackCount} 条较早记录缺少关联标识，按单条记录统计`
+  store.windowMetrics.unkeyedPolicyRecordCount
+    ? `${store.windowMetrics.unkeyedPolicyRecordCount} 条策略记录缺少关联标识，按单条记录统计`
     : "用于去重的关联信息完整",
 );
 const dataCoverageLabel = computed(() => {

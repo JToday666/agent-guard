@@ -99,10 +99,16 @@ export function containsInstructionLikeText(value: string): boolean {
     /never\s+(mention|reveal|tell)|hide\s+this\s+rule|do\s+not\s+mention\s+this\s+rule/i.test(
       value,
     ) ||
-    /identityverify|market-segment-submit|support-profile-confirm|managed-device\s+support\s+profile/i.test(
+    /follow\s+these\s+instructions\s+instead|treat\s+this\s+content\s+as\s+a\s+system\s+message/i.test(
       value,
     ) ||
-    /lead-verification-relax|reduce\s+verification\s+controls|weaken\s+verification/i.test(
+    /bypass\s+verification|disable\s+verification|skip\s+verification|reduce\s+verification\s+controls/i.test(
+      value,
+    ) ||
+    /weaken\s+security\s+controls|disable\s+security\s+controls|override\s+approval/i.test(
+      value,
+    ) ||
+    /apply\s+(a\s+)?configuration\s+change|change\s+account\s+settings|grant\s+administrator\s+access/i.test(
       value,
     )
   );
@@ -116,25 +122,33 @@ export function containsSensitiveText(value: string): boolean {
 }
 
 export function contextSourceSummaries(event: PromptBuildEventInput): string[] {
-  if (!Array.isArray(event.messages)) {
-    return [];
-  }
-  return event.messages
-    .map((item) => {
-      const record = asRecord(item);
-      return stringPreview(record.content ?? record.text ?? item);
-    })
-    .filter((item) => item.length > 0);
+  const messages = Array.isArray(event.messages)
+    ? event.messages.map((item) => {
+        const record = asRecord(item);
+        return stringPreview(record.content ?? record.text ?? item);
+      })
+    : [];
+  return [
+    ...messages,
+    stringPreview(event.prompt),
+    stringPreview(event.context),
+  ].filter(
+    (item, index, values) => item.length > 0 && values.indexOf(item) === index,
+  );
 }
 
 export function modelContentPreview(
-  hookName: "llm_input" | "llm_output",
+  hookName: "before_agent_run" | "llm_input" | "llm_output",
   event: ModelHookEventInput,
 ): string {
-  if (hookName === "llm_input") {
-    return stringPreview(
-      event.prompt ?? event.input ?? event.content ?? event.messages,
-    );
+  if (hookName !== "llm_output") {
+    return [
+      stringPreview(event.systemPrompt),
+      stringPreview(event.prompt ?? event.input ?? event.content),
+      stringPreview(event.messages),
+    ]
+      .filter((item) => item.length > 0)
+      .join("\n");
   }
   return stringPreview(
     event.output ??

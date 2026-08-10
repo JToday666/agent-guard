@@ -33,9 +33,9 @@ Dashboard 不做用户登录，不保存长期 token，不生成 launch code，�
 ## 3. 数据来源
 
 ```text
-GET  /v1/audit/events
+GET  /v1/audit/window
 GET  /v1/audit/integrity
-GET  /v1/metrics/eval
+GET  /v1/metrics/policy-evaluations?evaluated_from=&evaluated_to=&outcomes_as_of=
 GET  /v1/evaluations/latest
 GET  /v1/approvals/pending
 GET  /v1/traces/{trace_id}
@@ -48,21 +48,12 @@ GET  /health?check_db=true
 POST /v1/approvals/{id}/resolve
 ```
 
-当前页面自动刷新不再请求 `GET /v1/metrics/eval`。该接口仅作为历史兼容入口保留；后端提供明确时间范围、去重方式和分母前，Dashboard 不展示其结果。
+Dashboard 自动刷新只请求原子审计窗口。API data source 将后端返回的
+`scope + events + policy_metrics` 作为一个 `AuditWindow` 更新，不在客户端重算策略指标。
+历史聚合只在用户选定明确时间范围时请求
+`GET /v1/metrics/policy-evaluations`，并与当前窗口和独立 evaluation run 状态分离。
 
-目标新增接口：
-
-```text
-GET /v1/audit/window
-GET /v1/metrics/policy-evaluations?evaluated_from=&evaluated_to=&outcomes_as_of=
-```
-
-在目标窗口接口落地前，API data source 从 `GET /v1/audit/events` 建立
-`has_more=unknown` 的兼容窗口，并在当前返回记录内筛选、去重逻辑
-`policy_evaluation`。页面领域模型保持 `AuditWindow = scope + events + metrics`，
-后端上线后只替换数据源映射。
-
-Dashboard 不直接读取 LangGraph、OpenClaw、本地工具或 AttackBench runner 的内部状态。证据链页优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载的 `GET /v1/audit/events` 事件窗口按 `trace_id` 做局部回退，不补造链路事实。溯源图读取 `GET /v1/traces/{trace_id}/provenance`，失败时不影响审计时间线显示。
+Dashboard 不直接读取 LangGraph、OpenClaw、本地工具或 AttackBench runner 的内部状态。证据链页优先读取 `GET /v1/traces/{trace_id}`；该接口失败时，前端只使用已加载审计窗口中的同 `trace_id` 事件做局部回退，不补造链路事实。溯源图读取 `GET /v1/traces/{trace_id}/provenance`，失败时不影响审计时间线显示。
 
 真实溯源响应沿用 Guard API 原始契约：`ref_id` 是未加展示前缀的实体 ID，审计节点通过原始 `audit_id` 与 Trace 时间线联动；关系值使用 `evaluated_to`、`recorded_as`、`reviewed_by`，风险元数据使用 `risk_score`。前端只在展示层映射中文标签，不以 Mock 字段形态替代真实接口。
 
@@ -72,7 +63,7 @@ Dashboard 只轮询当前页面所需的数据域。页面切换时复用最近 
 
 ## 4. 鉴权边界
 
-Dashboard 使用 HttpOnly browser session 访问 Guard API。状态改变请求必须带 CSRF token，审批 resolve 必须额外提交 approval nonce。
+Dashboard 使用 HttpOnly browser session 访问 Guard API。状态改变请求必须带 CSRF token，审批 resolve 的唯一性由服务端原子状态转换保证。
 
 长期凭证不得进入前端：
 
@@ -112,7 +103,7 @@ P0、P1 关键路径和部分 P2 功能均已交付：
 5. 指标页能展示最新评测的攻击成功率、按攻击类型统计和评测样本，以及当前审计窗口中逻辑唯一策略评估的介入率、策略误报率、策略漏报率和判定延迟；runtime outcome/observation 不重复计数。
 6. 系统页能展示只读策略快照、最近历史、OpenClaw 验证与心跳状态和配置审计发现项明细。
 7. Dashboard 不直接访问运行时内部数据。
-8. Dashboard 不保存长期 token，审批 resolve 使用 browser session、CSRF token 和 approval nonce，Adapter 能通过 wait 接口收到审批结果。
+8. Dashboard 不保存长期 token，审批 resolve 使用 browser session 和 CSRF token，Adapter 能通过 wait 接口收到审批结果。
 9. API 模式回归使用真实溯源字段和关系值，验证风险标签、关系文案以及审计节点与时间线的双向联动。
 10. 调查页轮询到新事件时，用户位于旧滚动位置则保留当前列表并提供“有新事件”入口；用户主动查看后再定位到最新事件。
 11. 封笔验证包含 `pnpm --filter @agentguard/dashboard typecheck`、`pnpm --filter @agentguard/dashboard build`、`pnpm --filter @agentguard/dashboard test:unit`、`pnpm --filter @agentguard/dashboard test:e2e` 和 `pnpm --filter @agentguard/dashboard test:e2e:api`。

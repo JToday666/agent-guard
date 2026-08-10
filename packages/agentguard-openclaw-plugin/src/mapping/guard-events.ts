@@ -341,15 +341,15 @@ export function buildContextGuardEvent(
 }
 
 export function buildModelGuardEvent(
-  hookName: "llm_input" | "llm_output",
+  hookName: "before_agent_run" | "llm_input" | "llm_output",
   event: ModelHookEventInput,
   context: ToolHookContextInput = {},
 ): GuardEvent {
   const runId = context.runId ?? null;
   const security = runtimeSecurityFields(event, context, {
-    promptFallback: hookName === "llm_input",
+    promptFallback: hookName !== "llm_output",
   });
-  const phase = hookName === "llm_input" ? "input" : "output";
+  const phase = hookName === "llm_output" ? "output" : "input";
   const content = modelContentPreview(hookName, event);
   const provider = event.provider ?? context.provider ?? null;
   const model = event.model ?? context.model ?? null;

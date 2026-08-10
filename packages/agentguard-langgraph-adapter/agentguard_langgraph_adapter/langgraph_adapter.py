@@ -272,6 +272,8 @@ class LangGraphAdapter:
                 "user_task": security.get("user_task") or security.get("payload") or "",
                 "source_type": security.get("source_type", "dataset"),
                 "source_trust": security.get("source_trust", "untrusted"),
+                "agent_id": security.get("agent_id")
+                or _config_agent_id(self.config),
                 "current_step": "before_tool",
                 "model_intent": security.get("model_intent"),
                 "derived_paths": [

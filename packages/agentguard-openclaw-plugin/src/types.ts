@@ -7,21 +7,23 @@ export type AgentGuardPluginConfig = {
   requestTimeoutMs: number;
   approvalPollIntervalMs: number;
   approvalTimeoutMs: number;
-  approvalWaitBudgetMs: number;
   diagnosticLogging: boolean;
-  runtimeId: string;
   agentId: string;
-  failClosedStages: string[];
-  redaction: RedactionConfig;
-  heartbeatIntervalMs: number;
 };
 
-export type OpenClawPluginConfigInput = Partial<AgentGuardPluginConfig> | undefined;
-
-export type RedactionConfig = {
-  enabled: boolean;
-  previewLimit: number;
-};
+/** OpenClaw resolves adapterToken SecretRef to a string before registration. */
+export type OpenClawPluginConfigInput =
+  | {
+      guardApiBaseUrl?: string;
+      adapterToken?: string;
+      enforcementMode?: AgentGuardPluginConfig["enforcementMode"];
+      requestTimeoutMs?: number;
+      approvalPollIntervalMs?: number;
+      approvalTimeoutMs?: number;
+      diagnosticLogging?: boolean;
+      agentId?: string;
+    }
+  | undefined;
 
 export type GuardEventType =
   | "tool_call_proposed"
@@ -253,6 +255,56 @@ export type AuditEvent = {
   latency_ms?: number | null;
   metadata?: JsonObject;
   evidence?: JsonObject;
+};
+
+export type RuntimeReceiptKind =
+  | "pre_execution_deny"
+  | "approval_release"
+  | "tool_result_modified"
+  | "tool_result_quarantined"
+  | "execution_completed"
+  | "execution_failed";
+
+export type RuntimeOutcomeReceipt = Omit<
+  AuditEvent,
+  | "record_type"
+  | "event_type"
+  | "decision"
+  | "risk_score"
+  | "severity"
+  | "blocked"
+  | "links"
+  | "latency_ms"
+  | "metadata"
+  | "evidence"
+> & {
+  audit_id: string;
+  record_type: "runtime_outcome";
+  event_type: "runtime_outcome";
+  decision: "allow" | "deny" | "ask";
+  risk_score: number;
+  severity: "low" | "medium" | "high" | "critical";
+  blocked: boolean;
+  links: {
+    event_id: string;
+    decision_id: string;
+    policy_audit_id: string;
+    action_id?: string;
+    approval_id?: string;
+    parent_audit_id?: string;
+  };
+  latency_ms: null;
+  metadata: {
+    agent_id: string;
+    outcome_kind: RuntimeReceiptKind;
+  };
+  evidence: {
+    intervention: JsonObject;
+    execution: JsonObject;
+    side_effects: JsonObject;
+    result: JsonObject;
+    approval: JsonObject;
+  };
 };
 
 export type ToolHookResult = {

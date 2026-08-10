@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+
+from agentguard_core import AuditEvent
 
 from guard_api.storage.base import (
     AuditEventFilters,
     ControlPlaneStore,
-    EvalMetricFilters,
-    EvalMetrics,
+    classify_audit_record_type,
+    parse_audit_timestamp,
 )
 
 from .evidence import _event_hook_name
-from .metric_rules import classify_record_type
 
 
 class MetricService:
     def __init__(self, *, store: ControlPlaneStore) -> None:
         self.store = store
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        return self.store.eval_metrics(filters)
 
     def runtime_metrics(
         self, *, runtime: str | None = None, limit: int = 1000
@@ -28,77 +26,34 @@ class MetricService:
         events = self.store.list_audit_events(
             AuditEventFilters(runtime=runtime, limit=limit)
         )
-        by_runtime: dict[str, dict[str, Any]] = {}
+        grouped_events: dict[str, list[AuditEvent]] = {}
         hook_activity: dict[str, int] = {}
         for event in events:
-            bucket = by_runtime.setdefault(
-                event.runtime,
-                {
-                    "event_count": 0,
-                    "allow_count": 0,
-                    "deny_count": 0,
-                    "ask_count": 0,
-                    "blocked_count": 0,
-                    "average_latency_ms": None,
-                    "_latency_values": [],
-                    "last_event_at": event.timestamp,
-                },
-            )
-            bucket["event_count"] = int(bucket["event_count"]) + 1
-            # §19.2/§19.3：allow/ask/deny/blocked 只统计策略判定记录。
-            is_policy = classify_record_type(event) == "policy_evaluation"
-            if is_policy and event.decision in {"allow", "deny", "ask"}:
-                bucket[f"{event.decision}_count"] = (
-                    int(bucket[f"{event.decision}_count"]) + 1
-                )
-            if is_policy and event.decision in {"deny", "ask"}:
-                bucket["blocked_count"] = int(bucket["blocked_count"]) + 1
-            if event.latency_ms is not None:
-                bucket["_latency_values"].append(event.latency_ms)  # type: ignore[union-attr]
-            if event.timestamp > str(bucket["last_event_at"]):
-                bucket["last_event_at"] = event.timestamp
+            grouped_events.setdefault(event.runtime, []).append(event)
             hook_name = _event_hook_name(event)
             if hook_name is not None:
                 hook_activity[hook_name] = hook_activity.get(hook_name, 0) + 1
 
-        for bucket in by_runtime.values():
-            latency_values = bucket.pop("_latency_values")
-            bucket["average_latency_ms"] = (
-                sum(latency_values) / len(latency_values) if latency_values else None
-            )
+        by_runtime = {
+            runtime_name: _aggregate_runtime_activity(runtime_events)
+            for runtime_name, runtime_events in grouped_events.items()
+        }
 
         statuses = {
             adapter_id: status
             for adapter_id, status in self.store.list_adapter_statuses().items()
-            if runtime is None
-            or status.get("runtime") == runtime
-            or adapter_id == runtime
+            if runtime is None or adapter_id == runtime
         }
-        event_count = len(events)
-        policy_events = [
-            event
-            for event in events
-            if classify_record_type(event) == "policy_evaluation"
-        ]
-        blocked_count = sum(
-            1 for event in policy_events if event.decision in {"deny", "ask"}
-        )
-        latency_values = [
-            event.latency_ms for event in events if event.latency_ms is not None
-        ]
+        aggregate = _aggregate_runtime_activity(events)
         return {
-            "runtime": runtime,
-            "event_count": event_count,
-            "allow_count": sum(
-                1 for event in policy_events if event.decision == "allow"
-            ),
-            "deny_count": sum(1 for event in policy_events if event.decision == "deny"),
-            "ask_count": sum(1 for event in policy_events if event.decision == "ask"),
-            "blocked_count": blocked_count,
-            "block_rate": (blocked_count / event_count) if event_count else None,
-            "average_latency_ms": (
-                (sum(latency_values) / len(latency_values)) if latency_values else None
-            ),
+            "metric_version": "runtime_activity.v2",
+            "scope": {
+                "kind": "latest_runtime_activity",
+                "runtime": runtime,
+                "limit": limit,
+                "returned_record_count": len(events),
+            },
+            **aggregate,
             "by_runtime": by_runtime,
             "hook_activity": dict(sorted(hook_activity.items())),
             "adapters": statuses,
@@ -106,3 +61,47 @@ class MetricService:
                 1 for status in statuses.values() if status.get("loaded") is True
             ),
         }
+
+
+def _aggregate_runtime_activity(events: list[AuditEvent]) -> dict[str, object]:
+    policy_events = [
+        event
+        for event in events
+        if classify_audit_record_type(event) == "policy_evaluation"
+    ]
+    allow_count = sum(1 for event in policy_events if event.decision == "allow")
+    deny_count = sum(1 for event in policy_events if event.decision == "deny")
+    ask_count = sum(1 for event in policy_events if event.decision == "ask")
+    intervention_count = deny_count + ask_count
+    latency_values = [
+        event.latency_ms for event in policy_events if event.latency_ms is not None
+    ]
+    last_event = _latest_event_timestamp(events)
+    return {
+        "record_count": len(events),
+        "policy_evaluation_count": len(policy_events),
+        "allow_count": allow_count,
+        "deny_count": deny_count,
+        "ask_count": ask_count,
+        "intervention_count": intervention_count,
+        "intervention_rate": (
+            intervention_count / len(policy_events) if policy_events else None
+        ),
+        "average_decision_latency_ms": (
+            sum(latency_values) / len(latency_values) if latency_values else None
+        ),
+        "latency_sample_count": len(latency_values),
+        "last_event_at": last_event,
+    }
+
+
+def _latest_event_timestamp(events: list[AuditEvent]) -> str | None:
+    latest: tuple[datetime, str] | None = None
+    for event in events:
+        try:
+            candidate = (parse_audit_timestamp(event.timestamp), event.timestamp)
+        except ValueError:
+            continue
+        if latest is None or candidate[0] > latest[0]:
+            latest = candidate
+    return latest[1] if latest is not None else None

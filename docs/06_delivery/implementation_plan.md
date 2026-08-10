@@ -66,7 +66,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
    - 在总览、调查、调查详情、审批、评测和系统状态页消费 Guard API 数据。
    - 展示阻断原因、命中规则、风险分数、资源目标。
    - 展示 pending approval，并支持 `allow_once` / `deny`。
-   - 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
+   - 审批 resolve 使用 browser session、CSRF token 和服务端原子状态转换。
 
 ## 4. P1 已完成 / 部分完成项
 
@@ -79,7 +79,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - FPR、FNR、Block Rate、Latency 已在安全评测页展示；混淆矩阵由 `is_malicious + blocked` 派生。
 - 评测结果导入与读取后端接口已实现：`POST /v1/evaluations`、`GET /v1/evaluations`、`GET /v1/evaluations/datasets`、`GET /v1/evaluations/latest`、`GET /v1/evaluations/{run_id}`；run 支持 dataset digest、版本锁定、per-case provenance 和 regression gate 摘要。
 - `GET /v1/metrics/runtime` 已提供最小运行时监控聚合：审计事件计数、阻断率、hook 活跃度和 adapter status。
-- OpenClaw `before_prompt_build`、`llm_input` 已升级为执行型前置阻断面；`llm_output` 通过 `before_agent_finalize` 承接最终输出 revise；`tool_result_persist` 已按 Guard 决策隔离原始工具结果。
+- OpenClaw `before_agent_run` 已作为模型读取前的正式输入阻断面；`before_prompt_build`、`llm_input`、`llm_output` 保持观察型，输出策略评估由 `before_agent_finalize` 承接 revise，最终外发由 `message_sending` 裁决；`tool_result_persist` 同步执行本地净化、异步上报远端评估，工具消息在下一次 `before_agent_run` 再接受阻断裁决。
 - LangGraph demo graph 已在 planner 前接入 `context_assembled` / `model_input_prepared` 阻断，并在 tool calls 落地前接入 `model_output_produced` 阻断。
 - Dashboard 运行时延迟对比（LangGraph / OpenClaw）由 `latency_ms` 字段前端派生。
 
@@ -107,7 +107,8 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - 多渠道审批。
 - 消融实验。
 - OpenClaw verify / E2E / reliability 报告已能写入 adapter status；后续需接入 CI 或发布脚本作为强制门禁。
-- Dashboard 新增后端能力的接入状态统一记录在 [`docs/TODO.md`](../TODO.md)；本文件只保留阶段路线和验收口径。
+- 当前已落地边界、明确冻结项和需要另行决策的后续工作统一记录在
+  [`docs/TODO.md`](../TODO.md)；本文件只保留阶段路线和验收口径。
 
 ## 8. 分工建议
 
@@ -127,7 +128,7 @@ P0 完成必须同时满足：
 4. 被拒绝的工具没有执行副作用。
 5. `ask` 决策能由 Guard API 创建 pending approval。
 6. Dashboard resolve 后，Adapter wait 能返回 `allow_once` 或 `deny`。
-7. 审批 resolve 使用 browser session、CSRF token 和 approval nonce。
+7. 审批 resolve 使用 browser session、CSRF token，并拒绝重复或过期转换。
 8. AuditEvent 被 Dashboard 展示。
 9. runner 输出 ASR before、ASR after、Block Rate、FPR。
 10. `schemas/` 中至少存在 `guard_event.schema.json`、`guard_decision.schema.json`、`audit_event.schema.json`、`attack_case.schema.json`。

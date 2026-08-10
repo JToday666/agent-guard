@@ -68,7 +68,7 @@ docs/
 | `packages/agentguard-openclaw-plugin`      | OpenClaw runtime hook 插件                                                  |
 | `benchmarks/openclaw-bench-tools`          | OpenClaw AttackBench 本地工具桥接                                           |
 | `agentguard_langgraph_bench/`              | AttackBench runner、样本、沙箱、演示 Agent 和外部 Agent 适配器              |
-| `schemas/`                                 | JSON Schema 与 OpenAPI                                                      |
+| `schemas/`                                 | GuardEvent、GuardDecision、AuditEvent 与 AttackCase JSON Schema             |
 | `tests/`                                   | 单元测试、契约测试、集成测试                                                |
 | `scripts/`                                 | 本地开发、插件安装验证和辅助命令                                            |
 | `docs/`                                    | 架构、稳定接口、API 目标契约、适配器、部署、鉴权和评测文档                  |
@@ -84,7 +84,8 @@ docs/
 - Guard API / Control Plane API 采用统一 Capability Auth；Adapter 使用 adapter token，Dashboard 使用 browser session。
 - Redteam 提供 ground truth，runner 负责统计指标。
 - 策略模型位于 `packages/agentguard-core/agentguard_core/policies/`，不硬编码进 Adapter。
-- Schemas 是 API 和事件字段的唯一结构来源。
+- Core/Guard API 的 Pydantic 模型是运行时校验来源；`schemas/` 是对外 JSON Schema，
+  必须通过契约测试与模型保持一致，不能独立演化。
 
 ## 6. 验收证据
 

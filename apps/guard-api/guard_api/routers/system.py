@@ -10,11 +10,7 @@ from fastapi.responses import JSONResponse
 
 from guard_api.models import AdapterStatusRecord
 
-from .common import (
-    legacy_unknown_adapter_status,
-    verify_adapter_heartbeat_write,
-    verify_browser_or_bearer_read,
-)
+from .common import verify_browser_or_bearer_read
 from .context import ApiContext
 
 
@@ -32,32 +28,45 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             )
         return {"status": "ok"}
 
-    @app.put("/v1/adapters/{adapter_id}/status")
-    def save_openclaw_adapter_status(
-        adapter_id: str,
+    @app.put("/v1/adapters/{runtime}/status")
+    def save_adapter_status(
+        runtime: str,
         payload: AdapterStatusRecord,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "adapter:status:write")
-        return store.save_adapter_status(adapter_id, payload)
+        auth_context = auth.verify_bearer(authorization, "adapter:status:write")
+        if auth_context.role == "adapter":
+            auth.verify_runtime_identity(
+                auth_context,
+                runtime=runtime,
+                agent_id=payload.agent_id,
+                require_agent_id=True,
+            )
+        return store.save_adapter_status(runtime, payload)
 
-    @app.post("/v1/adapters/{adapter_id}/heartbeat")
+    @app.post("/v1/adapters/{runtime}/heartbeat")
     def save_adapter_heartbeat(
-        adapter_id: str,
+        runtime: str,
         payload: AdapterStatusRecord,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        verify_adapter_heartbeat_write(auth, authorization)
+        auth_context = auth.verify_bearer(authorization, "adapter:status:write")
+        auth.verify_runtime_identity(
+            auth_context,
+            runtime=runtime,
+            agent_id=payload.agent_id,
+            require_agent_id=True,
+        )
         heartbeat = payload.model_copy(
             update={
                 "last_heartbeat_at": payload.last_heartbeat_at or utc_now_iso(),
             }
         )
-        return store.save_adapter_status(adapter_id, heartbeat)
+        return store.save_adapter_status(runtime, heartbeat)
 
-    @app.get("/v1/adapters/{adapter_id}/status")
-    def openclaw_adapter_status(
-        adapter_id: str,
+    @app.get("/v1/adapters/{runtime}/status")
+    def get_adapter_status(
+        runtime: str,
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
@@ -67,7 +76,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             authorization=authorization,
             agentguard_session=agentguard_session,
         )
-        status = store.get_adapter_status(adapter_id)
+        status = store.get_adapter_status(runtime)
         if status is None:
-            return legacy_unknown_adapter_status()
+            return AdapterStatusRecord().model_dump(mode="json")
         return status

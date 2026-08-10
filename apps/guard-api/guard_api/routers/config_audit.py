@@ -48,5 +48,16 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         payload: ConfigAuditEvent,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "event:evaluate")
+        auth_context = auth.verify_bearer(authorization, "event:evaluate")
+        metadata_agent_id = payload.metadata.get("agent_id")
+        auth.verify_runtime_identity(
+            auth_context,
+            runtime=payload.runtime,
+            agent_id=(
+                metadata_agent_id
+                if isinstance(metadata_agent_id, str) and metadata_agent_id
+                else None
+            ),
+            require_agent_id=True,
+        )
         return config_audit_service.evaluate(payload).model_dump(mode="json")

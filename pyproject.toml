@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Formal AgentGuard Core and API service"
 requires-python = ">=3.12"
 dependencies = [
-  "aegis-agentguard",
   "aegis-agentguard-cli",
   "aegis-agentguard-core",
   "aegis-agentguard-api",
@@ -18,6 +17,7 @@ bench = [
 ]
 dev = [
   "black>=25.1.0",
+  "httpx2>=2.10.0",
   "jsonschema>=4.26",
   "pyright>=1.1.390",
   "pytest>=9",
@@ -28,7 +28,6 @@ dev = [
 package = false
 
 [tool.uv.sources]
-aegis-agentguard = { path = "packages/agentguard-meta", editable = true }
 aegis-agentguard-cli = { path = "apps/cli", editable = true }
 aegis-agentguard-core = { path = "packages/agentguard-core", editable = true }
 aegis-agentguard-api = { path = "apps/guard-api", editable = true }

@@ -43,38 +43,73 @@ export interface GuardAuditIntegrityMetadataDto {
 export interface GuardApprovalDto {
   approval_id: string;
   trace_id: string;
-  subject_id?: string;
-  subject_type?: string;
-  action_id?: string;
-  action_name?: string;
-  tool_call_id: string;
+  subject_id: string;
+  subject_type: string;
+  action_id: string;
+  action_name: string;
   requesting_principal_id: string;
   runtime: Exclude<RuntimeName, "unknown">;
   agent_id: string;
   status: "pending" | "resolved" | "expired";
   decision_options: Array<"allow_once" | "deny">;
   decision: "allow_once" | "deny" | null;
-  tool: string;
   resource: string;
   reason: string;
   risk_score: number;
   severity: Exclude<RiskSeverity, "unknown">;
   created_at: string;
-  expires_at: string | null;
+  expires_at: string;
   resolved_at: string | null;
-  approval_nonce?: string;
 }
 
-export interface GuardEvalMetricsDto {
-  event_count: number;
+export interface GuardAuditWindowScopeDto {
+  kind: "audit_window";
+  snapshot_id: string;
+  outcomes_as_of: string;
+  order: "audit_sequence";
+  limit: number;
+  returned_record_count: number;
+  has_more: boolean;
+  next_cursor: string | null;
+  sequence_from: number | null;
+  sequence_to: number | null;
+  occurred_from: string | null;
+  occurred_to: string | null;
+  filters: {
+    trace_id: string | null;
+    case_id: string | null;
+    runtime: string | null;
+    decision: string | null;
+  };
+}
+
+export interface GuardPolicyMetricsDto {
+  metric_version: "policy_evaluation.v2";
+  evaluation_count: number;
+  unknown_decision_count: number;
   allow_count: number;
-  deny_count: number;
   ask_count: number;
-  blocked_count: number;
-  block_rate: number | null;
-  fpr: number | null;
-  fnr: number | null;
-  average_latency_ms: number | null;
+  deny_count: number;
+  intervention_count: number;
+  intervention_rate: number | null;
+  policy_deny_rate: number | null;
+  approval_trigger_rate: number | null;
+  policy_intervention_fpr: number | null;
+  policy_intervention_fnr: number | null;
+  benign_label_count: number;
+  malicious_label_count: number;
+  unlabeled_count: number;
+  average_decision_latency_ms: number | null;
+  latency_sample_count: number;
+  duplicate_policy_record_count: number;
+  unkeyed_policy_record_count: number;
+  deduplication: "logical_policy_evaluation";
+}
+
+export interface GuardAuditWindowDto {
+  scope: GuardAuditWindowScopeDto;
+  events: GuardAuditEventDto[];
+  policy_metrics: GuardPolicyMetricsDto;
 }
 
 export interface GuardEvaluationAttackSummaryDto {
@@ -123,7 +158,6 @@ export interface GuardTraceDetailDto {
   trace_id: string;
   audit_events: GuardAuditEventDto[];
   approvals: GuardApprovalDto[];
-  metrics: GuardEvalMetricsDto;
   audit_window?: {
     limit?: number;
     returned_count?: number;
@@ -153,6 +187,20 @@ export interface GuardAuditIntegrityDto {
   event_count: number;
   head_hash: string | null;
   first_broken_audit_id: string | null;
+  canonicalization: "jcs:rfc8785";
+  anchor: GuardAuditAnchorDto;
+}
+
+export interface GuardAuditAnchorDto {
+  enabled: boolean;
+  status: "disabled" | "empty" | "current" | "stale" | "invalid" | "error";
+  checkpoint_sequence: number | null;
+  checkpoint_head_hash: string | null;
+  checkpoint_hash: string | null;
+  checkpointed_at: string | null;
+  lag: number | null;
+  key_id: string | null;
+  error_code: string | null;
 }
 
 export interface GuardConfigAuditFindingDto {
@@ -180,12 +228,11 @@ export interface GuardAdapterStatusDto {
   status: "loaded" | "not_loaded" | "error" | "unknown";
   loaded: boolean;
   hook_count: number | null;
-  expected_hook_count: number;
+  expected_hook_count: number | null;
   last_verified_at: string | null;
   last_heartbeat_at?: string | null;
   error: string | null;
   source: string | null;
-  runtime?: string | null;
   runtime_id?: string | null;
   agent_id?: string | null;
   plugin_version?: string | null;

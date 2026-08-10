@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RuntimeOutcomeReceipt",
+  "type": "object",
+  "required": [
+    "audit_id",
+    "schema_version",
+    "record_type",
+    "trace_id",
+    "runtime",
+    "timestamp",
+    "stage",
+    "event_type",
+    "summary",
+    "decision",
+    "risk_score",
+    "severity",
+    "blocked",
+    "resource_targets",
+    "rule_hits",
+    "reason",
+    "links",
+    "latency_ms",
+    "metadata",
+    "evidence"
+  ],
+  "properties": {
+    "audit_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "schema_version": { "const": "0.4" },
+    "record_type": { "const": "runtime_outcome" },
+    "trace_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "case_id": { "type": ["string", "null"] },
+    "runtime": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "stage": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "event_type": { "const": "runtime_outcome" },
+    "attack_type": { "type": ["string", "null"] },
+    "is_malicious": { "type": ["boolean", "null"] },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "decision": { "enum": ["allow", "deny", "ask"] },
+    "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "severity": { "enum": ["low", "medium", "high", "critical"] },
+    "blocked": { "type": "boolean" },
+    "resource_targets": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "rule_hits": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "links": {
+      "type": "object",
+      "required": ["event_id", "decision_id", "policy_audit_id"],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "decision_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "policy_audit_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "action_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "approval_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "parent_audit_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+    "latency_ms": { "type": "null" },
+    "metadata": {
+      "type": "object",
+      "required": ["agent_id", "outcome_kind"],
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "outcome_kind": {
+          "enum": [
+            "pre_execution_deny",
+            "approval_release",
+            "tool_result_modified",
+            "tool_result_quarantined",
+            "execution_completed",
+            "execution_failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["intervention", "execution", "side_effects", "result", "approval"],
+      "properties": {
+        "intervention": {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+          },
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "required": ["status", "receipt_recorded", "invoked_at", "completed_at", "error", "tool_result_entered_context", "persisted"],
+          "properties": {
+            "status": { "enum": ["not_invoked", "executed", "failed", "unknown"] },
+            "receipt_recorded": { "const": true },
+            "invoked_at": { "type": ["string", "null"], "format": "date-time" },
+            "completed_at": { "type": "string", "format": "date-time" },
+            "error": { "type": ["string", "null"], "maxLength": 2000 },
+            "tool_result_entered_context": { "type": ["boolean", "null"] },
+            "persisted": { "type": ["boolean", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "side_effects": {
+          "type": "object",
+          "required": ["measurement_status", "count", "summary"],
+          "properties": {
+            "measurement_status": { "enum": ["measured", "not_measured", "unknown"] },
+            "count": { "type": ["integer", "null"], "minimum": 0 },
+            "summary": { "type": ["string", "null"], "maxLength": 2000 }
+          },
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "required": ["disposition", "summary", "sanitized"],
+          "properties": {
+            "disposition": { "enum": ["not_applicable", "passed_through", "modified", "quarantined", "unknown"] },
+            "summary": { "type": ["string", "null"], "maxLength": 2000 },
+            "sanitized": { "type": ["boolean", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "approval": {
+          "type": "object",
+          "required": ["approval_id", "status", "decision", "resolved_at"],
+          "properties": {
+            "approval_id": { "type": ["string", "null"], "maxLength": 160 },
+            "status": { "enum": ["not_required", "pending", "allowed", "denied", "expired", "unknown"] },
+            "decision": { "enum": ["allow_once", "deny", null] },
+            "resolved_at": { "type": ["string", "null"], "format": "date-time" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -46,22 +46,20 @@ export interface ApprovalRequest {
   id: string;
   createdAt: string;
   status: ApprovalStatus;
-  tool: string;
   resource: string;
   riskScore: number;
   severity: RiskSeverity;
   reason: string;
   eventId: string;
   traceId: string;
-  subjectId?: string;
-  subjectType?: string;
-  actionId?: string;
-  actionName?: string;
+  subjectId: string;
+  subjectType: string;
+  actionId: string;
+  actionName: string;
   userTask: string;
   agentAction: string;
   consequence: string;
   ruleHits: string[];
-  approvalNonce?: string;
   expiresAt?: string | null;
   resolvedAt?: string | null;
 }
@@ -364,16 +362,28 @@ export interface TraceEvidenceViewModel {
 
 export interface AuditWindowScope {
   kind: "audit_window";
-  source: "legacy_audit_events" | "audit_window_api";
+  snapshotId: string;
+  outcomesAsOf: string;
+  order: "audit_sequence";
   limit: number;
   returnedRecordCount: number;
-  hasMore: boolean | null;
-  from: string | null;
-  to: string | null;
-  deduplication: "logical_policy_evaluation";
+  hasMore: boolean;
+  nextCursor: string | null;
+  sequenceFrom: number | null;
+  sequenceTo: number | null;
+  occurredFrom: string | null;
+  occurredTo: string | null;
+  filters: {
+    traceId: string | null;
+    caseId: string | null;
+    runtime: string | null;
+    decision: string | null;
+  };
 }
 
 export interface WindowMetrics {
+  metricVersion: "policy_evaluation.v2";
+  deduplication: "logical_policy_evaluation";
   evaluationCount: number;
   unknownDecisionCount: number;
   allowCount: number;
@@ -391,7 +401,7 @@ export interface WindowMetrics {
   averageDecisionLatencyMs: number | null;
   latencySampleCount: number;
   duplicatePolicyRecordCount: number;
-  legacyFallbackCount: number;
+  unkeyedPolicyRecordCount: number;
 }
 
 export interface AuditWindow {
@@ -492,6 +502,20 @@ export interface AuditIntegrity {
   eventCount: number;
   headHash: string | null;
   firstBrokenAuditId: string | null;
+  canonicalization: "jcs:rfc8785";
+  anchor: AuditAnchor;
+}
+
+export interface AuditAnchor {
+  enabled: boolean;
+  status: "disabled" | "empty" | "current" | "stale" | "invalid" | "error";
+  checkpointSequence: number | null;
+  checkpointHeadHash: string | null;
+  checkpointHash: string | null;
+  checkpointedAt: string | null;
+  lag: number | null;
+  keyId: string | null;
+  errorCode: string | null;
 }
 
 export interface ConfigAuditFinding {
@@ -525,7 +549,6 @@ export interface AdapterStatus {
   lastHeartbeatAt: string | null;
   error: string | null;
   source: string | null;
-  runtime: string | null;
   runtimeId: string | null;
   agentId: string | null;
   pluginVersion: string | null;

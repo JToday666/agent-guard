@@ -1,4 +1,5 @@
 import {
+  OPENCLAW_FAIL_CLOSED_HOOKS,
   OPENCLAW_REQUIRED_HOOK_COUNT,
   OPENCLAW_REQUIRED_HOOKS,
 } from "../hook-contract.mjs";
@@ -13,6 +14,7 @@ import type {
   GuardEvent,
   MessageHookResult,
   OpenClawPluginConfigInput,
+  RuntimeOutcomeReceipt,
   ToolHookResult,
 } from "./types.js";
 import type { OutcomeApprovalEvidence } from "./mapping/audit-outcomes.js";
@@ -34,14 +36,9 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   enforcementMode: "enforce",
   requestTimeoutMs: 5000,
   approvalPollIntervalMs: 1000,
-  approvalTimeoutMs: 120000,
-  approvalWaitBudgetMs: 25000,
+  approvalTimeoutMs: 25000,
   diagnosticLogging: false,
-  runtimeId: "openclaw",
   agentId: "main",
-  failClosedStages: ["before_tool_call", "message_sending", "before_install", "before_prompt_build", "llm_input"],
-  redaction: { enabled: true, previewLimit: 2000 },
-  heartbeatIntervalMs: 60000,
 };
 
 export class GuardApiError extends Error {
@@ -59,6 +56,17 @@ export class GuardApiConflictError extends GuardApiError {
   constructor(message: string) {
     super(message);
     this.name = "GuardApiConflictError";
+  }
+}
+
+/** Non-retryable producer/authorization failures for durable receipt delivery. */
+export class GuardApiPermanentError extends GuardApiError {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Guard API request failed permanently with status ${status}`);
+    this.name = "GuardApiPermanentError";
+    this.status = status;
   }
 }
 
@@ -84,7 +92,9 @@ export class GuardApiClient {
     this.fetchImpl = params.fetchImpl ?? fetch;
   }
 
-  async evaluate(event: GuardEvent | Record<string, unknown>): Promise<GuardEvaluationResponse> {
+  async evaluate(
+    event: GuardEvent | Record<string, unknown>,
+  ): Promise<GuardEvaluationResponse> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -96,7 +106,9 @@ export class GuardApiClient {
     return (await response.json()) as GuardEvaluationResponse;
   }
 
-  async evaluateConfigAudit(event: ConfigAuditEvent): Promise<ConfigAuditResult> {
+  async evaluateConfigAudit(
+    event: ConfigAuditEvent,
+  ): Promise<ConfigAuditResult> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -108,7 +120,9 @@ export class GuardApiClient {
     return (await response.json()) as ConfigAuditResult;
   }
 
-  async submitRuntimeObservation(event: AuditEvent): Promise<AuditSubmitResponse> {
+  async submitRuntimeObservation(
+    event: AuditEvent,
+  ): Promise<AuditSubmitResponse> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -122,10 +136,12 @@ export class GuardApiClient {
 
   /**
    * 提交 runtime_outcome 回执（复用 POST /v1/audit/events，不新增端点）。
-   * 回执是 fire-and-forget：409 只记诊断（不重试、不 fail-closed），
-   * 其余错误继续抛给调用方的 .catch(logDiagnostic) 处理。
+   * 回执是 fire-and-forget：永久 4xx 只记诊断，网络、429 与 5xx
+   * 交给持久化投递队列重试，均不改变已经完成的运行时处置。
    */
-  async submitRuntimeOutcome(event: AuditEvent): Promise<AuditSubmitResponse> {
+  async submitRuntimeOutcome(
+    event: RuntimeOutcomeReceipt,
+  ): Promise<AuditSubmitResponse> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -137,11 +153,18 @@ export class GuardApiClient {
       });
       return (await response.json()) as AuditSubmitResponse;
     } catch (error) {
-      if (error instanceof GuardApiConflictError) {
+      if (
+        error instanceof GuardApiConflictError ||
+        error instanceof GuardApiPermanentError
+      ) {
         logDiagnostic(
           this.config,
-          "runtime outcome receipt rejected with 409 conflict",
-          { audit_id: event.audit_id ?? null },
+          "runtime outcome receipt was permanently rejected",
+          {
+            audit_id: event.audit_id ?? null,
+            status:
+              error instanceof GuardApiPermanentError ? error.status : 409,
+          },
         );
         return {
           ok: false,
@@ -154,19 +177,21 @@ export class GuardApiClient {
     }
   }
 
-  async submitHeartbeat(input: AdapterHeartbeatInput): Promise<Record<string, unknown>> {
+  async submitHeartbeat(
+    input: AdapterHeartbeatInput,
+  ): Promise<Record<string, unknown>> {
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
-    const hooks = input.hooks.length > 0 ? input.hooks : [...OPENCLAW_REQUIRED_HOOKS];
+    const hooks =
+      input.hooks.length > 0 ? input.hooks : [...OPENCLAW_REQUIRED_HOOKS];
 
     const response = await this.request("/v1/adapters/openclaw/heartbeat", {
       method: "POST",
       body: JSON.stringify({
         status: "loaded",
         loaded: true,
-        runtime: "openclaw",
-        runtime_id: this.config.runtimeId,
+        runtime_id: "openclaw",
         agent_id: this.config.agentId,
         plugin_version: input.pluginVersion,
         runtime_version: input.runtimeVersion ?? null,
@@ -175,54 +200,91 @@ export class GuardApiClient {
         hooks,
         hook_count: hooks.length,
         expected_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
-        fail_closed_stages: this.config.failClosedStages,
+        fail_closed_stages: [...OPENCLAW_FAIL_CLOSED_HOOKS],
         enforcement_mode: this.config.enforcementMode,
       }),
     });
     return (await response.json()) as Record<string, unknown>;
   }
 
-  async waitForApproval(approvalId: string, timeoutBudgetMs = this.config.approvalTimeoutMs): Promise<ApprovalWaitResponse> {
-    const startedAt = Date.now();
-    const timeoutMs = Math.min(this.config.approvalTimeoutMs, timeoutBudgetMs);
-    do {
-      const response = await this.request(`/v1/approvals/${encodeURIComponent(approvalId)}/wait`, {
-        method: "GET",
-      });
+  async waitForApproval(approvalId: string): Promise<ApprovalWaitResponse> {
+    const deadline = Date.now() + this.config.approvalTimeoutMs;
+    while (Date.now() < deadline) {
+      const remainingMs = deadline - Date.now();
+      let response: Response;
+      try {
+        response = await this.request(
+          `/v1/approvals/${encodeURIComponent(approvalId)}/wait`,
+          { method: "GET" },
+          Math.min(this.config.requestTimeoutMs, remainingMs),
+        );
+      } catch (error) {
+        if (Date.now() >= deadline) {
+          return { status: "timeout", decision: "deny" };
+        }
+        throw error;
+      }
       const parsed = (await response.json()) as ApprovalWaitResponse;
       if (parsed.status !== "pending") {
         return parsed;
       }
-      await delay(this.config.approvalPollIntervalMs);
-    } while (Date.now() - startedAt < timeoutMs);
+      const delayMs = Math.min(
+        this.config.approvalPollIntervalMs,
+        Math.max(0, deadline - Date.now()),
+      );
+      if (delayMs > 0) {
+        await delay(delayMs);
+      }
+    }
     return { status: "timeout", decision: "deny" };
   }
 
-  private async request(path: string, init: RequestInit): Promise<Response> {
+  private async request(
+    path: string,
+    init: RequestInit,
+    timeoutMs = this.config.requestTimeoutMs,
+  ): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await this.fetchImpl(`${trimTrailingSlash(this.config.guardApiBaseUrl)}${path}`, {
-        ...init,
-        signal: controller.signal,
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${this.config.adapterToken}`,
-          "Content-Type": "application/json",
-          ...(init.headers ?? {}),
+      const response = await this.fetchImpl(
+        `${trimTrailingSlash(this.config.guardApiBaseUrl)}${path}`,
+        {
+          ...init,
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${this.config.adapterToken}`,
+            "Content-Type": "application/json",
+            ...(init.headers ?? {}),
+          },
         },
-      });
+      );
       if (!response.ok) {
-        logDiagnostic(this.config, "Guard API request returned an error response", {
-          path,
-          status: response.status,
-        });
+        logDiagnostic(
+          this.config,
+          "Guard API request returned an error response",
+          {
+            path,
+            status: response.status,
+          },
+        );
         if (response.status === 409) {
           throw new GuardApiConflictError(
             "Guard API request failed with status 409",
           );
         }
-        throw new GuardApiError(`Guard API request failed with status ${response.status}`);
+        if (
+          response.status >= 400 &&
+          response.status < 500 &&
+          response.status !== 408 &&
+          response.status !== 429
+        ) {
+          throw new GuardApiPermanentError(response.status);
+        }
+        throw new GuardApiError(
+          `Guard API request failed with status ${response.status}`,
+        );
       }
       return response;
     } catch (error) {
@@ -242,26 +304,41 @@ export class GuardApiClient {
 
 export function buildPluginConfig(
   input: OpenClawPluginConfigInput,
-  env: Record<string, string | undefined> = process.env,
 ): AgentGuardPluginConfig {
-  return {
-    guardApiBaseUrl: nonEmptyString(input?.guardApiBaseUrl, DEFAULT_CONFIG.guardApiBaseUrl),
-    adapterToken: nonEmptyString(input?.adapterToken, env.AGENTGUARD_ADAPTER_TOKEN ?? DEFAULT_CONFIG.adapterToken),
-    enforcementMode: enforcementMode(input?.enforcementMode, DEFAULT_CONFIG.enforcementMode),
-    requestTimeoutMs: positiveInteger(input?.requestTimeoutMs, DEFAULT_CONFIG.requestTimeoutMs),
+  const config: AgentGuardPluginConfig = {
+    guardApiBaseUrl: nonEmptyString(
+      input?.guardApiBaseUrl,
+      DEFAULT_CONFIG.guardApiBaseUrl,
+    ),
+    adapterToken: nonEmptyString(
+      input?.adapterToken,
+      DEFAULT_CONFIG.adapterToken,
+    ),
+    enforcementMode: enforcementMode(
+      input?.enforcementMode,
+      DEFAULT_CONFIG.enforcementMode,
+    ),
+    requestTimeoutMs: positiveInteger(
+      input?.requestTimeoutMs,
+      DEFAULT_CONFIG.requestTimeoutMs,
+    ),
     approvalPollIntervalMs: positiveInteger(
       input?.approvalPollIntervalMs,
       DEFAULT_CONFIG.approvalPollIntervalMs,
     ),
-    approvalTimeoutMs: positiveInteger(input?.approvalTimeoutMs, DEFAULT_CONFIG.approvalTimeoutMs),
-    approvalWaitBudgetMs: positiveInteger(input?.approvalWaitBudgetMs, DEFAULT_CONFIG.approvalWaitBudgetMs),
+    approvalTimeoutMs: positiveInteger(
+      input?.approvalTimeoutMs,
+      DEFAULT_CONFIG.approvalTimeoutMs,
+    ),
     diagnosticLogging: input?.diagnosticLogging === true,
-    runtimeId: nonEmptyString(input?.runtimeId, DEFAULT_CONFIG.runtimeId),
     agentId: nonEmptyString(input?.agentId, DEFAULT_CONFIG.agentId),
-    failClosedStages: stringArray(input?.failClosedStages, DEFAULT_CONFIG.failClosedStages),
-    redaction: redactionConfig(input?.redaction, DEFAULT_CONFIG.redaction),
-    heartbeatIntervalMs: positiveInteger(input?.heartbeatIntervalMs, DEFAULT_CONFIG.heartbeatIntervalMs),
   };
+  if (!config.adapterToken) {
+    throw new GuardApiError(
+      "AgentGuard adapterToken must be configured through an OpenClaw SecretRef",
+    );
+  }
+  return config;
 }
 
 export async function decisionToToolResult(
@@ -278,13 +355,22 @@ export async function decisionToToolResult(
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
-    return { block: true, blockReason: safeDecisionMessage(response, response.approval?.approval_id) };
+    return {
+      block: true,
+      blockReason: safeDecisionMessage(
+        response,
+        response.approval?.approval_id,
+      ),
+    };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
   if (approval.status === "resolved" && approval.decision === "allow_once") {
     onOutcome?.({
       kind: "approval_release",
-      approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
+      approval: approvalEvidenceFromWait(
+        response.approval.approval_id,
+        approval,
+      ),
     });
     return undefined;
   }
@@ -292,7 +378,10 @@ export async function decisionToToolResult(
     kind: "pre_execution_deny",
     approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
   });
-  return { block: true, blockReason: safeDecisionMessage(response, response.approval.approval_id) };
+  return {
+    block: true,
+    blockReason: safeDecisionMessage(response, response.approval.approval_id),
+  };
 }
 
 export async function decisionToMessageResult(
@@ -309,13 +398,22 @@ export async function decisionToMessageResult(
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
-    return { cancel: true, cancelReason: safeDecisionMessage(response, response.approval?.approval_id) };
+    return {
+      cancel: true,
+      cancelReason: safeDecisionMessage(
+        response,
+        response.approval?.approval_id,
+      ),
+    };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
   if (approval.status === "resolved" && approval.decision === "allow_once") {
     onOutcome?.({
       kind: "approval_release",
-      approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
+      approval: approvalEvidenceFromWait(
+        response.approval.approval_id,
+        approval,
+      ),
     });
     return undefined;
   }
@@ -323,7 +421,10 @@ export async function decisionToMessageResult(
     kind: "pre_execution_deny",
     approval: approvalEvidenceFromWait(response.approval.approval_id, approval),
   });
-  return { cancel: true, cancelReason: safeDecisionMessage(response, response.approval.approval_id) };
+  return {
+    cancel: true,
+    cancelReason: safeDecisionMessage(response, response.approval.approval_id),
+  };
 }
 
 /** 把审批等待结果映射为 §9.8 evidence 稳定状态（timeout→expired）。 */
@@ -333,7 +434,12 @@ function approvalEvidenceFromWait(
 ): OutcomeApprovalEvidence {
   const resolvedAt = new Date().toISOString();
   if (wait.decision === "allow_once") {
-    return { approvalId, status: "allowed", decision: "allow_once", resolvedAt };
+    return {
+      approvalId,
+      status: "allowed",
+      decision: "allow_once",
+      resolvedAt,
+    };
   }
   if (wait.status === "timeout" || wait.status === "expired") {
     return { approvalId, status: "expired", decision: null, resolvedAt };
@@ -347,15 +453,27 @@ function approvalEvidenceFromWait(
 }
 
 export function failClosedToolResult(): ToolHookResult {
-  return { block: true, blockReason: "AgentGuard is unavailable; blocked by fail-closed policy." };
+  return {
+    block: true,
+    blockReason: "AgentGuard is unavailable; blocked by fail-closed policy.",
+  };
 }
 
 export function failClosedMessageResult(): MessageHookResult {
-  return { cancel: true, cancelReason: "AgentGuard is unavailable; cancelled by fail-closed policy." };
+  return {
+    cancel: true,
+    cancelReason: "AgentGuard is unavailable; cancelled by fail-closed policy.",
+  };
 }
 
-function safeDecisionMessage(response: GuardEvaluationResponse, approvalId?: string): string {
-  const message = response.decision.safe_message || response.decision.reason || "Blocked by AgentGuard policy.";
+function safeDecisionMessage(
+  response: GuardEvaluationResponse,
+  approvalId?: string,
+): string {
+  const message =
+    response.decision.safe_message ||
+    response.decision.reason ||
+    "Blocked by AgentGuard policy.";
   return approvalId ? `${message} (approval_id=${approvalId})` : message;
 }
 
@@ -364,33 +482,18 @@ function nonEmptyString(value: unknown, fallback: string): string {
 }
 
 function positiveInteger(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
-function stringArray(value: unknown, fallback: string[]): string[] {
-  if (!Array.isArray(value)) {
-    return [...fallback];
-  }
-  const items = value.filter((item): item is string => typeof item === "string" && item.length > 0);
-  return items.length > 0 ? [...items] : [...fallback];
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : fallback;
 }
 
 function enforcementMode(
   value: unknown,
   fallback: AgentGuardPluginConfig["enforcementMode"],
 ): AgentGuardPluginConfig["enforcementMode"] {
-  return value === "enforce" || value === "observe" || value === "disabled" ? value : fallback;
-}
-
-function redactionConfig(value: unknown, fallback: AgentGuardPluginConfig["redaction"]): AgentGuardPluginConfig["redaction"] {
-  if (typeof value !== "object" || value === null) {
-    return { ...fallback };
-  }
-  const record = value as Record<string, unknown>;
-  return {
-    enabled: record.enabled !== false,
-    previewLimit: positiveInteger(record.previewLimit, fallback.previewLimit),
-  };
+  return value === "enforce" || value === "observe" || value === "disabled"
+    ? value
+    : fallback;
 }
 
 function trimTrailingSlash(value: string): string {
@@ -409,7 +512,11 @@ export function logDiagnostic(
   if (!config.diagnosticLogging) {
     return;
   }
-  console.warn("[AgentGuard OpenClaw]", message, JSON.stringify(sanitizeDiagnostic(details, config.adapterToken)));
+  console.warn(
+    "[AgentGuard OpenClaw]",
+    message,
+    JSON.stringify(sanitizeDiagnostic(details, config.adapterToken)),
+  );
 }
 
 function sanitizeDiagnostic(value: unknown, adapterToken: string): unknown {

@@ -127,21 +127,20 @@ test("reports legacy fallback rows without guessing a logical key", () => {
   ]);
 
   assert.equal(selection.events.length, 2);
-  assert.equal(selection.legacyFallbackCount, 2);
+  assert.equal(selection.unkeyedPolicyRecordCount, 2);
   assert.equal(selection.duplicatePolicyRecordCount, 0);
 });
 
-test("creates an explicit client-derived audit window scope", () => {
+test("creates an atomic audit window fixture scope", () => {
   const window = createAuditWindow([...events], {
     limit: 500,
-    hasMore: null,
-    source: "legacy_audit_events",
+    hasMore: false,
   });
 
   assert.equal(window.scope.returnedRecordCount, 3);
-  assert.equal(window.scope.hasMore, null);
-  assert.equal(window.scope.from, "2026-06-22T06:05:00Z");
-  assert.equal(window.scope.to, "2026-06-22T07:10:00Z");
+  assert.equal(window.scope.hasMore, false);
+  assert.equal(window.scope.occurredFrom, "2026-06-22T06:05:00Z");
+  assert.equal(window.scope.occurredTo, "2026-06-22T07:10:00Z");
   assert.equal(window.metrics.evaluationCount, 3);
 });
 

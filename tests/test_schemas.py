@@ -21,12 +21,15 @@ from agentguard_core import (
     MessageSendPayload,
     ModelCallPayload,
     PolicyBundle,
+    RuntimeOutcomeReceipt,
     ToolCallPayload,
     ToolDescriptor,
     ToolResult,
     ToolResultPayload,
 )
-from agentguard_core.models import Decision, GuardEventType, guard_event_raw_payload_contracts
+from agentguard_core.decisions import Decision
+from agentguard_core.events import GuardEventType, guard_event_raw_payload_contracts
+from guard_api.models import AdapterStatusRecord, EvaluationRun
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,12 +39,10 @@ def _load_schema(name: str) -> dict:
     return json.loads((ROOT / "schemas" / name).read_text(encoding="utf-8"))
 
 
-def test_core_package_imports_preserve_compatibility() -> None:
+def test_core_package_exports_match_canonical_subpackages() -> None:
     from agentguard_core import GuardEvent as TopLevelGuardEvent
     from agentguard_core import PolicyBundle as TopLevelPolicyBundle
-    from agentguard_core.detectors import OutboundDetector as LegacyOutboundDetector
-    from agentguard_core.models import GuardEvent as LegacyGuardEvent
-    from agentguard_core.models import PolicyBundle as LegacyPolicyBundle
+    from agentguard_core.detectors import OutboundDetector
 
     from agentguard_core.decisions import GuardDecision as PackagedGuardDecision
     from agentguard_core.detectors.outbound import OutboundDetector as PackagedOutboundDetector
@@ -49,10 +50,10 @@ def test_core_package_imports_preserve_compatibility() -> None:
     from agentguard_core.policies import PolicyBundle as PackagedPolicyBundle
 
     assert agentguard_core.GuardEvent is TopLevelGuardEvent
-    assert TopLevelGuardEvent is LegacyGuardEvent is PackagedGuardEvent
-    assert TopLevelPolicyBundle is LegacyPolicyBundle is PackagedPolicyBundle
+    assert TopLevelGuardEvent is PackagedGuardEvent
+    assert TopLevelPolicyBundle is PackagedPolicyBundle
     assert PackagedGuardDecision is GuardDecision
-    assert LegacyOutboundDetector is PackagedOutboundDetector
+    assert OutboundDetector is PackagedOutboundDetector
 
 
 def test_public_schemas_validate_target_models() -> None:
@@ -107,6 +108,108 @@ def test_public_schemas_validate_target_models() -> None:
         },
         _load_schema("attack_case.schema.json"),
     )
+
+
+def test_operational_models_normalize_aware_timestamps_to_utc() -> None:
+    run = EvaluationRun(
+        run_id="eval_timezone",
+        run_at="2026-06-28T08:00:00+08:00",
+    )
+    status = AdapterStatusRecord(
+        last_verified_at="2026-06-28T08:01:00+08:00",
+        last_heartbeat_at="2026-06-28T08:02:00+08:00",
+    )
+
+    assert run.run_at == "2026-06-28T00:00:00+00:00"
+    assert status.last_verified_at == "2026-06-28T00:01:00+00:00"
+    assert status.last_heartbeat_at == "2026-06-28T00:02:00+00:00"
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (EvaluationRun, {"run_id": "eval_naive", "run_at": "2026-06-28T00:00:00"}),
+        (AdapterStatusRecord, {"last_heartbeat_at": "2026-06-28T00:00:00"}),
+    ],
+)
+def test_operational_models_reject_naive_timestamps(model, payload) -> None:
+    with pytest.raises(PydanticValidationError):
+        model.model_validate(payload)
+
+
+def test_runtime_outcome_receipt_has_one_strict_cross_runtime_schema() -> None:
+    payload = {
+        "audit_id": "audit_outcome_evt_schema_pre_execution_deny",
+        "schema_version": "0.4",
+        "record_type": "runtime_outcome",
+        "trace_id": "trace_schema_outcome",
+        "case_id": None,
+        "runtime": "langgraph",
+        "timestamp": "2026-08-10T08:00:01+08:00",
+        "stage": "after_guard_decision",
+        "event_type": "runtime_outcome",
+        "attack_type": None,
+        "is_malicious": None,
+        "summary": "Runtime did not invoke the action",
+        "decision": "deny",
+        "risk_score": 90,
+        "severity": "high",
+        "blocked": True,
+        "resource_targets": [],
+        "rule_hits": ["P001"],
+        "reason": "Policy denied the action",
+        "links": {
+            "event_id": "evt_schema",
+            "decision_id": "dec_schema",
+            "policy_audit_id": "audit_policy_schema",
+        },
+        "latency_ms": None,
+        "metadata": {
+            "agent_id": "main",
+            "outcome_kind": "pre_execution_deny",
+        },
+        "evidence": {
+            "intervention": {"type": "policy_deny", "reason": "Denied"},
+            "execution": {
+                "status": "not_invoked",
+                "receipt_recorded": True,
+                "invoked_at": None,
+                "completed_at": "2026-08-10T08:00:01+08:00",
+                "error": None,
+                "tool_result_entered_context": False,
+                "persisted": False,
+            },
+            "side_effects": {
+                "measurement_status": "measured",
+                "count": 0,
+                "summary": "No invocation",
+            },
+            "result": {
+                "disposition": "not_applicable",
+                "summary": None,
+                "sanitized": False,
+            },
+            "approval": {
+                "approval_id": None,
+                "status": "not_required",
+                "decision": None,
+                "resolved_at": None,
+            },
+        },
+    }
+
+    receipt = RuntimeOutcomeReceipt.model_validate(payload)
+
+    assert receipt.timestamp == "2026-08-10T00:00:01+00:00"
+    validate(
+        receipt.model_dump(mode="json"),
+        _load_schema("runtime_outcome_receipt.schema.json"),
+    )
+    validate(receipt.model_dump(mode="json"), _load_schema("audit_event.schema.json"))
+    with pytest.raises(PydanticValidationError):
+        RuntimeOutcomeReceipt.model_validate(
+            {**payload, "audit_id": "audit_outcome_wrong"}
+        )
 
 
 def test_core_models_reject_wrong_schema_version() -> None:

@@ -400,16 +400,16 @@ def test_approval_service_updates_the_existing_provenance_node() -> None:
             approval_id="approval-service",
             trace_id="trace-approval",
             subject_id="action-approval",
+            subject_type="tool_call",
             action_id="action-approval",
             action_name="code_exec",
-            tool_call_id="action-approval",
             requesting_principal_id="adapter",
-            tool="code_exec",
             resource="2 + 2",
             reason="需要人工确认",
             risk_score=72,
             severity="high",
             evidence={"decision": {"decision_id": "approval-decision"}},
+            expires_at="2099-01-01T00:00:00+00:00",
         )
     )
     writer.update_approval(approval)
@@ -447,16 +447,16 @@ def test_approval_update_rejects_a_decision_from_another_trace() -> None:
         approval_id="approval-cross-trace",
         trace_id="trace-local",
         subject_id="action-local",
+        subject_type="tool_call",
         action_id="action-local",
         action_name="code_exec",
-        tool_call_id="action-local",
         requesting_principal_id="adapter",
-        tool="code_exec",
         resource="2 + 2",
         reason="需要人工确认",
         risk_score=72,
         severity="high",
         evidence={"decision": {"decision_id": "foreign"}},
+        expires_at="2099-01-01T00:00:00+00:00",
     )
 
     with pytest.raises(ProvenanceConflictError):

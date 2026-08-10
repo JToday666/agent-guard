@@ -100,11 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--output", help="Write JSONL to this file instead of stdout")
     export.set_defaults(handler=_cmd_audit_export)
 
-    metrics = subcommands.add_parser("metrics", help="Read evaluation metrics")
-    metrics.add_argument("--trace-id")
+    metrics = subcommands.add_parser("metrics", help="Read policy evaluation metrics")
+    metrics.add_argument("--evaluated-from")
+    metrics.add_argument("--evaluated-to")
+    metrics.add_argument("--outcomes-as-of")
     metrics.add_argument("--case-id")
     metrics.add_argument("--runtime")
-    metrics.add_argument("--decision")
     metrics.add_argument("--json", action="store_true", help="Print JSON response")
     metrics.set_defaults(handler=_cmd_metrics)
 
@@ -117,6 +118,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trace_get.add_argument("--output", help="Write JSON to this file instead of stdout")
     trace_get.set_defaults(handler=_cmd_trace_get)
+
+    credential = subcommands.add_parser(
+        "credential", help="Manage runtime adapter credentials"
+    )
+    credential_subcommands = credential.add_subparsers(
+        dest="credential_command", required=True
+    )
+    credential_issue = credential_subcommands.add_parser(
+        "issue", help="Issue a runtime-bound adapter token"
+    )
+    credential_issue.add_argument("--runtime", required=True)
+    credential_issue.add_argument("--agent-id", required=True)
+    credential_issue.add_argument(
+        "--principal-id",
+        help="Stable adapter principal; defaults to <runtime>:<agent-id>",
+    )
+    credential_issue.add_argument("--expires-at", help="RFC 3339 expiry timestamp")
+    credential_issue.add_argument("--json", action="store_true")
+    credential_issue.set_defaults(handler=_cmd_credential_issue)
+
+    credential_list = credential_subcommands.add_parser(
+        "list", help="List issued adapter credentials"
+    )
+    credential_list.add_argument("--json", action="store_true")
+    credential_list.set_defaults(handler=_cmd_credential_list)
+
+    credential_revoke = credential_subcommands.add_parser(
+        "revoke", help="Revoke an adapter credential"
+    )
+    credential_revoke.add_argument("credential_id")
+    credential_revoke.add_argument("--json", action="store_true")
+    credential_revoke.set_defaults(handler=_cmd_credential_revoke)
 
     openclaw = subcommands.add_parser("openclaw", help="OpenClaw helper commands")
     openclaw_subcommands = openclaw.add_subparsers(
@@ -204,19 +237,39 @@ def _cmd_audit_export(
             "limit": args.limit,
         }
     )
-    payload = _request_json(
-        "GET", "/v1/audit/events", env=env, transport=transport, params=params
-    )
-    if not isinstance(payload, list):
-        raise CliError("Guard API response for audit export was not a list")
+    events: list[Any] = []
+    cursor: str | None = None
+    if args.limit <= 0:
+        raise CliError("--limit must be greater than zero", exit_code=2)
+    page_limit = min(args.limit, 1000)
+    while len(events) < args.limit:
+        page_params = (
+            {**params, "limit": page_limit} if cursor is None else {"cursor": cursor}
+        )
+        payload = _request_json(
+            "GET", "/v1/audit/window", env=env, transport=transport, params=page_params
+        )
+        if not isinstance(payload, dict):
+            raise CliError("Guard API response for audit export was not an object")
+        page_events = payload.get("events")
+        scope = payload.get("scope")
+        if not isinstance(page_events, list) or not isinstance(scope, dict):
+            raise CliError("Guard API audit window response was incomplete")
+        events.extend(page_events[: args.limit - len(events)])
+        if scope.get("has_more") is not True:
+            break
+        next_cursor = scope.get("next_cursor")
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
+            raise CliError("Guard API audit window cursor was invalid")
+        cursor = next_cursor
     lines = "".join(
-        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in payload
+        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in events
     )
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(lines, encoding="utf-8")
-        stdout.write(f"Wrote {len(payload)} audit events to {output_path}\n")
+        stdout.write(f"Wrote {len(events)} audit events to {output_path}\n")
     else:
         stdout.write(lines)
     return 0
@@ -230,16 +283,23 @@ def _cmd_metrics(
     transport: httpx.BaseTransport | None,
     **_: Any,
 ) -> int:
+    if not args.evaluated_from or not args.evaluated_to:
+        raise CliError("--evaluated-from and --evaluated-to are required", exit_code=2)
     params = _filter_params(
         {
-            "trace_id": args.trace_id,
+            "evaluated_from": args.evaluated_from,
+            "evaluated_to": args.evaluated_to,
+            "outcomes_as_of": args.outcomes_as_of,
             "case_id": args.case_id,
             "runtime": args.runtime,
-            "decision": args.decision,
         }
     )
     payload = _request_json(
-        "GET", "/v1/metrics/eval", env=env, transport=transport, params=params
+        "GET",
+        "/v1/metrics/policy-evaluations",
+        env=env,
+        transport=transport,
+        params=params,
     )
     if args.json:
         _write_json(stdout, payload)
@@ -267,6 +327,100 @@ def _cmd_trace_get(
         stdout.write(f"Wrote trace {args.trace_id} to {output_path}\n")
     else:
         _write_json(stdout, payload)
+    return 0
+
+
+def _cmd_credential_issue(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    principal_id = args.principal_id or f"{args.runtime}:{args.agent_id}"
+    response = _request_json(
+        "POST",
+        "/v1/credentials",
+        env=env,
+        transport=transport,
+        json_body=_filter_params(
+            {
+                "principal_id": principal_id,
+                "runtime": args.runtime,
+                "agent_id": args.agent_id,
+                "expires_at": args.expires_at,
+            }
+        ),
+    )
+    if not isinstance(response, dict):
+        raise CliError("Guard API credential response was not an object")
+    token = response.get("token")
+    credential = response.get("credential")
+    if not isinstance(token, str) or not isinstance(credential, dict):
+        raise CliError("Guard API credential response was incomplete")
+    if args.json:
+        _write_json(stdout, response)
+        return 0
+    stdout.write(f"Credential: {credential.get('credential_id', '<unknown>')}\n")
+    stdout.write(f"Runtime: {args.runtime}\n")
+    stdout.write(f"Agent: {args.agent_id}\n")
+    stdout.write(f"Token (shown once): {token}\n")
+    return 0
+
+
+def _cmd_credential_list(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    response = _request_json("GET", "/v1/credentials", env=env, transport=transport)
+    if not isinstance(response, list):
+        raise CliError("Guard API credential list was not an array")
+    if args.json:
+        _write_json(stdout, response)
+        return 0
+    if not response:
+        stdout.write("No adapter credentials.\n")
+        return 0
+    for credential in response:
+        if not isinstance(credential, dict):
+            raise CliError("Guard API credential list contained an invalid row")
+        stdout.write(
+            "{credential_id}  {runtime}/{agent_id}  {principal_id}  {state}\n".format(
+                credential_id=credential.get("credential_id", "<unknown>"),
+                runtime=credential.get("runtime", "<unknown>"),
+                agent_id=credential.get("agent_id", "<unknown>"),
+                principal_id=credential.get("principal_id", "<unknown>"),
+                state="revoked" if credential.get("revoked_at") else "active",
+            )
+        )
+    return 0
+
+
+def _cmd_credential_revoke(
+    args: argparse.Namespace,
+    *,
+    env: Env,
+    stdout: TextIO,
+    transport: httpx.BaseTransport | None,
+    **_: Any,
+) -> int:
+    response = _request_json(
+        "POST",
+        f"/v1/credentials/{args.credential_id}/revoke",
+        env=env,
+        transport=transport,
+    )
+    if not isinstance(response, dict):
+        raise CliError("Guard API revoke response was not an object")
+    if args.json:
+        _write_json(stdout, response)
+    else:
+        stdout.write(f"Revoked credential {args.credential_id}\n")
     return 0
 
 
@@ -372,18 +526,22 @@ def _json_text(payload: Any) -> str:
 def _format_metrics(payload: Any) -> str:
     if not isinstance(payload, dict):
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    metrics = payload.get("policy_metrics")
+    if not isinstance(metrics, dict):
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
     keys = [
-        "event_count",
+        "evaluation_count",
         "allow_count",
         "deny_count",
         "ask_count",
-        "blocked_count",
-        "block_rate",
-        "fpr",
-        "fnr",
-        "average_latency_ms",
+        "intervention_rate",
+        "policy_deny_rate",
+        "approval_trigger_rate",
+        "policy_intervention_fpr",
+        "policy_intervention_fnr",
+        "average_decision_latency_ms",
     ]
-    parts = [f"{key}={payload[key]}" for key in keys if key in payload]
+    parts = [f"{key}={metrics[key]}" for key in keys if key in metrics]
     return (
         " ".join(parts)
         if parts

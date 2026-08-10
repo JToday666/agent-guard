@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from uuid import uuid4
@@ -31,7 +32,7 @@ from guard_api.services import (
 import guard_api.services.evaluation as evaluation_service_module
 from guard_api.services.audit_window import AuditWindowService
 from guard_api.services.evidence import build_audit_event
-from guard_api.services.metric_rules import classify_record_type
+from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.services.redaction import (
     MAX_EVIDENCE_BYTES,
     evidence_serialized_size,
@@ -41,16 +42,19 @@ from guard_api.storage.base import (
     AuditEventFilters,
     AuditIdConflictError,
     AuditWindowQuery,
-    EvalMetricFilters,
+    EvaluationRunConflictError,
+    classify_audit_record_type,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "runtime_safety_trace_v04.json"
 
 ADAPTER_HEADERS = {"Authorization": "Bearer adapter-secret"}
+_CURSOR_SIGNING_KEY = b"agentguard-test-cursor-signing-key-32-bytes"
 
 _STABLE_LINK_KEYS = {
     "event_id",
@@ -63,19 +67,25 @@ _STABLE_LINK_KEYS = {
 
 
 def _settings() -> GuardApiSettings:
-    return GuardApiSettings(
-        adapter_token="adapter-secret", control_token="control-secret"
+    return GuardApiSettings(control_token="control-secret")
+
+
+def _audit_window_service(store) -> AuditWindowService:
+    return AuditWindowService(
+        store=store,
+        cursor_signing_key=_CURSOR_SIGNING_KEY,
     )
 
 
 @pytest.fixture(params=["memory", "postgres"])
 def store(request):
     if request.param == "memory":
-        return MemoryControlPlaneStore()
+        return memory_store_with_adapter()
     database_url = get_test_database_url()
     reset_control_plane_schema(database_url)
     postgres_store = PostgresControlPlaneStore(database_url)
     postgres_store.initialize()
+    add_adapter_credential(postgres_store)
     return postgres_store
 
 
@@ -102,6 +112,7 @@ def _guard_event_payload(
             "user_task": "Complete the visible web form only",
             "source_type": "webpage",
             "source_trust": "untrusted",
+            "agent_id": "main",
         },
         "payload": {
             "tool": {
@@ -137,7 +148,11 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
     run_id = uuid4().hex
     trace_id = f"trace_contract_shape_{run_id}"
     bundle = PolicyBundle(disabled_rules=["P001_sensitive_file_access"])
-    PolicyService(store=store).save_snapshot(bundle, updated_by="contract-test")
+    PolicyService(store=store).save_snapshot(
+        bundle,
+        expected_revision=0,
+        updated_by="contract-test",
+    )
 
     response = _post_evaluate(
         client, _guard_event_payload(event_id=f"evt_shape_{run_id}", trace_id=trace_id)
@@ -166,7 +181,7 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
         "version": bundle.version,
         "revision": 1,
         "canonical_digest": canonical_sha256(bundle.model_dump(mode="json")),
-        "canonicalization": "json:sorted-keys:v1",
+        "canonicalization": "jcs:rfc8785",
     }
     # §9.9：links 只保留稳定 ID；digest 移入 metadata。
     assert set(audit.links) <= _STABLE_LINK_KEYS
@@ -310,12 +325,15 @@ def test_contract_duplicate_policy_audits_counted_once(store) -> None:
             )
         )
 
-    metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
+    events = store.read_audit_events_bounded(
+        AuditWindowQuery(trace_id=trace_id, limit=100)
+    )
+    metrics = aggregate_policy_metrics(events)
 
     # §19.1：重复逻辑键只保留最早入链记录。
-    assert metrics["event_count"] == 1
+    assert metrics["evaluation_count"] == 1
     assert metrics["ask_count"] == 1
-    assert metrics["blocked_count"] == 1
+    assert metrics["intervention_count"] == 1
 
 
 def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
@@ -344,15 +362,15 @@ def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
         )
 
     events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
-    classified = {event.audit_id: classify_record_type(event) for event in events}
+    classified = {event.audit_id: classify_audit_record_type(event) for event in events}
     assert classified == {
         f"audit_cfg_{run_id}": "config_audit",
         f"audit_obs_{run_id}": "runtime_observation",
         f"audit_policy_{run_id}": "policy_evaluation",
     }
     # 只有被分类为 policy_evaluation 的旧记录进入策略指标。
-    metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
-    assert metrics["event_count"] == 1
+    metrics = aggregate_policy_metrics(events)
+    assert metrics["evaluation_count"] == 1
     assert metrics["allow_count"] == 1
 
     fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -373,7 +391,7 @@ def test_contract_legacy_03_records_classified_per_19_2(store) -> None:
     policy_audit = next(
         event for event in events if event.audit_id == f"audit_policy_{run_id}"
     )
-    assert classify_record_type(policy_audit) == fixture_policy["record_type"]
+    assert classify_audit_record_type(policy_audit) == fixture_policy["record_type"]
 
 
 def test_contract_evidence_serialized_within_64kib() -> None:
@@ -440,55 +458,8 @@ def test_contract_03_inbound_stored_verbatim_and_excluded_from_policy_metrics(
     assert len(events) == 1
     assert events[0].schema_version == "0.3"
     assert events[0].record_type is None
-    metrics = store.eval_metrics(EvalMetricFilters(trace_id=trace_id))
-    assert metrics["event_count"] == 0
-
-
-def test_contract_legacy_shape_record_replays_via_fallback_reads(store, client) -> None:
-    # PR #92/#93 旧形态：digest 在 links、decision dump 在 metadata。
-    run_id = uuid4().hex
-    event_id = f"evt_legacyshape_{run_id}"
-    trace_id = f"trace_legacyshape_{run_id}"
-    payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
-    decision = GuardDecision(
-        decision_id=f"dec_legacyshape_{run_id}",
-        decision="allow",
-        risk_score=0,
-        severity="low",
-        categories=[],
-        rule_hits=[],
-        reason="Legacy replay.",
-        safe_message=None,
-        approval_intent=None,
-        latency_ms=1,
-    )
-    legacy_audit = AuditEvent(
-        audit_id=f"audit_legacyshape_{run_id}",
-        schema_version="0.3",
-        trace_id=trace_id,
-        event_type="tool_call_proposed",
-        summary="Legacy shape audit",
-        decision="allow",
-        risk_score=0,
-        severity="low",
-        blocked=False,
-        reason="Legacy shape.",
-        links={
-            "event_id": event_id,
-            "decision_id": decision.decision_id,
-            "request_digest": canonical_sha256(
-                GuardEvent.model_validate(payload).model_dump(mode="json")
-            ),
-        },
-        metadata={"guard_decision": decision.model_dump(mode="json")},
-    )
-    store.add_audit_event(legacy_audit)
-
-    response = _post_evaluate(client, payload)
-
-    assert response.status_code == 200
-    assert response.json()["decision"]["decision_id"] == decision.decision_id
-    assert len(store.list_audit_events(AuditEventFilters(trace_id=trace_id))) == 1
+    metrics = aggregate_policy_metrics(events)
+    assert metrics["evaluation_count"] == 0
 
 
 def _thread_client(store) -> TestClient:
@@ -502,6 +473,26 @@ def _thread_client(store) -> TestClient:
     return TestClient(create_app(store=thread_store, settings=_settings()))
 
 
+def test_contract_evaluation_run_is_immutable_and_idempotent(store) -> None:
+    run_id = f"eval_contract_{uuid4().hex}"
+    original = {
+        "run_id": run_id,
+        "run_at": "2026-06-28T08:00:00+08:00",
+        "dataset_id": "attackbench",
+        "dataset_version": "v1",
+        "cases": [],
+    }
+
+    created = store.save_evaluation_run(original)
+    replayed = store.save_evaluation_run(original)
+
+    assert created == replayed
+    assert created["run_at"] == "2026-06-28T00:00:00+00:00"
+    with pytest.raises(EvaluationRunConflictError):
+        store.save_evaluation_run({**original, "dataset_version": "v2"})
+    assert store.get_evaluation_run(run_id) == created
+
+
 def test_contract_concurrent_same_content_single_chain_entry(store) -> None:
     # 并发同 event_id 同内容：仅一条入链且全部响应回放同一 decision_id。
     run_id = uuid4().hex
@@ -509,12 +500,15 @@ def test_contract_concurrent_same_content_single_chain_entry(store) -> None:
     trace_id = f"trace_concurrent_{run_id}"
     payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
     worker_count = 8
+    clients = [_thread_client(store) for _ in range(worker_count)]
 
-    def worker(_: int):
-        return _post_evaluate(_thread_client(store), payload)
+    def worker(index: int):
+        return _post_evaluate(clients[index], payload)
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         responses = list(executor.map(worker, range(worker_count)))
+    for thread_client in clients:
+        thread_client.close()
 
     assert [response.status_code for response in responses] == [200] * worker_count
     decision_ids = {
@@ -583,6 +577,56 @@ def test_contract_concurrent_ask_creates_one_audit_and_one_approval(
     assert audits[0].links["approval_id"] == approvals[0].approval_id
 
 
+def test_contract_failed_evaluation_rolls_back_all_persisted_facts(
+    store, monkeypatch
+) -> None:
+    run_id = uuid4().hex
+    event = GuardEvent.model_validate(
+        _guard_event_payload(
+            event_id=f"evt_rollback_{run_id}",
+            trace_id=f"trace_rollback_{run_id}",
+        )
+    )
+
+    def ask_decision(_event: GuardEvent, _bundle: PolicyBundle) -> GuardDecision:
+        return GuardDecision(
+            decision_id=f"dec_rollback_{run_id}",
+            decision="ask",
+            risk_score=72,
+            severity="high",
+            categories=["task_mismatch"],
+            rule_hits=[],
+            reason="Human approval is required.",
+            approval_intent=ApprovalIntent(options=["allow_once", "deny"], resource=""),
+        )
+
+    monkeypatch.setattr(evaluation_service_module, "core_evaluate", ask_decision)
+    audit_service = AuditService(store=store)
+    original_record = audit_service.record_evaluation
+
+    def fail_after_record(*args, **kwargs):
+        original_record(*args, **kwargs)
+        raise RuntimeError("injected failure after evidence materialization")
+
+    monkeypatch.setattr(audit_service, "record_evaluation", fail_after_record)
+    service = EvaluationService(
+        policy_service=PolicyService(store=store),
+        audit_service=audit_service,
+        approval_service=ApprovalService(store=store, settings=_settings()),
+    )
+
+    with pytest.raises(
+        RuntimeError, match="injected failure after evidence materialization"
+    ):
+        service.evaluate(event, requesting_principal_id="contract-adapter")
+
+    assert store.list_audit_events(AuditEventFilters(trace_id=event.trace_id)) == []
+    assert store.list_approvals(trace_id=event.trace_id) == []
+    assert store.list_action_critic_reviews(event.trace_id) == []
+    assert store.list_provenance(event.trace_id) == ([], [])
+    assert store.verify_audit_integrity().valid
+
+
 def test_contract_concurrent_different_content_exactly_one_conflict(store) -> None:
     # 并发同 event_id 异内容：恰好一个 409 EVALUATION_CONFLICT，另一侧正常入链。
     run_id = uuid4().hex
@@ -596,12 +640,15 @@ def test_contract_concurrent_different_content_exactly_one_conflict(store) -> No
             arguments={"to": "other@red-team.agentguard.local"},
         ),
     ]
+    clients = [_thread_client(store) for _ in payloads]
 
     def worker(index: int):
-        return _post_evaluate(_thread_client(store), payloads[index])
+        return _post_evaluate(clients[index], payloads[index])
 
     with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
         responses = list(executor.map(worker, range(len(payloads))))
+    for thread_client in clients:
+        thread_client.close()
 
     statuses = sorted(response.status_code for response in responses)
     assert statuses == [200, 409]
@@ -609,64 +656,6 @@ def test_contract_concurrent_different_content_exactly_one_conflict(store) -> No
     assert conflict.json()["error"]["code"] == "EVALUATION_CONFLICT"
     events = store.list_audit_events(AuditEventFilters(trace_id=trace_id))
     assert len(events) == 1
-    assert store.verify_audit_integrity().valid
-
-
-def test_contract_legacy_shape_record_replays_under_concurrency(store) -> None:
-    # 存量 legacy 形态记录（digest 在 links、decision dump 在 metadata）
-    # 在并发评估下仍被全部线程回放，不新增链上记录。
-    run_id = uuid4().hex
-    event_id = f"evt_legacyswarm_{run_id}"
-    trace_id = f"trace_legacyswarm_{run_id}"
-    payload = _guard_event_payload(event_id=event_id, trace_id=trace_id)
-    decision = GuardDecision(
-        decision_id=f"dec_legacyswarm_{run_id}",
-        decision="allow",
-        risk_score=0,
-        severity="low",
-        categories=[],
-        rule_hits=[],
-        reason="Legacy concurrent replay.",
-        safe_message=None,
-        approval_intent=None,
-        latency_ms=1,
-    )
-    store.add_audit_event(
-        AuditEvent(
-            audit_id=f"audit_legacyswarm_{run_id}",
-            schema_version="0.3",
-            trace_id=trace_id,
-            event_type="tool_call_proposed",
-            summary="Legacy shape audit under concurrency",
-            decision="allow",
-            risk_score=0,
-            severity="low",
-            blocked=False,
-            reason="Legacy shape.",
-            links={
-                "event_id": event_id,
-                "decision_id": decision.decision_id,
-                "request_digest": canonical_sha256(
-                    GuardEvent.model_validate(payload).model_dump(mode="json")
-                ),
-            },
-            metadata={"guard_decision": decision.model_dump(mode="json")},
-        )
-    )
-    worker_count = 4
-
-    def worker(_: int):
-        return _post_evaluate(_thread_client(store), payload)
-
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        responses = list(executor.map(worker, range(worker_count)))
-
-    assert [response.status_code for response in responses] == [200] * worker_count
-    assert all(
-        response.json()["decision"]["decision_id"] == decision.decision_id
-        for response in responses
-    )
-    assert len(store.list_audit_events(AuditEventFilters(trace_id=trace_id))) == 1
     assert store.verify_audit_integrity().valid
 
 
@@ -822,7 +811,7 @@ def test_contract_bounded_read_is_descending_within_snapshot(store) -> None:
 
     # 空查询不抛错。
     assert (
-        MemoryControlPlaneStore().read_audit_events_bounded(AuditWindowQuery(limit=1))
+        memory_store_with_adapter().read_audit_events_bounded(AuditWindowQuery(limit=1))
         == []
     )
 
@@ -831,7 +820,7 @@ def test_contract_window_has_more_boundary(store) -> None:
     run_id = uuid4().hex
     for index in range(5):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
-    service = AuditWindowService(store=store)
+    service = _audit_window_service(store)
 
     exact = service.get_window(limit=5)
     assert exact["scope"]["returned_record_count"] == 5
@@ -850,7 +839,7 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
     run_id = uuid4().hex
     for index in range(6):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
-    service = AuditWindowService(store=store)
+    service = _audit_window_service(store)
 
     page1 = service.get_window(limit=4)
     page1_sequences = [
@@ -862,7 +851,7 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
     for index in range(6, 9):
         store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
 
-    page2 = service.get_window(limit=4, cursor=page1["scope"]["next_cursor"])
+    page2 = service.get_window(cursor=page1["scope"]["next_cursor"])
     page2_sequences = [
         _event_sequence(AuditEvent.model_validate(row)) for row in page2["events"]
     ]
@@ -873,6 +862,7 @@ def test_contract_window_cursor_snapshot_stable_under_concurrent_writes(store) -
     assert page2["scope"]["next_cursor"] is None
     # cursor 固化快照：两页 snapshot 与上界一致，新写入未进入窗口。
     assert page2["scope"]["snapshot_id"] == page1["scope"]["snapshot_id"]
+    assert page2["scope"]["outcomes_as_of"] == page1["scope"]["outcomes_as_of"]
     assert page2["scope"]["sequence_to"] == 2
 
 
@@ -893,13 +883,13 @@ def test_contract_window_duplicate_policy_records_counted_once(store) -> None:
         )
     store.add_audit_event(_window_audit_event(index=3, run_id=run_id))
 
-    window = AuditWindowService(store=store).get_window(limit=10)
+    window = _audit_window_service(store).get_window(limit=10)
     metrics = window["policy_metrics"]
 
     # legacy 重复记录经 §19.2 分类回退判为 policy_evaluation，读时只计一次。
     assert metrics["evaluation_count"] == 2
     assert metrics["duplicate_policy_record_count"] == 2
-    assert metrics["legacy_fallback_count"] == 0
+    assert metrics["unkeyed_policy_record_count"] == 0
     assert metrics["allow_count"] == 2
 
 
@@ -924,7 +914,7 @@ def test_contract_window_non_policy_records_excluded_from_metrics(store) -> None
         _window_audit_event(index=3, run_id=run_id, record_type="config_audit")
     )
 
-    window = AuditWindowService(store=store).get_window(limit=10)
+    window = _audit_window_service(store).get_window(limit=10)
     metrics = window["policy_metrics"]
 
     assert window["scope"]["returned_record_count"] == 4
@@ -949,7 +939,7 @@ def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
         _window_audit_event(index=2, run_id=run_id, decision="deny", is_malicious=None)
     )
 
-    metrics = AuditWindowService(store=store).get_window(limit=10)["policy_metrics"]
+    metrics = _audit_window_service(store).get_window(limit=10)["policy_metrics"]
     assert metrics["unknown_decision_count"] == 0
     assert metrics["unlabeled_count"] == 1
     assert metrics["benign_label_count"] == 1
@@ -966,7 +956,7 @@ def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
             is_malicious=False,
         )
     )
-    metrics = AuditWindowService(store=store).get_window(limit=10)["policy_metrics"]
+    metrics = _audit_window_service(store).get_window(limit=10)["policy_metrics"]
     assert metrics["unknown_decision_count"] == 0
     assert metrics["allow_count"] == 1
     assert metrics["policy_intervention_fpr"] == 1.0
@@ -979,7 +969,7 @@ def test_contract_window_unlabeled_and_unknown_decision_rules(store) -> None:
             index=0, run_id=empty_run, record_type="runtime_observation", decision=None
         )
     )
-    empty_metrics = AuditWindowService(store=store).get_window(
+    empty_metrics = _audit_window_service(store).get_window(
         limit=10, trace_id=f"trace_win_{empty_run}"
     )["policy_metrics"]
     assert empty_metrics["evaluation_count"] == 0
@@ -1007,8 +997,8 @@ def test_contract_cohort_evaluated_range_selects_policy_records(store) -> None:
     rows = store.read_audit_events_bounded(
         AuditWindowQuery(
             upper_sequence=frozen_upper,
-            evaluated_from="2026-06-01T00:01:00+00:00",
-            evaluated_to="2026-06-01T00:04:00+00:00",
+            evaluated_from=datetime.fromisoformat("2026-06-01T00:01:00+00:00"),
+            evaluated_to=datetime.fromisoformat("2026-06-01T00:04:00+00:00"),
             limit=100,
         )
     )
@@ -1016,12 +1006,58 @@ def test_contract_cohort_evaluated_range_selects_policy_records(store) -> None:
     assert [_event_sequence(event) for event in rows] == [4, 3, 2]
 
 
+def test_contract_cohort_reads_every_keyset_page() -> None:
+    store = MemoryControlPlaneStore()
+    run_id = uuid4().hex
+    for index in range(1001):
+        store.add_audit_event(_window_audit_event(index=index, run_id=run_id))
+
+    cohort = _audit_window_service(store).get_policy_cohort(
+        evaluated_from="2026-06-01T00:00:00+00:00",
+        evaluated_to="2026-06-02T00:00:00+00:00",
+    )
+
+    assert cohort["policy_metrics"]["evaluation_count"] == 1001
+
+
+def test_contract_cohort_applies_ingestion_time_as_of() -> None:
+    clock_values = iter(
+        [
+            datetime.fromisoformat("2026-06-02T00:00:00+00:00"),
+            datetime.fromisoformat("2026-06-03T00:00:00+00:00"),
+            datetime.fromisoformat("2026-06-04T00:00:00+00:00"),
+        ]
+    )
+    store = MemoryControlPlaneStore(audit_clock=lambda: next(clock_values))
+    run_id = uuid4().hex
+    store.add_audit_event(_window_audit_event(index=0, run_id=run_id))
+    store.add_audit_event(_window_audit_event(index=1, run_id=run_id))
+
+    cohort = _audit_window_service(store).get_policy_cohort(
+        evaluated_from="2026-06-01T00:00:00+00:00",
+        evaluated_to="2026-06-02T00:00:00+00:00",
+        outcomes_as_of="2026-06-02T12:00:00+00:00",
+    )
+
+    assert cohort["scope"]["outcomes_as_of"] == "2026-06-02T12:00:00Z"
+    assert cohort["policy_metrics"]["evaluation_count"] == 1
+
+
+def test_contract_rejects_audit_timestamp_without_timezone(store) -> None:
+    event = _window_audit_event(index=0, run_id=uuid4().hex).model_copy(
+        update={"timestamp": "2026-06-01T00:00:00"}
+    )
+
+    with pytest.raises(ValueError, match="include a timezone"):
+        store.add_audit_event(event)
+
+
 def test_contract_memory_and_postgres_window_parity() -> None:
     database_url = get_test_database_url()
     reset_control_plane_schema(database_url)
     postgres_store = PostgresControlPlaneStore(database_url)
     postgres_store.initialize()
-    memory_store = MemoryControlPlaneStore()
+    memory_store = memory_store_with_adapter()
     run_id = uuid4().hex
     events = [
         _window_audit_event(
@@ -1053,8 +1089,8 @@ def test_contract_memory_and_postgres_window_parity() -> None:
         for event in events:
             target.add_audit_event(event)
 
-    memory_window = AuditWindowService(store=memory_store).get_window(limit=3)
-    postgres_window = AuditWindowService(store=postgres_store).get_window(limit=3)
+    memory_window = _audit_window_service(memory_store).get_window(limit=3)
+    postgres_window = _audit_window_service(postgres_store).get_window(limit=3)
 
     # Memory/PostgreSQL 在相同 fixture 上完全一致（outcomes_as_of 为请求时刻）。
     assert memory_window["events"] == postgres_window["events"]
@@ -1063,25 +1099,30 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     postgres_scope = dict(postgres_window["scope"])
     memory_scope.pop("outcomes_as_of")
     postgres_scope.pop("outcomes_as_of")
+    assert memory_scope.pop("next_cursor")
+    assert postgres_scope.pop("next_cursor")
     assert memory_scope == postgres_scope
 
-    memory_page2 = AuditWindowService(store=memory_store).get_window(
-        limit=3, cursor=memory_window["scope"]["next_cursor"]
+    memory_page2 = _audit_window_service(memory_store).get_window(
+        cursor=memory_window["scope"]["next_cursor"]
     )
-    postgres_page2 = AuditWindowService(store=postgres_store).get_window(
-        limit=3, cursor=postgres_window["scope"]["next_cursor"]
+    postgres_page2 = _audit_window_service(postgres_store).get_window(
+        cursor=postgres_window["scope"]["next_cursor"]
     )
     assert memory_page2["events"] == postgres_page2["events"]
     assert memory_page2["policy_metrics"] == postgres_page2["policy_metrics"]
 
-    cohort_memory = AuditWindowService(store=memory_store).get_policy_cohort(
+    cohort_memory = _audit_window_service(memory_store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-01T00:05:00+00:00",
-        outcomes_as_of="2026-06-02T00:00:00+00:00",
     )
-    cohort_postgres = AuditWindowService(store=postgres_store).get_policy_cohort(
+    cohort_postgres = _audit_window_service(postgres_store).get_policy_cohort(
         evaluated_from="2026-06-01T00:00:00+00:00",
         evaluated_to="2026-06-01T00:05:00+00:00",
-        outcomes_as_of="2026-06-02T00:00:00+00:00",
     )
-    assert cohort_memory == cohort_postgres
+    assert cohort_memory["policy_metrics"] == cohort_postgres["policy_metrics"]
+    memory_cohort_scope = dict(cohort_memory["scope"])
+    postgres_cohort_scope = dict(cohort_postgres["scope"])
+    memory_cohort_scope.pop("outcomes_as_of")
+    postgres_cohort_scope.pop("outcomes_as_of")
+    assert memory_cohort_scope == postgres_cohort_scope

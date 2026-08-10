@@ -10,10 +10,17 @@ from agentguard_core import (
     GuardDecision,
     GuardEvent,
     PolicyBundle,
+    RuntimeOutcomeReceipt,
 )
+from pydantic import ValidationError
 
-from guard_api.storage.base import AuditEventFilters, ControlPlaneStore
+from guard_api.storage.base import ControlPlaneStore
+from guard_api.storage.integrity import CANONICALIZATION
 
+from .audit_checkpoint import (
+    AuditCheckpointService,
+    disabled_audit_anchor_status,
+)
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
 from .redaction import sanitize_audit_event
@@ -28,20 +35,58 @@ class PolicyEvaluationWriteForbiddenError(ValueError):
     """
 
 
+class RuntimeOutcomeReceiptError(ValueError):
+    """Raised when a runtime receipt is invalid or conflicts with its parent."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 class AuditService:
     def __init__(
         self,
         *,
         store: ControlPlaneStore,
         provenance_writer: ProvenanceWriter | None = None,
+        checkpoint_service: AuditCheckpointService | None = None,
     ) -> None:
         self.store = store
         self.provenance_writer = provenance_writer or ProvenanceWriter(store=store)
+        self.checkpoint_service = checkpoint_service
+
+    def prepare_submission(
+        self,
+        event: AuditEvent,
+        *,
+        raw_payload: dict[str, object] | None = None,
+    ) -> AuditEvent:
+        """Apply the strict producer contract before authorization/persistence."""
+
+        if event.record_type != "runtime_outcome":
+            return event
+        candidate = (
+            raw_payload if raw_payload is not None else event.model_dump(mode="json")
+        )
+        try:
+            return RuntimeOutcomeReceipt.model_validate(candidate)
+        except ValidationError:
+            raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID") from None
 
     def submit(self, event: AuditEvent) -> dict[str, str | bool]:
         # §12.1 守卫：仅拒显式声明 policy_evaluation 的入站记录。
         if event.record_type == "policy_evaluation":
             raise PolicyEvaluationWriteForbiddenError(event.audit_id)
+        if event.record_type == "runtime_outcome":
+            receipt = (
+                event
+                if isinstance(event, RuntimeOutcomeReceipt)
+                else self.prepare_submission(event)
+            )
+            if not isinstance(receipt, RuntimeOutcomeReceipt):  # pragma: no cover
+                raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID")
+            self._validate_runtime_outcome_parent(receipt)
+            event = AuditEvent.model_validate(receipt.model_dump(mode="json"))
         event = sanitize_audit_event(event)
         is_new = self.store.add_audit_event(event)
         persisted = self.store.get_audit_event(event.audit_id) or event
@@ -56,8 +101,44 @@ class AuditService:
             "idempotent_replay": not is_new,
         }
 
-    def list_events(self, filters: AuditEventFilters | None = None) -> list[AuditEvent]:
-        return self.store.list_audit_events(filters)
+    def _validate_runtime_outcome_parent(self, receipt: RuntimeOutcomeReceipt) -> None:
+        parent = self.store.get_audit_event(receipt.links.policy_audit_id)
+        if parent is None or parent.record_type != "policy_evaluation":
+            raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_NOT_FOUND")
+        expected = {
+            "trace_id": parent.trace_id,
+            "case_id": parent.case_id,
+            "runtime": parent.runtime,
+            "event_id": parent.links.get("event_id"),
+            "decision_id": parent.links.get("decision_id"),
+            "action_id": parent.links.get("action_id"),
+            "approval_id": parent.links.get("approval_id"),
+            "decision": parent.decision,
+            "risk_score": parent.risk_score,
+            "severity": parent.severity,
+            "blocked": parent.blocked,
+            "is_malicious": parent.is_malicious,
+            "agent_id": parent.metadata.get("agent_id"),
+            "rule_hits": parent.rule_hits,
+        }
+        actual = {
+            "trace_id": receipt.trace_id,
+            "case_id": receipt.case_id,
+            "runtime": receipt.runtime,
+            "event_id": receipt.links.event_id,
+            "decision_id": receipt.links.decision_id,
+            "action_id": receipt.links.action_id,
+            "approval_id": receipt.links.approval_id,
+            "decision": receipt.decision,
+            "risk_score": receipt.risk_score,
+            "severity": receipt.severity,
+            "blocked": receipt.blocked,
+            "is_malicious": receipt.is_malicious,
+            "agent_id": receipt.metadata.agent_id,
+            "rule_hits": receipt.rule_hits,
+        }
+        if actual != expected:
+            raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_MISMATCH")
 
     def record_evaluation(
         self,
@@ -121,4 +202,14 @@ class AuditService:
         )
 
     def integrity(self) -> dict[str, object]:
-        return asdict(self.store.verify_audit_integrity())
+        chain_status = self.store.verify_audit_integrity()
+        anchor_status = (
+            self.checkpoint_service.inspect(chain_status)
+            if self.checkpoint_service is not None
+            else disabled_audit_anchor_status()
+        )
+        return {
+            **asdict(chain_status),
+            "canonicalization": CANONICALIZATION,
+            "anchor": asdict(anchor_status),
+        }

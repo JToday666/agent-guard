@@ -7,6 +7,8 @@ import { getApprovalEvidenceRoutes } from "./approval-evidence-route.ts";
 function approval(eventId: string): ApprovalRequest {
   return {
     agentAction: "发送邮件",
+    actionId: "call-1",
+    actionName: "send_email",
     consequence: "动作将继续执行",
     createdAt: "2026-06-07T12:03:30+08:00",
     eventId,
@@ -17,7 +19,8 @@ function approval(eventId: string): ApprovalRequest {
     ruleHits: [],
     severity: "high",
     status: "pending",
-    tool: "send_email",
+    subjectId: "call-1",
+    subjectType: "tool_call",
     traceId: "trace-2",
     userTask: "发送摘要",
   };

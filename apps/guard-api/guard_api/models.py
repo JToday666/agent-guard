@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_iso
-from agentguard_core.models import ApprovalResolution
+from agentguard_core.decisions import ApprovalResolution
+
+ADAPTER_CREDENTIAL_SCOPES = (
+    "event:evaluate",
+    "event:audit:write",
+    "approval:wait",
+    "adapter:status:write",
+)
 
 
 class LlmApprovalReview(BaseModel):
@@ -26,13 +34,14 @@ class LlmApprovalReview(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     approval_id: str = Field(default_factory=lambda: new_id("app"))
     trace_id: str
     subject_id: str
-    subject_type: str = "tool_call"
+    subject_type: str
     action_id: str
     action_name: str
-    tool_call_id: str
     requesting_principal_id: str
     runtime: str = "langgraph"
     agent_id: str = "main"
@@ -41,7 +50,6 @@ class ApprovalRequest(BaseModel):
         default_factory=lambda: ["allow_once", "deny"]
     )
     decision: ApprovalResolution | None = None
-    tool: str
     resource: str
     reason: str
     risk_score: int = Field(ge=0, le=100)
@@ -52,25 +60,29 @@ class ApprovalRequest(BaseModel):
     resolved_by: str | None = None
     resolution_reason: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
-    expires_at: str | None = None
+    expires_at: str
     resolved_at: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def fill_subject_compatibility_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        values = dict(data)
-        subject_id = values.get("subject_id") or values.get("tool_call_id")
-        if subject_id is not None:
-            values["subject_id"] = subject_id
-            values["tool_call_id"] = values.get("tool_call_id") or subject_id
-            values["action_id"] = values.get("action_id") or subject_id
-        values["subject_type"] = values.get("subject_type") or "tool_call"
-        values["action_name"] = (
-            values.get("action_name") or values.get("tool") or values["subject_type"]
-        )
-        return values
+    @model_validator(mode="after")
+    def validate_lifecycle(self) -> Self:
+        created_at = _rfc3339_timestamp(self.created_at, "created_at")
+        expires_at = _rfc3339_timestamp(self.expires_at, "expires_at")
+        if expires_at <= created_at:
+            raise ValueError("expires_at must be later than created_at")
+        if self.status == "resolved":
+            if self.decision is None or self.resolved_at is None:
+                raise ValueError("resolved approvals require decision and resolved_at")
+            resolved_at = _rfc3339_timestamp(self.resolved_at, "resolved_at")
+            self.resolved_at = resolved_at.astimezone(timezone.utc).isoformat()
+        elif self.resolved_at is not None:
+            raise ValueError("only resolved approvals may include resolved_at")
+        if self.status == "pending" and self.decision is not None:
+            raise ValueError("pending approvals cannot include a decision")
+        if self.status == "expired" and self.decision not in {None, "deny"}:
+            raise ValueError("expired approvals may only derive a deny decision")
+        self.created_at = created_at.astimezone(timezone.utc).isoformat()
+        self.expires_at = expires_at.astimezone(timezone.utc).isoformat()
+        return self
 
 
 class LlmApprovalReviewInput(BaseModel):
@@ -159,6 +171,7 @@ class EvaluationRun(BaseModel):
 
     @model_validator(mode="after")
     def fill_case_dataset_metadata(self) -> Self:
+        self.run_at = _utc_timestamp(self.run_at, "run_at")
         filled_cases: list[EvaluationCase] = []
         for case in self.cases:
             updates: dict[str, Any] = {}
@@ -182,21 +195,19 @@ class ConfigAuditFindingRecord(BaseModel):
 
 
 AdapterStatus = Literal["loaded", "not_loaded", "error", "unknown"]
-AdapterStatusSource = Literal["agentguardctl", "openclaw-plugin-dev", "openclaw-plugin"]
 
 
 class AdapterStatusRecord(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     status: AdapterStatus = "unknown"
     loaded: bool = False
-    hook_count: int | None = None
-    expected_hook_count: int = 22
+    hook_count: int | None = Field(default=None, ge=0)
+    expected_hook_count: int | None = Field(default=None, ge=0)
     last_verified_at: str | None = None
     last_heartbeat_at: str | None = None
     error: str | None = None
-    source: AdapterStatusSource | None = None
-    runtime: str | None = None
+    source: str | None = None
     runtime_id: str | None = None
     agent_id: str | None = None
     plugin_version: str | None = None
@@ -204,6 +215,19 @@ class AdapterStatusRecord(BaseModel):
     capabilities: dict[str, Any] = Field(default_factory=dict)
     hooks: list[str] = Field(default_factory=list)
     fail_closed_stages: list[str] = Field(default_factory=list)
+    enforcement_mode: Literal["enforce", "observe", "disabled"] | None = None
+
+    @model_validator(mode="after")
+    def normalize_timestamps(self) -> Self:
+        if self.last_verified_at is not None:
+            self.last_verified_at = _utc_timestamp(
+                self.last_verified_at, "last_verified_at"
+            )
+        if self.last_heartbeat_at is not None:
+            self.last_heartbeat_at = _utc_timestamp(
+                self.last_heartbeat_at, "last_heartbeat_at"
+            )
+        return self
 
 
 class CredentialRecord(BaseModel):
@@ -219,17 +243,60 @@ class CredentialRecord(BaseModel):
     expires_at: str | None = None
     revoked_at: str | None = None
 
+    @model_validator(mode="after")
+    def validate_active_adapter_identity(self) -> Self:
+        if self.revoked_at is not None:
+            return self
+        if (
+            self.principal_type != "component"
+            or self.role != "adapter"
+            or not self.runtime
+            or not self.agent_id
+            or set(self.scopes) != set(ADAPTER_CREDENTIAL_SCOPES)
+        ):
+            raise ValueError(
+                "active credentials must use the runtime-bound adapter profile"
+            )
+        return self
+
     def public_dump(self) -> dict[str, Any]:
-        payload = self.model_dump(mode="json")
-        payload["token_hash"] = "[redacted]"
-        return payload
+        return self.model_dump(mode="json", exclude={"token_hash"})
 
 
 class CredentialCreateRequest(BaseModel):
-    principal_type: str
-    principal_id: str
-    role: str
-    scopes: list[str] = Field(default_factory=list)
-    runtime: str | None = None
-    agent_id: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    principal_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    runtime: str = Field(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    agent_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
     expires_at: str | None = None
+
+    @model_validator(mode="after")
+    def validate_expiry(self) -> Self:
+        if self.expires_at is None:
+            return self
+        expires_at = _rfc3339_timestamp(self.expires_at, "expires_at")
+        if expires_at <= datetime.now(timezone.utc):
+            raise ValueError("expires_at must be in the future")
+        self.expires_at = expires_at.astimezone(timezone.utc).isoformat()
+        return self
+
+
+def _rfc3339_timestamp(value: str, field_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{field_name} must be an RFC 3339 timestamp") from None
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name} must include a timezone")
+    return parsed
+
+
+def _utc_timestamp(value: str, field_name: str) -> str:
+    return _rfc3339_timestamp(value, field_name).astimezone(timezone.utc).isoformat()

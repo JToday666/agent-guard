@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .events import ModelCallPayload
 from .credentials import has_credential_command_text as _has_credential_command_text
@@ -26,24 +27,30 @@ _PROMPT_INJECTION_INTENT_MARKERS: dict[str, list[str]] = {
         "credential bundle",
     ],
     "unsafe_external_action": [
-        "identityverify",
-        "market-segment-submit",
-        "connector-diagnostic-submit",
-        "bulk-lead-submit",
-        "route-suggestion-apply",
+        "send externally",
+        "upload externally",
+        "forward externally",
+        "submit to an external",
+        "copy into the external form",
+        "paste into the external form",
+        "complete the external action",
     ],
     "security_control_weakening": [
-        "lead-verification-relax",
+        "bypass verification",
+        "disable verification",
+        "skip verification",
         "reduce verification controls",
-        "weaken verification",
-        "reduced verification route",
+        "weaken security controls",
+        "disable security controls",
+        "override approval",
     ],
     "system_or_account_configuration_change": [
-        "support-profile-confirm",
-        "managed-device support profile",
-        "apply support profile",
         "configuration change",
+        "apply configuration change",
         "account configuration",
+        "change account settings",
+        "grant administrator access",
+        "change permissions",
     ],
 }
 
@@ -129,10 +136,9 @@ _AGENT_ABUSE_INTENT_MARKERS: dict[str, list[str]] = {
         "subprocess",
     ],
     "platform_abuse": [
-        "/platform/zoom/disruption",
-        "zoom disruption",
         "meeting disruption",
         "platform abuse",
+        "service disruption",
     ],
     "phishing_or_impersonation": [
         "phishing",
@@ -146,31 +152,29 @@ _AGENT_ABUSE_INTENT_MARKERS: dict[str, list[str]] = {
         "/ads/clicks",
         "click fraud",
         "ad click",
-        "smart-fitness-watch",
+        "automated ad clicks",
     ],
     "account_recovery_abuse": [
-        "submit-appeal",
+        "submit appeal",
         "account recovery",
         "manual review override",
         "restore access",
         "antiabuse",
         "verification abuse",
+        "verification override",
+        "bypass captcha",
     ],
     "defamation_or_misinformation": [
-        "misinformation_post",
+        "misinformation",
         "defamation",
         "false allegation",
-        "caught doing heroin",
-        "doing heroin",
-        "addicted",
+        "fabricated claim",
     ],
     "private_record_collection": [
-        "private-person-search",
-        "retrieve-private-records",
         "private records",
         "private record",
-        "current_residence",
-        "family_property_records",
+        "current residence",
+        "family property records",
         "private email",
         "private phone",
         "home address",
@@ -232,8 +236,10 @@ def contains_any(text: str, needles: list[str]) -> bool:
 
 
 def normalize_match_text(text: str) -> str:
-    lowered = text.lower()
+    lowered = unicodedata.normalize("NFKC", text).lower()
+    lowered = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", lowered)
     lowered = re.sub(r"[\t\r\n]+", " ", lowered)
+    lowered = re.sub(r"(?<=[a-z0-9])[-_]+(?=[a-z0-9])", " ", lowered)
     lowered = re.sub(r"\s*([=|;&])\s*", r"\1", lowered)
     return re.sub(r"\s+", " ", lowered).strip()
 
@@ -341,9 +347,37 @@ def agent_abuse_intents(text: str, policies: PolicyBundle) -> list[str]:
         intents.append("malicious_payload_delivery")
     if _looks_like_backdoor_or_compute_abuse(text):
         intents.append("backdoor_or_compute_abuse")
+    if _looks_like_defamatory_claim(text):
+        intents.append("defamation_or_misinformation")
     if not intents and contains_any(text, policies.agent_abuse_markers):
         intents.append("unauthorized_action")
     return list(dict.fromkeys(intents))
+
+
+def _looks_like_defamatory_claim(text: str) -> bool:
+    normalized = normalize_match_text(text)
+    allegation = contains_any(
+        normalized,
+        [
+            "heroin",
+            "cocaine",
+            "drug addict",
+            "addicted to drugs",
+            "committed fraud",
+            "committed a crime",
+        ],
+    )
+    asserted_as_fact = contains_any(
+        normalized,
+        [
+            "caught",
+            "is a",
+            "was a",
+            "confirmed",
+            "proven",
+        ],
+    )
+    return allegation and asserted_as_fact
 
 
 def _looks_like_malicious_payload_delivery(text: str) -> bool:

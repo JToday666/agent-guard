@@ -4,20 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentguard_core import AuditEvent
+from agentguard_core import AuditEvent, RuntimeOutcomeReceipt
 
 from guard_api.auth import ApiAuthError
-from guard_api.errors import error_response
-from guard_api.services.audit import PolicyEvaluationWriteForbiddenError
+from guard_api.services.audit import (
+    PolicyEvaluationWriteForbiddenError,
+    RuntimeOutcomeReceiptError,
+)
 from guard_api.services.trace import (
     encode_conditional_document,
     if_none_match_matches,
 )
 from guard_api.storage.base import AuditIdConflictError
-from fastapi import Cookie, FastAPI, Header
-from fastapi.responses import JSONResponse, Response
-
-from guard_api.storage.base import AuditEventFilters
+from fastapi import Cookie, FastAPI, Header, Request
+from fastapi.responses import Response
 
 from .common import (
     bounded_limit,
@@ -47,15 +47,38 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     audit_service = context.audit_service
     trace_service = context.trace_service
     audit_window_service = context.audit_window_service
-    settings = context.settings
 
     @app.post("/v1/audit/events")
-    def audit_event(
-        payload: AuditEvent, authorization: str | None = Header(default=None)
+    async def audit_event(
+        payload: AuditEvent,
+        request: Request,
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "event:audit:write")
+        auth_context = auth.verify_bearer(authorization, "event:audit:write")
         try:
-            return audit_service.submit(payload)
+            prepared = audit_service.prepare_submission(
+                payload,
+                raw_payload=await request.json(),
+            )
+        except RuntimeOutcomeReceiptError as exc:
+            raise ApiAuthError(exc.code, status_code=422) from None
+        metadata_agent_id = (
+            prepared.metadata.agent_id
+            if isinstance(prepared, RuntimeOutcomeReceipt)
+            else prepared.metadata.get("agent_id")
+        )
+        auth.verify_runtime_identity(
+            auth_context,
+            runtime=prepared.runtime,
+            agent_id=(
+                metadata_agent_id
+                if isinstance(metadata_agent_id, str) and metadata_agent_id
+                else None
+            ),
+            require_agent_id=isinstance(prepared, RuntimeOutcomeReceipt),
+        )
+        try:
+            return audit_service.submit(prepared)
         except PolicyEvaluationWriteForbiddenError:
             # §12.1：policy_evaluation 只能由 POST /v1/guard/evaluate 写入。
             raise ApiAuthError(
@@ -67,38 +90,15 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 "AUDIT_ID_CONFLICT",
                 status_code=409,
             ) from None
-
-    @app.get("/v1/audit/events")
-    def audit_events(
-        trace_id: str | None = None,
-        case_id: str | None = None,
-        runtime: str | None = None,
-        decision: str | None = None,
-        limit: int = 500,
-        authorization: str | None = Header(default=None),
-        agentguard_session: str | None = Cookie(default=None),
-    ) -> list[dict[str, Any]]:
-        verify_browser_or_bearer_read(
-            auth,
-            required_scope="audit:read",
-            authorization=authorization,
-            agentguard_session=agentguard_session,
-        )
-        filters = AuditEventFilters(
-            trace_id=trace_id,
-            case_id=case_id,
-            runtime=runtime,
-            decision=decision,
-            limit=bounded_limit(limit),
-        )
-        return [
-            event.model_dump(mode="json")
-            for event in audit_service.list_events(filters)
-        ]
+        except RuntimeOutcomeReceiptError as exc:
+            status_code = (
+                409 if exc.code == "RUNTIME_OUTCOME_PARENT_MISMATCH" else 422
+            )
+            raise ApiAuthError(exc.code, status_code=status_code) from None
 
     @app.get("/v1/audit/window", response_model=None)
     def audit_window(
-        limit: int = 500,
+        limit: int | None = None,
         trace_id: str | None = None,
         case_id: str | None = None,
         runtime: str | None = None,
@@ -106,11 +106,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         cursor: str | None = None,
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
-    ) -> dict[str, Any] | JSONResponse:
-        # 契约 §14.1：feature flag 关闭时端点不存在。
-        if not settings.audit_window_enabled:
-            return error_response("NOT_FOUND", status_code=404)
-        # 契约 §5.1：bearer 需同时具备 audit:read 与 metrics:read。
+    ) -> dict[str, Any]:
         verify_browser_or_bearer_scopes(
             auth,
             required_scopes=("audit:read", "metrics:read"),
@@ -118,7 +114,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             agentguard_session=agentguard_session,
         )
         return audit_window_service.get_window(
-            limit=bounded_limit(limit),
+            limit=bounded_limit(limit) if limit is not None else None,
             trace_id=trace_id,
             case_id=case_id,
             runtime=runtime,
@@ -142,6 +138,8 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     @app.get("/v1/traces/{trace_id}")
     def trace_detail(
         trace_id: str,
+        limit: int | None = None,
+        cursor: str | None = None,
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         authorization: str | None = Header(default=None),
         agentguard_session: str | None = Cookie(default=None),
@@ -153,7 +151,12 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             agentguard_session=agentguard_session,
         )
         return _conditional_json_response(
-            trace_service.get_trace(trace_id), if_none_match
+            trace_service.get_trace(
+                trace_id,
+                limit=(bounded_limit(limit) if limit is not None else None),
+                cursor=cursor,
+            ),
+            if_none_match,
         )
 
     @app.get("/v1/traces/{trace_id}/provenance")

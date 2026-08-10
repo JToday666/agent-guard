@@ -16,7 +16,6 @@ import type {
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
   GuardConfigAuditFindingRecordDto,
-  GuardEvalMetricsDto,
   GuardEvaluationRunDto,
   GuardPolicyBundleDto,
   GuardPolicyHistoryDto,
@@ -148,7 +147,6 @@ const mockOpenClawStatus: GuardAdapterStatusDto = {
   last_heartbeat_at: "2026-06-28T00:01:30+00:00",
   error: null,
   source: "agentguardctl",
-  runtime: "openclaw",
   runtime_id: "openclaw-local",
   agent_id: "main",
   plugin_version: "0.1.0",
@@ -174,7 +172,6 @@ const unknownAdapterStatus: GuardAdapterStatusDto = {
   last_heartbeat_at: null,
   error: null,
   source: null,
-  runtime: null,
   runtime_id: null,
   agent_id: null,
   plugin_version: null,
@@ -284,8 +281,20 @@ const mockPolicyHistory: GuardPolicyHistoryDto[] = [
 const mockAuditIntegrity: GuardAuditIntegrityDto = {
   valid: true,
   event_count: fixtureEvents.length,
-  head_hash: "a3f9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+  head_hash: "a".repeat(64),
   first_broken_audit_id: null,
+  canonicalization: "jcs:rfc8785",
+  anchor: {
+    enabled: true,
+    status: "current",
+    checkpoint_sequence: fixtureEvents.length,
+    checkpoint_head_hash: "a".repeat(64),
+    checkpoint_hash: "b".repeat(64),
+    checkpointed_at: "2026-06-28T08:30:00Z",
+    lag: 0,
+    key_id: "dashboard-demo-2026",
+    error_code: null,
+  },
 };
 
 function createMockApprovalDtos(): GuardApprovalDto[] {
@@ -305,7 +314,6 @@ function createMockApprovalDtos(): GuardApprovalDto[] {
       subject_type: approval.subjectType,
       action_id: approval.actionId,
       action_name: approval.actionName,
-      tool_call_id: approval.actionId ?? approval.subjectId ?? approval.id,
       requesting_principal_id: "main",
       runtime: event?.runtime ?? "openclaw",
       agent_id: "main",
@@ -313,7 +321,6 @@ function createMockApprovalDtos(): GuardApprovalDto[] {
       decision_options: ["allow_once", "deny"],
       decision:
         approval.status === "allowed" ? "allow_once" : approval.status === "denied" ? "deny" : null,
-      tool: approval.tool,
       resource: approval.resource,
       reason: approval.reason,
       risk_score: approval.riskScore,
@@ -321,28 +328,8 @@ function createMockApprovalDtos(): GuardApprovalDto[] {
       created_at: approval.createdAt,
       expires_at: approval.expiresAt ?? fallbackExpiry,
       resolved_at: approval.resolvedAt ?? null,
-      approval_nonce: `mock_${approval.id}`,
     };
   });
-}
-
-function createMetrics(events: GuardAuditEventDto[]): GuardEvalMetricsDto {
-  const metrics = createAuditWindow(events.map(mapAuditEvent), {
-    limit: AUDIT_EVENT_WINDOW_LIMIT,
-    hasMore: null,
-    source: "legacy_audit_events",
-  }).metrics;
-  return {
-    event_count: metrics.evaluationCount,
-    allow_count: metrics.allowCount,
-    deny_count: metrics.denyCount,
-    ask_count: metrics.askCount,
-    blocked_count: metrics.interventionCount,
-    block_rate: metrics.interventionRate,
-    fpr: metrics.policyFpr,
-    fnr: metrics.policyFnr,
-    average_latency_ms: metrics.averageDecisionLatencyMs,
-  };
 }
 
 function createTraceDetail(traceId: string, approvalDtos: GuardApprovalDto[]): GuardTraceDetailDto {
@@ -356,7 +343,6 @@ function createTraceDetail(traceId: string, approvalDtos: GuardApprovalDto[]): G
       returned_count: events.length,
       has_more: false,
     },
-    metrics: createMetrics(events),
   };
 }
 
@@ -415,8 +401,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
     await wait(this.delayMs, signal);
     return createAuditWindow(this.filteredAuditEvents(filters), {
       limit: AUDIT_EVENT_WINDOW_LIMIT,
-      hasMore: null,
-      source: "legacy_audit_events",
+      hasMore: false,
+      filters: {
+        traceId: filters.traceId ?? null,
+        caseId: filters.caseId ?? null,
+        runtime: filters.runtime ?? null,
+        decision: filters.decision ?? null,
+      },
     });
   }
 

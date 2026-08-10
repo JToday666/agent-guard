@@ -25,6 +25,7 @@ dependencies = [
   "fastapi>=0.136",
   "httpx>=0.28",
   "psycopg[binary]>=3.3",
+  "rfc8785==0.1.4",
   "SQLAlchemy>=2.0",
   "uvicorn>=0.49",
 ]

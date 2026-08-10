@@ -188,10 +188,10 @@ edge:{relation}:{source_node_id}:{target_node_id}
 ### 7.3 审批状态
 
 - 创建审批时写入 `approval` 节点以及 `decision → approval`。
-- resolve 或 expire 时以相同 `approval:{approval_id}` 更新明确终态。
+- resolve 时以相同 `approval:{approval_id}` 更新明确终态；expire 由审批记录的 `expires_at` 在查询视图中派生，不通过 GET 回写存储。
 - 审批终态本身不证明工具已执行或未执行。
 - 只有收到引用该 approval 的 runtime outcome 后，才写入审批到运行结果的关系。
-- nonce、CSRF token、browser session 和完整审批参数不得进入 provenance。
+- CSRF token、browser session 和完整审批参数不得进入 provenance。
 
 ## 8. 一致性、失败与重试
 
@@ -213,7 +213,7 @@ contract tests 保证最终状态一致。
 - 复用冻结契约的脱敏 key、字符串、数组、嵌套深度和 64 KiB 单事件 evidence 限制。
 - node label、metadata、edge metadata 必须经过相同服务端脱敏。
 - ID 不包含原始路径、收件人、消息内容、工具参数、用户任务或凭证值。
-- metadata 不保存 control token、adapter token、session、CSRF token、approval nonce。
+- metadata 不保存 control token、adapter token、session 或 CSRF token。
 - 未测量副作用保持 `count=null` 和 `measurement_status=not_measured`。
 - deny、ask 或 approval denied 不得单独推断 `execution.status=not_invoked`。
 - Dashboard 的二次遮盖不能替代服务端最小化。
@@ -222,7 +222,7 @@ contract tests 保证最终状态一致。
 
 `GET /v1/traces/{trace_id}/provenance`：
 
-- 只读取 `provenance_nodes` 和 `provenance_edges` 中已经持久化的事实。
+- 读取已持久化的 provenance 图，并仅用同一 trace 的权威审批记录覆盖 approval 节点当前状态；不得据此补造执行或副作用事实。
 - 继续返回当前稀疏图、旧 kind 和旧 relation，不做破坏性过滤。
 - 新消费者必须忽略未知 kind、relation 和 metadata。
 - 缺少节点或关系时返回合法稀疏图，不从 AuditEvent 查询结果临时补图。

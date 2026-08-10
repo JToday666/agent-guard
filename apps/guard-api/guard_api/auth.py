@@ -9,7 +9,11 @@ from datetime import datetime, timedelta, timezone
 
 from agentguard_core import new_id
 
-from guard_api.models import CredentialCreateRequest, CredentialRecord
+from guard_api.models import (
+    ADAPTER_CREDENTIAL_SCOPES,
+    CredentialCreateRequest,
+    CredentialRecord,
+)
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
@@ -53,17 +57,7 @@ class CapabilityAuthService:
         if not authorization.startswith(prefix):
             raise ApiAuthError("TOKEN_INVALID")
         token = authorization.removeprefix(prefix)
-        if hmac.compare_digest(token, self.settings.adapter_token):
-            context = AuthContext(
-                principal_type="component",
-                principal_id="cred_adapter_main",
-                role="adapter",
-                scopes=["event:evaluate", "event:audit:write", "approval:wait"],
-                auth_method="bearer",
-                runtime="langgraph",
-                agent_id="main",
-            )
-        elif hmac.compare_digest(token, self.settings.control_token):
+        if hmac.compare_digest(token, self.settings.control_token):
             context = AuthContext(
                 principal_type="cli",
                 principal_id="cred_control",
@@ -107,16 +101,33 @@ class CapabilityAuthService:
             raise ApiAuthError("SCOPE_DENIED", status_code=403)
         return context
 
+    def verify_runtime_identity(
+        self,
+        context: AuthContext,
+        *,
+        runtime: str,
+        agent_id: str | None = None,
+        require_agent_id: bool = False,
+    ) -> None:
+        if context.runtime is None or context.agent_id is None:
+            raise ApiAuthError("CREDENTIAL_IDENTITY_INCOMPLETE", status_code=403)
+        if require_agent_id and not agent_id:
+            raise ApiAuthError("EVENT_IDENTITY_INCOMPLETE", status_code=403)
+        if context.runtime != runtime or (
+            agent_id is not None and context.agent_id != agent_id
+        ):
+            raise ApiAuthError("RUNTIME_IDENTITY_MISMATCH", status_code=403)
+
     def create_credential(
         self, request: CredentialCreateRequest
     ) -> tuple[str, CredentialRecord]:
         token = f"agt_{new_id('tok')}"
         credential = CredentialRecord(
             token_hash=_token_hash(token),
-            principal_type=request.principal_type,
+            principal_type="component",
             principal_id=request.principal_id,
-            role=request.role,
-            scopes=request.scopes,
+            role="adapter",
+            scopes=list(ADAPTER_CREDENTIAL_SCOPES),
             runtime=request.runtime,
             agent_id=request.agent_id,
             expires_at=request.expires_at,
@@ -178,56 +189,6 @@ class CapabilityAuthService:
         if not csrf_token or not hmac.compare_digest(csrf_token, session.csrf_token):
             raise ApiAuthError("CSRF_INVALID", status_code=403)
 
-    def issue_approval_nonce(
-        self,
-        *,
-        approval_id: str,
-        session_id: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-    ) -> str:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        nonce = new_id("nonce")
-        expires_at = _now() + timedelta(
-            seconds=self.settings.approval_nonce_ttl_seconds
-        )
-        self.store.create_approval_nonce(
-            _token_hash(nonce),
-            approval_id=approval_id,
-            session_hash=_token_hash(session_id),
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at.isoformat(),
-        )
-        return nonce
-
-    def consume_approval_nonce(
-        self,
-        *,
-        nonce: str,
-        approval_id: str,
-        session_id: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-    ) -> None:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        approval_nonce = self.store.consume_approval_nonce(
-            _token_hash(nonce),
-            approval_id=approval_id,
-            session_hash=_token_hash(session_id),
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            used_at=_now().isoformat(),
-        )
-        if approval_nonce is None:
-            raise ApiAuthError("APPROVAL_NONCE_INVALID", status_code=403)
-        if _parse_datetime(approval_nonce.expires_at) < _now():
-            raise ApiAuthError("APPROVAL_NONCE_INVALID", status_code=403)
-
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -242,10 +203,3 @@ def _parse_datetime(value: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
-
-
-def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
-    approval_subject_id = subject_id or tool_call_id
-    if approval_subject_id is None:
-        raise ApiAuthError("APPROVAL_SUBJECT_MISSING", status_code=403)
-    return approval_subject_id

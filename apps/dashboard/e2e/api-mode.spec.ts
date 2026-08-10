@@ -36,7 +36,7 @@ const eventDto = {
     sequence: 1,
     prev_hash: null,
     event_hash: "hash_api",
-    canonicalization: "json:v1",
+    canonicalization: "jcs:rfc8785",
   },
   metadata: {
     action_name: "send_email",
@@ -46,16 +46,27 @@ const eventDto = {
   },
 };
 
-const metricsDto = {
-  event_count: 1,
+const policyMetricsDto = {
+  metric_version: "policy_evaluation.v2",
+  evaluation_count: 1,
+  unknown_decision_count: 0,
   allow_count: 0,
   deny_count: 0,
   ask_count: 1,
-  blocked_count: 1,
-  block_rate: 1,
-  fpr: null,
-  fnr: 0,
-  average_latency_ms: 4,
+  intervention_count: 1,
+  intervention_rate: 1,
+  policy_deny_rate: 0,
+  approval_trigger_rate: 1,
+  policy_intervention_fpr: null,
+  policy_intervention_fnr: 0,
+  benign_label_count: 0,
+  malicious_label_count: 1,
+  unlabeled_count: 0,
+  average_decision_latency_ms: 4,
+  latency_sample_count: 1,
+  duplicate_policy_record_count: 0,
+  unkeyed_policy_record_count: 0,
+  deduplication: "logical_policy_evaluation",
 };
 
 async function installApiRoutes(
@@ -128,8 +139,34 @@ async function installApiRoutes(
       });
     }
 
-    if (path === "/audit/events") {
-      return route.fulfill({ json: options.events ?? [eventDto] });
+    if (path === "/audit/window") {
+      const events = options.events ?? [eventDto];
+      return route.fulfill({
+        json: {
+          scope: {
+            kind: "audit_window",
+            snapshot_id: "snapshot-api-mode",
+            outcomes_as_of: "2026-06-28T08:00:05Z",
+            order: "audit_sequence",
+            limit: 500,
+            returned_record_count: events.length,
+            has_more: false,
+            next_cursor: null,
+            sequence_from: events.length ? 1 : null,
+            sequence_to: events.length,
+            occurred_from: events.length ? "2026-06-28T08:00:00Z" : null,
+            occurred_to: events.length ? "2026-06-28T08:00:00Z" : null,
+            filters: {
+              trace_id: null,
+              case_id: null,
+              runtime: null,
+              decision: null,
+            },
+          },
+          events,
+          policy_metrics: policyMetricsDto,
+        },
+      });
     }
     if (path === "/approvals/pending") {
       return route.fulfill({
@@ -176,8 +213,20 @@ async function installApiRoutes(
         json: {
           valid: true,
           event_count: 1,
-          head_hash: "hash_api",
+          head_hash: "a".repeat(64),
           first_broken_audit_id: null,
+          canonicalization: "jcs:rfc8785",
+          anchor: {
+            enabled: true,
+            status: "current",
+            checkpoint_sequence: 1,
+            checkpoint_head_hash: "a".repeat(64),
+            checkpoint_hash: "b".repeat(64),
+            checkpointed_at: "2026-06-28T08:00:00Z",
+            lag: 0,
+            key_id: "api-test-2026",
+            error_code: null,
+          },
         },
       });
     }
@@ -237,7 +286,6 @@ async function installApiRoutes(
           trace_id: "trace_api_001",
           audit_events: traceEvents,
           approvals: snapshot?.approvals ?? options.approvals ?? [],
-          metrics: metricsDto,
           audit_window: {
             limit: 500,
             returned_count: traceEvents.length,
@@ -371,14 +419,16 @@ function uncertainApproval() {
   return {
     approval_id: "approval_uncertain",
     trace_id: "trace_api_001",
-    tool_call_id: "call_uncertain",
+    subject_id: "call_uncertain",
+    subject_type: "tool_call",
+    action_id: "call_uncertain",
+    action_name: "send_email",
     requesting_principal_id: "agent_api",
     runtime: "langgraph",
     agent_id: "agent_api",
     status: "pending",
     decision_options: ["allow_once", "deny"],
     decision: null,
-    tool: "send_email",
     resource: "external@example.invalid",
     reason: "外部发送需要人工确认",
     risk_score: 64,
@@ -386,7 +436,6 @@ function uncertainApproval() {
     created_at: "2026-06-28T08:00:00Z",
     expires_at: "2099-06-28T08:05:00Z",
     resolved_at: null,
-    approval_nonce: "nonce_uncertain",
   };
 }
 
@@ -396,7 +445,7 @@ function runtimeApproval(status: "pending" | "resolved", decision: "allow_once" 
     approval_id: "approval_runtime",
     action_id: "action_api_001",
     action_name: "send_email",
-    tool_call_id: "action_api_001",
+    subject_id: "action_api_001",
     status,
     decision,
     resolved_at: status === "resolved" ? "2026-06-28T08:00:02Z" : null,
@@ -604,7 +653,7 @@ test("API mode renders every supported guard stage once and groups one tool life
     decision: "allow",
     event_type: eventType,
     integrity: {
-      canonicalization: "json:v1",
+      canonicalization: "jcs:rfc8785",
       event_hash: `hash_matrix_${index}`,
       prev_hash: index === 1 ? null : `hash_matrix_${index - 1}`,
       sequence: index,
@@ -637,7 +686,7 @@ test("API mode renders every supported guard stage once and groups one tool life
       decision: null,
       event_type: "trace_completed",
       integrity: {
-        canonicalization: "json:v1",
+        canonicalization: "jcs:rfc8785",
         event_hash: "hash_matrix_terminal",
         prev_hash: "hash_matrix_7",
         sequence: 8,
@@ -696,7 +745,7 @@ test("API mode keeps a large execution trace navigable without rendering every o
       blocked: false,
       decision: "allow",
       integrity: {
-        canonicalization: "json:v1",
+        canonicalization: "jcs:rfc8785",
         event_hash: `hash_large_${index}`,
         prev_hash: index === 1 ? null : `hash_large_${index - 1}`,
         sequence: index,
@@ -901,7 +950,7 @@ test("API mode renders authenticated dashboard and tolerates partial endpoint fa
 
   await installApiRoutes(page, { failConfigAudit: true });
   const auditRequestPromise = page.waitForRequest((request) =>
-    request.url().includes("/api/v1/audit/events?"),
+    request.url().includes("/api/v1/audit/window?"),
   );
   await page.goto("/overview");
   const auditHeaders = (await auditRequestPromise).headers();
@@ -1100,14 +1149,16 @@ test("API mode disables an approval when its expiry passes without another poll"
       {
         approval_id: "approval_expiring",
         trace_id: "trace_api_001",
-        tool_call_id: "call_expiring",
+        subject_id: "call_expiring",
+        subject_type: "tool_call",
+        action_id: "call_expiring",
+        action_name: "send_email",
         requesting_principal_id: "agent_api",
         runtime: "langgraph",
         agent_id: "agent_api",
         status: "pending",
         decision_options: ["allow_once", "deny"],
         decision: null,
-        tool: "send_email",
         resource: "external@example.invalid",
         reason: "外部发送需要人工确认",
         risk_score: 64,
@@ -1115,7 +1166,6 @@ test("API mode disables an approval when its expiry passes without another poll"
         created_at: new Date(now.getTime() - 60_000).toISOString(),
         expires_at: new Date(now.getTime() + 60_000).toISOString(),
         resolved_at: null,
-        approval_nonce: "nonce_expiring",
       },
     ],
   });
@@ -1186,7 +1236,7 @@ test("API polling requests only common data and the active page domain", async (
   await expect(page.locator(".freshness--ready").first()).toBeVisible();
 
   const overviewPaths = [...requestedPaths];
-  expect(overviewPaths).toContain("/api/v1/audit/events");
+  expect(overviewPaths).toContain("/api/v1/audit/window");
   expect(overviewPaths).not.toContain("/api/v1/metrics/eval");
   expect(overviewPaths).not.toContain("/api/v1/policies/current");
   expect(overviewPaths).not.toContain("/api/v1/config-audit/findings");
@@ -1197,7 +1247,7 @@ test("API polling requests only common data and the active page domain", async (
   await expect(page.getByRole("heading", { name: "安全评测" })).toBeVisible();
   await expect.poll(() => requestedPaths.includes("/api/v1/evaluations/latest")).toBe(true);
 
-  expect(requestedPaths).not.toContain("/api/v1/audit/events");
+  expect(requestedPaths).not.toContain("/api/v1/audit/window");
   expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
   expect(requestedPaths).not.toContain("/api/v1/policies/current");
 
@@ -1209,7 +1259,7 @@ test("API polling requests only common data and the active page domain", async (
   expect(requestedPaths).toContain("/api/v1/policies/history");
   expect(requestedPaths).toContain("/api/v1/config-audit/findings");
   expect(requestedPaths).toContain("/api/v1/adapters/openclaw/status");
-  expect(requestedPaths).not.toContain("/api/v1/audit/events");
+  expect(requestedPaths).not.toContain("/api/v1/audit/window");
 });
 
 test("manual refresh bypasses the shared-resource freshness window", async ({ page }) => {
@@ -1224,6 +1274,6 @@ test("manual refresh bypasses the shared-resource freshness window", async ({ pa
 
   requestedPaths.length = 0;
   await page.getByRole("button", { name: "刷新数据" }).click();
-  await expect.poll(() => requestedPaths.includes("/api/v1/audit/events")).toBe(true);
+  await expect.poll(() => requestedPaths.includes("/api/v1/audit/window")).toBe(true);
   expect(requestedPaths).not.toContain("/api/v1/metrics/eval");
 });

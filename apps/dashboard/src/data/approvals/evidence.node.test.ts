@@ -55,7 +55,6 @@ function approval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
     status: "pending",
     subjectId: "call_1",
     subjectType: "tool_call",
-    tool: "send_email",
     traceId: "trace_1",
     userTask: "未提供",
     ...overrides,

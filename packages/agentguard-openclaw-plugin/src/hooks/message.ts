@@ -1,60 +1,30 @@
-import type { PluginHookName } from "openclaw/plugin-sdk/types";
-
-import { OPENCLAW_OBSERVATION_HOOKS } from "../../hook-contract.mjs";
 import {
   decisionToMessageResult,
-  decisionToToolResult,
   failClosedMessageResult,
-  failClosedToolResult,
   logDiagnostic,
 } from "../guard-api-client.js";
 import {
-  buildBeforeInstallConfigAuditEvent,
-  buildContextGuardEvent,
   buildMessageSendGuardEvent,
-  buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
-  buildToolCallGuardEvent,
-} from "../mapping.js";
-import {
-  containsSensitiveCredentialText,
-  redactUnknownCredentials,
-  sanitizePersistentInstructionPoisoning,
-  stringPreview,
-} from "../security.js";
+} from "../mapping/index.js";
+import { redactUnknownCredentials } from "../security.js";
 import {
   asRecord,
-  firstNonEmptyString,
   rememberSessionState,
-  rememberToolCallState,
-  stringMaybe,
   withCachedRuntimeFields,
-  withCachedToolContext,
 } from "../runtime/state.js";
 import {
   blockingApprovalHookTimeoutMs,
-  decisionToBlockResult,
-  failClosedBlockResult,
   isDisabled,
   isEnforcing,
   isObserve,
-  quarantinedToolResultMessage,
-  safeDecisionMessage,
-  shouldFailClosedRuntimeStage,
-  shouldRuntimeBlock,
 } from "../runtime/enforcement.js";
 import { fireRuntimeOutcomeReceipt } from "../runtime/outcome-receipt.js";
 import type { HookContext } from "./context.js";
 
 export function registerMessageSending(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, outcomeDelivery, sessionState } =
+    hookContext;
   api.on(
     "message_sending",
     async (event, context) => {
@@ -76,8 +46,7 @@ export function registerMessageSending(hookContext: HookContext): void {
         return await decisionToMessageResult(
           decision,
           {
-            waitForApproval: (approvalId) =>
-              client.waitForApproval(approvalId, config.approvalWaitBudgetMs),
+            waitForApproval: (approvalId) => client.waitForApproval(approvalId),
           },
           (outcome) => {
             fireRuntimeOutcomeReceipt({
@@ -89,6 +58,7 @@ export function registerMessageSending(hookContext: HookContext): void {
               approval: outcome.approval,
               stage: "message_sending",
               logLabel: "message_sending",
+              delivery: outcomeDelivery,
             });
           },
         );
@@ -104,14 +74,7 @@ export function registerMessageSending(hookContext: HookContext): void {
 }
 
 export function registerMessageReceived(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   api.on(
     "message_received",
     (event, context) => {
@@ -149,14 +112,7 @@ export function registerMessageReceived(hookContext: HookContext): void {
 }
 
 export function registerBeforeMessageWrite(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   api.on(
     "before_message_write",
     (event, context) => {
@@ -189,7 +145,7 @@ export function registerBeforeMessageWrite(hookContext: HookContext): void {
         logDiagnostic(config, "before_message_write redaction failed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        return undefined;
+        return isEnforcing(config) ? { block: true } : undefined;
       }
     },
     { priority: 100, timeoutMs: 2000 },

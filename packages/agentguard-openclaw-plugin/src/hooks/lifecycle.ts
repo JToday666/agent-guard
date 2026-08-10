@@ -1,59 +1,25 @@
 import type { PluginHookName } from "openclaw/plugin-sdk/types";
 
 import { OPENCLAW_OBSERVATION_HOOKS } from "../../hook-contract.mjs";
-import {
-  decisionToMessageResult,
-  decisionToToolResult,
-  failClosedMessageResult,
-  failClosedToolResult,
-  logDiagnostic,
-} from "../guard-api-client.js";
+import { logDiagnostic } from "../guard-api-client.js";
 import {
   buildBeforeInstallConfigAuditEvent,
-  buildContextGuardEvent,
-  buildMessageSendGuardEvent,
-  buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
-  buildToolCallGuardEvent,
-} from "../mapping.js";
-import {
-  containsSensitiveCredentialText,
-  redactUnknownCredentials,
-  sanitizePersistentInstructionPoisoning,
-  stringPreview,
-} from "../security.js";
+} from "../mapping/index.js";
 import {
   asRecord,
-  firstNonEmptyString,
   rememberSessionState,
-  rememberToolCallState,
-  stringMaybe,
   withCachedRuntimeFields,
-  withCachedToolContext,
 } from "../runtime/state.js";
 import {
-  blockingApprovalHookTimeoutMs,
-  decisionToBlockResult,
-  failClosedBlockResult,
+  guardRequestHookTimeoutMs,
   isDisabled,
-  isEnforcing,
   isObserve,
-  quarantinedToolResultMessage,
-  safeDecisionMessage,
-  shouldFailClosedRuntimeStage,
-  shouldRuntimeBlock,
 } from "../runtime/enforcement.js";
 import type { HookContext } from "./context.js";
 
 export function registerBeforeInstall(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient } = hookContext;
   api.on(
     "before_install",
     async (event, context) => {
@@ -84,19 +50,12 @@ export function registerBeforeInstall(hookContext: HookContext): void {
             };
       }
     },
-    { priority: 100, timeoutMs: 10_000 },
+    { priority: 100, timeoutMs: guardRequestHookTimeoutMs(config) },
   );
 }
 
 export function registerObservationHooks(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   for (const hookName of OPENCLAW_OBSERVATION_HOOKS as readonly PluginHookName[]) {
     api.on(
       hookName,

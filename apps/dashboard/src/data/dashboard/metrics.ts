@@ -22,23 +22,26 @@ const datedTimeLabelFormatter = new Intl.DateTimeFormat("zh-CN", {
 export interface LogicalPolicyEvaluationSelection {
   events: AuditEventRow[];
   duplicatePolicyRecordCount: number;
-  legacyFallbackCount: number;
+  unkeyedPolicyRecordCount: number;
 }
 
 interface AuditWindowOptions {
-  hasMore?: boolean | null;
+  filters?: AuditWindowScope["filters"];
+  hasMore?: boolean;
   limit: number;
-  source?: AuditWindowScope["source"];
+  nextCursor?: string | null;
+  outcomesAsOf?: string;
+  snapshotId?: string;
 }
 
-function logicalPolicyKey(event: AuditEventRow): { key: string; legacyFallback: boolean } {
+function logicalPolicyKey(event: AuditEventRow): { key: string; unkeyed: boolean } {
   if (event.eventId && event.decisionId) {
     return {
       key: `${event.eventId}\u0000${event.decisionId}`,
-      legacyFallback: false,
+      unkeyed: false,
     };
   }
-  return { key: `audit:${event.id}`, legacyFallback: true };
+  return { key: `audit:${event.id}`, unkeyed: true };
 }
 
 export function selectLogicalPolicyEvaluations(
@@ -46,11 +49,11 @@ export function selectLogicalPolicyEvaluations(
 ): LogicalPolicyEvaluationSelection {
   const logicalEvents = new Map<string, AuditEventRow>();
   let duplicatePolicyRecordCount = 0;
-  let legacyFallbackCount = 0;
+  let unkeyedPolicyRecordCount = 0;
 
   for (const event of events) {
     if (event.recordType !== "policy_evaluation") continue;
-    const { key, legacyFallback } = logicalPolicyKey(event);
+    const { key, unkeyed } = logicalPolicyKey(event);
     const current = logicalEvents.get(key);
     if (current) {
       duplicatePolicyRecordCount += 1;
@@ -64,14 +67,14 @@ export function selectLogicalPolicyEvaluations(
       }
       continue;
     }
-    if (legacyFallback) legacyFallbackCount += 1;
+    if (unkeyed) unkeyedPolicyRecordCount += 1;
     logicalEvents.set(key, event);
   }
 
   return {
     events: [...logicalEvents.values()],
     duplicatePolicyRecordCount,
-    legacyFallbackCount,
+    unkeyedPolicyRecordCount,
   };
 }
 
@@ -97,6 +100,8 @@ export function deriveWindowMetrics(events: readonly AuditEventRow[]): WindowMet
   const falseNegativeCount = maliciousEvents.filter((event) => event.decision === "allow").length;
 
   return {
+    metricVersion: "policy_evaluation.v2",
+    deduplication: "logical_policy_evaluation",
     evaluationCount: policyEvents.length,
     unknownDecisionCount,
     allowCount,
@@ -118,7 +123,7 @@ export function deriveWindowMetrics(events: readonly AuditEventRow[]): WindowMet
       : null,
     latencySampleCount: latencyValues.length,
     duplicatePolicyRecordCount: selection.duplicatePolicyRecordCount,
-    legacyFallbackCount: selection.legacyFallbackCount,
+    unkeyedPolicyRecordCount: selection.unkeyedPolicyRecordCount,
   };
 }
 
@@ -141,16 +146,29 @@ export function createAuditWindow(
   options: AuditWindowOptions,
 ): AuditWindow {
   const range = auditWindowRange(events);
+  const sequences = events
+    .map((event) => event.auditSequence)
+    .filter((value): value is number => value !== null);
   return {
     scope: {
       kind: "audit_window",
-      source: options.source ?? "legacy_audit_events",
+      snapshotId: options.snapshotId ?? `local:${Math.max(0, ...sequences)}`,
+      outcomesAsOf: options.outcomesAsOf ?? range.to ?? new Date(0).toISOString(),
+      order: "audit_sequence",
       limit: options.limit,
       returnedRecordCount: events.length,
-      hasMore: options.hasMore ?? null,
-      from: range.from,
-      to: range.to,
-      deduplication: "logical_policy_evaluation",
+      hasMore: options.hasMore ?? false,
+      nextCursor: options.nextCursor ?? null,
+      sequenceFrom: sequences.length ? Math.min(...sequences) : null,
+      sequenceTo: sequences.length ? Math.max(...sequences) : null,
+      occurredFrom: range.from,
+      occurredTo: range.to,
+      filters: options.filters ?? {
+        traceId: null,
+        caseId: null,
+        runtime: null,
+        decision: null,
+      },
     },
     events,
     metrics: deriveWindowMetrics(events),

@@ -1,62 +1,34 @@
-import type { PluginHookName } from "openclaw/plugin-sdk/types";
-
-import { OPENCLAW_OBSERVATION_HOOKS } from "../../hook-contract.mjs";
+import { logDiagnostic } from "../guard-api-client.js";
 import {
-  decisionToMessageResult,
-  decisionToToolResult,
-  failClosedMessageResult,
-  failClosedToolResult,
-  logDiagnostic,
-} from "../guard-api-client.js";
-import {
-  buildBeforeInstallConfigAuditEvent,
   buildContextGuardEvent,
-  buildMessageSendGuardEvent,
   buildModelGuardEvent,
   buildRuntimeObservationAuditEvent,
-  buildToolCallGuardEvent,
-} from "../mapping.js";
-import {
-  containsSensitiveCredentialText,
-  redactUnknownCredentials,
-  sanitizePersistentInstructionPoisoning,
-  stringPreview,
-} from "../security.js";
+} from "../mapping/index.js";
 import {
   asRecord,
-  firstNonEmptyString,
   rememberSessionState,
-  rememberToolCallState,
-  stringMaybe,
   withCachedRuntimeFields,
-  withCachedToolContext,
 } from "../runtime/state.js";
 import {
-  blockingApprovalHookTimeoutMs,
-  decisionToBlockResult,
-  failClosedBlockResult,
+  decisionToInputGateResult,
+  failClosedInputGateResult,
+  guardRequestHookTimeoutMs,
   isDisabled,
-  isEnforcing,
   isObserve,
-  quarantinedToolResultMessage,
-  safeDecisionMessage,
-  shouldFailClosedRuntimeStage,
-  shouldRuntimeBlock,
 } from "../runtime/enforcement.js";
+import { fireRuntimeOutcomeReceipt } from "../runtime/outcome-receipt.js";
 import type { HookContext } from "./context.js";
+import type {
+  GuardEvaluationResponse,
+  GuardEvent,
+  JsonObject,
+} from "../types.js";
 
 export function registerBeforePromptBuild(hookContext: HookContext): void {
-  const {
-    api,
-    config,
-    makeClient,
-    sessionState,
-    toolCallState,
-    finalizeRevisionKeys,
-  } = hookContext;
+  const { api, config, makeClient, sessionState } = hookContext;
   api.on(
     "before_prompt_build",
-    async (event, context) => {
+    (event, context) => {
       if (isDisabled(config)) {
         return undefined;
       }
@@ -66,26 +38,171 @@ export function registerBeforePromptBuild(hookContext: HookContext): void {
           promptFallback: true,
         });
         const cached = withCachedRuntimeFields(sessionState, event, context);
-        const decision = await client.evaluate(
-          buildContextGuardEvent(
-            "before_prompt_build",
-            cached.event,
-            cached.context,
-          ),
-        );
-        if (shouldRuntimeBlock(config, decision)) {
-          return decisionToBlockResult(decision) as never;
-        }
+        void client
+          .submitRuntimeObservation(
+            buildRuntimeObservationAuditEvent(
+              "before_prompt_build",
+              cached.event,
+              cached.context,
+            ),
+          )
+          .catch((error) => {
+            logDiagnostic(config, "before_prompt_build observation failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
       } catch (error) {
-        logDiagnostic(config, "before_prompt_build enforcement failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        if (shouldFailClosedRuntimeStage(config, "before_prompt_build")) {
-          return failClosedBlockResult() as never;
-        }
+        logDiagnostic(
+          config,
+          "before_prompt_build observation mapping failed",
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
       }
       return undefined;
     },
     { priority: 0, timeoutMs: 2000 },
+  );
+}
+
+export function registerBeforeAgentRun(hookContext: HookContext): void {
+  const { api, config, makeClient, outcomeDelivery, sessionState } =
+    hookContext;
+  api.on(
+    "before_agent_run",
+    async (event, context) => {
+      if (isDisabled(config)) {
+        return { outcome: "pass" };
+      }
+      const client = makeClient();
+      try {
+        rememberSessionState(sessionState, event, context, {
+          promptFallback: true,
+        });
+        const cached = withCachedRuntimeFields(sessionState, event, context);
+        const evaluations: Array<{
+          guardEvent: GuardEvent;
+          evaluation: GuardEvaluationResponse;
+        }> = [];
+        const modelInputEvent = buildModelGuardEvent(
+          "before_agent_run",
+          currentInputOnly(cached.event),
+          cached.context,
+        );
+        const toolMessages = untrustedToolMessages(cached.event);
+        const requests = [
+          client.evaluate(modelInputEvent).then((evaluation) => ({
+            guardEvent: modelInputEvent,
+            evaluation,
+          })),
+        ];
+        if (toolMessages.length > 0) {
+          const contextEvent = buildContextGuardEvent(
+            "before_agent_run",
+            {
+              ...cached.event,
+              prompt: undefined,
+              messages: toolMessages,
+              sourceTrust: "untrusted",
+              sourceType: "tool_result",
+            },
+            cached.context,
+          );
+          requests.push(
+            client.evaluate(contextEvent).then((evaluation) => ({
+              guardEvent: contextEvent,
+              evaluation,
+            })),
+          );
+        }
+        evaluations.push(...(await Promise.all(requests)));
+        if (isObserve(config)) {
+          return { outcome: "pass" };
+        }
+        const blocked = mostRestrictiveEvaluation(evaluations);
+        if (!blocked) {
+          return { outcome: "pass" };
+        }
+        const result = decisionToInputGateResult(blocked.evaluation);
+        if (result.outcome === "block") {
+          fireRuntimeOutcomeReceipt({
+            client,
+            config,
+            guardEvent: blocked.guardEvent,
+            evaluation: blocked.evaluation,
+            kind: "pre_execution_deny",
+            stage: "before_agent_run",
+            logLabel: "before_agent_run",
+            delivery: outcomeDelivery,
+          });
+        }
+        return result;
+      } catch (error) {
+        logDiagnostic(config, "before_agent_run enforcement failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return isObserve(config)
+          ? { outcome: "pass" }
+          : failClosedInputGateResult();
+      }
+    },
+    { priority: 100, timeoutMs: guardRequestHookTimeoutMs(config) },
+  );
+}
+
+function currentInputOnly(event: JsonObject): JsonObject {
+  const senderIsOwner = event.senderIsOwner;
+  return {
+    ...event,
+    systemPrompt: undefined,
+    messages: undefined,
+    sourceTrust:
+      senderIsOwner === true
+        ? "trusted"
+        : senderIsOwner === false
+          ? "untrusted"
+          : (event.sourceTrust ?? event.source_trust ?? "untrusted"),
+    sourceType:
+      senderIsOwner === true
+        ? "user"
+        : senderIsOwner === false
+          ? "external_user"
+          : (event.sourceType ?? event.source_type ?? "unknown"),
+  };
+}
+
+function untrustedToolMessages(event: JsonObject): unknown[] {
+  if (!Array.isArray(event.messages)) {
+    return [];
+  }
+  return event.messages.filter((message) => {
+    const record = asRecord(message);
+    const role = String(record.role ?? "").toLowerCase();
+    return (
+      role === "tool" ||
+      role === "function" ||
+      "toolCallId" in record ||
+      "tool_call_id" in record
+    );
+  });
+}
+
+function mostRestrictiveEvaluation(
+  evaluations: Array<{
+    guardEvent: GuardEvent;
+    evaluation: GuardEvaluationResponse;
+  }>,
+):
+  | {
+      guardEvent: GuardEvent;
+      evaluation: GuardEvaluationResponse;
+    }
+  | undefined {
+  return (
+    evaluations.find(
+      ({ evaluation }) => evaluation.decision.decision === "deny",
+    ) ??
+    evaluations.find(({ evaluation }) => evaluation.decision.decision === "ask")
   );
 }

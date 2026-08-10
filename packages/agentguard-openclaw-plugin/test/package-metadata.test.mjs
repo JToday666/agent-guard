@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  OPENCLAW_ENFORCEMENT_HOOKS,
+  OPENCLAW_FAIL_CLOSED_HOOKS,
+  OPENCLAW_REQUIRED_HOOKS,
+} from "../hook-contract.mjs";
 
 const packageRoot = new URL("../", import.meta.url);
 
@@ -19,4 +24,39 @@ test("package, manifest, and heartbeat versions stay aligned", async () => {
   assert.equal(packageJson.name, "@agentguard-ai/openclaw-plugin");
   assert.equal(manifest.version, packageJson.version);
   assert.equal(heartbeatVersion, packageJson.version);
+});
+
+test("manifest exposes one strict config surface and a SecretRef token", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("openclaw.plugin.json", packageRoot), "utf8"),
+  );
+  const properties = manifest.configSchema.properties;
+
+  assert.deepEqual(Object.keys(properties).sort(), [
+    "adapterToken",
+    "agentId",
+    "approvalPollIntervalMs",
+    "approvalTimeoutMs",
+    "diagnosticLogging",
+    "enforcementMode",
+    "guardApiBaseUrl",
+    "requestTimeoutMs",
+  ]);
+  assert.deepEqual(manifest.configSchema.required, ["adapterToken"]);
+  assert.equal(properties.adapterToken.type, "object");
+  assert.deepEqual(manifest.configContracts.secretInputs.paths, [
+    { path: "adapterToken", expected: "string" },
+  ]);
+  assert.equal("approvalWaitBudgetMs" in properties, false);
+});
+
+test("hook contract uses supported OpenClaw enforcement surfaces", () => {
+  assert.equal(OPENCLAW_REQUIRED_HOOKS.length, 23);
+  assert.ok(OPENCLAW_REQUIRED_HOOKS.includes("before_agent_run"));
+  assert.equal(
+    OPENCLAW_ENFORCEMENT_HOOKS.includes("before_prompt_build"),
+    false,
+  );
+  assert.equal(OPENCLAW_ENFORCEMENT_HOOKS.includes("llm_input"), false);
+  assert.deepEqual(OPENCLAW_FAIL_CLOSED_HOOKS, OPENCLAW_ENFORCEMENT_HOOKS);
 });

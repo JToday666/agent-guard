@@ -90,6 +90,7 @@ export type ToolResultPersistEventInput = RuntimeSecurityFields & {
 
 export type PromptBuildEventInput = RuntimeSecurityFields & {
   prompt?: unknown;
+  systemPrompt?: unknown;
   messages?: unknown;
   context?: unknown;
   sanitized?: boolean;
@@ -98,6 +99,7 @@ export type PromptBuildEventInput = RuntimeSecurityFields & {
 
 export type ModelHookEventInput = RuntimeSecurityFields & {
   prompt?: unknown;
+  systemPrompt?: unknown;
   input?: unknown;
   output?: unknown;
   response?: unknown;
@@ -398,7 +400,7 @@ export function runtimeSecurityFields(
   const sourceType =
     stringMaybe(eventRecord.sourceType ?? eventRecord.source_type) ??
     stringMaybe(contextRecord.sourceType ?? contextRecord.source_type) ??
-    "openclaw";
+    "unknown";
   const explicitTrust =
     stringMaybe(eventRecord.sourceTrust ?? eventRecord.source_trust) ??
     stringMaybe(contextRecord.sourceTrust ?? contextRecord.source_trust);
@@ -437,7 +439,7 @@ export function inferSourceTrust(
   if (isTrustedSourceType(normalizedType)) {
     return "trusted";
   }
-  return "trusted";
+  return "untrusted";
 }
 
 export function isUntrustedSourceType(value: string): boolean {

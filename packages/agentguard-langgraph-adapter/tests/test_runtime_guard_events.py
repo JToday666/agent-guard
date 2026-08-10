@@ -389,7 +389,11 @@ def test_gateway_blocks_agent_abuse_tool_call_before_runtime_invoke() -> None:
     assert result.event["event_type"] == "tool_call_proposed"
     assert result.event["tool"]["name"] == "browser_click"
     assert result.block_semantics == "policy_deny"
-    assert client.audit_events[-1]["event_type"] == "tool_call_not_invoked"
+    assert client.audit_events[-1]["event_type"] == "runtime_outcome"
+    assert client.audit_events[-1]["metadata"] == {
+        "agent_id": "langgraph",
+        "outcome_kind": "pre_execution_deny",
+    }
 
 
 def test_gateway_quarantines_poisoned_tool_result_before_context_admission() -> None:

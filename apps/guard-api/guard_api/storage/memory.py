@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from threading import Lock
-from typing import Any, Iterator
+from datetime import datetime, timezone
+from threading import Lock, RLock
+from typing import Any, Callable, Iterator
 
 from agentguard_core import (
     ActionCriticReview,
@@ -28,19 +30,21 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.storage.base import (
+    ApprovalStateConflictError,
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
-    EvalMetricFilters,
-    EvalMetrics,
+    EvaluationRunConflictError,
+    PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
-    StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
+    classify_audit_record_type,
     merge_provenance_edge,
     merge_provenance_node,
+    parse_audit_timestamp,
     within_evaluated_range,
 )
 from guard_api.storage.integrity import (
@@ -48,7 +52,10 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
-from guard_api.services.metric_rules import aggregate_policy_metrics
+
+
+def _system_utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(slots=True)
@@ -65,14 +72,19 @@ class MemoryControlPlaneStore:
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
     launch_codes: dict[str, StoredLaunchCode] = field(default_factory=dict)
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
-    approval_nonces: dict[str, StoredApprovalNonce] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
-    audit_integrity_lock: Any = field(default_factory=Lock, init=False, repr=False)
-    provenance_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    audit_clock: Callable[[], datetime] = field(default=_system_utc_now, repr=False)
+    audit_integrity_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    provenance_lock: Any = field(default_factory=RLock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    evaluation_run_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    approval_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    memory_change_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    action_critic_lock: Any = field(default_factory=RLock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
+    audit_ingested_at_by_id: dict[str, datetime] = field(default_factory=dict)
 
     def initialize(self) -> None:
         return None
@@ -81,6 +93,10 @@ class MemoryControlPlaneStore:
         return True
 
     def add_audit_event(self, event: AuditEvent) -> bool:
+        parse_audit_timestamp(event.timestamp)
+        ingested_at = self.audit_clock()
+        if ingested_at.tzinfo is None:
+            raise ValueError("audit ingestion clock must include a timezone")
         with self.audit_integrity_lock:
             existing = self.audit_events_by_id.get(event.audit_id)
             if existing is not None:
@@ -99,6 +115,7 @@ class MemoryControlPlaneStore:
             )
             self.audit_events.append(event_with_integrity)
             self.audit_events_by_id[event.audit_id] = event_with_integrity
+            self.audit_ingested_at_by_id[event.audit_id] = ingested_at
             return True
 
     def get_audit_event(self, audit_id: str) -> AuditEvent | None:
@@ -126,9 +143,20 @@ class MemoryControlPlaneStore:
             events = [
                 event
                 for event in self.audit_events[: max(end, 0)]
-                if _matches_window_filters(event, query)
+                if _matches_window_filters(
+                    event,
+                    query,
+                    ingested_at=self.audit_ingested_at_by_id[event.audit_id],
+                )
             ]
         return list(reversed(events))[: query.limit]
+
+    def capture_audit_snapshot(self) -> tuple[int, datetime]:
+        with self.audit_integrity_lock:
+            captured_at = self.audit_clock()
+            if captured_at.tzinfo is None:
+                raise ValueError("audit ingestion clock must include a timezone")
+            return len(self.audit_events), captured_at
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         with self.audit_integrity_lock:
@@ -142,25 +170,47 @@ class MemoryControlPlaneStore:
         return None
 
     @contextmanager
-    def policy_evaluation_guard(self, event_id: str) -> Iterator[None]:
-        """Serialize evaluation side effects before the policy audit is committed.
-
-        The in-memory backend deliberately uses one process-wide evaluation lock.
-        Evaluation throughput is not a local-test bottleneck, and the simple lock
-        keeps approval, memory-change and audit creation consistent with the
-        PostgreSQL per-event advisory lock.
-        """
+    def evaluation_transaction(self, event_id: str) -> Iterator[None]:
+        """Atomically apply one evaluation to the in-memory reference store."""
 
         del event_id
-        with self.policy_evaluation_lock:
-            yield
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        # 按入链顺序传入，共享聚合器对重复逻辑键保留最早入链记录（§19.1）。
-        events = _filter_audit_events(
-            list(self.audit_events), filters or EvalMetricFilters()
-        )
-        return aggregate_policy_metrics(events)
+        with (
+            self.policy_evaluation_lock,
+            self.audit_integrity_lock,
+            self.provenance_lock,
+            self.approval_lock,
+            self.memory_change_lock,
+            self.action_critic_lock,
+        ):
+            snapshot = {
+                "audit_events": deepcopy(self.audit_events),
+                "audit_events_by_id": deepcopy(self.audit_events_by_id),
+                "audit_ingested_at_by_id": deepcopy(self.audit_ingested_at_by_id),
+                "provenance_nodes": deepcopy(self.provenance_nodes),
+                "provenance_edges": deepcopy(self.provenance_edges),
+                "approvals": deepcopy(self.approvals),
+                "memory_changes": deepcopy(self.memory_changes),
+                "action_critic_reviews": deepcopy(self.action_critic_reviews),
+            }
+            try:
+                yield
+            except BaseException:
+                self.audit_events[:] = snapshot["audit_events"]
+                self.audit_events_by_id.clear()
+                self.audit_events_by_id.update(snapshot["audit_events_by_id"])
+                self.audit_ingested_at_by_id.clear()
+                self.audit_ingested_at_by_id.update(snapshot["audit_ingested_at_by_id"])
+                self.provenance_nodes.clear()
+                self.provenance_nodes.update(snapshot["provenance_nodes"])
+                self.provenance_edges.clear()
+                self.provenance_edges.update(snapshot["provenance_edges"])
+                self.approvals.clear()
+                self.approvals.update(snapshot["approvals"])
+                self.memory_changes.clear()
+                self.memory_changes.update(snapshot["memory_changes"])
+                self.action_critic_reviews.clear()
+                self.action_critic_reviews.update(snapshot["action_critic_reviews"])
+                raise
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         with self.provenance_lock:
@@ -190,7 +240,11 @@ class MemoryControlPlaneStore:
             return merged
 
     def list_provenance(
-        self, trace_id: str
+        self,
+        trace_id: str,
+        *,
+        node_limit: int | None = None,
+        edge_limit: int | None = None,
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
         with self.provenance_lock:
             nodes = [
@@ -205,6 +259,16 @@ class MemoryControlPlaneStore:
             ]
         nodes.sort(key=lambda node: (node.timestamp, node.node_id))
         edges.sort(key=lambda edge: (edge.timestamp, edge.edge_id))
+        if node_limit is not None:
+            nodes = nodes[: _bounded_collection_limit(node_limit)]
+            node_ids = {node.node_id for node in nodes}
+            edges = [
+                edge
+                for edge in edges
+                if edge.source_node_id in node_ids and edge.target_node_id in node_ids
+            ]
+        if edge_limit is not None:
+            edges = edges[: _bounded_collection_limit(edge_limit)]
         return nodes, edges
 
     def add_config_audit_finding(
@@ -245,8 +309,15 @@ class MemoryControlPlaneStore:
         self, run: EvaluationRun | dict[str, Any]
     ) -> dict[str, Any]:
         payload = EvaluationRun.model_validate(run).model_dump(mode="json")
-        self.evaluation_runs[payload["run_id"]] = payload
-        return payload
+        run_id = payload["run_id"]
+        with self.evaluation_run_lock:
+            existing = self.evaluation_runs.get(run_id)
+            if existing is not None:
+                if existing == payload:
+                    return dict(existing)
+                raise EvaluationRunConflictError(run_id)
+            self.evaluation_runs[run_id] = payload
+        return dict(payload)
 
     def get_latest_evaluation_run(self) -> dict[str, Any] | None:
         if not self.evaluation_runs:
@@ -320,51 +391,64 @@ class MemoryControlPlaneStore:
     def add_action_critic_review(
         self, review: ActionCriticReview
     ) -> ActionCriticReview:
-        self.action_critic_reviews[review.review_id] = review
-        return review
+        with self.action_critic_lock:
+            self.action_critic_reviews[review.review_id] = review
+            return review
 
     def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]:
-        reviews = [
-            review
-            for review in self.action_critic_reviews.values()
-            if review.trace_id == trace_id
-        ]
+        with self.action_critic_lock:
+            reviews = [
+                review
+                for review in self.action_critic_reviews.values()
+                if review.trace_id == trace_id
+            ]
         return sorted(reviews, key=lambda review: (review.created_at, review.review_id))
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
-        self.memory_changes[change.change_id] = change
-        return change
+        with self.memory_change_lock:
+            self.memory_changes[change.change_id] = change
+            return change
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
-        return self.memory_changes.get(change_id)
+        with self.memory_change_lock:
+            return self.memory_changes.get(change_id)
 
     def update_memory_change_status(
         self, change_id: str, status: str
     ) -> MemoryGuardChange:
-        current = self.memory_changes[change_id]
-        updated = current.model_copy(
-            update={"status": status, "updated_at": utc_now_iso()}
-        )
-        self.memory_changes[change_id] = updated
-        return updated
+        with self.memory_change_lock:
+            current = self.memory_changes[change_id]
+            updated = current.model_copy(
+                update={"status": status, "updated_at": utc_now_iso()}
+            )
+            self.memory_changes[change_id] = updated
+            return updated
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         if self.policy_snapshot is None:
             return None
         return self.policy_snapshot.policy_bundle
 
+    def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None:
+        return self.policy_snapshot
+
     def save_policy_snapshot(
         self,
         policy_bundle: PolicyBundle,
         *,
+        expected_revision: int,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord:
         with self.policy_snapshot_lock:
-            revision = (
-                (self.policy_snapshot.revision + 1)
-                if self.policy_snapshot is not None
-                else 1
+            current_revision = (
+                self.policy_snapshot.revision if self.policy_snapshot is not None else 0
             )
+            if expected_revision != current_revision:
+                raise PolicyRevisionConflictError(
+                    expected_revision=expected_revision,
+                    current_revision=current_revision,
+                )
+            revision = current_revision + 1
             record = PolicySnapshotRecord(
                 revision=revision,
                 policy_bundle=policy_bundle,
@@ -381,20 +465,65 @@ class MemoryControlPlaneStore:
         return list(reversed(self.policy_snapshot_history))[: _bounded_limit(limit)]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
-        self.approvals[approval.approval_id] = approval
-        return approval
+        with self.approval_lock:
+            existing = self.approvals.get(approval.approval_id)
+            if existing is not None:
+                current = _with_effective_approval_status(existing)
+                if current.status != "pending":
+                    return current.model_copy(deep=True)
+                stored = approval.model_copy(
+                    update={
+                        "status": current.status,
+                        "decision": current.decision,
+                        "resolution_source": current.resolution_source,
+                        "resolved_by": current.resolved_by,
+                        "resolution_reason": current.resolution_reason,
+                        "created_at": current.created_at,
+                        "expires_at": current.expires_at,
+                        "resolved_at": current.resolved_at,
+                    },
+                    deep=True,
+                )
+            else:
+                stored = approval.model_copy(deep=True)
+            self.approvals[approval.approval_id] = stored
+            return _with_effective_approval_status(stored)
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
-        return [item for item in self.approvals.values() if item.status == "pending"]
+        with self.approval_lock:
+            approvals = [
+                _with_effective_approval_status(item)
+                for item in self.approvals.values()
+            ]
+        return sorted(
+            (item for item in approvals if item.status == "pending"),
+            key=lambda item: item.created_at,
+        )
 
-    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
-        approvals = list(self.approvals.values())
+    def list_approvals(
+        self,
+        trace_id: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[ApprovalRequest]:
+        with self.approval_lock:
+            approvals = [
+                _with_effective_approval_status(item)
+                for item in self.approvals.values()
+            ]
         if trace_id is not None:
             approvals = [item for item in approvals if item.trace_id == trace_id]
-        return sorted(approvals, key=lambda item: item.created_at)
+        ordered = sorted(approvals, key=lambda item: item.created_at)
+        if limit is not None:
+            return ordered[: _bounded_collection_limit(limit)]
+        return ordered
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        return self.approvals.get(approval_id)
+        with self.approval_lock:
+            approval = self.approvals.get(approval_id)
+            if approval is None:
+                return None
+            return _with_effective_approval_status(approval)
 
     def resolve_approval(
         self,
@@ -406,27 +535,27 @@ class MemoryControlPlaneStore:
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest:
-        approval = self.approvals[approval_id]
-        approval.status = "resolved"
-        approval.decision = decision  # type: ignore[assignment]
-        approval.resolved_at = utc_now_iso()
-        if resolution_source is not None:
-            approval.resolution_source = resolution_source  # type: ignore[assignment]
-        if resolved_by is not None:
-            approval.resolved_by = resolved_by
-        if resolution_reason is not None:
-            approval.resolution_reason = resolution_reason
-        if llm_review is not None:
-            approval.llm_review = llm_review  # type: ignore[assignment]
-        self.approvals[approval_id] = approval
-        return approval
-
-    def expire_approval(self, approval_id: str) -> ApprovalRequest:
-        approval = self.approvals[approval_id]
-        approval.status = "expired"
-        approval.decision = "deny"
-        self.approvals[approval_id] = approval
-        return approval
+        with self.approval_lock:
+            approval = self.approvals[approval_id]
+            current = _with_effective_approval_status(approval)
+            if current.status != "pending":
+                raise ApprovalStateConflictError(approval_id, current.status)
+            updates: dict[str, Any] = {
+                "status": "resolved",
+                "decision": decision,
+                "resolved_at": utc_now_iso(),
+            }
+            if resolution_source is not None:
+                updates["resolution_source"] = resolution_source
+            if resolved_by is not None:
+                updates["resolved_by"] = resolved_by
+            if resolution_reason is not None:
+                updates["resolution_reason"] = resolution_reason
+            if llm_review is not None:
+                updates["llm_review"] = llm_review
+            resolved = current.model_copy(update=updates, deep=True)
+            self.approvals[approval_id] = resolved
+            return resolved.model_copy(deep=True)
 
     def create_launch_code(self, code_hash: str, expires_at: str) -> StoredLaunchCode:
         launch_code = StoredLaunchCode(code_hash=code_hash, expires_at=expires_at)
@@ -472,71 +601,13 @@ class MemoryControlPlaneStore:
             revoked_at=revoked_at,
         )
 
-    def create_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        expires_at: str,
-    ) -> StoredApprovalNonce:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        nonce = StoredApprovalNonce(
-            nonce_hash=nonce_hash,
-            approval_id=approval_id,
-            session_hash=session_hash,
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at,
-        )
-        self.approval_nonces[nonce_hash] = nonce
-        return nonce
-
-    def consume_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        used_at: str,
-    ) -> StoredApprovalNonce | None:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        nonce = self.approval_nonces.get(nonce_hash)
-        if (
-            nonce is None
-            or nonce.used_at is not None
-            or nonce.approval_id != approval_id
-            or nonce.session_hash != session_hash
-            or nonce.subject_id != approval_subject_id
-        ):
-            return None
-        consumed = StoredApprovalNonce(
-            nonce_hash=nonce.nonce_hash,
-            approval_id=nonce.approval_id,
-            session_hash=nonce.session_hash,
-            subject_id=nonce.subject_id,
-            tool_call_id=nonce.tool_call_id,
-            expires_at=nonce.expires_at,
-            used_at=used_at,
-        )
-        self.approval_nonces[nonce_hash] = consumed
-        return consumed
-
 
 def _audit_content_matches(existing: AuditEvent, incoming: AuditEvent) -> bool:
-    from guard_api.storage.integrity import _canonical_json_bytes
+    from guard_api.storage.integrity import canonical_json_bytes
 
-    return _canonical_json_bytes(
+    return canonical_json_bytes(
         existing.model_dump(mode="json", exclude={"integrity"})
-    ) == _canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
+    ) == canonical_json_bytes(incoming.model_dump(mode="json", exclude={"integrity"}))
 
 
 def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:
@@ -549,7 +620,7 @@ def _is_policy_evaluation_for(event: AuditEvent, event_id: str) -> bool:
 
 def _filter_audit_events(
     events: list[AuditEvent],
-    filters: AuditEventFilters | EvalMetricFilters,
+    filters: AuditEventFilters,
 ) -> list[AuditEvent]:
     if filters.trace_id is not None:
         events = [event for event in events if event.trace_id == filters.trace_id]
@@ -562,7 +633,19 @@ def _filter_audit_events(
     return events
 
 
-def _matches_window_filters(event: AuditEvent, query: AuditWindowQuery) -> bool:
+def _matches_window_filters(
+    event: AuditEvent,
+    query: AuditWindowQuery,
+    *,
+    ingested_at: datetime,
+) -> bool:
+    if (
+        query.record_type is not None
+        and classify_audit_record_type(event) != query.record_type
+    ):
+        return False
+    if query.ingested_as_of is not None and ingested_at > query.ingested_as_of:
+        return False
     if query.trace_id is not None and event.trace_id != query.trace_id:
         return False
     if query.case_id is not None and event.case_id != query.case_id:
@@ -580,6 +663,10 @@ def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
 
 
+def _bounded_collection_limit(limit: int) -> int:
+    return max(1, min(limit, 5000))
+
+
 def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
     event = ConfigAuditEvent.model_validate(row["event"])
     finding = ConfigAuditFinding.model_validate(row["finding"])
@@ -594,8 +681,18 @@ def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
     )
 
 
-def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
-    approval_subject_id = subject_id or tool_call_id
-    if approval_subject_id is None:
-        raise ValueError("approval nonce requires subject_id or tool_call_id")
-    return approval_subject_id
+def _with_effective_approval_status(
+    approval: ApprovalRequest, *, now: datetime | None = None
+) -> ApprovalRequest:
+    current = approval.model_copy(deep=True)
+    if current.status != "pending" or current.expires_at is None:
+        return current
+    try:
+        expires_at = datetime.fromisoformat(current.expires_at)
+    except ValueError:
+        return current
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= (now or datetime.now(timezone.utc)):
+        return current.model_copy(update={"status": "expired", "decision": "deny"})
+    return current

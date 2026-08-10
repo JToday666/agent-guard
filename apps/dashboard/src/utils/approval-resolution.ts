@@ -28,8 +28,9 @@ export function getApprovalResolutionFailure(reason: unknown): ApprovalResolutio
   const status = errorStatus(reason);
 
   if (
-    code === "APPROVAL_NONCE_INVALID" ||
     code === "APPROVAL_NOT_FOUND" ||
+    code === "APPROVAL_EXPIRED" ||
+    code === "APPROVAL_ALREADY_RESOLVED" ||
     code === "APPROVAL_DECISION_INVALID" ||
     status === 404 ||
     status === 409
@@ -37,8 +38,8 @@ export function getApprovalResolutionFailure(reason: unknown): ApprovalResolutio
     return {
       kind: "conflict",
       message:
-        code === "APPROVAL_NONCE_INVALID"
-          ? "该审批凭证已失效或已被使用，队列已更新。"
+        code === "APPROVAL_EXPIRED"
+          ? "该审批已过期，队列已更新。"
           : "该审批已不在待处理状态，可能已由其他端完成。",
       shouldRefreshQueue: true,
     };

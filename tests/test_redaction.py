@@ -11,6 +11,7 @@ from guard_api.services.redaction import (
     CONTENT_PREVIEW_LIMIT,
     MAX_EVIDENCE_BYTES,
     MAX_NESTING_DEPTH,
+    OBJECT_KEYS_LIMIT,
     REDACTED,
     SUMMARY_TEXT_LIMIT,
     bound_redacted_value,
@@ -106,6 +107,18 @@ def test_bound_value_applies_array_and_depth_limits() -> None:
     assert MAX_NESTING_DEPTH == 6
 
 
+def test_bound_value_caps_mapping_width_and_key_length() -> None:
+    payload = {
+        f"field_{index}_{'x' * 300}": index for index in range(OBJECT_KEYS_LIMIT + 20)
+    }
+
+    bounded = bound_value(payload)
+
+    assert isinstance(bounded, dict)
+    assert len(bounded) == OBJECT_KEYS_LIMIT
+    assert max(map(len, bounded)) <= 131
+
+
 def test_bound_redacted_value_combines_redaction_and_bounds() -> None:
     payload = {
         "api_token": "abc123",
@@ -136,6 +149,15 @@ def test_enforce_evidence_budget_keeps_small_evidence_untouched() -> None:
     evidence: dict[str, object] = {"guard_event": {"user_task": "small"}}
 
     assert enforce_evidence_budget(evidence) == evidence
+
+
+def test_enforce_evidence_budget_never_returns_an_oversized_mapping() -> None:
+    evidence: dict[str, object] = {f"short_key_{index}": "x" for index in range(20_000)}
+
+    bounded = enforce_evidence_budget(evidence, max_bytes=512)
+
+    assert evidence_serialized_size(bounded) <= 512
+    assert bounded.get("_truncated") is True
 
 
 def test_sanitize_audit_event_cleans_all_browser_readable_free_text() -> None:

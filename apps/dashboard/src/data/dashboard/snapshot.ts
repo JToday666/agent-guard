@@ -54,6 +54,8 @@ export function hasSameEventWindow(
 
 function hasSameWindowMetrics(left: WindowMetrics, right: WindowMetrics): boolean {
   return (
+    left.metricVersion === right.metricVersion &&
+    left.deduplication === right.deduplication &&
     left.evaluationCount === right.evaluationCount &&
     left.unknownDecisionCount === right.unknownDecisionCount &&
     left.allowCount === right.allowCount &&
@@ -71,20 +73,28 @@ function hasSameWindowMetrics(left: WindowMetrics, right: WindowMetrics): boolea
     left.averageDecisionLatencyMs === right.averageDecisionLatencyMs &&
     left.latencySampleCount === right.latencySampleCount &&
     left.duplicatePolicyRecordCount === right.duplicatePolicyRecordCount &&
-    left.legacyFallbackCount === right.legacyFallbackCount
+    left.unkeyedPolicyRecordCount === right.unkeyedPolicyRecordCount
   );
 }
 
 export function hasSameAuditWindow(left: AuditWindow, right: AuditWindow): boolean {
   return (
     left.scope.kind === right.scope.kind &&
-    left.scope.source === right.scope.source &&
+    left.scope.snapshotId === right.scope.snapshotId &&
+    left.scope.outcomesAsOf === right.scope.outcomesAsOf &&
+    left.scope.order === right.scope.order &&
     left.scope.limit === right.scope.limit &&
     left.scope.returnedRecordCount === right.scope.returnedRecordCount &&
     left.scope.hasMore === right.scope.hasMore &&
-    left.scope.from === right.scope.from &&
-    left.scope.to === right.scope.to &&
-    left.scope.deduplication === right.scope.deduplication &&
+    left.scope.nextCursor === right.scope.nextCursor &&
+    left.scope.sequenceFrom === right.scope.sequenceFrom &&
+    left.scope.sequenceTo === right.scope.sequenceTo &&
+    left.scope.occurredFrom === right.scope.occurredFrom &&
+    left.scope.occurredTo === right.scope.occurredTo &&
+    left.scope.filters.traceId === right.scope.filters.traceId &&
+    left.scope.filters.caseId === right.scope.filters.caseId &&
+    left.scope.filters.runtime === right.scope.filters.runtime &&
+    left.scope.filters.decision === right.scope.filters.decision &&
     hasSameEventWindow(left.events, right.events) &&
     hasSameWindowMetrics(left.metrics, right.metrics)
   );
@@ -132,7 +142,6 @@ function hasSameApproval(left: ApprovalRequest, right: ApprovalRequest): boolean
     left.id === right.id &&
     left.createdAt === right.createdAt &&
     left.status === right.status &&
-    left.tool === right.tool &&
     left.resource === right.resource &&
     left.riskScore === right.riskScore &&
     left.severity === right.severity &&
@@ -160,9 +169,5 @@ export function reconcileApprovals(
     current.length === incoming.length &&
     current.every((approval, index) => hasSameApproval(approval, incoming[index]!));
   if (!hasSameVisibleData) return incoming;
-
-  current.forEach((approval, index) => {
-    approval.approvalNonce = incoming[index]!.approvalNonce;
-  });
   return current;
 }

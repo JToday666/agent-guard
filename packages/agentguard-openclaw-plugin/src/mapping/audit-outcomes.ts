@@ -1,8 +1,9 @@
 import type {
-  AuditEvent,
   GuardEvaluationResponse,
   GuardEvent,
   JsonObject,
+  RuntimeOutcomeReceipt,
+  RuntimeReceiptKind,
 } from "../types.js";
 
 /**
@@ -48,22 +49,30 @@ export function buildRuntimeOutcomeAuditEvent(
   evaluation: GuardEvaluationResponse,
   kind: RuntimeOutcomeKind,
   options: RuntimeOutcomeOptions = {},
-): AuditEvent {
+): RuntimeOutcomeReceipt {
   const decision = evaluation.decision;
   const timestamp = options.timestamp ?? new Date().toISOString();
   const policyAuditId = evaluation.policy_audit_id;
+  const decisionId = decision.decision_id;
+  const riskScore = decision.risk_score;
+  if (!policyAuditId || !decisionId) {
+    throw new Error(
+      "runtime outcome receipt requires policy_audit_id and decision_id",
+    );
+  }
+  if (typeof riskScore !== "number" || !Number.isInteger(riskScore)) {
+    throw new Error("runtime outcome receipt requires an integer risk_score");
+  }
+  const severity = receiptSeverity(decision.severity);
   const actionId = toolCallId(guardEvent);
   const approval = options.approval ?? null;
+  const outcomeKind = receiptKind(kind, options);
 
-  const links: Record<string, string> = {
+  const links: RuntimeOutcomeReceipt["links"] = {
     event_id: guardEvent.event_id,
-    // runtime_outcome 必须指向策略评估审计（§8.3）。缺失时留空占位，
-    // 由调用方决定是否仍提交；契约要求必填，故此处不做臆造。
-    policy_audit_id: policyAuditId ?? "",
+    decision_id: decisionId,
+    policy_audit_id: policyAuditId,
   };
-  if (decision.decision_id) {
-    links.decision_id = decision.decision_id;
-  }
   if (actionId) {
     links.action_id = actionId;
   }
@@ -75,7 +84,7 @@ export function buildRuntimeOutcomeAuditEvent(
 
   return {
     // 确定性派生：同一逻辑评估 + 同一干预类型重试时保持稳定（§12.3 幂等）。
-    audit_id: `audit_outcome_${guardEvent.event_id}_${kind}`,
+    audit_id: `audit_outcome_${guardEvent.event_id}_${outcomeKind}`,
     schema_version: "0.4",
     record_type: "runtime_outcome",
     trace_id: guardEvent.trace_id,
@@ -89,8 +98,8 @@ export function buildRuntimeOutcomeAuditEvent(
     summary: outcomeSummary(kind, decision.decision),
     // 有关联策略时复制顶层策略摘要（§8.3）。
     decision: decision.decision,
-    risk_score: decision.risk_score ?? null,
-    severity: decision.severity ?? null,
+    risk_score: riskScore,
+    severity,
     blocked: decision.decision !== "allow",
     resource_targets: guardEvent.security_context.derived_paths,
     rule_hits: (decision.rule_hits ?? [])
@@ -100,21 +109,10 @@ export function buildRuntimeOutcomeAuditEvent(
     links,
     latency_ms: null,
     metadata: {
-      openclaw_outcome_kind: kind,
+      agent_id: guardEvent.security_context.agent_id,
+      outcome_kind: outcomeKind,
     },
     evidence: {
-      guard_event: projectGuardEvent(guardEvent),
-      guard_decision: {
-        decision_id: decision.decision_id,
-        decision: decision.decision,
-        risk_score: decision.risk_score ?? null,
-        severity: decision.severity ?? null,
-        categories: decision.categories ?? [],
-        rule_hits: [],
-        reason: decision.reason,
-        risk_breakdown: null,
-      },
-      policy: null,
       intervention: {
         type: kind,
         reason: options.reason ?? INTERVENTION_REASON[kind],
@@ -125,6 +123,32 @@ export function buildRuntimeOutcomeAuditEvent(
       approval: approvalEvidence(kind, approval, evaluation),
     },
   };
+}
+
+function receiptKind(
+  kind: RuntimeOutcomeKind,
+  options: RuntimeOutcomeOptions,
+): RuntimeReceiptKind {
+  if (kind !== "tool_result_quarantine") {
+    return kind;
+  }
+  return options.resultDisposition === "modified"
+    ? "tool_result_modified"
+    : "tool_result_quarantined";
+}
+
+function receiptSeverity(
+  value: string | undefined,
+): RuntimeOutcomeReceipt["severity"] {
+  if (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "critical"
+  ) {
+    return value;
+  }
+  throw new Error("runtime outcome receipt requires a known severity");
 }
 
 function toolCallId(guardEvent: GuardEvent): string | undefined {
@@ -145,34 +169,6 @@ function outcomeSummary(
     return "OpenClaw 在人工审批放行后继续执行";
   }
   return "OpenClaw 在持久化前隔离或改写了工具结果";
-}
-
-// §9.1 有界投影：只保留稳定、已脱敏的字段，不回传原始参数。
-function projectGuardEvent(guardEvent: GuardEvent): JsonObject {
-  const security = guardEvent.security_context;
-  const payload = guardEvent.payload as JsonObject;
-  const tool = payload.tool as JsonObject | undefined;
-  return {
-    event_id: guardEvent.event_id,
-    event_type: guardEvent.event_type,
-    user_task: security.user_task,
-    source: {
-      source_id: security.session_id ?? security.sender_id ?? null,
-      type: security.source_type,
-      label: security.source_type,
-      trust_level: security.source_trust,
-    },
-    context_sources: [],
-    model_intent: security.model_intent ?? null,
-    tool: tool
-      ? {
-          name: tool.name ?? null,
-          category: tool.category ?? null,
-          call_id: tool.call_id ?? null,
-        }
-      : null,
-    normalized_resources: [],
-  };
 }
 
 // §9.5 执行回执：只填插件可确证的状态，未观察字段保持 null/unknown。

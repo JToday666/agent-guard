@@ -195,7 +195,7 @@ const triageItems = computed(() => {
       riskScore: approval.riskScore,
       severity: approval.severity,
       tone: "warning" as const,
-      tool: approval.tool,
+      tool: approval.actionName,
       to: `/approvals/${approval.id}`,
     }));
   const approvalEventIds = new Set(store.approvals.map((approval) => approval.eventId));
@@ -228,14 +228,12 @@ const trendSummary = computed(() => {
 });
 
 const windowRangeLabel = computed(() => {
-  const { from, to } = store.auditWindow.scope;
-  if (!from || !to) return "近期审计数据";
-  return `${formatDashboardDateTime(from)} 至 ${formatDashboardDateTime(to)}`;
+  const { occurredFrom, occurredTo } = store.auditWindow.scope;
+  if (!occurredFrom || !occurredTo) return "近期审计数据";
+  return `${formatDashboardDateTime(occurredFrom)} 至 ${formatDashboardDateTime(occurredTo)}`;
 });
 const windowCompletenessLabel = computed(() => {
-  if (store.auditWindow.scope.hasMore === true) return "仅显示部分记录";
-  if (store.auditWindow.scope.hasMore === false) return "近期记录完整";
-  return "是否截断未知";
+  return store.auditWindow.scope.hasMore ? "仅显示部分记录" : "当前快照记录完整";
 });
 
 const metricItems = computed(() => [

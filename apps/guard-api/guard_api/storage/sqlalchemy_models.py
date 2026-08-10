@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Index, Integer, MetaData, Table, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    MetaData,
+    Table,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 
 metadata = MetaData()
@@ -12,23 +25,72 @@ audit_events = Table(
     metadata,
     Column("audit_id", Text, primary_key=True),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "ingested_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("record_type", Text, nullable=False),
+    Column("trace_id", Text, nullable=False),
+    Column("case_id", Text, nullable=True),
+    Column("runtime", Text, nullable=False),
+    Column("decision", Text, nullable=True),
+    Column("event_id", Text, nullable=True),
+    Column("decision_id", Text, nullable=True),
+    Column("is_malicious", Boolean, nullable=True),
+    Column("latency_ms", Integer, nullable=True),
     Column("chain_id", Text, nullable=False),
-    Column("sequence", Integer, nullable=False),
+    Column("sequence", BigInteger, nullable=False),
     Column("prev_hash", Text, nullable=True),
     Column("event_hash", Text, nullable=False),
-    Index("ix_audit_events_created_at", "created_at"),
-    Index("ix_audit_events_chain_sequence", "chain_id", "sequence"),
+    CheckConstraint("sequence > 0", name="ck_audit_events_sequence_positive"),
+    CheckConstraint(
+        "record_type IN ('policy_evaluation', 'runtime_outcome', "
+        "'runtime_observation', 'config_audit')",
+        name="ck_audit_events_record_type",
+    ),
+    CheckConstraint(
+        "decision IS NULL OR decision IN ('allow', 'ask', 'deny')",
+        name="ck_audit_events_decision",
+    ),
+    CheckConstraint(
+        "latency_ms IS NULL OR latency_ms >= 0",
+        name="ck_audit_events_latency_nonnegative",
+    ),
+    Index("ux_audit_events_chain_sequence", "chain_id", "sequence", unique=True),
     Index("ix_audit_events_event_hash", "event_hash"),
+    Index("ix_audit_events_trace_sequence", "trace_id", "sequence"),
+    Index("ix_audit_events_runtime_sequence", "runtime", "sequence"),
+    Index(
+        "ix_audit_events_case_sequence",
+        "case_id",
+        "sequence",
+        postgresql_where=text("case_id IS NOT NULL"),
+    ),
+    Index(
+        "ix_audit_events_decision_sequence",
+        "decision",
+        "sequence",
+        postgresql_where=text("decision IS NOT NULL"),
+    ),
+    Index(
+        "ix_audit_events_policy_occurred_sequence",
+        "occurred_at",
+        "sequence",
+        postgresql_where=text("record_type = 'policy_evaluation'"),
+    ),
+    Index("ix_audit_events_ingested_at", "ingested_at"),
 )
 
 audit_integrity_heads = Table(
     "audit_integrity_heads",
     metadata,
     Column("chain_id", Text, primary_key=True),
-    Column("sequence", Integer, nullable=False),
+    Column("sequence", BigInteger, nullable=False),
     Column("event_hash", Text, nullable=True),
-    Column("updated_at", Text, nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 provenance_nodes = Table(
@@ -39,7 +101,7 @@ provenance_nodes = Table(
     Column("kind", Text, nullable=False),
     Column("ref_id", Text, nullable=False),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Index("ix_provenance_nodes_trace_id", "trace_id"),
     Index("ix_provenance_nodes_kind", "kind"),
 )
@@ -53,7 +115,7 @@ provenance_edges = Table(
     Column("target_node_id", Text, nullable=False),
     Column("relation", Text, nullable=False),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Index("ix_provenance_edges_trace_id", "trace_id"),
     Index("ix_provenance_edges_relation", "relation"),
 )
@@ -65,11 +127,13 @@ config_audit_findings = Table(
     Column("runtime", Text, nullable=False),
     Column("target_type", Text, nullable=False),
     Column("target_id", Text, nullable=False),
+    Column("trace_id", Text, nullable=False),
     Column("severity", Text, nullable=False),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Index("ix_config_audit_findings_runtime", "runtime"),
     Index("ix_config_audit_findings_target", "target_type", "target_id"),
+    Index("ix_config_audit_findings_trace_id", "trace_id"),
     Index("ix_config_audit_findings_severity", "severity"),
 )
 
@@ -97,7 +161,7 @@ action_critic_reviews = Table(
     Column("event_id", Text, nullable=False),
     Column("verdict", Text, nullable=False),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Index("ix_action_critic_reviews_trace_id", "trace_id"),
     Index("ix_action_critic_reviews_event_id", "event_id"),
     Index("ix_action_critic_reviews_verdict", "verdict"),
@@ -107,19 +171,67 @@ evaluation_runs = Table(
     "evaluation_runs",
     metadata,
     Column("run_id", Text, primary_key=True),
-    Column("run_at", Text, nullable=False),
+    Column("run_at", DateTime(timezone=True), nullable=False),
+    Column("dataset_id", Text, nullable=True),
+    Column("dataset_version", Text, nullable=True),
+    Column("regression_status", Text, nullable=True),
     Column("payload_json", JSONB, nullable=False),
-    Column("created_at", Text, nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "regression_status IS NULL OR regression_status IN ('passed', 'failed', 'skipped')",
+        name="ck_evaluation_runs_regression_status",
+    ),
     Index("ix_evaluation_runs_run_at", "run_at"),
+    Index(
+        "ix_evaluation_runs_dataset_run_at",
+        "dataset_id",
+        "dataset_version",
+        "run_at",
+    ),
 )
 
 adapter_statuses = Table(
     "adapter_statuses",
     metadata,
     Column("adapter_id", Text, primary_key=True),
+    Column("status", Text, nullable=False),
+    Column("loaded", Boolean, nullable=False),
+    Column("runtime_id", Text, nullable=True),
+    Column("agent_id", Text, nullable=True),
+    Column("enforcement_mode", Text, nullable=True),
+    Column("last_heartbeat_at", DateTime(timezone=True), nullable=True),
     Column("payload_json", JSONB, nullable=False),
-    Column("updated_at", Text, nullable=False),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "status IN ('loaded', 'not_loaded', 'error', 'unknown')",
+        name="ck_adapter_statuses_status",
+    ),
+    CheckConstraint(
+        "enforcement_mode IS NULL OR enforcement_mode IN ('enforce', 'observe', 'disabled')",
+        name="ck_adapter_statuses_enforcement_mode",
+    ),
     Index("ix_adapter_statuses_updated_at", "updated_at"),
+    Index("ix_adapter_statuses_status", "status"),
+    Index(
+        "ix_adapter_statuses_runtime_agent",
+        "runtime_id",
+        "agent_id",
+    ),
+    Index(
+        "ix_adapter_statuses_last_heartbeat_at",
+        "last_heartbeat_at",
+        postgresql_where=text("last_heartbeat_at IS NOT NULL"),
+    ),
 )
 
 credentials = Table(
@@ -136,7 +248,13 @@ credentials = Table(
     Column("created_at", Text, nullable=False),
     Column("expires_at", Text, nullable=True),
     Column("revoked_at", Text, nullable=True),
-    Index("ix_credentials_token_hash", "token_hash"),
+    CheckConstraint(
+        "revoked_at IS NOT NULL OR "
+        "(principal_type = 'component' AND role = 'adapter' "
+        "AND runtime IS NOT NULL AND agent_id IS NOT NULL)",
+        name="ck_credentials_active_adapter_identity",
+    ),
+    Index("ix_credentials_token_hash", "token_hash", unique=True),
     Index("ix_credentials_principal", "principal_type", "principal_id"),
     Index("ix_credentials_runtime_agent", "runtime", "agent_id"),
     Index("ix_credentials_revoked_at", "revoked_at"),
@@ -146,10 +264,46 @@ approval_requests = Table(
     "approval_requests",
     metadata,
     Column("approval_id", Text, primary_key=True),
+    Column("trace_id", Text, nullable=False),
+    Column("runtime", Text, nullable=False),
+    Column("agent_id", Text, nullable=False),
+    Column("subject_id", Text, nullable=False),
+    Column("action_id", Text, nullable=False),
     Column("payload_json", JSONB, nullable=False),
-    Column("status", Text, nullable=False),
-    Column("created_at", Text, nullable=False),
-    Index("ix_approval_requests_status_created_at", "status", "created_at"),
+    Column("decision", Text, nullable=True),
+    Column("resolution_source", Text, nullable=True),
+    Column("resolved_by", Text, nullable=True),
+    Column("resolution_reason", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("resolved_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "decision IS NULL OR decision IN ('allow_once', 'deny')",
+        name="ck_approval_requests_decision",
+    ),
+    CheckConstraint(
+        "resolution_source IS NULL OR resolution_source IN ('human', 'llm', 'system')",
+        name="ck_approval_requests_resolution_source",
+    ),
+    CheckConstraint(
+        "(resolved_at IS NULL AND decision IS NULL) OR "
+        "(resolved_at IS NOT NULL AND decision IS NOT NULL)",
+        name="ck_approval_requests_resolution_state",
+    ),
+    CheckConstraint("expires_at > created_at", name="ck_approval_requests_expiry"),
+    Index(
+        "ix_approval_requests_pending_created_at",
+        "resolved_at",
+        "expires_at",
+        "created_at",
+    ),
+    Index("ix_approval_requests_trace_created_at", "trace_id", "created_at"),
+    Index(
+        "ix_approval_requests_runtime_agent_created_at",
+        "runtime",
+        "agent_id",
+        "created_at",
+    ),
 )
 
 policy_snapshots = Table(
@@ -192,21 +346,4 @@ browser_sessions = Table(
     Column("revoked_at", Text, nullable=True),
     Index("ix_browser_sessions_expires_at", "expires_at"),
     Index("ix_browser_sessions_revoked_at", "revoked_at"),
-)
-
-approval_nonces = Table(
-    "approval_nonces",
-    metadata,
-    Column("nonce_hash", Text, primary_key=True),
-    Column("approval_id", Text, nullable=False),
-    Column("session_hash", Text, nullable=False),
-    Column("subject_id", Text, nullable=False),
-    Column("tool_call_id", Text, nullable=False),
-    Column("expires_at", Text, nullable=False),
-    Column("used_at", Text, nullable=True),
-    Index("ix_approval_nonces_approval_id", "approval_id"),
-    Index("ix_approval_nonces_session_hash", "session_hash"),
-    Index("ix_approval_nonces_subject_id", "subject_id"),
-    Index("ix_approval_nonces_expires_at", "expires_at"),
-    Index("ix_approval_nonces_used_at", "used_at"),
 )

@@ -21,6 +21,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from tests.support.auth import add_adapter_credential
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 
 ADAPTER_TOKEN = "runtime-demo-adapter"
@@ -32,7 +33,6 @@ def test_runtime_safety_demo_closes_real_memory_http_chain(tmp_path: Path) -> No
         store=MemoryControlPlaneStore(),
         settings=GuardApiSettings(
             storage_backend="memory",
-            adapter_token=ADAPTER_TOKEN,
             control_token=CONTROL_TOKEN,
         ),
         work_dir=tmp_path,
@@ -50,7 +50,6 @@ def test_runtime_safety_demo_closes_real_postgres_http_chain(
             settings=GuardApiSettings(
                 storage_backend="postgres",
                 database_url=database_url,
-                adapter_token=ADAPTER_TOKEN,
                 control_token=CONTROL_TOKEN,
             ),
             work_dir=tmp_path,
@@ -65,6 +64,14 @@ def _assert_runtime_safety_demo(
     settings: GuardApiSettings,
     work_dir: Path,
 ) -> None:
+    store.initialize()
+    add_adapter_credential(
+        store,
+        token=ADAPTER_TOKEN,
+        runtime="langgraph",
+        agent_id="langgraph-demo",
+        principal_id="cred_runtime_demo",
+    )
     app = create_app(
         store=store,
         settings=settings,
@@ -266,15 +273,12 @@ def _allow_code_execution_once(base_url: str) -> dict[str, Any]:
             pending_response = client.get("/v1/approvals/pending")
             pending_response.raise_for_status()
             for approval in pending_response.json():
-                if approval.get("tool") != "code_exec":
+                if approval.get("action_name") != "code_exec":
                     continue
                 response = client.post(
                     f"/v1/approvals/{approval['approval_id']}/resolve",
                     headers={"X-AgentGuard-CSRF": csrf_token},
-                    json={
-                        "decision": "allow_once",
-                        "approval_nonce": approval["approval_nonce"],
-                    },
+                    json={"decision": "allow_once"},
                 )
                 response.raise_for_status()
                 return response.json()
@@ -289,11 +293,12 @@ def _assert_trace_facts(
     code_action_id: str,
 ) -> None:
     audits = trace["audit_events"]
-    assert trace["audit_window"] == {
-        "limit": 1000,
-        "returned_count": len(audits),
-        "has_more": False,
-    }
+    audit_window = trace["audit_window"]
+    assert audit_window["limit"] == 1000
+    assert audit_window["returned_count"] == len(audits)
+    assert audit_window["has_more"] is False
+    assert audit_window["next_cursor"] is None
+    assert audit_window["snapshot_id"].startswith("sha256:")
     assert any(item["event_type"] == "trace_started" for item in audits)
     assert any(item["event_type"] == "trace_completed" for item in audits)
     routine_guard_hooks = [

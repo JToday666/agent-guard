@@ -14,6 +14,12 @@ const PLUGIN_ROOT = path.join(ROOT, "packages", "agentguard-openclaw-plugin");
 const DEV_ROOT = path.join(ROOT, ".openclaw-dev");
 const STAGING_DIR = path.join(DEV_ROOT, PLUGIN_ID);
 const BACKUP_DIR = path.join(DEV_ROOT, "backups");
+const SECRET_DIR = path.join(DEV_ROOT, "secrets");
+const ADAPTER_TOKEN_SECRET_PATH = path.join(
+  SECRET_DIR,
+  "openclaw-adapter-token",
+);
+const ADAPTER_TOKEN_SECRET_PROVIDER = "agentguard_adapter";
 const CODE_ROOT = path.resolve(ROOT, "..");
 const LOCAL_OPENCLAW_HOME = path.join(CODE_ROOT, ".openclaw-home");
 const LOCAL_OPENCLAW_STATE_DIR = path.join(CODE_ROOT, ".openclaw");
@@ -64,10 +70,20 @@ function install() {
 
   run("pnpm", ["--filter", PLUGIN_PACKAGE, "build"]);
   rebuildStaging();
+  writeAdapterTokenSecret(adapterToken);
   backupOpenClawConfig("install");
   uninstallExistingPlugin();
   run("openclaw", ["plugins", "install", "-l", STAGING_DIR]);
   patchOpenClawConfig({
+    secrets: {
+      providers: {
+        [ADAPTER_TOKEN_SECRET_PROVIDER]: {
+          source: "file",
+          path: ADAPTER_TOKEN_SECRET_PATH,
+          mode: "singleValue",
+        },
+      },
+    },
     plugins: {
       load: {
         paths: agentGuardLoadPaths({ includeStaging: true }),
@@ -78,7 +94,11 @@ function install() {
           hooks: { timeoutMs: 10000, allowConversationAccess: true },
           config: {
             guardApiBaseUrl,
-            adapterToken,
+            adapterToken: {
+              source: "file",
+              provider: ADAPTER_TOKEN_SECRET_PROVIDER,
+              id: "value",
+            },
             requestTimeoutMs: 3000,
             approvalPollIntervalMs: 100,
             approvalTimeoutMs: 3000,
@@ -189,6 +209,11 @@ async function verify({ record }) {
 function uninstall({ cleanStaging }) {
   backupOpenClawConfig("uninstall");
   patchOpenClawConfig({
+    secrets: {
+      providers: {
+        [ADAPTER_TOKEN_SECRET_PROVIDER]: null,
+      },
+    },
     plugins: {
       load: {
         paths: agentGuardLoadPaths({ includeStaging: false }),
@@ -214,11 +239,21 @@ function uninstall({ cleanStaging }) {
   refreshPluginRegistry();
   restartGateway();
   waitForGateway();
+  fs.rmSync(ADAPTER_TOKEN_SECRET_PATH, { force: true });
   if (cleanStaging) {
     fs.rmSync(STAGING_DIR, { recursive: true, force: true });
     console.log(`Removed ${relativePath(STAGING_DIR)}.`);
   }
   console.log(`Uninstalled ${PLUGIN_ID}.`);
+}
+
+function writeAdapterTokenSecret(adapterToken) {
+  fs.mkdirSync(SECRET_DIR, { recursive: true, mode: 0o700 });
+  fs.chmodSync(SECRET_DIR, 0o700);
+  fs.writeFileSync(ADAPTER_TOKEN_SECRET_PATH, `${adapterToken}\n`, {
+    mode: 0o600,
+  });
+  fs.chmodSync(ADAPTER_TOKEN_SECRET_PATH, 0o600);
 }
 
 function rebuildStaging() {

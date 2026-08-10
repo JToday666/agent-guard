@@ -32,10 +32,10 @@ AttackCase
 - 工具执行前拦截：文件读写、邮件外发、API 调用、代码执行、MCP 工具调用、消息发送和记忆写入等行为进入统一判定链路。
 - 三态决策：`allow` 直接放行，`deny` 阻断副作用，`ask` 进入人工审批或受限自动审批。
 - 可解释检测：覆盖敏感资源、外发泄露、工具画像不一致、任务偏离、危险命令、提示注入、模型输出泄露、环境污染、记忆污染和凭证风险。
-- 审计证据：Guard API 记录 AuditEvent、决策原因、规则命中、风险分、Trace ID、审计哈希链和 provenance graph。
+- 审计证据：Guard API 记录 AuditEvent、决策原因、规则命中、风险分、Trace ID、RFC 8785 审计哈希链、数据库外签名检查点和 provenance graph。
 - Dashboard：提供总览、调查、证据链、审批、评测和系统状态页面。
 - 评测靶场：内置 LangGraph demo agent、OpenClaw 外部 Agent 适配、Mock Tools、浏览器和 MCP/RAG 沙箱。
-- OpenClaw 插件：hook-only security plugin，默认注册 22 个 hook，并对关键执行阶段 fail closed。
+- OpenClaw 插件：hook-only security plugin，默认注册 23 个 hook；模型输入使用正式 `before_agent_run` gate，关键执行和持久化边界固定 fail closed。
 
 ## 数据集规模
 
@@ -72,12 +72,39 @@ cp .env.example .env
 
 `.env` 只用于本机，不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。默认示例使用本地 PostgreSQL；正式演示前应确认 `AGENTGUARD_DATABASE_URL` 和 `AGENTGUARD_TEST_DATABASE_URL` 指向已存在的独立数据库。
 
+开发环境可以不启用外部审计检查点；`production` 或非 loopback 监听必须同时配置绝对路径 `AGENTGUARD_AUDIT_CHECKPOINT_PATH`、至少 32 字节的 base64url 密钥 `AGENTGUARD_AUDIT_CHECKPOINT_KEY` 和非秘密标识 `AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID`。检查点应写入 PostgreSQL 之外、由部署侧保护的持久卷；完整配置和轮换步骤见[部署、安装与使用说明](docs/06_delivery/deployment_install_usage.md)。
+
+## 质量门禁
+
+GitHub CI 会在面向 `dev`、`main` 的 push 和 pull request 上执行 Python lint、类型检查、根测试、LangGraph Adapter 测试与 PostgreSQL migration 测试，并执行 Dashboard 静态检查、单元测试、构建、Chromium 浏览器 E2E、OpenClaw 插件、bench tools 和本地 shim 检查。本地可分别运行：
+
+```bash
+uv run ruff check apps packages scripts tests
+uv run pyright
+uv run pytest -q tests packages/agentguard-langgraph-adapter/tests
+pnpm --filter @agentguard/dashboard check
+pnpm --filter @agentguard/dashboard test:e2e
+pnpm --filter @agentguard/dashboard test:e2e:api
+pnpm --filter @agentguard-ai/openclaw-plugin test
+pnpm --filter @agentguard/openclaw-bench-tools test
+pnpm openclaw:bench-shim:test
+```
+
 ## 本地真实 API 模式
 
 第一个终端启动 Guard API：
 
 ```bash
 pnpm guard-api:dev
+```
+
+首次接入某个运行时，在加载 `.env` 后签发与其身份绑定的凭证；完整 token 只显示一次，把它配置到对应 Adapter 的 `AGENTGUARD_ADAPTER_TOKEN`，不要配置成 Guard API 的静态密码：
+
+```bash
+set -a
+. ./.env
+set +a
+uv run agentguardctl credential issue --runtime openclaw --agent-id main
 ```
 
 第二个终端启动 Dashboard：
@@ -114,8 +141,14 @@ pnpm dashboard:dev:mock
 ```bash
 uv run agentguardctl health --check-db
 uv run agentguardctl audit export --limit 10
-uv run agentguardctl metrics --json
+uv run agentguardctl metrics \
+  --evaluated-from 2026-08-01T00:00:00Z \
+  --evaluated-to 2026-08-02T00:00:00Z \
+  --json
 uv run agentguardctl trace get <trace_id> --provenance
+uv run agentguardctl credential list
+uv run agentguardctl credential issue --runtime openclaw --agent-id main
+uv run agentguardctl credential revoke <credential_id>
 uv run agentguardctl openclaw verify
 uv run agentguardctl eval import --help
 ```

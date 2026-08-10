@@ -13,10 +13,10 @@ function apiError(
   return Object.assign(new Error("request failed"), { code, status });
 }
 
-test("classifies consumed approval nonces as a refreshable conflict", () => {
-  assert.deepEqual(getApprovalResolutionFailure(apiError("APPROVAL_NONCE_INVALID", 403)), {
+test("classifies expired approvals as a refreshable conflict", () => {
+  assert.deepEqual(getApprovalResolutionFailure(apiError("APPROVAL_EXPIRED", 409)), {
     kind: "conflict",
-    message: "该审批凭证已失效或已被使用，队列已更新。",
+    message: "该审批已过期，队列已更新。",
     shouldRefreshQueue: true,
   });
 });

@@ -53,7 +53,7 @@
                   formatRelativeExpiry(approval.expiresAt)
                 }}</time>
               </span>
-              <strong>{{ approval.tool }}</strong>
+              <strong>{{ approval.actionName }}</strong>
               <small>{{ approval.resource }}</small>
               <span
                 class="approval-queue__score"
@@ -77,7 +77,7 @@
             />
           </div>
         </div>
-        <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的工具动作。">
+        <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的动作。">
           <RouterLink to="/investigations">查看调查事件</RouterLink>
         </EmptyState>
       </div>
@@ -140,7 +140,6 @@ const isExpired = computed(() => {
 const resolutionDisabledReason = computed(() => {
   if (isSubmitting.value) return "审批正在提交";
   if (!authStore.csrfToken) return "浏览器会话尚未就绪，请刷新页面后重试";
-  if (!selectedApproval.value?.approvalNonce) return "审批凭证缺失，请刷新队列";
   if (isExpired.value) return "审批已过期，不能继续处理";
   return "";
 });

@@ -87,7 +87,7 @@ pnpm --filter @agentguard/dashboard exec playwright install-deps chromium
 ## 数据与鉴权边界
 
 - Dashboard 不保存 control token，不直接连接数据库，不直接调用 Core。
-- 真实 API 模式下，请求依赖 HttpOnly browser session 和必要的 CSRF / approval nonce。
+- 真实 API 模式下，请求依赖 HttpOnly browser session；状态改变请求使用内存中的 CSRF token，审批唯一性由服务端原子状态转换保证。
 - 直接访问 `http://localhost:5173/` 且没有 session 时，`GET /v1/auth/browser/me` 返回 `401` 属于预期行为。
 - API 请求失败时，真实 API 模式不会自动切换到 Mock 数据。
 - 页面可见时每 10 秒串行刷新核心数据；页面隐藏时暂停轮询，恢复可见后立即刷新。

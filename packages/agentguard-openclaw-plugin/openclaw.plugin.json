@@ -6,19 +6,50 @@
   "activation": {
     "onStartup": true
   },
+  "configContracts": {
+    "secretInputs": {
+      "paths": [
+        {
+          "path": "adapterToken",
+          "expected": "string"
+        }
+      ]
+    }
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
+    "required": ["adapterToken"],
     "properties": {
       "guardApiBaseUrl": {
-        "type": "string"
+        "type": "string",
+        "minLength": 1,
+        "default": "http://127.0.0.1:8088"
       },
       "adapterToken": {
-        "type": "string"
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "provider", "id"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["env", "file", "exec"]
+          },
+          "provider": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
       },
       "enforcementMode": {
         "type": "string",
-        "enum": ["enforce", "observe", "disabled"]
+        "enum": ["enforce", "observe", "disabled"],
+        "default": "enforce"
       },
       "requestTimeoutMs": {
         "type": "integer",
@@ -33,15 +64,16 @@
       "approvalTimeoutMs": {
         "type": "integer",
         "minimum": 1,
-        "maximum": 600000
-      },
-      "approvalWaitBudgetMs": {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 600000
+        "maximum": 600000,
+        "default": 25000
       },
       "diagnosticLogging": {
         "type": "boolean"
+      },
+      "agentId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        "default": "main"
       }
     }
   },
@@ -51,7 +83,8 @@
       "placeholder": "http://127.0.0.1:8088"
     },
     "adapterToken": {
-      "label": "AgentGuard adapter token",
+      "label": "AgentGuard adapter token SecretRef",
+      "help": "Use an OpenClaw SecretRef; plaintext tokens are not accepted.",
       "sensitive": true
     },
     "enforcementMode": {
@@ -59,6 +92,9 @@
     },
     "diagnosticLogging": {
       "label": "Diagnostic logging"
+    },
+    "agentId": {
+      "label": "Bound agent ID"
     }
   }
 }

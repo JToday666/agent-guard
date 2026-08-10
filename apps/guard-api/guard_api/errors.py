@@ -22,25 +22,48 @@ _ERROR_MESSAGES = {
     "AUTH_MISSING": "Authentication is required.",
     "TOKEN_INVALID": "Bearer token is invalid.",
     "SCOPE_DENIED": "Bearer token does not include the required scope.",
+    "CREDENTIAL_IDENTITY_INCOMPLETE": "Credential is missing its runtime identity binding.",
+    "EVENT_IDENTITY_INCOMPLETE": "Runtime request is missing its agent identity.",
+    "RUNTIME_IDENTITY_MISMATCH": "Runtime request does not match the credential identity.",
     "SESSION_INVALID": "Browser session is invalid.",
     "SESSION_EXPIRED": "Browser session has expired.",
     "CSRF_INVALID": "CSRF token is invalid.",
     "LAUNCH_CODE_INVALID": "Launch code is invalid.",
     "LAUNCH_CODE_EXPIRED": "Launch code has expired.",
-    "APPROVAL_NONCE_INVALID": "Approval nonce is invalid.",
-    "APPROVAL_SUBJECT_MISSING": "Approval subject is required.",
     "APPROVAL_NOT_FOUND": "Approval was not found.",
     "APPROVAL_DECISION_INVALID": "Approval decision is invalid.",
+    "APPROVAL_EXPIRED": "Approval has expired.",
+    "APPROVAL_ALREADY_RESOLVED": "Approval has already been resolved.",
     "APPROVAL_WAIT_DENIED": "Approval wait is not allowed for this principal.",
+    "CREDENTIAL_NOT_FOUND": "Credential was not found.",
     "AUDIT_ID_CONFLICT": "The audit_id is already bound to different content.",
+    "AUDIT_TIMESTAMP_INVALID": "Audit timestamps must be RFC 3339 values with a timezone.",
+    "AUDIT_CANONICALIZATION_INVALID": (
+        "Audit evidence must be valid RFC 8785 / I-JSON data."
+    ),
     "POLICY_EVALUATION_WRITE_FORBIDDEN": (
         "policy_evaluation records can only be written by POST /v1/guard/evaluate."
     ),
+    "RUNTIME_OUTCOME_INVALID": "Runtime outcome receipt failed strict validation.",
+    "RUNTIME_OUTCOME_PARENT_NOT_FOUND": (
+        "Runtime outcome receipt does not reference a policy evaluation."
+    ),
+    "RUNTIME_OUTCOME_PARENT_MISMATCH": (
+        "Runtime outcome receipt conflicts with its policy evaluation."
+    ),
+    "POLICY_INVALID": "Policy bundle failed semantic validation.",
+    "POLICY_PRECONDITION_REQUIRED": "Policy writes require the current revision ETag.",
+    "POLICY_REVISION_CONFLICT": "Policy revision is stale or invalid.",
     "PROVENANCE_CONFLICT": "A stable provenance ID conflicts with persisted facts.",
     "CURSOR_EXPIRED": "The audit window cursor has expired or is invalid.",
     "CURSOR_SCOPE_MISMATCH": "Request filters do not match the audit window cursor scope.",
     "COHORT_RANGE_MISSING": "evaluated_from and evaluated_to are required for policy evaluation cohorts.",
+    "COHORT_RANGE_INVALID": "The policy evaluation cohort range is invalid.",
+    "REQUEST_TOO_LARGE": "Request body exceeds the configured size limit.",
     "EVALUATION_CONFLICT": "Evaluation conflicts with an existing result for the same event.",
+    "EVALUATION_RUN_CONFLICT": (
+        "Evaluation run ID is already bound to different immutable content."
+    ),
     "VALIDATION_ERROR": "Request validation failed.",
     "NOT_FOUND": "Resource was not found.",
     "METHOD_NOT_ALLOWED": "HTTP method is not allowed.",

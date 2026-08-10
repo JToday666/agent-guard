@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import itertools
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -36,31 +37,30 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.storage.base import (
+    ApprovalStateConflictError,
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
-    EvalMetricFilters,
-    EvalMetrics,
+    EvaluationRunConflictError,
+    PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
-    StoredApprovalNonce,
     StoredBrowserSession,
     StoredLaunchCode,
+    classify_audit_record_type,
     merge_provenance_edge,
     merge_provenance_node,
-    within_evaluated_range,
+    parse_audit_timestamp,
 )
 from guard_api.storage.integrity import (
     attach_audit_integrity,
     read_audit_integrity,
     verify_audit_chain,
 )
-from guard_api.services.metric_rules import aggregate_policy_metrics
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
     adapter_statuses,
-    approval_nonces,
     approval_requests,
     audit_integrity_heads,
     audit_events,
@@ -97,6 +97,13 @@ class PostgresControlPlaneStore:
     database_url: str
     _engine: Engine = field(init=False, repr=False)
     _session_factory: sessionmaker[Session] = field(init=False, repr=False)
+    _active_evaluation_session: ContextVar[Session | None] = field(
+        default_factory=lambda: ContextVar(
+            "agentguard_active_evaluation_session", default=None
+        ),
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         self.database_url = _normalize_database_url(self.database_url)
@@ -115,94 +122,103 @@ class PostgresControlPlaneStore:
             return False
 
     def add_audit_event(self, event: AuditEvent) -> bool:
-        with self._session_factory() as session:
-            with session.begin():
-                session.execute(
-                    text("SELECT pg_advisory_xact_lock(:lock_id)"),
-                    {"lock_id": _AUDIT_INTEGRITY_ADVISORY_LOCK_ID},
+        occurred_at = parse_audit_timestamp(event.timestamp)
+        with self._write_session() as session:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": _AUDIT_INTEGRITY_ADVISORY_LOCK_ID},
+            )
+            existing = session.execute(
+                select(audit_events.c.audit_id).where(
+                    audit_events.c.audit_id == event.audit_id
                 )
-                existing = session.execute(
-                    select(audit_events.c.audit_id).where(
+            ).scalar_one_or_none()
+            if existing is not None:
+                stored_payload = session.execute(
+                    select(audit_events.c.payload_json).where(
                         audit_events.c.audit_id == event.audit_id
                     )
-                ).scalar_one_or_none()
-                if existing is not None:
-                    stored_payload = session.execute(
-                        select(audit_events.c.payload_json).where(
-                            audit_events.c.audit_id == event.audit_id
-                        )
-                    ).scalar_one()
-                    from guard_api.storage.integrity import _canonical_json_bytes
+                ).scalar_one()
+                from guard_api.storage.integrity import canonical_json_bytes
 
-                    stored_content = _canonical_json_bytes(
-                        {k: v for k, v in stored_payload.items() if k != "integrity"}
-                    )
-                    incoming_content = _canonical_json_bytes(
-                        event.model_dump(mode="json", exclude={"integrity"})
-                    )
-                    if stored_content == incoming_content:
-                        return False
-                    raise AuditIdConflictError(event.audit_id)
-                head = (
-                    session.execute(
-                        select(
-                            audit_integrity_heads.c.sequence,
-                            audit_integrity_heads.c.event_hash,
-                        )
-                        .where(audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID)
-                        .with_for_update()
-                    )
-                    .mappings()
-                    .one_or_none()
+                stored_content = canonical_json_bytes(
+                    {k: v for k, v in stored_payload.items() if k != "integrity"}
                 )
-                sequence = int(head["sequence"]) + 1 if head is not None else 1
-                prev_hash = (
-                    str(head["event_hash"])
-                    if head is not None and head["event_hash"] is not None
-                    else None
+                incoming_content = canonical_json_bytes(
+                    event.model_dump(mode="json", exclude={"integrity"})
                 )
-                event_with_integrity = attach_audit_integrity(
-                    event,
-                    sequence=sequence,
-                    prev_hash=prev_hash,
-                )
-                integrity = read_audit_integrity(event_with_integrity)
-                if integrity is None:
-                    raise RuntimeError("audit integrity metadata was not attached")
-                payload = event_with_integrity.model_dump(mode="json")
+                if stored_content == incoming_content:
+                    return False
+                raise AuditIdConflictError(event.audit_id)
+            head = (
                 session.execute(
-                    pg_insert(audit_events).values(
-                        audit_id=event.audit_id,
-                        payload_json=payload,
-                        created_at=event.timestamp,
-                        chain_id=_AUDIT_CHAIN_ID,
-                        sequence=integrity.sequence,
-                        prev_hash=integrity.prev_hash,
-                        event_hash=integrity.event_hash,
+                    select(
+                        audit_integrity_heads.c.sequence,
+                        audit_integrity_heads.c.event_hash,
                     )
+                    .where(audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID)
+                    .with_for_update()
                 )
-                head_stmt = pg_insert(audit_integrity_heads).values(
+                .mappings()
+                .one_or_none()
+            )
+            sequence = int(head["sequence"]) + 1 if head is not None else 1
+            prev_hash = (
+                str(head["event_hash"])
+                if head is not None and head["event_hash"] is not None
+                else None
+            )
+            event_with_integrity = attach_audit_integrity(
+                event,
+                sequence=sequence,
+                prev_hash=prev_hash,
+            )
+            integrity = read_audit_integrity(event_with_integrity)
+            if integrity is None:
+                raise RuntimeError("audit integrity metadata was not attached")
+            payload = event_with_integrity.model_dump(mode="json")
+            session.execute(
+                pg_insert(audit_events).values(
+                    audit_id=event.audit_id,
+                    payload_json=payload,
+                    occurred_at=occurred_at,
+                    record_type=classify_audit_record_type(event),
+                    trace_id=event.trace_id,
+                    case_id=event.case_id,
+                    runtime=event.runtime,
+                    decision=event.decision,
+                    event_id=event.links.get("event_id"),
+                    decision_id=event.links.get("decision_id"),
+                    is_malicious=event.is_malicious,
+                    latency_ms=event.latency_ms,
                     chain_id=_AUDIT_CHAIN_ID,
                     sequence=integrity.sequence,
+                    prev_hash=integrity.prev_hash,
                     event_hash=integrity.event_hash,
-                    updated_at=event.timestamp,
                 )
-                head_stmt = head_stmt.on_conflict_do_update(
-                    index_elements=[audit_integrity_heads.c.chain_id],
-                    set_={
-                        "sequence": head_stmt.excluded.sequence,
-                        "event_hash": head_stmt.excluded.event_hash,
-                        "updated_at": head_stmt.excluded.updated_at,
-                    },
-                )
-                session.execute(head_stmt)
-                return True
+            )
+            head_stmt = pg_insert(audit_integrity_heads).values(
+                chain_id=_AUDIT_CHAIN_ID,
+                sequence=integrity.sequence,
+                event_hash=integrity.event_hash,
+                updated_at=func.statement_timestamp(),
+            )
+            head_stmt = head_stmt.on_conflict_do_update(
+                index_elements=[audit_integrity_heads.c.chain_id],
+                set_={
+                    "sequence": head_stmt.excluded.sequence,
+                    "event_hash": head_stmt.excluded.event_hash,
+                    "updated_at": head_stmt.excluded.updated_at,
+                },
+            )
+            session.execute(head_stmt)
+            return True
 
     def get_audit_event(self, audit_id: str) -> AuditEvent | None:
         stmt = select(audit_events.c.payload_json).where(
             audit_events.c.audit_id == audit_id
         )
-        with self._session_factory() as session:
+        with self._read_session() as session:
             row = session.execute(stmt).scalar_one_or_none()
         return AuditEvent.model_validate(row) if row is not None else None
 
@@ -213,7 +229,7 @@ class PostgresControlPlaneStore:
         stmt = (
             select(audit_events.c.payload_json)
             .where(*_audit_filter_conditions(filters))
-            .order_by(desc(audit_events.c.created_at), desc(audit_events.c.audit_id))
+            .order_by(desc(audit_events.c.sequence))
             .limit(_bounded_limit(filters.limit))
         )
         with self._session_factory() as session:
@@ -221,15 +237,12 @@ class PostgresControlPlaneStore:
         return [AuditEvent.model_validate(row) for row in rows]
 
     def read_audit_events_bounded(self, query: AuditWindowQuery) -> list[AuditEvent]:
-        # 上界读 audit_integrity_heads 链头；序列范围命中现有
-        # ix_audit_events_chain_sequence；JSONB 过滤为残余谓词（契约 §7.3）。
+        # sequence 固化一致性快照；正式列承载过滤条件，避免 JSONB 解包和
+        # Python 全表过滤。索引负责常用 trace/runtime/case/decision 与时间 cohort。
         conditions: list[Any] = [audit_events.c.chain_id == _AUDIT_CHAIN_ID]
         if query.after_sequence is not None:
             conditions.append(audit_events.c.sequence < query.after_sequence)
         conditions.extend(_window_filter_conditions(query))
-        time_range_present = (
-            query.evaluated_from is not None or query.evaluated_to is not None
-        )
         with self._session_factory() as session:
             with session.begin():
                 upper = query.upper_sequence
@@ -245,67 +258,60 @@ class PostgresControlPlaneStore:
                     select(audit_events.c.payload_json)
                     .where(audit_events.c.sequence <= upper, *conditions)
                     .order_by(desc(audit_events.c.sequence))
+                    .limit(query.limit)
                 )
-                # 时间 cohort 经由共享解析函数在 Python 层过滤以保证与
-                # Memory 端口径一致；无时间条件时 SQL LIMIT 直接限流。
-                if not time_range_present:
-                    stmt = stmt.limit(query.limit)
                 rows = session.execute(stmt).scalars().all()
-        events = (AuditEvent.model_validate(row) for row in rows)
-        if time_range_present:
-            events = (
-                event
-                for event in events
-                if within_evaluated_range(
-                    event.timestamp, query.evaluated_from, query.evaluated_to
-                )
-            )
-        return list(itertools.islice(events, query.limit))
+        return [AuditEvent.model_validate(row) for row in rows]
+
+    def capture_audit_snapshot(self) -> tuple[int, datetime]:
+        head_sequence = (
+            select(audit_integrity_heads.c.sequence)
+            .where(audit_integrity_heads.c.chain_id == _AUDIT_CHAIN_ID)
+            .scalar_subquery()
+        )
+        stmt = select(
+            func.coalesce(head_sequence, 0),
+            func.statement_timestamp(),
+        )
+        with self._session_factory() as session:
+            row = session.execute(stmt).one()
+        return int(row[0]), row[1]
 
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None:
-        links = audit_events.c.payload_json.op("->")("links")
-        record_type = audit_events.c.payload_json.op("->>")("record_type")
         stmt = (
             select(audit_events.c.payload_json)
             .where(
-                links.op("->>")("event_id") == event_id,
-                links.op("?")("decision_id"),
-                func.coalesce(record_type, "policy_evaluation") == "policy_evaluation",
+                audit_events.c.event_id == event_id,
+                audit_events.c.decision_id.is_not(None),
+                audit_events.c.record_type == "policy_evaluation",
             )
             .order_by(audit_events.c.sequence.asc(), audit_events.c.audit_id.asc())
             .limit(1)
         )
-        with self._session_factory() as session:
+        with self._read_session() as session:
             row = session.execute(stmt).scalars().first()
         return AuditEvent.model_validate(row) if row is not None else None
 
     @contextmanager
-    def policy_evaluation_guard(self, event_id: str) -> Iterator[None]:
-        """Hold a crash-safe per-event PostgreSQL advisory lock.
-
-        Approval and other evaluation side effects happen before the unique
-        policy audit insert. Holding a session advisory lock across the service
-        operation prevents concurrent requests for one event from creating
-        orphan approvals while retaining the database unique index as the final
-        integrity guard.
-        """
+    def evaluation_transaction(self, event_id: str) -> Iterator[None]:
+        """Commit every evaluation fact atomically under a per-event lock."""
 
         lock_id = int.from_bytes(
-            hashlib.sha256(event_id.encode("utf-8")).digest()[:8],
+            hashlib.sha256(f"evaluation:{event_id}".encode("utf-8")).digest()[:8],
             byteorder="big",
             signed=True,
         )
-        with self._engine.connect() as connection:
-            connection.execute(
-                text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": lock_id}
+        if self._active_evaluation_session.get() is not None:
+            raise RuntimeError("nested evaluation transactions are not supported")
+        with self._session_factory.begin() as session:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
             )
+            token = self._active_evaluation_session.set(session)
             try:
                 yield
             finally:
-                connection.execute(
-                    text("SELECT pg_advisory_unlock(:lock_id)"),
-                    {"lock_id": lock_id},
-                )
+                self._active_evaluation_session.reset(token)
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
@@ -317,111 +323,98 @@ class PostgresControlPlaneStore:
             rows = session.execute(stmt).scalars().all()
         return verify_audit_chain(AuditEvent.model_validate(row) for row in rows)
 
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics:
-        # 保留 where 下推取事件，聚合口径交由跨存储共享聚合器（§19）。
-        filters = filters or EvalMetricFilters()
-        where_sql, params = _metric_where_clause(filters)
-        stmt = text(f"""
-            SELECT payload_json
-            FROM audit_events
-            {where_sql}
-            ORDER BY sequence ASC, audit_id ASC
-            """)
-        with self._session_factory() as session:
-            rows = session.execute(stmt, params).scalars().all()
-        events = [AuditEvent.model_validate(row) for row in rows]
-        return aggregate_policy_metrics(events)
-
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
-        with self._session_factory() as session:
-            with session.begin():
-                _lock_provenance_identity(session, "node", node.node_id)
-                row = session.execute(
-                    select(provenance_nodes.c.payload_json).where(
-                        provenance_nodes.c.node_id == node.node_id
-                    )
-                ).scalar_one_or_none()
-                merged = (
-                    node
-                    if row is None
-                    else merge_provenance_node(ProvenanceNode.model_validate(row), node)
+        with self._write_session() as session:
+            _lock_provenance_identity(session, "node", node.node_id)
+            row = session.execute(
+                select(provenance_nodes.c.payload_json).where(
+                    provenance_nodes.c.node_id == node.node_id
                 )
-                payload = merged.model_dump(mode="json")
-                stmt = pg_insert(provenance_nodes).values(
-                    node_id=merged.node_id,
-                    trace_id=merged.trace_id,
-                    kind=merged.kind,
-                    ref_id=merged.ref_id,
-                    payload_json=payload,
-                    created_at=merged.timestamp,
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[provenance_nodes.c.node_id],
-                    set_={
-                        "payload_json": stmt.excluded.payload_json,
-                        "created_at": stmt.excluded.created_at,
-                    },
-                )
-                session.execute(stmt)
+            ).scalar_one_or_none()
+            merged = (
+                node
+                if row is None
+                else merge_provenance_node(ProvenanceNode.model_validate(row), node)
+            )
+            payload = merged.model_dump(mode="json")
+            stmt = pg_insert(provenance_nodes).values(
+                node_id=merged.node_id,
+                trace_id=merged.trace_id,
+                kind=merged.kind,
+                ref_id=merged.ref_id,
+                payload_json=payload,
+                created_at=_database_datetime(merged.timestamp),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[provenance_nodes.c.node_id],
+                set_={
+                    "payload_json": stmt.excluded.payload_json,
+                    "created_at": stmt.excluded.created_at,
+                },
+            )
+            session.execute(stmt)
         return merged
 
     def get_provenance_node(self, node_id: str) -> ProvenanceNode | None:
         stmt = select(provenance_nodes.c.payload_json).where(
             provenance_nodes.c.node_id == node_id
         )
-        with self._session_factory() as session:
+        with self._read_session() as session:
             row = session.execute(stmt).scalar_one_or_none()
         return ProvenanceNode.model_validate(row) if row is not None else None
 
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge:
-        with self._session_factory() as session:
-            with session.begin():
-                _lock_provenance_identity(session, "edge", edge.edge_id)
-                endpoint_count = session.execute(
-                    select(func.count())
-                    .select_from(provenance_nodes)
-                    .where(
-                        provenance_nodes.c.node_id.in_(
-                            [edge.source_node_id, edge.target_node_id]
-                        ),
-                        provenance_nodes.c.trace_id == edge.trace_id,
-                    )
-                ).scalar_one()
-                expected_count = 1 if edge.source_node_id == edge.target_node_id else 2
-                if int(endpoint_count) != expected_count:
-                    raise ProvenanceEndpointMissingError(edge.edge_id)
-                row = session.execute(
-                    select(provenance_edges.c.payload_json).where(
-                        provenance_edges.c.edge_id == edge.edge_id
-                    )
-                ).scalar_one_or_none()
-                merged = (
-                    edge
-                    if row is None
-                    else merge_provenance_edge(ProvenanceEdge.model_validate(row), edge)
+        with self._write_session() as session:
+            _lock_provenance_identity(session, "edge", edge.edge_id)
+            endpoint_count = session.execute(
+                select(func.count())
+                .select_from(provenance_nodes)
+                .where(
+                    provenance_nodes.c.node_id.in_(
+                        [edge.source_node_id, edge.target_node_id]
+                    ),
+                    provenance_nodes.c.trace_id == edge.trace_id,
                 )
-                payload = merged.model_dump(mode="json")
-                stmt = pg_insert(provenance_edges).values(
-                    edge_id=merged.edge_id,
-                    trace_id=merged.trace_id,
-                    source_node_id=merged.source_node_id,
-                    target_node_id=merged.target_node_id,
-                    relation=merged.relation,
-                    payload_json=payload,
-                    created_at=merged.timestamp,
+            ).scalar_one()
+            expected_count = 1 if edge.source_node_id == edge.target_node_id else 2
+            if int(endpoint_count) != expected_count:
+                raise ProvenanceEndpointMissingError(edge.edge_id)
+            row = session.execute(
+                select(provenance_edges.c.payload_json).where(
+                    provenance_edges.c.edge_id == edge.edge_id
                 )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[provenance_edges.c.edge_id],
-                    set_={
-                        "payload_json": stmt.excluded.payload_json,
-                        "created_at": stmt.excluded.created_at,
-                    },
-                )
-                session.execute(stmt)
+            ).scalar_one_or_none()
+            merged = (
+                edge
+                if row is None
+                else merge_provenance_edge(ProvenanceEdge.model_validate(row), edge)
+            )
+            payload = merged.model_dump(mode="json")
+            stmt = pg_insert(provenance_edges).values(
+                edge_id=merged.edge_id,
+                trace_id=merged.trace_id,
+                source_node_id=merged.source_node_id,
+                target_node_id=merged.target_node_id,
+                relation=merged.relation,
+                payload_json=payload,
+                created_at=_database_datetime(merged.timestamp),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[provenance_edges.c.edge_id],
+                set_={
+                    "payload_json": stmt.excluded.payload_json,
+                    "created_at": stmt.excluded.created_at,
+                },
+            )
+            session.execute(stmt)
         return merged
 
     def list_provenance(
-        self, trace_id: str
+        self,
+        trace_id: str,
+        *,
+        node_limit: int | None = None,
+        edge_limit: int | None = None,
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
         node_stmt = (
             select(provenance_nodes.c.payload_json)
@@ -437,11 +430,25 @@ class PostgresControlPlaneStore:
                 provenance_edges.c.created_at.asc(), provenance_edges.c.edge_id.asc()
             )
         )
+        if node_limit is not None:
+            node_stmt = node_stmt.limit(_bounded_collection_limit(node_limit))
         with self._session_factory() as session:
             node_rows = session.execute(node_stmt).scalars().all()
+        nodes = [ProvenanceNode.model_validate(row) for row in node_rows]
+        if node_limit is not None:
+            node_ids = [node.node_id for node in nodes]
+            if not node_ids:
+                return [], []
+            edge_stmt = edge_stmt.where(
+                provenance_edges.c.source_node_id.in_(node_ids),
+                provenance_edges.c.target_node_id.in_(node_ids),
+            )
+        if edge_limit is not None:
+            edge_stmt = edge_stmt.limit(_bounded_collection_limit(edge_limit))
+        with self._session_factory() as session:
             edge_rows = session.execute(edge_stmt).scalars().all()
         return (
-            [ProvenanceNode.model_validate(row) for row in node_rows],
+            nodes,
             [ProvenanceEdge.model_validate(row) for row in edge_rows],
         )
 
@@ -459,13 +466,22 @@ class PostgresControlPlaneStore:
             runtime=event.runtime,
             target_type=event.target_type,
             target_id=event.target_id,
+            trace_id=str(event.metadata.get("trace_id") or event.event_id),
             severity=finding.severity,
             payload_json=payload,
-            created_at=event.timestamp,
+            created_at=_database_datetime(event.timestamp),
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[config_audit_findings.c.finding_id],
-            set_={"payload_json": stmt.excluded.payload_json},
+            set_={
+                "runtime": stmt.excluded.runtime,
+                "target_type": stmt.excluded.target_type,
+                "target_id": stmt.excluded.target_id,
+                "trace_id": stmt.excluded.trace_id,
+                "severity": stmt.excluded.severity,
+                "payload_json": stmt.excluded.payload_json,
+                "created_at": stmt.excluded.created_at,
+            },
         )
         with self._session_factory() as session:
             session.execute(stmt)
@@ -492,12 +508,7 @@ class PostgresControlPlaneStore:
         if severity is not None:
             stmt = stmt.where(config_audit_findings.c.severity == severity)
         if trace_id is not None:
-            stmt = stmt.where(
-                text(
-                    "(config_audit_findings.payload_json #>> '{event,metadata,trace_id}') = :trace_id "
-                    "OR (config_audit_findings.payload_json #>> '{event,event_id}') = :trace_id"
-                )
-            ).params(trace_id=trace_id)
+            stmt = stmt.where(config_audit_findings.c.trace_id == trace_id)
         stmt = stmt.limit(_bounded_limit(limit))
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
@@ -508,24 +519,35 @@ class PostgresControlPlaneStore:
         self, run: EvaluationRun | dict[str, Any]
     ) -> dict[str, Any]:
         payload = EvaluationRun.model_validate(run).model_dump(mode="json")
+        regression_gate = payload.get("regression_gate")
+        regression_status = (
+            regression_gate.get("status") if isinstance(regression_gate, dict) else None
+        )
         stmt = pg_insert(evaluation_runs).values(
             run_id=payload["run_id"],
-            run_at=payload["run_at"],
+            run_at=_database_datetime(payload["run_at"]),
+            dataset_id=payload.get("dataset_id"),
+            dataset_version=payload.get("dataset_version"),
+            regression_status=regression_status,
             payload_json=payload,
-            created_at=utc_now_iso(),
+            created_at=func.statement_timestamp(),
         )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[evaluation_runs.c.run_id],
-            set_={
-                "run_at": stmt.excluded.run_at,
-                "payload_json": stmt.excluded.payload_json,
-                "created_at": stmt.excluded.created_at,
-            },
-        )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return payload
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=[evaluation_runs.c.run_id]
+        ).returning(evaluation_runs.c.payload_json)
+        with self._session_factory.begin() as session:
+            inserted = session.execute(stmt).scalar_one_or_none()
+            if inserted is not None:
+                return EvaluationRun.model_validate(inserted).model_dump(mode="json")
+            existing = session.execute(
+                select(evaluation_runs.c.payload_json).where(
+                    evaluation_runs.c.run_id == payload["run_id"]
+                )
+            ).scalar_one()
+            stored = EvaluationRun.model_validate(existing).model_dump(mode="json")
+            if stored != payload:
+                raise EvaluationRunConflictError(payload["run_id"])
+            return stored
 
     def get_latest_evaluation_run(self) -> dict[str, Any] | None:
         stmt = (
@@ -561,14 +583,9 @@ class PostgresControlPlaneStore:
             desc(evaluation_runs.c.run_id),
         )
         if dataset_id is not None:
-            stmt = stmt.where(
-                evaluation_runs.c.payload_json.op("->>")("dataset_id") == dataset_id
-            )
+            stmt = stmt.where(evaluation_runs.c.dataset_id == dataset_id)
         if dataset_version is not None:
-            stmt = stmt.where(
-                evaluation_runs.c.payload_json.op("->>")("dataset_version")
-                == dataset_version
-            )
+            stmt = stmt.where(evaluation_runs.c.dataset_version == dataset_version)
         stmt = stmt.limit(_bounded_limit(limit))
         with self._session_factory() as session:
             rows = session.execute(stmt).scalars().all()
@@ -580,16 +597,31 @@ class PostgresControlPlaneStore:
         self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]
     ) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
+        heartbeat_at = payload.get("last_heartbeat_at")
         stmt = pg_insert(adapter_statuses).values(
             adapter_id=adapter_id,
+            status=payload["status"],
+            loaded=payload["loaded"],
+            runtime_id=payload.get("runtime_id"),
+            agent_id=payload.get("agent_id"),
+            enforcement_mode=payload.get("enforcement_mode"),
+            last_heartbeat_at=(
+                _database_datetime(heartbeat_at) if heartbeat_at is not None else None
+            ),
             payload_json=payload,
-            updated_at=payload.get("last_verified_at") or utc_now_iso(),
+            updated_at=func.statement_timestamp(),
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[adapter_statuses.c.adapter_id],
             set_={
+                "status": stmt.excluded.status,
+                "loaded": stmt.excluded.loaded,
+                "runtime_id": stmt.excluded.runtime_id,
+                "agent_id": stmt.excluded.agent_id,
+                "enforcement_mode": stmt.excluded.enforcement_mode,
+                "last_heartbeat_at": stmt.excluded.last_heartbeat_at,
                 "payload_json": stmt.excluded.payload_json,
-                "updated_at": stmt.excluded.updated_at,
+                "updated_at": func.statement_timestamp(),
             },
         )
         with self._session_factory() as session:
@@ -709,7 +741,7 @@ class PostgresControlPlaneStore:
             event_id=review.event_id,
             verdict=review.verdict,
             payload_json=payload,
-            created_at=review.created_at,
+            created_at=_database_datetime(review.created_at),
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[action_critic_reviews.c.review_id],
@@ -721,9 +753,8 @@ class PostgresControlPlaneStore:
                 "created_at": stmt.excluded.created_at,
             },
         )
-        with self._session_factory() as session:
+        with self._write_session() as session:
             session.execute(stmt)
-            session.commit()
         return review
 
     def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]:
@@ -735,7 +766,7 @@ class PostgresControlPlaneStore:
                 action_critic_reviews.c.review_id.asc(),
             )
         )
-        with self._session_factory() as session:
+        with self._read_session() as session:
             rows = session.execute(stmt).scalars().all()
         return [ActionCriticReview.model_validate(row) for row in rows]
 
@@ -759,16 +790,15 @@ class PostgresControlPlaneStore:
                 "updated_at": stmt.excluded.updated_at,
             },
         )
-        with self._session_factory() as session:
+        with self._write_session() as session:
             session.execute(stmt)
-            session.commit()
         return change
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
         stmt = select(memory_guard_changes.c.payload_json).where(
             memory_guard_changes.c.change_id == change_id
         )
-        with self._session_factory() as session:
+        with self._read_session() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
             return None
@@ -810,7 +840,7 @@ class PostgresControlPlaneStore:
             policy_snapshots.c.updated_at,
             policy_snapshots.c.updated_by,
         ).where(policy_snapshots.c.policy_id == "current")
-        with self._session_factory() as session:
+        with self._read_session() as session:
             row = session.execute(stmt).mappings().one_or_none()
         if row is None:
             return None
@@ -825,6 +855,7 @@ class PostgresControlPlaneStore:
         self,
         policy_bundle: PolicyBundle,
         *,
+        expected_revision: int,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord:
         payload = policy_bundle.model_dump(mode="json")
@@ -840,9 +871,15 @@ class PostgresControlPlaneStore:
                         policy_snapshots.c.policy_id == "current"
                     )
                 ).scalar_one_or_none()
-                revision = (
-                    int(current_revision) + 1 if current_revision is not None else 1
+                normalized_current_revision = (
+                    int(current_revision) if current_revision is not None else 0
                 )
+                if expected_revision != normalized_current_revision:
+                    raise PolicyRevisionConflictError(
+                        expected_revision=expected_revision,
+                        current_revision=normalized_current_revision,
+                    )
+                revision = normalized_current_revision + 1
                 stmt = pg_insert(policy_snapshots).values(
                     policy_id="current",
                     payload_json=payload,
@@ -901,56 +938,86 @@ class PostgresControlPlaneStore:
         ]
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
-        payload = approval.model_dump(mode="json")
+        created_at = _database_datetime(approval.created_at)
+        expires_at = _database_datetime(approval.expires_at)
+        resolved_at = (
+            _database_datetime(approval.resolved_at)
+            if approval.status == "resolved" and approval.resolved_at is not None
+            else None
+        )
         stmt = pg_insert(approval_requests).values(
             approval_id=approval.approval_id,
-            payload_json=payload,
-            status=approval.status,
-            created_at=approval.created_at,
+            trace_id=approval.trace_id,
+            runtime=approval.runtime,
+            agent_id=approval.agent_id,
+            subject_id=approval.subject_id,
+            action_id=approval.action_id,
+            payload_json=_approval_payload(approval),
+            decision=approval.decision if resolved_at is not None else None,
+            resolution_source=(
+                approval.resolution_source if resolved_at is not None else None
+            ),
+            resolved_by=approval.resolved_by if resolved_at is not None else None,
+            resolution_reason=(
+                approval.resolution_reason if resolved_at is not None else None
+            ),
+            created_at=created_at,
+            expires_at=expires_at,
+            resolved_at=resolved_at,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[approval_requests.c.approval_id],
             set_={
+                "trace_id": stmt.excluded.trace_id,
+                "runtime": stmt.excluded.runtime,
+                "agent_id": stmt.excluded.agent_id,
+                "subject_id": stmt.excluded.subject_id,
+                "action_id": stmt.excluded.action_id,
                 "payload_json": stmt.excluded.payload_json,
-                "status": stmt.excluded.status,
             },
         )
-        with self._session_factory() as session:
+        with self._write_session() as session:
             session.execute(stmt)
-            session.commit()
-        return approval
+        stored = self.get_approval(approval.approval_id)
+        if stored is None:  # pragma: no cover - insert/read invariant
+            raise KeyError(approval.approval_id)
+        return stored
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
         stmt = (
-            select(approval_requests.c.payload_json)
-            .where(approval_requests.c.status == "pending")
+            _approval_select()
+            .where(
+                approval_requests.c.resolved_at.is_(None),
+                approval_requests.c.expires_at > func.now(),
+            )
             .order_by(approval_requests.c.created_at.asc())
         )
         with self._session_factory() as session:
-            rows = session.execute(stmt).scalars().all()
-        return [ApprovalRequest.model_validate(row) for row in rows]
+            rows = session.execute(stmt).mappings().all()
+        return [_approval_from_row(row) for row in rows]
 
-    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]:
-        stmt = select(approval_requests.c.payload_json).order_by(
-            approval_requests.c.created_at.asc()
-        )
+    def list_approvals(
+        self,
+        trace_id: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[ApprovalRequest]:
+        stmt = _approval_select().order_by(approval_requests.c.created_at.asc())
         if trace_id is not None:
-            stmt = stmt.where(
-                approval_requests.c.payload_json.op("->>")("trace_id") == trace_id
-            )
+            stmt = stmt.where(approval_requests.c.trace_id == trace_id)
+        if limit is not None:
+            stmt = stmt.limit(_bounded_collection_limit(limit))
         with self._session_factory() as session:
-            rows = session.execute(stmt).scalars().all()
-        return [ApprovalRequest.model_validate(row) for row in rows]
+            rows = session.execute(stmt).mappings().all()
+        return [_approval_from_row(row) for row in rows]
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        stmt = select(approval_requests.c.payload_json).where(
-            approval_requests.c.approval_id == approval_id
-        )
-        with self._session_factory() as session:
-            row = session.execute(stmt).scalar_one_or_none()
+        stmt = _approval_select().where(approval_requests.c.approval_id == approval_id)
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
         if row is None:
             return None
-        return ApprovalRequest.model_validate(row)
+        return _approval_from_row(row)
 
     def resolve_approval(
         self,
@@ -962,31 +1029,46 @@ class PostgresControlPlaneStore:
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest:
-        approval = self.get_approval(approval_id)
-        if approval is None:
-            raise KeyError(approval_id)
-        approval.status = "resolved"
-        approval.decision = decision  # type: ignore[assignment]
-        approval.resolved_at = utc_now_iso()
-        if resolution_source is not None:
-            approval.resolution_source = resolution_source  # type: ignore[assignment]
-        if resolved_by is not None:
-            approval.resolved_by = resolved_by
-        if resolution_reason is not None:
-            approval.resolution_reason = resolution_reason
-        if llm_review is not None:
-            approval.llm_review = llm_review  # type: ignore[assignment]
-        self._update_approval(approval)
-        return approval
-
-    def expire_approval(self, approval_id: str) -> ApprovalRequest:
-        approval = self.get_approval(approval_id)
-        if approval is None:
-            raise KeyError(approval_id)
-        approval.status = "expired"
-        approval.decision = "deny"
-        self._update_approval(approval)
-        return approval
+        stmt = (
+            _approval_select()
+            .where(approval_requests.c.approval_id == approval_id)
+            .with_for_update()
+        )
+        with self._write_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+            if row is None:
+                raise KeyError(approval_id)
+            approval = _approval_from_row(row)
+            if approval.status != "pending":
+                raise ApprovalStateConflictError(approval_id, approval.status)
+            resolved_at = row["_database_now"]
+            updates: dict[str, Any] = {
+                "status": "resolved",
+                "decision": decision,
+                "resolved_at": _database_datetime_iso(resolved_at),
+            }
+            if resolution_source is not None:
+                updates["resolution_source"] = resolution_source
+            if resolved_by is not None:
+                updates["resolved_by"] = resolved_by
+            if resolution_reason is not None:
+                updates["resolution_reason"] = resolution_reason
+            if llm_review is not None:
+                updates["llm_review"] = llm_review
+            resolved = approval.model_copy(update=updates)
+            session.execute(
+                update(approval_requests)
+                .where(approval_requests.c.approval_id == approval_id)
+                .values(
+                    payload_json=_approval_payload(resolved),
+                    decision=decision,
+                    resolution_source=resolved.resolution_source,
+                    resolved_by=resolved.resolved_by,
+                    resolution_reason=resolved.resolution_reason,
+                    resolved_at=resolved_at,
+                )
+            )
+        return resolved
 
     def create_launch_code(self, code_hash: str, expires_at: str) -> StoredLaunchCode:
         stmt = pg_insert(launch_codes).values(
@@ -1083,110 +1165,23 @@ class PostgresControlPlaneStore:
             session.execute(stmt)
             session.commit()
 
-    def create_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        expires_at: str,
-    ) -> StoredApprovalNonce:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        stmt = pg_insert(approval_nonces).values(
-            nonce_hash=nonce_hash,
-            approval_id=approval_id,
-            session_hash=session_hash,
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at,
-            used_at=None,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[approval_nonces.c.nonce_hash],
-            set_={
-                "approval_id": stmt.excluded.approval_id,
-                "session_hash": stmt.excluded.session_hash,
-                "subject_id": stmt.excluded.subject_id,
-                "tool_call_id": stmt.excluded.tool_call_id,
-                "expires_at": stmt.excluded.expires_at,
-                "used_at": None,
-            },
-        )
+    @contextmanager
+    def _read_session(self) -> Iterator[Session]:
+        active = self._active_evaluation_session.get()
+        if active is not None:
+            yield active
+            return
         with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return StoredApprovalNonce(
-            nonce_hash=nonce_hash,
-            approval_id=approval_id,
-            session_hash=session_hash,
-            subject_id=approval_subject_id,
-            tool_call_id=tool_call_id or approval_subject_id,
-            expires_at=expires_at,
-        )
+            yield session
 
-    def consume_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        used_at: str,
-    ) -> StoredApprovalNonce | None:
-        approval_subject_id = _approval_subject_id(
-            subject_id=subject_id, tool_call_id=tool_call_id
-        )
-        stmt = (
-            update(approval_nonces)
-            .where(
-                approval_nonces.c.nonce_hash == nonce_hash,
-                approval_nonces.c.used_at.is_(None),
-                approval_nonces.c.approval_id == approval_id,
-                approval_nonces.c.session_hash == session_hash,
-                approval_nonces.c.subject_id == approval_subject_id,
-            )
-            .values(used_at=used_at)
-            .returning(
-                approval_nonces.c.nonce_hash,
-                approval_nonces.c.approval_id,
-                approval_nonces.c.session_hash,
-                approval_nonces.c.subject_id,
-                approval_nonces.c.tool_call_id,
-                approval_nonces.c.expires_at,
-                approval_nonces.c.used_at,
-            )
-        )
-        with self._session_factory() as session:
-            row = session.execute(stmt).mappings().one_or_none()
-            session.commit()
-        if row is None:
-            return None
-        return StoredApprovalNonce(
-            nonce_hash=row["nonce_hash"],
-            approval_id=row["approval_id"],
-            session_hash=row["session_hash"],
-            subject_id=row["subject_id"],
-            tool_call_id=row["tool_call_id"],
-            expires_at=row["expires_at"],
-            used_at=row["used_at"],
-        )
-
-    def _update_approval(self, approval: ApprovalRequest) -> None:
-        stmt = (
-            update(approval_requests)
-            .where(approval_requests.c.approval_id == approval.approval_id)
-            .values(
-                payload_json=approval.model_dump(mode="json"), status=approval.status
-            )
-        )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
+    @contextmanager
+    def _write_session(self) -> Iterator[Session]:
+        active = self._active_evaluation_session.get()
+        if active is not None:
+            yield active
+            return
+        with self._session_factory.begin() as session:
+            yield session
 
     def _alembic_config(self) -> Config:
         migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
@@ -1199,48 +1194,43 @@ class PostgresControlPlaneStore:
 def _audit_filter_conditions(filters: AuditEventFilters) -> list[Any]:
     conditions: list[Any] = []
     if filters.trace_id is not None:
-        conditions.append(_json_text("trace_id") == filters.trace_id)
+        conditions.append(audit_events.c.trace_id == filters.trace_id)
     if filters.case_id is not None:
-        conditions.append(_json_text("case_id") == filters.case_id)
+        conditions.append(audit_events.c.case_id == filters.case_id)
     if filters.runtime is not None:
-        conditions.append(_json_text("runtime") == filters.runtime)
+        conditions.append(audit_events.c.runtime == filters.runtime)
     if filters.decision is not None:
-        conditions.append(_json_text("decision") == filters.decision)
+        conditions.append(audit_events.c.decision == filters.decision)
     return conditions
 
 
 def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
     conditions: list[Any] = []
+    if query.evaluated_from is not None:
+        conditions.append(audit_events.c.occurred_at >= query.evaluated_from)
+    if query.evaluated_to is not None:
+        conditions.append(audit_events.c.occurred_at < query.evaluated_to)
+    if query.ingested_as_of is not None:
+        conditions.append(audit_events.c.ingested_at <= query.ingested_as_of)
+    if query.record_type is not None:
+        conditions.append(audit_events.c.record_type == query.record_type)
     if query.trace_id is not None:
-        conditions.append(_json_text("trace_id") == query.trace_id)
+        conditions.append(audit_events.c.trace_id == query.trace_id)
     if query.case_id is not None:
-        conditions.append(_json_text("case_id") == query.case_id)
+        conditions.append(audit_events.c.case_id == query.case_id)
     if query.runtime is not None:
-        conditions.append(_json_text("runtime") == query.runtime)
+        conditions.append(audit_events.c.runtime == query.runtime)
     if query.decision is not None:
-        conditions.append(_json_text("decision") == query.decision)
+        conditions.append(audit_events.c.decision == query.decision)
     return conditions
-
-
-def _metric_where_clause(filters: EvalMetricFilters) -> tuple[str, dict[str, str]]:
-    clauses: list[str] = []
-    params: dict[str, str] = {}
-    for key in ("trace_id", "case_id", "runtime", "decision"):
-        value = getattr(filters, key)
-        if value is not None:
-            clauses.append(f"payload_json ->> '{key}' = :{key}")
-            params[key] = value
-    if not clauses:
-        return "", params
-    return "WHERE " + " AND ".join(clauses), params
-
-
-def _json_text(key: str) -> Any:
-    return audit_events.c.payload_json.op("->>")(key)
 
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _bounded_collection_limit(limit: int) -> int:
+    return max(1, min(limit, 5000))
 
 
 def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
@@ -1257,11 +1247,71 @@ def _config_finding_record(row: dict[str, Any]) -> ConfigAuditFindingRecord:
     )
 
 
-def _approval_subject_id(*, subject_id: str | None, tool_call_id: str | None) -> str:
-    approval_subject_id = subject_id or tool_call_id
-    if approval_subject_id is None:
-        raise ValueError("approval nonce requires subject_id or tool_call_id")
-    return approval_subject_id
+_APPROVAL_FORMAL_FIELDS = {
+    "status",
+    "decision",
+    "resolution_source",
+    "resolved_by",
+    "resolution_reason",
+    "created_at",
+    "expires_at",
+    "resolved_at",
+}
+
+
+def _approval_select() -> Any:
+    return select(*approval_requests.c, func.now().label("_database_now"))
+
+
+def _approval_payload(approval: ApprovalRequest) -> dict[str, Any]:
+    return approval.model_dump(mode="json", exclude=_APPROVAL_FORMAL_FIELDS)
+
+
+def _approval_from_row(row: Any) -> ApprovalRequest:
+    created_at = _database_datetime(row["created_at"])
+    expires_at = _database_datetime(row["expires_at"])
+    database_now = _database_datetime(row["_database_now"])
+    resolved_at = (
+        _database_datetime(row["resolved_at"])
+        if row["resolved_at"] is not None
+        else None
+    )
+    if resolved_at is not None:
+        status = "resolved"
+        decision = row["decision"]
+    elif expires_at <= database_now:
+        status = "expired"
+        decision = "deny"
+    else:
+        status = "pending"
+        decision = None
+    payload = dict(row["payload_json"])
+    payload.update(
+        {
+            "status": status,
+            "decision": decision,
+            "resolution_source": row["resolution_source"],
+            "resolved_by": row["resolved_by"],
+            "resolution_reason": row["resolution_reason"],
+            "created_at": _database_datetime_iso(created_at),
+            "expires_at": _database_datetime_iso(expires_at),
+            "resolved_at": (
+                _database_datetime_iso(resolved_at) if resolved_at is not None else None
+            ),
+        }
+    )
+    return ApprovalRequest.model_validate(payload)
+
+
+def _database_datetime(value: str | datetime) -> datetime:
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _database_datetime_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _normalize_database_url(database_url: str) -> str:

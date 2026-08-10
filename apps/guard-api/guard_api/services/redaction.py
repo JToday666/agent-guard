@@ -9,6 +9,7 @@ item caps, nesting depth, and the 64 KiB per-event evidence budget. Guard API
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 
 from agentguard_core import AuditEvent
@@ -42,6 +43,8 @@ CONTEXT_SOURCES_LIMIT = 20
 NORMALIZED_RESOURCES_LIMIT = 50
 RULE_HITS_LIMIT = 100
 ARRAY_LIMIT = 20
+OBJECT_KEYS_LIMIT = 100
+OBJECT_KEY_TEXT_LIMIT = 128
 MAX_NESTING_DEPTH = 6
 MAX_EVIDENCE_BYTES = 64 * 1024
 
@@ -120,16 +123,17 @@ def bound_value(
             return "..." if value else value
         return value
     if isinstance(value, dict):
-        return {
-            str(key): bound_value(
+        bounded: dict[str, object] = {}
+        for key, nested in list(value.items())[:OBJECT_KEYS_LIMIT]:
+            bounded_key = truncate_text(scrub_text(str(key)), OBJECT_KEY_TEXT_LIMIT)
+            bounded[bounded_key] = bound_value(
                 nested,
                 text_limit=text_limit,
                 array_limit=array_limit,
                 max_depth=max_depth,
                 _depth=_depth + 1,
             )
-            for key, nested in value.items()
-        }
+        return bounded
     if isinstance(value, list):
         return [
             bound_value(
@@ -249,16 +253,17 @@ def _bound_typed_value(
     if isinstance(value, dict):
         if _depth >= max_depth:
             return {}
-        return {
-            str(key): _bound_typed_value(
+        bounded: dict[str, object] = {}
+        for key, nested in list(value.items())[:OBJECT_KEYS_LIMIT]:
+            bounded_key = truncate_text(scrub_text(str(key)), OBJECT_KEY_TEXT_LIMIT)
+            bounded[bounded_key] = _bound_typed_value(
                 nested,
                 text_limit=text_limit,
                 array_limit=array_limit,
                 max_depth=max_depth,
                 _depth=_depth + 1,
             )
-            for key, nested in value.items()
-        }
+        return bounded
     if isinstance(value, list):
         if _depth >= max_depth:
             return []
@@ -290,6 +295,7 @@ def enforce_evidence_budget(
     """
 
     current = evidence
+    original_size = evidence_serialized_size(evidence)
     for text_limit in (500, 200, 64, 16):
         if evidence_serialized_size(current) <= max_bytes:
             return current
@@ -300,4 +306,20 @@ def enforce_evidence_budget(
             max_depth=MAX_NESTING_DEPTH,
         )
         current = bounded if isinstance(bounded, dict) else {}
-    return current
+    if evidence_serialized_size(current) <= max_bytes:
+        return current
+
+    # A large number of short keys can still exceed the byte budget after text
+    # projection. Keep a deterministic commitment to the already-redacted input
+    # instead of returning an oversized record or silently dropping all context.
+    digest = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    fallback: dict[str, object] = {
+        "_truncated": True,
+        "_original_size_bytes": original_size,
+        "_redacted_sha256": digest,
+    }
+    if evidence_serialized_size(fallback) <= max_bytes:
+        return fallback
+    return {}

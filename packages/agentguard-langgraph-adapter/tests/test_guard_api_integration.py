@@ -16,6 +16,7 @@ from agentguard_langgraph_adapter.tool_gateway import GuardedToolGateway
 from guard_api.main import create_app
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
+from tests.support.auth import add_adapter_credential
 
 
 def test_default_config_targets_guard_api_v03() -> None:
@@ -139,10 +140,10 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = MemoryControlPlaneStore()
+    add_adapter_credential(store, agent_id="langgraph")
     app = create_app(
         store=store,
         settings=GuardApiSettings(
-            adapter_token="adapter-secret",
             control_token="control-secret",
             storage_backend="memory",
         ),
@@ -205,7 +206,7 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
         arguments={"path": "/docs/public.txt"},
         result="public content",
         security={"user_task": "Read a public document", "source_trust": "trusted"},
-        trace_id="trace_v03_result",
+        trace_id="trace_v03_tool",
         call_id="call_v03_tool",
     )
     adapter.evaluate_memory_write(
@@ -274,15 +275,11 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
     )
     csrf_token = exchange.json()["csrf_token"]
     pending = api.get("/v1/approvals/pending")
-    approval_nonce = next(
-        item["approval_nonce"]
-        for item in pending.json()
-        if item["approval_id"] == approval_id
-    )
+    assert any(item["approval_id"] == approval_id for item in pending.json())
     resolved = api.post(
         f"/v1/approvals/{approval_id}/resolve",
         headers={"X-AgentGuard-CSRF": csrf_token},
-        json={"decision": "allow_once", "approval_nonce": approval_nonce},
+        json={"decision": "allow_once"},
     )
     assert resolved.status_code == 200
     assert adapter.wait_for_approval(approval_id)["decision"] == "allow_once"
@@ -293,10 +290,10 @@ def test_guard_api_v03_gateway_skips_policy_audit_submission(
 ) -> None:
     """G-02：gateway 完整流程不得经 POST /v1/audit/events 重复提交策略审计。"""
     store = MemoryControlPlaneStore()
+    add_adapter_credential(store, agent_id="langgraph")
     app = create_app(
         store=store,
         settings=GuardApiSettings(
-            adapter_token="adapter-secret",
             control_token="control-secret",
             storage_backend="memory",
         ),
@@ -351,6 +348,7 @@ def test_guard_api_v03_gateway_skips_policy_audit_submission(
 
     assert result.executed is True
     assert result.blocked is False
+    assert result.runtime_receipt_error is None
     # Guard API 模式下策略审计只由 evaluate writer 写入；adapter 仍通过
     # audit/events 回写其权威生产的运行时结果。
     assert request_paths.count("/v1/audit/events") == 1

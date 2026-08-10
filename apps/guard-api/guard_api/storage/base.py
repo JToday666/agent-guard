@@ -42,27 +42,22 @@ class AuditWindowQuery:
 
     upper_sequence 为 None 时以当前链头上界为准；after_sequence 用于
     cursor 续页，只读取 sequence 严格小于它的记录；evaluated_from/to
-    按 RFC 3339 规范化 UTC 字符串过滤记录 timestamp，范围语义为
-    [evaluated_from, evaluated_to)。窗口与 cohort 共用本查询。
+    使用带时区 datetime 过滤事实发生时间，范围语义为
+    [evaluated_from, evaluated_to)。ingested_as_of 限制查询只包含该时点
+    已进入审计链的事实。窗口与 cohort 共用本查询。
     """
 
     upper_sequence: int | None = None
     after_sequence: int | None = None
-    evaluated_from: str | None = None
-    evaluated_to: str | None = None
+    evaluated_from: datetime | None = None
+    evaluated_to: datetime | None = None
+    ingested_as_of: datetime | None = None
+    record_type: str | None = None
     trace_id: str | None = None
     case_id: str | None = None
     runtime: str | None = None
     decision: str | None = None
     limit: int = 500
-
-
-@dataclass(frozen=True, slots=True)
-class EvalMetricFilters:
-    trace_id: str | None = None
-    case_id: str | None = None
-    runtime: str | None = None
-    decision: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,17 +76,6 @@ class StoredBrowserSession:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredApprovalNonce:
-    nonce_hash: str
-    approval_id: str
-    session_hash: str
-    subject_id: str
-    tool_call_id: str
-    expires_at: str
-    used_at: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class PolicySnapshotRecord:
     revision: int
     policy_bundle: PolicyBundle
@@ -99,13 +83,10 @@ class PolicySnapshotRecord:
     updated_by: str
 
 
-EvalMetrics = dict[str, int | float | None]
-
-
 def within_evaluated_range(
     timestamp: str,
-    evaluated_from: str | None,
-    evaluated_to: str | None,
+    evaluated_from: datetime | None,
+    evaluated_to: datetime | None,
 ) -> bool:
     """判断记录 timestamp 是否落入 [evaluated_from, evaluated_to) 区间。
 
@@ -117,18 +98,46 @@ def within_evaluated_range(
     if evaluated_from is None and evaluated_to is None:
         return True
     try:
-        occurred_at = datetime.fromisoformat(timestamp)
+        occurred_at = parse_audit_timestamp(timestamp)
     except ValueError:
         return False
-    if occurred_at.tzinfo is None:
+    if evaluated_from is not None and occurred_at < evaluated_from:
         return False
-    if evaluated_from is not None and occurred_at < datetime.fromisoformat(
-        evaluated_from
-    ):
-        return False
-    if evaluated_to is not None and occurred_at >= datetime.fromisoformat(evaluated_to):
+    if evaluated_to is not None and occurred_at >= evaluated_to:
         return False
     return True
+
+
+class AuditTimestampError(ValueError):
+    """Raised when an audit fact timestamp is not an aware RFC 3339 value."""
+
+
+class AuditCanonicalizationError(ValueError):
+    """Raised when evidence is outside the RFC 8785 / I-JSON domain."""
+
+
+def parse_audit_timestamp(timestamp: str) -> datetime:
+    """Parse an audit fact timestamp and require an explicit timezone."""
+
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        raise AuditTimestampError("audit timestamp must be RFC 3339") from None
+    if parsed.tzinfo is None:
+        raise AuditTimestampError("audit timestamp must include a timezone")
+    return parsed
+
+
+def classify_audit_record_type(event: AuditEvent) -> str:
+    """Resolve the persisted record class for both 0.4 and frozen 0.3 input."""
+
+    if event.record_type:
+        return event.record_type
+    if event.event_type == "config_audit":
+        return "config_audit"
+    if event.event_type == "runtime_observation":
+        return "runtime_observation"
+    return "policy_evaluation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,12 +152,40 @@ class AuditIdConflictError(ValueError):
     """Raised when the same audit_id is re-submitted with different content."""
 
 
+class ApprovalStateConflictError(ValueError):
+    """Raised when an approval can no longer transition from pending."""
+
+    def __init__(self, approval_id: str, status: str) -> None:
+        self.approval_id = approval_id
+        self.status = status
+        super().__init__(f"{approval_id}: {status}")
+
+
 class ProvenanceConflictError(ValueError):
     """Raised when a stable provenance ID is bound to conflicting facts."""
 
 
 class ProvenanceEndpointMissingError(ProvenanceConflictError):
     """Raised when a provenance edge references a missing or foreign node."""
+
+
+class PolicyRevisionConflictError(ValueError):
+    """Raised when a policy write targets a stale revision."""
+
+    def __init__(self, *, expected_revision: int, current_revision: int) -> None:
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
+        super().__init__(
+            f"expected policy revision {expected_revision}, current is {current_revision}"
+        )
+
+
+class EvaluationRunConflictError(ValueError):
+    """Raised when an immutable evaluation run ID is reused for new content."""
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+        super().__init__(run_id)
 
 
 def merge_provenance_node(
@@ -307,13 +344,13 @@ class ControlPlaneStore(Protocol):
         self, query: AuditWindowQuery
     ) -> list[AuditEvent]: ...
 
+    def capture_audit_snapshot(self) -> tuple[int, datetime]: ...
+
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
 
-    def policy_evaluation_guard(self, event_id: str) -> ContextManager[None]: ...
+    def evaluation_transaction(self, event_id: str) -> ContextManager[None]: ...
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
-
-    def eval_metrics(self, filters: EvalMetricFilters | None = None) -> EvalMetrics: ...
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode: ...
 
@@ -322,7 +359,11 @@ class ControlPlaneStore(Protocol):
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge: ...
 
     def list_provenance(
-        self, trace_id: str
+        self,
+        trace_id: str,
+        *,
+        node_limit: int | None = None,
+        edge_limit: int | None = None,
     ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]: ...
 
     def add_config_audit_finding(
@@ -393,10 +434,13 @@ class ControlPlaneStore(Protocol):
 
     def get_policy_snapshot(self) -> PolicyBundle | None: ...
 
+    def get_policy_snapshot_record(self) -> PolicySnapshotRecord | None: ...
+
     def save_policy_snapshot(
         self,
         policy_bundle: PolicyBundle,
         *,
+        expected_revision: int,
         updated_by: str = "system",
     ) -> PolicySnapshotRecord: ...
 
@@ -408,7 +452,12 @@ class ControlPlaneStore(Protocol):
 
     def list_pending_approvals(self) -> list[ApprovalRequest]: ...
 
-    def list_approvals(self, trace_id: str | None = None) -> list[ApprovalRequest]: ...
+    def list_approvals(
+        self,
+        trace_id: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[ApprovalRequest]: ...
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None: ...
 
@@ -422,8 +471,6 @@ class ControlPlaneStore(Protocol):
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest: ...
-
-    def expire_approval(self, approval_id: str) -> ApprovalRequest: ...
 
     def create_launch_code(
         self, code_hash: str, expires_at: str
@@ -444,25 +491,3 @@ class ControlPlaneStore(Protocol):
     def get_browser_session(self, session_hash: str) -> StoredBrowserSession | None: ...
 
     def revoke_browser_session(self, session_hash: str, revoked_at: str) -> None: ...
-
-    def create_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        expires_at: str,
-    ) -> StoredApprovalNonce: ...
-
-    def consume_approval_nonce(
-        self,
-        nonce_hash: str,
-        *,
-        approval_id: str,
-        session_hash: str,
-        subject_id: str | None = None,
-        tool_call_id: str | None = None,
-        used_at: str,
-    ) -> StoredApprovalNonce | None: ...

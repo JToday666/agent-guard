@@ -16,11 +16,13 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    AGENTGUARD_ENV=production \
     AGENTGUARD_HOST=0.0.0.0 \
     AGENTGUARD_PORT=8088
 
 RUN groupadd --system agentguard \
-    && useradd --system --gid agentguard --create-home agentguard
+    && useradd --system --gid agentguard --create-home agentguard \
+    && install -d -o agentguard -g agentguard -m 0700 /var/lib/agentguard
 
 COPY --from=builder /wheelhouse /wheelhouse
 RUN python -m pip install --no-index --find-links=/wheelhouse \

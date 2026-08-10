@@ -1,4 +1,4 @@
-"""Install the AgentGuard meta package from a local wheelhouse and verify imports."""
+"""Install the three AgentGuard Python components and verify their entry points."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ def main() -> int:
         "aegis-agentguard-core",
         "aegis-agentguard-api",
         "aegis-agentguard-cli",
-        "aegis-agentguard",
     ):
         find_links.extend(["--find-links", str(root / directory)])
 
@@ -40,7 +39,9 @@ def main() -> int:
                 "--python",
                 str(python),
                 *find_links,
-                "aegis-agentguard[all]==0.1.0b1",
+                "aegis-agentguard-core==0.1.0b1",
+                "aegis-agentguard-api==0.1.0b1",
+                "aegis-agentguard-cli==0.1.0b1",
             ]
         )
         _run(
@@ -49,17 +50,10 @@ def main() -> int:
                 "-c",
                 (
                     "import importlib.util; "
-                    "import aegis_agentguard, agentguard_core, guard_api, "
-                    "agentguard_cli; "
-                    "assert aegis_agentguard.__version__ == '0.1.0b1'; "
+                    "import agentguard_core, guard_api, agentguard_cli; "
                     "assert agentguard_core.__version__ == '0.1.0b1'; "
                     "assert guard_api.__version__ == '0.1.0b1'; "
                     "assert agentguard_cli.__version__ == '0.1.0b1'; "
-                    "assert aegis_agentguard.GuardEngine is agentguard_core.GuardEngine; "
-                    "assert aegis_agentguard.GuardEvent is agentguard_core.GuardEvent; "
-                    "assert aegis_agentguard.GuardDecision is agentguard_core.GuardDecision; "
-                    "assert aegis_agentguard.PolicyBundle is agentguard_core.PolicyBundle; "
-                    "assert aegis_agentguard.evaluate is agentguard_core.evaluate; "
                     "assert importlib.util.find_spec('agentguard') is None"
                 ),
             ]

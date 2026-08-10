@@ -2,21 +2,22 @@ from __future__ import annotations
 
 # Dashboard-facing Guard API capability regressions.
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 from agentguard_core import AuditEvent
 from guard_api.main import create_app
-from guard_api.models import CredentialRecord
+from guard_api.models import AdapterStatusRecord
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
+from tests.support.auth import memory_store_with_adapter
 
 
-def test_evaluation_run_import_and_latest_requires_control_write_and_browser_or_control_read() -> None:
+def test_evaluation_run_import_and_latest_requires_control_write_and_browser_or_control_read() -> (
+    None
+):
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
 
@@ -25,7 +26,9 @@ def test_evaluation_run_import_and_latest_requires_control_write_and_browser_or_
     assert missing_response.status_code == 404
     assert missing_response.json()["error"]["code"] == "EVALUATION_NOT_FOUND"
 
-    payload = _evaluation_run_payload(run_id="eval_older", run_at="2026-06-20T00:00:00+00:00")
+    payload = _evaluation_run_payload(
+        run_id="eval_older", run_at="2026-06-20T00:00:00+00:00"
+    )
     adapter_response = client.post(
         "/v1/evaluations",
         headers={"Authorization": "Bearer adapter-secret"},
@@ -42,12 +45,17 @@ def test_evaluation_run_import_and_latest_requires_control_write_and_browser_or_
     assert control_response.status_code == 200
     assert control_response.json()["run_id"] == "eval_older"
 
-    newer_payload = _evaluation_run_payload(run_id="eval_newer", run_at="2026-06-21T00:00:00+00:00")
-    assert client.post(
-        "/v1/evaluations",
-        headers={"Authorization": "Bearer control-secret"},
-        json=newer_payload,
-    ).status_code == 200
+    newer_payload = _evaluation_run_payload(
+        run_id="eval_newer", run_at="2026-06-21T00:00:00+00:00"
+    )
+    assert (
+        client.post(
+            "/v1/evaluations",
+            headers={"Authorization": "Bearer control-secret"},
+            json=newer_payload,
+        ).status_code
+        == 200
+    )
 
     browser_latest = client.get("/v1/evaluations/latest")
     control_latest = client.get(
@@ -66,7 +74,7 @@ def test_evaluation_run_import_and_latest_requires_control_write_and_browser_or_
 
 def test_evaluation_run_rejects_invalid_asr_range() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
@@ -86,8 +94,8 @@ def test_evaluation_run_rejects_invalid_asr_range() -> None:
 
 def test_config_audit_findings_can_be_read_with_filters() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
+        store=memory_store_with_adapter(runtime="openclaw"),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
     response = client.post(
@@ -100,7 +108,7 @@ def test_config_audit_findings_can_be_read_with_filters() -> None:
             "target_id": "agentguard-security",
             "action": "before_install",
             "timestamp": "2026-06-28T00:00:00+00:00",
-            "metadata": {"trace_id": "trace_cfg_findings"},
+            "metadata": {"trace_id": "trace_cfg_findings", "agent_id": "main"},
             "findings": [
                 {
                     "finding_id": "finding_cfg_high",
@@ -143,31 +151,24 @@ def test_config_audit_findings_can_be_read_with_filters() -> None:
 
 def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret"),
+        store=memory_store_with_adapter(runtime="openclaw"),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     client = TestClient(app)
     _login_dashboard(client)
 
     unknown_response = client.get("/v1/adapters/openclaw/status")
     assert unknown_response.status_code == 200
-    assert unknown_response.json() == {
-        "status": "unknown",
-        "loaded": False,
-        "hook_count": None,
-        "expected_hook_count": 22,
-        "last_verified_at": None,
-        "error": None,
-        "source": None,
-    }
+    assert unknown_response.json() == AdapterStatusRecord().model_dump(mode="json")
 
     adapter_write = client.put(
         "/v1/adapters/openclaw/status",
         headers={"Authorization": "Bearer adapter-secret"},
         json=_openclaw_status_payload(),
     )
-    assert adapter_write.status_code == 403
-    assert adapter_write.json()["error"]["code"] == "SCOPE_DENIED"
+    assert adapter_write.status_code == 200
+    assert adapter_write.json()["runtime_id"] == "openclaw-gateway"
+    assert "runtime" not in adapter_write.json()
 
     write_response = client.put(
         "/v1/adapters/openclaw/status",
@@ -178,7 +179,7 @@ def test_openclaw_adapter_status_can_be_recorded_and_read() -> None:
 
     assert write_response.status_code == 200
     assert write_response.json()["status"] == "loaded"
-    assert write_response.json()["hook_count"] == 22
+    assert write_response.json()["hook_count"] == 23
     assert read_response.status_code == 200
     assert read_response.json() == write_response.json()
 
@@ -228,24 +229,24 @@ def _openclaw_status_payload() -> dict:
     return {
         "status": "loaded",
         "loaded": True,
-        "hook_count": 22,
-        "expected_hook_count": 22,
+        "hook_count": 23,
+        "expected_hook_count": 23,
         "last_verified_at": "2026-06-28T00:00:00+00:00",
         "error": None,
         "source": "agentguardctl",
+        "runtime_id": "openclaw-gateway",
+        "agent_id": "main",
     }
 
 
-# 契约 §5/§6/§14：原子审计窗口与 policy_evaluation cohort HTTP 层回归。
+# 原子审计窗口与 policy_evaluation cohort HTTP 层回归。
 
 
 def _window_app() -> tuple[MemoryControlPlaneStore, TestClient]:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     app = create_app(
         store=store,
-        settings=GuardApiSettings(
-            adapter_token="adapter-secret", control_token="control-secret"
-        ),
+        settings=GuardApiSettings(control_token="control-secret"),
     )
     return store, TestClient(app)
 
@@ -265,7 +266,10 @@ def _window_policy_audit(
         severity="low",
         blocked=decision in {"ask", "deny"},
         reason="HTTP window fixture.",
-        links={"event_id": f"evt_http_window_{index}", "decision_id": f"dec_http_window_{index}"},
+        links={
+            "event_id": f"evt_http_window_{index}",
+            "decision_id": f"dec_http_window_{index}",
+        },
     )
 
 
@@ -293,30 +297,25 @@ def test_audit_window_requires_dual_scopes_for_bearer() -> None:
     assert adapter_response.status_code == 403
     assert adapter_response.json()["error"]["code"] == "SCOPE_DENIED"
 
-    # 只持单一 scope 的凭证同样被拒（契约 §5.1）。
-    for scopes in (("audit:read",), ("metrics:read",)):
-        token = f"single-scope-{scopes[0]}"
-        store.create_credential(
-            CredentialRecord(
-                credential_id=f"cred_window_{scopes[0].replace(':', '_')}",
-                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
-                principal_type="cli",
-                principal_id=f"principal_{scopes[0]}",
-                role="viewer",
-                scopes=list(scopes),
-            )
-        )
-        single_response = client.get(
-            "/v1/audit/window", headers={"Authorization": f"Bearer {token}"}
-        )
-        assert single_response.status_code == 403
-        assert single_response.json()["error"]["code"] == "SCOPE_DENIED"
-
     # browser session 允许读取。
     _login_dashboard(client)
     browser_response = client.get("/v1/audit/window")
     assert browser_response.status_code == 200
     assert browser_response.json()["scope"]["returned_record_count"] == 2
+
+
+def test_superseded_audit_and_metric_read_routes_are_absent() -> None:
+    _, client = _window_app()
+    headers = {"Authorization": "Bearer control-secret"}
+
+    # POST /v1/audit/events 仍是 runtime 写入面，GET 读入面已删除。
+    audit_read = client.get("/v1/audit/events", headers=headers)
+    metric_read = client.get("/v1/metrics/eval", headers=headers)
+
+    assert audit_read.status_code == 405
+    assert audit_read.json()["error"]["code"] == "METHOD_NOT_ALLOWED"
+    assert metric_read.status_code == 404
+    assert metric_read.json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_audit_window_cursor_scope_mismatch_and_expired() -> None:
@@ -325,7 +324,9 @@ def test_audit_window_cursor_scope_mismatch_and_expired() -> None:
         store.add_audit_event(_window_policy_audit(index=index))
     headers = {"Authorization": "Bearer control-secret"}
 
-    first = client.get("/v1/audit/window?limit=2", headers=headers)
+    first = client.get(
+        "/v1/audit/window?limit=2&trace_id=trace_http_window", headers=headers
+    )
     assert first.status_code == 200
     cursor = first.json()["scope"]["next_cursor"]
     assert cursor
@@ -349,10 +350,15 @@ def test_audit_window_cursor_scope_mismatch_and_expired() -> None:
     assert expired.status_code == 410
     assert expired.json()["error"]["code"] == "CURSOR_EXPIRED"
 
-    # 同作用域续页成功且快照不变。
-    second = client.get(f"/v1/audit/window?limit=2&cursor={cursor}", headers=headers)
+    # cursor 自包含 filters/limit；续页只提交 cursor。
+    second = client.get(f"/v1/audit/window?cursor={cursor}", headers=headers)
     assert second.status_code == 200
     assert second.json()["scope"]["snapshot_id"] == first.json()["scope"]["snapshot_id"]
+    assert (
+        second.json()["scope"]["outcomes_as_of"]
+        == first.json()["scope"]["outcomes_as_of"]
+    )
+    assert second.json()["scope"]["filters"]["trace_id"] == "trace_http_window"
     assert second.json()["scope"]["has_more"] is False
 
 
@@ -365,6 +371,15 @@ def test_policy_evaluation_cohort_range_required_and_utc_normalized() -> None:
     missing = client.get("/v1/metrics/policy-evaluations", headers=headers)
     assert missing.status_code == 400
     assert missing.json()["error"]["code"] == "COHORT_RANGE_MISSING"
+
+    invalid = client.get(
+        "/v1/metrics/policy-evaluations"
+        "?evaluated_from=2026-08-02T00:00:00Z"
+        "&evaluated_to=2026-08-01T00:00:00Z",
+        headers=headers,
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "COHORT_RANGE_INVALID"
 
     # +08:00 偏移规范化为 UTC；outcomes_as_of 缺省回显请求快照时刻。
     response = client.get(
@@ -401,38 +416,3 @@ def test_policy_evaluation_cohort_range_required_and_utc_normalized() -> None:
     )
     assert adapter_response.status_code == 403
     assert adapter_response.json()["error"]["code"] == "SCOPE_DENIED"
-
-
-def test_audit_window_flag_disabled_returns_404(monkeypatch) -> None:
-    monkeypatch.delenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", raising=False)
-    settings = GuardApiSettings(
-        adapter_token="adapter-secret",
-        control_token="control-secret",
-        audit_window_enabled=False,
-    )
-    client = TestClient(create_app(store=MemoryControlPlaneStore(), settings=settings))
-    headers = {"Authorization": "Bearer control-secret"}
-
-    window_response = client.get("/v1/audit/window", headers=headers)
-    assert window_response.status_code == 404
-    assert window_response.json()["error"]["code"] == "NOT_FOUND"
-
-    cohort_response = client.get(
-        "/v1/metrics/policy-evaluations"
-        "?evaluated_from=2026-08-01T00:00:00Z&evaluated_to=2026-08-02T00:00:00Z",
-        headers=headers,
-    )
-    assert cohort_response.status_code == 404
-    assert cohort_response.json()["error"]["code"] == "NOT_FOUND"
-
-
-def test_audit_window_flag_defaults_follow_environment(monkeypatch) -> None:
-    monkeypatch.delenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", raising=False)
-    monkeypatch.setenv("AGENTGUARD_ENV", "development")
-    assert GuardApiSettings().audit_window_enabled is True
-    monkeypatch.setenv("AGENTGUARD_ENV", "production")
-    assert GuardApiSettings().audit_window_enabled is False
-    monkeypatch.setenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", "true")
-    assert GuardApiSettings().audit_window_enabled is True
-    monkeypatch.setenv("AGENTGUARD_AUDIT_WINDOW_ENABLED", "0")
-    assert GuardApiSettings().audit_window_enabled is False

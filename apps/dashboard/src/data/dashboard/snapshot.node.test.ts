@@ -48,7 +48,6 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     id: "approval_1",
     createdAt: "2026-06-22T06:30:00Z",
     status: "pending",
-    tool: "send_email",
     resource: "external@example.com",
     riskScore: 70,
     severity: "high",
@@ -63,7 +62,6 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     subjectType: "tool_call",
     actionId: "call_1",
     actionName: "send_email",
-    approvalNonce: "nonce_1",
     expiresAt: "2026-06-22T06:45:00Z",
     resolvedAt: null,
     ...overrides,
@@ -91,8 +89,7 @@ test("detects event type and malicious-label changes used by filters and metrics
 test("compares audit windows and their scoped metrics atomically", () => {
   const window = createAuditWindow([makeEvent()], {
     limit: 500,
-    hasMore: null,
-    source: "legacy_audit_events",
+    hasMore: false,
   });
   assert.equal(hasSameAuditWindow(window, createAuditWindow([makeEvent()], window.scope)), true);
   assert.equal(
@@ -147,15 +144,14 @@ test("compares evaluation runs without inheriting audit metrics", () => {
   );
 });
 
-test("updates approval nonce without replacing unchanged visible data", () => {
+test("reuses approvals when visible data is unchanged", () => {
   const current = [makeApproval()];
-  const incoming = [makeApproval({ approvalNonce: "nonce_2" })];
+  const incoming = [makeApproval()];
 
   const reconciled = reconcileApprovals(current, incoming);
 
   assert.equal(reconciled, current);
   assert.equal(reconciled[0], current[0]);
-  assert.equal(reconciled[0]?.approvalNonce, "nonce_2");
 });
 
 test("replaces approvals when visible data changes", () => {

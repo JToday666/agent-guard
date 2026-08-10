@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 
 
@@ -40,26 +38,3 @@ def verify_browser_or_bearer_scopes(
                 raise ApiAuthError("SCOPE_DENIED", status_code=403)
         return
     auth.verify_browser_session(agentguard_session)
-
-
-def verify_adapter_heartbeat_write(
-    auth: CapabilityAuthService, authorization: str | None
-) -> None:
-    try:
-        auth.verify_bearer(authorization, "adapter:status:write")
-    except ApiAuthError as error:
-        if error.code != "SCOPE_DENIED":
-            raise
-        auth.verify_bearer(authorization, "event:evaluate")
-
-
-def legacy_unknown_adapter_status() -> dict[str, Any]:
-    return {
-        "status": "unknown",
-        "loaded": False,
-        "hook_count": None,
-        "expected_hook_count": 22,
-        "last_verified_at": None,
-        "error": None,
-        "source": None,
-    }

@@ -30,7 +30,7 @@ SDK_ROOT = Path(__file__).resolve().parents[1] / "packages" / "agentguard-langgr
 if SDK_ROOT.exists() and str(SDK_ROOT) not in sys.path:
     sys.path.insert(0, str(SDK_ROOT))
 
-from agentguard_langgraph_adapter import ToolCompatibilityLayer
+from agentguard_langgraph_adapter import ToolCompatibilityLayer  # noqa: E402
 
 PROMPT_INJECTION_VISIBLE_TOOLS = {
     "read_file",

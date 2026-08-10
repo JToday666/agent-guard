@@ -43,9 +43,9 @@ Runtime Native Event
 | `GET /health?check_db=true` | P0 | Control Plane 数据库连接健康检查 |
 | `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
 | `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
-| `GET /v1/audit/events` | P0 | Dashboard/CLI 事件列表，可按 query 过滤 |
-| `GET /v1/audit/integrity` | P0 | Dashboard/CLI 审计完整性状态 |
-| `GET /v1/metrics/eval` | P0 | 评测指标，可按 query 过滤 |
+| `GET /v1/audit/window` | P0 | Dashboard/CLI 原子审计窗口，同时返回 scope、事件和策略指标 |
+| `GET /v1/audit/integrity` | P0 | Dashboard/CLI 数据库审计链状态与数据库外签名锚点状态 |
+| `GET /v1/metrics/policy-evaluations` | P0 | 按明确时间 cohort 聚合历史策略指标 |
 | `GET /v1/metrics/runtime` | P1 | 运行时监控指标，聚合审计事件、hook 活跃度和 adapter status |
 | `POST /v1/evaluations` | P1 | 导入并保存 AttackBench/Core matrix 等评测 run |
 | `GET /v1/evaluations` | P1 | 查询已保存评测 run，可按 dataset 过滤 |
@@ -66,13 +66,14 @@ Runtime Native Event
 | `GET /v1/policies/history` | P0 | 策略快照历史 |
 | `GET /v1/config-audit/findings` | P2 | 查询 Config Audit findings |
 | `POST /v1/config-audit/evaluate` | P2 | Adapter/Plugin 上报配置审计事件并得到阻断结果 |
-| `PUT /v1/adapters/{adapter_id}/status` | P2 | 写入 adapter 最近一次 verify/status 结果 |
-| `POST /v1/adapters/{adapter_id}/heartbeat` | P2 | Adapter/Plugin 上报 heartbeat 和能力信息 |
-| `GET /v1/adapters/{adapter_id}/status` | P2 | 查询 adapter 最近状态 |
+| `PUT /v1/adapters/{runtime}/status` | P2 | 写入 adapter 最近一次 verify/status 结果 |
+| `POST /v1/adapters/{runtime}/heartbeat` | P2 | Adapter/Plugin 上报 heartbeat 和能力信息 |
+| `GET /v1/adapters/{runtime}/status` | P2 | 查询 adapter 最近状态 |
 
 目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
 历史文档中的 `POST /v1/eval/runs` 已统一为当前实现的 `/v1/evaluations` 系列接口。
-`GET /v1/metrics/eval` 面向评测统计；`GET /v1/metrics/runtime` 面向运行时健康和 hook 活跃度，不替代评测指标。
+`GET /v1/metrics/policy-evaluations` 面向历史策略统计；`GET /v1/metrics/runtime`
+面向运行时健康和 hook 活跃度，两者不共用分母或状态。
 
 ## 4. 鉴权与状态
 
@@ -90,16 +91,16 @@ P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `Auth
 | 调用方           | 凭证            | 要求                                                                                 |
 | ---------------- | --------------- | ------------------------------------------------------------------------------------ |
 | CLI / Launcher   | control token   | `Authorization: Bearer`，用于 `auth:launch` 和 `audit:read`、`metrics:read`、`trace:read`、`policy:read` |
-| Adapter / Plugin | adapter token   | `Authorization: Bearer`，用于 `event:evaluate`、`event:audit:write`、`approval:wait` |
+| Adapter / Plugin | runtime credential | `Authorization: Bearer`，固定用于 `event:evaluate`、`event:audit:write`、`approval:wait`、`adapter:status:write`，并绑定 runtime/agent |
 | Vue Dashboard    | browser session | HttpOnly Cookie，用于 Dashboard API                                                  |
 | Vue 状态改变请求 | CSRF token      | `X-AgentGuard-CSRF`                                                                  |
-| 审批 resolve     | approval nonce  | JSON body，单次使用                                                                  |
+| 审批 resolve     | browser + CSRF  | Cookie 与 `X-AgentGuard-CSRF`；服务端原子终结审批                                     |
 
-Adapter 不得拥有 `approval:resolve`、`auth:launch` 或 CLI/Dashboard 只读 scope。Vue 不保存长期 token。browser session、launch code 和 approval nonce 由 Guard API / Control Plane 持久化保存。`launch_code`、`session_id` 和 `approval_nonce` 只保存 hash；launch code 和 approval nonce 只能消费一次；logout 后 browser session 被撤销。
+Adapter credential 由 Control Plane 签发，原始 token 只返回一次，数据库仅保存 hash 与 runtime/agent 身份。未注册的静态 token 不被接受。Adapter 不得拥有 `approval:resolve`、`auth:launch` 或 CLI/Dashboard 只读 scope。Vue 不保存长期 token。browser session 和 launch code 由 Guard API / Control Plane 持久化保存，`launch_code` 与 `session_id` 只保存 hash；launch code 只能消费一次，logout 后 browser session 被撤销。审批重复提交由服务端原子状态转换拒绝。
 Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/history` 接受 browser session 或 control token + `policy:read`，`PUT /v1/policies/current` 需要 browser session 和 `X-AgentGuard-CSRF`。Adapter token 不能读取或写入策略。
 `PUT /v1/policies/current` 替换单 current snapshot，并追加 history revision；Control Plane 必须保证并发写入时 revision 单调递增且 history 不丢失。
 
-除 `GET /health?check_db=true` 的数据库降级响应仍保持 `{"status":"degraded","database":"error"}` 外，Guard API 非 2xx 错误统一使用兼容 envelope：
+除 `GET /health?check_db=true` 的数据库降级响应使用 `{"status":"degraded","database":"error"}` 外，Guard API 非 2xx 错误统一使用以下 envelope：
 
 ```json
 {
@@ -117,11 +118,11 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 }
 ```
 
-既有客户端可以继续只读取 `error.code`；`message` 和 `details` 是向后兼容扩展字段。
+`error.code` 是程序分支依据；`message` 用于人类可读摘要，`details` 用于结构化诊断。
 
 ## 4.1 查询参数
 
-`GET /v1/audit/events` 支持以下可选 query 参数：
+`GET /v1/audit/window` 支持以下 query 参数：
 
 | 参数       | 含义                          |
 | ---------- | ----------------------------- |
@@ -129,9 +130,18 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 | `case_id`  | 只返回指定 case 的审计事件    |
 | `runtime`  | 只返回指定 runtime 的审计事件 |
 | `decision` | 只返回指定决策的审计事件      |
-| `limit`    | 返回条数，默认 500，最大 1000 |
+| `limit`    | 首页返回条数，默认 500，最大 1000 |
+| `cursor`   | 续页不透明指针；续页时只需提交该字段 |
 
-`GET /v1/metrics/eval` 支持 `trace_id`、`case_id`、`runtime`、`decision`。指标由 Control Plane 基于审计事件和样本标签聚合计算。
+`GET /v1/audit/window` 以审计链 sequence 固化快照。cursor 绑定快照、过滤条件、页大小和位置；新写入不得移动已返回页。
+
+`GET /v1/metrics/policy-evaluations` 必须提交 `evaluated_from` 和
+`evaluated_to`，可选 `outcomes_as_of`、`runtime` 和 `case_id`。时间使用带时区
+RFC 3339，范围语义为 `[evaluated_from, evaluated_to)`；记录还必须在
+`outcomes_as_of` 之前进入审计链。该截止时点缺省为固定 sequence 快照的捕获时刻，
+晚于快照的请求值以响应中可证明的有效截止时点为准。
+缺失范围返回 `COHORT_RANGE_MISSING`，格式、时区或顺序无效返回
+`COHORT_RANGE_INVALID`。
 
 `GET /v1/metrics/runtime` 支持 `runtime` 和 `limit`。返回总体审计事件计数、阻断率、平均延迟、`by_runtime` 分组、`hook_activity` 计数、`adapters` 最近状态和 `active_adapter_count`。
 
@@ -139,9 +149,9 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
 列表查询支持 `dataset_id`、`dataset_version` 和 `limit`。评测 run 支持 `dataset_digest`、`dataset_locked`、`regression_gate`，case 支持 `case_digest` 与 `provenance`；dataset registry 当前由已保存 run 聚合生成。
 
 `GET /v1/config-audit/findings` 接受 browser session 或 control token + `config-audit:read`，支持 `trace_id`、`target_id`、`target_type`、`severity`、`limit`。
-`POST /v1/config-audit/evaluate` 由 adapter token + `event:evaluate` 写入配置审计结果。
+`POST /v1/config-audit/evaluate` 由 runtime credential + `event:evaluate` 写入配置审计结果，并校验载荷 runtime/agent 身份。
 
-`PUT /v1/adapters/{adapter_id}/status` 由 control token + `adapter:status:write` 写入最近一次 verify/status；`POST /v1/adapters/{adapter_id}/heartbeat` 接受 adapter heartbeat 写入；`GET /v1/adapters/{adapter_id}/status` 接受 browser session 或 control token + `adapter:read`。
+`PUT /v1/adapters/{runtime}/status` 接受 control token 或绑定该 runtime/agent 的 credential + `adapter:status:write`；`POST /v1/adapters/{runtime}/heartbeat` 只接受绑定身份与路径 runtime 一致、且载荷 `agent_id` 一致的 runtime credential；`GET /v1/adapters/{runtime}/status` 接受 browser session 或 control token + `adapter:read`。路径是 runtime 的唯一权威表示，载荷不重复传 `runtime`；`runtime_id` 仅表示具体运行实例。
 
 `GET /v1/policies/current` 和 `PUT /v1/policies/current` 只管理一个当前 `PolicyBundle`
 快照，请求和响应仍是裸 `PolicyBundle`，不包 envelope。Guard API 从存储读取该快照并传入 `agentguard-core.evaluate(event, policies)`；
@@ -157,16 +167,10 @@ Policy API 属于管理面：`GET /v1/policies/current` 和 `GET /v1/policies/hi
   "trace_id": "trace_001",
   "audit_events": [],
   "approvals": [],
-  "metrics": {
-    "event_count": 0,
-    "allow_count": 0,
-    "deny_count": 0,
-    "ask_count": 0,
-    "blocked_count": 0,
-    "block_rate": null,
-    "fpr": null,
-    "fnr": null,
-    "average_latency_ms": null
+  "audit_window": {
+    "limit": 1000,
+    "returned_count": 0,
+    "has_more": false
   }
 }
 ```
@@ -316,7 +320,7 @@ P0 内置规则 ID：
 }
 ```
 
-`ask` 决策必须包含审批意图，但不包含已持久化的 approval row 或 approval nonce：
+`ask` 决策必须包含审批意图，但不包含已持久化的 approval row：
 
 ```json
 {
@@ -335,8 +339,8 @@ P0 内置规则 ID：
 ```
 
 Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `approval_id` 返回给 Adapter。
-审批记录使用 `subject_id` 绑定 approval nonce 和 resolve 操作。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。
-审批响应同时包含 `subject_id`、`subject_type`、`action_id` 和 `action_name`。`tool_call_id` 是兼容别名，当前等于 `subject_id`，后续删除该字段必须单独做破坏性迁移。
+审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。resolve 只允许从未过期的 pending 状态原子转换一次。
+审批响应只使用 `subject_id`、`subject_type`、`action_id` 和 `action_name` 表达主体与动作；不接受或返回工具专用别名。
 
 ## 9. AuditEvent
 
@@ -516,6 +520,6 @@ Core 会同时读取 `contains_sensitive_data` 和 `content_preview` 中的敏�
 1. P0 三个核心模型有 JSON Schema。
 2. `POST /v1/guard/evaluate` 能返回 `allow`、`deny`、`ask`。
 3. Adapter 能依据 `GuardDecision` 控制工具是否执行。
-4. Core 返回 `ask` 时只包含审批意图，approval row 和 nonce 由 Guard API / Control Plane 创建。
+4. Core 返回 `ask` 时只包含审批意图，approval row 与终态转换由 Guard API / Control Plane 管理。
 5. Dashboard 能基于 AuditEvent 展示阻断原因。
 6. AttackBench runner 能用 `case_id`、`trace_id` 汇总指标。

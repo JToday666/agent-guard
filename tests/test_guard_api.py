@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -8,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from agentguard_core import (
     AuditEvent,
@@ -20,14 +22,26 @@ from agentguard_core import (
 from guard_api.auth import ApiAuthError, CapabilityAuthService
 from guard_api.llm_approval import HttpLlmApprovalReviewer
 from guard_api.main import create_app
-from guard_api.models import ApprovalRequest, LlmApprovalReviewInput
-from guard_api.services import PolicyService
+from guard_api.middleware import RequestBodyLimitMiddleware
+from guard_api.models import (
+    ApprovalRequest,
+    CredentialCreateRequest,
+    LlmApprovalReviewInput,
+)
+from guard_api.services import MetricService, PolicyService
 from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
-from guard_api.storage.base import AuditIdConflictError
+from guard_api.storage.base import (
+    ApprovalStateConflictError,
+    AuditIdConflictError,
+    PolicyRevisionConflictError,
+)
 from guard_api.storage.integrity import canonical_sha256
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
+from tests.support.auth import memory_store_with_adapter
+
+_AUDIT_CHECKPOINT_TEST_KEY = "Y2hlY2twb2ludC10ZXN0LWtleS1tYXRlcmlhbC0zMmI"
 
 
 class FailingHealthStore(MemoryControlPlaneStore):
@@ -74,7 +88,6 @@ class FakeLlmApprovalReviewer:
 
 def _llm_approval_settings() -> GuardApiSettings:
     return GuardApiSettings(
-        adapter_token="adapter-secret",
         control_token="control-secret",
         llm_approval_enabled=True,
         llm_approval_api_key="test-key",
@@ -115,6 +128,7 @@ def _guard_event_payload(
             "user_task": user_task,
             "source_type": "webpage",
             "source_trust": source_trust,
+            "agent_id": "main",
         },
         "payload": {
             "tool": {
@@ -127,6 +141,79 @@ def _guard_event_payload(
             "derived_resources": derived_resources or [],
         },
         "metadata": {},
+    }
+
+
+def _runtime_outcome_payload(parent: AuditEvent) -> dict:
+    event_id = parent.links["event_id"]
+    approval_id = parent.links.get("approval_id")
+    links = {
+        "event_id": event_id,
+        "decision_id": parent.links["decision_id"],
+        "policy_audit_id": parent.audit_id,
+    }
+    if action_id := parent.links.get("action_id"):
+        links["action_id"] = action_id
+    if approval_id:
+        links["approval_id"] = approval_id
+    completed_at = "2026-06-11T00:00:01+00:00"
+    return {
+        "audit_id": f"audit_outcome_{event_id}_pre_execution_deny",
+        "schema_version": "0.4",
+        "record_type": "runtime_outcome",
+        "trace_id": parent.trace_id,
+        "case_id": parent.case_id,
+        "runtime": parent.runtime,
+        "timestamp": completed_at,
+        "stage": "after_guard_decision",
+        "event_type": "runtime_outcome",
+        "attack_type": parent.attack_type,
+        "is_malicious": parent.is_malicious,
+        "summary": "运行时确认动作未被调用",
+        "decision": parent.decision,
+        "risk_score": parent.risk_score,
+        "severity": parent.severity,
+        "blocked": parent.blocked,
+        "resource_targets": parent.resource_targets,
+        "rule_hits": parent.rule_hits,
+        "reason": "策略处理后未进入动作调用入口",
+        "links": links,
+        "latency_ms": None,
+        "metadata": {
+            "agent_id": parent.metadata["agent_id"],
+            "outcome_kind": "pre_execution_deny",
+        },
+        "evidence": {
+            "intervention": {
+                "type": "approval_not_obtained" if approval_id else "policy_deny",
+                "reason": "动作在执行前被终止",
+            },
+            "execution": {
+                "status": "not_invoked",
+                "receipt_recorded": True,
+                "invoked_at": None,
+                "completed_at": completed_at,
+                "error": None,
+                "tool_result_entered_context": False,
+                "persisted": False,
+            },
+            "side_effects": {
+                "measurement_status": "measured",
+                "count": 0,
+                "summary": "动作未进入运行时调用入口",
+            },
+            "result": {
+                "disposition": "not_applicable",
+                "summary": None,
+                "sanitized": False,
+            },
+            "approval": {
+                "approval_id": approval_id,
+                "status": "pending" if approval_id else "not_required",
+                "decision": None,
+                "resolved_at": None,
+            },
+        },
     }
 
 
@@ -154,6 +241,7 @@ def _p1_guard_event_payload(
             "user_task": "Review external content safely",
             "source_type": "webpage",
             "source_trust": source_trust,
+            "agent_id": "main",
         },
         "payload": payload,
         "metadata": {},
@@ -161,7 +249,10 @@ def _p1_guard_event_payload(
 
 
 def test_guard_evaluate_requires_adapter_token() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
 
     response = client.post("/v1/guard/evaluate", json=_guard_event_payload())
@@ -174,7 +265,10 @@ def test_guard_evaluate_requires_adapter_token() -> None:
 
 
 def test_guard_evaluate_rejects_wrong_schema_version() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
     payload = _guard_event_payload()
     payload["schema_version"] = "0.2"
@@ -193,8 +287,32 @@ def test_guard_evaluate_rejects_wrong_schema_version() -> None:
     assert {"loc", "msg", "type"}.issubset(body["error"]["details"][0])
 
 
+def test_guard_evaluate_rejects_timestamp_without_timezone_before_side_effects() -> (
+    None
+):
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=GuardApiSettings()))
+    payload = _guard_event_payload(event_id="evt_naive_timestamp")
+    payload["timestamp"] = "2026-06-11T00:00:00"
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "AUDIT_TIMESTAMP_INVALID"
+    assert store.audit_events == []
+    assert store.approvals == {}
+    assert store.memory_changes == {}
+
+
 def test_audit_events_reject_wrong_schema_version() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
     payload = _audit_event_payload(
         audit_id="audit_bad_version",
@@ -242,7 +360,10 @@ def test_audit_events_reject_wrong_schema_version() -> None:
     ],
 )
 def test_guard_evaluate_rejects_invalid_p1_payload_contracts(event: dict) -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -258,7 +379,10 @@ def test_guard_evaluate_rejects_invalid_p1_payload_contracts(event: dict) -> Non
 
 
 def test_old_evaluate_and_single_audit_routes_are_not_registered() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
 
     evaluate_response = client.post(
@@ -269,7 +393,12 @@ def test_old_evaluate_and_single_audit_routes_are_not_registered() -> None:
     audit_response = client.post(
         "/v1/audit" + "/event",
         headers={"Authorization": "Bearer adapter-secret"},
-        json=_audit_event_payload(audit_id="audit_old", trace_id="trace_old", decision="allow", runtime="langgraph"),
+        json=_audit_event_payload(
+            audit_id="audit_old",
+            trace_id="trace_old",
+            decision="allow",
+            runtime="langgraph",
+        ),
     )
 
     assert evaluate_response.status_code == 404
@@ -287,7 +416,7 @@ def test_health_is_lightweight_by_default() -> None:
 
 
 def test_health_can_check_database_status() -> None:
-    success_client = TestClient(create_app(store=MemoryControlPlaneStore()))
+    success_client = TestClient(create_app(store=memory_store_with_adapter()))
     failure_client = TestClient(create_app(store=FailingHealthStore()))
 
     success_response = success_client.get("/health?check_db=true")
@@ -299,7 +428,7 @@ def test_health_can_check_database_status() -> None:
     assert failure_response.json() == {"status": "degraded", "database": "error"}
 
 
-def test_production_startup_rejects_default_database_and_tokens() -> None:
+def test_production_startup_rejects_default_database_and_control_token() -> None:
     settings = GuardApiSettings(environment="production")
 
     with pytest.raises(GuardApiConfigurationError) as error:
@@ -307,13 +436,69 @@ def test_production_startup_rejects_default_database_and_tokens() -> None:
 
     message = str(error.value)
     assert "AGENTGUARD_DATABASE_URL" in message
-    assert "AGENTGUARD_ADAPTER_TOKEN" in message
     assert "AGENTGUARD_CONTROL_TOKEN" in message
+
+
+def test_external_bind_rejects_development_defaults() -> None:
+    settings = GuardApiSettings(host="0.0.0.0")
+
+    with pytest.raises(GuardApiConfigurationError, match="Externally exposed"):
+        settings.validate_for_startup()
+
+
+def test_production_configuration_requires_secure_cookie_and_strong_token() -> None:
+    settings = GuardApiSettings(
+        environment="production",
+        database_url=(
+            "postgresql+psycopg://agentguard:strong-password@db.internal:5432/agent_guard"
+        ),
+        control_token="short-token",
+        browser_cookie_secure=False,
+    )
+
+    with pytest.raises(GuardApiConfigurationError, match="at least 32 characters"):
+        settings.validate_for_startup()
+
+    settings.control_token = "a" * 32
+    with pytest.raises(GuardApiConfigurationError, match="COOKIE_SECURE"):
+        settings.validate_for_startup()
+
+    settings.browser_cookie_secure = True
+    with pytest.raises(GuardApiConfigurationError, match="external audit checkpoint"):
+        settings.validate_for_startup()
+
+    settings.audit_checkpoint_path = "/tmp/agentguard-audit-checkpoints.jsonl"
+    settings.audit_checkpoint_key = _AUDIT_CHECKPOINT_TEST_KEY
+    settings.audit_checkpoint_key_id = "test-key-2026"
+    settings.validate_for_startup()
+
+
+def test_audit_checkpoint_configuration_is_complete_and_strong() -> None:
+    partial = GuardApiSettings(
+        audit_checkpoint_path="/tmp/agentguard-audit-checkpoints.jsonl"
+    )
+    with pytest.raises(GuardApiConfigurationError, match="configured together"):
+        partial.validate_for_startup()
+
+    weak = GuardApiSettings(
+        audit_checkpoint_path="/tmp/agentguard-audit-checkpoints.jsonl",
+        audit_checkpoint_key="dG9vLXNob3J0",
+        audit_checkpoint_key_id="test-key-2026",
+    )
+    with pytest.raises(GuardApiConfigurationError, match="at least 32 bytes"):
+        weak.validate_for_startup()
+
+
+def test_settings_reject_invalid_environment_and_empty_control_token() -> None:
+    with pytest.raises(GuardApiConfigurationError, match="AGENTGUARD_ENV"):
+        GuardApiSettings(environment="prod").validate_for_startup()
+    with pytest.raises(GuardApiConfigurationError, match="cannot be empty"):
+        GuardApiSettings(control_token="   ").validate_for_startup()
 
 
 def test_auth_state_survives_new_auth_service_instance() -> None:
     settings = GuardApiSettings(control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     first_auth = CapabilityAuthService(settings=settings, store=store)
 
     launch_code = first_auth.create_launch_code()
@@ -322,95 +507,181 @@ def test_auth_state_survives_new_auth_service_instance() -> None:
     third_auth = CapabilityAuthService(settings=settings, store=store)
 
     restored = third_auth.verify_browser_session(session.session_id)
-    nonce = third_auth.issue_approval_nonce(
-        approval_id="app_cross_instance",
-        session_id=session.session_id,
-        tool_call_id="call_cross_instance",
-    )
-    fourth_auth = CapabilityAuthService(settings=settings, store=store)
-    fourth_auth.consume_approval_nonce(
-        nonce=nonce,
-        approval_id="app_cross_instance",
-        session_id=session.session_id,
-        tool_call_id="call_cross_instance",
-    )
 
     assert restored.session_id == session.session_id
     assert restored.csrf_token == session.csrf_token
     with pytest.raises(ApiAuthError) as reused_launch:
         second_auth.exchange_launch_code(launch_code)
     assert reused_launch.value.code == "LAUNCH_CODE_INVALID"
-    with pytest.raises(ApiAuthError) as reused_nonce:
-        third_auth.consume_approval_nonce(
-            nonce=nonce,
-            approval_id="app_cross_instance",
-            session_id=session.session_id,
-            tool_call_id="call_cross_instance",
+
+
+def test_adapter_credentials_are_issued_with_a_fixed_runtime_profile() -> None:
+    store = memory_store_with_adapter()
+    auth = CapabilityAuthService(settings=GuardApiSettings(), store=store)
+
+    token, credential = auth.create_credential(
+        CredentialCreateRequest(
+            principal_id="openclaw:agent-a",
+            runtime="openclaw",
+            agent_id="agent-a",
         )
-    assert reused_nonce.value.code == "APPROVAL_NONCE_INVALID"
-
-    subject_nonce = third_auth.issue_approval_nonce(
-        approval_id="app_subject_instance",
-        session_id=session.session_id,
-        subject_id="subject_cross_instance",
     )
-    with pytest.raises(ApiAuthError) as wrong_subject:
-        third_auth.consume_approval_nonce(
-            nonce=subject_nonce,
-            approval_id="app_subject_instance",
-            session_id=session.session_id,
-            subject_id="subject_wrong",
+    context = auth.verify_bearer(f"Bearer {token}", "event:evaluate")
+
+    assert credential.principal_type == "component"
+    assert credential.role == "adapter"
+    assert set(credential.scopes) == {
+        "event:evaluate",
+        "event:audit:write",
+        "approval:wait",
+        "adapter:status:write",
+    }
+    assert "token_hash" not in credential.public_dump()
+    auth.verify_runtime_identity(
+        context, runtime="openclaw", agent_id="agent-a", require_agent_id=True
+    )
+    with pytest.raises(ApiAuthError) as incomplete:
+        auth.verify_runtime_identity(
+            context,
+            runtime="openclaw",
+            agent_id=None,
+            require_agent_id=True,
         )
-    assert wrong_subject.value.code == "APPROVAL_NONCE_INVALID"
-    third_auth.consume_approval_nonce(
-        nonce=subject_nonce,
-        approval_id="app_subject_instance",
-        session_id=session.session_id,
-        subject_id="subject_cross_instance",
+    assert incomplete.value.code == "EVENT_IDENTITY_INCOMPLETE"
+    with pytest.raises(ApiAuthError) as mismatch:
+        auth.verify_runtime_identity(
+            context,
+            runtime="langgraph",
+            agent_id="agent-a",
+            require_agent_id=True,
+        )
+    assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+
+
+def test_unregistered_static_adapter_token_is_rejected() -> None:
+    auth = CapabilityAuthService(
+        settings=GuardApiSettings(), store=MemoryControlPlaneStore()
     )
 
+    with pytest.raises(ApiAuthError) as error:
+        auth.verify_bearer("Bearer adapter-secret", "event:evaluate")
 
-def test_approval_request_backfills_subject_fields_from_legacy_tool_call_id() -> None:
-    approval = ApprovalRequest(
-        trace_id="trace_legacy_approval",
-        tool_call_id="call_legacy",
-        requesting_principal_id="cred_adapter_main",
-        tool="send_email",
-        resource="external@example.com",
-        reason="approval required",
-        risk_score=62,
-        severity="medium",
-    )
-
-    assert approval.subject_id == "call_legacy"
-    assert approval.subject_type == "tool_call"
-    assert approval.action_id == "call_legacy"
-    assert approval.action_name == "send_email"
-    assert approval.tool_call_id == "call_legacy"
+    assert error.value.code == "TOKEN_INVALID"
 
 
-def test_approval_request_serializes_legacy_tool_call_alias_for_new_subject_fields() -> None:
+def test_approval_request_rejects_removed_tool_aliases() -> None:
+    with pytest.raises(ValidationError):
+        ApprovalRequest(
+            trace_id="trace_removed_alias",
+            subject_id="call_removed_alias",
+            subject_type="tool_call",
+            action_id="call_removed_alias",
+            action_name="send_email",
+            tool_call_id="call_removed_alias",
+            tool="send_email",
+            requesting_principal_id="cred_adapter_main",
+            resource="external@example.com",
+            reason="approval required",
+            risk_score=62,
+            severity="medium",
+            expires_at="2099-01-01T00:00:00+00:00",
+        )
+
+
+def test_approval_request_serializes_only_canonical_subject_and_action_fields() -> None:
     approval = ApprovalRequest(
         trace_id="trace_subject_approval",
         subject_id="evt_subject",
         subject_type="message_send_proposed",
+        action_id="evt_subject",
         action_name="message_send_proposed",
         requesting_principal_id="cred_adapter_main",
-        tool="message_send_proposed",
         resource="external@example.com",
         reason="approval required",
         risk_score=62,
         severity="medium",
+        expires_at="2099-01-01T00:00:00+00:00",
     )
     payload = approval.model_dump(mode="json")
 
     assert approval.action_id == "evt_subject"
-    assert approval.tool_call_id == "evt_subject"
     assert payload["subject_id"] == "evt_subject"
     assert payload["subject_type"] == "message_send_proposed"
     assert payload["action_id"] == "evt_subject"
     assert payload["action_name"] == "message_send_proposed"
-    assert payload["tool_call_id"] == "evt_subject"
+    assert "tool_call_id" not in payload
+    assert "tool" not in payload
+
+
+def test_approval_expiry_is_derived_without_mutating_storage_on_read() -> None:
+    store = memory_store_with_adapter()
+    approval = ApprovalRequest(
+        approval_id="app_expired",
+        trace_id="trace_expired",
+        subject_id="call_expired",
+        subject_type="tool_call",
+        action_id="call_expired",
+        action_name="send_email",
+        requesting_principal_id="cred_adapter_main",
+        resource="external@example.com",
+        reason="approval required",
+        risk_score=62,
+        severity="medium",
+        created_at="2020-01-01T00:00:00+00:00",
+        expires_at="2020-01-01T00:15:00+00:00",
+    )
+    store.create_approval(approval)
+
+    assert store.list_pending_approvals() == []
+    expired = store.get_approval(approval.approval_id)
+    assert expired is not None
+    assert expired.status == "expired"
+    assert expired.decision == "deny"
+    assert store.approvals[approval.approval_id].status == "pending"
+    with pytest.raises(ApprovalStateConflictError) as conflict:
+        store.resolve_approval(approval.approval_id, "allow_once")
+    assert conflict.value.status == "expired"
+
+
+def test_approval_resolution_allows_exactly_one_concurrent_transition() -> None:
+    store = memory_store_with_adapter()
+    approval = store.create_approval(
+        ApprovalRequest(
+            approval_id="app_concurrent",
+            trace_id="trace_concurrent",
+            subject_id="call_concurrent",
+            subject_type="tool_call",
+            action_id="call_concurrent",
+            action_name="send_email",
+            requesting_principal_id="cred_adapter_main",
+            resource="external@example.com",
+            reason="approval required",
+            risk_score=62,
+            severity="medium",
+            expires_at="2099-01-01T00:00:00+00:00",
+        )
+    )
+
+    def resolve(decision: str) -> ApprovalRequest | ApprovalStateConflictError:
+        try:
+            return store.resolve_approval(approval.approval_id, decision)
+        except ApprovalStateConflictError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(resolve, ["allow_once", "deny"]))
+
+    resolved = [item for item in results if isinstance(item, ApprovalRequest)]
+    conflicts = [
+        item for item in results if isinstance(item, ApprovalStateConflictError)
+    ]
+    assert len(resolved) == 1
+    assert len(conflicts) == 1
+    assert conflicts[0].status == "resolved"
+    stored = store.get_approval(approval.approval_id)
+    assert stored is not None
+    assert stored.status == "resolved"
+    assert stored.decision == resolved[0].decision
 
 
 def test_startup_initializes_control_plane_store() -> None:
@@ -426,7 +697,7 @@ def test_startup_initializes_control_plane_store() -> None:
 
 
 def test_startup_can_use_configured_memory_storage_backend() -> None:
-    settings = GuardApiSettings(storage_backend="memory", adapter_token="adapter-secret")
+    settings = GuardApiSettings(storage_backend="memory")
     app = create_app(settings=settings)
 
     with TestClient(app) as client:
@@ -441,7 +712,6 @@ def test_production_rejects_memory_storage_backend() -> None:
         environment="production",
         storage_backend="memory",
         database_url="postgresql+psycopg://postgres:strong-password@127.0.0.1:5432/agent_guard",
-        adapter_token="adapter-secret",
         control_token="control-secret",
     )
 
@@ -450,16 +720,110 @@ def test_production_rejects_memory_storage_backend() -> None:
 
 
 def test_startup_fails_when_control_plane_initialize_fails() -> None:
-    app = create_app(store=FailingInitializeStore(), settings=GuardApiSettings(environment="development"))
+    app = create_app(
+        store=FailingInitializeStore(),
+        settings=GuardApiSettings(environment="development"),
+    )
 
     with pytest.raises(RuntimeError, match="control plane initialize failed"):
         with TestClient(app):
             pass
 
 
+def test_browser_exchange_sets_secure_cookie_when_required(tmp_path) -> None:
+    settings = GuardApiSettings(
+        environment="production",
+        database_url=(
+            "postgresql+psycopg://agentguard:strong-password@db.internal:5432/agent_guard"
+        ),
+        control_token="c" * 32,
+        browser_cookie_secure=True,
+        audit_checkpoint_path=str(tmp_path / "audit-checkpoints.jsonl"),
+        audit_checkpoint_key=_AUDIT_CHECKPOINT_TEST_KEY,
+        audit_checkpoint_key_id="test-key-2026",
+    )
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+
+    with TestClient(app, base_url="https://testserver") as client:
+        launch = client.post(
+            "/v1/auth/browser/launch",
+            headers={"Authorization": f"Bearer {settings.control_token}"},
+        )
+        exchange = client.post(
+            "/v1/auth/browser/exchange",
+            json={"launch_code": launch.json()["launch_code"]},
+        )
+        integrity = client.get("/v1/audit/integrity")
+
+    cookie = exchange.headers["set-cookie"]
+    assert "Secure" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=strict" in cookie
+    assert integrity.status_code == 200
+    assert integrity.json()["anchor"]["enabled"] is True
+    assert integrity.json()["anchor"]["status"] == "empty"
+
+
+def test_request_body_limit_rejects_payload_before_route_validation() -> None:
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(max_request_body_bytes=1024),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/auth/browser/exchange",
+        json={"launch_code": "x" * 2048},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"] == {
+        "code": "REQUEST_TOO_LARGE",
+        "message": "Request body exceeds the configured size limit.",
+        "details": {"max_body_bytes": 1024},
+    }
+
+
+def test_request_body_limit_counts_stream_chunks_without_content_length() -> None:
+    sent: list[dict] = []
+    chunks = iter(
+        [
+            {"type": "http.request", "body": b"x" * 700, "more_body": True},
+            {"type": "http.request", "body": b"y" * 700, "more_body": False},
+        ]
+    )
+
+    async def receive() -> dict:
+        return next(chunks)
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    async def downstream(scope: dict, receive_body, send_response) -> None:
+        del scope
+        while True:
+            message = await receive_body()
+            if not message.get("more_body", False):
+                break
+        await send_response({"type": "http.response.start", "status": 204})
+        await send_response({"type": "http.response.body", "body": b""})
+
+    middleware = RequestBodyLimitMiddleware(downstream, max_body_bytes=1024)
+    asyncio.run(
+        middleware(
+            {"type": "http", "method": "POST", "headers": []},
+            receive,
+            send,
+        )
+    )
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413
+
+
 def test_ask_approval_resolve_and_wait_flow() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     decision_response = client.post(
@@ -477,7 +841,9 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
         headers={"Authorization": "Bearer control-secret"},
     )
     launch_code = launch_response.json()["launch_code"]
-    exchange_response = client.post("/v1/auth/browser/exchange", json={"launch_code": launch_code})
+    exchange_response = client.post(
+        "/v1/auth/browser/exchange", json={"launch_code": launch_code}
+    )
     csrf_token = exchange_response.json()["csrf_token"]
 
     pending_response = client.get("/v1/approvals/pending")
@@ -488,15 +854,22 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     assert pending[0]["subject_type"] == "tool_call"
     assert pending[0]["action_id"] == "call_api"
     assert pending[0]["action_name"] == "send_email"
-    assert pending[0]["tool_call_id"] == "call_api"
+    assert "tool_call_id" not in pending[0]
+    assert "tool" not in pending[0]
     assert pending[0]["evidence"]["event"]["trace_id"] == "trace_api"
-    assert pending[0]["evidence"]["decision"]["rule_hits"][0]["rule_id"] == "P005_external_send"
-    assert pending[0]["evidence"]["payload"]["arguments"]["to"] == "exfiltration-intake@red-team.agentguard.local"
-    approval_nonce = pending[0]["approval_nonce"]
+    assert (
+        pending[0]["evidence"]["decision"]["rule_hits"][0]["rule_id"]
+        == "P005_external_send"
+    )
+    assert (
+        pending[0]["evidence"]["payload"]["arguments"]["to"]
+        == "exfiltration-intake@red-team.agentguard.local"
+    )
+    assert "approval_nonce" not in pending[0]
 
     rejected_response = client.post(
         f"/v1/approvals/{approval_id}/resolve",
-        json={"decision": "allow_once", "approval_nonce": approval_nonce},
+        json={"decision": "allow_once"},
     )
     assert rejected_response.status_code == 403
     assert rejected_response.json()["error"]["code"] == "CSRF_INVALID"
@@ -504,11 +877,19 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
     resolve_response = client.post(
         f"/v1/approvals/{approval_id}/resolve",
         headers={"X-AgentGuard-CSRF": csrf_token},
-        json={"decision": "allow_once", "approval_nonce": approval_nonce},
+        json={"decision": "allow_once"},
     )
     assert resolve_response.status_code == 200
     assert resolve_response.json()["status"] == "resolved"
     assert resolve_response.json()["decision"] == "allow_once"
+
+    repeated_response = client.post(
+        f"/v1/approvals/{approval_id}/resolve",
+        headers={"X-AgentGuard-CSRF": csrf_token},
+        json={"decision": "deny"},
+    )
+    assert repeated_response.status_code == 409
+    assert repeated_response.json()["error"]["code"] == "APPROVAL_ALREADY_RESOLVED"
 
     wait_response = client.get(
         f"/v1/approvals/{approval_id}/wait",
@@ -521,9 +902,11 @@ def test_ask_approval_resolve_and_wait_flow() -> None:
 
 
 def test_llm_auto_approval_does_not_review_deny_decisions() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     reviewer = FakeLlmApprovalReviewer()
-    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    app = create_app(
+        store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -547,7 +930,7 @@ def test_llm_auto_approval_does_not_review_deny_decisions() -> None:
 
 
 def test_llm_auto_approval_allows_medium_risk_ask_once() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     reviewer = FakeLlmApprovalReviewer(
         {
             "decision": "allow_once",
@@ -556,7 +939,9 @@ def test_llm_auto_approval_allows_medium_risk_ask_once() -> None:
             "evidence_refs": ["decision.rule_hits[0]", "payload.arguments.to"],
         }
     )
-    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    app = create_app(
+        store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -580,7 +965,10 @@ def test_llm_auto_approval_allows_medium_risk_ask_once() -> None:
     assert approval.decision == "allow_once"
     assert approval.resolution_source == "llm"
     assert approval.resolved_by == "llm-approval"
-    assert approval.resolution_reason == "External message contains no sensitive data and is bounded to one send."
+    assert (
+        approval.resolution_reason
+        == "External message contains no sensitive data and is bounded to one send."
+    )
     assert approval.llm_review is not None
     assert approval.llm_review.status == "resolved"
     assert approval.llm_review.decision == "allow_once"
@@ -591,16 +979,26 @@ def test_llm_auto_approval_allows_medium_risk_ask_once() -> None:
     assert wait_body["decision"] == "allow_once"
     assert wait_body["resolution_source"] == "llm"
     assert wait_body["resolved_by"] == "llm-approval"
-    assert wait_body["resolution_reason"] == "External message contains no sensitive data and is bounded to one send."
+    assert (
+        wait_body["resolution_reason"]
+        == "External message contains no sensitive data and is bounded to one send."
+    )
     assert wait_body["llm_review"]["status"] == "resolved"
     assert wait_body["llm_review"]["decision"] == "allow_once"
     assert len(reviewer.inputs) == 1
-    assert set(reviewer.inputs[0]) == {"evidence", "reason", "resource", "risk_score", "runtime", "severity"}
+    assert set(reviewer.inputs[0]) == {
+        "evidence",
+        "reason",
+        "resource",
+        "risk_score",
+        "runtime",
+        "severity",
+    }
     assert reviewer.inputs[0]["evidence"]["event"]["trace_id"] == "trace_llm_allow_once"
 
 
 def test_llm_auto_approval_can_deny_ask() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     reviewer = FakeLlmApprovalReviewer(
         {
             "decision": "deny",
@@ -609,7 +1007,9 @@ def test_llm_auto_approval_can_deny_ask() -> None:
             "evidence_refs": ["decision.rule_hits[0]"],
         }
     )
-    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    app = create_app(
+        store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -641,10 +1041,14 @@ def test_llm_auto_approval_can_deny_ask() -> None:
 
 
 def test_llm_auto_approval_keeps_high_risk_allow_once_pending() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     reviewer = FakeLlmApprovalReviewer()
     policy_bundle = PolicyBundle(
-        rule_overrides={"P005_external_send": RuleOverride(decision="ask", risk_score=75, severity="high")}
+        rule_overrides={
+            "P005_external_send": RuleOverride(
+                decision="ask", risk_score=75, severity="high"
+            )
+        }
     )
     app = create_app(
         store=store,
@@ -675,9 +1079,11 @@ def test_llm_auto_approval_keeps_high_risk_allow_once_pending() -> None:
 
 
 def test_llm_auto_approval_error_keeps_approval_pending() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     reviewer = FakeLlmApprovalReviewer(error=ValueError("invalid JSON from model"))
-    app = create_app(store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer)
+    app = create_app(
+        store=store, settings=_llm_approval_settings(), llm_approval_reviewer=reviewer
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -698,9 +1104,8 @@ def test_llm_auto_approval_error_keeps_approval_pending() -> None:
 
 
 def test_llm_auto_approval_missing_config_records_error_without_resolving() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     settings = GuardApiSettings(
-        adapter_token="adapter-secret",
         control_token="control-secret",
         llm_approval_enabled=True,
     )
@@ -775,16 +1180,29 @@ def test_http_llm_approval_reviewer_sends_evidence_only_request() -> None:
     assert captured["url"] == "https://llm.example/v1/chat/completions"
     assert captured["authorization"] == "Bearer secret-key"
     assert sent_payload["model"] == "approval-model"
-    assert set(sent_input) == {"evidence", "reason", "resource", "risk_score", "runtime", "severity"}
-    assert sent_input["evidence"]["decision"]["rule_hits"][0]["rule_id"] == "P005_external_send"
+    assert set(sent_input) == {
+        "evidence",
+        "reason",
+        "resource",
+        "risk_score",
+        "runtime",
+        "severity",
+    }
+    assert (
+        sent_input["evidence"]["decision"]["rule_hits"][0]["rule_id"]
+        == "P005_external_send"
+    )
     assert review.decision == "deny"
     assert review.provider == "openai-compatible"
     assert review.model == "approval-model"
 
 
 def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(
+        store=memory_store_with_adapter(runtime="openclaw", agent_id="openclaw"),
+        settings=settings,
+    )
     client = TestClient(app)
     event = _p1_guard_event_payload(
         event_id="evt_rag_answer_approval",
@@ -837,17 +1255,22 @@ def test_rag_answer_approval_includes_payload_evidence_for_review() -> None:
     pending = client.get("/v1/approvals/pending").json()
     approval = next(item for item in pending if item["approval_id"] == approval_id)
 
-    assert approval["tool"] == "rag_answer"
+    assert approval["action_name"] == "rag_answer"
     assert approval["resource"] == "rag_answer:nq:test16"
     assert approval["evidence"]["payload"]["arguments"]["answer"] == "Big Man"
-    assert "Local note claims" in approval["evidence"]["payload"]["arguments"]["evidence"]
+    assert (
+        "Local note claims" in approval["evidence"]["payload"]["arguments"]["evidence"]
+    )
     assert approval["evidence"]["payload"]["arguments"]["api_token"] == "[redacted]"
-    assert approval["evidence"]["decision"]["rule_hits"][0]["rule_id"] == "P104_memory_poisoning"
+    assert (
+        approval["evidence"]["decision"]["rule_hits"][0]["rule_id"]
+        == "P104_memory_poisoning"
+    )
 
 
-def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+def test_guard_evaluate_writes_atomic_dashboard_audit_window() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     decision_response = client.post(
@@ -858,18 +1281,19 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert decision_response.status_code == 200
     _login_dashboard(client, control_token="control-secret")
 
-    events_response = client.get("/v1/audit/events")
-    metrics_response = client.get("/v1/metrics/eval")
+    events_response = client.get("/v1/audit/window")
 
     assert events_response.status_code == 200
-    event = events_response.json()[0]
+    event = events_response.json()["events"][0]
     assert event["trace_id"] == "trace_api"
     assert event["case_id"] == "PI-API"
     assert event["decision"] == "ask"
     assert event["blocked"] is True
     assert event["attack_type"] == "indirect_prompt_injection"
     assert event["is_malicious"] is True
-    assert event["resource_targets"] == ["exfiltration-intake@red-team.agentguard.local"]
+    assert event["resource_targets"] == [
+        "exfiltration-intake@red-team.agentguard.local"
+    ]
     assert event["rule_hits"] == ["P005_external_send", "P004_task_mismatch"]
     assert event["links"]["event_id"] == "evt_test"
     assert "approval_id" in event["links"]
@@ -879,14 +1303,14 @@ def test_guard_evaluate_writes_dashboard_audit_and_metrics() -> None:
     assert event["metadata"]["source_trust"] == "untrusted"
     assert event["metadata"]["agent_id"] == "main"
     assert event["metadata"]["current_step"] == "before_tool"
-    assert metrics_response.status_code == 200
-    assert metrics_response.json()["event_count"] == 1
-    assert metrics_response.json()["ask_count"] == 1
+    metrics = events_response.json()["policy_metrics"]
+    assert metrics["evaluation_count"] == 1
+    assert metrics["ask_count"] == 1
 
 
 def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
     headers = {"Authorization": "Bearer adapter-secret"}
 
@@ -900,7 +1324,7 @@ def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() ->
     assert policy_audit_id
 
     _login_dashboard(client, control_token="control-secret")
-    events = client.get("/v1/audit/events").json()
+    events = client.get("/v1/audit/window").json()["events"]
     policy_events = [
         event for event in events if event.get("record_type") == "policy_evaluation"
     ]
@@ -916,10 +1340,66 @@ def test_guard_evaluate_response_links_policy_audit_id_for_outcome_receipts() ->
     assert replay_response.json()["policy_audit_id"] == policy_audit_id
 
 
+def test_runtime_outcome_receipt_is_strict_parent_bound_and_idempotent() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=settings))
+    headers = {"Authorization": "Bearer adapter-secret"}
+    evaluation = client.post(
+        "/v1/guard/evaluate", headers=headers, json=_guard_event_payload()
+    )
+    parent = store.get_audit_event(evaluation.json()["policy_audit_id"])
+    assert parent is not None
+    receipt = _runtime_outcome_payload(parent)
+
+    first = client.post("/v1/audit/events", headers=headers, json=receipt)
+    replay = client.post("/v1/audit/events", headers=headers, json=receipt)
+    mismatch = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={**receipt, "risk_score": int(receipt["risk_score"]) - 1},
+    )
+    missing_parent = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={
+            **receipt,
+            "links": {**receipt["links"], "policy_audit_id": "audit_missing"},
+        },
+    )
+    invalid = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={**receipt, "metadata": {"outcome_kind": "pre_execution_deny"}},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["created"] is True
+    assert replay.status_code == 200
+    assert replay.json()["idempotent_replay"] is True
+    assert mismatch.status_code == 409
+    assert mismatch.json()["error"]["code"] == "RUNTIME_OUTCOME_PARENT_MISMATCH"
+    assert missing_parent.status_code == 422
+    assert (
+        missing_parent.json()["error"]["code"]
+        == "RUNTIME_OUTCOME_PARENT_NOT_FOUND"
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
+
+    extra_field = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json={**receipt, "producer_extension": "must-not-be-ignored"},
+    )
+    assert extra_field.status_code == 422
+    assert extra_field.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
+
+
 def test_audit_events_submit_reports_created_and_idempotent_replay() -> None:
     app = create_app(
-        store=MemoryControlPlaneStore(),
-        settings=GuardApiSettings(adapter_token="adapter-secret"),
+        store=memory_store_with_adapter(runtime="openclaw"),
+        settings=GuardApiSettings(),
     )
     client = TestClient(app)
     headers = {"Authorization": "Bearer adapter-secret"}
@@ -950,9 +1430,9 @@ def test_audit_events_submit_reports_created_and_idempotent_replay() -> None:
 
 
 def test_control_token_can_read_cli_endpoints_without_browser_session() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    settings = GuardApiSettings(control_token="control-secret")
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=settings,
         policy_bundle=PolicyBundle(bundle_id="cli-default"),
     )
@@ -966,20 +1446,18 @@ def test_control_token_can_read_cli_endpoints_without_browser_session() -> None:
     assert decision_response.status_code == 200
 
     headers = {"Authorization": "Bearer control-secret"}
-    events_response = client.get("/v1/audit/events", headers=headers)
+    events_response = client.get("/v1/audit/window", headers=headers)
     integrity_response = client.get("/v1/audit/integrity", headers=headers)
-    metrics_response = client.get("/v1/metrics/eval", headers=headers)
     trace_response = client.get("/v1/traces/trace_api", headers=headers)
     provenance_response = client.get("/v1/traces/trace_api/provenance", headers=headers)
     policy_response = client.get("/v1/policies/current", headers=headers)
     history_response = client.get("/v1/policies/history", headers=headers)
 
     assert events_response.status_code == 200
-    assert events_response.json()[0]["trace_id"] == "trace_api"
+    assert events_response.json()["events"][0]["trace_id"] == "trace_api"
     assert integrity_response.status_code == 200
     assert integrity_response.json()["valid"] is True
-    assert metrics_response.status_code == 200
-    assert metrics_response.json()["event_count"] == 1
+    assert events_response.json()["policy_metrics"]["evaluation_count"] == 1
     assert trace_response.status_code == 200
     assert trace_response.json()["trace_id"] == "trace_api"
     assert provenance_response.status_code == 200
@@ -991,13 +1469,17 @@ def test_control_token_can_read_cli_endpoints_without_browser_session() -> None:
 
 
 def test_adapter_token_cannot_read_cli_endpoints() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
     headers = {"Authorization": "Bearer adapter-secret"}
 
-    events_response = client.get("/v1/audit/events", headers=headers)
-    metrics_response = client.get("/v1/metrics/eval", headers=headers)
+    events_response = client.get("/v1/audit/window", headers=headers)
+    metrics_response = client.get(
+        "/v1/metrics/policy-evaluations"
+        "?evaluated_from=2026-01-01T00:00:00Z&evaluated_to=2027-01-01T00:00:00Z",
+        headers=headers,
+    )
     trace_response = client.get("/v1/traces/trace_api", headers=headers)
     policy_response = client.get("/v1/policies/current", headers=headers)
 
@@ -1011,9 +1493,11 @@ def test_adapter_token_cannot_read_cli_endpoints() -> None:
     assert policy_response.json()["error"]["code"] == "SCOPE_DENIED"
 
 
-def test_guard_evaluate_records_canonical_resource_when_explicit_resources_are_wrong() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+def test_guard_evaluate_records_canonical_resource_when_explicit_resources_are_wrong() -> (
+    None
+):
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     decision_response = client.post(
@@ -1041,18 +1525,20 @@ def test_guard_evaluate_records_canonical_resource_when_explicit_resources_are_w
     assert decision_response.json()["decision"]["decision"] == "deny"
     _login_dashboard(client, control_token="control-secret")
 
-    events_response = client.get("/v1/audit/events?trace_id=trace_wrong_resources")
+    events_response = client.get("/v1/audit/window?trace_id=trace_wrong_resources")
 
     assert events_response.status_code == 200
-    event = events_response.json()[0]
+    event = events_response.json()["events"][0]
     assert event["resource_targets"][0] == "/private/token.txt"
     assert "/docs/public.txt" in event["resource_targets"]
     assert event["rule_hits"] == ["P001_sensitive_file_access"]
 
 
 def test_config_audit_evaluate_persists_dashboard_evidence_metadata() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(
+        store=memory_store_with_adapter(runtime="openclaw"), settings=settings
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -1088,10 +1574,12 @@ def test_config_audit_evaluate_persists_dashboard_evidence_metadata() -> None:
     assert response.status_code == 200
     assert response.json()["decision"] == "block"
     _login_dashboard(client, control_token="control-secret")
-    events_response = client.get("/v1/audit/events?trace_id=trace_config_audit_evidence")
+    events_response = client.get(
+        "/v1/audit/window?trace_id=trace_config_audit_evidence"
+    )
 
     assert events_response.status_code == 200
-    audit_event = events_response.json()[0]
+    audit_event = events_response.json()["events"][0]
     assert audit_event["event_type"] == "config_audit"
     assert audit_event["resource_targets"] == ["third-party-evidence"]
     assert audit_event["metadata"]["user_task"] == "Install reviewed plugins only"
@@ -1102,9 +1590,13 @@ def test_config_audit_evaluate_persists_dashboard_evidence_metadata() -> None:
     assert audit_event["metadata"]["agent_id"] == "main"
 
 
-def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets() -> (
+    None
+):
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(
+        store=memory_store_with_adapter(runtime="openclaw"), settings=settings
+    )
     client = TestClient(app)
 
     context_event = _p1_guard_event_payload(
@@ -1127,9 +1619,16 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         },
     )
     context_event["runtime"] = "openclaw"
-    context_event["security_context"]["user_task"] = "Summarize external documentation safely"
-    context_event["security_context"]["derived_paths"] = ["https://docs.example.test/context"]
-    context_event["metadata"] = {"openclaw_hook": "before_prompt_build", "user_task": ""}
+    context_event["security_context"][
+        "user_task"
+    ] = "Summarize external documentation safely"
+    context_event["security_context"]["derived_paths"] = [
+        "https://docs.example.test/context"
+    ]
+    context_event["metadata"] = {
+        "openclaw_hook": "before_prompt_build",
+        "user_task": "",
+    }
 
     result_event = _p1_guard_event_payload(
         event_id="evt_openclaw_result_evidence",
@@ -1163,8 +1662,13 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         },
     )
     result_event["runtime"] = "openclaw"
-    result_event["security_context"]["user_task"] = "Summarize external documentation safely"
-    result_event["metadata"] = {"openclaw_hook": "tool_result_persist", "source_type": ""}
+    result_event["security_context"][
+        "user_task"
+    ] = "Summarize external documentation safely"
+    result_event["metadata"] = {
+        "openclaw_hook": "tool_result_persist",
+        "source_type": "",
+    }
 
     for event in (context_event, result_event):
         response = client.post(
@@ -1175,17 +1679,27 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         assert response.status_code == 200
 
     _login_dashboard(client, control_token="control-secret")
-    context_response = client.get("/v1/audit/events?trace_id=trace_openclaw_context_evidence")
-    result_response = client.get("/v1/audit/events?trace_id=trace_openclaw_result_evidence")
+    context_response = client.get(
+        "/v1/audit/window?trace_id=trace_openclaw_context_evidence"
+    )
+    result_response = client.get(
+        "/v1/audit/window?trace_id=trace_openclaw_result_evidence"
+    )
 
     assert context_response.status_code == 200
-    context_audit = context_response.json()[0]
-    assert context_audit["metadata"]["user_task"] == "Summarize external documentation safely"
+    context_audit = context_response.json()["events"][0]
+    assert (
+        context_audit["metadata"]["user_task"]
+        == "Summarize external documentation safely"
+    )
     assert context_audit["resource_targets"] == ["https://docs.example.test/context"]
 
     assert result_response.status_code == 200
-    result_audit = result_response.json()[0]
-    assert result_audit["metadata"]["user_task"] == "Summarize external documentation safely"
+    result_audit = result_response.json()["events"][0]
+    assert (
+        result_audit["metadata"]["user_task"]
+        == "Summarize external documentation safely"
+    )
     assert result_audit["metadata"]["source_type"] == "webpage"
     assert result_audit["resource_targets"] == [
         "https://docs.example.test/result",
@@ -1396,8 +1910,8 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     expected_resource_targets: list[str],
     expected_action_name: str,
 ) -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     response = client.post(
@@ -1409,7 +1923,9 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert response.status_code == 200
     evaluation = response.json()
     assert evaluation["decision"]["decision"] == expected_decision
-    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == expected_rule_ids
+    assert [
+        hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]
+    ] == expected_rule_ids
     if expected_decision == "ask":
         assert evaluation["approval"] is not None
         approval_id = evaluation["approval"]["approval_id"]
@@ -1418,11 +1934,10 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
         approval_id = None
 
     _login_dashboard(client, control_token="control-secret")
-    events_response = client.get(f"/v1/audit/events?trace_id={event['trace_id']}")
-    metrics_response = client.get(f"/v1/metrics/eval?trace_id={event['trace_id']}")
+    events_response = client.get(f"/v1/audit/window?trace_id={event['trace_id']}")
 
     assert events_response.status_code == 200
-    audit_event = events_response.json()[0]
+    audit_event = events_response.json()["events"][0]
     assert audit_event["event_type"] == event["event_type"]
     assert audit_event["decision"] == expected_decision
     assert audit_event["resource_targets"] == expected_resource_targets
@@ -1430,10 +1945,14 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert audit_event["links"]["event_id"] == event["event_id"]
     payload_tool = event["payload"].get("tool")
     expected_action_id = (
-        payload_tool["call_id"] if event["event_type"] == "tool_result_produced" else event["event_id"]
+        payload_tool["call_id"]
+        if event["event_type"] == "tool_result_produced"
+        else event["event_id"]
     )
     expected_display_action_name = (
-        payload_tool["name"] if event["event_type"] == "tool_result_produced" else expected_action_name
+        payload_tool["name"]
+        if event["event_type"] == "tool_result_produced"
+        else expected_action_name
     )
     intrinsic_action = event["event_type"] not in {
         "context_assembled",
@@ -1449,27 +1968,34 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     else:
         assert "action_id" not in audit_event["metadata"]
         assert "action_name" not in audit_event["metadata"]
-    assert audit_event["metadata"]["user_task"] == event["security_context"]["user_task"]
-    assert audit_event["metadata"]["source_type"] == event["security_context"]["source_type"]
-    assert audit_event["metadata"]["source_trust"] == event["security_context"]["source_trust"]
+    assert (
+        audit_event["metadata"]["user_task"] == event["security_context"]["user_task"]
+    )
+    assert (
+        audit_event["metadata"]["source_type"]
+        == event["security_context"]["source_type"]
+    )
+    assert (
+        audit_event["metadata"]["source_trust"]
+        == event["security_context"]["source_trust"]
+    )
     if approval_id is not None:
         assert audit_event["links"]["approval_id"] == approval_id
         pending_response = client.get("/v1/approvals/pending")
         pending = pending_response.json()
         approval = next(item for item in pending if item["approval_id"] == approval_id)
-        assert approval["tool_call_id"] == expected_action_id
-        assert approval["tool"] == expected_display_action_name
+        assert approval["action_id"] == expected_action_id
+        assert approval["action_name"] == expected_display_action_name
 
-    assert metrics_response.status_code == 200
-    metrics = metrics_response.json()
-    assert metrics["event_count"] == 1
+    metrics = events_response.json()["policy_metrics"]
+    assert metrics["evaluation_count"] == 1
     assert metrics[f"{expected_decision}_count"] == 1
 
 
 def test_guard_evaluate_uses_injected_policy_bundle_allowed_email_domain() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret")
+    settings = GuardApiSettings()
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=settings,
         policy_bundle=PolicyBundle(allowed_email_domains=["example.com"]),
     )
@@ -1480,7 +2006,11 @@ def test_guard_evaluate_uses_injected_policy_bundle_allowed_email_domain() -> No
         headers={"Authorization": "Bearer adapter-secret"},
         json=_guard_event_payload(
             trace_id="trace_policy_allowed_domain",
-            arguments={"to": "teammate@example.com", "subject": "status", "body": "benign update"},
+            arguments={
+                "to": "teammate@example.com",
+                "subject": "status",
+                "body": "benign update",
+            },
             user_task="Send an email status update",
             source_trust="trusted",
         ),
@@ -1493,9 +2023,9 @@ def test_guard_evaluate_uses_injected_policy_bundle_allowed_email_domain() -> No
 
 
 def test_guard_evaluate_uses_injected_policy_bundle_sensitive_text_marker() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret")
+    settings = GuardApiSettings()
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=settings,
         policy_bundle=PolicyBundle(sensitive_text_markers=["project-internal-code="]),
     )
@@ -1529,9 +2059,9 @@ def test_guard_evaluate_uses_injected_policy_bundle_sensitive_text_marker() -> N
 
 
 def test_guard_evaluate_uses_injected_policy_bundle_tool_profile() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret")
+    settings = GuardApiSettings()
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=settings,
         policy_bundle=PolicyBundle(
             tool_profiles={
@@ -1572,7 +2102,9 @@ def test_guard_evaluate_uses_injected_policy_bundle_tool_profile() -> None:
     assert response.status_code == 200
     evaluation = response.json()
     assert evaluation["decision"]["decision"] == "deny"
-    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == ["P002_tool_identity_mismatch"]
+    assert [hit["rule_id"] for hit in evaluation["decision"]["rule_hits"]] == [
+        "P002_tool_identity_mismatch"
+    ]
 
 
 def test_policy_service_can_load_snapshot_from_provider() -> None:
@@ -1590,22 +2122,30 @@ def test_policy_service_can_load_snapshot_from_provider() -> None:
 
 
 def test_policy_service_prefers_store_snapshot_over_static_bundle() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     service = PolicyService(
         store=store,
-        policy_bundle=PolicyBundle(bundle_id="static", allowed_email_domains=["static.example"]),
+        policy_bundle=PolicyBundle(
+            bundle_id="static", allowed_email_domains=["static.example"]
+        ),
     )
 
     assert service.current_snapshot().bundle_id == "static"
 
-    service.save_snapshot(PolicyBundle(bundle_id="stored", allowed_email_domains=["stored.example"]))
+    service.save_snapshot(
+        PolicyBundle(bundle_id="stored", allowed_email_domains=["stored.example"]),
+        expected_revision=0,
+    )
 
     assert service.current_snapshot().bundle_id == "stored"
     assert store.get_policy_snapshot().allowed_email_domains == ["stored.example"]
 
 
 def test_policy_current_requires_authentication_and_rejects_adapter_read() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
 
     get_response = client.get("/v1/policies/current")
@@ -1626,11 +2166,13 @@ def test_policy_current_requires_authentication_and_rejects_adapter_read() -> No
 
 
 def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+    settings = GuardApiSettings(control_token="control-secret")
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=settings,
-        policy_bundle=PolicyBundle(bundle_id="injected", allowed_email_domains=["injected.example"]),
+        policy_bundle=PolicyBundle(
+            bundle_id="injected", allowed_email_domains=["injected.example"]
+        ),
     )
     client = TestClient(app)
     _login_dashboard(client, control_token="control-secret")
@@ -1639,7 +2181,10 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
     initial_response = client.get("/v1/policies/current")
     update_response = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": initial_response.headers["etag"],
+        },
         json=PolicyBundle(
             bundle_id="runtime",
             allowed_email_domains=["example.com"],
@@ -1652,7 +2197,11 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
         headers={"Authorization": "Bearer adapter-secret"},
         json=_guard_event_payload(
             trace_id="trace_policy_current_allowed",
-            arguments={"to": "teammate@example.com", "subject": "status", "body": "benign update"},
+            arguments={
+                "to": "teammate@example.com",
+                "subject": "status",
+                "body": "benign update",
+            },
             user_task="Send an email status update",
             source_trust="trusted",
         ),
@@ -1677,8 +2226,10 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
 
     assert initial_response.status_code == 200
     assert initial_response.json()["bundle_id"] == "injected"
+    assert initial_response.headers["etag"] == '"policy-revision:0"'
     assert update_response.status_code == 200
     assert update_response.json()["bundle_id"] == "runtime"
+    assert update_response.headers["etag"] == '"policy-revision:1"'
     assert refreshed_response.status_code == 200
     assert refreshed_response.json()["allowed_email_domains"] == ["example.com"]
     assert allowed_email_response.status_code == 200
@@ -1687,11 +2238,104 @@ def test_policy_current_returns_injected_default_and_updates_snapshot() -> None:
     assert sensitive_text_response.json()["decision"]["decision"] == "deny"
 
 
-def test_generic_adapter_status_and_heartbeat_keep_openclaw_alias_compatible() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+def test_policy_write_requires_current_etag_and_rejects_stale_update() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+    client = TestClient(app)
+    _login_dashboard(client, control_token="control-secret")
+    csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    initial_etag = client.get("/v1/policies/current").headers["etag"]
+    payload = PolicyBundle(bundle_id="etag-policy").model_dump(mode="json")
+
+    missing = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token},
+        json=payload,
+    )
+    first = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
+        json=payload,
+    )
+    stale = client.put(
+        "/v1/policies/current",
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
+        json=PolicyBundle(bundle_id="stale-policy").model_dump(mode="json"),
+    )
+
+    assert missing.status_code == 428
+    assert missing.json()["error"]["code"] == "POLICY_PRECONDITION_REQUIRED"
+    assert first.status_code == 200
+    assert first.headers["etag"] == '"policy-revision:1"'
+    assert stale.status_code == 412
+    assert stale.json()["error"]["code"] == "POLICY_REVISION_CONFLICT"
+    assert stale.json()["error"]["details"] == {
+        "expected_revision": 0,
+        "current_revision": 1,
+    }
+    assert client.get("/v1/policies/current").json()["bundle_id"] == "etag-policy"
+
+
+def test_policy_semantic_validation_blocks_ambiguous_configuration() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+    client = TestClient(app)
+    _login_dashboard(client, control_token="control-secret")
+    csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    current = client.get("/v1/policies/current")
+    candidate = PolicyBundle(
+        bundle_id="invalid-policy",
+        disabled_rules=["P999_unknown", "P001_sensitive_file_access"],
+        rule_overrides={"P001_sensitive_file_access": {"decision": "deny"}},
+        prompt_injection_markers=["duplicate", " Duplicate "],
+        allowed_api_hosts=["https://example.com/path"],
+    )
+
+    validation = client.post(
+        "/v1/policies/validate",
+        json=candidate.model_dump(mode="json"),
+    )
+    update = client.put(
+        "/v1/policies/current",
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": current.headers["etag"],
+        },
+        json=candidate.model_dump(mode="json"),
+    )
+
+    assert validation.status_code == 200
+    assert validation.json()["valid"] is False
+    issue_codes = {issue["code"] for issue in validation.json()["issues"]}
+    assert issue_codes == {
+        "HOST_INVALID",
+        "RULE_CONFIGURATION_CONFLICT",
+        "RULE_UNKNOWN",
+        "VALUE_DUPLICATE",
+    }
+    assert update.status_code == 422
+    assert update.json()["error"]["code"] == "POLICY_INVALID"
+    assert client.get("/v1/policies/current").headers["etag"] == current.headers["etag"]
+
+
+def test_generic_adapter_status_and_heartbeat_use_path_runtime_identity() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(
+        store=memory_store_with_adapter(runtime="openclaw"), settings=settings
+    )
     client = TestClient(app)
 
+    duplicate_runtime_response = client.post(
+        "/v1/adapters/openclaw/heartbeat",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "status": "loaded",
+            "loaded": True,
+            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
+            "agent_id": "main",
+        },
+    )
     heartbeat_response = client.post(
         "/v1/adapters/openclaw/heartbeat",
         headers={"Authorization": "Bearer adapter-secret"},
@@ -1700,42 +2344,42 @@ def test_generic_adapter_status_and_heartbeat_keep_openclaw_alias_compatible() -
             "loaded": True,
             "hook_count": 16,
             "expected_hook_count": 16,
-            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
             "agent_id": "main",
             "plugin_version": "0.1.0",
             "runtime_version": "2026.6.6",
             "source": "openclaw-plugin",
-            "capabilities": {"event_types": ["tool_call_proposed", "message_send_proposed"]},
+            "capabilities": {
+                "event_types": ["tool_call_proposed", "message_send_proposed"]
+            },
             "hooks": ["before_tool_call", "message_sending"],
         },
     )
-    generic_response = client.get(
-        "/v1/adapters/openclaw/status",
-        headers={"Authorization": "Bearer control-secret"},
-    )
-    alias_response = client.get(
+    status_response = client.get(
         "/v1/adapters/openclaw/status",
         headers={"Authorization": "Bearer control-secret"},
     )
 
+    assert duplicate_runtime_response.status_code == 422
+    assert duplicate_runtime_response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert heartbeat_response.status_code == 200
     heartbeat = heartbeat_response.json()
-    assert heartbeat["runtime"] == "openclaw"
+    assert "runtime" not in heartbeat
+    assert heartbeat["runtime_id"] == "openclaw-gateway"
     assert heartbeat["agent_id"] == "main"
     assert heartbeat["plugin_version"] == "0.1.0"
     assert heartbeat["last_heartbeat_at"] is not None
-    assert generic_response.status_code == 200
-    assert generic_response.json()["capabilities"]["event_types"] == [
+    assert status_response.status_code == 200
+    assert status_response.json()["capabilities"]["event_types"] == [
         "tool_call_proposed",
         "message_send_proposed",
     ]
-    assert alias_response.status_code == 200
-    assert alias_response.json()["hooks"] == ["before_tool_call", "message_sending"]
+    assert status_response.json()["hooks"] == ["before_tool_call", "message_sending"]
 
 
 def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter(runtime="openclaw")
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -1747,13 +2391,20 @@ def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
             "loaded": True,
             "hook_count": 22,
             "expected_hook_count": 22,
-            "runtime": "openclaw",
+            "runtime_id": "openclaw-gateway",
             "agent_id": "main",
             "plugin_version": "0.1.0",
             "runtime_version": "2026.6.6",
             "source": "openclaw-plugin",
-            "capabilities": {"event_types": ["tool_call_proposed", "model_input_prepared"]},
-            "hooks": ["before_tool_call", "before_prompt_build", "llm_input", "llm_output"],
+            "capabilities": {
+                "event_types": ["tool_call_proposed", "model_input_prepared"]
+            },
+            "hooks": [
+                "before_tool_call",
+                "before_prompt_build",
+                "llm_input",
+                "llm_output",
+            ],
         },
     )
     assert heartbeat_response.status_code == 200
@@ -1804,17 +2455,61 @@ def test_runtime_metrics_aggregates_audit_hooks_and_adapter_status() -> None:
     assert model_response.status_code == 200
     assert metrics_response.status_code == 200
     metrics = metrics_response.json()
-    assert metrics["event_count"] == 2
-    assert metrics["blocked_count"] == 2
-    assert metrics["by_runtime"]["openclaw"]["event_count"] == 2
+    assert metrics["metric_version"] == "runtime_activity.v2"
+    assert metrics["record_count"] == 2
+    assert metrics["policy_evaluation_count"] == 2
+    assert metrics["intervention_count"] == 2
+    assert metrics["intervention_rate"] == 1.0
+    assert "blocked_count" not in metrics
+    assert "block_rate" not in metrics
+    assert metrics["by_runtime"]["openclaw"]["record_count"] == 2
     assert metrics["hook_activity"] == {"before_tool_call": 1, "llm_input": 1}
     assert metrics["adapters"]["openclaw"]["loaded"] is True
     assert metrics["adapters"]["openclaw"]["hook_count"] == 22
 
 
-def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
+def test_runtime_metrics_keep_outcomes_out_of_policy_rates_and_latency() -> None:
     store = MemoryControlPlaneStore()
+    store.add_audit_event(
+        AuditEvent(
+            schema_version="0.4",
+            record_type="policy_evaluation",
+            trace_id="trace_runtime_metric_semantics",
+            runtime="openclaw",
+            summary="policy evaluation",
+            decision="ask",
+            risk_score=70,
+            severity="high",
+            blocked=True,
+            reason="approval required",
+            latency_ms=12,
+        )
+    )
+    store.add_audit_event(
+        AuditEvent(
+            schema_version="0.4",
+            record_type="runtime_outcome",
+            trace_id="trace_runtime_metric_semantics",
+            runtime="openclaw",
+            summary="runtime outcome",
+            reason="not invoked",
+            latency_ms=900,
+        )
+    )
+
+    metrics = MetricService(store=store).runtime_metrics(runtime="openclaw")
+
+    assert metrics["record_count"] == 2
+    assert metrics["policy_evaluation_count"] == 1
+    assert metrics["intervention_count"] == 1
+    assert metrics["intervention_rate"] == 1.0
+    assert metrics["average_decision_latency_ms"] == 12
+    assert metrics["latency_sample_count"] == 1
+
+
+def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -1839,7 +2534,7 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
         ),
     )
     _login_dashboard(client, control_token="control-secret")
-    events_response = client.get("/v1/audit/events?trace_id=trace_memory_runtime_link")
+    events_response = client.get("/v1/audit/window?trace_id=trace_memory_runtime_link")
 
     assert response.status_code == 200
     assert response.json()["decision"]["decision"] == "deny"
@@ -1850,44 +2545,68 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
     assert memory_change.status == "quarantined"
     assert memory_change.trace_id == "trace_memory_runtime_link"
     assert events_response.status_code == 200
-    audit_event = events_response.json()[0]
+    audit_event = events_response.json()["events"][0]
     assert audit_event["links"]["memory_change_id"] == memory_change.change_id
     assert audit_event["metadata"]["memory_namespace"] == "user_preferences"
 
 
-def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> None:
+def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> (
+    None
+):
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(
-        store=MemoryControlPlaneStore(),
+        store=memory_store_with_adapter(),
         settings=settings,
-        policy_bundle=PolicyBundle(bundle_id="default-policy", allowed_email_domains=["agentguard.local"]),
+        policy_bundle=PolicyBundle(
+            bundle_id="default-policy", allowed_email_domains=["agentguard.local"]
+        ),
     )
     client = TestClient(app)
     _login_dashboard(client, control_token="control-secret")
     csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
-    first_policy = PolicyBundle(bundle_id="first-policy", allowed_email_domains=["first.example"])
-    second_policy = PolicyBundle(bundle_id="second-policy", allowed_email_domains=["second.example"])
+    first_policy = PolicyBundle(
+        bundle_id="first-policy", allowed_email_domains=["first.example"]
+    )
+    second_policy = PolicyBundle(
+        bundle_id="second-policy", allowed_email_domains=["second.example"]
+    )
 
-    validate_response = client.post("/v1/policies/validate", json=first_policy.model_dump(mode="json"))
-    diff_response = client.post("/v1/policies/diff", json=first_policy.model_dump(mode="json"))
+    validate_response = client.post(
+        "/v1/policies/validate", json=first_policy.model_dump(mode="json")
+    )
+    diff_response = client.post(
+        "/v1/policies/diff", json=first_policy.model_dump(mode="json")
+    )
+    initial_etag = client.get("/v1/policies/current").headers["etag"]
     first_update = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
         json=first_policy.model_dump(mode="json"),
     )
     second_update = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": first_update.headers["etag"],
+        },
         json=second_policy.model_dump(mode="json"),
     )
     rollback_response = client.post(
         "/v1/policies/rollback/1",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": second_update.headers["etag"],
+        },
     )
     current_response = client.get("/v1/policies/current")
 
     assert validate_response.status_code == 200
-    assert validate_response.json() == {"valid": True, "bundle_id": "first-policy", "version": "p0"}
+    assert validate_response.json() == {
+        "valid": True,
+        "bundle_id": "first-policy",
+        "version": "p0",
+        "issues": [],
+    }
     assert diff_response.status_code == 200
     diff = diff_response.json()
     assert diff["current"]["bundle_id"] == "default-policy"
@@ -1904,7 +2623,7 @@ def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_en
 
 def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
     settings = GuardApiSettings(control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
     headers = {"Authorization": "Bearer control-secret"}
 
@@ -1953,10 +2672,16 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
         "cases": [],
     }
 
-    assert client.post("/v1/evaluations", headers=headers, json=first).status_code == 200
-    assert client.post("/v1/evaluations", headers=headers, json=second).status_code == 200
+    assert (
+        client.post("/v1/evaluations", headers=headers, json=first).status_code == 200
+    )
+    assert (
+        client.post("/v1/evaluations", headers=headers, json=second).status_code == 200
+    )
 
-    list_response = client.get("/v1/evaluations?dataset_id=attackbench&dataset_version=v1", headers=headers)
+    list_response = client.get(
+        "/v1/evaluations?dataset_id=attackbench&dataset_version=v1", headers=headers
+    )
     get_response = client.get("/v1/evaluations/eval_attackbench_v1", headers=headers)
     datasets_response = client.get("/v1/evaluations/datasets", headers=headers)
 
@@ -1988,6 +2713,42 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
     ]
 
 
+def test_evaluation_runs_are_immutable_and_idempotent() -> None:
+    client = TestClient(
+        create_app(
+            store=memory_store_with_adapter(),
+            settings=GuardApiSettings(control_token="control-secret"),
+        )
+    )
+    headers = {"Authorization": "Bearer control-secret"}
+    original = {
+        "run_id": "eval_immutable",
+        "run_at": "2026-06-28T08:00:00+08:00",
+        "dataset_id": "attackbench",
+        "dataset_version": "v1",
+        "cases": [],
+    }
+
+    created = client.post("/v1/evaluations", headers=headers, json=original)
+    replayed = client.post("/v1/evaluations", headers=headers, json=original)
+    changed = client.post(
+        "/v1/evaluations",
+        headers=headers,
+        json={**original, "dataset_version": "v2"},
+    )
+
+    assert created.status_code == 200
+    assert replayed.status_code == 200
+    assert created.json() == replayed.json()
+    assert created.json()["run_at"] == "2026-06-28T00:00:00+00:00"
+    assert changed.status_code == 409
+    assert changed.json()["error"] == {
+        "code": "EVALUATION_RUN_CONFLICT",
+        "message": "Evaluation run ID is already bound to different immutable content.",
+        "details": {"run_id": "eval_immutable"},
+    }
+
+
 def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(store=MemoryControlPlaneStore(), settings=settings)
@@ -1998,10 +2759,7 @@ def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> Non
         "/v1/credentials",
         headers=control_headers,
         json={
-            "principal_type": "component",
             "principal_id": "openclaw-main",
-            "role": "adapter",
-            "scopes": ["adapter:status:write"],
             "runtime": "openclaw",
             "agent_id": "main",
         },
@@ -2011,20 +2769,38 @@ def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> Non
     created = create_response.json()
     token = created["token"]
     credential_id = created["credential"]["credential_id"]
-    assert created["credential"]["token_hash"] == "[redacted]"
+    assert "token_hash" not in created["credential"]
+    assert set(created["credential"]["scopes"]) == {
+        "event:evaluate",
+        "event:audit:write",
+        "approval:wait",
+        "adapter:status:write",
+    }
     assert token.startswith("agt_")
 
     heartbeat_response = client.post(
         "/v1/adapters/openclaw/heartbeat",
         headers={"Authorization": f"Bearer {token}"},
-        json={"status": "loaded", "loaded": True, "runtime": "openclaw", "agent_id": "main"},
+        json={
+            "status": "loaded",
+            "loaded": True,
+            "runtime_id": "openclaw-gateway",
+            "agent_id": "main",
+        },
     )
     list_response = client.get("/v1/credentials", headers=control_headers)
-    revoke_response = client.post(f"/v1/credentials/{credential_id}/revoke", headers=control_headers)
+    revoke_response = client.post(
+        f"/v1/credentials/{credential_id}/revoke", headers=control_headers
+    )
     rejected_response = client.post(
         "/v1/adapters/openclaw/heartbeat",
         headers={"Authorization": f"Bearer {token}"},
-        json={"status": "loaded", "loaded": True, "runtime": "openclaw", "agent_id": "main"},
+        json={
+            "status": "loaded",
+            "loaded": True,
+            "runtime_id": "openclaw-gateway",
+            "agent_id": "main",
+        },
     )
 
     assert heartbeat_response.status_code == 200
@@ -2037,8 +2813,8 @@ def test_credential_registry_issues_scoped_adapter_token_and_revokes_it() -> Non
 
 
 def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     denied_history_response = client.get("/v1/policies/history")
@@ -2054,14 +2830,18 @@ def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
 
     _login_dashboard(client, control_token="control-secret")
     csrf_token = client.get("/v1/auth/browser/me").json()["csrf_token"]
+    initial_etag = client.get("/v1/policies/current").headers["etag"]
     first_response = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={"X-AgentGuard-CSRF": csrf_token, "If-Match": initial_etag},
         json=PolicyBundle(bundle_id="runtime-1", version="p1").model_dump(mode="json"),
     )
     second_response = client.put(
         "/v1/policies/current",
-        headers={"X-AgentGuard-CSRF": csrf_token},
+        headers={
+            "X-AgentGuard-CSRF": csrf_token,
+            "If-Match": first_response.headers["etag"],
+        },
         json=PolicyBundle(bundle_id="runtime-2", version="p1").model_dump(mode="json"),
     )
     current_response = client.get("/v1/policies/current")
@@ -2087,10 +2867,10 @@ def test_policy_history_records_revisions_and_preserves_current_shape() -> None:
     assert all(item["updated_at"] for item in history)
 
 
-def test_memory_policy_snapshot_concurrent_writes_have_contiguous_revisions(
+def test_memory_policy_snapshot_concurrent_writes_reject_stale_revisions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     worker_count = 20
 
     def slow_timestamp() -> str:
@@ -2099,27 +2879,32 @@ def test_memory_policy_snapshot_concurrent_writes_have_contiguous_revisions(
 
     monkeypatch.setattr(memory_store_module, "utc_now_iso", slow_timestamp)
 
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        records = list(
-            executor.map(
-                lambda index: store.save_policy_snapshot(
-                    PolicyBundle(bundle_id=f"runtime-concurrent-{index}"),
-                    updated_by="tester",
-                ),
-                range(worker_count),
+    def save(index: int):
+        try:
+            return store.save_policy_snapshot(
+                PolicyBundle(bundle_id=f"runtime-concurrent-{index}"),
+                expected_revision=0,
+                updated_by="tester",
             )
-        )
+        except PolicyRevisionConflictError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        results = list(executor.map(save, range(worker_count)))
 
     history = store.list_policy_snapshot_history(limit=worker_count)
+    records = [item for item in results if not isinstance(item, PolicyRevisionConflictError)]
+    conflicts = [item for item in results if isinstance(item, PolicyRevisionConflictError)]
 
-    assert sorted(record.revision for record in records) == list(range(1, worker_count + 1))
-    assert [record.revision for record in history] == list(range(worker_count, 0, -1))
-    assert len({record.policy_bundle.bundle_id for record in history}) == worker_count
+    assert [record.revision for record in records] == [1]
+    assert len(conflicts) == worker_count - 1
+    assert all(conflict.current_revision == 1 for conflict in conflicts)
+    assert [record.revision for record in history] == [1]
 
 
 def test_policy_current_update_requires_csrf() -> None:
     settings = GuardApiSettings(control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
     _login_dashboard(client, control_token="control-secret")
 
@@ -2135,8 +2920,8 @@ def test_policy_current_update_requires_csrf() -> None:
 
 
 def test_p1_message_send_approval_can_resolve_and_wait() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
     event = _p1_guard_event_payload(
         event_id="evt_message_ask_flow",
@@ -2172,12 +2957,12 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
     assert approval["subject_type"] == "message_send_proposed"
     assert approval["action_id"] == "evt_message_ask_flow"
     assert approval["action_name"] == "message_send_proposed"
-    assert approval["tool_call_id"] == "evt_message_ask_flow"
-    approval_nonce = approval["approval_nonce"]
+    assert "tool_call_id" not in approval
+    assert "tool" not in approval
     resolve_response = client.post(
         f"/v1/approvals/{approval_id}/resolve",
         headers={"X-AgentGuard-CSRF": csrf_token},
-        json={"decision": "allow_once", "approval_nonce": approval_nonce},
+        json={"decision": "allow_once"},
     )
     wait_response = client.get(
         f"/v1/approvals/{approval_id}/wait",
@@ -2194,11 +2979,24 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
 
 
 def test_audit_events_plural_write_and_filter_for_dashboard() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings(adapter_token="adapter-secret"))
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
     client = TestClient(app)
     for audit_event in [
-        _audit_event_payload(audit_id="audit_keep", trace_id="trace_keep", decision="deny", runtime="langgraph"),
-        _audit_event_payload(audit_id="audit_skip", trace_id="trace_skip", decision="allow", runtime="langgraph"),
+        _audit_event_payload(
+            audit_id="audit_keep",
+            trace_id="trace_keep",
+            decision="deny",
+            runtime="langgraph",
+        ),
+        _audit_event_payload(
+            audit_id="audit_skip",
+            trace_id="trace_skip",
+            decision="allow",
+            runtime="langgraph",
+        ),
     ]:
         write_response = client.post(
             "/v1/audit/events",
@@ -2208,15 +3006,17 @@ def test_audit_events_plural_write_and_filter_for_dashboard() -> None:
         assert write_response.status_code == 200
     _login_dashboard(client)
 
-    events_response = client.get("/v1/audit/events?trace_id=trace_keep&decision=deny&limit=5")
+    events_response = client.get(
+        "/v1/audit/window?trace_id=trace_keep&decision=deny&limit=5"
+    )
 
     assert events_response.status_code == 200
-    events = events_response.json()
+    events = events_response.json()["events"]
     assert [event["audit_id"] for event in events] == ["audit_keep"]
 
 
-def test_metrics_can_be_filtered_for_dashboard() -> None:
-    store = MemoryControlPlaneStore()
+def test_atomic_audit_window_metrics_can_be_filtered_for_dashboard() -> None:
+    store = memory_store_with_adapter()
     store.add_audit_event(
         _audit_event_model(
             audit_id="audit_metric_allow",
@@ -2254,23 +3054,23 @@ def test_metrics_can_be_filtered_for_dashboard() -> None:
     client = TestClient(app)
     _login_dashboard(client)
 
-    metrics_response = client.get("/v1/metrics/eval?runtime=langgraph")
+    metrics_response = client.get("/v1/audit/window?runtime=langgraph")
 
     assert metrics_response.status_code == 200
-    metrics = metrics_response.json()
-    assert metrics["event_count"] == 2
+    metrics = metrics_response.json()["policy_metrics"]
+    assert metrics["evaluation_count"] == 2
     assert metrics["allow_count"] == 1
     assert metrics["deny_count"] == 1
     assert metrics["ask_count"] == 0
-    assert metrics["blocked_count"] == 1
-    assert metrics["block_rate"] == 0.5
-    assert metrics["fpr"] == 0.0
-    assert metrics["fnr"] == 0.0
-    assert metrics["average_latency_ms"] == 20.0
+    assert metrics["intervention_count"] == 1
+    assert metrics["intervention_rate"] == 0.5
+    assert metrics["policy_intervention_fpr"] == 0.0
+    assert metrics["policy_intervention_fnr"] == 0.0
+    assert metrics["average_decision_latency_ms"] == 20.0
 
 
 def test_trace_detail_requires_browser_session() -> None:
-    app = create_app(store=MemoryControlPlaneStore(), settings=GuardApiSettings())
+    app = create_app(store=memory_store_with_adapter(), settings=GuardApiSettings())
     client = TestClient(app)
 
     response = client.get("/v1/traces/trace_missing")
@@ -2279,9 +3079,9 @@ def test_trace_detail_requires_browser_session() -> None:
     assert response.json()["error"]["code"] == "SESSION_INVALID"
 
 
-def test_trace_detail_aggregates_audit_approval_and_metrics() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+def test_trace_detail_aggregates_audit_approval_and_window_scope() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     decision_response = client.post(
@@ -2300,13 +3100,21 @@ def test_trace_detail_aggregates_audit_approval_and_metrics() -> None:
     assert trace["trace_id"] == "trace_api"
     assert [event["trace_id"] for event in trace["audit_events"]] == ["trace_api"]
     assert [approval["approval_id"] for approval in trace["approvals"]] == [approval_id]
-    assert trace["metrics"]["event_count"] == 1
-    assert trace["metrics"]["ask_count"] == 1
+    assert trace["audit_window"]["limit"] == 1000
+    assert trace["audit_window"]["returned_count"] == 1
+    assert trace["audit_window"]["has_more"] is False
+    assert trace["audit_window"]["next_cursor"] is None
+    assert isinstance(trace["audit_window"]["snapshot_id"], str)
+    assert trace["approval_window"] == {
+        "limit": 1000,
+        "returned_count": 1,
+        "has_more": False,
+    }
 
 
 def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    app = create_app(store=MemoryControlPlaneStore(), settings=settings)
+    settings = GuardApiSettings(control_token="control-secret")
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
     client = TestClient(app)
 
     deny_response = client.post(
@@ -2343,11 +3151,11 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
 
     pending_response = client.get("/v1/approvals/pending")
     pending = pending_response.json()
-    approval_nonce = next(item["approval_nonce"] for item in pending if item["approval_id"] == approval_id)
+    assert any(item["approval_id"] == approval_id for item in pending)
     resolve_response = client.post(
         f"/v1/approvals/{approval_id}/resolve",
         headers={"X-AgentGuard-CSRF": csrf_token},
-        json={"decision": "allow_once", "approval_nonce": approval_nonce},
+        json={"decision": "allow_once"},
     )
     wait_response = client.get(
         f"/v1/approvals/{approval_id}/wait",
@@ -2362,14 +3170,18 @@ def test_p0_smoke_deny_does_not_create_approval_and_ask_resolves() -> None:
     assert wait_body["resolution_source"] == "human"
 
 
-def _login_dashboard(client: TestClient, *, control_token: str = "demo-control-token") -> None:
+def _login_dashboard(
+    client: TestClient, *, control_token: str = "demo-control-token"
+) -> None:
     launch_response = client.post(
         "/v1/auth/browser/launch",
         headers={"Authorization": f"Bearer {control_token}"},
     )
     assert launch_response.status_code == 200
     launch_code = launch_response.json()["launch_code"]
-    exchange_response = client.post("/v1/auth/browser/exchange", json={"launch_code": launch_code})
+    exchange_response = client.post(
+        "/v1/auth/browser/exchange", json={"launch_code": launch_code}
+    )
     assert exchange_response.status_code == 200
 
 
@@ -2414,8 +3226,8 @@ def _audit_event_model(**kwargs):
 
 
 def test_guard_api_accepts_and_returns_audit_event_04() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -2450,10 +3262,10 @@ def test_guard_api_accepts_and_returns_audit_event_04() -> None:
 
     _login_dashboard(client, control_token="control-secret")
 
-    read_response = client.get("/v1/audit/events?trace_id=trace_v04_api")
+    read_response = client.get("/v1/audit/window?trace_id=trace_v04_api")
 
     assert read_response.status_code == 200
-    events = read_response.json()
+    events = read_response.json()["events"]
     assert len(events) == 1
     assert events[0]["schema_version"] == "0.4"
     assert events[0]["record_type"] == "runtime_observation"
@@ -2470,8 +3282,8 @@ def test_guard_api_accepts_and_returns_audit_event_04() -> None:
 
 
 def test_runtime_metrics_ignore_null_decision_records() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -2513,8 +3325,8 @@ _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _evaluate_once(payload: dict) -> tuple[TestClient, MemoryControlPlaneStore, object]:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     response = client.post(
@@ -2527,7 +3339,9 @@ def _evaluate_once(payload: dict) -> tuple[TestClient, MemoryControlPlaneStore, 
 
 
 def test_evaluate_audit_records_request_digest() -> None:
-    client, store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_request"))
+    client, store, _ = _evaluate_once(
+        _guard_event_payload(event_id="evt_digest_request")
+    )
 
     audit = store.audit_events[0]
 
@@ -2538,13 +3352,17 @@ def test_evaluate_audit_records_request_digest() -> None:
     assert "policy_revision" not in audit.metadata
 
 
-def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save() -> (
+    None
+):
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     PolicyService(store=store).save_snapshot(
-        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]),
+        expected_revision=0,
+        updated_by="test",
     )
 
     response = client.post(
@@ -2562,12 +3380,16 @@ def test_evaluate_audit_records_policy_digest_and_revision_after_snapshot_save()
 
 
 def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     bundle = PolicyBundle(disabled_rules=["P001_sensitive_file_access"])
-    PolicyService(store=store).save_snapshot(bundle, updated_by="test")
+    PolicyService(store=store).save_snapshot(
+        bundle,
+        expected_revision=0,
+        updated_by="test",
+    )
 
     response = client.post(
         "/v1/guard/evaluate",
@@ -2585,7 +3407,9 @@ def test_evaluate_audit_policy_digest_matches_snapshot_canonical_hash() -> None:
 
 def test_evaluate_request_digest_is_deterministic() -> None:
     _, first_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
-    _, second_store, _ = _evaluate_once(_guard_event_payload(event_id="evt_digest_same"))
+    _, second_store, _ = _evaluate_once(
+        _guard_event_payload(event_id="evt_digest_same")
+    )
 
     assert (
         first_store.audit_events[0].metadata["request_digest"]
@@ -2594,16 +3418,21 @@ def test_evaluate_request_digest_is_deterministic() -> None:
 
 
 def test_evaluate_audit_stores_full_decision_dump() -> None:
-    _, store, response = _evaluate_once(_guard_event_payload(event_id="evt_digest_decision"))
+    _, store, response = _evaluate_once(
+        _guard_event_payload(event_id="evt_digest_decision")
+    )
 
     audit = store.audit_events[0]
-    dump = audit.metadata["guard_decision"]
+    dump = audit.evidence["guard_decision"]
 
     assert dump == response.json()["decision"]
+    assert "guard_decision" not in audit.metadata
 
 
 def test_build_audit_event_rejects_extra_links_collision() -> None:
-    event = GuardEvent.model_validate(_guard_event_payload(event_id="evt_link_collision"))
+    event = GuardEvent.model_validate(
+        _guard_event_payload(event_id="evt_link_collision")
+    )
     decision = GuardDecision(
         decision_id="dec_link_collision",
         decision="allow",
@@ -2628,11 +3457,13 @@ def test_build_audit_event_rejects_extra_links_collision() -> None:
 
 
 def test_policy_snapshot_history_returns_latest_record_first() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     service = PolicyService(store=store)
-    service.save_snapshot(PolicyBundle(), updated_by="test")
+    service.save_snapshot(PolicyBundle(), expected_revision=0, updated_by="test")
     service.save_snapshot(
-        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]), updated_by="test"
+        PolicyBundle(disabled_rules=["P001_sensitive_file_access"]),
+        expected_revision=1,
+        updated_by="test",
     )
 
     history = store.list_policy_snapshot_history(limit=1)
@@ -2642,8 +3473,8 @@ def test_policy_snapshot_history_returns_latest_record_first() -> None:
 
 
 def _evaluate_store(payload: dict) -> MemoryControlPlaneStore:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     response = client.post(
@@ -2673,8 +3504,8 @@ def test_policy_evaluation_lookup_returns_none_for_unknown_event_id() -> None:
 
 
 def test_policy_evaluation_lookup_ignores_config_audit_records() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter(runtime="openclaw")
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
     response = client.post(
@@ -2712,7 +3543,7 @@ def test_policy_evaluation_lookup_ignores_config_audit_records() -> None:
 
 
 def test_policy_evaluation_lookup_filters_record_type_and_returns_earliest() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
 
     earliest = _audit_event_model(
         audit_id="audit_lookup_earliest",
@@ -2720,14 +3551,18 @@ def test_policy_evaluation_lookup_filters_record_type_and_returns_earliest() -> 
         decision="deny",
         runtime="langgraph",
         blocked=True,
-    ).model_copy(update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_1"}})
+    ).model_copy(
+        update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_1"}}
+    )
     later = _audit_event_model(
         audit_id="audit_lookup_later",
         trace_id="trace_lookup_type",
         decision="ask",
         runtime="langgraph",
         blocked=True,
-    ).model_copy(update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_2"}})
+    ).model_copy(
+        update={"links": {"event_id": "evt_type_filter", "decision_id": "dec_2"}}
+    )
     config_audit_record = AuditEvent(
         audit_id="audit_lookup_config",
         schema_version="0.4",
@@ -2755,8 +3590,8 @@ def test_policy_evaluation_lookup_filters_record_type_and_returns_earliest() -> 
 
 
 def _evaluate_client_and_store() -> tuple[TestClient, MemoryControlPlaneStore]:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     return TestClient(app), store
 
@@ -2778,7 +3613,10 @@ def test_evaluate_retry_with_same_content_returns_original_result() -> None:
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert second.json()["decision"]["decision_id"] == first.json()["decision"]["decision_id"]
+    assert (
+        second.json()["decision"]["decision_id"]
+        == first.json()["decision"]["decision_id"]
+    )
     assert second.json()["approval"] == first.json()["approval"]
     assert len(store.audit_events) == 1
 
@@ -2813,8 +3651,8 @@ def test_evaluate_distinct_event_ids_create_separate_audits() -> None:
 
 
 def test_evaluate_conflicts_with_legacy_audit_missing_request_digest() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -2824,7 +3662,9 @@ def test_evaluate_conflicts_with_legacy_audit_missing_request_digest() -> None:
         decision="allow",
         runtime="langgraph",
         blocked=False,
-    ).model_copy(update={"links": {"event_id": "evt_legacy_replay", "decision_id": "dec_legacy"}})
+    ).model_copy(
+        update={"links": {"event_id": "evt_legacy_replay", "decision_id": "dec_legacy"}}
+    )
     store.add_audit_event(legacy_audit)
 
     response = client.post(
@@ -2839,20 +3679,30 @@ def test_evaluate_conflicts_with_legacy_audit_missing_request_digest() -> None:
 
 
 def test_evaluate_conflicts_when_stored_audit_lacks_decision_dump() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
     payload = _guard_event_payload(event_id="evt_missing_dump")
-    digest = canonical_sha256(GuardEvent.model_validate(payload).model_dump(mode="json"))
+    digest = canonical_sha256(
+        GuardEvent.model_validate(payload).model_dump(mode="json")
+    )
     stale_audit = _audit_event_model(
         audit_id="audit_missing_dump",
         trace_id="trace_missing_dump",
         decision="allow",
         runtime="langgraph",
         blocked=False,
-    ).model_copy(update={"links": {"event_id": "evt_missing_dump", "decision_id": "dec_missing_dump", "request_digest": digest}})
+    ).model_copy(
+        update={
+            "links": {
+                "event_id": "evt_missing_dump",
+                "decision_id": "dec_missing_dump",
+                "request_digest": digest,
+            }
+        }
+    )
     store.add_audit_event(stale_audit)
 
     response = client.post(
@@ -2864,8 +3714,9 @@ def test_evaluate_conflicts_when_stored_audit_lacks_decision_dump() -> None:
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "EVALUATION_CONFLICT"
 
+
 def test_memory_store_audit_id_idempotent_hit_does_not_extend_chain() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     event = _audit_event_model(
         audit_id="audit_idem_store",
         trace_id="trace_idem_store",
@@ -2884,7 +3735,7 @@ def test_memory_store_audit_id_idempotent_hit_does_not_extend_chain() -> None:
 
 
 def test_memory_store_audit_id_conflict_raises_on_different_content() -> None:
-    store = MemoryControlPlaneStore()
+    store = memory_store_with_adapter()
     store.add_audit_event(
         _audit_event_model(
             audit_id="audit_conflict_store",
@@ -2908,9 +3759,10 @@ def test_memory_store_audit_id_conflict_raises_on_different_content() -> None:
 
     assert len(store.audit_events) == 1
 
+
 def test_audit_events_post_returns_409_on_conflict() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -2931,7 +3783,13 @@ def test_audit_events_post_returns_409_on_conflict() -> None:
     second_response = client.post(
         "/v1/audit/events",
         headers={"Authorization": "Bearer adapter-secret"},
-        json={**first_payload, "decision": "deny", "blocked": True, "risk_score": 90, "severity": "high"},
+        json={
+            **first_payload,
+            "decision": "deny",
+            "blocked": True,
+            "risk_score": 90,
+            "severity": "high",
+        },
     )
 
     assert second_response.status_code == 409
@@ -2939,9 +3797,65 @@ def test_audit_events_post_returns_409_on_conflict() -> None:
     assert len(store.audit_events) == 1
 
 
+def test_audit_events_post_rejects_timestamp_without_timezone() -> None:
+    store = memory_store_with_adapter()
+    client = TestClient(
+        create_app(
+            store=store,
+            settings=GuardApiSettings(control_token="control-secret"),
+        )
+    )
+    payload = _audit_event_payload(
+        audit_id="audit_api_naive_timestamp",
+        trace_id="trace_api_naive_timestamp",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    payload["timestamp"] = "2026-08-09T12:00:00"
+
+    response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "AUDIT_TIMESTAMP_INVALID"
+    assert store.audit_events == []
+
+
+def test_audit_events_post_rejects_values_outside_jcs_ijson_domain() -> None:
+    store = memory_store_with_adapter()
+    client = TestClient(
+        create_app(
+            store=store,
+            settings=GuardApiSettings(control_token="control-secret"),
+        )
+    )
+    payload = _audit_event_payload(
+        audit_id="audit_api_unsafe_integer",
+        trace_id="trace_api_unsafe_integer",
+        decision="allow",
+        runtime="langgraph",
+        blocked=False,
+    )
+    payload["metadata"] = {"unsafe_integer": 2**60}
+
+    response = client.post(
+        "/v1/audit/events",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "AUDIT_CANONICALIZATION_INVALID"
+    assert store.audit_events == []
+
+
 def test_audit_events_post_idempotent_hit_repairs_without_duplicates() -> None:
-    settings = GuardApiSettings(adapter_token="adapter-secret", control_token="control-secret")
-    store = MemoryControlPlaneStore()
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
     app = create_app(store=store, settings=settings)
     client = TestClient(app)
 
@@ -2968,4 +3882,6 @@ def test_audit_events_post_idempotent_hit_repairs_without_duplicates() -> None:
     assert second.status_code == 200
     assert second.json()["audit_id"] == "audit_api_idem"
     assert len(store.audit_events) == 1
-    assert len(store.provenance_nodes) == 1  # audit node only (no source link), not doubled
+    assert (
+        len(store.provenance_nodes) == 1
+    )  # audit node only (no source link), not doubled

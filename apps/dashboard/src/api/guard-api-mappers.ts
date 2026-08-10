@@ -3,6 +3,7 @@ import type {
   GuardApprovalDto,
   GuardAuditEventDto,
   GuardAuditIntegrityDto,
+  GuardAuditWindowDto,
   GuardConfigAuditFindingRecordDto,
   GuardEvaluationRunDto,
   GuardHealthDto,
@@ -18,6 +19,7 @@ import type {
   AuditEventRow,
   AuditIntegrity,
   AuditRecordType,
+  AuditWindow,
   ConfigAuditFindingRecord,
   EvaluationAttackMetric,
   EvaluationCase,
@@ -219,10 +221,60 @@ export function mapAuditEvent(dto: GuardAuditEventDto): AuditEventRow {
   };
 }
 
+export function mapAuditWindow(dto: GuardAuditWindowDto): AuditWindow {
+  const scope = readRecord(dto.scope);
+  const filters = readRecord(scope.filters);
+  const metrics = readRecord(dto.policy_metrics);
+  return {
+    scope: {
+      kind: "audit_window",
+      snapshotId: readString(scope.snapshot_id) ?? "",
+      outcomesAsOf: readString(scope.outcomes_as_of) ?? "",
+      order: "audit_sequence",
+      limit: readNumber(scope.limit),
+      returnedRecordCount: readNumber(scope.returned_record_count),
+      hasMore: readBoolean(scope.has_more),
+      nextCursor: readString(scope.next_cursor),
+      sequenceFrom: readNullableNumber(scope.sequence_from),
+      sequenceTo: readNullableNumber(scope.sequence_to),
+      occurredFrom: readString(scope.occurred_from),
+      occurredTo: readString(scope.occurred_to),
+      filters: {
+        traceId: readString(filters.trace_id),
+        caseId: readString(filters.case_id),
+        runtime: readString(filters.runtime),
+        decision: readString(filters.decision),
+      },
+    },
+    events: readArray(dto.events).map((row) => mapAuditEvent(row as GuardAuditEventDto)),
+    metrics: {
+      metricVersion: "policy_evaluation.v2",
+      deduplication: "logical_policy_evaluation",
+      evaluationCount: readNumber(metrics.evaluation_count),
+      unknownDecisionCount: readNumber(metrics.unknown_decision_count),
+      allowCount: readNumber(metrics.allow_count),
+      denyCount: readNumber(metrics.deny_count),
+      askCount: readNumber(metrics.ask_count),
+      interventionCount: readNumber(metrics.intervention_count),
+      interventionRate: readNullableNumber(metrics.intervention_rate),
+      policyDenyRate: readNullableNumber(metrics.policy_deny_rate),
+      approvalTriggerRate: readNullableNumber(metrics.approval_trigger_rate),
+      policyFpr: readNullableNumber(metrics.policy_intervention_fpr),
+      policyFnr: readNullableNumber(metrics.policy_intervention_fnr),
+      benignLabelCount: readNumber(metrics.benign_label_count),
+      maliciousLabelCount: readNumber(metrics.malicious_label_count),
+      unlabeledCount: readNumber(metrics.unlabeled_count),
+      averageDecisionLatencyMs: readNullableNumber(metrics.average_decision_latency_ms),
+      latencySampleCount: readNumber(metrics.latency_sample_count),
+      duplicatePolicyRecordCount: readNumber(metrics.duplicate_policy_record_count),
+      unkeyedPolicyRecordCount: readNumber(metrics.unkeyed_policy_record_count),
+    },
+  };
+}
+
 export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
-  const tool = readString(dto.tool) ?? "未提供";
+  const actionName = readString(dto.action_name) ?? "未提供";
   const resource = readString(dto.resource) ?? "未提供";
-  const toolCallId = readString(dto.tool_call_id) ?? "未提供";
   const status: ApprovalRequest["status"] =
     dto.status === "expired"
       ? "expired"
@@ -236,22 +288,20 @@ export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
     id: readString(dto.approval_id) ?? "未提供",
     createdAt: readString(dto.created_at) ?? "",
     status,
-    tool,
     resource: maskSensitiveText(resource),
     riskScore: readNumber(dto.risk_score),
     severity: readSeverity(dto.severity),
     reason: readString(dto.reason) ?? "未提供",
     eventId: "",
     traceId: readString(dto.trace_id) ?? "",
-    subjectId: readString(dto.subject_id) ?? toolCallId,
-    subjectType: readString(dto.subject_type) ?? "tool_call",
-    actionId: readString(dto.action_id) ?? toolCallId,
-    actionName: readString(dto.action_name) ?? tool,
+    subjectId: readString(dto.subject_id) ?? "未提供",
+    subjectType: readString(dto.subject_type) ?? "未提供",
+    actionId: readString(dto.action_id) ?? "未提供",
+    actionName,
     userTask: "未提供",
-    agentAction: `${tool}(${maskSensitiveText(resource)})`,
+    agentAction: `${actionName}(${maskSensitiveText(resource)})`,
     consequence: approvalConsequence(status),
     ruleHits: [],
-    approvalNonce: readString(dto.approval_nonce) ?? undefined,
     expiresAt: readString(dto.expires_at),
     resolvedAt: readString(dto.resolved_at),
   };
@@ -389,12 +439,39 @@ export function mapPolicySummary(
 
 export function mapAuditIntegrity(dto: GuardAuditIntegrityDto): AuditIntegrity {
   const integrity = readRecord(dto);
+  const anchor = readRecord(integrity.anchor);
   return {
     valid: readBoolean(integrity.valid),
     eventCount: readNumber(integrity.event_count),
     headHash: readString(integrity.head_hash),
     firstBrokenAuditId: readString(integrity.first_broken_audit_id),
+    canonicalization: dto.canonicalization,
+    anchor: {
+      enabled: readBoolean(anchor.enabled),
+      status: readAuditAnchorStatus(anchor.status),
+      checkpointSequence: readNullableNumber(anchor.checkpoint_sequence),
+      checkpointHeadHash: readString(anchor.checkpoint_head_hash),
+      checkpointHash: readString(anchor.checkpoint_hash),
+      checkpointedAt: readString(anchor.checkpointed_at),
+      lag: readNullableNumber(anchor.lag),
+      keyId: readString(anchor.key_id),
+      errorCode: readString(anchor.error_code),
+    },
   };
+}
+
+function readAuditAnchorStatus(value: unknown): AuditIntegrity["anchor"]["status"] {
+  if (
+    value === "disabled" ||
+    value === "empty" ||
+    value === "current" ||
+    value === "stale" ||
+    value === "invalid" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return "error";
 }
 
 export function mapConfigAuditFindingRecord(
@@ -441,7 +518,6 @@ export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
     lastHeartbeatAt: readString(dto.last_heartbeat_at),
     error: readString(dto.error),
     source: readString(dto.source),
-    runtime: readString(dto.runtime),
     runtimeId: readString(dto.runtime_id),
     agentId: readString(dto.agent_id),
     pluginVersion: readString(dto.plugin_version),

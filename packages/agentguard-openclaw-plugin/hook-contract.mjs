@@ -1,5 +1,18 @@
-const blockingHooks = ["before_tool_call", "message_sending", "before_install"];
-const promptModelHooks = ["before_prompt_build", "llm_input", "llm_output"];
+const primaryBlockingHooks = [
+  "before_tool_call",
+  "message_sending",
+  "before_install",
+];
+const promptModelHooks = [
+  "before_prompt_build",
+  "before_agent_run",
+  "llm_input",
+  "llm_output",
+];
+const synchronousPersistenceHooks = [
+  "tool_result_persist",
+  "before_message_write",
+];
 const observationHooks = [
   "gateway_start",
   "gateway_stop",
@@ -15,20 +28,19 @@ const observationHooks = [
   "resolve_exec_env",
 ];
 
-export const OPENCLAW_BLOCKING_HOOKS = Object.freeze(blockingHooks);
 export const OPENCLAW_OBSERVATION_HOOKS = Object.freeze(observationHooks);
 export const OPENCLAW_ENFORCEMENT_HOOKS = Object.freeze([
-  ...blockingHooks,
-  "before_prompt_build",
-  "llm_input",
+  ...primaryBlockingHooks,
+  "before_agent_run",
   "before_agent_finalize",
+  ...synchronousPersistenceHooks,
 ]);
+export const OPENCLAW_FAIL_CLOSED_HOOKS = OPENCLAW_ENFORCEMENT_HOOKS;
 export const OPENCLAW_REQUIRED_HOOKS = Object.freeze([
-  ...blockingHooks,
+  ...primaryBlockingHooks,
   "message_received",
   ...promptModelHooks,
-  "tool_result_persist",
-  "before_message_write",
+  ...synchronousPersistenceHooks,
   "before_agent_finalize",
   ...observationHooks,
 ]);
