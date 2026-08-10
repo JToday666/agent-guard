@@ -76,13 +76,15 @@ cp .env.example .env
 
 ## 质量门禁
 
-GitHub CI 会在 push 和 pull request 上执行 Python lint、类型检查、根测试、LangGraph Adapter 测试与 PostgreSQL migration 测试，并执行 Dashboard、OpenClaw 插件、bench tools 和本地 shim 检查。本地可分别运行：
+GitHub CI 会在面向 `dev`、`main` 的 push 和 pull request 上执行 Python lint、类型检查、根测试、LangGraph Adapter 测试与 PostgreSQL migration 测试，并执行 Dashboard 静态检查、单元测试、构建、Chromium 浏览器 E2E、OpenClaw 插件、bench tools 和本地 shim 检查。本地可分别运行：
 
 ```bash
-uv run ruff check apps/cli apps/guard-api packages/agentguard-core packages/agentguard-langgraph-adapter tests
+uv run ruff check apps packages scripts tests
 uv run pyright
 uv run pytest -q tests packages/agentguard-langgraph-adapter/tests
 pnpm --filter @agentguard/dashboard check
+pnpm --filter @agentguard/dashboard test:e2e
+pnpm --filter @agentguard/dashboard test:e2e:api
 pnpm --filter @agentguard-ai/openclaw-plugin test
 pnpm --filter @agentguard/openclaw-bench-tools test
 pnpm openclaw:bench-shim:test
