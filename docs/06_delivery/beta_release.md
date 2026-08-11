@@ -52,15 +52,14 @@ import agentguard_cli
 
 ## 当前发布边界
 
-截至 2026-08-05，仓库没有配置 CI/CD，也不会在 PR、push 或 tag 时自动检查或
-发布。本次 PyPI、npm 和 Git tag 由发布负责人在本地完成；以下命令用于复现构建和
-验证，不代表仓库已经具备自动发布能力。
+2026-08-05 的首次 PyPI、npm 和 Git tag 由发布负责人在本地完成。当前仓库已经增加
+基础 CI、Windows 安全回归门禁和 `Release Check` 工作流：PR 与 `dev` / `main` push
+会在全新临时目录构建并验证 Python/npm 制品，但不会自动上传注册表或创建 tag。
 
 Guard API 镜像构建和 GHCR 发布仍未完成，不属于本次 Python/npm Beta 发布物。
 
-Trusted Publishing、自动制品构建、SBOM、provenance 和远端审批门禁均未配置，
-不能作为当前发布的已有保障。任何 registry 凭证、token、`.env` 或本地测试结果
-都不得提交。
+Trusted Publishing、SBOM、签名 provenance 和远端审批门禁仍未配置，不能作为当前
+发布的已有保障。任何 registry 凭证、token、`.env` 或本地测试结果都不得提交。
 
 ## 本地发布复现检查
 
@@ -93,22 +92,28 @@ uv run pytest tests/test_postgres_test_utils.py tests/test_guard_api_postgres.py
 
 ## 本地制品验证
 
-构建三个 Python 包：
+必须从一个不存在的临时目录开始构建，不得复用长期保留且可能含历史制品的
+`release-dist`。以下以 shell 临时目录为例：
 
 ```bash
-uv build packages/agentguard-core --out-dir release-dist/aegis-agentguard-core
-uv build apps/guard-api --out-dir release-dist/aegis-agentguard-api
-uv build apps/cli --out-dir release-dist/aegis-agentguard-cli
-uvx twine check release-dist/*/*
-uv run python scripts/verify-wheel-install.py release-dist
+RELEASE_ROOT="$(mktemp -d)"
+uv build packages/agentguard-core --out-dir "$RELEASE_ROOT/aegis-agentguard-core"
+uv build apps/guard-api --out-dir "$RELEASE_ROOT/aegis-agentguard-api"
+uv build apps/cli --out-dir "$RELEASE_ROOT/aegis-agentguard-cli"
+uv run python scripts/verify-wheel-install.py "$RELEASE_ROOT"
 ```
 
 构建并验证 OpenClaw npm tarball：
 
 ```bash
-pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination release-dist/npm
-node scripts/verify-npm-tarball.mjs
-uv run python scripts/check-release-artifacts.py release-dist
+mkdir -p "$RELEASE_ROOT/npm"
+pnpm --filter @agentguard-ai/openclaw-plugin build
+pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination "$RELEASE_ROOT/npm"
+node scripts/verify-npm-tarball.mjs "$RELEASE_ROOT/npm/agentguard-ai-openclaw-plugin-0.1.0-beta.1.tgz"
+uv run python scripts/check-release-artifacts.py "$RELEASE_ROOT"
+SOURCE_REVISION="$(git rev-parse HEAD)"
+uv run python scripts/release-artifact-manifest.py create "$RELEASE_ROOT" --source-revision "$SOURCE_REVISION"
+uv run python scripts/release-artifact-manifest.py verify "$RELEASE_ROOT" --source-revision "$SOURCE_REVISION"
 ```
 
 检查结果必须满足：
@@ -117,6 +122,8 @@ uv run python scripts/check-release-artifacts.py release-dist
 - Core 只提供 `agentguard_core` 导入，不再提供平行的元包门面。
 - npm tarball 可在空目录安装并加载插件。
 - 制品不包含 `.env`、凭证、Dashboard、LangGraph、benchmark、测试结果或本地路径。
+- 七个 archive 的相对路径、大小、SHA-256 与完整 Git revision 写入 1.1 manifest；
+  重名、遗漏、额外制品、摘要变化或源码 revision 不一致都会失败。
 
 ## Guard API 容器与 GHCR 延期
 
@@ -135,8 +142,8 @@ Core → API → CLI → npm：
 - Git tag `v0.1.0-beta.1` 已存在并指向本次 Beta 源码。
 
 后续发布继续要求所有本地检查通过、制品摘要经复核，且发布凭证只存在于本机凭证
-存储或进程环境中。不得根据本次手工发布推断自动发布、供应链签名或远端审批已经
-配置完成。
+存储或进程环境中。不得根据 `Release Check` 通过推断注册表自动发布、供应链签名或
+远端审批已经配置完成。
 
 当前 tag 只形成 Git 引用；仓库没有 tag 触发的自动发布流程。创建后续 tag 前必须
 重新完成版本、制品和注册表检查。
