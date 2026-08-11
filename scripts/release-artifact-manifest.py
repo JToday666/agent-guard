@@ -6,20 +6,23 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 DEFAULT_MANIFEST_NAME = "release-artifact-manifest.json"
+SOURCE_REVISION_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
 class ReleaseManifestError(ValueError):
     """Raised when release artifacts do not have one immutable identity."""
 
 
-def build_manifest(root: Path) -> dict[str, Any]:
+def build_manifest(root: Path, source_revision: str) -> dict[str, Any]:
     root = root.resolve()
+    source_revision = _validate_source_revision(source_revision)
     archives = _archives(root)
     _reject_duplicate_names(archives, root)
     artifacts = [
@@ -33,13 +36,16 @@ def build_manifest(root: Path) -> dict[str, Any]:
     ]
     return {
         "schema_version": SCHEMA_VERSION,
+        "source_revision": source_revision,
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
     }
 
 
-def write_manifest(root: Path, output: Path) -> dict[str, Any]:
-    manifest = build_manifest(root)
+def write_manifest(
+    root: Path, output: Path, source_revision: str
+) -> dict[str, Any]:
+    manifest = build_manifest(root, source_revision)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -48,7 +54,9 @@ def write_manifest(root: Path, output: Path) -> dict[str, Any]:
     return manifest
 
 
-def verify_manifest(root: Path, manifest_path: Path) -> list[str]:
+def verify_manifest(
+    root: Path, manifest_path: Path, source_revision: str
+) -> list[str]:
     errors: list[str] = []
     try:
         expected = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -57,9 +65,12 @@ def verify_manifest(root: Path, manifest_path: Path) -> list[str]:
     if not isinstance(expected, dict) or expected.get("schema_version") != SCHEMA_VERSION:
         return [f"manifest schema_version must be {SCHEMA_VERSION}"]
     try:
-        actual = build_manifest(root)
+        source_revision = _validate_source_revision(source_revision)
+        actual = build_manifest(root, source_revision)
     except ReleaseManifestError as exc:
         return [str(exc)]
+    if expected.get("source_revision") != source_revision:
+        errors.append("manifest source_revision does not match the requested source")
 
     expected_artifacts = expected.get("artifacts")
     if not isinstance(expected_artifacts, list):
@@ -123,6 +134,15 @@ def _reject_duplicate_names(archives: list[Path], root: Path) -> None:
         raise ReleaseManifestError(f"duplicate release archive names: {details}")
 
 
+def _validate_source_revision(source_revision: str) -> str:
+    normalized = source_revision.strip().lower()
+    if not SOURCE_REVISION_PATTERN.fullmatch(normalized):
+        raise ReleaseManifestError(
+            "source revision must be a full 40 or 64 character hexadecimal Git id"
+        )
+    return normalized
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -137,9 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     create = subparsers.add_parser("create")
     create.add_argument("root", type=Path)
     create.add_argument("--output", type=Path)
+    create.add_argument("--source-revision", required=True)
     verify = subparsers.add_parser("verify")
     verify.add_argument("root", type=Path)
     verify.add_argument("--manifest", type=Path)
+    verify.add_argument("--source-revision", required=True)
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
@@ -148,14 +170,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "create":
         try:
-            manifest = write_manifest(root, manifest_path.resolve())
+            manifest = write_manifest(
+                root, manifest_path.resolve(), args.source_revision
+            )
         except ReleaseManifestError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
         return 0
 
-    errors = verify_manifest(root, manifest_path.resolve())
+    errors = verify_manifest(
+        root, manifest_path.resolve(), args.source_revision
+    )
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
