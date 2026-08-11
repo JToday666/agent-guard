@@ -2633,7 +2633,7 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
         "run_at": "2026-06-28T00:00:00+00:00",
         "dataset_id": "attackbench",
         "dataset_version": "v1",
-        "dataset_digest": "sha256:attackbench-v1",
+        "dataset_digest": "sha256:" + "a" * 64,
         "dataset_locked": True,
         "regression_gate": {
             "status": "passed",
@@ -2651,7 +2651,7 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
                 "case_id": "PI-001",
                 "attack_type": "prompt_injection",
                 "runtime": "openclaw",
-                "case_digest": "sha256:pi-001",
+                "case_digest": "sha256:" + "b" * 64,
                 "provenance": {
                     "source": "attackbench",
                     "source_path": "bench/datasets/attack_cases/prompt_injection.jsonl",
@@ -2702,7 +2702,7 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
     assert attackbench["versions"] == [
         {
             "dataset_version": "v1",
-            "dataset_digest": "sha256:attackbench-v1",
+            "dataset_digest": "sha256:" + "a" * 64,
             "locked": True,
             "run_count": 1,
             "case_count": 1,
