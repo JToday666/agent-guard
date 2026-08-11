@@ -8,6 +8,7 @@ from typing import Any, Literal, Protocol
 import httpx
 
 from .config import DEFAULT_API_MODE, validate_api_mode
+from .endpoint_policy import GuardApiEndpointError, validate_guard_api_base_url
 from .event_models import PolicyDecision, RuleHit
 
 
@@ -98,22 +99,29 @@ class AgentGuardCoreClient:
         payload: dict[str, Any] | None = None,
         timeout: float,
     ) -> dict[str, Any]:
-        url = self.config.core_base_url.rstrip("/") + path
         try:
-            with httpx.Client(timeout=timeout) as client:
+            base_url = validate_guard_api_base_url(self.config.core_base_url)
+        except GuardApiEndpointError as exc:
+            raise CoreClientError(str(exc)) from exc
+        url = base_url + path
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
                 if method == "GET":
                     response = client.get(url, headers=self._headers())
                 else:
                     response = client.post(url, headers=self._headers(), json=payload)
+            if response.is_redirect:
+                raise CoreClientError("Guard API redirects are not allowed")
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as exc:
-            detail = _response_error_detail(exc.response)
             raise CoreClientError(
-                f"Core returned HTTP {exc.response.status_code} for {path}{detail}"
+                f"Core returned HTTP {exc.response.status_code} for {path}"
             ) from exc
         except httpx.RequestError as exc:
-            raise CoreClientError(f"Core request failed for {path}: {exc}") from exc
+            raise CoreClientError(
+                f"Core request failed for {path} ({type(exc).__name__})"
+            ) from exc
         except ValueError as exc:
             raise CoreClientError(f"Core returned invalid JSON for {path}") from exc
         if not isinstance(data, dict):
@@ -154,13 +162,6 @@ def _decision_with_top_level_approval(
     if isinstance(policy_audit_id, str) and policy_audit_id:
         enriched["policy_audit_id"] = policy_audit_id
     return enriched
-
-
-def _response_error_detail(response: httpx.Response) -> str:
-    text = response.text.strip()
-    if not text:
-        return ""
-    return f": {text[:500]}"
 
 
 @dataclass(slots=True)

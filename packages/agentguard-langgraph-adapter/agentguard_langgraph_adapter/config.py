@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Literal
 import warnings
 
+from .endpoint_policy import validate_guard_api_base_url
+
 ApiMode = Literal["guard-api-v0.3", "legacy"]
 SUPPORTED_API_MODES: tuple[ApiMode, ...] = ("guard-api-v0.3", "legacy")
 DEFAULT_API_MODE: ApiMode = "guard-api-v0.3"
@@ -41,6 +43,7 @@ class AgentGuardLangGraphConfig:
     api_mode: ApiMode = DEFAULT_API_MODE
 
     def __post_init__(self) -> None:
+        self.core_base_url = validate_guard_api_base_url(self.core_base_url)
         self.api_mode = validate_api_mode(self.api_mode)
         warn_if_legacy_api_mode(self.api_mode)
 

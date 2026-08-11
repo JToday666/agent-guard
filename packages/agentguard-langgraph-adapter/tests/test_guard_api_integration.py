@@ -63,7 +63,7 @@ def test_legacy_mode_keeps_old_routes_and_rejects_v03_only_capabilities(
 
     monkeypatch.setattr(httpx, "Client", MockClient)
     config = AgentGuardLangGraphConfig(
-        core_base_url="http://legacy.test",
+        core_base_url="https://legacy.test",
         token="legacy-token",
         api_mode="legacy",
     )
@@ -171,7 +171,7 @@ def test_guard_api_v03_evaluates_p1_audits_and_approval_flow(
     monkeypatch.setattr(httpx, "Client", MockClient)
     adapter = LangGraphAdapter(
         config=AgentGuardLangGraphConfig(
-            core_base_url="http://guard-api.test",
+            core_base_url="https://guard-api.test",
             token="adapter-secret",
             api_mode="guard-api-v0.3",
         )
@@ -323,7 +323,7 @@ def test_guard_api_v03_gateway_skips_policy_audit_submission(
     monkeypatch.setattr(httpx, "Client", MockClient)
     adapter = LangGraphAdapter(
         config=AgentGuardLangGraphConfig(
-            core_base_url="http://guard-api.test",
+            core_base_url="https://guard-api.test",
             token="adapter-secret",
             api_mode="guard-api-v0.3",
         )

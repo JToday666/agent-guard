@@ -127,7 +127,7 @@ test("GuardApiClient sends bearer token without exposing it in errors", async ()
   const requests = [];
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -145,7 +145,7 @@ test("GuardApiClient sends bearer token without exposing it in errors", async ()
   const result = await client.evaluate({ event_id: "evt_001" });
 
   assert.equal(result.decision.decision, "allow");
-  assert.equal(requests[0].url, "http://guard.test/v1/guard/evaluate");
+  assert.equal(requests[0].url, "https://guard.test/v1/guard/evaluate");
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
 });
 
@@ -153,7 +153,7 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
   const requests = [];
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -188,7 +188,7 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
 
   assert.equal(
     requests[0].url,
-    "http://guard.test/v1/adapters/openclaw/heartbeat",
+    "https://guard.test/v1/adapters/openclaw/heartbeat",
   );
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
   assert.equal("runtime" in requests[0].body, false);
@@ -223,7 +223,7 @@ test("GuardApiClient falls back to the canonical hook contract for an empty hear
   const requests = [];
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -252,7 +252,7 @@ test("GuardApiClient falls back to the canonical hook contract for an empty hear
 test("GuardApiClient fail-closed errors do not include adapter token", async () => {
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -313,7 +313,7 @@ test("GuardApiClient caps approval polling by the single approval timeout", asyn
   let waitCalls = 0;
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 50,
@@ -345,7 +345,7 @@ test("GuardApiClient diagnostic logging redacts adapter token", async () => {
   console.warn = (...args) => warnings.push(args.map(String).join(" "));
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -372,7 +372,7 @@ test("submitRuntimeOutcome posts to /v1/audit/events and surfaces created flags"
   const requests = [];
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -394,7 +394,7 @@ test("submitRuntimeOutcome posts to /v1/audit/events and surfaces created flags"
 
   const result = await client.submitRuntimeOutcome(runtimeOutcomeReceipt());
 
-  assert.equal(requests[0].url, "http://guard.test/v1/audit/events");
+  assert.equal(requests[0].url, "https://guard.test/v1/audit/events");
   assert.equal(requests[0].init.method, "POST");
   assert.equal(result.ok, true);
   assert.equal(result.created, true);
@@ -404,7 +404,7 @@ test("submitRuntimeOutcome posts to /v1/audit/events and surfaces created flags"
 test("submitRuntimeOutcome treats 409 conflict as diagnostics without throwing", async () => {
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -433,7 +433,7 @@ test("submitRuntimeOutcome treats 409 conflict as diagnostics without throwing",
 test("submitRuntimeOutcome does not retry permanently invalid receipts", async () => {
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,
@@ -453,16 +453,13 @@ test("submitRuntimeOutcome does not retry permanently invalid receipts", async (
 
   assert.equal(result.ok, false);
   assert.equal(result.created, false);
-  assert.equal(
-    result.audit_id,
-    "audit_outcome_evt_invalid_pre_execution_deny",
-  );
+  assert.equal(result.audit_id, "audit_outcome_evt_invalid_pre_execution_deny");
 });
 
 test("submitRuntimeOutcome still rejects on server errors", async () => {
   const client = new GuardApiClient({
     config: {
-      guardApiBaseUrl: "http://guard.test",
+      guardApiBaseUrl: "https://guard.test",
       adapterToken: "secret-token",
       requestTimeoutMs: 1000,
       approvalPollIntervalMs: 10,

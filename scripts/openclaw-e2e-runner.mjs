@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { OPENCLAW_REQUIRED_HOOKS } from "../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import { resolveGuardApiBaseUrl } from "./guard-api-endpoint.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -17,9 +18,7 @@ const pluginRequire = createRequire(path.join(PLUGIN_ROOT, "package.json"));
 
 loadDotEnv(path.join(ROOT, ".env"));
 
-const GUARD_API_BASE_URL =
-  process.env.AGENTGUARD_API_URL ||
-  `http://${process.env.AGENTGUARD_HOST || "127.0.0.1"}:${process.env.AGENTGUARD_PORT || "8088"}`;
+const GUARD_API_BASE_URL = resolveGuardApiBaseUrl(process.env);
 const ADAPTER_TOKEN = requiredEnv("AGENTGUARD_ADAPTER_TOKEN");
 const CONTROL_TOKEN = requiredEnv("AGENTGUARD_CONTROL_TOKEN");
 const REPORT_PATH =
@@ -305,6 +304,7 @@ async function request(pathname, init = {}) {
   try {
     response = await fetch(`${GUARD_API_BASE_URL}${pathname}`, {
       ...init,
+      redirect: "error",
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
@@ -313,7 +313,7 @@ async function request(pathname, init = {}) {
     });
   } catch (error) {
     throw new Error(
-      `fetch failed for ${pathname}: ${String(error?.cause?.message ?? error?.message ?? error)}`,
+      `fetch failed for ${pathname} (${error instanceof Error ? error.name : "Error"})`,
       {
         cause: error,
       },
@@ -1752,9 +1752,9 @@ print("agentguard test database initialized")
 }
 
 async function assertGuardApiPortIsFree() {
-  const response = await fetch(`${GUARD_API_BASE_URL}/health`).catch(
-    () => null,
-  );
+  const response = await fetch(`${GUARD_API_BASE_URL}/health`, {
+    redirect: "error",
+  }).catch(() => null);
   if (response !== null) {
     throw new Error(
       `Guard API is already reachable at ${GUARD_API_BASE_URL}; stop it before reliability testing so the runner can use AGENTGUARD_TEST_DATABASE_URL.`,
@@ -1801,9 +1801,9 @@ async function waitForGuardApiHealth(guardApi) {
         `Guard API exited before becoming healthy:\n${guardApi.logs.join("")}`,
       );
     }
-    const response = await fetch(
-      `${GUARD_API_BASE_URL}/health?check_db=true`,
-    ).catch(() => null);
+    const response = await fetch(`${GUARD_API_BASE_URL}/health?check_db=true`, {
+      redirect: "error",
+    }).catch(() => null);
     if (response?.ok) {
       const body = await response.json().catch(() => ({}));
       if (body.status === "ok" && body.database === "ok") {

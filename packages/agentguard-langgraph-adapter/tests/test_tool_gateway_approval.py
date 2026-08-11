@@ -18,7 +18,7 @@ def test_guard_api_v03_client_preserves_top_level_approval(monkeypatch) -> None:
     client = AgentGuardCoreClient(
         SimpleNamespace(
             token="adapter-token",
-            core_base_url="http://agentguard.test",
+            core_base_url="https://agentguard.test",
             timeout=1.0,
             core_api_mode="guard-api-v0.3",
         )

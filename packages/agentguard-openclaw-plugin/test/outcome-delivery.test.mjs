@@ -14,7 +14,7 @@ import test from "node:test";
 import { RuntimeOutcomeDelivery } from "../dist/runtime/outcome-delivery.js";
 
 const config = {
-  guardApiBaseUrl: "http://guard.test",
+  guardApiBaseUrl: "https://guard.test",
   adapterToken: "secret-token",
   enforcementMode: "enforce",
   requestTimeoutMs: 1_000,

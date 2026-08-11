@@ -40,14 +40,14 @@ def test_health_uses_host_and_port_default_api_url() -> None:
 
     exit_code, output, error = _run_cli(
         ["health", "--json"],
-        env={"AGENTGUARD_HOST": "10.0.0.5", "AGENTGUARD_PORT": "9090"},
+        env={"AGENTGUARD_HOST": "127.0.0.5", "AGENTGUARD_PORT": "9090"},
         transport=httpx.MockTransport(handler),
     )
 
     assert exit_code == 0
     assert json.loads(output) == {"status": "ok"}
     assert error == ""
-    assert seen_urls == ["http://10.0.0.5:9090/health"]
+    assert seen_urls == ["http://127.0.0.5:9090/health"]
 
 
 def test_health_check_db_requests_database_health() -> None:
@@ -59,20 +59,20 @@ def test_health_check_db_requests_database_health() -> None:
 
     exit_code, output, error = _run_cli(
         ["health", "--check-db"],
-        env={"AGENTGUARD_API_URL": "http://guard.local"},
+        env={"AGENTGUARD_API_URL": "https://guard.local"},
         transport=httpx.MockTransport(handler),
     )
 
     assert exit_code == 0
     assert output == "Guard API: ok, database: ok\n"
     assert error == ""
-    assert seen_urls == ["http://guard.local/health?check_db=true"]
+    assert seen_urls == ["https://guard.local/health?check_db=true"]
 
 
 def test_launch_requires_control_token_and_prints_dashboard_url() -> None:
     missing_code, missing_output, missing_error = _run_cli(
         ["launch"],
-        env={"AGENTGUARD_API_URL": "http://guard.local"},
+        env={"AGENTGUARD_API_URL": "https://guard.local"},
         transport=httpx.MockTransport(lambda _: httpx.Response(500)),
     )
 
@@ -85,7 +85,7 @@ def test_launch_requires_control_token_and_prints_dashboard_url() -> None:
     exit_code, output, error = _run_cli(
         ["launch", "--dashboard-url", "http://dashboard.local/app"],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -122,7 +122,7 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
     stdout_code, stdout_output, stdout_error = _run_cli(
         ["audit", "export", "--trace-id", "trace_1", "--limit", "2"],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -140,7 +140,7 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
             str(output_path),
         ],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -157,8 +157,8 @@ def test_audit_export_writes_jsonl_to_stdout_and_file(tmp_path: Path) -> None:
         for line in output_path.read_text(encoding="utf-8").splitlines()
     ] == events
     assert seen_urls == [
-        "http://guard.local/v1/audit/window?trace_id=trace_1&limit=2",
-        "http://guard.local/v1/audit/window?trace_id=trace_1&limit=2",
+        "https://guard.local/v1/audit/window?trace_id=trace_1&limit=2",
+        "https://guard.local/v1/audit/window?trace_id=trace_1&limit=2",
     ]
 
 
@@ -190,7 +190,7 @@ def test_audit_export_follows_one_snapshot_cursor() -> None:
     exit_code, output, error = _run_cli(
         ["audit", "export", "--runtime", "openclaw", "--limit", "3"],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -204,8 +204,8 @@ def test_audit_export_follows_one_snapshot_cursor() -> None:
         "audit_1",
     ]
     assert seen_urls == [
-        "http://guard.local/v1/audit/window?runtime=openclaw&limit=3",
-        "http://guard.local/v1/audit/window?cursor=cursor-1",
+        "https://guard.local/v1/audit/window?runtime=openclaw&limit=3",
+        "https://guard.local/v1/audit/window?cursor=cursor-1",
     ]
 
 
@@ -221,7 +221,7 @@ def test_metrics_outputs_stable_json() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == (
-            "http://guard.local/v1/metrics/policy-evaluations"
+            "https://guard.local/v1/metrics/policy-evaluations"
             "?evaluated_from=2026-08-01T00%3A00%3A00Z"
             "&evaluated_to=2026-08-02T00%3A00%3A00Z&runtime=openclaw"
         )
@@ -239,7 +239,7 @@ def test_metrics_outputs_stable_json() -> None:
             "--json",
         ],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -254,13 +254,13 @@ def test_trace_get_writes_provenance_json(tmp_path: Path) -> None:
     output_path = tmp_path / "trace.json"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "http://guard.local/v1/traces/trace_1/provenance"
+        assert str(request.url) == "https://guard.local/v1/traces/trace_1/provenance"
         return httpx.Response(200, json={"trace_id": "trace_1", "graph": {"nodes": []}})
 
     exit_code, output, error = _run_cli(
         ["trace", "get", "trace_1", "--provenance", "--output", str(output_path)],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -303,7 +303,7 @@ def test_credential_issue_posts_runtime_binding_and_shows_token_once() -> None:
     exit_code, output, error = _run_cli(
         ["credential", "issue", "--runtime", "openclaw", "--agent-id", "agent-a"],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -320,7 +320,7 @@ def test_credential_issue_posts_runtime_binding_and_shows_token_once() -> None:
     assert seen == [
         {
             "method": "POST",
-            "url": "http://guard.local/v1/credentials",
+            "url": "https://guard.local/v1/credentials",
             "authorization": "Bearer control-secret",
             "body": {
                 "principal_id": "openclaw:agent-a",
@@ -354,7 +354,7 @@ def test_credential_list_and_revoke_use_control_plane_endpoints() -> None:
         )
 
     env = {
-        "AGENTGUARD_API_URL": "http://guard.local",
+        "AGENTGUARD_API_URL": "https://guard.local",
         "AGENTGUARD_CONTROL_TOKEN": "control-secret",
     }
     list_code, list_output, list_error = _run_cli(
@@ -371,8 +371,8 @@ def test_credential_list_and_revoke_use_control_plane_endpoints() -> None:
     assert list_output == "cred_1  openclaw/agent-a  openclaw:agent-a  active\n"
     assert revoke_output == "Revoked credential cred_1\n"
     assert seen == [
-        ("GET", "http://guard.local/v1/credentials"),
-        ("POST", "http://guard.local/v1/credentials/cred_1/revoke"),
+        ("GET", "https://guard.local/v1/credentials"),
+        ("POST", "https://guard.local/v1/credentials/cred_1/revoke"),
     ]
 
 
@@ -386,7 +386,7 @@ def test_http_error_and_connection_error_return_nonzero() -> None:
             "2026-08-02T00:00:00Z",
         ],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "bad-token",
         },
         transport=httpx.MockTransport(
@@ -399,7 +399,7 @@ def test_http_error_and_connection_error_return_nonzero() -> None:
 
     connect_code, _, connect_error = _run_cli(
         ["health"],
-        env={"AGENTGUARD_API_URL": "http://guard.local"},
+        env={"AGENTGUARD_API_URL": "https://guard.local"},
         transport=httpx.MockTransport(raise_connect_error),
     )
 
@@ -407,7 +407,8 @@ def test_http_error_and_connection_error_return_nonzero() -> None:
     assert "HTTP 403" in http_error
     assert "SCOPE_DENIED" in http_error
     assert connect_code == 1
-    assert "connection refused" in connect_error
+    assert "ConnectError" in connect_error
+    assert "connection refused" not in connect_error
 
 
 def test_openclaw_verify_delegates_to_existing_pnpm_script() -> None:
@@ -470,7 +471,7 @@ def test_eval_import_posts_evaluation_run(tmp_path: Path) -> None:
     exit_code, output, error = _run_cli(
         ["eval", "import", str(output_path)],
         env={
-            "AGENTGUARD_API_URL": "http://guard.local",
+            "AGENTGUARD_API_URL": "https://guard.local",
             "AGENTGUARD_CONTROL_TOKEN": "control-secret",
         },
         transport=httpx.MockTransport(handler),
@@ -482,7 +483,7 @@ def test_eval_import_posts_evaluation_run(tmp_path: Path) -> None:
     assert seen == [
         {
             "method": "POST",
-            "url": "http://guard.local/v1/evaluations",
+            "url": "https://guard.local/v1/evaluations",
             "authorization": "Bearer control-secret",
             "body": payload,
         }

@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import {
   OPENCLAW_FAIL_CLOSED_HOOKS,
   OPENCLAW_REQUIRED_HOOK_COUNT,
@@ -30,6 +32,9 @@ type ApprovalWaiter = {
   waitForApproval?: (approvalId: string) => Promise<ApprovalWaitResponse>;
 };
 
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+const ENCODED_LINE_BREAK = /%0[ad]/iu;
+
 const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   guardApiBaseUrl: "http://127.0.0.1:8088",
   adapterToken: "",
@@ -46,6 +51,100 @@ export class GuardApiError extends Error {
     super(message);
     this.name = "GuardApiError";
   }
+}
+
+export function validateGuardApiBaseUrl(value: unknown): string {
+  if (typeof value !== "string" || value === "" || value.trim() !== value) {
+    throw new GuardApiError("Guard API URL must be a non-empty absolute URL");
+  }
+  if (
+    CONTROL_CHARACTER.test(value) ||
+    ENCODED_LINE_BREAK.test(value) ||
+    value.includes("\\")
+  ) {
+    throw new GuardApiError("Guard API URL contains forbidden characters");
+  }
+  if (value.includes("?") || value.includes("#")) {
+    throw new GuardApiError("Guard API URL cannot contain a query or fragment");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new GuardApiError("Guard API URL is invalid");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new GuardApiError("Guard API URL must use http or https");
+  }
+  if (parsed.username || parsed.password) {
+    throw new GuardApiError("Guard API URL cannot contain user information");
+  }
+
+  const rawHost = rawHostname(value);
+  const hostname = parsed.hostname.replace(/^\[|\]$/gu, "").toLowerCase();
+  if (
+    !rawHost ||
+    hostname.includes("%") ||
+    !hasCanonicalIpSpelling(rawHost, hostname)
+  ) {
+    throw new GuardApiError("Guard API URL must contain a valid host and port");
+  }
+  if (parsed.protocol === "http:" && !isExplicitLoopback(rawHost, hostname)) {
+    throw new GuardApiError(
+      "Guard API HTTP is allowed only for explicit loopback addresses",
+    );
+  }
+
+  const normalizedPath = parsed.pathname.replace(/\/+$/u, "");
+  return `${parsed.protocol}//${parsed.host}${normalizedPath}`;
+}
+
+function rawHostname(value: string): string {
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/iu.exec(value)?.[1];
+  if (!authority || authority.includes("@")) {
+    return "";
+  }
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    return end >= 0 ? authority.slice(0, end + 1) : "";
+  }
+  return authority.split(":", 1)[0] ?? "";
+}
+
+function hasCanonicalIpSpelling(
+  rawHost: string,
+  parsedHostname: string,
+): boolean {
+  const unwrapped = rawHost.replace(/^\[|\]$/gu, "");
+  const parsedKind = isIP(parsedHostname);
+  if (parsedKind === 4) {
+    return (
+      isIP(unwrapped) === 4 &&
+      unwrapped
+        .split(".")
+        .every((part) => String(Number.parseInt(part, 10)) === part)
+    );
+  }
+  if (parsedKind === 6) {
+    return rawHost.startsWith("[") && isIP(unwrapped) === 6;
+  }
+  return !/^(?:0x[0-9a-f]+|[0-9.]+)$/iu.test(unwrapped);
+}
+
+function isExplicitLoopback(rawHost: string, parsedHostname: string): boolean {
+  if (parsedHostname === "localhost") {
+    return rawHost.toLowerCase() === "localhost";
+  }
+  if (isIP(parsedHostname) === 4) {
+    return (
+      parsedHostname.startsWith("127.") &&
+      hasCanonicalIpSpelling(rawHost, parsedHostname)
+    );
+  }
+  return (
+    parsedHostname === "::1" && hasCanonicalIpSpelling(rawHost, parsedHostname)
+  );
 }
 
 /**
@@ -88,7 +187,10 @@ export class GuardApiClient {
   private readonly fetchImpl: FetchLike;
 
   constructor(params: ClientParams) {
-    this.config = params.config;
+    this.config = {
+      ...params.config,
+      guardApiBaseUrl: validateGuardApiBaseUrl(params.config.guardApiBaseUrl),
+    };
     this.fetchImpl = params.fetchImpl ?? fetch;
   }
 
@@ -251,6 +353,7 @@ export class GuardApiClient {
         `${trimTrailingSlash(this.config.guardApiBaseUrl)}${path}`,
         {
           ...init,
+          redirect: "error",
           signal: controller.signal,
           headers: {
             Accept: "application/json",
@@ -306,9 +409,8 @@ export function buildPluginConfig(
   input: OpenClawPluginConfigInput,
 ): AgentGuardPluginConfig {
   const config: AgentGuardPluginConfig = {
-    guardApiBaseUrl: nonEmptyString(
-      input?.guardApiBaseUrl,
-      DEFAULT_CONFIG.guardApiBaseUrl,
+    guardApiBaseUrl: validateGuardApiBaseUrl(
+      nonEmptyString(input?.guardApiBaseUrl, DEFAULT_CONFIG.guardApiBaseUrl),
     ),
     adapterToken: nonEmptyString(
       input?.adapterToken,

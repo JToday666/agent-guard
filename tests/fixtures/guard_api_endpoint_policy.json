@@ -1,0 +1,52 @@
+{
+  "allowed": [
+    {
+      "input": "http://127.0.0.1:8088",
+      "normalized": "http://127.0.0.1:8088"
+    },
+    {
+      "input": "http://127.1.2.3:8088",
+      "normalized": "http://127.1.2.3:8088"
+    },
+    {
+      "input": "http://localhost:8088/",
+      "normalized": "http://localhost:8088"
+    },
+    {
+      "input": "http://[::1]:8088",
+      "normalized": "http://[::1]:8088"
+    },
+    {
+      "input": "https://guard.example",
+      "normalized": "https://guard.example"
+    },
+    {
+      "input": "https://guard.example:8443/agentguard/",
+      "normalized": "https://guard.example:8443/agentguard"
+    }
+  ],
+  "rejected": [
+    "",
+    " guard.example",
+    "guard.example",
+    "//guard.example",
+    "http://guard.example",
+    "http://192.168.1.10",
+    "http://0.0.0.0",
+    "http://localhost.evil.example",
+    "ftp://localhost",
+    "https://user:password@guard.example",
+    "https://guard.example?token=value",
+    "https://guard.example#fragment",
+    "https://guard.example:99999",
+    "http://127.1",
+    "http://0x7f000001",
+    "http://2130706433",
+    "http://127.000.000.001",
+    "https://0x7f000001",
+    "https://2130706433",
+    "https://127.000.000.001",
+    "http://localhost\\@evil.example",
+    "https://guard.example/%0d%0aheader"
+  ]
+}
