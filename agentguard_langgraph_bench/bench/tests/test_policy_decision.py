@@ -58,7 +58,8 @@ def test_policy_allow_executes_tool(tmp_path):
     assert result.executed is True
     assert result.blocked is False
     assert result.result == "hello"
-    assert core.audit_events
+    # guard-api-v0.3 由 Guard API 持久化权威策略审计，Adapter 不重复提交。
+    assert core.audit_events == []
 
 
 def test_policy_deny_does_not_execute_tool(tmp_path):
