@@ -9,13 +9,18 @@ import json
 import os
 import re
 import stat
+import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Callable, Literal
+from typing import Callable, Iterator, Literal
 
-import fcntl
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from guard_api.storage.base import (
     AuditCanonicalizationError,
@@ -72,6 +77,58 @@ class AuditCheckpointIntegrityError(AuditCheckpointError):
 
 class AuditCheckpointIoError(AuditCheckpointError):
     """Raised when the checkpoint sink cannot be read or durably appended."""
+
+
+@contextmanager
+def _locked_file_descriptor(
+    descriptor: int,
+    *,
+    exclusive: bool,
+) -> Iterator[None]:
+    """Hold the checkpoint file lock without masking a primary operation error."""
+
+    acquired = False
+    active_error: BaseException | None = None
+    try:
+        _acquire_file_lock(descriptor, exclusive=exclusive)
+        acquired = True
+        yield
+    except BaseException as exc:
+        active_error = exc
+        raise
+    finally:
+        if acquired:
+            try:
+                _release_file_lock(descriptor)
+            except AuditCheckpointIoError as exc:
+                if active_error is None:
+                    raise
+                active_error.add_note(exc.code)
+
+
+def _acquire_file_lock(descriptor: int, *, exclusive: bool) -> None:
+    try:
+        if sys.platform == "win32":
+            # ``msvcrt`` has no dependable cross-process shared-lock behavior for
+            # this use case. Serialize reads and writes on Windows instead.
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(descriptor, mode)
+    except OSError as exc:
+        raise AuditCheckpointIoError("AUDIT_CHECKPOINT_LOCK_FAILED") from exc
+
+
+def _release_file_lock(descriptor: int) -> None:
+    try:
+        if sys.platform == "win32":
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError as exc:
+        raise AuditCheckpointIoError("AUDIT_CHECKPOINT_UNLOCK_FAILED") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,48 +205,45 @@ class AuditCheckpointService:
         with self._lock:
             descriptor = self._open(create=True)
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-                latest = self._synchronize(descriptor)
-                status = self._status_for(latest, chain_status)
-                if status.status == "invalid":
-                    raise AuditCheckpointIntegrityError(
-                        status.error_code or "AUDIT_CHECKPOINT_INVALID"
-                    )
-                if chain_status.event_count == 0 or status.status == "current":
-                    return status
-                if chain_status.head_hash is None:
-                    raise AuditCheckpointIntegrityError("AUDIT_CHAIN_HEAD_MISSING")
+                with _locked_file_descriptor(descriptor, exclusive=True):
+                    latest = self._synchronize(descriptor)
+                    status = self._status_for(latest, chain_status)
+                    if status.status == "invalid":
+                        raise AuditCheckpointIntegrityError(
+                            status.error_code or "AUDIT_CHECKPOINT_INVALID"
+                        )
+                    if chain_status.event_count == 0 or status.status == "current":
+                        return status
+                    if chain_status.head_hash is None:
+                        raise AuditCheckpointIntegrityError("AUDIT_CHAIN_HEAD_MISSING")
 
-                record_payload = self._build_record(
-                    sequence=chain_status.event_count,
-                    head_hash=chain_status.head_hash,
-                    previous_checkpoint_hash=(
-                        latest.checkpoint_hash if latest is not None else None
-                    ),
-                )
-                line = canonical_json_bytes(record_payload) + b"\n"
-                current_size = os.fstat(descriptor).st_size
-                if current_size + len(line) > MAX_CHECKPOINT_FILE_BYTES:
-                    raise AuditCheckpointIoError("AUDIT_CHECKPOINT_FILE_TOO_LARGE")
-                try:
-                    remaining = memoryview(line)
-                    while remaining:
-                        written = os.write(descriptor, remaining)
-                        if written <= 0:
-                            raise OSError("checkpoint append made no progress")
-                        remaining = remaining[written:]
-                    os.fsync(descriptor)
-                except OSError as exc:
-                    raise AuditCheckpointIoError(
-                        "AUDIT_CHECKPOINT_APPEND_FAILED"
-                    ) from exc
-                self._refresh_cache_after_append(descriptor, record_payload)
-                return self._status_for(self._latest, chain_status)
+                    record_payload = self._build_record(
+                        sequence=chain_status.event_count,
+                        head_hash=chain_status.head_hash,
+                        previous_checkpoint_hash=(
+                            latest.checkpoint_hash if latest is not None else None
+                        ),
+                    )
+                    line = canonical_json_bytes(record_payload) + b"\n"
+                    current_size = os.fstat(descriptor).st_size
+                    if current_size + len(line) > MAX_CHECKPOINT_FILE_BYTES:
+                        raise AuditCheckpointIoError("AUDIT_CHECKPOINT_FILE_TOO_LARGE")
+                    try:
+                        remaining = memoryview(line)
+                        while remaining:
+                            written = os.write(descriptor, remaining)
+                            if written <= 0:
+                                raise OSError("checkpoint append made no progress")
+                            remaining = remaining[written:]
+                        os.fsync(descriptor)
+                    except OSError as exc:
+                        raise AuditCheckpointIoError(
+                            "AUDIT_CHECKPOINT_APPEND_FAILED"
+                        ) from exc
+                    self._refresh_cache_after_append(descriptor, record_payload)
+                    return self._status_for(self._latest, chain_status)
             finally:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
-                finally:
-                    os.close(descriptor)
+                os.close(descriptor)
 
     def inspect(self, chain_status: AuditIntegrityStatus) -> AuditAnchorStatus:
         """Verify the external log and compare its latest head with the database."""
@@ -205,13 +259,10 @@ class AuditCheckpointService:
             with self._lock:
                 descriptor = self._open(create=False)
                 try:
-                    fcntl.flock(descriptor, fcntl.LOCK_SH)
-                    latest = self._synchronize(descriptor)
+                    with _locked_file_descriptor(descriptor, exclusive=False):
+                        latest = self._synchronize(descriptor)
                 finally:
-                    try:
-                        fcntl.flock(descriptor, fcntl.LOCK_UN)
-                    finally:
-                        os.close(descriptor)
+                    os.close(descriptor)
             return self._status_for(latest, chain_status)
         except AuditCheckpointIntegrityError as exc:
             return AuditAnchorStatus(
