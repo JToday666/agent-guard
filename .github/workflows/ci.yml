@@ -75,6 +75,58 @@ jobs:
       - name: Validate release version mapping
         run: uv run python scripts/check-release-versions.py
 
+  attackbench-contracts:
+    name: AttackBench trusted contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Test frozen dataset and trustworthy metrics
+        run: >-
+          uv run --group bench pytest -q
+          agentguard_langgraph_bench/bench/tests/test_dataset_contract.py
+          agentguard_langgraph_bench/bench/tests/test_trustworthy_metrics.py
+          agentguard_langgraph_bench/bench/tests/test_attackcase_schema.py
+          agentguard_langgraph_bench/bench/tests/test_core_client.py
+          agentguard_langgraph_bench/bench/tests/test_policy_decision.py
+          agentguard_langgraph_bench/bench/tests/test_tool_gateway_approval_continuation.py
+
+  windows-security:
+    name: Windows security and release contracts
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Test Windows blocking fixes
+        run: >-
+          uv run pytest -q
+          tests/test_audit_checkpoint.py
+          tests/test_guard_api_endpoint_policy.py
+          tests/test_check_release_artifacts.py
+          tests/test_release_artifact_manifest.py
+
   node:
     name: Node 24 / pnpm 11
     runs-on: ubuntu-latest
