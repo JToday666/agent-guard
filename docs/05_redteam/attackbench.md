@@ -37,6 +37,10 @@ AttackBench 实现位于 `agentguard_langgraph_bench/`，负责攻击样本、�
 
 数据集加载器在目录级加载时会排除 `memory_poisoning_stateful.jsonl`（延迟触发变体，当前目录中不存在该文件）；正常对照样本统一放在 `benign.jsonl`。
 
+主目录的 7 个 JSONL 共 70 条，`dataset_manifest.json` 固定文件集合、逐文件
+SHA-256、分类数量、总数和聚合摘要。加载器在执行前验证清单，文件增删、内容变化或
+数量漂移都会阻断运行；每条结果同时携带 case digest 和来源位置。
+
 PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/poisonedrag/`、`bench/datasets/mcpsafety/` 和 `bench/datasets/instrumentation/`。需要外部源树的用例，只在对应资源可用时参与完整兼容性验证。
 
 ## 4. AttackCase 格式
@@ -67,14 +71,25 @@ PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/
 
 ## 5. Runner 流程
 
+单次 `runner` 只执行一个明确的 `defense=off` 或 `defense=on` pass。正式防御效果证据
+必须通过成对编排器运行，不能把两个任意历史 run 手工拼接：
+
+```bash
+uv run --group bench python -m agentguard_langgraph_bench.bench.paired_runner \
+  --paired-results-dir <全新输出目录> \
+  --dataset agentguard_langgraph_bench/bench/datasets/attack_cases \
+  --core-url http://127.0.0.1:8088 \
+  --token <运行时凭证>
+```
+
 ```text
-读取 AttackCase JSONL
-→ 运行无防御 Agent
-→ 判断攻击是否成功
-→ 开启 AgentGuard
-→ 重放同一 AttackCase
-→ 判断是否阻断
-→ 写入评测证据并汇总 ASR / Block Rate / FPR / FNR / Latency
+校验冻结数据集
+→ 在独立目录运行 defense=off
+→ 重置环境并用同一参数运行 defense=on
+→ 校验 dataset id/version/digest、case 集合与数量完全相同
+→ 排除无效 case、基础设施失败、fake Core 和证据完整性失败
+→ 输出 paired-baseline-report.json 与两侧 artifact SHA-256
+→ 仅在 run_valid=true 时解释 ASR reduction / Block Rate / FPR / FNR
 ```
 
 ## 6. 指标
@@ -91,6 +106,11 @@ PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/
 | F1         | 综合检测指标     |
 | Latency    | 延迟开销         |
 
+`AGENTGUARD_FAIL_CLOSED` 只能保证 Core 不可用时工具不被执行，不能证明检测器识别成功。
+这类 `core_unavailable` 行会标记为 `run_valid=false` 和 `infrastructure_error`，并从
+阻断率、FPR、召回率及防御效果解释中排除。成对报告要求 defense-on 使用
+`core_mode=real_core`，且任一侧存在无效 case 都会令整对结果不可解释。
+
 ## 7. P0/P1/P2 开发边界
 
 | 阶段 | 交付                                                                      |
@@ -103,6 +123,7 @@ PoisonedRAG、MCP Safety 和 Instrumentation 资源分别位于 `bench/datasets/
 
 1. 至少 3 类 P0 恶意样本和一组 benign 样本。
 2. 每个样本有 `expected_decision` 和 `success_condition`。
-3. runner 能输出防御前后对比。
+3. 成对编排器能输出防御前后对比，且两侧数据摘要和 case 集合完全一致。
 4. 正常样本能用于计算 FPR。
 5. 报告可被 Dashboard 指标页读取或复用。
+6. Core 不可用、fake Core、未冻结数据集或证据完整性失败时，报告明确失败而不是计为成功阻断。
