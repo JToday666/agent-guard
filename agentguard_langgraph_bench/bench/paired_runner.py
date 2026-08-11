@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .config import DEFAULT_DATASET_DIR
+from .dataset_contract import build_dataset_snapshot
+from .dataset_loader import load_attack_cases
+
 SCHEMA_VERSION = "1.0"
 FORBIDDEN_RUNNER_OPTIONS = {"--defense", "--results-dir", "--no-reset-env"}
 
@@ -31,7 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     on_summary = _read_json_object(on_summary_path)
     off_rows = _read_json_array(off_rows_path)
     on_rows = _read_json_array(on_rows_path)
+    dataset_path = _runner_dataset_path(runner_args)
+    dataset_snapshot, case_evidence = _dataset_evidence(dataset_path, off_rows)
+    off_summary.update(dataset_snapshot)
+    on_summary.update(dataset_snapshot)
     report = build_paired_report(off_summary, off_rows, on_summary, on_rows)
+    report["cases"] = case_evidence
     report["artifacts"] = {
         "defense_off": _artifact_identity(root, off_summary_path, off_rows_path),
         "defense_on": _artifact_identity(root, on_summary_path, on_rows_path),
@@ -146,6 +155,56 @@ def _validate_runner_args(runner_args: list[str]) -> None:
         raise SystemExit(
             "paired runner owns these options: " + ", ".join(conflicting)
         )
+
+
+def _runner_dataset_path(runner_args: list[str]) -> Path:
+    values: list[str] = []
+    for index, argument in enumerate(runner_args):
+        if argument == "--dataset" and index + 1 < len(runner_args):
+            values.append(runner_args[index + 1])
+        elif argument.startswith("--dataset="):
+            values.append(argument.split("=", 1)[1])
+    return Path(values[-1] if values else DEFAULT_DATASET_DIR)
+
+
+def _dataset_evidence(
+    dataset_path: Path, rows: list[dict[str, Any]]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    cases = load_attack_cases(dataset_path)
+    by_identity = {
+        (
+            str(case.case_id),
+            str(case.metadata.get("dataset_file") or ""),
+            int(case.metadata.get("dataset_row_index") or 0),
+        ): case
+        for case in cases
+    }
+    selected = []
+    evidence = []
+    for row in rows:
+        identity = (
+            str(row.get("case_id") or ""),
+            str(row.get("dataset_file") or ""),
+            int(row.get("dataset_row_index") or 0),
+        )
+        case = by_identity.get(identity)
+        if case is None:
+            raise RuntimeError(f"run row cannot be bound to the locked dataset: {identity}")
+        selected.append(case)
+        evidence.append(
+            {
+                "case_id": case.case_id,
+                "case_run_key": row.get("case_run_key"),
+                "dataset_file": case.metadata.get("dataset_file"),
+                "dataset_row_index": case.metadata.get("dataset_row_index"),
+                "case_digest": case.metadata.get("case_digest"),
+                "provenance": case.metadata.get("provenance"),
+            }
+        )
+    snapshot = build_dataset_snapshot(dataset_path, selected).as_dict()
+    if snapshot["selected_case_count"] != len(rows):
+        raise RuntimeError("locked dataset selection count does not match run rows")
+    return snapshot, evidence
 
 
 def _result_paths(results_dir: Path) -> tuple[Path, Path]:

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from agentguard_langgraph_bench.bench.paired_runner import build_paired_report
+from pathlib import Path
+
+from agentguard_langgraph_bench.bench.paired_runner import (
+    _dataset_evidence,
+    build_paired_report,
+)
 
 
 def _summary(*, defense_enabled: bool) -> dict:
@@ -85,3 +90,28 @@ def test_paired_report_rejects_fake_core_and_unlocked_dataset() -> None:
         "defense_on_dataset_unlocked",
         "defense_on_core_not_real",
     ]
+
+
+def test_paired_runner_binds_rows_to_locked_case_provenance() -> None:
+    dataset = Path("agentguard_langgraph_bench/bench/datasets/attack_cases")
+    rows = [
+        {
+            "case_id": "PI-001",
+            "case_run_key": "PI-001",
+            "dataset_file": "prompt_injection.jsonl",
+            "dataset_row_index": 1,
+        },
+        {
+            "case_id": "BN-001",
+            "case_run_key": "BN-001",
+            "dataset_file": "benign.jsonl",
+            "dataset_row_index": 1,
+        },
+    ]
+
+    snapshot, evidence = _dataset_evidence(dataset, rows)
+
+    assert snapshot["dataset_locked"] is True
+    assert snapshot["selected_case_count"] == 2
+    assert all(item["case_digest"].startswith("sha256:") for item in evidence)
+    assert [item["provenance"]["line"] for item in evidence] == [1, 1]
