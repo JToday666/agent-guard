@@ -6,10 +6,12 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from .dataset_contract import (
+    DEFAULT_DIRECTORY_EXCLUDED_FILES,
+    attach_case_provenance,
+    validate_dataset_source,
+)
 from .models import AttackCase
-
-
-DEFAULT_DIRECTORY_EXCLUDED_FILES = frozenset({"memory_poisoning_stateful.jsonl"})
 
 
 def iter_jsonl(path: Path) -> Iterable[dict]:
@@ -26,6 +28,7 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
 
 def load_attack_cases(dataset_path: str | Path) -> list[AttackCase]:
     path = Path(dataset_path)
+    validate_dataset_source(path)
     files = (
         [file for file in sorted(path.glob("*.jsonl")) if file.name not in DEFAULT_DIRECTORY_EXCLUDED_FILES]
         if path.is_dir()
@@ -34,10 +37,10 @@ def load_attack_cases(dataset_path: str | Path) -> list[AttackCase]:
     cases: list[AttackCase] = []
     for file_path in files:
         for row_index, payload in enumerate(iter_jsonl(file_path), start=1):
-            metadata = dict(payload.get("metadata") or {})
-            metadata.setdefault("dataset_file", file_path.name)
-            metadata.setdefault("dataset_file_stem", file_path.stem)
-            metadata.setdefault("dataset_row_index", row_index)
-            payload["metadata"] = metadata
+            attach_case_provenance(
+                payload,
+                file_path=file_path,
+                row_index=row_index,
+            )
             cases.append(AttackCase.model_validate(payload))
     return cases
