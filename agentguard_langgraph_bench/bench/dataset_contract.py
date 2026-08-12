@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DATASET_MANIFEST_NAME = "dataset_manifest.json"
+DATASET_DIGEST_CANONICALIZATION = "utf8-lf"
 DEFAULT_DIRECTORY_EXCLUDED_FILES = frozenset({"memory_poisoning_stateful.jsonl"})
 
 
@@ -118,12 +119,17 @@ def _validate_locked_manifest(path: Path, manifest: dict[str, Any]) -> None:
         "dataset_id",
         "dataset_version",
         "dataset_digest",
+        "digest_canonicalization",
         "dataset_locked",
         "case_count",
         "files",
     }
     if not required.issubset(manifest) or manifest.get("dataset_locked") is not True:
         raise DatasetContractError("locked dataset manifest is incomplete")
+    if manifest.get("digest_canonicalization") != DATASET_DIGEST_CANONICALIZATION:
+        raise DatasetContractError(
+            "locked dataset digest canonicalization is unsupported"
+        )
     files = manifest.get("files")
     if not isinstance(files, list) or not files:
         raise DatasetContractError("locked dataset manifest has no files")
@@ -173,13 +179,23 @@ def _source_digest(files: Iterable[Path]) -> str:
     for path in files:
         digest.update(path.name.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(_canonical_source_bytes(path))
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
 
 
 def _file_digest(path: Path) -> str:
-    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    return f"sha256:{hashlib.sha256(_canonical_source_bytes(path)).hexdigest()}"
+
+
+def _canonical_source_bytes(path: Path) -> bytes:
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise DatasetContractError(
+            f"locked dataset file is not valid UTF-8: {path.name}"
+        ) from exc
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
 
 
 def _case_digest(payload: dict[str, Any]) -> str:

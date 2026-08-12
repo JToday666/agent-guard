@@ -41,6 +41,19 @@ def test_locked_dataset_rejects_silent_source_drift(tmp_path: Path) -> None:
         load_attack_cases(dataset_dir)
 
 
+def test_locked_dataset_digest_is_stable_across_line_endings(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "attack_cases"
+    shutil.copytree(DEFAULT_DATASET_DIR, dataset_dir)
+    for source in dataset_dir.glob("*.jsonl"):
+        source.write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+
+    cases = load_attack_cases(dataset_dir)
+    snapshot = build_dataset_snapshot(dataset_dir, cases)
+
+    assert len(cases) == 70
+    assert snapshot.dataset_locked is True
+
+
 def test_unregistered_dataset_is_explicitly_unlocked(tmp_path: Path) -> None:
     source = DEFAULT_DATASET_DIR / "benign.jsonl"
     target = tmp_path / "custom.jsonl"
@@ -61,6 +74,7 @@ def test_manifest_declares_exact_attack_type_counts() -> None:
     )
 
     assert manifest["case_count"] == 70
+    assert manifest["digest_canonicalization"] == "utf8-lf"
     assert manifest["attack_type_counts"] == {
         "agent_abuse": 10,
         "benign": 10,
