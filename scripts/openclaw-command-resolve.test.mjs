@@ -47,6 +47,16 @@ IF EXIST "%dp0%\\node.exe" (
 endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pnpm\\bin\\pnpm.mjs" %*
 `;
 
+// pnpm 生命周期注入的 store shim：仅使用 %~dp0 变体，入口含 ..\ 相对段。
+const SAMPLE_PNPM_STORE_SHIM = `@SETLOCAL
+@IF EXIST "%~dp0\\node.exe" (
+  "%~dp0\\node.exe"  "%~dp0\\..\\node_modules\\pnpm\\bin\\pnpm.mjs" %*
+) ELSE (
+  @SET PATHEXT=%PATHEXT:;.JS;=;%
+  node  "%~dp0\\..\\node_modules\\pnpm\\bin\\pnpm.mjs" %*
+)
+`;
+
 test("parseWindowsShimEntry extracts JS entry from npm-style openclaw shim", () => {
   assert.equal(
     parseWindowsShimEntry(SAMPLE_OPENCLAW_SHIM),
@@ -58,6 +68,13 @@ test("parseWindowsShimEntry extracts JS entry from pnpm shim", () => {
   assert.equal(
     parseWindowsShimEntry(SAMPLE_PNPM_SHIM),
     "node_modules\\pnpm\\bin\\pnpm.mjs",
+  );
+});
+
+test("parseWindowsShimEntry extracts JS entry from %~dp0 store shim variant", () => {
+  assert.equal(
+    parseWindowsShimEntry(SAMPLE_PNPM_STORE_SHIM),
+    "..\\node_modules\\pnpm\\bin\\pnpm.mjs",
   );
 });
 
@@ -86,6 +103,32 @@ test("resolveToolCommand resolves Windows .cmd shim to node + entry JS", () => {
     ]);
   } finally {
     fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveToolCommand resolves %~dp0 store shim with .. entry segment", () => {
+  const shimRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cmdresolve-"));
+  try {
+    // 布局模拟 pnpm store links：<root>/bin/pnpm.cmd → <root>/node_modules/...
+    const binDir = path.join(shimRoot, "bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const entryDir = path.join(shimRoot, "node_modules", "pnpm", "bin");
+    fs.mkdirSync(entryDir, { recursive: true });
+    fs.writeFileSync(path.join(entryDir, "pnpm.mjs"), "// entry");
+    fs.writeFileSync(path.join(binDir, "pnpm.cmd"), SAMPLE_PNPM_STORE_SHIM);
+
+    const resolved = resolveToolCommand("pnpm", {
+      platform: "win32",
+      env: { PATH: binDir },
+      execPath: "C:\\node\\node.exe",
+    });
+    assert.equal(resolved.kind, "node-shim");
+    assert.equal(resolved.command, "C:\\node\\node.exe");
+    assert.deepEqual(resolved.prependArgs, [
+      path.join(entryDir, "pnpm.mjs"),
+    ]);
+  } finally {
+    fs.rmSync(shimRoot, { recursive: true, force: true });
   }
 });
 

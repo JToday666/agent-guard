@@ -6,14 +6,17 @@ import { spawnSync as nodeSpawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const JS_SHIM_ENTRY_PATTERN = /%dp0%\\([^"'\s]+?\.(?:mjs|cjs|js))/gi;
+// 兼容 npm 风格 `%dp0%\...` 与 pnpm store shim 的 `%~dp0\...` 变体
+// （含 `%~dp0%\...` 写法）；引号变体由捕获组的 [^"'\s] 边界天然支持。
+const JS_SHIM_ENTRY_PATTERN = /%~?dp0%?\\([^"'\s]+?\.(?:mjs|cjs|js))/gi;
 
 // 原生可执行文件（Windows/POSIX 均可直接 spawn）。
 const NATIVE_TOOLS = new Set(["uv", "node"]);
 
 /**
  * 从 Windows .cmd shim 文本中提取 JS 入口相对路径（相对 shim 所在目录，
- * 即 shim 内的 %dp0%）。取最后一个匹配，因为真正的启动行在 shim 末尾。
+ * 即 shim 内的 %dp0% / %~dp0）。取最后一个匹配，因为真正的启动行在 shim 末尾。
+ * 相对路径可包含 `..\`（如 pnpm store shim），由调用方 path.resolve 归一化。
  */
 export function parseWindowsShimEntry(shimText) {
   let last = null;

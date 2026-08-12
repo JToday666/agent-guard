@@ -747,41 +747,36 @@ async function runSmoke(options) {
       });
       await waitForGatewayReady(gateway, gatewayPort, 60_000);
       try {
+        // 隔离 Gateway 中 CLI inspect 的 hookCount 需 hooks 被 agent runtime
+        // 实际触发后才上报；executeVerify 已内置 inspect-only 失败时的
+        // heartbeat 回退（hook_evidence_source=heartbeat-fallback），其余失败
+        // 仍为硬门禁，这里不再重复实现回退判定。
         const verifyPayload = await executeVerify(makeDeps({ record: false }));
+        const fallback =
+          verifyPayload.hook_evidence_source === "heartbeat-fallback";
         record("installer-verify", true, {
-          source: "installer-verify",
+          source: fallback
+            ? "installer-verify-fallback-heartbeat"
+            : "installer-verify",
+          ...(fallback
+            ? {
+                reason:
+                  "隔离 Gateway 中 inspect hookCount 不达标（需 hooks 实际触发），以 Guard API heartbeat 23 hooks/loaded 实证替代",
+                heartbeat: scopeAdapterStatus,
+              }
+            : {}),
           hook_count: verifyPayload.hook_count,
           runtime_version: verifyPayload.runtime_version,
           plugin_version: verifyPayload.plugin_version,
         });
       } catch (error) {
-        // 隔离 Gateway 中 CLI inspect 的 hookCount 需 hooks 被 agent runtime
-        // 实际触发后才上报，无法达到 23；此时回退到 Step 7 已由 Guard API
-        // 实证的 heartbeat（loaded、hook_count=23）。仅接受 inspect 类失败，
-        // 其余失败仍为硬门禁。
         const message = error instanceof Error ? error.message : String(error);
         const failureLines = message
           .split("\n")
           .filter((line) => line.startsWith("- "))
           .map((line) => line.slice(2));
-        const inspectOnly =
-          failureLines.length > 0 &&
-          failureLines.every((line) =>
-            /^expected hookCount=\d+, got 0$/.test(line) ||
-            /^missing hooks: /.test(line),
-          );
-        if (inspectOnly) {
-          record("installer-verify", true, {
-            source: "installer-verify-fallback-heartbeat",
-            reason:
-              "隔离 Gateway 中 inspect hookCount 不达标（需 hooks 实际触发），以 Guard API heartbeat 23 hooks/loaded 实证替代",
-            heartbeat: scopeAdapterStatus,
-            inspect_failures: failureLines,
-          });
-        } else {
-          record("installer-verify", false, { failures: failureLines });
-          throw new Error(`安装器 verify 失败：\n${message}`);
-        }
+        record("installer-verify", false, { failures: failureLines });
+        throw new Error(`安装器 verify 失败：\n${message}`);
       }
     } else {
       // 无 Guard API 测试库时：只验证到插件在真实 Gateway 中加载并产生运行证据

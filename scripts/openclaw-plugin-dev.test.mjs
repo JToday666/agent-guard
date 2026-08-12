@@ -12,8 +12,10 @@ import {
   evaluateGatewayStatus,
   executeInstall,
   executeUninstall,
+  executeVerify,
   extractAgentGuardFragment,
   isAgentGuardLoadPath,
+  isInspectOnlyHookFailure,
   parseOpenClawVersion,
   pickCredentialStrategy,
   redactSecrets,
@@ -24,6 +26,7 @@ import {
   shouldRestartGateway,
   waitForFreshHeartbeat,
 } from "./openclaw-plugin-dev.mjs";
+import { OPENCLAW_REQUIRED_HOOKS } from "../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 
 const SENTINEL_TOKEN = "tok_sentinel_supersecret_123456";
 const PLUGIN_ID = "agentguard-security";
@@ -895,4 +898,143 @@ test("waitForFreshHeartbeat accepts only heartbeats after the start time", async
   });
   assert.equal(stale.fresh, false);
   assert.equal(stale.lastHeartbeatAt, "2026-08-11T23:59:00Z");
+});
+
+// ---------- isInspectOnlyHookFailure / executeVerify heartbeat 回退 ----------
+
+test("isInspectOnlyHookFailure accepts only hookCount/missing-hooks lines", () => {
+  assert.equal(isInspectOnlyHookFailure([]), false);
+  assert.equal(
+    isInspectOnlyHookFailure([
+      "expected hookCount=23, got 0",
+      "missing hooks: before_tool_call, llm_input",
+    ]),
+    true,
+  );
+  assert.equal(
+    isInspectOnlyHookFailure([
+      "expected hookCount=23, got 0",
+      "Gateway RPC 连通异常 (exit=1, runtime=stopped, connectivity=failed)",
+    ]),
+    false,
+  );
+});
+
+// 构造 executeVerify 可用的 world：staging/配置/命令路由/heartbeat mock。
+function setupVerifyWorld(world, { hookCount, typedHooks, heartbeat }) {
+  fs.mkdirSync(world.stagingDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(world.stagingDir, "package.json"),
+    JSON.stringify({ version: "0.1.0-beta.1" }),
+  );
+  world.seedConfig({
+    plugins: {
+      entries: {
+        [PLUGIN_ID]: { enabled: true, config: { enforcementMode: "enforce" } },
+      },
+    },
+  });
+  world.deps.run = (tool, args) => {
+    if (tool === "openclaw" && args[0] === "plugins" && args[1] === "inspect") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          plugin: {
+            status: "loaded",
+            hookCount,
+            source: path.join(world.stagingDir, "dist", "index.js"),
+          },
+          typedHooks,
+          diagnostics: [],
+        }),
+        stderr: "",
+      };
+    }
+    if (tool === "openclaw" && args[0] === "gateway" && args[1] === "status") {
+      return {
+        status: 0,
+        stdout: "Runtime: running\nConnectivity probe: ok\n",
+        stderr: "",
+      };
+    }
+    if (tool === "openclaw" && args[0] === "--version") {
+      return { status: 0, stdout: "OpenClaw 2026.7.1-2 (0790d9f)\n", stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  world.deps.fetch = async () => ({ ok: true, json: async () => heartbeat });
+  return world;
+}
+
+function freshHeartbeat(overrides = {}) {
+  return {
+    last_heartbeat_at: new Date(Date.now() + 60_000).toISOString(),
+    loaded: true,
+    hook_count: OPENCLAW_REQUIRED_HOOKS.length,
+    ...overrides,
+  };
+}
+
+test("executeVerify falls back to fresh heartbeat when inspect hookCount=0", async () => {
+  const world = createWorld();
+  try {
+    setupVerifyWorld(world, { hookCount: 0, typedHooks: [], heartbeat: freshHeartbeat() });
+    const payload = await executeVerify(world.deps);
+    assert.equal(payload.hook_evidence_source, "heartbeat-fallback");
+    assert.equal(payload.hook_count, OPENCLAW_REQUIRED_HOOKS.length);
+    assert.equal(payload.status, "loaded");
+  } finally {
+    world.cleanup();
+  }
+});
+
+test("executeVerify fails when inspect hookCount=0 and heartbeat is stale", async () => {
+  const world = createWorld();
+  try {
+    setupVerifyWorld(world, {
+      hookCount: 0,
+      typedHooks: [],
+      heartbeat: { last_heartbeat_at: "2020-01-01T00:00:00Z", loaded: true, hook_count: 23 },
+    });
+    world.deps.heartbeatTimeoutMs = 5;
+    await assert.rejects(
+      () => executeVerify(world.deps),
+      /expected hookCount=23, got 0/,
+    );
+  } finally {
+    world.cleanup();
+  }
+});
+
+test("executeVerify fails when fresh heartbeat lacks loaded/23 hooks", async () => {
+  const world = createWorld();
+  try {
+    setupVerifyWorld(world, {
+      hookCount: 0,
+      typedHooks: [],
+      heartbeat: freshHeartbeat({ hook_count: 0 }),
+    });
+    await assert.rejects(
+      () => executeVerify(world.deps),
+      /expected hookCount=23, got 0/,
+    );
+  } finally {
+    world.cleanup();
+  }
+});
+
+test("executeVerify uses inspect evidence when hookCount reaches 23", async () => {
+  const world = createWorld();
+  try {
+    setupVerifyWorld(world, {
+      hookCount: OPENCLAW_REQUIRED_HOOKS.length,
+      typedHooks: OPENCLAW_REQUIRED_HOOKS.map((name) => ({ name })),
+      heartbeat: freshHeartbeat(),
+    });
+    const payload = await executeVerify(world.deps);
+    assert.equal(payload.hook_evidence_source, "inspect");
+    assert.equal(payload.hook_count, OPENCLAW_REQUIRED_HOOKS.length);
+  } finally {
+    world.cleanup();
+  }
 });

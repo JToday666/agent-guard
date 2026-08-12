@@ -246,6 +246,24 @@ export function shouldRestartGateway(profile, { noRestart = false } = {}) {
   return Boolean(profile?.isolated) && !noRestart;
 }
 
+// inspect 类 hook 失败判定：hookCount=0 与 missing hooks 只在 hooks 未被
+// agent runtime 实际触发时出现，此时允许以 Guard API 新鲜 heartbeat 作为
+// hook 证据回退；其余失败仍为硬门禁。
+const INSPECT_HOOK_FAILURE_PATTERNS = [
+  /^expected hookCount=\d+, got 0$/,
+  /^missing hooks: /,
+];
+
+export function isInspectOnlyHookFailure(failureLines) {
+  const lines = Array.isArray(failureLines) ? failureLines : [];
+  return (
+    lines.length > 0 &&
+    lines.every((line) =>
+      INSPECT_HOOK_FAILURE_PATTERNS.some((pattern) => pattern.test(line)),
+    )
+  );
+}
+
 export function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -667,11 +685,27 @@ export async function executeVerify(deps) {
     last_heartbeat_at: heartbeat.lastHeartbeatAt,
     error: null,
     source: "openclaw-plugin-dev",
+    hook_evidence_source: "inspect",
     agent_id: AGENT_ID,
     plugin_version: pluginVersion,
     runtime_version: openclawVersion,
     enforcement_mode: ENFORCEMENT_MODE,
   };
+
+  // inspect 的 hookCount 需 hooks 被 agent runtime 实际触发后才上报；
+  // 仅剩 inspect 类 hook 失败且 Guard API 新鲜 heartbeat 实证 loaded/23 hooks
+  // 时，以 heartbeat 为 hook 证据通过并标记回退来源；两者皆缺时仍失败。
+  if (failures.length > 0 && isInspectOnlyHookFailure(failures)) {
+    if (
+      heartbeat.fresh &&
+      heartbeat.loaded === true &&
+      heartbeat.hookCount === REQUIRED_HOOKS.length
+    ) {
+      statusPayload.hook_count = heartbeat.hookCount;
+      statusPayload.hook_evidence_source = "heartbeat-fallback";
+      failures.length = 0;
+    }
+  }
 
   if (failures.length > 0) {
     const errorMessage = redactSecrets(failures.join("\n- "), { secrets });
@@ -700,7 +734,7 @@ export async function executeVerify(deps) {
     });
   }
   deps.log(
-    `Verified ${PLUGIN_ID}: status=loaded, hookCount=${statusPayload.hook_count}, heartbeat=${heartbeat.lastHeartbeatAt}, runtime=${gatewayEval.runtime}, openclaw=${openclawVersion}, plugin=${pluginVersion}.`,
+    `Verified ${PLUGIN_ID}: status=loaded, hookCount=${statusPayload.hook_count}, hookEvidence=${statusPayload.hook_evidence_source}, heartbeat=${heartbeat.lastHeartbeatAt}, runtime=${gatewayEval.runtime}, openclaw=${openclawVersion}, plugin=${pluginVersion}.`,
   );
   return statusPayload;
 }
@@ -728,7 +762,13 @@ export async function waitForFreshHeartbeat({
         lastHeartbeatAt = body?.last_heartbeat_at ?? lastHeartbeatAt;
         const heartbeatMs = Date.parse(body?.last_heartbeat_at ?? "");
         if (Number.isFinite(heartbeatMs) && heartbeatMs >= since.getTime()) {
-          return { fresh: true, lastHeartbeatAt: body.last_heartbeat_at };
+          return {
+            fresh: true,
+            lastHeartbeatAt: body.last_heartbeat_at,
+            loaded: body?.loaded === true,
+            hookCount:
+              typeof body?.hook_count === "number" ? body.hook_count : null,
+          };
         }
       } else {
         lastError = `HTTP ${response.status}`;
@@ -737,7 +777,13 @@ export async function waitForFreshHeartbeat({
       lastError = error instanceof Error ? error.message : String(error);
     }
     if (Date.now() + pollMs > deadline) {
-      return { fresh: false, lastHeartbeatAt, error: lastError };
+      return {
+        fresh: false,
+        lastHeartbeatAt,
+        loaded: null,
+        hookCount: null,
+        error: lastError,
+      };
     }
     await sleep(pollMs);
   }
@@ -1051,8 +1097,35 @@ function backupOpenClawConfig(deps, configPath, reason) {
   return backupPath;
 }
 
+// Guard API AdapterStatusRecord 采用 extra=forbid 契约，记录前剥离契约外字段
+//（如 hook_evidence_source 仅作为 verify 结果标记，不落库）。
+const GUARD_API_ADAPTER_STATUS_FIELDS = [
+  "status",
+  "loaded",
+  "hook_count",
+  "expected_hook_count",
+  "last_verified_at",
+  "last_heartbeat_at",
+  "error",
+  "source",
+  "runtime_id",
+  "agent_id",
+  "plugin_version",
+  "runtime_version",
+  "capabilities",
+  "hooks",
+  "fail_closed_stages",
+  "enforcement_mode",
+];
+
 async function safeRecordStatus(deps, { guardApiBaseUrl, controlToken, ...status }) {
   try {
+    const payload = {};
+    for (const key of GUARD_API_ADAPTER_STATUS_FIELDS) {
+      if (status[key] !== undefined) {
+        payload[key] = status[key];
+      }
+    }
     const response = await deps.fetch(
       `${guardApiBaseUrl}/v1/adapters/openclaw/status`,
       {
@@ -1062,7 +1135,7 @@ async function safeRecordStatus(deps, { guardApiBaseUrl, controlToken, ...status
           Authorization: `Bearer ${controlToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(status),
+        body: JSON.stringify(payload),
       },
     );
     if (!response.ok) {
