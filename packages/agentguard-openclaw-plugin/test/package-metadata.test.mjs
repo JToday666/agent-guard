@@ -43,7 +43,28 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "requestTimeoutMs",
   ]);
   assert.deepEqual(manifest.configSchema.required, ["adapterToken"]);
-  assert.equal(properties.adapterToken.type, "object");
+  const adapterToken = properties.adapterToken;
+  assert.equal(adapterToken.type, undefined);
+  assert.ok(Array.isArray(adapterToken.oneOf));
+  assert.equal(adapterToken.oneOf.length, 2);
+  const [secretRefBranch, materializedBranch] = adapterToken.oneOf;
+  assert.equal(secretRefBranch.type, "object");
+  assert.equal(secretRefBranch.additionalProperties, false);
+  assert.deepEqual(secretRefBranch.required, ["source", "provider", "id"]);
+  assert.deepEqual(secretRefBranch.properties.source, {
+    type: "string",
+    enum: ["env", "file", "exec"],
+  });
+  assert.deepEqual(secretRefBranch.properties.provider, {
+    type: "string",
+    pattern: "^[a-z][a-z0-9_-]{0,63}$",
+  });
+  assert.deepEqual(secretRefBranch.properties.id, {
+    type: "string",
+    minLength: 1,
+    maxLength: 256,
+  });
+  assert.deepEqual(materializedBranch, { type: "string", minLength: 1 });
   assert.deepEqual(manifest.configContracts.secretInputs.paths, [
     { path: "adapterToken", expected: "string" },
   ]);

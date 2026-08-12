@@ -515,6 +515,17 @@ function findPackageJson(entryPath) {
   throw new Error(`Could not locate package.json for ${entryPath}`);
 }
 
+function resolveOpenclawVersion() {
+  try {
+    const packageJsonPath = findPackageJson(pluginRequire.resolve("openclaw"));
+    const version = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
+      .version;
+    return typeof version === "string" && version ? version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function parseReliabilityArgs(args) {
   const options = {
     iterations: DEFAULT_RELIABILITY_ITERATIONS,
@@ -801,7 +812,7 @@ async function executeReliabilityRun({
     ok: failures.length === 0,
     generated_at: new Date().toISOString(),
     scope: {
-      openclaw: "2026.6.6",
+      openclaw: resolveOpenclawVersion(),
       guard_api_base_url: GUARD_API_BASE_URL,
       guard_database: databaseName(testDatabaseUrl),
       dashboard_dependency: "none",
@@ -1625,7 +1636,7 @@ async function main() {
     ok: failures.length === 0,
     generated_at: new Date().toISOString(),
     scope: {
-      openclaw: "2026.6.6",
+      openclaw: resolveOpenclawVersion(),
       guard_api_base_url: GUARD_API_BASE_URL,
       guard_database: databaseName(process.env.AGENTGUARD_DATABASE_URL),
       dashboard_dependency: "none",
