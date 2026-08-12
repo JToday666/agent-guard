@@ -3,12 +3,14 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { OPENCLAW_REQUIRED_HOOKS } from "../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { resolveGuardApiBaseUrl } from "./guard-api-endpoint.mjs";
+import { resolveToolCommand } from "./openclaw-command-resolve.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -1747,14 +1749,19 @@ reset_control_plane_schema(url)
 PostgresControlPlaneStore(url).initialize()
 print("agentguard test database initialized")
 `;
-  const result = spawnSync("uv", ["run", "python", "-c", python], {
-    cwd: ROOT,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      AGENTGUARD_TEST_DATABASE_URL: databaseUrl,
+  const uv = resolveToolCommand("uv");
+  const result = spawnSync(
+    uv.command,
+    [...uv.prependArgs, "run", "python", "-c", python],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        AGENTGUARD_TEST_DATABASE_URL: databaseUrl,
+      },
     },
-  });
+  );
   if (result.status !== 0) {
     throw new Error(
       `Failed to initialize AGENTGUARD_TEST_DATABASE_URL:\n${combinedSpawnOutput(result)}`,
@@ -1777,9 +1784,19 @@ function startGuardApi({ databaseUrl }) {
   const host = process.env.AGENTGUARD_HOST || "127.0.0.1";
   const port = process.env.AGENTGUARD_PORT || "8088";
   const logs = [];
+  const uv = resolveToolCommand("uv");
   const child = spawn(
-    "uv",
-    ["run", "uvicorn", "guard_api.main:app", "--host", host, "--port", port],
+    uv.command,
+    [
+      ...uv.prependArgs,
+      "run",
+      "uvicorn",
+      "guard_api.main:app",
+      "--host",
+      host,
+      "--port",
+      port,
+    ],
     {
       cwd: ROOT,
       env: {
@@ -1848,11 +1865,16 @@ async function stopGuardApi(guardApi) {
 }
 
 function runOpenClawPluginVerify() {
-  const result = spawnSync("pnpm", ["openclaw:plugin:verify"], {
-    cwd: ROOT,
-    encoding: "utf8",
-    env: process.env,
-  });
+  const pnpm = resolveToolCommand("pnpm");
+  const result = spawnSync(
+    pnpm.command,
+    [...pnpm.prependArgs, "openclaw:plugin:verify"],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: process.env,
+    },
+  );
   if (result.status !== 0) {
     throw new Error(
       `OpenClaw plugin verification failed:\n${combinedSpawnOutput(result)}`,
@@ -1862,6 +1884,31 @@ function runOpenClawPluginVerify() {
 
 function combinedSpawnOutput(result) {
   return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+}
+
+/**
+ * 取一个可用随机端口（监听 0 端口后释放），绑定失败最多重取 attempts 次。
+ * 供 CI / 隔离演练使用；reliability 流程仍使用 8088 逻辑不变。
+ */
+export async function pickRandomPort({ host = "127.0.0.1", attempts = 3 } = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once("error", reject);
+        server.listen(0, host, () => {
+          const { port } = server.address();
+          server.close(() => resolve(port));
+        });
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(
+    `无法获取随机端口（已重试 ${attempts} 次）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
 }
 
 async function controlGet(pathname) {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import httpx
 import pytest
 
 from agentguard_cli import cli
+
+_EXPECTED_PNPM = shutil.which("pnpm") or shutil.which("pnpm.cmd")
 
 
 def _run_cli(
@@ -412,6 +415,8 @@ def test_http_error_and_connection_error_return_nonzero() -> None:
 
 
 def test_openclaw_verify_delegates_to_existing_pnpm_script() -> None:
+    if _EXPECTED_PNPM is None:
+        pytest.skip("pnpm is not available on PATH")
     commands: list[list[str]] = []
 
     def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -423,10 +428,12 @@ def test_openclaw_verify_delegates_to_existing_pnpm_script() -> None:
     assert exit_code == 0
     assert output == ""
     assert error == ""
-    assert commands == [["pnpm", "openclaw:plugin:verify"]]
+    assert commands == [[_EXPECTED_PNPM, "openclaw:plugin:verify"]]
 
 
 def test_openclaw_verify_record_passes_record_flag_to_dev_script() -> None:
+    if _EXPECTED_PNPM is None:
+        pytest.skip("pnpm is not available on PATH")
     commands: list[list[str]] = []
 
     def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -440,7 +447,7 @@ def test_openclaw_verify_record_passes_record_flag_to_dev_script() -> None:
     assert exit_code == 0
     assert output == ""
     assert error == ""
-    assert commands == [["pnpm", "openclaw:plugin:verify", "--", "--record"]]
+    assert commands == [[_EXPECTED_PNPM, "openclaw:plugin:verify", "--", "--record"]]
 
 
 def test_eval_import_posts_evaluation_run(tmp_path: Path) -> None:
