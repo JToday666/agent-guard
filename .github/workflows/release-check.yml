@@ -19,8 +19,6 @@ jobs:
     name: Build and verify release artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      RELEASE_ROOT: ${{ runner.temp }}/agentguard-release
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,6 +45,9 @@ jobs:
 
       - name: Validate release versions
         run: uv run python scripts/check-release-versions.py
+
+      - name: Set release root
+        run: echo "RELEASE_ROOT=${RUNNER_TEMP}/agentguard-release" >> "$GITHUB_ENV"
 
       - name: Build artifacts in a fresh directory
         run: |
