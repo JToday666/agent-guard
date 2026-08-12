@@ -36,7 +36,7 @@ def test_core_client_posts_authorization_header(monkeypatch):
     monkeypatch.setattr(httpx, "Client", TestClient)
     client = AgentGuardCoreClient(
         BenchConfig(
-            core_base_url="http://core.test",
+            core_base_url="https://core.test",
             token="secret-token",
             core_api_mode="legacy",
         )
@@ -96,7 +96,7 @@ def test_core_client_wraps_flat_tool_event_for_guard_api_v03(monkeypatch):
     monkeypatch.setattr(httpx, "Client", TestClient)
     client = AgentGuardCoreClient(
         BenchConfig(
-            core_base_url="http://core.test",
+            core_base_url="https://core.test",
             token="secret-token",
             core_api_mode="guard-api-v0.3",
         )
@@ -143,7 +143,7 @@ def test_core_client_invalid_json_raises(monkeypatch):
     monkeypatch.setattr(httpx, "Client", TestClient)
     client = AgentGuardCoreClient(
         BenchConfig(
-            core_base_url="http://core.test",
+            core_base_url="https://core.test",
             token="secret-token",
             core_api_mode="legacy",
         )

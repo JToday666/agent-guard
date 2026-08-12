@@ -446,7 +446,9 @@ def test_external_bind_rejects_development_defaults() -> None:
         settings.validate_for_startup()
 
 
-def test_production_configuration_requires_secure_cookie_and_strong_token() -> None:
+def test_production_configuration_requires_secure_cookie_and_strong_token(
+    tmp_path,
+) -> None:
     settings = GuardApiSettings(
         environment="production",
         database_url=(
@@ -467,21 +469,20 @@ def test_production_configuration_requires_secure_cookie_and_strong_token() -> N
     with pytest.raises(GuardApiConfigurationError, match="external audit checkpoint"):
         settings.validate_for_startup()
 
-    settings.audit_checkpoint_path = "/tmp/agentguard-audit-checkpoints.jsonl"
+    settings.audit_checkpoint_path = str(tmp_path / "agentguard-audit-checkpoints.jsonl")
     settings.audit_checkpoint_key = _AUDIT_CHECKPOINT_TEST_KEY
     settings.audit_checkpoint_key_id = "test-key-2026"
     settings.validate_for_startup()
 
 
-def test_audit_checkpoint_configuration_is_complete_and_strong() -> None:
-    partial = GuardApiSettings(
-        audit_checkpoint_path="/tmp/agentguard-audit-checkpoints.jsonl"
-    )
+def test_audit_checkpoint_configuration_is_complete_and_strong(tmp_path) -> None:
+    checkpoint_path = str(tmp_path / "agentguard-audit-checkpoints.jsonl")
+    partial = GuardApiSettings(audit_checkpoint_path=checkpoint_path)
     with pytest.raises(GuardApiConfigurationError, match="configured together"):
         partial.validate_for_startup()
 
     weak = GuardApiSettings(
-        audit_checkpoint_path="/tmp/agentguard-audit-checkpoints.jsonl",
+        audit_checkpoint_path=checkpoint_path,
         audit_checkpoint_key="dG9vLXNob3J0",
         audit_checkpoint_key_id="test-key-2026",
     )
@@ -2632,7 +2633,7 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
         "run_at": "2026-06-28T00:00:00+00:00",
         "dataset_id": "attackbench",
         "dataset_version": "v1",
-        "dataset_digest": "sha256:attackbench-v1",
+        "dataset_digest": "sha256:" + "a" * 64,
         "dataset_locked": True,
         "regression_gate": {
             "status": "passed",
@@ -2650,7 +2651,7 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
                 "case_id": "PI-001",
                 "attack_type": "prompt_injection",
                 "runtime": "openclaw",
-                "case_digest": "sha256:pi-001",
+                "case_digest": "sha256:" + "b" * 64,
                 "provenance": {
                     "source": "attackbench",
                     "source_path": "bench/datasets/attack_cases/prompt_injection.jsonl",
@@ -2701,7 +2702,7 @@ def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
     assert attackbench["versions"] == [
         {
             "dataset_version": "v1",
-            "dataset_digest": "sha256:attackbench-v1",
+            "dataset_digest": "sha256:" + "a" * 64,
             "locked": True,
             "run_count": 1,
             "case_count": 1,

@@ -18,6 +18,13 @@ ADAPTER_CREDENTIAL_SCOPES = (
 )
 
 
+def _is_sha256_digest(value: str | None) -> bool:
+    if value is None or not value.startswith("sha256:"):
+        return False
+    digest = value.removeprefix("sha256:")
+    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+
+
 class LlmApprovalReview(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -172,6 +179,21 @@ class EvaluationRun(BaseModel):
     @model_validator(mode="after")
     def fill_case_dataset_metadata(self) -> Self:
         self.run_at = _utc_timestamp(self.run_at, "run_at")
+        if self.dataset_locked:
+            if (
+                not self.dataset_id
+                or not self.dataset_version
+                or not self.dataset_digest
+            ):
+                raise ValueError(
+                    "locked evaluation datasets require id, version, and digest"
+                )
+            if not _is_sha256_digest(self.dataset_digest):
+                raise ValueError(
+                    "locked evaluation dataset digest must be a full sha256 digest"
+                )
+            if not self.cases:
+                raise ValueError("locked evaluation runs require at least one case")
         filled_cases: list[EvaluationCase] = []
         for case in self.cases:
             updates: dict[str, Any] = {}
@@ -179,7 +201,27 @@ class EvaluationRun(BaseModel):
                 updates["dataset_id"] = self.dataset_id
             if case.dataset_version is None and self.dataset_version is not None:
                 updates["dataset_version"] = self.dataset_version
-            filled_cases.append(case.model_copy(update=updates) if updates else case)
+            filled = case.model_copy(update=updates) if updates else case
+            if self.dataset_locked:
+                if filled.dataset_id != self.dataset_id or filled.dataset_version != self.dataset_version:
+                    raise ValueError(
+                        "locked evaluation case dataset identity must match its run"
+                    )
+                if not _is_sha256_digest(filled.case_digest):
+                    raise ValueError(
+                        "locked evaluation cases require a full sha256 digest"
+                    )
+                provenance = filled.provenance
+                if (
+                    not isinstance(provenance.get("source"), str)
+                    or not isinstance(provenance.get("source_path"), str)
+                    or not isinstance(provenance.get("line"), int)
+                    or provenance["line"] < 1
+                ):
+                    raise ValueError(
+                        "locked evaluation cases require source, source_path, and positive line provenance"
+                    )
+            filled_cases.append(filled)
         self.cases = filled_cases
         return self
 

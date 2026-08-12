@@ -115,9 +115,13 @@ PostgreSQL 跑通，Dashboard 已通过真实 PostgreSQL API 完成代表性动�
 
 步骤：
 
-1. 批量运行 P0 攻击样本和 benign 样本。
-2. 生成 defense before / after 对比结果。
-3. Dashboard 或报告展示指标。
+1. 启动真实 Guard API，使用冻结的 70 条主数据集和同一组 runner 参数。
+2. 通过 `agentguard_langgraph_bench.bench.paired_runner` 成对运行 defense off / on。
+3. 确认 `paired-baseline-report.json` 的 `run_valid=true`、数据摘要和 case 集合一致。
+4. Dashboard 或报告展示 ASR reduction、Block Rate、FPR、FNR 和 Latency。
+
+Core 不可用触发的 fail-closed、fake Core、未冻结数据集或任一无效 case 都不得作为
+“防御成功”展示；此时应展示基础设施失败并停止指标解读。
 
 ## 6. Demo 4：OpenClaw 真实接入
 

@@ -24,6 +24,8 @@
       "guardApiBaseUrl": {
         "type": "string",
         "minLength": 1,
+        "format": "uri",
+        "description": "Guard API URL. HTTP is allowed only for explicit loopback addresses; remote targets require HTTPS and redirects are rejected.",
         "default": "http://127.0.0.1:8088"
       },
       "adapterToken": {

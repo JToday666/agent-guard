@@ -219,7 +219,8 @@ def test_gateway_records_approval_release_start_and_terminal_outcome(tmp_path) -
     assert started["links"]["action_id"] == "call_receipt"
     assert started["links"]["policy_audit_id"] == "audit_policy_receipt"
     assert started["evidence"]["approval"]["status"] == "allowed"
-    assert outcome["event_type"] == "tool_call_completed"
+    assert outcome["event_type"] == "runtime_outcome"
+    assert outcome["metadata"]["outcome_kind"] == "execution_completed"
     assert outcome["links"]["parent_audit_id"] == started["audit_id"]
     assert outcome["evidence"]["execution"]["status"] == "executed"
     assert outcome["evidence"]["side_effects"]["measurement_status"] == "measured"
@@ -253,7 +254,8 @@ def test_gateway_records_not_invoked_for_approval_deny(tmp_path) -> None:
     assert len(guard.submitted) == 1
     outcome = guard.submitted[0]
     assert outcome["record_type"] == "runtime_outcome"
-    assert outcome["event_type"] == "tool_call_not_invoked"
+    assert outcome["event_type"] == "runtime_outcome"
+    assert outcome["metadata"]["outcome_kind"] == "pre_execution_deny"
     assert outcome["evidence"]["execution"]["status"] == "not_invoked"
     assert outcome["evidence"]["side_effects"]["count"] == 0
     assert outcome["evidence"]["approval"]["status"] == "denied"

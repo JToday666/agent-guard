@@ -15,7 +15,7 @@ function registerPlugin(plugin, api) {
 }
 
 const config = {
-  guardApiBaseUrl: "http://guard.test",
+  guardApiBaseUrl: "https://guard.test",
   adapterToken: "secret-token",
   requestTimeoutMs: 1000,
   approvalPollIntervalMs: 10,
@@ -86,8 +86,8 @@ test("GuardApiClient evaluates config audit and submits runtime observations wit
   // §12.3：后端返回 created/idempotent_replay 区分首写与幂等重放。
   assert.equal(observationResult.created, true);
   assert.equal(observationResult.idempotent_replay, false);
-  assert.equal(requests[0].url, "http://guard.test/v1/config-audit/evaluate");
-  assert.equal(requests[1].url, "http://guard.test/v1/audit/events");
+  assert.equal(requests[0].url, "https://guard.test/v1/config-audit/evaluate");
+  assert.equal(requests[1].url, "https://guard.test/v1/audit/events");
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
 });
 

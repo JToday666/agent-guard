@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 
 from ._version import __version__
+from .endpoint_policy import GuardApiEndpointError, validate_guard_api_base_url
 
 Env = Mapping[str, str]
 RunCommand = Callable[[list[str]], subprocess.CompletedProcess[bytes]]
@@ -471,6 +472,7 @@ def _request_json(
     json_body: Any | None = None,
     token_required: bool = True,
 ) -> Any:
+    base_url = _api_base_url(env)
     headers = {}
     if token_required:
         token = env.get("AGENTGUARD_CONTROL_TOKEN")
@@ -480,16 +482,24 @@ def _request_json(
             )
         headers["Authorization"] = f"Bearer {token}"
     try:
-        with httpx.Client(timeout=10.0, transport=transport) as client:
+        with httpx.Client(
+            timeout=10.0,
+            transport=transport,
+            follow_redirects=False,
+        ) as client:
             response = client.request(
                 method,
-                _join_url(_api_base_url(env), path),
+                _join_url(base_url, path),
                 params=params,
                 headers=headers,
                 json=json_body,
             )
     except httpx.HTTPError as exc:
-        raise CliError(f"Guard API request failed: {exc}") from exc
+        raise CliError(
+            f"Guard API request failed ({type(exc).__name__})"
+        ) from exc
+    if 300 <= response.status_code < 400:
+        raise CliError("Guard API redirects are not allowed")
     if response.status_code >= 400:
         raise CliError(_http_error_message(response))
     try:
@@ -500,11 +510,17 @@ def _request_json(
 
 def _api_base_url(env: Env) -> str:
     explicit = env.get("AGENTGUARD_API_URL")
-    if explicit:
-        return explicit.rstrip("/")
-    host = env.get("AGENTGUARD_HOST", "127.0.0.1")
-    port = env.get("AGENTGUARD_PORT", "8088")
-    return f"http://{host}:{port}"
+    if explicit is not None:
+        candidate = explicit
+    else:
+        host = env.get("AGENTGUARD_HOST", "127.0.0.1")
+        port = env.get("AGENTGUARD_PORT", "8088")
+        authority_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        candidate = f"http://{authority_host}:{port}"
+    try:
+        return validate_guard_api_base_url(candidate)
+    except GuardApiEndpointError as exc:
+        raise CliError(str(exc), exit_code=2) from exc
 
 
 def _join_url(base_url: str, path: str) -> str:

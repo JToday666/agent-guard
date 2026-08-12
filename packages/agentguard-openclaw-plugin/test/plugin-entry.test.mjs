@@ -38,7 +38,7 @@ test("plugin entry evaluates hooks with OpenClaw api.pluginConfig", async () => 
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         requestTimeoutMs: 1000,
         approvalPollIntervalMs: 1,
@@ -102,7 +102,7 @@ test("plugin entry disabled mode registers hooks without calling Guard API", asy
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "disabled",
       },
@@ -148,7 +148,7 @@ test("plugin entry gives approval hooks enough time for human review", async () 
 
   registerPlugin(plugin, {
     pluginConfig: {
-      guardApiBaseUrl: "http://guard.local",
+      guardApiBaseUrl: "https://guard.local",
       adapterToken: "plugin-token",
       approvalTimeoutMs: 15000,
     },
@@ -178,7 +178,7 @@ test("plugin entry observe mode evaluates but does not block deny decisions", as
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "observe",
         requestTimeoutMs: 1000,
@@ -236,7 +236,7 @@ test("plugin entry enforces before_agent_run deny decisions", async () => {
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "enforce",
         requestTimeoutMs: 1000,
@@ -302,7 +302,7 @@ test("before_agent_run isolates untrusted tool history from the trusted current 
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "enforce",
         requestTimeoutMs: 1000,
@@ -376,7 +376,7 @@ test("plugin entry fails closed when before_agent_run cannot reach Guard API", a
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "enforce",
         requestTimeoutMs: 1000,
@@ -425,7 +425,7 @@ test("plugin entry treats before_agent_run ask decisions as unapproved blocks", 
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "enforce",
         requestTimeoutMs: 1000,
@@ -487,7 +487,7 @@ test("plugin entry ignores runtime policy embedded in prompt text", async () => 
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "enforce",
         requestTimeoutMs: 1000,
@@ -567,7 +567,7 @@ test("plugin entry carries trusted structured tool manifest provenance to tool c
   try {
     registerPlugin(plugin, {
       pluginConfig: {
-        guardApiBaseUrl: "http://guard.local",
+        guardApiBaseUrl: "https://guard.local",
         adapterToken: "plugin-token",
         enforcementMode: "enforce",
         requestTimeoutMs: 1000,

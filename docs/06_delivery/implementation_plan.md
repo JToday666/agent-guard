@@ -98,7 +98,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - Memory Guard 已有后端基础变更流：propose、commit、rollback。
 - Action Critic 已有确定性 review 与可选 provider 扩展点。
 - OpenClaw verify / E2E / reliability 最近状态摘要写入与读取接口已实现：`PUT /v1/adapters/openclaw/status`、`GET /v1/adapters/openclaw/status`。
-- 安全评测 ASR before/after 后端导入、latest 查询和 dataset registry 汇总已实现，统一走 `/v1/evaluations` 系列接口；独立 dataset 资源表、样本版本锁文件和跨 run regression gate 发布门禁仍需后续补齐。
+- 安全评测 ASR before/after 后端导入、latest 查询和 dataset registry 汇总已实现，统一走 `/v1/evaluations` 系列接口；70 条主数据已由 digest manifest 锁定，成对编排器会校验两侧 case 集合、真实 Core、基础设施状态和证据完整性。独立 dataset 资源表与跨 run 阈值回归门禁仍需后续补齐。
 
 ## 7. P2 剩余能力
 

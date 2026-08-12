@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { OPENCLAW_REQUIRED_HOOKS } from "../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import { resolveGuardApiBaseUrl } from "./guard-api-endpoint.mjs";
 
 const ROOT = process.cwd();
 const PLUGIN_ID = "agentguard-security";
@@ -63,10 +64,8 @@ async function main() {
 
 function install() {
   const env = readDotEnv();
+  const guardApiBaseUrl = resolveGuardApiBaseUrl(env);
   const adapterToken = requireEnv(env, "AGENTGUARD_ADAPTER_TOKEN");
-  const host = env.AGENTGUARD_HOST || "127.0.0.1";
-  const port = env.AGENTGUARD_PORT || "8088";
-  const guardApiBaseUrl = `http://${host}:${port}`;
 
   run("pnpm", ["--filter", PLUGIN_PACKAGE, "build"]);
   rebuildStaging();
@@ -474,14 +473,11 @@ function readDotEnv() {
 
 async function recordOpenClawStatus(status) {
   const env = readDotEnv();
+  const apiBaseUrl = resolveGuardApiBaseUrl(env);
   const controlToken = requireEnv(env, "AGENTGUARD_CONTROL_TOKEN");
-  const host = env.AGENTGUARD_HOST || "127.0.0.1";
-  const port = env.AGENTGUARD_PORT || "8088";
-  const apiBaseUrl = (
-    env.AGENTGUARD_API_URL || `http://${host}:${port}`
-  ).replace(/\/+$/, "");
   const response = await fetch(`${apiBaseUrl}/v1/adapters/openclaw/status`, {
     method: "PUT",
+    redirect: "error",
     headers: {
       Authorization: `Bearer ${controlToken}`,
       "Content-Type": "application/json",
@@ -489,9 +485,8 @@ async function recordOpenClawStatus(status) {
     body: JSON.stringify(status),
   });
   if (!response.ok) {
-    const body = await response.text();
     throw new Error(
-      `Guard API status record failed: HTTP ${response.status} ${body}`,
+      `Guard API status record failed with HTTP ${response.status}`,
     );
   }
 }

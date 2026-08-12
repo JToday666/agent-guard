@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "agentguard-attackbench",
+  "dataset_version": "2026.08.1",
+  "dataset_digest": "sha256:1c1d83868995b47e91765f9840b2972bc1a14fdc044caf28207b991f7c296024",
+  "digest_canonicalization": "utf8-lf",
+  "dataset_locked": true,
+  "case_count": 70,
+  "attack_type_counts": {
+    "agent_abuse": 10,
+    "benign": 10,
+    "file_exfiltration": 10,
+    "jailbreak": 10,
+    "memory_poisoning": 10,
+    "prompt_injection": 10,
+    "tool_hijacking": 10
+  },
+  "files": [
+    {
+      "name": "agent_abuse.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:9271ece0bfbb8d5df342361e2c00faa130c5ac35dcc49eb273a49a2c133b00f3"
+    },
+    {
+      "name": "benign.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:8eaf1575714c23f087dfb2cb31593b9f238214017d8a776c1ae63a2bfadc3886"
+    },
+    {
+      "name": "file_exfiltration.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:15aae3b9fac15decffbd1c798b65099d9c380a6387de901164a818c6f6b7217d"
+    },
+    {
+      "name": "jailbreak.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:97ca53cae2f081da6ea98294c388678be9c4af86078480d78e40cd563d109c51"
+    },
+    {
+      "name": "memory_poisoning.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:efc9951ac2df5cfac631fca20446d69eb98c53d74b74c61c9f58822f40992fcf"
+    },
+    {
+      "name": "prompt_injection.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:1dd9dfa8d38fd967498ddf0a18fc524fd180fb3cf2e6f1beac3a0dfa3d108cfd"
+    },
+    {
+      "name": "tool_hijacking.jsonl",
+      "case_count": 10,
+      "sha256": "sha256:fd49ab56809793840a5bbda0e3d0c071475df4129dbc9d2af2c8a1ca6aa21e2a"
+    }
+  ]
+}

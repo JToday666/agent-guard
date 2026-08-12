@@ -15,14 +15,21 @@ CORE_PATH = ROOT / "packages" / "agentguard-core"
 if str(CORE_PATH) not in sys.path:
     sys.path.insert(0, str(CORE_PATH))
 
-from agentguard_core import GuardEvent, evaluate  # noqa: E402
+from agentguard_core import (  # noqa: E402
+    SUPPORTED_POLICY_RULE_IDS,
+    GuardEvent,
+    PolicyBundle,
+    evaluate,
+)
 
 BLOCKING_DECISIONS = {"ask", "deny"}
+REQUIRED_QUADRANTS = {"positive", "benign", "disabled", "override"}
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    cases = load_cases(args.dataset)
+    cases = expand_cases(load_cases(args.dataset))
+    validate_matrix(cases)
     evaluated_cases = [evaluate_case(case) for case in cases]
     report = build_report(evaluated_cases)
     write_report(report, args.output_dir)
@@ -50,9 +57,139 @@ def load_cases(path: Path) -> list[dict[str, Any]]:
     return cases
 
 
+def expand_cases(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for entry in entries:
+        if "rule_id" not in entry:
+            cases.append(entry)
+            continue
+        rule_id = str(entry["rule_id"])
+        positive_event = _event_with_defaults(
+            entry["positive_event"], f"{rule_id}_positive", is_malicious=True
+        )
+        benign_event = _event_with_defaults(
+            entry.get("benign_event", _default_benign_event()),
+            f"{rule_id}_benign",
+            is_malicious=False,
+        )
+        default_decision = str(entry["expected_default_decision"])
+        override_decision = "deny" if default_decision == "ask" else "ask"
+        common = {"rule_id": rule_id, "_line_number": entry["_line_number"]}
+        cases.extend(
+            [
+                common
+                | {
+                    "case_id": f"{rule_id}_positive",
+                    "quadrant": "positive",
+                    "event": positive_event,
+                    "expected_decision": default_decision,
+                    "expected_rule_ids": [rule_id],
+                },
+                common
+                | {
+                    "case_id": f"{rule_id}_benign",
+                    "quadrant": "benign",
+                    "event": benign_event,
+                    "expected_decision": "allow",
+                    "expected_rule_ids": [],
+                },
+                common
+                | {
+                    "case_id": f"{rule_id}_disabled",
+                    "quadrant": "disabled",
+                    "event": positive_event,
+                    "policies": {"disabled_rules": [rule_id]},
+                    "expected_decision": "allow",
+                    "expected_rule_ids": [],
+                },
+                common
+                | {
+                    "case_id": f"{rule_id}_override",
+                    "quadrant": "override",
+                    "event": positive_event,
+                    "policies": {
+                        "rule_overrides": {
+                            rule_id: {"decision": override_decision}
+                        }
+                    },
+                    "expected_decision": override_decision,
+                    "expected_rule_ids": [rule_id],
+                },
+            ]
+        )
+    return cases
+
+
+def validate_matrix(cases: list[dict[str, Any]]) -> None:
+    coverage: dict[str, set[str]] = defaultdict(set)
+    for case in cases:
+        rule_id = case.get("rule_id")
+        quadrant = case.get("quadrant")
+        if rule_id and quadrant:
+            coverage[str(rule_id)].add(str(quadrant))
+    expected_rules = set(SUPPORTED_POLICY_RULE_IDS)
+    if set(coverage) != expected_rules:
+        missing = sorted(expected_rules - set(coverage))
+        extra = sorted(set(coverage) - expected_rules)
+        raise ValueError(f"incomplete rule matrix: missing={missing}, extra={extra}")
+    incomplete = {
+        rule_id: sorted(REQUIRED_QUADRANTS - quadrants)
+        for rule_id, quadrants in coverage.items()
+        if quadrants != REQUIRED_QUADRANTS
+    }
+    if incomplete:
+        raise ValueError(f"incomplete rule quadrants: {incomplete}")
+
+
+def _event_with_defaults(
+    raw_event: dict[str, Any], case_id: str, *, is_malicious: bool
+) -> dict[str, Any]:
+    event = dict(raw_event)
+    event.setdefault("schema_version", "0.3")
+    event.setdefault("event_id", f"evt_matrix_{case_id}")
+    event.setdefault("event_type", "tool_call_proposed")
+    event.setdefault("runtime", "core_matrix")
+    event.setdefault("trace_id", f"trace_matrix_{case_id}")
+    event.setdefault("case_id", case_id)
+    event.setdefault("attack_type", "rule_matrix")
+    event.setdefault("is_malicious", is_malicious)
+    event.setdefault("timestamp", "2026-06-27T00:00:00+00:00")
+    event.setdefault("pre_execution", True)
+    event.setdefault(
+        "security_context",
+        {
+            "user_task": "Perform the explicitly requested safe operation.",
+            "source_type": "user",
+            "source_trust": "trusted",
+        },
+    )
+    event.setdefault("metadata", {})
+    return event
+
+
+def _default_benign_event() -> dict[str, Any]:
+    return {
+        "security_context": {
+            "user_task": "Read /docs/public.txt and summarize it.",
+            "source_type": "user",
+            "source_trust": "trusted",
+        },
+        "payload": {
+            "tool": {
+                "name": "read_file",
+                "category": "file",
+                "kind": "file_read",
+            },
+            "arguments": {"path": "/docs/public.txt"},
+            "derived_resources": [],
+        },
+    }
+
+
 def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     event = GuardEvent.model_validate(case["event"])
-    decision = evaluate(event)
+    policies = PolicyBundle.model_validate(case.get("policies", {}))
+    decision = evaluate(event, policies)
     expected_rule_ids = list(case.get("expected_rule_ids", []))
     actual_rule_ids = [hit.rule_id for hit in decision.rule_hits]
     expected_decision = str(case["expected_decision"])
@@ -63,6 +200,8 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     return {
         "case_id": str(case["case_id"]),
         "line_number": case["_line_number"],
+        "rule_id": case.get("rule_id"),
+        "quadrant": case.get("quadrant"),
         "is_malicious": event.is_malicious,
         "expected_decision": expected_decision,
         "actual_decision": actual_decision,
@@ -78,16 +217,34 @@ def build_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "ok": all(case["ok"] for case in cases),
         "summary": summarize_cases(cases),
+        "matrix_coverage": summarize_matrix_coverage(cases),
         "rules": summarize_rules(cases),
         "cases": {case["case_id"]: case for case in cases},
+    }
+
+
+def summarize_matrix_coverage(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "rule_count": len(SUPPORTED_POLICY_RULE_IDS),
+        "quadrants_per_rule": len(REQUIRED_QUADRANTS),
+        "expected_case_count": len(SUPPORTED_POLICY_RULE_IDS)
+        * len(REQUIRED_QUADRANTS),
+        "covered_rules": sorted(SUPPORTED_POLICY_RULE_IDS),
+        "quadrants": sorted(REQUIRED_QUADRANTS),
     }
 
 
 def summarize_cases(cases: list[dict[str, Any]]) -> dict[str, Any]:
     blocked = [case for case in cases if case["blocked"]]
     allowed = [case for case in cases if not case["blocked"]]
-    benign = [case for case in cases if case["is_malicious"] is False]
-    malicious = [case for case in cases if case["is_malicious"] is True]
+    # disabled/override 是策略控制面测试，不可混入默认策略的 FPR/FNR。
+    metric_cases = [
+        case
+        for case in cases
+        if case.get("quadrant") in {None, "positive", "benign"}
+    ]
+    benign = [case for case in metric_cases if case["is_malicious"] is False]
+    malicious = [case for case in metric_cases if case["is_malicious"] is True]
     false_positives = [case for case in benign if case["blocked"]]
     false_negatives = [case for case in malicious if not case["blocked"]]
     return {
