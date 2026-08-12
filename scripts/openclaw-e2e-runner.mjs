@@ -486,21 +486,46 @@ function edgeRelations(graph) {
   return [...new Set((graph?.edges ?? []).map((edge) => edge.relation))].sort();
 }
 
-async function loadPluginAndRunner() {
+export async function loadPluginAndRunner({ openclawRoot = null } = {}) {
   const plugin = (await import(pathToFileURL(PLUGIN_DIST).href)).default;
-  const openclawPackageJson = findPackageJson(
-    pluginRequire.resolve("openclaw"),
+  const overrideRoot =
+    openclawRoot ?? process.env.AGENTGUARD_OPENCLAW_ROOT ?? null;
+  const openclawPackageJson = overrideRoot
+    ? resolveOpenclawPackageJson(overrideRoot)
+    : findPackageJson(pluginRequire.resolve("openclaw"));
+  const hookRunnerPath = path.join(
+    path.dirname(openclawPackageJson),
+    "dist",
+    "plugins",
+    "hook-runner-global.js",
   );
-  const hookRunnerUrl = pathToFileURL(
-    path.join(
-      path.dirname(openclawPackageJson),
-      "dist",
-      "plugins",
-      "hook-runner-global.js",
-    ),
-  ).href;
-  const hookRunner = await import(hookRunnerUrl);
+  if (!fs.existsSync(hookRunnerPath)) {
+    throw new Error(
+      `OpenClaw hook runner 不存在，已探测路径：${hookRunnerPath}（openclaw 根目录：${overrideRoot ?? "插件 node_modules"}）。当前已验证的 OpenClaw 版本：2026.6.6、2026.7.1-2。`,
+    );
+  }
+  const hookRunner = await import(pathToFileURL(hookRunnerPath).href);
   return { plugin, hookRunner };
+}
+
+/**
+ * 从显式 openclaw 根目录解析 openclaw 的 package.json。
+ * 根目录可以是 npm prefix（含 node_modules/openclaw）或包目录本身。
+ */
+export function resolveOpenclawPackageJson(rootDir) {
+  const resolvedRoot = path.resolve(rootDir);
+  const candidates = [
+    path.join(resolvedRoot, "node_modules", "openclaw", "package.json"),
+    path.join(resolvedRoot, "package.json"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(
+    `无法在 ${resolvedRoot} 下定位 openclaw package.json，已探测：${candidates.join(", ")}`,
+  );
 }
 
 function findPackageJson(entryPath) {
@@ -517,9 +542,13 @@ function findPackageJson(entryPath) {
   throw new Error(`Could not locate package.json for ${entryPath}`);
 }
 
-function resolveOpenclawVersion() {
+export function resolveOpenclawVersion(openclawRoot = null) {
+  const overrideRoot =
+    openclawRoot ?? process.env.AGENTGUARD_OPENCLAW_ROOT ?? null;
   try {
-    const packageJsonPath = findPackageJson(pluginRequire.resolve("openclaw"));
+    const packageJsonPath = overrideRoot
+      ? resolveOpenclawPackageJson(overrideRoot)
+      : findPackageJson(pluginRequire.resolve("openclaw"));
     const version = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
       .version;
     return typeof version === "string" && version ? version : "unknown";
@@ -1723,7 +1752,7 @@ function databaseName(databaseUrl) {
   }
 }
 
-function assertSafeTestDatabaseUrl(databaseUrl) {
+export function assertSafeTestDatabaseUrl(databaseUrl) {
   const normalized = normalizePostgresUrl(databaseUrl);
   const database = databaseName(normalized);
   if (database === "agent_guard_test" || database?.endsWith("_test")) {
@@ -1740,7 +1769,7 @@ function normalizePostgresUrl(databaseUrl) {
     : databaseUrl;
 }
 
-function resetAndInitializeTestDatabase(databaseUrl) {
+export function resetAndInitializeTestDatabase(databaseUrl) {
   const python = `
 from tests.support.postgres import assert_safe_test_database_url, reset_control_plane_schema
 from guard_api.storage.postgres import PostgresControlPlaneStore
@@ -1769,7 +1798,7 @@ print("agentguard test database initialized")
   }
 }
 
-async function assertGuardApiPortIsFree() {
+export async function assertGuardApiPortIsFree() {
   const response = await fetch(`${GUARD_API_BASE_URL}/health`, {
     redirect: "error",
   }).catch(() => null);
@@ -1780,7 +1809,7 @@ async function assertGuardApiPortIsFree() {
   }
 }
 
-function startGuardApi({ databaseUrl }) {
+export function startGuardApi({ databaseUrl }) {
   const host = process.env.AGENTGUARD_HOST || "127.0.0.1";
   const port = process.env.AGENTGUARD_PORT || "8088";
   const logs = [];
@@ -1821,7 +1850,7 @@ function startGuardApi({ databaseUrl }) {
   return { child, logs };
 }
 
-async function waitForGuardApiHealth(guardApi) {
+export async function waitForGuardApiHealth(guardApi) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30_000) {
     if (guardApi.child.exitCode !== null) {
@@ -1845,7 +1874,7 @@ async function waitForGuardApiHealth(guardApi) {
   );
 }
 
-async function stopGuardApi(guardApi) {
+export async function stopGuardApi(guardApi) {
   if (!guardApi || guardApi.child.exitCode !== null) {
     return;
   }

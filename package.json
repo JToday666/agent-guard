@@ -34,6 +34,6 @@
     "openclaw:bench-tools:verify": "node scripts/openclaw-bench-tools-dev.mjs verify",
     "openclaw:bench-tools:uninstall": "node scripts/openclaw-bench-tools-dev.mjs uninstall",
     "openclaw:bench-shim": "node scripts/openclaw-bench-shim.mjs",
-    "openclaw:bench-shim:test": "node --test scripts/openclaw-bench-shim.test.mjs scripts/openclaw-bench-tools-dev.test.mjs scripts/openclaw-command-resolve.test.mjs scripts/openclaw-plugin-dev.test.mjs"
+    "openclaw:bench-shim:test": "node --test scripts/openclaw-bench-shim.test.mjs scripts/openclaw-bench-tools-dev.test.mjs scripts/openclaw-command-resolve.test.mjs scripts/openclaw-plugin-dev.test.mjs scripts/openclaw-runtime-smoke.test.mjs"
   }
 }
