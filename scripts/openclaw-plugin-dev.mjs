@@ -369,7 +369,7 @@ export async function executeInstall(deps) {
     log(`Building ${PLUGIN_PACKAGE}...`);
     deps.buildPlugin(deps, runBase);
     // Step 4 临时目录构建校验完整后原子切换 staging
-    switchStaging(deps, { oldStagingDir });
+    await switchStaging(deps, { oldStagingDir });
     // Step 5 凭证准备（平台分流）
     prepareCredentials(deps, { strategy, adapterToken, stateDir });
     // Step 6 单一 patch：dry-run 先行，成功后写入
@@ -450,7 +450,7 @@ export async function executeInstall(deps) {
     };
   } catch (error) {
     // Step 8 任一步失败：按基线回滚并报告原始错误与回滚结果
-    const rollbackOutcome = rollbackToBaseline(deps, baseline, {
+    const rollbackOutcome = await rollbackToBaseline(deps, baseline, {
       oldStagingDir,
       runBase,
     });
@@ -848,7 +848,42 @@ function probeGatewayRunning(deps, runBase) {
   }
 }
 
-function switchStaging(deps, { oldStagingDir }) {
+// Windows 上防病毒实时扫描等瞬时占用会使 rename 短暂失败（EPERM/EACCES/EBUSY），
+// 目录切换与回滚路径均需短时重试，否则安装被瞬时锁击穿。
+const RETRYABLE_RENAME_CODES = new Set([
+  "EPERM",
+  "EACCES",
+  "EBUSY",
+  "EAGAIN",
+  "ENOTEMPTY",
+]);
+const DEFAULT_RENAME_ATTEMPTS = 3;
+const DEFAULT_RENAME_RETRY_DELAY_MS = 250;
+
+async function renameWithRetry(deps, from, to) {
+  const attempts = deps.renameAttempts ?? DEFAULT_RENAME_ATTEMPTS;
+  const delayMs = deps.renameRetryDelayMs ?? DEFAULT_RENAME_RETRY_DELAY_MS;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      deps.fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      const retryable =
+        error && typeof error === "object"
+          ? RETRYABLE_RENAME_CODES.has(error.code)
+          : false;
+      if (!retryable || attempt >= attempts) {
+        throw error;
+      }
+      deps.warn(
+        `rename 瞬时失败（${error.code}），重试 ${attempt}/${attempts}：${from} -> ${to}`,
+      );
+      await deps.sleep(delayMs);
+    }
+  }
+}
+
+async function switchStaging(deps, { oldStagingDir }) {
   const { fs } = deps;
   const tempDir = `${deps.stagingDir}.next-${deps.pid}`;
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -877,14 +912,16 @@ function switchStaging(deps, { oldStagingDir }) {
   // 旧 staging 先改名保留，切换成功后才允许清理
   fs.rmSync(oldStagingDir, { recursive: true, force: true });
   if (fs.existsSync(deps.stagingDir)) {
-    fs.renameSync(deps.stagingDir, oldStagingDir);
+    await renameWithRetry(deps, deps.stagingDir, oldStagingDir);
   }
   try {
-    fs.renameSync(tempDir, deps.stagingDir);
+    await renameWithRetry(deps, tempDir, deps.stagingDir);
   } catch (error) {
     if (fs.existsSync(oldStagingDir)) {
-      fs.renameSync(oldStagingDir, deps.stagingDir);
+      await renameWithRetry(deps, oldStagingDir, deps.stagingDir);
     }
+    // 失败不留临时 staging 残留
+    fs.rmSync(tempDir, { recursive: true, force: true });
     throw error;
   }
 }
@@ -984,7 +1021,7 @@ function atomicWriteFile(deps, targetPath, content, mode) {
   deps.fs.renameSync(tmpPath, targetPath);
 }
 
-function rollbackToBaseline(deps, baseline, { oldStagingDir, runBase }) {
+async function rollbackToBaseline(deps, baseline, { oldStagingDir, runBase }) {
   const { fs } = deps;
   const outcomes = [];
   const note = (label, ok) => outcomes.push(`${label}${ok ? "成功" : "失败"}`);
@@ -1018,12 +1055,17 @@ function rollbackToBaseline(deps, baseline, { oldStagingDir, runBase }) {
     }
     if (fs.existsSync(oldStagingDir)) {
       fs.rmSync(deps.stagingDir, { recursive: true, force: true });
-      fs.renameSync(oldStagingDir, deps.stagingDir);
+      await renameWithRetry(deps, oldStagingDir, deps.stagingDir);
       note("staging 还原", true);
     } else if (!baseline.stagingExisted && fs.existsSync(deps.stagingDir)) {
       fs.rmSync(deps.stagingDir, { recursive: true, force: true });
       note("staging 清理", true);
     }
+    // 清理切换失败可能遗留的临时 staging 目录
+    fs.rmSync(`${deps.stagingDir}.next-${deps.pid}`, {
+      recursive: true,
+      force: true,
+    });
     if (baseline.restartAllowed && baseline.gatewayWasRunning) {
       try {
         deps.run("openclaw", ["gateway", "restart", "--safe"], {

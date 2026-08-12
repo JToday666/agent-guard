@@ -534,6 +534,75 @@ test("install runs dry-run before config write and applies single patch", async 
   }
 });
 
+// ---------- staging 切换：Windows 瞬时 EPERM 重试 ----------
+
+function withFlakyRename(world, { flakes, targetDir }) {
+  const realRename = fs.renameSync.bind(fs);
+  let remaining = flakes;
+  world.deps.fs = {
+    ...fs,
+    renameSync: (from, to) => {
+      if (to === targetDir && remaining > 0) {
+        remaining -= 1;
+        const error = new Error(
+          `EPERM: operation not permitted, rename '${from}' -> '${to}'`,
+        );
+        error.code = "EPERM";
+        throw error;
+      }
+      return realRename(from, to);
+    },
+  };
+  return () => remaining;
+}
+
+test("staging switch retries transient EPERM and completes reinstall", async () => {
+  const world = createWorld();
+  try {
+    world.seedConfig({});
+    await executeInstall(world.deps);
+    // 第二次安装：目标 staging 目录前两次 rename 瞬时 EPERM（如防病毒实时扫描占用）
+    const remaining = withFlakyRename(world, {
+      flakes: 2,
+      targetDir: world.stagingDir,
+    });
+
+    await executeInstall(world.deps);
+
+    assert.equal(fs.existsSync(world.stagingDir), true);
+    assert.equal(fs.existsSync(`${world.stagingDir}.next-4242`), false);
+    assert.equal(fs.existsSync(`${world.stagingDir}.old-4242`), false);
+    assert.equal(remaining(), 0);
+  } finally {
+    world.cleanup();
+  }
+});
+
+test("staging switch gives up after retries, rolls back and restores old staging", async () => {
+  const world = createWorld();
+  try {
+    world.seedConfig({});
+    await executeInstall(world.deps);
+    const baselineBytes = fs.readFileSync(world.profile.configPath);
+    // 前 4 次 rename 到 staging 目标均 EPERM：足以耗尽单次切换的重试，
+    // 但回滚路径的还原 rename 最终能成功（瞬时锁解除）
+    withFlakyRename(world, { flakes: 4, targetDir: world.stagingDir });
+
+    await assert.rejects(() => executeInstall(world.deps), /rolled back/i);
+
+    assert.deepEqual(
+      fs.readFileSync(world.profile.configPath),
+      baselineBytes,
+    );
+    // 旧 staging 恢复，临时目录清理
+    assert.equal(fs.existsSync(world.stagingDir), true);
+    assert.equal(fs.existsSync(`${world.stagingDir}.next-4242`), false);
+    assert.equal(fs.existsSync(`${world.stagingDir}.old-4242`), false);
+  } finally {
+    world.cleanup();
+  }
+});
+
 // ---------- install：各故障点注入 → 回滚 ----------
 
 test("dry-run failure rolls back config hash, state env and staging", async () => {
