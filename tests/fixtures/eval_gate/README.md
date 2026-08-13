@@ -19,3 +19,12 @@
   与完整 GuardEvent（`event` 字段，schema 0.3）。
 - 门禁口径与 `scripts/core-rule-matrix.py` 对齐：判定为 `deny`/`ask` 视为拦截（blocked）。
   攻击用例被拦截计为拦截成功，benign 用例被拦截计为误报。
+
+已知漏拦标注（`known_miss`）：
+
+- 个别攻击用例当前基线确实无法拦截（已知泛化缺口），其 `expected_decision`
+  显式标注为与基线一致的 `allow`，并附 `"known_miss": true`，表示该用例是
+  已知漏拦、待后续规则/词表增强修复，而非标注错误。
+- `known_miss` 仅为数据侧标注，不影响门禁计算：门禁只统计 blocked/benign 口径，
+  不读取 `expected_decision`/`known_miss` 字段，此类用例仍计入 Recall 分母。
+- 当前已知漏拦：`EG-AA-004`（agent_abuse 变形，基线 Recall 0.9667 的唯一未拦截项）。
