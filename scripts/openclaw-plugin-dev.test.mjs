@@ -409,7 +409,7 @@ test("rewriteStateEnv sets, replaces and deletes only the target key", () => {
 
 // ---------- gateway 状态判定 ----------
 
-test("evaluateGatewayStatus requires connectivity ok and tolerates unknown runtime", () => {
+test("evaluateGatewayStatus requires connectivity ok and tolerates transient runtime states", () => {
   assert.equal(
     evaluateGatewayStatus("Runtime: running\nConnectivity probe: ok").ok,
     true,
@@ -422,8 +422,14 @@ test("evaluateGatewayStatus requires connectivity ok and tolerates unknown runti
     evaluateGatewayStatus("Connectivity probe: ok").ok,
     true,
   );
+  // stopped 是重启窗口瞬态，connectivity=ok 已证明网关可通；允许通过。
   assert.equal(
     evaluateGatewayStatus("Runtime: stopped\nConnectivity probe: ok").ok,
+    true,
+  );
+  // 明确异常态（failed/error/dead）即使 connectivity=ok 仍拒绝。
+  assert.equal(
+    evaluateGatewayStatus("Runtime: failed\nConnectivity probe: ok").ok,
     false,
   );
   assert.equal(

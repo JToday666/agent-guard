@@ -228,6 +228,7 @@ jobs:
             npm-openclaw-${{ matrix.os }}-${{ matrix.openclaw }}-
 
       - name: Install OpenClaw outside workspace
+        shell: bash
         run: npm install --prefix "$AGENTGUARD_OPENCLAW_ROOT" "openclaw@${{ matrix.openclaw }}" --ignore-scripts --no-audit --no-fund
 
       - name: Start preinstalled PostgreSQL (Ubuntu)

@@ -227,7 +227,8 @@ export function redactSecrets(text, { secrets = [] } = {}) {
 }
 
 // gateway status 输出判定：Connectivity probe 必须 ok；
-// Runtime 允许 unknown（Windows 任务计划不可查询时），明确异常态才失败。
+// Runtime 允许 unknown（Windows 任务计划不可查询时）和 stopped（重启/启动窗口瞬态，
+// connectivity=ok 已证明进程存活），仅明确异常态（failed/error/dead）才失败。
 export function evaluateGatewayStatus(stdout) {
   const text = String(stdout ?? "");
   const runtime = (
@@ -236,7 +237,7 @@ export function evaluateGatewayStatus(stdout) {
   const connectivity = (
     /Connectivity probe:\s*(\S+)/.exec(text)?.[1] ?? "unknown"
   ).toLowerCase();
-  const failedRuntime = new Set(["stopped", "failed", "error", "dead"]);
+  const failedRuntime = new Set(["failed", "error", "dead"]);
   const ok = connectivity === "ok" && !failedRuntime.has(runtime);
   return { ok, runtime, connectivity };
 }
