@@ -64,6 +64,8 @@ export type SecurityContext = {
   source_trust: string;
   channel?: string | null;
   sender_id?: string | null;
+  conversation_id?: string | null;
+  session_key?: string | null;
   session_id?: string | null;
   run_id?: string | null;
   agent_id: string;

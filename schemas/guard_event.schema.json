@@ -240,7 +240,8 @@
       "properties": {
         "memory": { "$ref": "#/$defs/memoryRecord" },
         "will_persist": { "type": "boolean" },
-        "requires_approval": { "type": "boolean" }
+        "requires_approval": { "type": "boolean" },
+        "action_id": { "type": ["string", "null"] }
       },
       "additionalProperties": true
     },

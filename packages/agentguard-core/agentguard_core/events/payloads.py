@@ -132,6 +132,9 @@ class MemoryEventPayload(BaseModel):
     memory: MemoryRecord
     will_persist: bool = True
     requires_approval: bool = False
+    # 来源工具调用 ID：LangGraph adapter 的 memory_write_proposed 事件用它把
+    # 记忆写入动作关联回触发它的工具调用（稳定 action_id）。
+    action_id: str | None = None
 
 
 class MessageSendPayload(BaseModel):
