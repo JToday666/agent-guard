@@ -81,7 +81,9 @@ export function resolveToolCommand(name, options = {}) {
     }
     const readFile = options.readFile ?? fs.readFileSync;
     const shimText = readFile(shimPath, "utf8");
-    const relativeEntry = parseWindowsShimEntry(shimText);
+    // shim 内的相对路径使用 Windows 分隔符；测试会注入 platform: "win32"
+    // 在 POSIX 主机上运行，此时 path.resolve 不识别反斜杠，须先归一化为 /。
+    const relativeEntry = parseWindowsShimEntry(shimText)?.split("\\").join("/");
     if (!relativeEntry) {
       throw new Error(
         `无法从 Windows shim ${shimPath} 中解析出 JS 入口路径。`,
