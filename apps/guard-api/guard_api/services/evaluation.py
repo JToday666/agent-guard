@@ -107,7 +107,9 @@ class EvaluationService:
             requesting_principal_id=requesting_principal_id,
         )
         approval = self.approval_service.auto_review_with_llm(approval)
-        memory_change = self._record_memory_change(event, decision)
+        memory_change = self._record_memory_change(
+            event, decision, requesting_principal_id=requesting_principal_id
+        )
         # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
         audit_event = self.audit_service.record_evaluation(
             event,
@@ -180,7 +182,11 @@ class EvaluationService:
         )
 
     def _record_memory_change(
-        self, event: GuardEvent, decision: GuardDecision
+        self,
+        event: GuardEvent,
+        decision: GuardDecision,
+        *,
+        requesting_principal_id: str,
     ) -> MemoryGuardChange | None:
         if self.memory_guard_service is None or not isinstance(
             event.payload, MemoryEventPayload
@@ -203,5 +209,8 @@ class EvaluationService:
                     "decision": decision.decision,
                     "requires_approval": event.payload.requires_approval,
                 },
-            )
+            ),
+            runtime=event.runtime,
+            agent_id=event.security_context.agent_id,
+            principal_id=requesting_principal_id,
         )
