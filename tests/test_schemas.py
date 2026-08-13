@@ -22,6 +22,7 @@ from agentguard_core import (
     ModelCallPayload,
     PolicyBundle,
     RuntimeOutcomeReceipt,
+    SecurityContext,
     ToolCallPayload,
     ToolDescriptor,
     ToolResult,
@@ -426,6 +427,46 @@ def test_guard_event_model_parses_raw_p1_payloads() -> None:
     assert isinstance(tool_result_event.payload, ToolResultPayload)
 
 
+def test_guard_event_model_parses_raw_tool_call_proposed_payload() -> None:
+    event = GuardEvent.model_validate(
+        {
+            "trace_id": "trace_raw_tool_call",
+            "event_type": "tool_call_proposed",
+            "payload": {
+                "tool": {"name": "send_email", "call_id": "call_raw_001"},
+                "arguments": {"to": "reviewer@agentguard.local"},
+                "derived_resources": [],
+            },
+        }
+    )
+
+    assert isinstance(event.payload, ToolCallPayload)
+    assert event.payload.tool.name == "send_email"
+
+
+def test_security_context_declares_session_identity_fields() -> None:
+    context = SecurityContext(
+        session_id="sess_001",
+        session_key="openclaw:main",
+        conversation_id="conv_001",
+    )
+
+    dump = context.model_dump(mode="json")
+    assert dump["session_id"] == "sess_001"
+    assert dump["session_key"] == "openclaw:main"
+    assert dump["conversation_id"] == "conv_001"
+
+    default_context = SecurityContext()
+    assert default_context.session_id is None
+    assert default_context.session_key is None
+    assert default_context.conversation_id is None
+    # 未显式设置时不得出现在 model_fields_set，供 digest 口径判别新旧形状。
+    assert not (
+        {"session_id", "session_key", "conversation_id"}
+        & default_context.model_fields_set
+    )
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -439,6 +480,23 @@ def test_guard_event_model_parses_raw_p1_payloads() -> None:
             "trace_id": "trace_raw_model_missing_phase",
             "event_type": "model_input_prepared",
             "payload": {"content_preview": "ignore previous instructions"},
+        },
+        {
+            "trace_id": "trace_raw_tool_call_missing_arguments",
+            "event_type": "tool_call_proposed",
+            "payload": {
+                "tool": {"name": "send_email", "call_id": "call_raw_missing"},
+                "derived_resources": [],
+            },
+        },
+        {
+            "trace_id": "trace_raw_tool_call_missing_tool_name",
+            "event_type": "tool_call_proposed",
+            "payload": {
+                "tool": {"call_id": "call_raw_no_name"},
+                "arguments": {},
+                "derived_resources": [],
+            },
         },
         {
             "trace_id": "trace_raw_tool_result_missing_call_id",
@@ -465,6 +523,12 @@ def test_guard_event_raw_payload_contracts_match_json_schema_required_fields() -
     defs = schema["$defs"]
     contracts = guard_event_raw_payload_contracts()
 
+    assert contracts["tool_call_proposed"].payload_required_fields == tuple(
+        defs["toolCallPayload"]["required"]
+    )
+    # tool_call_proposed 主路径只校验 tool.name 存在性：存量数据集事件
+    # 不携带 call_id，收紧会改变行为；不拒绝多余字段。
+    assert contracts["tool_call_proposed"].nested_required_fields["tool"] == ("name",)
     assert contracts["context_assembled"].payload_required_fields == tuple(
         defs["contextBuildPayload"]["required"]
     )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentguard_core import (
     ActionCritic,
     AuditEvent,
@@ -27,6 +29,34 @@ from .policy import PolicyService
 
 class EvaluationConflictError(ValueError):
     """Raised when the same event_id is re-evaluated with different content."""
+
+
+# SecurityContext 后续增补的会话身份字段（见 agentguard_core SecurityContext）。
+_SESSION_IDENTITY_FIELDS: tuple[str, ...] = (
+    "conversation_id",
+    "session_key",
+    "session_id",
+)
+
+
+def canonical_request_dump(event: GuardEvent) -> dict[str, Any]:
+    """request_digest 的规范化 dump 口径。
+
+    SecurityContext 增补带默认值的会话字段后，model_dump 会多出默认 null
+    键，导致存量事件的 digest 与变更前计算值不一致，重放被误判为
+    EvaluationConflictError。口径：生产者未显式发送（不在 model_fields_set）
+    的新增字段从 dump 中剔除，使旧形状事件的 digest 与变更前全量 dump 完全
+    一致；显式携带的字段（含显式 null）仍参与 digest，保留内容变化检测能力。
+    """
+
+    dump = event.model_dump(mode="json")
+    explicitly_set = event.security_context.model_fields_set
+    context_dump = dump.get("security_context")
+    if isinstance(context_dump, dict):
+        for field_name in _SESSION_IDENTITY_FIELDS:
+            if field_name not in explicitly_set:
+                context_dump.pop(field_name, None)
+    return dump
 
 
 def _stored_request_digest(audit: AuditEvent) -> object:
@@ -68,7 +98,7 @@ class EvaluationService:
         # Validate temporal identity before detectors or any approval/memory side
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
-        request_digest = canonical_sha256(event.model_dump(mode="json"))
+        request_digest = canonical_sha256(canonical_request_dump(event))
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         with self.audit_service.store.evaluation_transaction(event.event_id):
