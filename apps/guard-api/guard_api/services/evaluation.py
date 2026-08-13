@@ -37,15 +37,17 @@ _SESSION_IDENTITY_FIELDS: tuple[str, ...] = (
     "session_key",
     "session_id",
 )
+# payload 契约扩展时增补的可选字段（见 MemoryEventPayload.action_id）。
+_PAYLOAD_EXTENSION_FIELDS: tuple[str, ...] = ("action_id",)
 
 
 def canonical_request_dump(event: GuardEvent) -> dict[str, Any]:
     """request_digest 的规范化 dump 口径。
 
-    SecurityContext 增补带默认值的会话字段后，model_dump 会多出默认 null
-    键，导致存量事件的 digest 与变更前计算值不一致，重放被误判为
+    SecurityContext / payload 契约增补带默认值的字段后，model_dump 会多出
+    默认 null 键，导致存量事件的 digest 与变更前计算值不一致，重放被误判为
     EvaluationConflictError。口径：生产者未显式发送（不在 model_fields_set）
-    的新增字段从 dump 中剔除，使旧形状事件的 digest 与变更前全量 dump 完全
+    的增补字段从 dump 中剔除，使旧形状事件的 digest 与变更前全量 dump 完全
     一致；显式携带的字段（含显式 null）仍参与 digest，保留内容变化检测能力。
     """
 
@@ -56,6 +58,12 @@ def canonical_request_dump(event: GuardEvent) -> dict[str, Any]:
         for field_name in _SESSION_IDENTITY_FIELDS:
             if field_name not in explicitly_set:
                 context_dump.pop(field_name, None)
+    payload_fields_set = getattr(event.payload, "model_fields_set", set())
+    payload_dump = dump.get("payload")
+    if isinstance(payload_dump, dict):
+        for field_name in _PAYLOAD_EXTENSION_FIELDS:
+            if field_name not in payload_fields_set:
+                payload_dump.pop(field_name, None)
     return dump
 
 

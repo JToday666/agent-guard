@@ -3947,6 +3947,110 @@ def test_evaluate_request_digest_includes_explicit_session_identity_fields() -> 
     )
 
 
+def _memory_guard_event_payload(*, event_id: str, action_id: str | None = None) -> dict:
+    payload: dict = {
+        "memory": {
+            "namespace": "user_preferences",
+            "key": "style",
+            "value_preview": "concise",
+            "source_trust": "trusted",
+            "operation": "write",
+        },
+        "will_persist": True,
+        "requires_approval": False,
+    }
+    if action_id is not None:
+        payload["action_id"] = action_id
+    return _p1_guard_event_payload(
+        event_id=event_id,
+        event_type="memory_write_proposed",
+        trace_id=f"trace_{event_id}",
+        payload=payload,
+        source_trust="trusted",
+        is_malicious=False,
+    )
+
+
+def test_canonical_request_dump_strips_unset_memory_action_id() -> None:
+    # 未显式携带 action_id 的 memory 事件，规范化 dump 不含该默认键，
+    # 与字段增补前的全量 dump 形状一致（存量 digest 口径不变）。
+    event = GuardEvent.model_validate(
+        _memory_guard_event_payload(event_id="evt_memory_dump_strip")
+    )
+
+    dump = canonical_request_dump(event)
+    full_dump = event.model_dump(mode="json")
+
+    assert "action_id" not in dump["payload"]
+    assert dump == {
+        **full_dump,
+        "security_context": {
+            key: value
+            for key, value in full_dump["security_context"].items()
+            if key not in {"session_id", "session_key", "conversation_id"}
+        },
+        "payload": {
+            key: value
+            for key, value in full_dump["payload"].items()
+            if key != "action_id"
+        },
+    }
+
+
+def test_canonical_request_dump_keeps_explicit_memory_action_id() -> None:
+    event = GuardEvent.model_validate(
+        _memory_guard_event_payload(
+            event_id="evt_memory_dump_keep", action_id="call_src_001"
+        )
+    )
+
+    dump = canonical_request_dump(event)
+
+    assert dump["payload"]["action_id"] == "call_src_001"
+
+
+def test_evaluate_memory_replay_legacy_shape_hits_idempotency() -> None:
+    # 旧形状 memory 事件（无 action_id）重放必须命中幂等而非 conflict。
+    client, store = _evaluate_client_and_store()
+    payload = _memory_guard_event_payload(event_id="evt_memory_legacy_replay")
+    expected_digest = canonical_sha256(
+        canonical_request_dump(GuardEvent.model_validate(payload))
+    )
+
+    first = _post_evaluate(client, payload)
+    assert first.status_code == 200
+    assert store.audit_events[0].metadata["request_digest"] == expected_digest
+
+    second = _post_evaluate(client, payload)
+    assert second.status_code == 200
+    assert (
+        second.json()["decision"]["decision_id"]
+        == first.json()["decision"]["decision_id"]
+    )
+    assert len(store.audit_events) == 1
+
+
+def test_evaluate_request_digest_includes_explicit_memory_action_id() -> None:
+    client, store = _evaluate_client_and_store()
+    payload = _memory_guard_event_payload(
+        event_id="evt_memory_action_digest", action_id="call_src_002"
+    )
+
+    response = _post_evaluate(client, payload)
+    assert response.status_code == 200
+
+    digest = store.audit_events[0].metadata["request_digest"]
+    baseline_digest = canonical_sha256(
+        canonical_request_dump(
+            GuardEvent.model_validate(
+                _memory_guard_event_payload(event_id="evt_memory_action_digest")
+            )
+        )
+    )
+    # action_id 必须实际影响 digest：与不携带 action_id 的同内容事件不同。
+    assert digest != baseline_digest
+
+
 def test_evaluate_audit_stores_full_decision_dump() -> None:
     _, store, response = _evaluate_once(
         _guard_event_payload(event_id="evt_digest_decision")
