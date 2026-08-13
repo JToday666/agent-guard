@@ -199,13 +199,16 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         openclaw: ["2026.6.6", "2026.7.1-2"]
     env:
-      AGENTGUARD_OPENCLAW_ROOT: ${{ runner.temp }}/openclaw-${{ matrix.openclaw }}
       AGENTGUARD_OPENCLAW_EXPECT_VERSION: ${{ matrix.openclaw }}
       AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
       AGENTGUARD_CONTROL_TOKEN: ci-smoke-control-token
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set OpenClaw install root
+        shell: bash
+        run: echo "AGENTGUARD_OPENCLAW_ROOT=${RUNNER_TEMP}/openclaw-${{ matrix.openclaw }}" >> "$GITHUB_ENV"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
