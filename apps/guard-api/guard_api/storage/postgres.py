@@ -26,6 +26,7 @@ from agentguard_core import (
     PolicyBundle,
     ProvenanceEdge,
     ProvenanceNode,
+    memory_change_can_transition,
     utc_now_iso,
 )
 from guard_api.models import (
@@ -43,6 +44,7 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeTransitionError,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
@@ -826,22 +828,37 @@ class PostgresControlPlaneStore:
         current = self.get_memory_change(change_id)
         if current is None:
             raise KeyError(change_id)
+        if current.status == status:
+            # 同态重复转换为幂等重放，直接返回当前记录。
+            return current
+        if not memory_change_can_transition(current.status, status):
+            raise MemoryChangeTransitionError(change_id, current.status, status)
         updated = current.model_copy(
             update={"status": status, "updated_at": utc_now_iso()}
         )
         stmt = (
             update(memory_guard_changes)
             .where(memory_guard_changes.c.change_id == change_id)
+            # 前态条件 UPDATE：只有当前状态仍等于读到的前态才生效，
+            # 以 rowcount 判定取代 read-modify-write，消除并发竞态。
+            .where(memory_guard_changes.c.status == current.status)
             .values(
                 status=updated.status,
                 payload_json=updated.model_dump(mode="json"),
                 updated_at=updated.updated_at,
             )
         )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return updated
+        with self._write_session() as session:
+            applied = session.execute(stmt).rowcount == 1
+        if applied:
+            return updated
+        # 并发转换已改变前态；重读区分幂等重放与非法转换。
+        latest = self.get_memory_change(change_id)
+        if latest is None:
+            raise KeyError(change_id)
+        if latest.status == status:
+            return latest
+        raise MemoryChangeTransitionError(change_id, latest.status, status)
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         record = self.get_policy_snapshot_record()

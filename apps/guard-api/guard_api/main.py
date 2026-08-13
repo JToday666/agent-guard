@@ -89,7 +89,7 @@ def create_app(
         cursor_signing_key=settings.audit_cursor_signing_key(),
     )
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
-    memory_guard_service = MemoryGuardService(store=store)
+    memory_guard_service = MemoryGuardService(store=store, audit_service=audit_service)
     approval_service = ApprovalService(
         store=store,
         settings=settings,

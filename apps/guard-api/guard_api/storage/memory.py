@@ -18,6 +18,7 @@ from agentguard_core import (
     PolicyBundle,
     ProvenanceEdge,
     ProvenanceNode,
+    memory_change_can_transition,
     utc_now_iso,
 )
 
@@ -36,6 +37,7 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeTransitionError,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
@@ -418,6 +420,11 @@ class MemoryControlPlaneStore:
     ) -> MemoryGuardChange:
         with self.memory_change_lock:
             current = self.memory_changes[change_id]
+            if current.status == status:
+                # 同态重复转换为幂等重放，直接返回当前记录。
+                return current
+            if not memory_change_can_transition(current.status, status):
+                raise MemoryChangeTransitionError(change_id, current.status, status)
             updated = current.model_copy(
                 update={"status": status, "updated_at": utc_now_iso()}
             )

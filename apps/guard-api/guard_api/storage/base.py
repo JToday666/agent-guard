@@ -161,6 +161,20 @@ class ApprovalStateConflictError(ValueError):
         super().__init__(f"{approval_id}: {status}")
 
 
+class MemoryChangeTransitionError(ValueError):
+    """记忆变更状态机拒绝的非法转换。
+
+    合法转换见 core `MEMORY_CHANGE_ALLOWED_TRANSITIONS`；同态重复转换
+    幂等返回当前状态而非抛出本异常。
+    """
+
+    def __init__(self, change_id: str, from_status: str, to_status: str) -> None:
+        self.change_id = change_id
+        self.from_status = from_status
+        self.to_status = to_status
+        super().__init__(f"{change_id}: {from_status} -> {to_status}")
+
+
 class ProvenanceConflictError(ValueError):
     """Raised when a stable provenance ID is bound to conflicting facts."""
 
@@ -430,7 +444,14 @@ class ControlPlaneStore(Protocol):
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange: ...
+    ) -> MemoryGuardChange:
+        """按状态机推进记忆变更生命周期。
+
+        契约：不存在抛 KeyError；同态重复幂等返回当前状态；非法转换抛
+        MemoryChangeTransitionError；实现必须用前态条件更新，消除
+        read-modify-write 竞态。
+        """
+        ...
 
     def get_policy_snapshot(self) -> PolicyBundle | None: ...
 
