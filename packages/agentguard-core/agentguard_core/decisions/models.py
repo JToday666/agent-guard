@@ -223,11 +223,15 @@ class RuntimeApprovalEvidence(BaseModel):
             ).isoformat()
         if self.status == "not_required":
             if self.approval_id is not None or self.decision is not None:
-                raise ValueError("not_required approval evidence cannot name an approval")
+                raise ValueError(
+                    "not_required approval evidence cannot name an approval"
+                )
             return self
         if self.status in {"pending", "allowed", "denied", "expired"}:
             if self.approval_id is None:
-                raise ValueError(f"{self.status} approval evidence requires approval_id")
+                raise ValueError(
+                    f"{self.status} approval evidence requires approval_id"
+                )
         if self.status == "allowed" and self.decision != "allow_once":
             raise ValueError("allowed approval evidence requires allow_once")
         if self.status == "denied" and self.decision != "deny":
@@ -252,6 +256,7 @@ class RuntimeOutcomeReceipt(AuditEvent):
 
     model_config = ConfigDict(extra="forbid")
 
+    # fmt: off
     audit_id: str = Field(min_length=1, max_length=256)  # pyright: ignore[reportGeneralTypeIssues]
     schema_version: Literal["0.4"] = "0.4"
     record_type: Literal["runtime_outcome"] = "runtime_outcome"
@@ -270,6 +275,7 @@ class RuntimeOutcomeReceipt(AuditEvent):
     latency_ms: Literal[None] = None
     metadata: RuntimeOutcomeMetadata  # pyright: ignore[reportGeneralTypeIssues]
     evidence: RuntimeOutcomeEvidence  # pyright: ignore[reportGeneralTypeIssues]
+    # fmt: on
 
     @model_validator(mode="after")
     def _validate_receipt(self) -> "RuntimeOutcomeReceipt":
