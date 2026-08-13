@@ -56,14 +56,17 @@ class MemoryGuardService:
         self, change_id: str, target_status: str, *, operator_id: str
     ) -> MemoryGuardChange:
         # 状态机与并发安全由存储层的前态条件更新保证；非法转换在此抛出。
-        # 结构化结果携带存储层读到的权威前态：仅在本次调用真正执行了
-        # 转换（applied=True）时入链审计，幂等重放与并发落败方不再重复写入。
-        result = self.store.update_memory_change_status(change_id, target_status)
-        if result.applied:
-            self._record_transition_audit(
-                result.previous_status, result.change, operator_id=operator_id
-            )
-        return result.change
+        # 状态变更与转换审计在同一原子窗口内提交或回滚，不留
+        # 「状态已改、链上无记录」的部分状态。
+        with self.store.memory_change_transaction(change_id):
+            # 结构化结果携带存储层读到的权威前态：仅在本次调用真正执行了
+            # 转换（applied=True）时入链审计，幂等重放与并发落败方不再重复写入。
+            result = self.store.update_memory_change_status(change_id, target_status)
+            if result.applied:
+                self._record_transition_audit(
+                    result.previous_status, result.change, operator_id=operator_id
+                )
+            return result.change
 
     def _record_transition_audit(
         self,

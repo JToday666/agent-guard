@@ -380,6 +380,15 @@ class ControlPlaneStore(Protocol):
 
     def evaluation_transaction(self, event_id: str) -> ContextManager[None]: ...
 
+    def memory_change_transaction(self, change_id: str) -> ContextManager[None]:
+        """状态转换与转换审计的原子窗口。
+
+        上下文内的状态条件更新、审计入链与 provenance 写入随同一事务
+        提交或回滚；实现必须保证外部读不到「状态已改、审计未入链」
+        的中间态。
+        """
+        ...
+
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode: ...

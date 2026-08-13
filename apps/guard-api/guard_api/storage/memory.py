@@ -215,6 +215,48 @@ class MemoryControlPlaneStore:
                 self.action_critic_reviews.update(snapshot["action_critic_reviews"])
                 raise
 
+    @contextmanager
+    def memory_change_transaction(self, change_id: str) -> Iterator[None]:
+        """状态转换与转换审计要么一起可见，要么一起回滚。
+
+        锁序与 evaluation_transaction 的前缀对齐（审计链 → provenance →
+        记忆变更），避免与评测事务交叉倒置死锁；持锁期间外部读不到
+        「状态已改、审计未入链」的中间态，异常时恢复快照。
+        """
+
+        del change_id
+        with (
+            self.audit_integrity_lock,
+            self.provenance_lock,
+            self.memory_change_lock,
+        ):
+            # 各容器内元素只会被替换或追加、不会就地变更，浅拷贝即可回滚。
+            snapshot = {
+                "memory_changes": dict(self.memory_changes),
+                "audit_events": list(self.audit_events),
+                "audit_events_by_id": dict(self.audit_events_by_id),
+                "audit_ingested_at_by_id": dict(self.audit_ingested_at_by_id),
+                "provenance_nodes": dict(self.provenance_nodes),
+                "provenance_edges": dict(self.provenance_edges),
+            }
+            try:
+                yield
+            except BaseException:
+                self.memory_changes.clear()
+                self.memory_changes.update(snapshot["memory_changes"])
+                self.audit_events[:] = snapshot["audit_events"]
+                self.audit_events_by_id.clear()
+                self.audit_events_by_id.update(snapshot["audit_events_by_id"])
+                self.audit_ingested_at_by_id.clear()
+                self.audit_ingested_at_by_id.update(
+                    snapshot["audit_ingested_at_by_id"]
+                )
+                self.provenance_nodes.clear()
+                self.provenance_nodes.update(snapshot["provenance_nodes"])
+                self.provenance_edges.clear()
+                self.provenance_edges.update(snapshot["provenance_edges"])
+                raise
+
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         with self.provenance_lock:
             existing = self.provenance_nodes.get(node.node_id)

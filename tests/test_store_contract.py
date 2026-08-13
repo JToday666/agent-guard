@@ -1259,3 +1259,47 @@ def test_store_memory_change_concurrent_transitions_stay_consistent(store) -> No
     final = store.get_memory_change(change.change_id)
     assert final.status in {"committed", "rejected"}
     assert all(outcome in {final.status, "conflict"} for outcome in outcomes)
+
+
+def test_store_memory_change_transaction_commits_state_and_audit_atomically(
+    store,
+) -> None:
+    # 原子窗口契约：窗口内状态转换与审计入链要么一起提交，要么异常时
+    # 一起回滚，不得遗留「状态已改、链上无记录」的部分状态。
+    change = _memory_change_fixture("memchg_txn_atomic", status="proposed")
+    store.create_memory_change(change)
+    event = AuditEvent(
+        audit_id="audit_memchg_txn_atomic",
+        schema_version="0.4",
+        record_type="config_audit",
+        trace_id="trace_memchg_txn_atomic",
+        event_type="memory_change_transition",
+        summary="Memory change memchg_txn_atomic transitioned proposed -> committed",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        blocked=False,
+        reason="memory_change:proposed->committed",
+        links={"memory_change_id": change.change_id},
+    )
+
+    with pytest.raises(RuntimeError, match="atomicity probe"):
+        with store.memory_change_transaction(change.change_id):
+            failed = store.update_memory_change_status(change.change_id, "committed")
+            assert failed.applied is True
+            assert store.add_audit_event(event)
+            raise RuntimeError("atomicity probe")
+
+    rolled_back = store.get_memory_change(change.change_id)
+    assert rolled_back is not None
+    assert rolled_back.status == "proposed"
+    assert store.get_audit_event(event.audit_id) is None
+
+    with store.memory_change_transaction(change.change_id):
+        committed = store.update_memory_change_status(change.change_id, "committed")
+        assert committed.applied is True
+        assert committed.previous_status == "proposed"
+        assert store.add_audit_event(event)
+
+    assert store.get_memory_change(change.change_id).status == "committed"
+    assert store.get_audit_event(event.audit_id) is not None

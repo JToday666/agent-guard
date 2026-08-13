@@ -116,9 +116,9 @@ class PostgresControlPlaneStore:
     database_url: str
     _engine: Engine = field(init=False, repr=False)
     _session_factory: sessionmaker[Session] = field(init=False, repr=False)
-    _active_evaluation_session: ContextVar[Session | None] = field(
+    _active_store_session: ContextVar[Session | None] = field(
         default_factory=lambda: ContextVar(
-            "agentguard_active_evaluation_session", default=None
+            "agentguard_active_store_session", default=None
         ),
         init=False,
         repr=False,
@@ -320,17 +320,40 @@ class PostgresControlPlaneStore:
             byteorder="big",
             signed=True,
         )
-        if self._active_evaluation_session.get() is not None:
+        if self._active_store_session.get() is not None:
             raise RuntimeError("nested evaluation transactions are not supported")
         with self._session_factory.begin() as session:
             session.execute(
                 text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
             )
-            token = self._active_evaluation_session.set(session)
+            token = self._active_store_session.set(session)
             try:
                 yield
             finally:
-                self._active_evaluation_session.reset(token)
+                self._active_store_session.reset(token)
+
+    @contextmanager
+    def memory_change_transaction(self, change_id: str) -> Iterator[None]:
+        """状态转换与转换审计共用同一事务，避免「状态已改、链上无记录」。
+
+        复用 evaluation_transaction 的会话加入机制：上下文内的所有
+        _read_session/_write_session 调用（含 add_audit_event 的链写入与
+        provenance 写入）都汇入同一 session，随本事务一次性提交或回滚。
+        审计链咨询锁仍由 add_audit_event 在事务内获取；与评测事务的
+        锁序（per-event 锁 → 审计链锁）不存在交叉倒置，不会死锁。
+        """
+
+        del change_id
+        if self._active_store_session.get() is not None:
+            raise RuntimeError(
+                "nested store write transactions are not supported"
+            )
+        with self._session_factory.begin() as session:
+            token = self._active_store_session.set(session)
+            try:
+                yield
+            finally:
+                self._active_store_session.reset(token)
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
@@ -1211,7 +1234,7 @@ class PostgresControlPlaneStore:
 
     @contextmanager
     def _read_session(self) -> Iterator[Session]:
-        active = self._active_evaluation_session.get()
+        active = self._active_store_session.get()
         if active is not None:
             yield active
             return
@@ -1220,7 +1243,7 @@ class PostgresControlPlaneStore:
 
     @contextmanager
     def _write_session(self) -> Iterator[Session]:
-        active = self._active_evaluation_session.get()
+        active = self._active_store_session.get()
         if active is not None:
             yield active
             return
