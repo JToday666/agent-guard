@@ -256,8 +256,28 @@ def test_core_protocol_keeps_terminal_event_lifecycle_and_decision_enum_compatib
     assert decisions == {"allow", "deny", "ask"}
     assert set(decision_schema["properties"]["decision"]["enum"]) == decisions
     assert "shadow_deny" not in decision_schema["properties"]["decision"]["enum"]
-    assert "enforcement" not in decision_schema["properties"]
-    assert "effects" not in decision_schema["properties"]
+    assert decision_schema["properties"]["enforcement"]["deprecated"] is True
+    assert decision_schema["properties"]["effects"]["deprecated"] is True
+    assert decision_schema["additionalProperties"] is False
+
+
+def test_guard_decision_schema_accepts_legacy_enforcement_and_effects_fields() -> None:
+    decision = GuardDecision(
+        decision_id="dec_legacy",
+        decision="deny",
+        risk_score=80,
+        severity="high",
+        categories=["prompt_injection"],
+        rule_hits=[],
+        reason="Denied.",
+        safe_message=None,
+        approval_intent=None,
+        latency_ms=1,
+    ).model_dump(mode="json")
+    decision["enforcement"] = None
+    decision["effects"] = []
+
+    validate(decision, _load_schema("guard_decision.schema.json"))
 
 
 def test_audit_event_allows_forward_compatible_extensions() -> None:

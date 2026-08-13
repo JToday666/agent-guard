@@ -35,7 +35,18 @@
         { "type": "null" }
       ]
     },
-    "latency_ms": { "type": ["integer", "null"] }
+    "latency_ms": { "type": ["integer", "null"] },
+    "enforcement": {
+      "description": "Deprecated / legacy-compat：历史存量 decision 载荷携带该字段（通常为 null），新版本不再产生；保留仅为通过 additionalProperties: false 校验存量数据。",
+      "deprecated": true,
+      "anyOf": [{ "type": "object" }, { "type": "null" }]
+    },
+    "effects": {
+      "description": "Deprecated / legacy-compat：历史存量 decision 载荷携带该字段（通常为空数组），新版本不再产生；保留仅为通过 additionalProperties: false 校验存量数据。",
+      "deprecated": true,
+      "type": "array",
+      "items": { "type": "object" }
+    }
   },
   "additionalProperties": false
 }
