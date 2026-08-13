@@ -21,6 +21,8 @@ def _verify_change_ownership(
     """生命周期处置仅放给绑定身份一致的调用方。
 
     历史存量记录无 runtime 绑定，无法证明归属，一律拒绝并返回明确错误。
+    runtime 身份一致还不够：同一 runtime/agent_id 下签发给不同 principal
+    的凭证不得处置他人提议的变更，必须再比对提议方 principal。
     """
 
     if change.runtime is None:
@@ -30,6 +32,11 @@ def _verify_change_ownership(
         runtime=change.runtime,
         agent_id=change.agent_id,
     )
+    if (
+        change.principal_id is not None
+        and change.principal_id != auth_context.principal_id
+    ):
+        raise ApiAuthError("MEMORY_CHANGE_PRINCIPAL_MISMATCH", status_code=403)
 
 
 def register_routes(app: FastAPI, context: ApiContext) -> None:

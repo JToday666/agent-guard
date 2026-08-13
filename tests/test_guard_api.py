@@ -2731,6 +2731,56 @@ def test_memory_change_lifecycle_rejects_mismatched_runtime_identity() -> None:
     assert unchanged.status == "proposed"
 
 
+def test_memory_change_lifecycle_rejects_other_principal_same_runtime() -> None:
+    store = memory_store_with_adapter()
+    # 同一 runtime/agent_id 下签发给另一个 principal 的凭证。
+    add_adapter_credential(
+        store,
+        token="twin-secret",
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_twin",
+    )
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_principal",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "source_trust": "trusted",
+        },
+    )
+    assert proposed.status_code == 200
+    change_id = proposed.json()["change_id"]
+
+    # runtime 身份一致但 principal 不同，不得处置他人的变更。
+    denied = client.post(
+        f"/v1/memory/changes/{change_id}/commit",
+        headers={"Authorization": "Bearer twin-secret"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMORY_CHANGE_PRINCIPAL_MISMATCH"
+    unchanged = store.get_memory_change(change_id)
+    assert unchanged is not None
+    assert unchanged.status == "proposed"
+
+    # 提议方本人（同 principal）正常通过。
+    allowed = client.post(
+        f"/v1/memory/changes/{change_id}/commit",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "committed"
+
+
 def test_memory_change_lifecycle_rejects_unbound_legacy_change() -> None:
     store = memory_store_with_adapter()
     legacy = MemoryGuardChange(
