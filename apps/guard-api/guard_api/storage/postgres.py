@@ -81,6 +81,22 @@ _AUDIT_INTEGRITY_ADVISORY_LOCK_ID = 427001030002
 _AUDIT_CHAIN_ID = "default"
 
 
+def _compat_strip_legacy_policy_bundle_fields(payload: Any) -> Any:
+    """存量策略快照的遗留字段兼容处理。
+
+    早期版本的 PolicyBundle 包含 default_enforcement_mode 字段，快照保存时全量
+    dump，已写入 policy_snapshots / policy_snapshot_history 的 payload_json。
+    该字段删除后，PolicyBundle 的 extra="forbid" 会使存量行回读失败，因此回读
+    前先剥离遗留字段，保持对存量数据的读取兼容。
+
+    当确认生产环境快照表 payload_json 中已无 default_enforcement_mode 存量行
+    （例如完成一次全量重写保存）后，可移除本函数及调用点。
+    """
+    if isinstance(payload, dict):
+        payload.pop("default_enforcement_mode", None)
+    return payload
+
+
 def _lock_provenance_identity(session: Session, kind: str, stable_id: str) -> None:
     lock_id = int.from_bytes(
         hashlib.sha256(f"provenance:{kind}:{stable_id}".encode("utf-8")).digest()[:8],
@@ -844,9 +860,10 @@ class PostgresControlPlaneStore:
             row = session.execute(stmt).mappings().one_or_none()
         if row is None:
             return None
+        payload = _compat_strip_legacy_policy_bundle_fields(row["payload_json"])
         return PolicySnapshotRecord(
             revision=int(row["revision"]),
-            policy_bundle=PolicyBundle.model_validate(row["payload_json"]),
+            policy_bundle=PolicyBundle.model_validate(payload),
             updated_at=str(row["updated_at"]),
             updated_by=str(row["updated_by"]),
         )
@@ -927,15 +944,18 @@ class PostgresControlPlaneStore:
         )
         with self._session_factory() as session:
             rows = session.execute(stmt).mappings().all()
-        return [
-            PolicySnapshotRecord(
-                revision=int(row["revision"]),
-                policy_bundle=PolicyBundle.model_validate(row["payload_json"]),
-                updated_at=str(row["updated_at"]),
-                updated_by=str(row["updated_by"]),
+        records: list[PolicySnapshotRecord] = []
+        for row in rows:
+            payload = _compat_strip_legacy_policy_bundle_fields(row["payload_json"])
+            records.append(
+                PolicySnapshotRecord(
+                    revision=int(row["revision"]),
+                    policy_bundle=PolicyBundle.model_validate(payload),
+                    updated_at=str(row["updated_at"]),
+                    updated_by=str(row["updated_by"]),
+                )
             )
-            for row in rows
-        ]
+        return records
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         created_at = _database_datetime(approval.created_at)

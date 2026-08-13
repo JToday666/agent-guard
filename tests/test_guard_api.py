@@ -5,6 +5,8 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -39,6 +41,10 @@ from guard_api.storage.base import (
 from guard_api.storage.integrity import canonical_sha256
 import guard_api.storage.memory as memory_store_module
 from guard_api.storage.memory import MemoryControlPlaneStore
+from guard_api.storage.postgres import (
+    PostgresControlPlaneStore,
+    _compat_strip_legacy_policy_bundle_fields,
+)
 from tests.support.auth import memory_store_with_adapter
 
 _AUDIT_CHECKPOINT_TEST_KEY = "Y2hlY2twb2ludC10ZXN0LWtleS1tYXRlcmlhbC0zMmI"
@@ -3471,6 +3477,91 @@ def test_policy_snapshot_history_returns_latest_record_first() -> None:
 
     assert len(history) == 1
     assert history[0].revision == 2
+
+
+def _legacy_policy_snapshot_row(revision: int) -> dict:
+    payload = PolicyBundle(
+        bundle_id=f"legacy-policy-{revision}",
+        allowed_email_domains=["legacy.example"],
+    ).model_dump(mode="json")
+    payload["default_enforcement_mode"] = "audit_only"
+    return {
+        "revision": revision,
+        "payload_json": payload,
+        "updated_at": "2026-08-12T00:00:00+00:00",
+        "updated_by": "legacy-deployment",
+    }
+
+
+def test_legacy_policy_snapshot_payload_requires_compat_strip() -> None:
+    payload = PolicyBundle().model_dump(mode="json")
+    payload["default_enforcement_mode"] = "audit_only"
+
+    with pytest.raises(ValidationError):
+        PolicyBundle.model_validate(payload)
+
+    stripped = _compat_strip_legacy_policy_bundle_fields(payload)
+
+    bundle = PolicyBundle.model_validate(stripped)
+    assert "default_enforcement_mode" not in bundle.model_dump(mode="json")
+    assert _compat_strip_legacy_policy_bundle_fields(None) is None
+
+
+def test_postgres_snapshot_record_readback_ignores_legacy_enforcement_mode(
+    monkeypatch,
+) -> None:
+    row = _legacy_policy_snapshot_row(revision=3)
+
+    @contextmanager
+    def fake_read_session(self):
+        session = MagicMock()
+        result = session.execute.return_value.mappings.return_value
+        result.one_or_none.return_value = row
+        yield session
+
+    monkeypatch.setattr(PostgresControlPlaneStore, "_read_session", fake_read_session)
+    store = PostgresControlPlaneStore.__new__(PostgresControlPlaneStore)
+
+    record = store.get_policy_snapshot_record()
+
+    assert record is not None
+    assert record.revision == 3
+    assert record.policy_bundle.bundle_id == "legacy-policy-3"
+    assert record.policy_bundle.allowed_email_domains == ["legacy.example"]
+    assert (
+        "default_enforcement_mode"
+        not in record.policy_bundle.model_dump(mode="json")
+    )
+
+
+def test_postgres_snapshot_history_readback_ignores_legacy_enforcement_mode() -> None:
+    rows = [
+        _legacy_policy_snapshot_row(revision=2),
+        _legacy_policy_snapshot_row(revision=1),
+    ]
+
+    def fake_session_factory():
+        session = MagicMock()
+        session.__enter__.return_value = session
+        result = session.execute.return_value.mappings.return_value
+        result.all.return_value = rows
+        return session
+
+    store = PostgresControlPlaneStore.__new__(PostgresControlPlaneStore)
+    setattr(store, "_session_factory", fake_session_factory)
+
+    history = store.list_policy_snapshot_history()
+
+    assert [record.revision for record in history] == [2, 1]
+    assert [record.policy_bundle.bundle_id for record in history] == [
+        "legacy-policy-2",
+        "legacy-policy-1",
+    ]
+    for record in history:
+        assert (
+            "default_enforcement_mode"
+            not in record.policy_bundle.model_dump(mode="json")
+        )
 
 
 def _evaluate_store(payload: dict) -> MemoryControlPlaneStore:
