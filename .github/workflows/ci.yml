@@ -249,10 +249,21 @@ jobs:
             Set-Service -Name $service.Name -StartupType Manual
             Start-Service -Name $service.Name
           }
-          # psql.exe 可能不在 PATH 上，从常见安装位置或 PATH 定位
+          # 定位 psql.exe（可能不在 PATH 上）
           $pgbin = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).Directory.FullName
           if (-not $pgbin) { $pgbin = (Get-Item (Get-Command psql.exe).Source).Directory.FullName }
+          # 从服务注册表定位 data 目录，临时改为 trust 认证以设置密码
+          $imgPath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$($service.Name)").ImagePath
+          $dataDir = if ($imgPath -match '-D\s+"?([^"]+)"?') { $matches[1] } else { (Get-ChildItem "C:\Program Files\PostgreSQL\*\data" -Directory | Select-Object -First 1).FullName }
+          $hbaPath = Join-Path $dataDir "pg_hba.conf"
+          $hbaBackup = Get-Content $hbaPath -Raw
+          $hbaTrust = $hbaBackup -replace '(host\s+all\s+all\s+\S+\s+)\S+', '${1}trust'
+          Set-Content $hbaPath -Value $hbaTrust -NoNewline
+          Restart-Service -Name $service.Name
           & "$pgbin\psql.exe" -U postgres -d postgres -c "ALTER USER postgres WITH PASSWORD '123456';"
+          # 恢复原始认证并重启
+          Set-Content $hbaPath -Value $hbaBackup -NoNewline
+          Restart-Service -Name $service.Name
           $exists = & "$pgbin\psql.exe" -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'"
           if ($exists -ne "1") { & "$pgbin\psql.exe" -U postgres -d postgres -c "CREATE DATABASE agent_guard_test;" }
 
