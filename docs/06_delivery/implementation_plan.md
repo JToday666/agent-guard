@@ -95,7 +95,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - OpenClaw Config Audit 后端评估与 findings 查询接口已实现；前端摘要可基于 `event_type=config_audit` 派生。
 - 运行时适配器活动（LangGraph / OpenClaw 审计统计）。
 - Dashboard 规则命中 TopN。
-- Memory Guard 已有后端基础变更流：propose、commit、rollback。
+- Memory Guard 已有后端基础变更流：propose、commit、rollback；commit/rollback 目前只更新变更记录的状态标记，不会对 runtime 真实记忆执行回滚或恢复，真实回滚继续延期。
 - Action Critic 已有确定性 review 与可选 provider 扩展点。
 - OpenClaw verify / E2E / reliability 最近状态摘要写入与读取接口已实现：`PUT /v1/adapters/openclaw/status`、`GET /v1/adapters/openclaw/status`。
 - 安全评测 ASR before/after 后端导入、latest 查询和 dataset registry 汇总已实现，统一走 `/v1/evaluations` 系列接口；70 条主数据已由 digest manifest 锁定，成对编排器会校验两侧 case 集合、真实 Core、基础设施状态和证据完整性。独立 dataset 资源表与跨 run 阈值回归门禁仍需后续补齐。
