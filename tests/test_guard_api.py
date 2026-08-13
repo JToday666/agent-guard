@@ -32,8 +32,10 @@ from guard_api.models import (
     LlmApprovalReviewInput,
 )
 from guard_api.services import MetricService, PolicyService
+from guard_api.services.audit import AuditService
 from guard_api.services.evaluation import canonical_request_dump
 from guard_api.services.evidence import build_audit_event
+from guard_api.services.memory import MemoryGuardService
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import (
     ApprovalStateConflictError,
@@ -2806,6 +2808,78 @@ def test_memory_change_lifecycle_rejects_unbound_legacy_change() -> None:
     unchanged = store.get_memory_change("memchg_legacy_unbound")
     assert unchanged is not None
     assert unchanged.status == "proposed"
+
+
+def _transition_audits(store: MemoryControlPlaneStore) -> list[AuditEvent]:
+    return [
+        event
+        for event in store.audit_events
+        if event.event_type == "memory_change_transition"
+    ]
+
+
+def test_memory_change_service_idempotent_replay_does_not_duplicate_audit() -> None:
+    store = memory_store_with_adapter()
+    service = MemoryGuardService(store=store, audit_service=AuditService(store=store))
+    change = service.propose(
+        MemoryGuardChange(
+            trace_id="trace_memory_replay",
+            namespace="agent",
+            key="preference",
+            value_preview="benign note",
+            source_trust="trusted",
+        ),
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_main",
+    )
+
+    first = service.commit(change.change_id, operator_id="cred_adapter_main")
+    second = service.commit(change.change_id, operator_id="cred_adapter_main")
+
+    # 第二次为同态幂等重放（applied=False），不得再写第二条转换审计。
+    assert first.status == "committed"
+    assert second.status == "committed"
+    transitions = _transition_audits(store)
+    assert len(transitions) == 1
+    assert transitions[0].metadata["from_status"] == "proposed"
+    assert transitions[0].metadata["to_status"] == "committed"
+    assert store.verify_audit_integrity().valid
+
+
+def test_memory_change_service_concurrent_commit_writes_single_transition_audit() -> (
+    None
+):
+    store = memory_store_with_adapter()
+    service = MemoryGuardService(store=store, audit_service=AuditService(store=store))
+    change = service.propose(
+        MemoryGuardChange(
+            trace_id="trace_memory_race",
+            namespace="agent",
+            key="preference",
+            value_preview="benign note",
+            source_trust="trusted",
+        ),
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_main",
+    )
+
+    def attempt(_: int) -> str:
+        return service.commit(
+            change.change_id, operator_id="cred_adapter_main"
+        ).status
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = list(executor.map(attempt, range(8)))
+
+    # 并发竞争下只有一方 applied=True；链上恰好一条转换审计，无重复入链。
+    assert all(status == "committed" for status in outcomes)
+    transitions = _transition_audits(store)
+    assert len(transitions) == 1
+    assert transitions[0].metadata["from_status"] == "proposed"
+    assert transitions[0].metadata["to_status"] == "committed"
+    assert store.verify_audit_integrity().valid
 
 
 def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> (
