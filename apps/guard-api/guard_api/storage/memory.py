@@ -18,6 +18,7 @@ from agentguard_core import (
     PolicyBundle,
     ProvenanceEdge,
     ProvenanceNode,
+    memory_change_can_transition,
     utc_now_iso,
 )
 
@@ -36,12 +37,16 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeAlreadyExistsError,
+    MemoryChangeTransitionError,
+    MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
     StoredLaunchCode,
     classify_audit_record_type,
+    memory_change_is_replay_match,
     merge_provenance_edge,
     merge_provenance_node,
     parse_audit_timestamp,
@@ -210,6 +215,46 @@ class MemoryControlPlaneStore:
                 self.memory_changes.update(snapshot["memory_changes"])
                 self.action_critic_reviews.clear()
                 self.action_critic_reviews.update(snapshot["action_critic_reviews"])
+                raise
+
+    @contextmanager
+    def memory_change_transaction(self, change_id: str) -> Iterator[None]:
+        """状态转换与转换审计要么一起可见，要么一起回滚。
+
+        锁序与 evaluation_transaction 的前缀对齐（审计链 → provenance →
+        记忆变更），避免与评测事务交叉倒置死锁；持锁期间外部读不到
+        「状态已改、审计未入链」的中间态，异常时恢复快照。
+        """
+
+        del change_id
+        with (
+            self.audit_integrity_lock,
+            self.provenance_lock,
+            self.memory_change_lock,
+        ):
+            # 各容器内元素只会被替换或追加、不会就地变更，浅拷贝即可回滚。
+            snapshot = {
+                "memory_changes": dict(self.memory_changes),
+                "audit_events": list(self.audit_events),
+                "audit_events_by_id": dict(self.audit_events_by_id),
+                "audit_ingested_at_by_id": dict(self.audit_ingested_at_by_id),
+                "provenance_nodes": dict(self.provenance_nodes),
+                "provenance_edges": dict(self.provenance_edges),
+            }
+            try:
+                yield
+            except BaseException:
+                self.memory_changes.clear()
+                self.memory_changes.update(snapshot["memory_changes"])
+                self.audit_events[:] = snapshot["audit_events"]
+                self.audit_events_by_id.clear()
+                self.audit_events_by_id.update(snapshot["audit_events_by_id"])
+                self.audit_ingested_at_by_id.clear()
+                self.audit_ingested_at_by_id.update(snapshot["audit_ingested_at_by_id"])
+                self.provenance_nodes.clear()
+                self.provenance_nodes.update(snapshot["provenance_nodes"])
+                self.provenance_edges.clear()
+                self.provenance_edges.update(snapshot["provenance_edges"])
                 raise
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
@@ -405,7 +450,13 @@ class MemoryControlPlaneStore:
         return sorted(reviews, key=lambda review: (review.created_at, review.review_id))
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        # 存在即拒绝：锁内判定，绝不覆盖既有记录；完全一致才幂等返回。
         with self.memory_change_lock:
+            existing = self.memory_changes.get(change.change_id)
+            if existing is not None:
+                if memory_change_is_replay_match(existing, change):
+                    return existing
+                raise MemoryChangeAlreadyExistsError(change.change_id)
             self.memory_changes[change.change_id] = change
             return change
 
@@ -415,14 +466,23 @@ class MemoryControlPlaneStore:
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange:
+    ) -> MemoryTransitionResult:
         with self.memory_change_lock:
             current = self.memory_changes[change_id]
+            if current.status == status:
+                # 同态重复转换为幂等重放，直接返回当前记录。
+                return MemoryTransitionResult(
+                    change=current, applied=False, previous_status=current.status
+                )
+            if not memory_change_can_transition(current.status, status):
+                raise MemoryChangeTransitionError(change_id, current.status, status)
             updated = current.model_copy(
                 update={"status": status, "updated_at": utc_now_iso()}
             )
             self.memory_changes[change_id] = updated
-            return updated
+            return MemoryTransitionResult(
+                change=updated, applied=True, previous_status=current.status
+            )
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         if self.policy_snapshot is None:

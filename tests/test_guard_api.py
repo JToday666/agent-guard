@@ -17,6 +17,7 @@ from agentguard_core import (
     AuditEvent,
     GuardDecision,
     GuardEvent,
+    MemoryGuardChange,
     PolicyBundle,
     RuleOverride,
     ToolProfile,
@@ -31,8 +32,10 @@ from guard_api.models import (
     LlmApprovalReviewInput,
 )
 from guard_api.services import MetricService, PolicyService
+from guard_api.services.audit import AuditService
 from guard_api.services.evaluation import canonical_request_dump
 from guard_api.services.evidence import build_audit_event
+from guard_api.services.memory import MemoryGuardService
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import (
     ApprovalStateConflictError,
@@ -46,7 +49,7 @@ from guard_api.storage.postgres import (
     PostgresControlPlaneStore,
     _compat_strip_legacy_policy_bundle_fields,
 )
-from tests.support.auth import memory_store_with_adapter
+from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 
 _AUDIT_CHECKPOINT_TEST_KEY = "Y2hlY2twb2ludC10ZXN0LWtleS1tYXRlcmlhbC0zMmI"
 
@@ -2620,6 +2623,356 @@ def test_memory_change_propose_binds_caller_identity() -> None:
     assert quarantined.json()["source_trust"] == "unknown"
 
 
+def test_memory_change_lifecycle_state_machine_audit_chain() -> None:
+    store = memory_store_with_adapter()
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers=headers,
+        json={
+            "trace_id": "trace_memory_sm",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "source_trust": "trusted",
+        },
+    )
+    assert proposed.status_code == 200
+    change_id = proposed.json()["change_id"]
+    assert proposed.json()["status"] == "proposed"
+
+    # 合法转换 proposed -> committed -> rolled_back；同态重复幂等返回当前状态。
+    committed = client.post(f"/v1/memory/changes/{change_id}/commit", headers=headers)
+    assert committed.status_code == 200
+    assert committed.json()["status"] == "committed"
+    repeated = client.post(f"/v1/memory/changes/{change_id}/commit", headers=headers)
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "committed"
+    rolled_back = client.post(
+        f"/v1/memory/changes/{change_id}/rollback", headers=headers
+    )
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["status"] == "rolled_back"
+
+    # 同态重复幂等返回当前状态；非法跨态转换返回 409 与明确错误码。
+    idempotent = client.post(
+        f"/v1/memory/changes/{change_id}/rollback", headers=headers
+    )
+    assert idempotent.status_code == 200
+    assert idempotent.json()["status"] == "rolled_back"
+    conflict = client.post(f"/v1/memory/changes/{change_id}/commit", headers=headers)
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "MEMORY_CHANGE_TRANSITION_CONFLICT"
+
+    missing = client.post("/v1/memory/changes/memchg_missing/commit", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "MEMORY_CHANGE_NOT_FOUND"
+
+    # 转换入链：仅实际转换写入最小化 config_audit 事件，链完整性验证通过。
+    transitions = [
+        event
+        for event in store.audit_events
+        if event.event_type == "memory_change_transition"
+    ]
+    assert [
+        (event.metadata["from_status"], event.metadata["to_status"])
+        for event in transitions
+    ] == [("proposed", "committed"), ("committed", "rolled_back")]
+    assert all(event.record_type == "config_audit" for event in transitions)
+    assert all(
+        event.metadata["operator_id"] == "cred_adapter_main" for event in transitions
+    )
+    assert all(event.links["memory_change_id"] == change_id for event in transitions)
+    assert store.verify_audit_integrity().valid
+
+
+def test_memory_change_lifecycle_rejects_mismatched_runtime_identity() -> None:
+    store = memory_store_with_adapter()
+    add_adapter_credential(
+        store,
+        token="other-secret",
+        runtime="openclaw",
+        agent_id="side",
+        principal_id="cred_adapter_side",
+    )
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_owner",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "source_trust": "trusted",
+        },
+    )
+    assert proposed.status_code == 200
+    change_id = proposed.json()["change_id"]
+
+    # 其他 runtime 身份不得处置不属于自己的变更。
+    denied = client.post(
+        f"/v1/memory/changes/{change_id}/commit",
+        headers={"Authorization": "Bearer other-secret"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "RUNTIME_IDENTITY_MISMATCH"
+    unchanged = store.get_memory_change(change_id)
+    assert unchanged is not None
+    assert unchanged.status == "proposed"
+
+
+def test_memory_change_lifecycle_rejects_other_principal_same_runtime() -> None:
+    store = memory_store_with_adapter()
+    # 同一 runtime/agent_id 下签发给另一个 principal 的凭证。
+    add_adapter_credential(
+        store,
+        token="twin-secret",
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_twin",
+    )
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_principal",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "source_trust": "trusted",
+        },
+    )
+    assert proposed.status_code == 200
+    change_id = proposed.json()["change_id"]
+
+    # runtime 身份一致但 principal 不同，不得处置他人的变更。
+    denied = client.post(
+        f"/v1/memory/changes/{change_id}/commit",
+        headers={"Authorization": "Bearer twin-secret"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMORY_CHANGE_PRINCIPAL_MISMATCH"
+    unchanged = store.get_memory_change(change_id)
+    assert unchanged is not None
+    assert unchanged.status == "proposed"
+
+    # 提议方本人（同 principal）正常通过。
+    allowed = client.post(
+        f"/v1/memory/changes/{change_id}/commit",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "committed"
+
+    # rollback 端点同样受 principal 校验约束：twin 凭证 403，原凭证 200。
+    denied_rollback = client.post(
+        f"/v1/memory/changes/{change_id}/rollback",
+        headers={"Authorization": "Bearer twin-secret"},
+    )
+    assert denied_rollback.status_code == 403
+    assert denied_rollback.json()["error"]["code"] == "MEMORY_CHANGE_PRINCIPAL_MISMATCH"
+    still_committed = store.get_memory_change(change_id)
+    assert still_committed is not None
+    assert still_committed.status == "committed"
+
+    allowed_rollback = client.post(
+        f"/v1/memory/changes/{change_id}/rollback",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+    assert allowed_rollback.status_code == 200
+    assert allowed_rollback.json()["status"] == "rolled_back"
+
+
+def test_memory_change_lifecycle_rejects_unbound_legacy_change() -> None:
+    store = memory_store_with_adapter()
+    legacy = MemoryGuardChange(
+        change_id="memchg_legacy_unbound",
+        trace_id="trace_memory_legacy",
+        namespace="agent",
+        key="preference",
+    )
+    store.create_memory_change(legacy)
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    # 历史存量记录无身份绑定，无法证明归属，一律拒绝。
+    denied = client.post(
+        "/v1/memory/changes/memchg_legacy_unbound/commit",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMORY_CHANGE_IDENTITY_UNBOUND"
+    unchanged = store.get_memory_change("memchg_legacy_unbound")
+    assert unchanged is not None
+    assert unchanged.status == "proposed"
+
+
+def test_propose_duplicate_change_id_rejects_and_replays_idempotently() -> None:
+    store = memory_store_with_adapter()
+    # 同一 runtime/agent_id 下签发给另一个 principal 的凭证。
+    add_adapter_credential(
+        store,
+        token="twin-secret",
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_twin",
+    )
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    payload = {
+        "change_id": "memchg_fixed_replay",
+        "trace_id": "trace_memory_replay_api",
+        "namespace": "agent",
+        "key": "preference",
+        "value_preview": "benign note",
+        "source_trust": "trusted",
+    }
+
+    # 首次 propose 正常创建，身份字段以认证上下文为准。
+    first = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert first.status_code == 200
+    assert first.json()["principal_id"] == "cred_adapter_main"
+    assert first.json()["status"] == "proposed"
+
+    # 攻击链：同 runtime/agent_id、不同 principal 的凭证以受害者 change_id
+    # 重复 propose，必须被拒且原记录 principal/status 不被覆盖。
+    hijack = dict(payload, value_preview="hijacked note")
+    denied = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer twin-secret"},
+        json=hijack,
+    )
+    assert denied.status_code == 409
+    assert denied.json()["error"]["code"] == "MEMORY_CHANGE_ALREADY_EXISTS"
+    unchanged = store.get_memory_change("memchg_fixed_replay")
+    assert unchanged is not None
+    assert unchanged.principal_id == "cred_adapter_main"
+    assert unchanged.status == "proposed"
+    assert unchanged.value_preview == "benign note"
+
+    # 原提议方以不同内容重复 propose 同样被拒（存在即拒绝）。
+    content_conflict = dict(payload, value_preview="edited note")
+    denied_content = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=content_conflict,
+    )
+    assert denied_content.status_code == 409
+    assert denied_content.json()["error"]["code"] == "MEMORY_CHANGE_ALREADY_EXISTS"
+
+    # 同 principal 同内容重复 propose 幂等返回既有记录（§12.3 重放语义）。
+    replay = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert replay.status_code == 200
+    assert replay.json()["change_id"] == "memchg_fixed_replay"
+    assert replay.json()["principal_id"] == "cred_adapter_main"
+    assert replay.json()["status"] == "proposed"
+    assert replay.json()["value_preview"] == "benign note"
+
+
+def test_propose_rejects_resetting_committed_change() -> None:
+    store = memory_store_with_adapter()
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+    payload = {
+        "change_id": "memchg_fixed_committed",
+        "trace_id": "trace_memory_committed_api",
+        "namespace": "agent",
+        "key": "preference",
+        "value_preview": "benign note",
+        "source_trust": "trusted",
+    }
+
+    proposed = client.post("/v1/memory/changes/propose", headers=headers, json=payload)
+    assert proposed.status_code == 200
+    committed = client.post(
+        "/v1/memory/changes/memchg_fixed_committed/commit", headers=headers
+    )
+    assert committed.status_code == 200
+    assert committed.json()["status"] == "committed"
+
+    # 已离开 proposed 态的记录被重复 propose 拒绝，状态机不得倒回。
+    replay = client.post("/v1/memory/changes/propose", headers=headers, json=payload)
+    assert replay.status_code == 409
+    assert replay.json()["error"]["code"] == "MEMORY_CHANGE_ALREADY_EXISTS"
+    unchanged = store.get_memory_change("memchg_fixed_committed")
+    assert unchanged is not None
+    assert unchanged.status == "committed"
+
+
+def _transition_audits(store: MemoryControlPlaneStore) -> list[AuditEvent]:
+    return [
+        event
+        for event in store.audit_events
+        if event.event_type == "memory_change_transition"
+    ]
+
+
+def test_memory_change_service_idempotent_replay_does_not_duplicate_audit() -> None:
+    store = memory_store_with_adapter()
+    service = MemoryGuardService(store=store, audit_service=AuditService(store=store))
+    change = service.propose(
+        MemoryGuardChange(
+            trace_id="trace_memory_replay",
+            namespace="agent",
+            key="preference",
+            value_preview="benign note",
+            source_trust="trusted",
+        ),
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_main",
+    )
+
+    first = service.commit(change.change_id, operator_id="cred_adapter_main")
+    second = service.commit(change.change_id, operator_id="cred_adapter_main")
+
+    # 第二次为同态幂等重放（applied=False），不得再写第二条转换审计。
+    assert first.status == "committed"
+    assert second.status == "committed"
+    transitions = _transition_audits(store)
+    assert len(transitions) == 1
+    assert transitions[0].metadata["from_status"] == "proposed"
+    assert transitions[0].metadata["to_status"] == "committed"
+    assert store.verify_audit_integrity().valid
+
+
 def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> (
     None
 ):
@@ -2963,8 +3316,12 @@ def test_memory_policy_snapshot_concurrent_writes_reject_stale_revisions(
         results = list(executor.map(save, range(worker_count)))
 
     history = store.list_policy_snapshot_history(limit=worker_count)
-    records = [item for item in results if not isinstance(item, PolicyRevisionConflictError)]
-    conflicts = [item for item in results if isinstance(item, PolicyRevisionConflictError)]
+    records = [
+        item for item in results if not isinstance(item, PolicyRevisionConflictError)
+    ]
+    conflicts = [
+        item for item in results if isinstance(item, PolicyRevisionConflictError)
+    ]
 
     assert [record.revision for record in records] == [1]
     assert len(conflicts) == worker_count - 1

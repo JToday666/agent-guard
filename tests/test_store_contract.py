@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
+from typing import Literal
 from uuid import uuid4
 
 import pytest
@@ -20,6 +21,7 @@ from agentguard_core import (
     AuditEvent,
     GuardDecision,
     GuardEvent,
+    MemoryGuardChange,
     PolicyBundle,
 )
 from guard_api.main import create_app
@@ -27,6 +29,7 @@ from guard_api.services import (
     ApprovalService,
     AuditService,
     EvaluationService,
+    MemoryGuardService,
     PolicyService,
 )
 import guard_api.services.evaluation as evaluation_service_module
@@ -43,6 +46,8 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeAlreadyExistsError,
+    MemoryChangeTransitionError,
     classify_audit_record_type,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
@@ -1128,3 +1133,234 @@ def test_contract_memory_and_postgres_window_parity() -> None:
     memory_cohort_scope.pop("outcomes_as_of")
     postgres_cohort_scope.pop("outcomes_as_of")
     assert memory_cohort_scope == postgres_cohort_scope
+
+
+# ---------------------------------------------------------------------------
+# 记忆变更生命周期状态机契约（内存与 PostgreSQL 双实现镜像）。
+# ---------------------------------------------------------------------------
+
+_MemoryChangeStatus = Literal[
+    "proposed", "quarantined", "committed", "rejected", "rolled_back"
+]
+
+_MEMORY_CHANGE_STATUSES: tuple[_MemoryChangeStatus, ...] = (
+    "proposed",
+    "quarantined",
+    "committed",
+    "rejected",
+    "rolled_back",
+)
+_MEMORY_CHANGE_LEGAL_TRANSITIONS: list[
+    tuple[_MemoryChangeStatus, _MemoryChangeStatus]
+] = [
+    ("proposed", "committed"),
+    ("proposed", "rejected"),
+    ("quarantined", "committed"),
+    ("quarantined", "rejected"),
+    ("committed", "rolled_back"),
+]
+_MEMORY_CHANGE_ILLEGAL_TRANSITIONS: list[
+    tuple[_MemoryChangeStatus, _MemoryChangeStatus]
+] = [
+    (from_status, to_status)
+    for from_status in _MEMORY_CHANGE_STATUSES
+    for to_status in _MEMORY_CHANGE_STATUSES
+    if from_status != to_status
+    and (from_status, to_status) not in set(_MEMORY_CHANGE_LEGAL_TRANSITIONS)
+]
+
+
+def _memory_change_fixture(
+    change_id: str,
+    *,
+    status: _MemoryChangeStatus,
+) -> MemoryGuardChange:
+    return MemoryGuardChange(
+        change_id=change_id,
+        trace_id=f"trace_{change_id}",
+        namespace="agent",
+        key="preference",
+        value_preview="fixture",
+        status=status,
+    )
+
+
+@pytest.mark.parametrize(("from_status", "to_status"), _MEMORY_CHANGE_LEGAL_TRANSITIONS)
+def test_store_memory_change_legal_transitions(
+    store, from_status: _MemoryChangeStatus, to_status: _MemoryChangeStatus
+) -> None:
+    change = _memory_change_fixture(
+        f"memchg_legal_{from_status}_{to_status}", status=from_status
+    )
+    store.create_memory_change(change)
+
+    result = store.update_memory_change_status(change.change_id, to_status)
+
+    assert result.applied is True
+    assert result.previous_status == from_status
+    assert result.change.status == to_status
+    assert result.change.updated_at >= change.updated_at
+
+
+@pytest.mark.parametrize(
+    ("from_status", "to_status"), _MEMORY_CHANGE_ILLEGAL_TRANSITIONS
+)
+def test_store_memory_change_illegal_transitions_raise(
+    store, from_status: _MemoryChangeStatus, to_status: _MemoryChangeStatus
+) -> None:
+    change = _memory_change_fixture(
+        f"memchg_illegal_{from_status}_{to_status}", status=from_status
+    )
+    store.create_memory_change(change)
+
+    with pytest.raises(MemoryChangeTransitionError) as excinfo:
+        store.update_memory_change_status(change.change_id, to_status)
+
+    assert excinfo.value.change_id == change.change_id
+    assert excinfo.value.from_status == from_status
+    assert excinfo.value.to_status == to_status
+    assert store.get_memory_change(change.change_id).status == from_status
+
+
+@pytest.mark.parametrize("status", _MEMORY_CHANGE_STATUSES)
+def test_store_memory_change_same_status_repeat_is_idempotent(
+    store, status: _MemoryChangeStatus
+) -> None:
+    change = _memory_change_fixture(f"memchg_idem_{status}", status=status)
+    store.create_memory_change(change)
+
+    result = store.update_memory_change_status(change.change_id, status)
+
+    assert result.applied is False
+    assert result.previous_status == status
+    assert result.change.status == status
+    assert result.change.updated_at == change.updated_at
+
+
+def test_store_memory_change_update_missing_raises_key_error(store) -> None:
+    with pytest.raises(KeyError):
+        store.update_memory_change_status("memchg_missing", "committed")
+
+
+def test_store_memory_change_concurrent_transitions_stay_consistent(store) -> None:
+    # 并发语义：多个写入方基于同一前态竞争，最终状态唯一且落败方收到转换冲突。
+    change = _memory_change_fixture("memchg_race", status="proposed")
+    store.create_memory_change(change)
+
+    def attempt(target_status: str) -> str:
+        try:
+            return store.update_memory_change_status(
+                change.change_id, target_status
+            ).change.status
+        except MemoryChangeTransitionError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = list(executor.map(attempt, ["committed", "rejected"] * 4))
+
+    final = store.get_memory_change(change.change_id)
+    assert final.status in {"committed", "rejected"}
+    assert all(outcome in {final.status, "conflict"} for outcome in outcomes)
+
+
+def test_store_memory_change_transaction_commits_state_and_audit_atomically(
+    store,
+) -> None:
+    # 原子窗口契约：窗口内状态转换与审计入链要么一起提交，要么异常时
+    # 一起回滚，不得遗留「状态已改、链上无记录」的部分状态。
+    change = _memory_change_fixture("memchg_txn_atomic", status="proposed")
+    store.create_memory_change(change)
+    event = AuditEvent(
+        audit_id="audit_memchg_txn_atomic",
+        schema_version="0.4",
+        record_type="config_audit",
+        trace_id="trace_memchg_txn_atomic",
+        event_type="memory_change_transition",
+        summary="Memory change memchg_txn_atomic transitioned proposed -> committed",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        blocked=False,
+        reason="memory_change:proposed->committed",
+        links={"memory_change_id": change.change_id},
+    )
+
+    with pytest.raises(RuntimeError, match="atomicity probe"):
+        with store.memory_change_transaction(change.change_id):
+            failed = store.update_memory_change_status(change.change_id, "committed")
+            assert failed.applied is True
+            assert store.add_audit_event(event)
+            raise RuntimeError("atomicity probe")
+
+    rolled_back = store.get_memory_change(change.change_id)
+    assert rolled_back is not None
+    assert rolled_back.status == "proposed"
+    assert store.get_audit_event(event.audit_id) is None
+
+    with store.memory_change_transaction(change.change_id):
+        committed = store.update_memory_change_status(change.change_id, "committed")
+        assert committed.applied is True
+        assert committed.previous_status == "proposed"
+        assert store.add_audit_event(event)
+
+    assert store.get_memory_change(change.change_id).status == "committed"
+    assert store.get_audit_event(event.audit_id) is not None
+
+
+def test_store_create_memory_change_rejects_existing_conflict(store) -> None:
+    # 存在即拒绝：同 change_id 不同内容/身份的重建不得覆盖既有记录。
+    original = _memory_change_fixture("memchg_conflict", status="proposed")
+    store.create_memory_change(original)
+
+    conflicting = original.model_copy(
+        update={"value_preview": "hijacked", "principal_id": "attacker"}
+    )
+    with pytest.raises(MemoryChangeAlreadyExistsError) as excinfo:
+        store.create_memory_change(conflicting)
+
+    assert excinfo.value.change_id == original.change_id
+    stored = store.get_memory_change(original.change_id)
+    assert stored is not None
+    assert stored.value_preview == "fixture"
+    assert stored.principal_id == original.principal_id
+    assert stored.status == "proposed"
+
+
+def test_store_create_memory_change_idempotent_replay_returns_existing(store) -> None:
+    # 幂等重放：除时间戳外完全一致的重复提交返回既有记录，不覆盖不报错。
+    original = _memory_change_fixture("memchg_replay", status="proposed")
+    first = store.create_memory_change(original)
+
+    replay = original.model_copy(update={"updated_at": "2099-01-01T00:00:00+00:00"})
+    second = store.create_memory_change(replay)
+
+    assert second.change_id == first.change_id
+    assert second.updated_at == first.updated_at
+    assert second == first
+
+
+def test_store_concurrent_commit_writes_single_transition_audit(store) -> None:
+    # 并发去重：8 线程并发 commit 同一变更，只有一方 applied=True，
+    # 链上恰好一条转换审计；使 postgres 条件更新路径也有服务级覆盖。
+    service = MemoryGuardService(store=store, audit_service=AuditService(store=store))
+    change = _memory_change_fixture("memchg_race_audit", status="proposed")
+    store.create_memory_change(change)
+
+    def attempt(_: int) -> str:
+        return service.commit(change.change_id, operator_id="cred_adapter_main").status
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = list(executor.map(attempt, range(8)))
+
+    assert all(status == "committed" for status in outcomes)
+    transitions = [
+        event
+        for event in store.list_audit_events(
+            AuditEventFilters(trace_id="trace_memchg_race_audit", limit=100)
+        )
+        if event.event_type == "memory_change_transition"
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].metadata["from_status"] == "proposed"
+    assert transitions[0].metadata["to_status"] == "committed"
+    assert store.verify_audit_integrity().valid

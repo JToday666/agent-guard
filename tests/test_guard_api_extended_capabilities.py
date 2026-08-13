@@ -372,7 +372,7 @@ def test_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> N
     )
     assert change.status == "proposed"
     assert (
-        store.update_memory_change_status(change.change_id, "committed").status
+        store.update_memory_change_status(change.change_id, "committed").change.status
         == "committed"
     )
 

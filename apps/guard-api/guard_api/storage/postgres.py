@@ -8,11 +8,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, desc, func, select, text, update
+from sqlalchemy import CursorResult, create_engine, desc, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,6 +26,7 @@ from agentguard_core import (
     PolicyBundle,
     ProvenanceEdge,
     ProvenanceNode,
+    memory_change_can_transition,
     utc_now_iso,
 )
 from guard_api.models import (
@@ -43,12 +44,16 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeAlreadyExistsError,
+    MemoryChangeTransitionError,
+    MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
     StoredLaunchCode,
     classify_audit_record_type,
+    memory_change_is_replay_match,
     merge_provenance_edge,
     merge_provenance_node,
     parse_audit_timestamp,
@@ -113,9 +118,9 @@ class PostgresControlPlaneStore:
     database_url: str
     _engine: Engine = field(init=False, repr=False)
     _session_factory: sessionmaker[Session] = field(init=False, repr=False)
-    _active_evaluation_session: ContextVar[Session | None] = field(
+    _active_store_session: ContextVar[Session | None] = field(
         default_factory=lambda: ContextVar(
-            "agentguard_active_evaluation_session", default=None
+            "agentguard_active_store_session", default=None
         ),
         init=False,
         repr=False,
@@ -317,17 +322,38 @@ class PostgresControlPlaneStore:
             byteorder="big",
             signed=True,
         )
-        if self._active_evaluation_session.get() is not None:
+        if self._active_store_session.get() is not None:
             raise RuntimeError("nested evaluation transactions are not supported")
         with self._session_factory.begin() as session:
             session.execute(
                 text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
             )
-            token = self._active_evaluation_session.set(session)
+            token = self._active_store_session.set(session)
             try:
                 yield
             finally:
-                self._active_evaluation_session.reset(token)
+                self._active_store_session.reset(token)
+
+    @contextmanager
+    def memory_change_transaction(self, change_id: str) -> Iterator[None]:
+        """状态转换与转换审计共用同一事务，避免「状态已改、链上无记录」。
+
+        复用 evaluation_transaction 的会话加入机制：上下文内的所有
+        _read_session/_write_session 调用（含 add_audit_event 的链写入与
+        provenance 写入）都汇入同一 session，随本事务一次性提交或回滚。
+        审计链咨询锁仍由 add_audit_event 在事务内获取；与评测事务的
+        锁序（per-event 锁 → 审计链锁）不存在交叉倒置，不会死锁。
+        """
+
+        del change_id
+        if self._active_store_session.get() is not None:
+            raise RuntimeError("nested store write transactions are not supported")
+        with self._session_factory.begin() as session:
+            token = self._active_store_session.set(session)
+            try:
+                yield
+            finally:
+                self._active_store_session.reset(token)
 
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
@@ -787,28 +813,39 @@ class PostgresControlPlaneStore:
         return [ActionCriticReview.model_validate(row) for row in rows]
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        # 存在即拒绝：on_conflict_do_nothing 绝不覆盖既有记录，
+        # 以 rowcount 判定插入是否生效，冲突时回读比对。
         payload = change.model_dump(mode="json")
-        stmt = pg_insert(memory_guard_changes).values(
-            change_id=change.change_id,
-            trace_id=change.trace_id,
-            namespace=change.namespace,
-            key=change.key,
-            status=change.status,
-            payload_json=payload,
-            created_at=change.created_at,
-            updated_at=change.updated_at,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[memory_guard_changes.c.change_id],
-            set_={
-                "status": stmt.excluded.status,
-                "payload_json": stmt.excluded.payload_json,
-                "updated_at": stmt.excluded.updated_at,
-            },
+        stmt = (
+            pg_insert(memory_guard_changes)
+            .values(
+                change_id=change.change_id,
+                trace_id=change.trace_id,
+                namespace=change.namespace,
+                key=change.key,
+                status=change.status,
+                payload_json=payload,
+                created_at=change.created_at,
+                updated_at=change.updated_at,
+            )
+            .on_conflict_do_nothing(index_elements=[memory_guard_changes.c.change_id])
         )
         with self._write_session() as session:
-            session.execute(stmt)
-        return change
+            result = cast("CursorResult[Any]", session.execute(stmt))
+            inserted = result.rowcount == 1
+        if inserted:
+            return change
+        # 同 change_id 已存在：经 _read_session 回读（汇入活动事务时可见
+        # 同事务内未提交写入），完全一致视为幂等重放，否则拒绝。
+        read_stmt = select(memory_guard_changes.c.payload_json).where(
+            memory_guard_changes.c.change_id == change.change_id
+        )
+        with self._read_session() as session:
+            existing_payload = session.execute(read_stmt).scalar_one()
+        existing = MemoryGuardChange.model_validate(existing_payload)
+        if memory_change_is_replay_match(existing, change):
+            return existing
+        raise MemoryChangeAlreadyExistsError(change.change_id)
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
         stmt = select(memory_guard_changes.c.payload_json).where(
@@ -822,26 +859,48 @@ class PostgresControlPlaneStore:
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange:
+    ) -> MemoryTransitionResult:
         current = self.get_memory_change(change_id)
         if current is None:
             raise KeyError(change_id)
+        if current.status == status:
+            # 同态重复转换为幂等重放，直接返回当前记录。
+            return MemoryTransitionResult(
+                change=current, applied=False, previous_status=current.status
+            )
+        if not memory_change_can_transition(current.status, status):
+            raise MemoryChangeTransitionError(change_id, current.status, status)
         updated = current.model_copy(
             update={"status": status, "updated_at": utc_now_iso()}
         )
         stmt = (
             update(memory_guard_changes)
             .where(memory_guard_changes.c.change_id == change_id)
+            # 前态条件 UPDATE：只有当前状态仍等于读到的前态才生效，
+            # 以 rowcount 判定取代 read-modify-write，消除并发竞态。
+            .where(memory_guard_changes.c.status == current.status)
             .values(
                 status=updated.status,
                 payload_json=updated.model_dump(mode="json"),
                 updated_at=updated.updated_at,
             )
         )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
-        return updated
+        with self._write_session() as session:
+            result = cast("CursorResult[Any]", session.execute(stmt))
+            applied = result.rowcount == 1
+        if applied:
+            return MemoryTransitionResult(
+                change=updated, applied=True, previous_status=current.status
+            )
+        # 并发转换已改变前态；重读区分幂等重放与非法转换。
+        latest = self.get_memory_change(change_id)
+        if latest is None:
+            raise KeyError(change_id)
+        if latest.status == status:
+            return MemoryTransitionResult(
+                change=latest, applied=False, previous_status=latest.status
+            )
+        raise MemoryChangeTransitionError(change_id, latest.status, status)
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         record = self.get_policy_snapshot_record()
@@ -1187,7 +1246,7 @@ class PostgresControlPlaneStore:
 
     @contextmanager
     def _read_session(self) -> Iterator[Session]:
-        active = self._active_evaluation_session.get()
+        active = self._active_store_session.get()
         if active is not None:
             yield active
             return
@@ -1196,7 +1255,7 @@ class PostgresControlPlaneStore:
 
     @contextmanager
     def _write_session(self) -> Iterator[Session]:
-        active = self._active_evaluation_session.get()
+        active = self._active_store_session.get()
         if active is not None:
             yield active
             return

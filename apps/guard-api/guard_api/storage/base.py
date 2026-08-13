@@ -161,6 +161,68 @@ class ApprovalStateConflictError(ValueError):
         super().__init__(f"{approval_id}: {status}")
 
 
+class MemoryChangeTransitionError(ValueError):
+    """记忆变更状态机拒绝的非法转换。
+
+    合法转换见 core `MEMORY_CHANGE_ALLOWED_TRANSITIONS`；同态重复转换
+    幂等返回当前状态而非抛出本异常。
+    """
+
+    def __init__(self, change_id: str, from_status: str, to_status: str) -> None:
+        self.change_id = change_id
+        self.from_status = from_status
+        self.to_status = to_status
+        super().__init__(f"{change_id}: {from_status} -> {to_status}")
+
+
+class MemoryChangeAlreadyExistsError(ValueError):
+    """同 change_id 的记忆变更已存在且本次提交内容不一致。
+
+    create_memory_change 采用「存在即拒绝」语义：重复提交仅在记录
+    完全一致时幂等返回既有记录，否则抛本异常，防止以重复 propose
+    覆盖提议方 principal/status/内容字段。
+    """
+
+    def __init__(self, change_id: str) -> None:
+        self.change_id = change_id
+        super().__init__(change_id)
+
+
+def memory_change_is_replay_match(
+    existing: MemoryGuardChange, incoming: MemoryGuardChange
+) -> bool:
+    """判定重复 propose 是否构成幂等重放。
+
+    对齐审计 §12.3 重放语义：除 created_at/updated_at 时间戳外全字段
+    一致（含 principal_id、status、内容字段）才视为同一提议的重放；
+    任何字段差异（含提议方不同）都判为冲突并拒绝。
+    """
+
+    return existing.model_dump(
+        mode="json",
+        exclude={
+            "created_at",
+            "updated_at",
+        },
+    ) == incoming.model_dump(mode="json", exclude={"created_at", "updated_at"})
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryTransitionResult:
+    """记忆变更状态转换的结构化结果。
+
+    change 为转换生效后的记录（applied=False 时为当前记录原样）；
+    applied 区分「本次调用真正执行了转换」与「已完成转换的幂等重放」，
+    服务层仅在 applied=True 时写入转换审计，消除并发落败方的重复入链；
+    previous_status 是存储层读到的转换前状态（权威值），服务层不得
+    再依赖更新前的陈旧读值。
+    """
+
+    change: MemoryGuardChange
+    applied: bool
+    previous_status: str
+
+
 class ProvenanceConflictError(ValueError):
     """Raised when a stable provenance ID is bound to conflicting facts."""
 
@@ -350,6 +412,15 @@ class ControlPlaneStore(Protocol):
 
     def evaluation_transaction(self, event_id: str) -> ContextManager[None]: ...
 
+    def memory_change_transaction(self, change_id: str) -> ContextManager[None]:
+        """状态转换与转换审计的原子窗口。
+
+        上下文内的状态条件更新、审计入链与 provenance 写入随同一事务
+        提交或回滚；实现必须保证外部读不到「状态已改、审计未入链」
+        的中间态。
+        """
+        ...
+
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode: ...
@@ -424,13 +495,29 @@ class ControlPlaneStore(Protocol):
 
     def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]: ...
 
-    def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange: ...
+    def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        """创建记忆变更记录（存在即拒绝语义）。
+
+        契约：change_id 不存在则插入并返回；同 change_id 已存在且与本次
+        提交完全一致（见 memory_change_is_replay_match）则幂等返回既有记录，
+        否则抛 MemoryChangeAlreadyExistsError。实现不得以 upsert 覆盖
+        既有记录的 principal/status/内容字段。
+        """
+        ...
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None: ...
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange: ...
+    ) -> MemoryTransitionResult:
+        """按状态机推进记忆变更生命周期。
+
+        契约：不存在抛 KeyError；同态重复幂等返回当前状态（applied=False）；
+        非法转换抛 MemoryChangeTransitionError；实现必须用前态条件更新，
+        消除 read-modify-write 竞态；返回结果携带 applied 与存储层读到的
+        previous_status，供服务层判定是否写入转换审计。
+        """
+        ...
 
     def get_policy_snapshot(self) -> PolicyBundle | None: ...
 
