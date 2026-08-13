@@ -21,8 +21,13 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         payload: MemoryGuardChange,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        auth.verify_bearer(authorization, "event:evaluate")
-        return memory_guard_service.propose(payload).model_dump(mode="json")
+        auth_context = auth.verify_bearer(authorization, "event:evaluate")
+        return memory_guard_service.propose(
+            payload,
+            runtime=auth_context.runtime,
+            agent_id=auth_context.agent_id,
+            principal_id=auth_context.principal_id,
+        ).model_dump(mode="json")
 
     @app.post("/v1/memory/changes/{change_id}/commit")
     def commit_memory_change(

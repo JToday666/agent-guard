@@ -2551,10 +2551,72 @@ def test_memory_write_evaluation_records_memory_change_and_audit_link() -> None:
     assert memory_change.key == "report_delivery_rule"
     assert memory_change.status == "quarantined"
     assert memory_change.trace_id == "trace_memory_runtime_link"
+    # 身份绑定：评估链路上的变更绑定事件 runtime/agent 与请求 principal。
+    assert memory_change.runtime == "langgraph"
+    assert memory_change.agent_id == "main"
+    assert memory_change.principal_id == "cred_adapter_main"
     assert events_response.status_code == 200
     audit_event = events_response.json()["events"][0]
     assert audit_event["links"]["memory_change_id"] == memory_change.change_id
     assert audit_event["metadata"]["memory_namespace"] == "user_preferences"
+
+
+def test_memory_change_propose_binds_caller_identity() -> None:
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(),
+    )
+    client = TestClient(app)
+
+    # 客户端自报的身份字段被认证上下文覆盖；未声明字段被拒绝。
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_bind",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "operation": "write",
+            "source_trust": "trusted",
+            "runtime": "openclaw",
+            "agent_id": "other-agent",
+            "principal_id": "attacker",
+        },
+    )
+    assert proposed.status_code == 200
+    change = proposed.json()
+    assert change["runtime"] == "langgraph"
+    assert change["agent_id"] == "main"
+    assert change["principal_id"] == "cred_adapter_main"
+
+    rejected = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_bind",
+            "namespace": "agent",
+            "key": "preference",
+            "unexpected_field": True,
+        },
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    # 未声明 source_trust 的变更默认 unknown，进入隔离而非被隐式信任。
+    quarantined = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_bind",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+        },
+    )
+    assert quarantined.status_code == 200
+    assert quarantined.json()["status"] == "quarantined"
+    assert quarantined.json()["source_trust"] == "unknown"
 
 
 def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> (

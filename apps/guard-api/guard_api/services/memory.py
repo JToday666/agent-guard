@@ -13,12 +13,26 @@ class MemoryGuardService:
     def __init__(self, *, store: ControlPlaneStore) -> None:
         self.store = store
 
-    def propose(self, change: MemoryGuardChange) -> MemoryGuardChange:
+    def propose(
+        self,
+        change: MemoryGuardChange,
+        *,
+        runtime: str | None = None,
+        agent_id: str | None = None,
+        principal_id: str | None = None,
+    ) -> MemoryGuardChange:
         status = (
             "quarantined" if _should_quarantine_memory_change(change) else "proposed"
         )
+        # 提议方身份一律以认证上下文为准，覆盖客户端自报绑定。
         proposed = change.model_copy(
-            update={"status": status, "updated_at": utc_now_iso()}
+            update={
+                "status": status,
+                "runtime": runtime,
+                "agent_id": agent_id,
+                "principal_id": principal_id,
+                "updated_at": utc_now_iso(),
+            }
         )
         return self.store.create_memory_change(proposed)
 
