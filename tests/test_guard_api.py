@@ -2782,6 +2782,24 @@ def test_memory_change_lifecycle_rejects_other_principal_same_runtime() -> None:
     assert allowed.status_code == 200
     assert allowed.json()["status"] == "committed"
 
+    # rollback 端点同样受 principal 校验约束：twin 凭证 403，原凭证 200。
+    denied_rollback = client.post(
+        f"/v1/memory/changes/{change_id}/rollback",
+        headers={"Authorization": "Bearer twin-secret"},
+    )
+    assert denied_rollback.status_code == 403
+    assert denied_rollback.json()["error"]["code"] == "MEMORY_CHANGE_PRINCIPAL_MISMATCH"
+    still_committed = store.get_memory_change(change_id)
+    assert still_committed is not None
+    assert still_committed.status == "committed"
+
+    allowed_rollback = client.post(
+        f"/v1/memory/changes/{change_id}/rollback",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+    assert allowed_rollback.status_code == 200
+    assert allowed_rollback.json()["status"] == "rolled_back"
+
 
 def test_memory_change_lifecycle_rejects_unbound_legacy_change() -> None:
     store = memory_store_with_adapter()
@@ -2808,6 +2826,114 @@ def test_memory_change_lifecycle_rejects_unbound_legacy_change() -> None:
     unchanged = store.get_memory_change("memchg_legacy_unbound")
     assert unchanged is not None
     assert unchanged.status == "proposed"
+
+
+def test_propose_duplicate_change_id_rejects_and_replays_idempotently() -> None:
+    store = memory_store_with_adapter()
+    # 同一 runtime/agent_id 下签发给另一个 principal 的凭证。
+    add_adapter_credential(
+        store,
+        token="twin-secret",
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="cred_adapter_twin",
+    )
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    payload = {
+        "change_id": "memchg_fixed_replay",
+        "trace_id": "trace_memory_replay_api",
+        "namespace": "agent",
+        "key": "preference",
+        "value_preview": "benign note",
+        "source_trust": "trusted",
+    }
+
+    # 首次 propose 正常创建，身份字段以认证上下文为准。
+    first = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert first.status_code == 200
+    assert first.json()["principal_id"] == "cred_adapter_main"
+    assert first.json()["status"] == "proposed"
+
+    # 攻击链：同 runtime/agent_id、不同 principal 的凭证以受害者 change_id
+    # 重复 propose，必须被拒且原记录 principal/status 不被覆盖。
+    hijack = dict(payload, value_preview="hijacked note")
+    denied = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer twin-secret"},
+        json=hijack,
+    )
+    assert denied.status_code == 409
+    assert denied.json()["error"]["code"] == "MEMORY_CHANGE_ALREADY_EXISTS"
+    unchanged = store.get_memory_change("memchg_fixed_replay")
+    assert unchanged is not None
+    assert unchanged.principal_id == "cred_adapter_main"
+    assert unchanged.status == "proposed"
+    assert unchanged.value_preview == "benign note"
+
+    # 原提议方以不同内容重复 propose 同样被拒（存在即拒绝）。
+    content_conflict = dict(payload, value_preview="edited note")
+    denied_content = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=content_conflict,
+    )
+    assert denied_content.status_code == 409
+    assert denied_content.json()["error"]["code"] == "MEMORY_CHANGE_ALREADY_EXISTS"
+
+    # 同 principal 同内容重复 propose 幂等返回既有记录（§12.3 重放语义）。
+    replay = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert replay.status_code == 200
+    assert replay.json()["change_id"] == "memchg_fixed_replay"
+    assert replay.json()["principal_id"] == "cred_adapter_main"
+    assert replay.json()["status"] == "proposed"
+    assert replay.json()["value_preview"] == "benign note"
+
+
+def test_propose_rejects_resetting_committed_change() -> None:
+    store = memory_store_with_adapter()
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+    payload = {
+        "change_id": "memchg_fixed_committed",
+        "trace_id": "trace_memory_committed_api",
+        "namespace": "agent",
+        "key": "preference",
+        "value_preview": "benign note",
+        "source_trust": "trusted",
+    }
+
+    proposed = client.post("/v1/memory/changes/propose", headers=headers, json=payload)
+    assert proposed.status_code == 200
+    committed = client.post(
+        "/v1/memory/changes/memchg_fixed_committed/commit", headers=headers
+    )
+    assert committed.status_code == 200
+    assert committed.json()["status"] == "committed"
+
+    # 已离开 proposed 态的记录被重复 propose 拒绝，状态机不得倒回。
+    replay = client.post("/v1/memory/changes/propose", headers=headers, json=payload)
+    assert replay.status_code == 409
+    assert replay.json()["error"]["code"] == "MEMORY_CHANGE_ALREADY_EXISTS"
+    unchanged = store.get_memory_change("memchg_fixed_committed")
+    assert unchanged is not None
+    assert unchanged.status == "committed"
 
 
 def _transition_audits(store: MemoryControlPlaneStore) -> list[AuditEvent]:
@@ -2840,39 +2966,6 @@ def test_memory_change_service_idempotent_replay_does_not_duplicate_audit() -> N
     # 第二次为同态幂等重放（applied=False），不得再写第二条转换审计。
     assert first.status == "committed"
     assert second.status == "committed"
-    transitions = _transition_audits(store)
-    assert len(transitions) == 1
-    assert transitions[0].metadata["from_status"] == "proposed"
-    assert transitions[0].metadata["to_status"] == "committed"
-    assert store.verify_audit_integrity().valid
-
-
-def test_memory_change_service_concurrent_commit_writes_single_transition_audit() -> (
-    None
-):
-    store = memory_store_with_adapter()
-    service = MemoryGuardService(store=store, audit_service=AuditService(store=store))
-    change = service.propose(
-        MemoryGuardChange(
-            trace_id="trace_memory_race",
-            namespace="agent",
-            key="preference",
-            value_preview="benign note",
-            source_trust="trusted",
-        ),
-        runtime="langgraph",
-        agent_id="main",
-        principal_id="cred_adapter_main",
-    )
-
-    def attempt(_: int) -> str:
-        return service.commit(change.change_id, operator_id="cred_adapter_main").status
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        outcomes = list(executor.map(attempt, range(8)))
-
-    # 并发竞争下只有一方 applied=True；链上恰好一条转换审计，无重复入链。
-    assert all(status == "committed" for status in outcomes)
     transitions = _transition_audits(store)
     assert len(transitions) == 1
     assert transitions[0].metadata["from_status"] == "proposed"
@@ -3223,8 +3316,12 @@ def test_memory_policy_snapshot_concurrent_writes_reject_stale_revisions(
         results = list(executor.map(save, range(worker_count)))
 
     history = store.list_policy_snapshot_history(limit=worker_count)
-    records = [item for item in results if not isinstance(item, PolicyRevisionConflictError)]
-    conflicts = [item for item in results if isinstance(item, PolicyRevisionConflictError)]
+    records = [
+        item for item in results if not isinstance(item, PolicyRevisionConflictError)
+    ]
+    conflicts = [
+        item for item in results if isinstance(item, PolicyRevisionConflictError)
+    ]
 
     assert [record.revision for record in records] == [1]
     assert len(conflicts) == worker_count - 1

@@ -29,6 +29,7 @@ from guard_api.services import (
     ApprovalService,
     AuditService,
     EvaluationService,
+    MemoryGuardService,
     PolicyService,
 )
 import guard_api.services.evaluation as evaluation_service_module
@@ -45,6 +46,7 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
     classify_audit_record_type,
 )
@@ -1303,3 +1305,62 @@ def test_store_memory_change_transaction_commits_state_and_audit_atomically(
 
     assert store.get_memory_change(change.change_id).status == "committed"
     assert store.get_audit_event(event.audit_id) is not None
+
+
+def test_store_create_memory_change_rejects_existing_conflict(store) -> None:
+    # 存在即拒绝：同 change_id 不同内容/身份的重建不得覆盖既有记录。
+    original = _memory_change_fixture("memchg_conflict", status="proposed")
+    store.create_memory_change(original)
+
+    conflicting = original.model_copy(
+        update={"value_preview": "hijacked", "principal_id": "attacker"}
+    )
+    with pytest.raises(MemoryChangeAlreadyExistsError) as excinfo:
+        store.create_memory_change(conflicting)
+
+    assert excinfo.value.change_id == original.change_id
+    stored = store.get_memory_change(original.change_id)
+    assert stored is not None
+    assert stored.value_preview == "fixture"
+    assert stored.principal_id == original.principal_id
+    assert stored.status == "proposed"
+
+
+def test_store_create_memory_change_idempotent_replay_returns_existing(store) -> None:
+    # 幂等重放：除时间戳外完全一致的重复提交返回既有记录，不覆盖不报错。
+    original = _memory_change_fixture("memchg_replay", status="proposed")
+    first = store.create_memory_change(original)
+
+    replay = original.model_copy(update={"updated_at": "2099-01-01T00:00:00+00:00"})
+    second = store.create_memory_change(replay)
+
+    assert second.change_id == first.change_id
+    assert second.updated_at == first.updated_at
+    assert second == first
+
+
+def test_store_concurrent_commit_writes_single_transition_audit(store) -> None:
+    # 并发去重：8 线程并发 commit 同一变更，只有一方 applied=True，
+    # 链上恰好一条转换审计；使 postgres 条件更新路径也有服务级覆盖。
+    service = MemoryGuardService(store=store, audit_service=AuditService(store=store))
+    change = _memory_change_fixture("memchg_race_audit", status="proposed")
+    store.create_memory_change(change)
+
+    def attempt(_: int) -> str:
+        return service.commit(change.change_id, operator_id="cred_adapter_main").status
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = list(executor.map(attempt, range(8)))
+
+    assert all(status == "committed" for status in outcomes)
+    transitions = [
+        event
+        for event in store.list_audit_events(
+            AuditEventFilters(trace_id="trace_memchg_race_audit", limit=100)
+        )
+        if event.event_type == "memory_change_transition"
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].metadata["from_status"] == "proposed"
+    assert transitions[0].metadata["to_status"] == "committed"
+    assert store.verify_audit_integrity().valid
