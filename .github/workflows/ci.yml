@@ -261,11 +261,11 @@ jobs:
           Set-Content $hbaPath -Value $hbaTrust -NoNewline
           Restart-Service -Name $service.Name
           & "$pgbin\psql.exe" -U postgres -d postgres -c "ALTER USER postgres WITH PASSWORD '123456';"
+          $exists = & "$pgbin\psql.exe" -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'"
+          if ($exists -ne "1") { & "$pgbin\psql.exe" -U postgres -d postgres -c "CREATE DATABASE agent_guard_test;" }
           # 恢复原始认证并重启
           Set-Content $hbaPath -Value $hbaBackup -NoNewline
           Restart-Service -Name $service.Name
-          $exists = & "$pgbin\psql.exe" -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'"
-          if ($exists -ne "1") { & "$pgbin\psql.exe" -U postgres -d postgres -c "CREATE DATABASE agent_guard_test;" }
 
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
