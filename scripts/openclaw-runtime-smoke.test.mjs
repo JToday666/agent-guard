@@ -10,6 +10,8 @@ import {
   parseSmokeArgs,
   pickFreePort,
   resolveOpenclawBinDir,
+  waitForGatewayExit,
+  waitForPortFree,
   withDiagnosticLogging,
   withGatewayAuthToken,
   withOpenclawBinOnPath,
@@ -212,4 +214,65 @@ test("parseDotEnvContent parses pairs, quotes and comments", () => {
 test("pickFreePort returns a usable port number", async () => {
   const port = await pickFreePort();
   assert.ok(Number.isInteger(port) && port > 0 && port < 65536);
+});
+
+test("waitForGatewayExit polls until child exitCode lands", async () => {
+  const child = { exitCode: null };
+  const gateway = { child };
+  let polls = 0;
+  const fakeSleep = async () => {
+    polls += 1;
+    if (polls >= 2) {
+      child.exitCode = 0;
+    }
+  };
+  const exited = await waitForGatewayExit(gateway, 60_000, {
+    sleep: fakeSleep,
+    pollMs: 1,
+  });
+  assert.equal(exited, true);
+  assert.equal(polls, 2);
+
+  // 已退出的实例直接返回 true，不轮询
+  polls = 0;
+  const done = await waitForGatewayExit(
+    { child: { exitCode: 1 } },
+    60_000,
+    { sleep: fakeSleep, pollMs: 1 },
+  );
+  assert.equal(done, true);
+  assert.equal(polls, 0);
+});
+
+test("waitForGatewayExit returns false when child keeps running", async () => {
+  const gateway = { child: { exitCode: null } };
+  const exited = await waitForGatewayExit(gateway, 1, {
+    sleep: async () => {},
+    pollMs: 1,
+  });
+  assert.equal(exited, false);
+});
+
+test("waitForPortFree waits until connect is refused", async () => {
+  let attempts = 0;
+  const connect = async () => {
+    attempts += 1;
+    return attempts < 3; // 前两次仍被旧实例占用，第三次已释放
+  };
+  const freed = await waitForPortFree(12345, 60_000, {
+    connect,
+    sleep: async () => {},
+    pollMs: 1,
+  });
+  assert.equal(freed, true);
+  assert.equal(attempts, 3);
+});
+
+test("waitForPortFree returns false when port stays occupied", async () => {
+  const freed = await waitForPortFree(12345, 1, {
+    connect: async () => true,
+    sleep: async () => {},
+    pollMs: 1,
+  });
+  assert.equal(freed, false);
 });
