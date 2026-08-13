@@ -2796,3 +2796,36 @@ def test_benign_context_build_is_allowed() -> None:
 
     assert decision.decision == "allow"
     assert decision.rule_hits == []
+
+
+def _sensitive_file_event() -> GuardEvent:
+    return _event(
+        tool_name="read_file",
+        arguments={"path": "/private/token.txt"},
+        user_task="summarize public docs",
+        source_trust="untrusted",
+        is_malicious=True,
+    )
+
+
+def test_explicit_empty_detector_list_runs_no_detectors() -> None:
+    engine = GuardEngine(detectors=[])
+
+    assert engine.detectors == []
+
+    decision = engine.evaluate(_sensitive_file_event())
+
+    assert decision.decision == "allow"
+    assert decision.rule_hits == []
+    assert decision.categories == []
+
+
+def test_none_detectors_load_default_detector_list() -> None:
+    engine = GuardEngine()
+
+    assert len(engine.detectors) > 0
+
+    decision = engine.evaluate(_sensitive_file_event())
+
+    assert decision.decision == "deny"
+    assert decision.rule_hits[0].rule_id == "P001_sensitive_file_access"

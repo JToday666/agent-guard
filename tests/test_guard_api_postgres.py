@@ -742,6 +742,58 @@ def test_postgres_store_persists_policy_snapshot_across_instances() -> None:
         _cleanup_policy_snapshot(database_url)
 
 
+def test_postgres_policy_snapshot_readback_strips_legacy_enforcement_mode() -> None:
+    database_url = get_test_database_url()
+
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        legacy_payload = PolicyBundle(bundle_id="pg-legacy-policy").model_dump(
+            mode="json"
+        )
+        legacy_payload["default_enforcement_mode"] = "audit_only"
+        engine = create_engine(database_url)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO policy_snapshots"
+                    " (policy_id, payload_json, revision, updated_at, updated_by)"
+                    " VALUES ('current', :payload, 1, :updated_at, 'legacy')"
+                ),
+                {
+                    "payload": json.dumps(legacy_payload),
+                    "updated_at": "2026-08-12T00:00:00+00:00",
+                },
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO policy_snapshot_history"
+                    " (revision, payload_json, updated_at, updated_by)"
+                    " VALUES (1, :payload, :updated_at, 'legacy')"
+                ),
+                {
+                    "payload": json.dumps(legacy_payload),
+                    "updated_at": "2026-08-12T00:00:00+00:00",
+                },
+            )
+
+        record = PostgresControlPlaneStore(database_url).get_policy_snapshot_record()
+        history = PostgresControlPlaneStore(database_url).list_policy_snapshot_history()
+
+        assert record is not None
+        assert record.policy_bundle.bundle_id == "pg-legacy-policy"
+        assert (
+            "default_enforcement_mode"
+            not in record.policy_bundle.model_dump(mode="json")
+        )
+        assert [item.policy_bundle.bundle_id for item in history] == [
+            "pg-legacy-policy"
+        ]
+    finally:
+        _cleanup_policy_snapshot(database_url)
+
+
 def test_postgres_policy_snapshot_concurrent_writes_reject_stale_revisions() -> None:
     database_url = get_test_database_url()
 

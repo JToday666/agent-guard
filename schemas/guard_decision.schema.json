@@ -37,34 +37,15 @@
     },
     "latency_ms": { "type": ["integer", "null"] },
     "enforcement": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": ["mode", "actual_decision", "policy_decision"],
-          "properties": {
-            "mode": { "enum": ["enforce", "audit_only", "shadow_deny", "modify"] },
-            "actual_decision": { "enum": ["allow", "deny", "ask"] },
-            "policy_decision": { "enum": ["allow", "deny", "ask"] },
-            "reason": { "type": ["string", "null"] }
-          },
-          "additionalProperties": true
-        },
-        { "type": "null" }
-      ]
+      "description": "Deprecated / legacy-compat：历史存量 decision 载荷携带该字段（通常为 null），新版本不再产生；保留仅为通过 additionalProperties: false 校验存量数据。",
+      "deprecated": true,
+      "anyOf": [{ "type": "object" }, { "type": "null" }]
     },
     "effects": {
+      "description": "Deprecated / legacy-compat：历史存量 decision 载荷携带该字段（通常为空数组），新版本不再产生；保留仅为通过 additionalProperties: false 校验存量数据。",
+      "deprecated": true,
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["effect_type", "target", "description"],
-        "properties": {
-          "effect_type": { "enum": ["would_block", "patch", "audit", "quarantine"] },
-          "target": { "type": "string" },
-          "description": { "type": "string" },
-          "patch": { "type": ["object", "null"] }
-        },
-        "additionalProperties": true
-      }
+      "items": { "type": "object" }
     }
   },
   "additionalProperties": false
