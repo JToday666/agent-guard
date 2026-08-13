@@ -175,6 +175,22 @@ class MemoryChangeTransitionError(ValueError):
         super().__init__(f"{change_id}: {from_status} -> {to_status}")
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryTransitionResult:
+    """记忆变更状态转换的结构化结果。
+
+    change 为转换生效后的记录（applied=False 时为当前记录原样）；
+    applied 区分「本次调用真正执行了转换」与「已完成转换的幂等重放」，
+    服务层仅在 applied=True 时写入转换审计，消除并发落败方的重复入链；
+    previous_status 是存储层读到的转换前状态（权威值），服务层不得
+    再依赖更新前的陈旧读值。
+    """
+
+    change: MemoryGuardChange
+    applied: bool
+    previous_status: str
+
+
 class ProvenanceConflictError(ValueError):
     """Raised when a stable provenance ID is bound to conflicting facts."""
 
@@ -444,12 +460,13 @@ class ControlPlaneStore(Protocol):
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange:
+    ) -> MemoryTransitionResult:
         """按状态机推进记忆变更生命周期。
 
-        契约：不存在抛 KeyError；同态重复幂等返回当前状态；非法转换抛
-        MemoryChangeTransitionError；实现必须用前态条件更新，消除
-        read-modify-write 竞态。
+        契约：不存在抛 KeyError；同态重复幂等返回当前状态（applied=False）；
+        非法转换抛 MemoryChangeTransitionError；实现必须用前态条件更新，
+        消除 read-modify-write 竞态；返回结果携带 applied 与存储层读到的
+        previous_status，供服务层判定是否写入转换审计。
         """
         ...
 

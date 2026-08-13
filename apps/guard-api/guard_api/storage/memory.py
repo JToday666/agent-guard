@@ -38,6 +38,7 @@ from guard_api.storage.base import (
     AuditWindowQuery,
     EvaluationRunConflictError,
     MemoryChangeTransitionError,
+    MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
@@ -417,19 +418,23 @@ class MemoryControlPlaneStore:
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange:
+    ) -> MemoryTransitionResult:
         with self.memory_change_lock:
             current = self.memory_changes[change_id]
             if current.status == status:
                 # 同态重复转换为幂等重放，直接返回当前记录。
-                return current
+                return MemoryTransitionResult(
+                    change=current, applied=False, previous_status=current.status
+                )
             if not memory_change_can_transition(current.status, status):
                 raise MemoryChangeTransitionError(change_id, current.status, status)
             updated = current.model_copy(
                 update={"status": status, "updated_at": utc_now_iso()}
             )
             self.memory_changes[change_id] = updated
-            return updated
+            return MemoryTransitionResult(
+                change=updated, applied=True, previous_status=current.status
+            )
 
     def get_policy_snapshot(self) -> PolicyBundle | None:
         if self.policy_snapshot is None:

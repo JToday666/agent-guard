@@ -45,6 +45,7 @@ from guard_api.storage.base import (
     AuditWindowQuery,
     EvaluationRunConflictError,
     MemoryChangeTransitionError,
+    MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
     ProvenanceEndpointMissingError,
@@ -824,13 +825,15 @@ class PostgresControlPlaneStore:
 
     def update_memory_change_status(
         self, change_id: str, status: str
-    ) -> MemoryGuardChange:
+    ) -> MemoryTransitionResult:
         current = self.get_memory_change(change_id)
         if current is None:
             raise KeyError(change_id)
         if current.status == status:
             # 同态重复转换为幂等重放，直接返回当前记录。
-            return current
+            return MemoryTransitionResult(
+                change=current, applied=False, previous_status=current.status
+            )
         if not memory_change_can_transition(current.status, status):
             raise MemoryChangeTransitionError(change_id, current.status, status)
         updated = current.model_copy(
@@ -851,13 +854,17 @@ class PostgresControlPlaneStore:
         with self._write_session() as session:
             applied = session.execute(stmt).rowcount == 1
         if applied:
-            return updated
+            return MemoryTransitionResult(
+                change=updated, applied=True, previous_status=current.status
+            )
         # 并发转换已改变前态；重读区分幂等重放与非法转换。
         latest = self.get_memory_change(change_id)
         if latest is None:
             raise KeyError(change_id)
         if latest.status == status:
-            return latest
+            return MemoryTransitionResult(
+                change=latest, applied=False, previous_status=latest.status
+            )
         raise MemoryChangeTransitionError(change_id, latest.status, status)
 
     def get_policy_snapshot(self) -> PolicyBundle | None:

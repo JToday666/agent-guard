@@ -55,18 +55,19 @@ class MemoryGuardService:
     def _transition(
         self, change_id: str, target_status: str, *, operator_id: str
     ) -> MemoryGuardChange:
-        previous = self.store.get_memory_change(change_id)
-        if previous is None:
-            raise KeyError(change_id)
         # 状态机与并发安全由存储层的前态条件更新保证；非法转换在此抛出。
-        updated = self.store.update_memory_change_status(change_id, target_status)
-        if previous.status != target_status:
-            self._record_transition_audit(previous, updated, operator_id=operator_id)
-        return updated
+        # 结构化结果携带存储层读到的权威前态：仅在本次调用真正执行了
+        # 转换（applied=True）时入链审计，幂等重放与并发落败方不再重复写入。
+        result = self.store.update_memory_change_status(change_id, target_status)
+        if result.applied:
+            self._record_transition_audit(
+                result.previous_status, result.change, operator_id=operator_id
+            )
+        return result.change
 
     def _record_transition_audit(
         self,
-        previous: MemoryGuardChange,
+        previous_status: str,
         updated: MemoryGuardChange,
         *,
         operator_id: str,
@@ -75,12 +76,14 @@ class MemoryGuardService:
         if self.audit_service is None:
             return
         self.audit_service.submit(
-            _memory_change_transition_audit(previous, updated, operator_id=operator_id)
+            _memory_change_transition_audit(
+                previous_status, updated, operator_id=operator_id
+            )
         )
 
 
 def _memory_change_transition_audit(
-    previous: MemoryGuardChange,
+    from_status: str,
     updated: MemoryGuardChange,
     *,
     operator_id: str,
@@ -95,16 +98,16 @@ def _memory_change_transition_audit(
         event_type="memory_change_transition",
         summary=(
             f"Memory change {updated.change_id} transitioned "
-            f"{previous.status} -> {updated.status}"
+            f"{from_status} -> {updated.status}"
         ),
         decision=decision,
         risk_score=0,
         severity="low",
         blocked=decision == "deny",
-        reason=f"memory_change:{previous.status}->{updated.status}",
+        reason=f"memory_change:{from_status}->{updated.status}",
         links={"memory_change_id": updated.change_id},
         metadata={
-            "from_status": previous.status,
+            "from_status": from_status,
             "to_status": updated.status,
             "operator_id": operator_id,
         },

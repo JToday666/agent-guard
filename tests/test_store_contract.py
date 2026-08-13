@@ -1192,10 +1192,12 @@ def test_store_memory_change_legal_transitions(
     )
     store.create_memory_change(change)
 
-    updated = store.update_memory_change_status(change.change_id, to_status)
+    result = store.update_memory_change_status(change.change_id, to_status)
 
-    assert updated.status == to_status
-    assert updated.updated_at >= change.updated_at
+    assert result.applied is True
+    assert result.previous_status == from_status
+    assert result.change.status == to_status
+    assert result.change.updated_at >= change.updated_at
 
 
 @pytest.mark.parametrize(
@@ -1225,10 +1227,12 @@ def test_store_memory_change_same_status_repeat_is_idempotent(
     change = _memory_change_fixture(f"memchg_idem_{status}", status=status)
     store.create_memory_change(change)
 
-    updated = store.update_memory_change_status(change.change_id, status)
+    result = store.update_memory_change_status(change.change_id, status)
 
-    assert updated.status == status
-    assert updated.updated_at == change.updated_at
+    assert result.applied is False
+    assert result.previous_status == status
+    assert result.change.status == status
+    assert result.change.updated_at == change.updated_at
 
 
 def test_store_memory_change_update_missing_raises_key_error(store) -> None:
@@ -1245,7 +1249,7 @@ def test_store_memory_change_concurrent_transitions_stay_consistent(store) -> No
         try:
             return store.update_memory_change_status(
                 change.change_id, target_status
-            ).status
+            ).change.status
         except MemoryChangeTransitionError:
             return "conflict"
 
