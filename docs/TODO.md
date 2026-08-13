@@ -29,6 +29,17 @@
 - Python 发布入口收敛为 `aegis-agentguard-core`、`aegis-agentguard-api` 和
   `aegis-agentguard-cli`；Core 只维护 `agentguard_core` 公共导入面。
 
+## 评测门禁基线（PR-1）
+
+- 门禁脚本为 `scripts/core-metrics-gate.py`，评估保留集
+  `tests/fixtures/eval_gate/`（保留集不参与任何词表调优）；口径与
+  `scripts/core-rule-matrix.py` 对齐：`deny`/`ask` 视为拦截，攻击用例被拦截计为
+  拦截成功，benign 用例被拦截计为误报。
+- 基线（2026-08-13，dev @ 9883771 派生分支 feat/eval-regression-gate）：
+  攻击变形 30 例、benign 13 例；Recall=0.9667（29/30），FNR=0.0333，FPR=0.0（0/13）。
+- 已知漏拦：EG-AA-004（defamation 语义变形邮件未被拦截）。
+- 门禁默认阈值：`--min-recall 0.90`、`--max-fpr 0.05`，相对当前基线留有余量。
+
 ## 本轮明确冻结
 
 以下内容不在当前优化范围内，不应通过邻接重构间接改变：
