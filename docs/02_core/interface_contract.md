@@ -342,6 +342,14 @@ Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `
 审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。resolve 只允许从未过期的 pending 状态原子转换一次。
 审批响应只使用 `subject_id`、`subject_type`、`action_id` 和 `action_name` 表达主体与动作；不接受或返回工具专用别名。
 
+### 8.1 检测器失败语义
+
+单个检测器在评估中抛出异常时，`agentguard-core` 不外抛异常，而是将该检测器转换为一条结构化保守检测结果并参与既有聚合：
+
+- 失败即保守（fail-closed）：失败检测器产出 `decision="ask"`、`category="detector_failure"`，`rule_hits` 携带检测器标识（`rule_id` 形如 `detector_failure:<DetectorName>`）与异常类别；不提供任何 fail-open 配置。
+- 可审计且不外泄：完整异常堆栈仅进入内部日志（`exc_info`），不进入对外 `reason`、`rule_hits.evidence` 或任何返回字段；对外字段只包含检测器标识与异常类别。
+- 隔离评估：单个检测器失败不影响其他检测器继续评估；失败证据与正常命中一起进入 `build_guard_decision` 聚合，`deny` 优先的聚合语义不变。
+
 ## 9. AuditEvent
 
 AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
