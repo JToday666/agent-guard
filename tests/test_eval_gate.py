@@ -50,3 +50,13 @@ def test_eval_gate_rejects_missing_dataset(tmp_path: Path) -> None:
 
     assert completed.returncode == 2
     assert "eval gate dataset not found" in completed.stderr
+
+
+def test_eval_gate_rejects_non_object_jsonl_line(tmp_path: Path) -> None:
+    dataset = tmp_path / "non_object.jsonl"
+    dataset.write_text("[1, 2, 3]\n", encoding="utf-8")
+
+    completed = _run_gate("--attack-dataset", str(dataset))
+
+    assert completed.returncode == 2
+    assert "non_object.jsonl:1 case must be a JSON object" in completed.stderr

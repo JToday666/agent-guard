@@ -80,6 +80,8 @@ def load_cases(path: Path) -> list[dict[str, Any]]:
             if not line:
                 continue
             case = json.loads(line)
+            if not isinstance(case, dict):
+                raise ValueError(f"{path}:{line_number} case must be a JSON object")
             case["_line_number"] = line_number
             if not case.get("case_id") or not isinstance(case.get("event"), dict):
                 raise ValueError(
