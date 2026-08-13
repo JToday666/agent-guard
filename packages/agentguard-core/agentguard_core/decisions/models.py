@@ -44,6 +44,16 @@ class ApprovalIntent(BaseModel):
 
 
 class GuardDecision(BaseModel):
+    """Stateless Core 对单个评估请求的判定结果。
+
+    检测器失败语义：当某个检测器在评估中抛出异常时，``GuardEngine``
+    不会外抛异常，而是将其转换为保守检测结果并参与聚合：
+    ``decision="ask"``、``categories`` 含 ``detector_failure``，
+    ``rule_hits`` 携带检测器标识与异常类别。失败即保守，不提供
+    任何 fail-open 配置；异常详情不进入对外 ``reason``，仅留存于
+    内部日志。其他检测器照常评估，deny 优先的聚合语义不变。
+    """
+
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
     risk_score: int = Field(ge=0, le=100)
@@ -223,11 +233,15 @@ class RuntimeApprovalEvidence(BaseModel):
             ).isoformat()
         if self.status == "not_required":
             if self.approval_id is not None or self.decision is not None:
-                raise ValueError("not_required approval evidence cannot name an approval")
+                raise ValueError(
+                    "not_required approval evidence cannot name an approval"
+                )
             return self
         if self.status in {"pending", "allowed", "denied", "expired"}:
             if self.approval_id is None:
-                raise ValueError(f"{self.status} approval evidence requires approval_id")
+                raise ValueError(
+                    f"{self.status} approval evidence requires approval_id"
+                )
         if self.status == "allowed" and self.decision != "allow_once":
             raise ValueError("allowed approval evidence requires allow_once")
         if self.status == "denied" and self.decision != "deny":
@@ -252,6 +266,7 @@ class RuntimeOutcomeReceipt(AuditEvent):
 
     model_config = ConfigDict(extra="forbid")
 
+    # fmt: off
     audit_id: str = Field(min_length=1, max_length=256)  # pyright: ignore[reportGeneralTypeIssues]
     schema_version: Literal["0.4"] = "0.4"
     record_type: Literal["runtime_outcome"] = "runtime_outcome"
@@ -270,6 +285,7 @@ class RuntimeOutcomeReceipt(AuditEvent):
     latency_ms: Literal[None] = None
     metadata: RuntimeOutcomeMetadata  # pyright: ignore[reportGeneralTypeIssues]
     evidence: RuntimeOutcomeEvidence  # pyright: ignore[reportGeneralTypeIssues]
+    # fmt: on
 
     @model_validator(mode="after")
     def _validate_receipt(self) -> "RuntimeOutcomeReceipt":
