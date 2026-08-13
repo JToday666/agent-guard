@@ -17,6 +17,7 @@ from agentguard_core import (
     AuditEvent,
     GuardDecision,
     GuardEvent,
+    MemoryGuardChange,
     PolicyBundle,
     RuleOverride,
     ToolProfile,
@@ -46,7 +47,7 @@ from guard_api.storage.postgres import (
     PostgresControlPlaneStore,
     _compat_strip_legacy_policy_bundle_fields,
 )
-from tests.support.auth import memory_store_with_adapter
+from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 
 _AUDIT_CHECKPOINT_TEST_KEY = "Y2hlY2twb2ludC10ZXN0LWtleS1tYXRlcmlhbC0zMmI"
 
@@ -2618,6 +2619,143 @@ def test_memory_change_propose_binds_caller_identity() -> None:
     assert quarantined.status_code == 200
     assert quarantined.json()["status"] == "quarantined"
     assert quarantined.json()["source_trust"] == "unknown"
+
+
+def test_memory_change_lifecycle_state_machine_audit_chain() -> None:
+    store = memory_store_with_adapter()
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer adapter-secret"}
+
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers=headers,
+        json={
+            "trace_id": "trace_memory_sm",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "source_trust": "trusted",
+        },
+    )
+    assert proposed.status_code == 200
+    change_id = proposed.json()["change_id"]
+    assert proposed.json()["status"] == "proposed"
+
+    # 合法转换 proposed -> committed -> rolled_back；同态重复幂等返回当前状态。
+    committed = client.post(f"/v1/memory/changes/{change_id}/commit", headers=headers)
+    assert committed.status_code == 200
+    assert committed.json()["status"] == "committed"
+    repeated = client.post(f"/v1/memory/changes/{change_id}/commit", headers=headers)
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "committed"
+    rolled_back = client.post(
+        f"/v1/memory/changes/{change_id}/rollback", headers=headers
+    )
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["status"] == "rolled_back"
+
+    # 同态重复幂等返回当前状态；非法跨态转换返回 409 与明确错误码。
+    idempotent = client.post(
+        f"/v1/memory/changes/{change_id}/rollback", headers=headers
+    )
+    assert idempotent.status_code == 200
+    assert idempotent.json()["status"] == "rolled_back"
+    conflict = client.post(f"/v1/memory/changes/{change_id}/commit", headers=headers)
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "MEMORY_CHANGE_TRANSITION_CONFLICT"
+
+    missing = client.post("/v1/memory/changes/memchg_missing/commit", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "MEMORY_CHANGE_NOT_FOUND"
+
+    # 转换入链：仅实际转换写入最小化 config_audit 事件，链完整性验证通过。
+    transitions = [
+        event
+        for event in store.audit_events
+        if event.event_type == "memory_change_transition"
+    ]
+    assert [
+        (event.metadata["from_status"], event.metadata["to_status"])
+        for event in transitions
+    ] == [("proposed", "committed"), ("committed", "rolled_back")]
+    assert all(event.record_type == "config_audit" for event in transitions)
+    assert all(
+        event.metadata["operator_id"] == "cred_adapter_main" for event in transitions
+    )
+    assert all(event.links["memory_change_id"] == change_id for event in transitions)
+    assert store.verify_audit_integrity().valid
+
+
+def test_memory_change_lifecycle_rejects_mismatched_runtime_identity() -> None:
+    store = memory_store_with_adapter()
+    add_adapter_credential(
+        store,
+        token="other-secret",
+        runtime="openclaw",
+        agent_id="side",
+        principal_id="cred_adapter_side",
+    )
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    proposed = client.post(
+        "/v1/memory/changes/propose",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json={
+            "trace_id": "trace_memory_owner",
+            "namespace": "agent",
+            "key": "preference",
+            "value_preview": "benign note",
+            "source_trust": "trusted",
+        },
+    )
+    assert proposed.status_code == 200
+    change_id = proposed.json()["change_id"]
+
+    # 其他 runtime 身份不得处置不属于自己的变更。
+    denied = client.post(
+        f"/v1/memory/changes/{change_id}/commit",
+        headers={"Authorization": "Bearer other-secret"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "RUNTIME_IDENTITY_MISMATCH"
+    unchanged = store.get_memory_change(change_id)
+    assert unchanged is not None
+    assert unchanged.status == "proposed"
+
+
+def test_memory_change_lifecycle_rejects_unbound_legacy_change() -> None:
+    store = memory_store_with_adapter()
+    legacy = MemoryGuardChange(
+        change_id="memchg_legacy_unbound",
+        trace_id="trace_memory_legacy",
+        namespace="agent",
+        key="preference",
+    )
+    store.create_memory_change(legacy)
+    app = create_app(
+        store=store,
+        settings=GuardApiSettings(control_token="control-secret"),
+    )
+    client = TestClient(app)
+
+    # 历史存量记录无身份绑定，无法证明归属，一律拒绝。
+    denied = client.post(
+        "/v1/memory/changes/memchg_legacy_unbound/commit",
+        headers={"Authorization": "Bearer adapter-secret"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMORY_CHANGE_IDENTITY_UNBOUND"
+    unchanged = store.get_memory_change("memchg_legacy_unbound")
+    assert unchanged is not None
+    assert unchanged.status == "proposed"
 
 
 def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_endpoints() -> (
