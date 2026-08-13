@@ -27,23 +27,35 @@ from .policies import PolicyBundle
 
 
 class GuardEngine:
+    """Stateless evaluation engine.
+
+    Detector selection semantics:
+    - ``detectors=None``（默认）：加载内置默认检测器列表。
+    - ``detectors=[]``（显式空列表）：不运行任何检测器，评估仅产出
+      无检测结果的基线决策。
+    """
+
     def __init__(self, *, detectors: list[Detector] | None = None) -> None:
-        self.detectors = detectors or [
-            SensitiveResourceDetector(),
-            McpToolHijackingDetector(),
-            FileExfiltrationDetector(),
-            ToolHijackDetector(),
-            UnprofiledToolResourceDetector(),
-            OutboundDetector(),
-            AgentAbuseDetector(),
-            TaskMismatchDetector(),
-            PromptInjectionDetector(),
-            JailbreakDetector(),
-            CredentialExposureDetector(),
-            CodeExecDetector(),
-            MemoryPoisoningDetector(),
-            EnvironmentPoisoningDetector(),
-        ]
+        self.detectors = (
+            detectors
+            if detectors is not None
+            else [
+                SensitiveResourceDetector(),
+                McpToolHijackingDetector(),
+                FileExfiltrationDetector(),
+                ToolHijackDetector(),
+                UnprofiledToolResourceDetector(),
+                OutboundDetector(),
+                AgentAbuseDetector(),
+                TaskMismatchDetector(),
+                PromptInjectionDetector(),
+                JailbreakDetector(),
+                CredentialExposureDetector(),
+                CodeExecDetector(),
+                MemoryPoisoningDetector(),
+                EnvironmentPoisoningDetector(),
+            ]
+        )
 
     def evaluate(
         self, event: GuardEvent, policies: PolicyBundle | None = None
