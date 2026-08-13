@@ -188,9 +188,11 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
     assert audit.links["event_id"] == f"evt_shape_{run_id}"
     assert "decision_id" in audit.links
     assert audit.metadata["request_digest"] == canonical_sha256(
-        GuardEvent.model_validate(
-            _guard_event_payload(event_id=f"evt_shape_{run_id}", trace_id=trace_id)
-        ).model_dump(mode="json")
+        evaluation_service_module.canonical_request_dump(
+            GuardEvent.model_validate(
+                _guard_event_payload(event_id=f"evt_shape_{run_id}", trace_id=trace_id)
+            )
+        )
     )
     assert audit.metadata["policy_digest"] == evidence["policy"]["canonical_digest"]
     assert "policy_source" not in audit.metadata

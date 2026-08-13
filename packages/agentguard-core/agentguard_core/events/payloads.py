@@ -17,6 +17,11 @@ class SecurityContext(BaseModel):
     source_trust: str = "trusted"
     channel: str | None = None
     sender_id: str | None = None
+    # 会话身份字段：OpenClaw 插件与 LangGraph adapter 已作为会话关联信息发送，
+    # 收入正式契约以避免它们停留在 extra 通道（为 extra=forbid 翻转做准备）。
+    conversation_id: str | None = None
+    session_key: str | None = None
+    session_id: str | None = None
     run_id: str | None = None
     agent_id: str = "main"
     current_step: str = "before_tool"

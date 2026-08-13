@@ -31,6 +31,7 @@ from guard_api.models import (
     LlmApprovalReviewInput,
 )
 from guard_api.services import MetricService, PolicyService
+from guard_api.services.evaluation import canonical_request_dump
 from guard_api.services.evidence import build_audit_event
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import (
@@ -3483,6 +3484,109 @@ def test_evaluate_request_digest_is_deterministic() -> None:
     assert (
         first_store.audit_events[0].metadata["request_digest"]
         == second_store.audit_events[0].metadata["request_digest"]
+    )
+
+
+def test_canonical_request_dump_strips_unset_session_identity_fields() -> None:
+    event = GuardEvent.model_validate(_guard_event_payload(event_id="evt_dump_strip"))
+
+    dump = canonical_request_dump(event)
+    full_dump = event.model_dump(mode="json")
+
+    context_dump = dump["security_context"]
+    assert "session_id" not in context_dump
+    assert "session_key" not in context_dump
+    assert "conversation_id" not in context_dump
+    # 未显式携带新字段时，规范化 dump 与字段增补前的全量 dump 形状完全一致
+    # （即当前全量 dump 剔除新增默认键），保证存量事件 digest 口径不变。
+    expected_context = {
+        key: value
+        for key, value in full_dump["security_context"].items()
+        if key not in {"session_id", "session_key", "conversation_id"}
+    }
+    assert dump == {**full_dump, "security_context": expected_context}
+
+
+def test_canonical_request_dump_keeps_explicit_session_identity_fields() -> None:
+    payload = _guard_event_payload(event_id="evt_dump_keep")
+    payload["security_context"] = {
+        **payload["security_context"],
+        "session_id": "sess_001",
+        "session_key": None,
+    }
+    event = GuardEvent.model_validate(payload)
+
+    dump = canonical_request_dump(event)
+    full_dump = event.model_dump(mode="json")
+
+    # 显式携带的字段（含显式 null）仍参与 digest。
+    assert dump["security_context"]["session_id"] == "sess_001"
+    assert dump["security_context"]["session_key"] is None
+    # 未显式携带的字段仍被剔除。
+    assert "conversation_id" not in dump["security_context"]
+    expected_context = {
+        key: value
+        for key, value in full_dump["security_context"].items()
+        if key != "conversation_id"
+    }
+    assert dump == {**full_dump, "security_context": expected_context}
+
+
+def test_evaluate_replay_of_legacy_shape_event_hits_idempotency() -> None:
+    # 旧格式事件（不携带会话身份三字段）重放必须命中幂等而非 conflict，
+    # 且 digest 与字段增补前的形状（不含新增默认键）口径完全一致。
+    client, store = _evaluate_client_and_store()
+    payload = _guard_event_payload(event_id="evt_legacy_shape_replay")
+    expected_digest = canonical_sha256(
+        canonical_request_dump(GuardEvent.model_validate(payload))
+    )
+
+    first = _post_evaluate(client, payload)
+    assert first.status_code == 200
+    assert store.audit_events[0].metadata["request_digest"] == expected_digest
+
+    second = _post_evaluate(client, payload)
+    assert second.status_code == 200
+    assert (
+        second.json()["decision"]["decision_id"]
+        == first.json()["decision"]["decision_id"]
+    )
+    assert len(store.audit_events) == 1
+
+
+def test_evaluate_request_digest_includes_explicit_session_identity_fields() -> None:
+    client, store = _evaluate_client_and_store()
+    payload = _guard_event_payload(event_id="evt_session_identity_digest")
+    payload["security_context"] = {
+        **payload["security_context"],
+        "session_id": "sess_001",
+        "session_key": "openclaw:main",
+        "conversation_id": "conv_001",
+    }
+
+    response = _post_evaluate(client, payload)
+    assert response.status_code == 200
+
+    digest = store.audit_events[0].metadata["request_digest"]
+    expected_digest = canonical_sha256(
+        canonical_request_dump(GuardEvent.model_validate(payload))
+    )
+    assert digest == expected_digest
+    # 新字段必须实际影响 digest：与不携带三字段的同内容事件不同。
+    baseline_digest = canonical_sha256(
+        canonical_request_dump(
+            GuardEvent.model_validate(
+                _guard_event_payload(event_id="evt_session_identity_digest")
+            )
+        )
+    )
+    assert digest != baseline_digest
+
+    replay = _post_evaluate(client, payload)
+    assert replay.status_code == 200
+    assert (
+        replay.json()["decision"]["decision_id"]
+        == response.json()["decision"]["decision_id"]
     )
 
 

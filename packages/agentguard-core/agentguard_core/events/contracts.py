@@ -48,6 +48,10 @@ class RawPayloadContract:
 
 _RAW_PAYLOAD_CONTRACTS: Mapping[str, RawPayloadContract] = MappingProxyType(
     {
+        "tool_call_proposed": RawPayloadContract(
+            payload_required_fields=("tool", "arguments", "derived_resources"),
+            nested_required_fields=MappingProxyType({"tool": ("name",)}),
+        ),
         "context_assembled": RawPayloadContract(
             payload_required_fields=("sources", "will_enter_context", "sanitized"),
             nested_required_fields=MappingProxyType(
