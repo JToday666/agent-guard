@@ -207,6 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set OpenClaw install root
+        shell: bash
         run: echo "AGENTGUARD_OPENCLAW_ROOT=${RUNNER_TEMP}/openclaw-${{ matrix.openclaw }}" >> "$GITHUB_ENV"
 
       - name: Set up pnpm
