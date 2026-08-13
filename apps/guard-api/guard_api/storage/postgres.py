@@ -8,11 +8,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, desc, func, select, text, update
+from sqlalchemy import CursorResult, create_engine, desc, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -873,7 +873,8 @@ class PostgresControlPlaneStore:
             )
         )
         with self._write_session() as session:
-            applied = session.execute(stmt).rowcount == 1
+            result = cast("CursorResult[Any]", session.execute(stmt))
+            applied = result.rowcount == 1
         if applied:
             return MemoryTransitionResult(
                 change=updated, applied=True, previous_status=current.status
