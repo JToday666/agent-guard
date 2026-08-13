@@ -175,6 +175,38 @@ class MemoryChangeTransitionError(ValueError):
         super().__init__(f"{change_id}: {from_status} -> {to_status}")
 
 
+class MemoryChangeAlreadyExistsError(ValueError):
+    """同 change_id 的记忆变更已存在且本次提交内容不一致。
+
+    create_memory_change 采用「存在即拒绝」语义：重复提交仅在记录
+    完全一致时幂等返回既有记录，否则抛本异常，防止以重复 propose
+    覆盖提议方 principal/status/内容字段。
+    """
+
+    def __init__(self, change_id: str) -> None:
+        self.change_id = change_id
+        super().__init__(change_id)
+
+
+def memory_change_is_replay_match(
+    existing: MemoryGuardChange, incoming: MemoryGuardChange
+) -> bool:
+    """判定重复 propose 是否构成幂等重放。
+
+    对齐审计 §12.3 重放语义：除 created_at/updated_at 时间戳外全字段
+    一致（含 principal_id、status、内容字段）才视为同一提议的重放；
+    任何字段差异（含提议方不同）都判为冲突并拒绝。
+    """
+
+    return existing.model_dump(
+        mode="json",
+        exclude={
+            "created_at",
+            "updated_at",
+        },
+    ) == incoming.model_dump(mode="json", exclude={"created_at", "updated_at"})
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryTransitionResult:
     """记忆变更状态转换的结构化结果。
@@ -463,7 +495,15 @@ class ControlPlaneStore(Protocol):
 
     def list_action_critic_reviews(self, trace_id: str) -> list[ActionCriticReview]: ...
 
-    def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange: ...
+    def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        """创建记忆变更记录（存在即拒绝语义）。
+
+        契约：change_id 不存在则插入并返回；同 change_id 已存在且与本次
+        提交完全一致（见 memory_change_is_replay_match）则幂等返回既有记录，
+        否则抛 MemoryChangeAlreadyExistsError。实现不得以 upsert 覆盖
+        既有记录的 principal/status/内容字段。
+        """
+        ...
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None: ...
 

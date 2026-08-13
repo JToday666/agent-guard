@@ -37,6 +37,7 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
     MemoryTransitionResult,
     PolicyRevisionConflictError,
@@ -45,6 +46,7 @@ from guard_api.storage.base import (
     StoredBrowserSession,
     StoredLaunchCode,
     classify_audit_record_type,
+    memory_change_is_replay_match,
     merge_provenance_edge,
     merge_provenance_node,
     parse_audit_timestamp,
@@ -448,7 +450,13 @@ class MemoryControlPlaneStore:
         return sorted(reviews, key=lambda review: (review.created_at, review.review_id))
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        # 存在即拒绝：锁内判定，绝不覆盖既有记录；完全一致才幂等返回。
         with self.memory_change_lock:
+            existing = self.memory_changes.get(change.change_id)
+            if existing is not None:
+                if memory_change_is_replay_match(existing, change):
+                    return existing
+                raise MemoryChangeAlreadyExistsError(change.change_id)
             self.memory_changes[change.change_id] = change
             return change
 

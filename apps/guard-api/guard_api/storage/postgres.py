@@ -44,6 +44,7 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
     MemoryTransitionResult,
     PolicyRevisionConflictError,
@@ -52,6 +53,7 @@ from guard_api.storage.base import (
     StoredBrowserSession,
     StoredLaunchCode,
     classify_audit_record_type,
+    memory_change_is_replay_match,
     merge_provenance_edge,
     merge_provenance_node,
     parse_audit_timestamp,
@@ -811,28 +813,39 @@ class PostgresControlPlaneStore:
         return [ActionCriticReview.model_validate(row) for row in rows]
 
     def create_memory_change(self, change: MemoryGuardChange) -> MemoryGuardChange:
+        # 存在即拒绝：on_conflict_do_nothing 绝不覆盖既有记录，
+        # 以 rowcount 判定插入是否生效，冲突时回读比对。
         payload = change.model_dump(mode="json")
-        stmt = pg_insert(memory_guard_changes).values(
-            change_id=change.change_id,
-            trace_id=change.trace_id,
-            namespace=change.namespace,
-            key=change.key,
-            status=change.status,
-            payload_json=payload,
-            created_at=change.created_at,
-            updated_at=change.updated_at,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[memory_guard_changes.c.change_id],
-            set_={
-                "status": stmt.excluded.status,
-                "payload_json": stmt.excluded.payload_json,
-                "updated_at": stmt.excluded.updated_at,
-            },
+        stmt = (
+            pg_insert(memory_guard_changes)
+            .values(
+                change_id=change.change_id,
+                trace_id=change.trace_id,
+                namespace=change.namespace,
+                key=change.key,
+                status=change.status,
+                payload_json=payload,
+                created_at=change.created_at,
+                updated_at=change.updated_at,
+            )
+            .on_conflict_do_nothing(index_elements=[memory_guard_changes.c.change_id])
         )
         with self._write_session() as session:
-            session.execute(stmt)
-        return change
+            result = cast("CursorResult[Any]", session.execute(stmt))
+            inserted = result.rowcount == 1
+        if inserted:
+            return change
+        # 同 change_id 已存在：经 _read_session 回读（汇入活动事务时可见
+        # 同事务内未提交写入），完全一致视为幂等重放，否则拒绝。
+        read_stmt = select(memory_guard_changes.c.payload_json).where(
+            memory_guard_changes.c.change_id == change.change_id
+        )
+        with self._read_session() as session:
+            existing_payload = session.execute(read_stmt).scalar_one()
+        existing = MemoryGuardChange.model_validate(existing_payload)
+        if memory_change_is_replay_match(existing, change):
+            return existing
+        raise MemoryChangeAlreadyExistsError(change.change_id)
 
     def get_memory_change(self, change_id: str) -> MemoryGuardChange | None:
         stmt = select(memory_guard_changes.c.payload_json).where(
