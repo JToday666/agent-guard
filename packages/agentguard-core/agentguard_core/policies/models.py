@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..decisions import EnforcementMode, RuleOverrideDecision
+from ..decisions import RuleOverrideDecision
 
 SUPPORTED_POLICY_RULE_IDS = frozenset(
     {
@@ -355,7 +355,6 @@ class PolicyBundle(BaseModel):
             "entity_override",
         ]
     )
-    default_enforcement_mode: EnforcementMode = "enforce"
     allowed_email_domains: list[str] = Field(
         default_factory=lambda: ["agentguard.local"]
     )

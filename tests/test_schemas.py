@@ -256,7 +256,8 @@ def test_core_protocol_keeps_terminal_event_lifecycle_and_decision_enum_compatib
     assert decisions == {"allow", "deny", "ask"}
     assert set(decision_schema["properties"]["decision"]["enum"]) == decisions
     assert "shadow_deny" not in decision_schema["properties"]["decision"]["enum"]
-    assert "shadow_deny" in decision_schema["properties"]["enforcement"]["anyOf"][0]["properties"]["mode"]["enum"]
+    assert "enforcement" not in decision_schema["properties"]
+    assert "effects" not in decision_schema["properties"]
 
 
 def test_audit_event_allows_forward_compatible_extensions() -> None:

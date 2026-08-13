@@ -35,37 +35,7 @@
         { "type": "null" }
       ]
     },
-    "latency_ms": { "type": ["integer", "null"] },
-    "enforcement": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": ["mode", "actual_decision", "policy_decision"],
-          "properties": {
-            "mode": { "enum": ["enforce", "audit_only", "shadow_deny", "modify"] },
-            "actual_decision": { "enum": ["allow", "deny", "ask"] },
-            "policy_decision": { "enum": ["allow", "deny", "ask"] },
-            "reason": { "type": ["string", "null"] }
-          },
-          "additionalProperties": true
-        },
-        { "type": "null" }
-      ]
-    },
-    "effects": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["effect_type", "target", "description"],
-        "properties": {
-          "effect_type": { "enum": ["would_block", "patch", "audit", "quarantine"] },
-          "target": { "type": "string" },
-          "description": { "type": "string" },
-          "patch": { "type": ["object", "null"] }
-        },
-        "additionalProperties": true
-      }
-    }
+    "latency_ms": { "type": ["integer", "null"] }
   },
   "additionalProperties": false
 }

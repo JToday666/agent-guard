@@ -8,8 +8,6 @@ from agentguard_core import (
     AuditIntegrityMetadata,
     ConfigAuditEvent,
     ConfigAuditFinding,
-    DecisionEffect,
-    DecisionEnforcement,
     GuardDecision,
     GuardEvent,
     MemoryGuardChange,
@@ -92,37 +90,30 @@ def _tool_event(*, trace_id: str = "trace_p2", source_trust: str = "untrusted") 
     )
 
 
-def test_decision_enforcement_is_additive_and_keeps_legacy_decision() -> None:
+def test_guard_decision_has_no_enforcement_or_effects_skeletons() -> None:
     decision = GuardDecision(
         decision="allow",
         risk_score=90,
         severity="high",
         categories=["tool_hijack"],
         rule_hits=[],
-        reason="Shadow policy would deny, but compatibility keeps the top-level decision allow.",
+        reason="Decision keeps only the landed top-level fields.",
         approval_intent=None,
-        enforcement=DecisionEnforcement(
-            mode="shadow_deny",
-            actual_decision="allow",
-            policy_decision="deny",
-            reason="Shadow mode is enabled for this policy.",
-        ),
-        effects=[
-            DecisionEffect(
-                effect_type="would_block",
-                target="tool_call:call_p2",
-                description="Would block sensitive private token access.",
-            )
-        ],
     )
 
     dumped = decision.model_dump(mode="json")
 
     assert dumped["decision"] == "allow"
-    assert dumped["enforcement"]["mode"] == "shadow_deny"
-    assert dumped["enforcement"]["policy_decision"] == "deny"
-    assert dumped["effects"][0]["effect_type"] == "would_block"
+    assert "enforcement" not in dumped
+    assert "effects" not in dumped
     assert decision.blocked is False
+    legacy_payload = dict(
+        dumped,
+        enforcement={"mode": "shadow_deny"},
+        effects=[{"effect_type": "would_block"}],
+    )
+    roundtrip = GuardDecision.model_validate(legacy_payload)
+    assert roundtrip.decision == "allow"
 
 
 def test_domain_models_roundtrip() -> None:
