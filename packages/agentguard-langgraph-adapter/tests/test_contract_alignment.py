@@ -16,9 +16,9 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from agentguard_langgraph_adapter.config import AgentGuardLangGraphConfig  # noqa: E402
 from agentguard_langgraph_adapter.core_client import _guard_api_v03_event  # noqa: E402
-from agentguard_langgraph_adapter.langgraph_adapter import (
+from agentguard_langgraph_adapter.langgraph_adapter import (  # noqa: E402
     LangGraphAdapter,
-)  # noqa: E402
+)
 from agentguard_core import GuardEvent  # noqa: E402
 from agentguard_core.events.payloads import (  # noqa: E402
     ContextBuildPayload,
