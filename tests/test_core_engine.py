@@ -11,6 +11,7 @@ from agentguard_core import (
     MessageSendPayload,
     ModelCallPayload,
     PolicyBundle,
+    RuleHit,
     RuleOverride,
     SecurityContext,
     ToolCallPayload,
@@ -19,6 +20,8 @@ from agentguard_core import (
     ToolResultPayload,
     evaluate,
 )
+from agentguard_core.decisions import DetectionResult
+from agentguard_core.detectors import Detector
 from agentguard_core.events import derive_resources
 
 
@@ -2829,3 +2832,78 @@ def test_none_detectors_load_default_detector_list() -> None:
 
     assert decision.decision == "deny"
     assert decision.rule_hits[0].rule_id == "P001_sensitive_file_access"
+
+
+class _FailingDetector(Detector):
+    """Detector stub that always raises; secret text must not leak outward."""
+
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
+        raise ValueError("internal-detector-secret-detail")
+
+
+class _DenyDetector(Detector):
+    """Detector stub that always returns one synthetic deny result."""
+
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle
+    ) -> list[DetectionResult]:
+        return [
+            DetectionResult(
+                decision="deny",
+                risk_score=90,
+                category="test_deny",
+                rule_hit=RuleHit(
+                    rule_id="TEST_synthetic_deny",
+                    rule_name="Synthetic Deny",
+                    severity="high",
+                    evidence=["synthetic deny for aggregation test"],
+                ),
+                reason="synthetic deny for aggregation test",
+                severity="high",
+            )
+        ]
+
+
+def test_failing_detector_yields_conservative_ask_detector_failure() -> None:
+    engine = GuardEngine(detectors=[_FailingDetector()])
+
+    decision = engine.evaluate(_sensitive_file_event())
+
+    assert decision.decision == "ask"
+    assert "detector_failure" in decision.categories
+    assert [hit.rule_id for hit in decision.rule_hits] == [
+        "detector_failure:_FailingDetector"
+    ]
+    assert decision.approval_intent is not None
+
+
+def test_detector_failure_does_not_mask_deny_from_healthy_detector() -> None:
+    engine = GuardEngine(detectors=[_FailingDetector(), _DenyDetector()])
+
+    decision = engine.evaluate(_sensitive_file_event())
+
+    assert decision.decision == "deny"
+    assert [hit.rule_id for hit in decision.rule_hits] == [
+        "detector_failure:_FailingDetector",
+        "TEST_synthetic_deny",
+    ]
+    assert "detector_failure" in decision.categories
+    assert "test_deny" in decision.categories
+
+
+def test_detector_failure_reason_excludes_exception_details() -> None:
+    engine = GuardEngine(detectors=[_FailingDetector()])
+
+    decision = engine.evaluate(_sensitive_file_event())
+
+    # 异常类别可出现在对外 reason，但异常消息/堆栈细节不得外泄。
+    assert "ValueError" in decision.reason
+    assert "internal-detector-secret-detail" not in decision.reason
+    assert "Traceback" not in decision.reason
+    evidence_text = " ".join(
+        item for hit in decision.rule_hits for item in hit.evidence
+    )
+    assert "internal-detector-secret-detail" not in evidence_text
+    assert "Traceback" not in evidence_text
