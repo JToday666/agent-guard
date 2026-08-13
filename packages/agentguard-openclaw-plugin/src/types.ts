@@ -182,8 +182,6 @@ export type GuardDecision = {
   safe_message?: string | null;
   approval_intent?: JsonObject | null;
   latency_ms?: number | null;
-  enforcement?: JsonObject | null;
-  effects?: JsonObject[];
 };
 
 export type EvaluationApproval = {
