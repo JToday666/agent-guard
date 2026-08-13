@@ -44,6 +44,16 @@ class ApprovalIntent(BaseModel):
 
 
 class GuardDecision(BaseModel):
+    """Stateless Core 对单个评估请求的判定结果。
+
+    检测器失败语义：当某个检测器在评估中抛出异常时，``GuardEngine``
+    不会外抛异常，而是将其转换为保守检测结果并参与聚合：
+    ``decision="ask"``、``categories`` 含 ``detector_failure``，
+    ``rule_hits`` 携带检测器标识与异常类别。失败即保守，不提供
+    任何 fail-open 配置；异常详情不进入对外 ``reason``，仅留存于
+    内部日志。其他检测器照常评估，deny 优先的聚合语义不变。
+    """
+
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
     risk_score: int = Field(ge=0, le=100)
