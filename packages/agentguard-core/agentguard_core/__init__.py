@@ -35,7 +35,7 @@ from .events import (
     guard_event_raw_payload_contracts,
 )
 from .ids import new_id, utc_now_iso
-from .memory_guard import MemoryGuardChange
+from .memory_guard import MemoryGuardChange, memory_change_can_transition
 from .policies import (
     SUPPORTED_POLICY_RULE_IDS,
     PolicyBundle,
@@ -84,6 +84,7 @@ __all__ = [
     "evaluate",
     "evaluate_config_audit",
     "guard_event_raw_payload_contracts",
+    "memory_change_can_transition",
     "new_id",
     "utc_now_iso",
 ]

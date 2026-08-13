@@ -31,3 +31,20 @@ class MemoryGuardChange(BaseModel):
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# 生命周期状态机：仅允许下列前态 → 后态转换；
+# 同态重复转换幂等返回当前状态，其余转换一律拒绝。
+MEMORY_CHANGE_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "proposed": frozenset({"committed", "rejected"}),
+    "quarantined": frozenset({"committed", "rejected"}),
+    "committed": frozenset({"rolled_back"}),
+    "rejected": frozenset(),
+    "rolled_back": frozenset(),
+}
+
+
+def memory_change_can_transition(from_status: str, to_status: str) -> bool:
+    """判断记忆变更状态转换是否合法（同态重复不在此处判定）。"""
+
+    return to_status in MEMORY_CHANGE_ALLOWED_TRANSITIONS.get(from_status, frozenset())
