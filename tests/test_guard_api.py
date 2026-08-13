@@ -2866,9 +2866,7 @@ def test_memory_change_service_concurrent_commit_writes_single_transition_audit(
     )
 
     def attempt(_: int) -> str:
-        return service.commit(
-            change.change_id, operator_id="cred_adapter_main"
-        ).status
+        return service.commit(change.change_id, operator_id="cred_adapter_main").status
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         outcomes = list(executor.map(attempt, range(8)))

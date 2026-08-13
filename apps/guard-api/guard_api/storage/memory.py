@@ -248,9 +248,7 @@ class MemoryControlPlaneStore:
                 self.audit_events_by_id.clear()
                 self.audit_events_by_id.update(snapshot["audit_events_by_id"])
                 self.audit_ingested_at_by_id.clear()
-                self.audit_ingested_at_by_id.update(
-                    snapshot["audit_ingested_at_by_id"]
-                )
+                self.audit_ingested_at_by_id.update(snapshot["audit_ingested_at_by_id"])
                 self.provenance_nodes.clear()
                 self.provenance_nodes.update(snapshot["provenance_nodes"])
                 self.provenance_edges.clear()

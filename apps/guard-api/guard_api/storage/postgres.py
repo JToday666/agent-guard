@@ -345,9 +345,7 @@ class PostgresControlPlaneStore:
 
         del change_id
         if self._active_store_session.get() is not None:
-            raise RuntimeError(
-                "nested store write transactions are not supported"
-            )
+            raise RuntimeError("nested store write transactions are not supported")
         with self._session_factory.begin() as session:
             token = self._active_store_session.set(session)
             try:
