@@ -382,25 +382,66 @@ function killGateway(gateway) {
   }
 }
 
+/** 探测端口是否可连接（1s 超时）。 */
+function tryConnectPort(port, host = "127.0.0.1") {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(port, host);
+    const done = (ok) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+    setTimeout(() => done(false), 1000);
+  });
+}
+
+/**
+ * 等待 Gateway 子进程真正退出（SIGKILL 后 exitCode 落地有延迟）。
+ * 旧实例未退出就重启会让新实例与旧实例争抢同一端口。
+ */
+export async function waitForGatewayExit(
+  gateway,
+  timeoutMs,
+  { sleep: sleepFn = sleep, pollMs = 100 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!gateway || gateway.child.exitCode !== null) {
+      return true;
+    }
+    await sleepFn(pollMs);
+  }
+  return !gateway || gateway.child.exitCode !== null;
+}
+
+/**
+ * 等待端口完全释放（连接被拒绝）：确保重启后的新实例独占端口，
+ * 避免旧实例残留监听导致 verify 探测到已停止的旧实例。
+ */
+export async function waitForPortFree(
+  port,
+  timeoutMs,
+  { connect = tryConnectPort, sleep: sleepFn = sleep, pollMs = 250 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await connect(port))) {
+      return true;
+    }
+    await sleepFn(pollMs);
+  }
+  return !(await connect(port));
+}
+
 /** 等待前台 Gateway 就绪：TCP 端口可连后再留缓冲时间供插件加载。 */
 async function waitForGatewayReady(gateway, port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  const tryConnect = () =>
-    new Promise((resolve) => {
-      const socket = net.createConnection(port, "127.0.0.1");
-      const done = (ok) => {
-        socket.destroy();
-        resolve(ok);
-      };
-      socket.once("connect", () => done(true));
-      socket.once("error", () => done(false));
-      setTimeout(() => done(false), 1000);
-    });
   while (Date.now() < deadline) {
     if (gateway.child.exitCode !== null) {
       throw new Error(`Gateway 在就绪前退出：\n${gateway.tail()}`);
     }
-    if (await tryConnect()) {
+    if (await tryConnectPort(port)) {
       await sleep(3000);
       return;
     }
@@ -735,8 +776,18 @@ async function runSmoke(options) {
       }
 
       // Step 8 重启前台 Gateway 后执行安装器 verify 口径（多证据）
+      // 重启时序加固：先等旧实例真正退出且端口释放，再拉起新实例，
+      // 否则新实例会与旧实例争抢端口（触发 gateway 自身重启），verify 的
+      // inspect/status/heartbeat 证据会撞上启动/重启窗口（hookCount=0、
+      // runtime=stopped、无新鲜 heartbeat）。
       killGateway(gateway);
-      await sleep(500);
+      await waitForGatewayExit(gateway, 10_000);
+      if (!(await waitForPortFree(gatewayPort, 15_000))) {
+        record("gateway-restart-ready", false, {
+          detail: `端口 ${gatewayPort} 在旧实例退出后仍被占用：\n${gateway.tail()}`,
+        });
+        throw new Error(`重启 Gateway 前端口 ${gatewayPort} 未释放`);
+      }
       since = new Date();
       gateway = spawnGateway({
         binDir,
@@ -746,12 +797,45 @@ async function runSmoke(options) {
         secrets,
       });
       await waitForGatewayReady(gateway, gatewayPort, 60_000);
+      // 新实例的“完全就绪”以新鲜 heartbeat 为准（插件启动后立即提交一次，
+      // 其后每 60s 一次）：仅 TCP 可连时插件可能尚未加载完成，此时跑 verify
+      // 会拿到启动期旧状态。heartbeat 晚于 since，必然来自新实例。
+      const readiness = await waitForFreshHeartbeat({
+        fetchImpl: (...args) => fetch(...args),
+        baseUrl: guardApiBaseUrl,
+        controlToken,
+        since,
+        timeoutMs: options.heartbeatTimeoutMs,
+        pollMs: 1500,
+        sleep,
+      });
+      if (!readiness.fresh) {
+        record("gateway-restart-ready", false, {
+          last_heartbeat_at: readiness.lastHeartbeatAt,
+          error: readiness.error ?? null,
+          gateway_log_tail: gateway.tail(),
+        });
+        throw new Error("重启后的 Gateway 未在限时内提交新鲜 heartbeat，verify 就绪条件不满足");
+      }
+      record("gateway-restart-ready", true, {
+        last_heartbeat_at: readiness.lastHeartbeatAt,
+      });
       try {
         // 隔离 Gateway 中 CLI inspect 的 hookCount 需 hooks 被 agent runtime
         // 实际触发后才上报；executeVerify 已内置 inspect-only 失败时的
         // heartbeat 回退（hook_evidence_source=heartbeat-fallback），其余失败
         // 仍为硬门禁，这里不再重复实现回退判定。
-        const verifyPayload = await executeVerify(makeDeps({ record: false }));
+        // `now` 锚定重启前时刻 since：新实例的 heartbeat（晚于 since）已在
+        // verify 前到达，证据 3 直接复用；否则会等下一次 heartbeat（60s 间隔），
+        // 超出 verify 默认 45s 窗口造成误报“无新鲜 heartbeat”。
+        // heartbeatTimeoutMs 同步放宽，兼容极端慢启动下的下一次 heartbeat。
+        const verifyPayload = await executeVerify(
+          makeDeps({
+            record: false,
+            now: () => since,
+            heartbeatTimeoutMs: Math.max(options.heartbeatTimeoutMs, 90_000),
+          }),
+        );
         const fallback =
           verifyPayload.hook_evidence_source === "heartbeat-fallback";
         record("installer-verify", true, {
