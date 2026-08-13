@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -432,7 +433,10 @@ def _cmd_openclaw_verify(
     **__: Any,
 ) -> int:
     runner = run_command or _default_run_command
-    command = ["pnpm", "openclaw:plugin:verify"]
+    pnpm = shutil.which("pnpm") or shutil.which("pnpm.cmd")
+    if pnpm is None:
+        raise CliError("pnpm is required for openclaw verify", exit_code=2)
+    command = [pnpm, "openclaw:plugin:verify"]
     if args.record:
         command.extend(["--", "--record"])
     completed = runner(command)

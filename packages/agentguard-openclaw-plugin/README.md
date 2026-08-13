@@ -73,6 +73,27 @@ OpenClaw plugin config 示例：
 
 `agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`approvalTimeoutMs` 是唯一审批等待上限；插件会把 Guard API 请求超时、审批超时和轮询间隔一并计入阻断 hook 的 SDK timeout。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
 
+## Windows 支持
+
+Windows 上安装脚本使用 env provider 而非 file provider：OpenClaw 的 file secret provider 在无法可靠校验文件 ACL 时会 fail-closed 拒绝加载（Windows 没有 POSIX 0600 权限语义），导致插件无法注册。作为折中，安装脚本把 adapter token 写入 OpenClaw state 目录下的 `.env`（键 `AGENTGUARD_OPENCLAW_ADAPTER_TOKEN`），并在 `secrets.providers` 中配置 `source: "env"` 且 allowlist 只含该键。
+
+必须明确的边界：
+
+- 这是明文保管的折中方案，仅缓解「token 进入 OpenClaw 主配置 / 审计事件 / 日志」的问题，不宣称加密保管。
+- state `.env` 与仓库根 `.env` 一样应被视为敏感文件；卸载时会删除该键。
+- 后续可接入 DPAPI 或 Windows Credential Manager 的 exec provider 替换 env provider，接口契约（SecretRef）不变。
+
+安装、卸载与 verify 的口径与 POSIX 一致：config patch dry-run 先行、失败按基线整体回滚、卸载只移除 AgentGuard 自有引用；不再使用 `openclaw plugins install --link`。CI 的 `openclaw-runtime-smoke` 矩阵 job 在 ubuntu-latest 与 windows-latest 上对真实 OpenClaw 运行时执行同一门禁。
+
+## 运行时版本兼容
+
+`package.json` 的 peer range 为 `openclaw >=2026.6.6 <2027.0.0`，这是允许安装的声明范围，不表示范围内每个版本都已实测。当前经过真实运行时验证（安装、23 hooks 加载、heartbeat、verify、卸载清理）的版本仅为：
+
+- `2026.6.6`
+- `2026.7.1-2`
+
+CI `openclaw-runtime-smoke` 门禁即以上述两个版本 × ubuntu/windows 为矩阵运行；新增兼容版本时应同步扩展该矩阵与本文档。
+
 ## 验证
 
 在仓库根目录运行：
@@ -92,6 +113,16 @@ pnpm openclaw:plugin:e2e
 pnpm openclaw:plugin:reliability
 pnpm openclaw:plugin:uninstall
 ```
+
+`pnpm openclaw:plugin:verify` 采用多证据口径：`plugins inspect`（loaded、23 hooks、staging 指向）、Gateway RPC 连通、Guard API 新鲜 heartbeat、enforce 模式与版本范围一致性；任一证据缺失即失败。
+
+真实运行时兼容门禁（CI `openclaw-runtime-smoke` job）由 `scripts/openclaw-runtime-smoke.mjs` 驱动：工作区外安装指定版本 OpenClaw → 隔离 profile 事务化安装 → 随机端口真实前台 Gateway → 新鲜 heartbeat（loaded、23 hooks）→ 安装器 verify → 卸载与残留检查，输出脱敏 JSON 报告。本机隔离干跑示例：
+
+```bash
+node scripts/openclaw-runtime-smoke.mjs --openclaw-root <工作区外的 openclaw 安装根目录> --expect-version 2026.7.1-2
+```
+
+干跑只使用临时目录中的隔离 profile 与 `_test` 库，严禁指向真实 `~/.openclaw` profile 或用户正在运行的 Gateway。
 
 `pnpm openclaw:plugin:e2e` 会读取根 `.env`，触发关键 hook，并在系统临时目录输出 `agentguard-openclaw-e2e-report.json` 和 `agentguard-openclaw-e2e-acceptance-report.md`。
 

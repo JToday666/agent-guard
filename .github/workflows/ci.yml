@@ -188,3 +188,88 @@ jobs:
 
       - name: Test Dashboard real API mode
         run: pnpm --filter @agentguard/dashboard test:e2e:api
+
+  openclaw-runtime-smoke:
+    name: OpenClaw runtime smoke (${{ matrix.os }} / ${{ matrix.openclaw }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        openclaw: ["2026.6.6", "2026.7.1-2"]
+    env:
+      AGENTGUARD_OPENCLAW_ROOT: ${{ runner.temp }}/openclaw-${{ matrix.openclaw }}
+      AGENTGUARD_OPENCLAW_EXPECT_VERSION: ${{ matrix.openclaw }}
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+      AGENTGUARD_CONTROL_TOKEN: ci-smoke-control-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Cache npm (openclaw install)
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/.npm
+          key: npm-openclaw-${{ matrix.os }}-${{ matrix.openclaw }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            npm-openclaw-${{ matrix.os }}-${{ matrix.openclaw }}-
+
+      - name: Install OpenClaw outside workspace
+        run: npm install --prefix "$AGENTGUARD_OPENCLAW_ROOT" "openclaw@${{ matrix.openclaw }}" --ignore-scripts --no-audit --no-fund
+
+      - name: Start preinstalled PostgreSQL (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '123456';"
+          sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'" | grep -q 1 || sudo -u postgres createdb agent_guard_test
+
+      - name: Start preinstalled PostgreSQL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $service = Get-Service -Name "postgresql-*" | Select-Object -First 1
+          if (-not $service) { throw "未找到预装的 PostgreSQL 服务（postgresql-*）" }
+          Start-Service -Name $service.Name
+          $pgbin = (Get-Item (Get-Command psql.exe).Source).Directory.FullName
+          & "$pgbin\psql.exe" -U postgres -d postgres -c "ALTER USER postgres WITH PASSWORD '123456';"
+          $exists = & "$pgbin\psql.exe" -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'"
+          if ($exists -ne "1") { & "$pgbin\psql.exe" -U postgres -d postgres -c "CREATE DATABASE agent_guard_test;" }
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Build OpenClaw plugin
+        run: pnpm --filter @agentguard-ai/openclaw-plugin build
+
+      - name: Run OpenClaw runtime smoke gate
+        run: node scripts/openclaw-runtime-smoke.mjs --provision-env
+
+      - name: Upload smoke report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openclaw-runtime-smoke-${{ matrix.os }}-${{ matrix.openclaw }}
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/agentguard-openclaw-runtime-smoke-report.json
+            ${{ runner.temp }}/agentguard-openclaw-smoke-gateway.log

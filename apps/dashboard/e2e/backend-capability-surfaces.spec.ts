@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import { MOCK_OPENCLAW_RUNTIME_VERSION } from "../src/data/sources/mock-data-source.ts";
 
 test("evaluation page shows latest run, attack ASR and sample cases", async ({ page }) => {
   await page.goto("/evaluation");
@@ -43,7 +44,7 @@ test("system page shows OpenClaw verify status and config findings", async ({ pa
       .locator(".adapter-verify__headline")
       .getByText(`${OPENCLAW_REQUIRED_HOOK_COUNT} / ${OPENCLAW_REQUIRED_HOOK_COUNT}`),
   ).toBeVisible();
-  await expect(page.getByText("OpenClaw 2026.6.6")).toBeVisible();
+  await expect(page.getByText(MOCK_OPENCLAW_RUNTIME_VERSION)).toBeVisible();
   await expect(page.getByText("已启用原始会话访问")).toBeVisible();
   await expect(
     page.locator(".finding-list").getByText("agentguard-security").first(),

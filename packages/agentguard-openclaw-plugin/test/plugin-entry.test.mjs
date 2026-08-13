@@ -644,3 +644,200 @@ test("plugin entry carries trusted structured tool manifest provenance to tool c
     globalThis.fetch = previousFetch;
   }
 });
+
+test("full registration succeeds when a persisted SecretRef resolves to a runtime token", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const { setRuntimeConfigSnapshot, clearRuntimeConfigSnapshot } =
+    await import("openclaw/plugin-sdk/runtime-config-snapshot");
+  const secretRef = {
+    source: "env",
+    provider: "default",
+    id: "AGENTGUARD_ADAPTER_TOKEN",
+  };
+  setRuntimeConfigSnapshot(
+    {},
+    {
+      plugins: {
+        entries: {
+          "agentguard-security": { config: { adapterToken: secretRef } },
+        },
+      },
+    },
+  );
+
+  try {
+    const services = [];
+    const registered = [];
+
+    registerPlugin(plugin, {
+      registrationMode: "full",
+      runtime: { version: "2026.6.6" },
+      pluginConfig: {
+        guardApiBaseUrl: "https://guard.local",
+        adapterToken: "resolved-secret-value",
+      },
+      registerService(service) {
+        services.push(service);
+      },
+      on(name) {
+        registered.push(name);
+      },
+    });
+
+    assert.equal(services.length, 1);
+    assert.equal(services[0].id, "agentguard-security-runtime");
+    assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+  } finally {
+    clearRuntimeConfigSnapshot();
+  }
+});
+
+test("full registration fails closed for a persisted plaintext token without leaking it", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const { setRuntimeConfigSnapshot, clearRuntimeConfigSnapshot } =
+    await import("openclaw/plugin-sdk/runtime-config-snapshot");
+  const plaintextSentinel = "plaintext-sentinel-token-9f8e7d";
+  setRuntimeConfigSnapshot(
+    {},
+    {
+      plugins: {
+        entries: {
+          "agentguard-security": {
+            config: { adapterToken: plaintextSentinel },
+          },
+        },
+      },
+    },
+  );
+
+  try {
+    const services = [];
+    const registered = [];
+
+    assert.throws(
+      () =>
+        registerPlugin(plugin, {
+          registrationMode: "full",
+          runtime: { version: "2026.6.6" },
+          pluginConfig: {
+            guardApiBaseUrl: "https://guard.local",
+            adapterToken: plaintextSentinel,
+          },
+          registerService(service) {
+            services.push(service);
+          },
+          on(name) {
+            registered.push(name);
+          },
+        }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.message.includes(plaintextSentinel), false);
+        return true;
+      },
+    );
+
+    assert.equal(services.length, 0);
+    assert.equal(registered.length, 0);
+  } finally {
+    clearRuntimeConfigSnapshot();
+  }
+});
+
+test("full registration fails closed when the source config snapshot is missing", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const { clearRuntimeConfigSnapshot } = await import(
+    "openclaw/plugin-sdk/runtime-config-snapshot"
+  );
+  clearRuntimeConfigSnapshot();
+
+  const services = [];
+  const registered = [];
+
+  assert.throws(
+    () =>
+      registerPlugin(plugin, {
+        registrationMode: "full",
+        runtime: { version: "2026.6.6" },
+        pluginConfig: {
+          guardApiBaseUrl: "https://guard.local",
+          adapterToken: "resolved-secret-value",
+        },
+        registerService(service) {
+          services.push(service);
+        },
+        on(name) {
+          registered.push(name);
+        },
+      }),
+    /registration refused/,
+  );
+
+  assert.equal(services.length, 0);
+  assert.equal(registered.length, 0);
+});
+
+test("discovery and cli-metadata registrations register nothing and read no credentials", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const previousFetch = globalThis.fetch;
+  let fetchCalls = 0;
+
+  try {
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    for (const registrationMode of ["discovery", "cli-metadata"]) {
+      const services = [];
+      const registered = [];
+
+      // No adapterToken in pluginConfig: any credential read or full
+      // registration attempt would throw here.
+      registerPlugin(plugin, {
+        registrationMode,
+        runtime: { version: "2026.6.6" },
+        pluginConfig: {},
+        registerService(service) {
+          services.push(service);
+        },
+        on(name) {
+          registered.push(name);
+        },
+      });
+
+      assert.equal(services.length, 0);
+      assert.equal(registered.length, 0);
+    }
+
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("undefined registration mode keeps the plaintext compatibility path", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const services = [];
+  const registered = [];
+
+  registerPlugin(plugin, {
+    pluginConfig: {
+      guardApiBaseUrl: "https://guard.local",
+      adapterToken: "plain-compat-token",
+    },
+    registerService(service) {
+      services.push(service);
+    },
+    on(name) {
+      registered.push(name);
+    },
+  });
+
+  assert.equal(services.length, 1);
+  assert.equal(services[0].id, "agentguard-security-runtime");
+  assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+});

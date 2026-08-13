@@ -1,5 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
+import { getRuntimeConfigSourceSnapshot } from "openclaw/plugin-sdk/runtime-config-snapshot";
+import { isSecretRef } from "openclaw/plugin-sdk/secret-input-runtime";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 import { join } from "node:path";
 
@@ -29,10 +31,27 @@ import {
 } from "./hooks/tool.js";
 import { scheduleHeartbeat } from "./runtime/heartbeat.js";
 import { RuntimeOutcomeDelivery } from "./runtime/outcome-delivery.js";
+import { evaluatePluginRegistration } from "./runtime/registration-gate.js";
 import type { SessionState, ToolCallState } from "./runtime/state.js";
 import type { OpenClawPluginConfigInput } from "./types.js";
 
 const PLUGIN_VERSION = "0.1.0-beta.1";
+
+type RuntimeConfigSourceSnapshotShape = {
+  plugins?: {
+    entries?: Record<string, { config?: Record<string, unknown> } | undefined>;
+  };
+};
+
+/** Reads the persisted adapterToken from the OpenClaw source config snapshot. */
+function readPersistedAdapterToken(): unknown {
+  const snapshot = getRuntimeConfigSourceSnapshot() as
+    | RuntimeConfigSourceSnapshotShape
+    | null
+    | undefined;
+  return snapshot?.plugins?.entries?.["agentguard-security"]?.config
+    ?.adapterToken;
+}
 
 const plugin: OpenClawPluginDefinition = definePluginEntry({
   id: "agentguard-security",
@@ -40,6 +59,29 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
   description:
     "Evaluates OpenClaw tool calls and outbound messages through AgentGuard Guard API.",
   register(api) {
+    const registrationMode = api.registrationMode as string | undefined;
+    if (registrationMode !== undefined && registrationMode !== "full") {
+      // Discovery, setup and CLI metadata passes must not read credentials
+      // or register hooks, services or background work.
+      return;
+    }
+    if (registrationMode === "full") {
+      const decision = evaluatePluginRegistration({
+        registrationMode,
+        persistentAdapterToken: readPersistedAdapterToken(),
+        runtimeAdapterToken: (
+          api.pluginConfig as Record<string, unknown> | undefined
+        )?.adapterToken,
+        isSecretRef,
+      });
+      if (decision.action !== "register") {
+        throw new Error(
+          `AgentGuard Security registration refused: ${decision.reason}`,
+        );
+      }
+    }
+    const runtimeVersion =
+      typeof api.runtime?.version === "string" ? api.runtime.version : "";
     const config = buildPluginConfig(
       api.pluginConfig as OpenClawPluginConfigInput,
     );
@@ -69,7 +111,12 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       start() {
         outcomeDelivery.start();
         stopHeartbeat?.();
-        stopHeartbeat = scheduleHeartbeat(config, makeClient, PLUGIN_VERSION);
+        stopHeartbeat = scheduleHeartbeat(
+          config,
+          makeClient,
+          PLUGIN_VERSION,
+          runtimeVersion,
+        );
       },
       stop() {
         stopHeartbeat?.();

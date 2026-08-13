@@ -17,6 +17,7 @@ export function scheduleHeartbeat(
   config: ReturnType<typeof buildPluginConfig>,
   makeClient: () => GuardApiClient,
   pluginVersion: string,
+  runtimeVersion: string,
 ): () => void {
   if (!config.adapterToken || isDisabled(config)) {
     return () => undefined;
@@ -25,7 +26,7 @@ export function scheduleHeartbeat(
     void makeClient()
       .submitHeartbeat({
         pluginVersion,
-        runtimeVersion: runtimeVersion(),
+        runtimeVersion: runtimeVersion.trim() ? runtimeVersion : null,
         hooks: [...OPENCLAW_REQUIRED_HOOKS],
         capabilities: {
           event_types: [
@@ -69,10 +70,6 @@ export function scheduleHeartbeat(
     clearTimeout(initialTimer);
     clearInterval(intervalTimer);
   };
-}
-
-export function runtimeVersion(): string {
-  return "2026.6.6";
 }
 
 export function unrefTimer(

@@ -46,6 +46,9 @@ function abortError(signal: AbortSignal): DOMException {
     : new DOMException("The operation was aborted.", "AbortError");
 }
 
+/** Mock OpenClaw runtime version shown by the mock adapter status. */
+export const MOCK_OPENCLAW_RUNTIME_VERSION = "OpenClaw 2026.6.6";
+
 function wait(delayMs: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -150,7 +153,7 @@ const mockOpenClawStatus: GuardAdapterStatusDto = {
   runtime_id: "openclaw-local",
   agent_id: "main",
   plugin_version: "0.1.0",
-  runtime_version: "OpenClaw 2026.6.6",
+  runtime_version: MOCK_OPENCLAW_RUNTIME_VERSION,
   capabilities: {
     event_types: [
       "tool_call_proposed",
