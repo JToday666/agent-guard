@@ -13,6 +13,8 @@ from typing import Any, Iterator, cast
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import CursorResult, create_engine, desc, func, select, text, update
+from sqlalchemy import Boolean, CheckConstraint, Column, Index, Integer, Table, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -45,12 +47,17 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MAX_REBUILD_INPUT_LIMIT,
     MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
     MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
+    ProjectionDigestConflictError,
+    ProjectionIdentityRecord,
     ProvenanceEndpointMissingError,
+    SecurityStateRecord,
+    StateVersionConflictError,
     StoredBrowserSession,
     StoredLaunchCode,
     TaskFactRecord,
@@ -78,6 +85,7 @@ from guard_api.storage.sqlalchemy_models import (
     evaluation_runs,
     launch_codes,
     memory_guard_changes,
+    metadata,
     policy_snapshot_history,
     policy_snapshots,
     provenance_edges,
@@ -128,6 +136,66 @@ def _lock_task_identity(session: Session, task_id: str) -> None:
     session.execute(
         text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
     )
+
+
+def _lock_security_state_scope(session: Session, scope_digest: str) -> None:
+    """按 scope_digest 加事务级 advisory lock，串行化同一 scope 的 state CAS（V21-04）。"""
+
+    lock_id = int.from_bytes(
+        hashlib.sha256(f"security_state:{scope_digest}".encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+    )
+
+
+# V21-04 security state 表元数据（与迁移 0015_security_state 对齐）。
+security_states = Table(
+    "security_states",
+    metadata,
+    Column("scope_digest", Text, primary_key=True),
+    Column("state_version", Integer, nullable=False),
+    Column("canonical_payload", JSONB, nullable=False),
+    Column("dirty", Boolean, nullable=False),
+    Column("dirty_domains", JSONB, nullable=False),
+    Column("projector_version", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    CheckConstraint(
+        "state_version >= 0",
+        name="ck_security_states_state_version_non_negative",
+    ),
+)
+
+projection_records = Table(
+    "projection_records",
+    metadata,
+    Column("scope_digest", Text, primary_key=True),
+    Column("source_record_type", Text, primary_key=True),
+    Column("source_record_id", Text, primary_key=True),
+    Column("source_revision", Integer, primary_key=True),
+    Column("projector_version", Text, primary_key=True),
+    Column("delta_digest", Text, nullable=False),
+    Column("delta_payload", JSONB, nullable=False),
+    Column("applied_state_version", Integer, nullable=False),
+    Column("created_at", Text, nullable=False),
+    CheckConstraint(
+        "source_record_type IN ("
+        "'policy_evaluation', 'runtime_outcome', 'approval', "
+        "'memory_transition', 'policy_revision', 'runtime_observation')",
+        name="ck_projection_records_source_record_type",
+    ),
+    CheckConstraint(
+        "applied_state_version > 0",
+        name="ck_projection_records_applied_state_version_positive",
+    ),
+    Index(
+        "ix_projection_records_scope_applied_version",
+        "scope_digest",
+        "applied_state_version",
+    ),
+)
 
 
 @dataclass(slots=True)
@@ -1108,6 +1176,280 @@ class PostgresControlPlaneStore:
             rows = session.execute(stmt).mappings().all()
         return [_task_fact_record_from_row(row) for row in rows]
 
+    def get_security_state(self, scope_digest: str) -> SecurityStateRecord | None:
+        stmt = select(
+            security_states.c.scope_digest,
+            security_states.c.state_version,
+            security_states.c.canonical_payload,
+            security_states.c.dirty,
+            security_states.c.dirty_domains,
+            security_states.c.projector_version,
+            security_states.c.updated_at,
+        ).where(security_states.c.scope_digest == scope_digest)
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        if row is None:
+            return None
+        return _security_state_record_from_row(row)
+
+    def cas_security_state(
+        self,
+        scope_digest: str,
+        expected_state_version: int,
+        record: SecurityStateRecord,
+    ) -> bool:
+        # 事务内 advisory lock + 单条条件 UPDATE（rowcount 判定）；无既有行
+        # 时以 expected_state_version == 0 为 CAS 前提插入，与 memory 语义对齐。
+        with self._session_factory() as session:
+            with session.begin():
+                _lock_security_state_scope(session, scope_digest)
+                result = cast(
+                    CursorResult[Any],
+                    session.execute(
+                        update(security_states)
+                        .where(
+                            security_states.c.scope_digest == scope_digest,
+                            security_states.c.state_version
+                            == expected_state_version,
+                        )
+                        .values(
+                            state_version=record.state_version,
+                            canonical_payload=record.canonical_payload,
+                            dirty=record.dirty,
+                            dirty_domains=record.dirty_domains,
+                            projector_version=record.projector_version,
+                            updated_at=record.updated_at,
+                        )
+                    ),
+                )
+                if result.rowcount == 1:
+                    return True
+                if result.rowcount != 0:  # pragma: no cover - PK 单行不变量
+                    raise StateVersionConflictError(
+                        expected_state_version=expected_state_version,
+                        current_state_version=-1,
+                    )
+                exists = session.execute(
+                    select(security_states.c.state_version).where(
+                        security_states.c.scope_digest == scope_digest
+                    )
+                ).scalar_one_or_none()
+                if exists is not None:
+                    raise StateVersionConflictError(
+                        expected_state_version=expected_state_version,
+                        current_state_version=int(exists),
+                    )
+                if expected_state_version != 0:
+                    raise StateVersionConflictError(
+                        expected_state_version=expected_state_version,
+                        current_state_version=0,
+                    )
+                session.execute(
+                    pg_insert(security_states).values(
+                        scope_digest=scope_digest,
+                        state_version=record.state_version,
+                        canonical_payload=record.canonical_payload,
+                        dirty=record.dirty,
+                        dirty_domains=record.dirty_domains,
+                        projector_version=record.projector_version,
+                        updated_at=record.updated_at,
+                    )
+                )
+                return True
+
+    def mark_security_state_dirty(
+        self, scope_digest: str, domains: list[str]
+    ) -> None:
+        # 事务内 advisory lock：state_version 保持不变；无既有行时创建
+        # version=0 的空态脏记录，与 memory 语义对齐。
+        from agentguard_core.security_context import (
+            PROJECTOR_VERSION,
+            OnlineSecurityState,
+            StateWatermarks,
+        )
+        from agentguard_core.signals.models import CoverageDomain
+
+        merged_domains = cast("list[CoverageDomain]", sorted(set(domains)))
+        with self._session_factory() as session:
+            with session.begin():
+                _lock_security_state_scope(session, scope_digest)
+                row = session.execute(
+                    select(
+                        security_states.c.state_version,
+                        security_states.c.canonical_payload,
+                        security_states.c.dirty_domains,
+                        security_states.c.projector_version,
+                    ).where(security_states.c.scope_digest == scope_digest)
+                ).mappings().one_or_none()
+                if row is None:
+                    # F1 双口径同步：payload 内的 dirty_domains 与列同时写入。
+                    empty_state = OnlineSecurityState(
+                        watermarks=StateWatermarks(
+                            committed_sequence=None,
+                            projected_sequence=None,
+                            runtime_receipt_sequence=None,
+                            memory_sequence=None,
+                            gaps=[],
+                        ),
+                        dirty_domains=merged_domains,
+                    )
+                    session.execute(
+                        pg_insert(security_states).values(
+                            scope_digest=scope_digest,
+                            state_version=0,
+                            canonical_payload=empty_state.model_dump(mode="json"),
+                            dirty=True,
+                            dirty_domains=merged_domains,
+                            projector_version=PROJECTOR_VERSION,
+                            updated_at=utc_now_iso(),
+                        )
+                    )
+                    return
+                merged = sorted(set(row["dirty_domains"]) | set(merged_domains))
+                # F1 双口径同步：把 dirty 域并入 canonical_payload 的
+                # dirty_domains（model_dump(mode="json") 口径，改后仍可
+                # model_validate 读回），否则 projector 从 payload 重建
+                # 状态后回写会静默清除失败事实。
+                payload_state = OnlineSecurityState.model_validate(
+                    row["canonical_payload"]
+                )
+                payload_state = payload_state.model_copy(
+                    update={
+                        "dirty_domains": sorted(
+                            set(payload_state.dirty_domains) | set(merged)
+                        )
+                    }
+                )
+                session.execute(
+                    update(security_states)
+                    .where(security_states.c.scope_digest == scope_digest)
+                    .values(
+                        dirty=True,
+                        dirty_domains=merged,
+                        canonical_payload=payload_state.model_dump(mode="json"),
+                        updated_at=utc_now_iso(),
+                    )
+                )
+
+    def record_projection(
+        self, record: ProjectionIdentityRecord
+    ) -> tuple[ProjectionIdentityRecord, bool]:
+        # 幂等三分支：PK 唯一 + 回读比对 digest；同身份异 digest 拒绝。
+        with self._session_factory() as session:
+            with session.begin():
+                _lock_security_state_scope(session, record.scope_digest)
+                existing = self._get_projection_locked(
+                    session,
+                    record.scope_digest,
+                    record.source_record_type,
+                    record.source_record_id,
+                    record.source_revision,
+                    record.projector_version,
+                )
+                if existing is not None:
+                    if existing.delta_digest == record.delta_digest:
+                        return existing, False
+                    raise ProjectionDigestConflictError(
+                        projection_key="|".join(
+                            [
+                                record.scope_digest,
+                                record.source_record_type,
+                                record.source_record_id,
+                                str(record.source_revision),
+                                record.projector_version,
+                            ]
+                        ),
+                        existing_digest=existing.delta_digest,
+                        incoming_digest=record.delta_digest,
+                    )
+                session.execute(
+                    pg_insert(projection_records).values(
+                        scope_digest=record.scope_digest,
+                        source_record_type=record.source_record_type,
+                        source_record_id=record.source_record_id,
+                        source_revision=record.source_revision,
+                        projector_version=record.projector_version,
+                        delta_digest=record.delta_digest,
+                        delta_payload=record.delta_payload,
+                        applied_state_version=record.applied_state_version,
+                        created_at=record.created_at,
+                    )
+                )
+        return record, True
+
+    def _get_projection_locked(
+        self,
+        session: Session,
+        scope_digest: str,
+        source_record_type: str,
+        source_record_id: str,
+        source_revision: int,
+        projector_version: str,
+    ) -> ProjectionIdentityRecord | None:
+        row = session.execute(
+            select(
+                projection_records.c.scope_digest,
+                projection_records.c.source_record_type,
+                projection_records.c.source_record_id,
+                projection_records.c.source_revision,
+                projection_records.c.projector_version,
+                projection_records.c.delta_digest,
+                projection_records.c.delta_payload,
+                projection_records.c.applied_state_version,
+                projection_records.c.created_at,
+            ).where(
+                projection_records.c.scope_digest == scope_digest,
+                projection_records.c.source_record_type == source_record_type,
+                projection_records.c.source_record_id == source_record_id,
+                projection_records.c.source_revision == source_revision,
+                projection_records.c.projector_version == projector_version,
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        return _projection_identity_record_from_row(row)
+
+    def get_projection(
+        self,
+        scope_digest: str,
+        source_record_type: str,
+        source_record_id: str,
+        source_revision: int,
+        projector_version: str,
+    ) -> ProjectionIdentityRecord | None:
+        with self._read_session() as session:
+            return self._get_projection_locked(
+                session,
+                scope_digest,
+                source_record_type,
+                source_record_id,
+                source_revision,
+                projector_version,
+            )
+
+    def list_rebuild_inputs(
+        self, scope_digest: str, *, limit: int
+    ) -> list[ProjectionIdentityRecord]:
+        stmt = (
+            select(
+                projection_records.c.scope_digest,
+                projection_records.c.source_record_type,
+                projection_records.c.source_record_id,
+                projection_records.c.source_revision,
+                projection_records.c.projector_version,
+                projection_records.c.delta_digest,
+                projection_records.c.delta_payload,
+                projection_records.c.applied_state_version,
+                projection_records.c.created_at,
+            )
+            .where(projection_records.c.scope_digest == scope_digest)
+            .order_by(projection_records.c.applied_state_version)
+            .limit(_bounded_limit(limit))
+        )
+        with self._read_session() as session:
+            rows = session.execute(stmt).mappings().all()
+        return [_projection_identity_record_from_row(row) for row in rows]
+
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         created_at = _database_datetime(approval.created_at)
         expires_at = _database_datetime(approval.expires_at)
@@ -1397,7 +1739,7 @@ def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
 
 
 def _bounded_limit(limit: int) -> int:
-    return max(1, min(limit, 1000))
+    return max(1, min(limit, MAX_REBUILD_INPUT_LIMIT))
 
 
 def _task_fact_record_from_row(row: Any) -> TaskFactRecord:
@@ -1407,6 +1749,32 @@ def _task_fact_record_from_row(row: Any) -> TaskFactRecord:
         canonical_payload=dict(payload),
         request_digest=str(row["request_digest"]),
         expected_revision=int(row["expected_revision"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _security_state_record_from_row(row: Any) -> SecurityStateRecord:
+    return SecurityStateRecord(
+        scope_digest=str(row["scope_digest"]),
+        state_version=int(row["state_version"]),
+        canonical_payload=dict(row["canonical_payload"]),
+        dirty=bool(row["dirty"]),
+        dirty_domains=list(row["dirty_domains"]),
+        projector_version=str(row["projector_version"]),
+        updated_at=str(row["updated_at"]),
+    )
+
+
+def _projection_identity_record_from_row(row: Any) -> ProjectionIdentityRecord:
+    return ProjectionIdentityRecord(
+        scope_digest=str(row["scope_digest"]),
+        source_record_type=str(row["source_record_type"]),
+        source_record_id=str(row["source_record_id"]),
+        source_revision=int(row["source_revision"]),
+        projector_version=str(row["projector_version"]),
+        delta_digest=str(row["delta_digest"]),
+        delta_payload=dict(row["delta_payload"]),
+        applied_state_version=int(row["applied_state_version"]),
         created_at=str(row["created_at"]),
     )
 
