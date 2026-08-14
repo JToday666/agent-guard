@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "status": "not_provisioned",
+  "storage": "controlled_external_injection",
+  "tuning_access": "forbidden",
+  "dataset_digest": null,
+  "category_counts": {
+    "attack": 0,
+    "benign": 0,
+    "agent_abuse": 0,
+    "memory_poisoning": 0,
+    "prompt_injection": 0
+  },
+  "limited_enable_minimum": {"attack": 100, "benign": 100},
+  "note": "真实 holdout 尚未注入；V21-00 不伪造摘要或案例数量，Limited Enable 前必须由受控路径生成非空摘要与类别数量。"
+}

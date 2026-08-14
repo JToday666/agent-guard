@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "source_boundary": "regression_only",
+  "scenarios": [
+    {"id": "low_read", "case_refs": ["EG-BN-001"]},
+    {"id": "sensitive_read", "case_refs": ["EG-FE-001"]},
+    {"id": "external_send", "case_refs": ["EG-AA-001"]},
+    {"id": "code_execution", "case_refs": ["EG-AA-002"]},
+    {"id": "memory", "case_refs": ["EG-MP-001"]},
+    {"id": "multi_event", "trace_ref": "TRACE-V21-SAMPLE-001"},
+    {
+      "id": "degraded",
+      "case_refs": ["EG-BN-001"],
+      "event_overlay": {"metadata": {"adapter_context_status": "degraded"}}
+    }
+  ]
+}

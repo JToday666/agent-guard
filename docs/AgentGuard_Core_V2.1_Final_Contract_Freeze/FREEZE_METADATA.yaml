@@ -1,0 +1,19 @@
+{
+  "name": "AgentGuard Core V2.1-Final",
+  "status": "frozen",
+  "prepared_at": "2026-08-14",
+  "frozen_at": "2026-08-14",
+  "review_signoff": {
+    "confirmed_by": "repository_owner",
+    "confirmed_via": "explicit_user_confirmation_in_codex_task",
+    "confirmed_at": "2026-08-14"
+  },
+  "repository": "JToday666/agent-guard",
+  "remote_dev_sha": "69efe2f027d9a4ba9c18623838e84f6ce30ffa62",
+  "core_design_parent_sha": "1d9fb7ffd6fbb94dc228143c19793e0f7fe20642",
+  "notes": [
+    "remote_dev_sha differs from the core design parent only by CI fixes at candidate preparation time",
+    "frozen after contract validation, Memory/PostgreSQL functional smoke, and explicit repository-owner sign-off",
+    "formal performance, Final ASR, Runtime Prevention, and later implementation metrics remain explicitly deferred or unmeasured"
+  ]
+}

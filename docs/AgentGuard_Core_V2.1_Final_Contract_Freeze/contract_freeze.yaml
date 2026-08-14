@@ -1,0 +1,98 @@
+{
+  "schema_version": "2.1-final-candidate",
+  "status": "frozen",
+  "repository": {
+    "full_name": "JToday666/agent-guard",
+    "remote_dev_sha_at_freeze": "69efe2f027d9a4ba9c18623838e84f6ce30ffa62",
+    "core_design_parent_sha": "1d9fb7ffd6fbb94dc228143c19793e0f7fe20642"
+  },
+  "freeze_levels": {
+    "F0": "system_security_invariants",
+    "F1": "internal_security_contracts",
+    "F2": "public_compatibility_contracts",
+    "F3": "tunable_versioned_policy"
+  },
+  "system_invariants": [
+    {"id": "F0-1", "name": "authority_roots_only"},
+    {"id": "F0-2", "name": "data_flow_does_not_grant_authority"},
+    {"id": "F0-3", "name": "missing_required_fact_is_not_safe"},
+    {"id": "F0-4", "name": "taint_is_monotonic_without_trusted_declassification"},
+    {"id": "F0-5", "name": "decision_is_not_execution_fact"},
+    {"id": "F0-6", "name": "semantic_failure_cannot_allow"},
+    {"id": "F0-7", "name": "required_component_failure_cannot_fail_open"},
+    {"id": "F0-8", "name": "uncommitted_fact_cannot_become_historical_state"},
+    {"id": "F0-9", "name": "allow_once_exactly_once_fingerprint_binding"},
+    {"id": "F0-10", "name": "authenticated_producer_is_not_automatically_authoritative"},
+    {"id": "F0-11", "name": "task_authority_requires_dedicated_ingress"},
+    {"id": "F0-12", "name": "v21_allow_once_requires_pre_execution_atomic_consumption"}
+  ],
+  "fast_dispositions": ["CLEAR_ALLOW", "CLEAR_DENY", "DEFER"],
+  "public_decisions": ["allow", "ask", "deny"],
+  "coverage_domains": ["task", "source", "capability", "behavior", "dataflow", "memory", "runtime_outcome"],
+  "coverage_statuses": ["complete", "partial", "stale", "unknown", "not_applicable"],
+  "taint_labels": ["UNTRUSTED", "EXTERNAL_INSTRUCTION", "SENSITIVE", "CREDENTIAL", "PERSISTENT_UNTRUSTED"],
+  "flow_strengths": ["exact", "strong", "possible"],
+  "policy_tiers": ["system_invariant", "system_hard_policy", "tenant_hard_policy", "review_policy"],
+  "semantic": {
+    "minimal_stage": "shadow",
+    "verdicts": ["aligned", "misaligned", "uncertain"],
+    "can_create_authority": false,
+    "can_override_hard_deny": false,
+    "can_issue_v21_allow_once": false,
+    "timeout_result": "ask",
+    "cross_event_cache_default": "disabled"
+  },
+  "task_authority": {
+    "ingress_scope": "task:write",
+    "evaluate_user_task_authority": "trusted_claim_only",
+    "server_generated_fields": ["task_id", "revision", "task_digest", "scope_digest"]
+  },
+  "state_projection": {
+    "authoritative_precedence": ["authoritative_record", "derived_projection", "online_cache"],
+    "projector_consumes_uncommitted_records": false,
+    "idempotency_key_fields": ["scope_digest", "source_record_type", "source_record_id", "source_revision", "projector_version"],
+    "state_version_cas": "required",
+    "safe_eviction": "required"
+  },
+  "fingerprints": {
+    "authorization_fingerprint": {
+      "keyed": true,
+      "purpose": ["allow_once_binding", "capability_exact_binding", "internal_cas"]
+    },
+    "audit_fingerprint": {"keyed": false, "redacted": true, "security_authorization_use": "forbidden"}
+  },
+  "execution_lease": {
+    "issuer": "guard_api",
+    "source": "authenticated_human_approval",
+    "consume_before_execution": true,
+    "idempotency_fields": ["approval_id", "action_id", "authorization_fingerprint"],
+    "receipt_links": ["consumption_id", "lease_id"],
+    "plaintext_token_in_audit": false
+  },
+  "minimal_required_models": [
+    "EvidenceRef", "FactRef", "SecurityStateScope", "SequenceRef", "EvaluationClock", "TaskFact",
+    "ActionEffect", "CanonicalArguments", "CanonicalResource", "ActionIR", "SourceFact", "FlowFact",
+    "DeclassificationFact", "MemoryFact", "CapabilityGrant", "GrantConsumption", "ExecutionLease",
+    "RecentActionFact", "RuntimeOutcomeFact", "BehaviorAggregate", "StickyTaintSummary", "CoverageMap",
+    "RequiredCheckPlan", "SecuritySnapshot", "SecuritySignal", "PolicyViolation", "EvaluationDegradation",
+    "AuthorityVerdict", "FlowVerdict", "SemanticRoutingAssessment", "FastAssessment", "SemanticJudgment",
+    "ProjectionRecordIdentity", "SecurityStateDeltaV21", "DecisionEvidenceV21"
+  ],
+  "public_compatibility": {
+    "guard_decision_breaking_change_required": false,
+    "guard_event_task_reference_optional": true,
+    "v21_evidence_location": "AuditEvent.evidence.decision_v21",
+    "state_delta_evidence_location": "AuditEvent.evidence.state_delta_v21",
+    "runtime_outcome_receipt": "reuse_existing_with_future_optional_lease_links"
+  },
+  "legacy_migration": {
+    "shadow_official_decider": "legacy",
+    "limited_enable_direction": "tightening_only",
+    "v21_clear_allow_can_downgrade_legacy_ask_or_deny": false,
+    "ownership_transfer": "rule_by_rule"
+  },
+  "implementation_phases": [
+    "V21-00", "V21-01", "V21-02", "V21-03", "V21-04", "V21-05", "V21-06", "V21-07",
+    "V21-08", "V21-09", "V21-10", "V21-11", "V21-12", "V21-13", "V21-14"
+  ]
+}

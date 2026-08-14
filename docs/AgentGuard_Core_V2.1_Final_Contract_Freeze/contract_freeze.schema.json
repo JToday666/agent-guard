@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.local/schemas/v21/contract-freeze.schema.json",
+  "title": "AgentGuard V2.1 Contract Freeze",
+  "type": "object",
+  "required": [
+    "schema_version", "status", "repository", "freeze_levels", "system_invariants",
+    "fast_dispositions", "public_decisions", "coverage_domains", "semantic",
+    "task_authority", "state_projection", "fingerprints", "execution_lease",
+    "minimal_required_models", "public_compatibility", "legacy_migration", "implementation_phases"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.1-final-candidate"},
+    "status": {"enum": ["candidate-for-freeze", "frozen"]},
+    "repository": {
+      "type": "object", "required": ["full_name", "remote_dev_sha_at_freeze", "core_design_parent_sha"],
+      "properties": {
+        "full_name": {"const": "JToday666/agent-guard"},
+        "remote_dev_sha_at_freeze": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "core_design_parent_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "freeze_levels": {"type": "object"},
+    "system_invariants": {
+      "type": "array", "minItems": 12,
+      "items": {"type": "object", "required": ["id", "name"], "properties": {"id": {"pattern": "^F0-[0-9]+$"}, "name": {"type": "string"}}}
+    },
+    "fast_dispositions": {"const": ["CLEAR_ALLOW", "CLEAR_DENY", "DEFER"]},
+    "public_decisions": {"const": ["allow", "ask", "deny"]},
+    "coverage_domains": {"const": ["task", "source", "capability", "behavior", "dataflow", "memory", "runtime_outcome"]},
+    "coverage_statuses": {"type": "array"},
+    "taint_labels": {"type": "array"},
+    "flow_strengths": {"type": "array"},
+    "policy_tiers": {"type": "array"},
+    "semantic": {"type": "object", "required": ["can_create_authority", "can_issue_v21_allow_once"], "properties": {"can_create_authority": {"const": false}, "can_issue_v21_allow_once": {"const": false}}},
+    "task_authority": {"type": "object", "required": ["ingress_scope", "evaluate_user_task_authority"], "properties": {"ingress_scope": {"const": "task:write"}, "evaluate_user_task_authority": {"const": "trusted_claim_only"}}},
+    "state_projection": {"type": "object"},
+    "fingerprints": {"type": "object"},
+    "execution_lease": {"type": "object", "required": ["consume_before_execution", "receipt_links"], "properties": {"consume_before_execution": {"const": true}, "receipt_links": {"const": ["consumption_id", "lease_id"]}}},
+    "minimal_required_models": {"type": "array", "minItems": 30, "uniqueItems": true, "items": {"type": "string"}},
+    "public_compatibility": {"type": "object"},
+    "legacy_migration": {"type": "object"},
+    "implementation_phases": {"type": "array", "minItems": 15, "maxItems": 15, "uniqueItems": true, "items": {"pattern": "^V21-[0-9]{2}$"}}
+  },
+  "additionalProperties": false
+}
