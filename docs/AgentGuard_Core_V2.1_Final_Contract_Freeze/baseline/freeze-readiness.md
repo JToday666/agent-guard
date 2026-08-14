@@ -8,6 +8,7 @@
 - `69efe2f` Legacy 快照覆盖 30 attack / 13 benign，当前逐 case decision、rule hits 和整体分布一致。
 - Core、Guard API Memory 与多事件框架已通过小迭代功能测试；统计、Wilson CI、nearest-rank 百分位、脱敏和错误路径已有自动测试。
 - Guard API PostgreSQL 已在本地 `postgres:16-alpine` 测试容器完成七类代表场景与低并发 functional smoke，报告状态为 `functional_smoke_passed`，blockers 为空。
+- 基线可信证明勘误已完成：正式档位强制 Memory/PostgreSQL 双后端，Legacy 快照拒绝 staged/unstaged/untracked 输入；当前报告绑定可达 source commit 与 source tree，并由 Frozen 校验工具复核。
 - 当前正式效果边界为 Final ASR `not_measured`、Runtime Prevention `not_measured`、Semantic `not_applicable`。
 
 未完成或被明确延后：
