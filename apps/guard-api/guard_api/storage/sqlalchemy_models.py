@@ -327,6 +327,37 @@ policy_snapshot_history = Table(
     Index("ix_policy_snapshot_history_updated_at", "updated_at"),
 )
 
+task_facts = Table(
+    "task_facts",
+    metadata,
+    Column("task_id", Text, primary_key=True),
+    Column("revision", Integer, primary_key=True),
+    Column("scope_digest", Text, nullable=False),
+    Column("scope_key_id", Text, nullable=False),
+    Column("principal_id", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("task_digest", Text, nullable=False),
+    Column("task_summary", Text, nullable=False),
+    Column("canonical_payload", JSONB, nullable=False),
+    Column("request_digest", Text, nullable=False),
+    Column("expected_revision", Integer, nullable=False),
+    Column("producer", Text, nullable=False),
+    Column("authority", Text, nullable=False),
+    Column("created_at", Text, nullable=False),
+    CheckConstraint("revision > 0", name="ck_task_facts_revision_positive"),
+    CheckConstraint(
+        "status IN ('active', 'cancelled', 'superseded')",
+        name="ck_task_facts_status",
+    ),
+    CheckConstraint(
+        "producer = 'guard_api_task_ingress' AND authority = 'authoritative'",
+        name="ck_task_facts_authority_root",
+    ),
+    Index("ix_task_facts_principal_id", "principal_id"),
+    Index("ix_task_facts_scope_key_id", "scope_key_id"),
+    Index("ix_task_facts_scope_digest", "scope_digest"),
+)
+
 launch_codes = Table(
     "launch_codes",
     metadata,

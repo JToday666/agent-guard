@@ -33,6 +33,7 @@ from guard_api.services import (
     PolicyService,
     PolicyValidationError,
     ProvenanceWriter,
+    TaskIngressService,
     TraceService,
 )
 from guard_api.settings import GuardApiSettings
@@ -43,6 +44,7 @@ from guard_api.storage.base import (
     EvaluationRunConflictError,
     PolicyRevisionConflictError,
     ProvenanceConflictError,
+    TaskRevisionConflictError,
 )
 from guard_api.storage.memory import MemoryControlPlaneStore
 from guard_api.storage.postgres import PostgresControlPlaneStore
@@ -113,6 +115,7 @@ def create_app(
         approval_service=approval_service,
         memory_guard_service=memory_guard_service,
     )
+    task_ingress_service = TaskIngressService(store=store, settings=settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -207,6 +210,19 @@ def create_app(
             details={"run_id": exc.run_id},
         )
 
+    @app.exception_handler(TaskRevisionConflictError)
+    async def task_revision_conflict_handler(
+        _: Request, exc: TaskRevisionConflictError
+    ) -> JSONResponse:
+        return error_response(
+            "TASK_REVISION_CONFLICT",
+            status_code=409,
+            details={
+                "expected_revision": exc.expected_revision,
+                "current_revision": exc.current_revision,
+            },
+        )
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
         _: Request, exc: RequestValidationError
@@ -243,6 +259,7 @@ def create_app(
             trace_service=trace_service,
             policy_service=policy_service,
             evaluation_service=evaluation_service,
+            task_ingress_service=task_ingress_service,
         ),
     )
     return app

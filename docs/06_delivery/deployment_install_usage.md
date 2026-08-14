@@ -57,6 +57,8 @@ AGENTGUARD_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/
 AGENTGUARD_TEST_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:5432/agent_guard_test
 AGENTGUARD_ADAPTER_TOKEN=
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
+AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID=development-2026-08
+AGENTGUARD_TASK_SCOPE_KEYS={"development-2026-08":"<至少 32 字节随机值的 base64url 编码>"}
 AGENTGUARD_HOST=127.0.0.1
 AGENTGUARD_PORT=8088
 AGENTGUARD_AUDIT_CHECKPOINT_PATH=
@@ -70,7 +72,7 @@ AGENTGUARD_LLM_APPROVAL_MODEL=
 AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS=3
 ```
 
-`.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。
+`.env` 已被 Git 忽略。不得提交真实数据库密码、adapter token、control token、Task Scope keyring、launch code、CSRF token 或 browser session。
 
 本地 loopback 开发可将三项外部检查点配置留空。生产环境或非 loopback 监听必须同时配置：
 
@@ -88,6 +90,8 @@ openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
 ```
 
 密钥应由 secret manager 注入，不能写入镜像、仓库或检查点文件。检查点路径必须是绝对路径，父目录需预先存在且可由 Guard API 用户写入；目标不能是符号链接。该 JSONL 文件独立于 PostgreSQL，使用 RFC 8785 JCS、SHA-256 哈希链和 HMAC-SHA256 签名保存抽样链头。它能发现仅修改或回滚数据库的行为，但不能抵抗同时取得数据库、进程密钥和检查点存储写权限的攻击者，因此部署侧应把目录挂载到独立持久卷，并使用 append-only、WORM 或外部日志采集策略保护。
+
+Task Scope keyring 与 `AGENTGUARD_CONTROL_TOKEN` 独立：更换登录凭证不得改变已有 TaskFact 的 `scope_digest`。轮换时先在 `AGENTGUARD_TASK_SCOPE_KEYS` 中加入新 key，再切换 `AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID`；只要数据库中仍有 TaskFact 引用旧 `scope_key_id`，旧 key 就必须保留。
 
 `AGENTGUARD_LLM_APPROVAL_ENABLED=true` 后，Guard API 会对 Core 已创建的 `ask` approval 尝试同步 LLM 自动审批。LLM 只消费 approval evidence；`deny` 不进入 LLM。低/中风险 `ask` 可被自动 resolve 为 `allow_once`，高/严重风险不允许被 LLM 自动放行。LLM 配置缺失、超时或返回非法 JSON 时，approval 保持 `pending`，仍可由人工审批接管。
 
@@ -362,6 +366,7 @@ uv run agentguardctl eval import --help
 当 `AGENTGUARD_ENV=production` 时，Guard API 会拒绝使用默认 token、默认数据库 URL，或缺少数据库外签名检查点的配置。生产化至少需要：
 
 - 更换 `AGENTGUARD_CONTROL_TOKEN`，并为每个 runtime/agent 单独签发 adapter credential。
+- 从 secret manager 注入独立的 `AGENTGUARD_TASK_SCOPE_KEYS`，并按 TaskFact 的 `scope_key_id` 保留轮换期旧 key。
 - 使用真实 PostgreSQL 账号、强密码和受限网络访问。
 - 不把 control token 注入浏览器、Dashboard env、前端构建产物或日志。
 - 通过 TLS 或可信内网访问 Guard API 和 Dashboard。

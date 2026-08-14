@@ -11,6 +11,7 @@ from .memory import MemoryGuardService
 from .metrics import MetricService
 from .policy import PolicyService, PolicyValidationError
 from .provenance import ProvenanceWriter
+from .task_ingress import TaskIngressService
 from .trace import TraceService
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "PolicyService",
     "PolicyValidationError",
     "ProvenanceWriter",
+    "TaskIngressService",
     "TraceService",
     "build_audit_event",
     "describe_guard_event",

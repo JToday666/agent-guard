@@ -24,6 +24,7 @@ CONTROL_PLANE_TABLES = [
     "audit_integrity_heads",
     "policy_snapshot_history",
     "policy_snapshots",
+    "task_facts",
     "approval_nonces",
     "browser_sessions",
     "launch_codes",

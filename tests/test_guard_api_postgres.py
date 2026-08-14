@@ -1202,3 +1202,124 @@ def test_postgres_store_audit_id_idempotent_and_conflict() -> None:
             store.add_audit_event(different)
     finally:
         reset_control_plane_schema(database_url)
+
+
+def test_postgres_migration_creates_task_facts_table() -> None:
+    database_url = get_test_database_url()
+
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        engine = create_engine(PostgresControlPlaneStore(database_url).database_url)
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text("SELECT to_regclass('public.task_facts')")
+            ).scalar_one()
+            columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'task_facts'
+                        """
+                    )
+                )
+            }
+
+        assert exists == "task_facts"
+        assert {
+            "task_id",
+            "revision",
+            "scope_digest",
+            "scope_key_id",
+            "principal_id",
+            "status",
+            "task_digest",
+            "task_summary",
+            "canonical_payload",
+            "request_digest",
+            "expected_revision",
+            "producer",
+            "authority",
+            "created_at",
+        }.issubset(columns)
+    finally:
+        reset_control_plane_schema(database_url)
+
+
+def test_postgres_task_ingress_create_idempotent_and_conflict() -> None:
+    database_url = get_test_database_url()
+
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        client = TestClient(
+            create_app(
+                store=PostgresControlPlaneStore(database_url),
+                settings=GuardApiSettings(
+                    control_token="control-secret",
+                    task_scope_active_key_id="test-key-1",
+                    task_scope_keys=(
+                        '{"test-key-1":'
+                        '"dGFzay1zY29wZS10ZXN0LWtleS1tYXRlcmlhbC0wMDAx"}'
+                    ),
+                ),
+            )
+        )
+        headers = {"Authorization": "Bearer control-secret"}
+        payload = {
+            "task_text": "汇总本周销售数据并生成报表",
+            "runtime": "langgraph",
+            "trace_id": "trace_pg_task",
+            "action_constraints": [{"op": "in", "action_types": ["file.read"]}],
+            "resource_constraints": [],
+            "destination_constraints": [],
+        }
+
+        created = client.post("/v1/tasks", json=payload, headers=headers)
+        assert created.status_code == 200
+        body = created.json()
+        task_id = body["task_id"]
+        assert body["revision"] == 1
+        assert body["task_digest"].startswith("sha256:")
+        assert body["scope_digest"].startswith("hmac-sha256:")
+
+        head = store.get_task_fact(task_id)
+        assert head is not None
+        assert head.task_fact.producer == "guard_api_task_ingress"
+        assert head.task_fact.authority == "authoritative"
+        assert head.task_fact.scope_key_id == "test-key-1"
+
+        revision_payload = {
+            **payload,
+            "task_text": "修订后的任务内容",
+            "expected_revision": 1,
+        }
+        first = client.put(f"/v1/tasks/{task_id}", json=revision_payload, headers=headers)
+        assert first.status_code == 200
+        assert first.json()["revision"] == 2
+
+        replay = client.put(
+            f"/v1/tasks/{task_id}", json=revision_payload, headers=headers
+        )
+        assert replay.status_code == 200
+        assert replay.json() == first.json()
+
+        conflict = client.put(
+            f"/v1/tasks/{task_id}",
+            json={**payload, "task_text": "冲突内容", "expected_revision": 1},
+            headers=headers,
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "TASK_REVISION_CONFLICT"
+
+        revisions = store.list_task_fact_revisions(task_id)
+        assert [record.task_fact.revision for record in revisions] == [1, 2]
+        assert revisions[0].task_fact.task_summary == "汇总本周销售数据并生成报表"
+        assert revisions[1].task_fact.task_summary == "修订后的任务内容"
+    finally:
+        reset_control_plane_schema(database_url)

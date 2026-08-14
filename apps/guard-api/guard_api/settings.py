@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -107,6 +108,15 @@ class GuardApiSettings:
     audit_checkpoint_key_id: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID")
     )
+    task_scope_active_key_id: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID"
+        )
+    )
+    task_scope_keys: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_TASK_SCOPE_KEYS"),
+        repr=False,
+    )
     audit_checkpoint_interval_seconds: int = field(
         default_factory=lambda: _env_int(
             "AGENTGUARD_AUDIT_CHECKPOINT_INTERVAL_SECONDS",
@@ -125,6 +135,59 @@ class GuardApiSettings:
             b"agentguard/audit-window-cursor/v3",
             hashlib.sha256,
         ).digest()
+
+    def task_scope_configured(self) -> bool:
+        return bool(self.task_scope_active_key_id and self.task_scope_keys)
+
+    def task_scope_keyring(self) -> dict[str, bytes]:
+        """解析独立、版本化的 SecurityStateScope HMAC keyring。"""
+        if not self.task_scope_keys:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_TASK_SCOPE_KEYS must be configured"
+            )
+        try:
+            raw_keyring = json.loads(self.task_scope_keys)
+        except json.JSONDecodeError:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_TASK_SCOPE_KEYS must be a JSON object"
+            ) from None
+        if not isinstance(raw_keyring, dict) or not raw_keyring:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_TASK_SCOPE_KEYS must be a non-empty JSON object"
+            )
+        keyring: dict[str, bytes] = {}
+        for key_id, encoded_key in raw_keyring.items():
+            if not isinstance(key_id, str) or not _CHECKPOINT_KEY_ID_PATTERN.fullmatch(
+                key_id
+            ):
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_TASK_SCOPE_KEYS key ids must contain 1-64 safe "
+                    "characters"
+                )
+            if not isinstance(encoded_key, str):
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_TASK_SCOPE_KEYS values must be base64url strings"
+                )
+            keyring[key_id] = _decode_base64url_key(
+                encoded_key,
+                label="AGENTGUARD_TASK_SCOPE_KEYS values",
+            )
+        return keyring
+
+    def task_scope_signing_key(self) -> bytes:
+        """返回 active key；control token 轮换不影响持久化 scope digest。"""
+        if not self.task_scope_active_key_id:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID must be configured"
+            )
+        keyring = self.task_scope_keyring()
+        try:
+            return keyring[self.task_scope_active_key_id]
+        except KeyError:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID must exist in "
+                "AGENTGUARD_TASK_SCOPE_KEYS"
+            ) from None
 
     def audit_checkpoint_configured(self) -> bool:
         return bool(
@@ -203,6 +266,18 @@ class GuardApiSettings:
                 )
             self.audit_checkpoint_signing_key()
 
+        task_scope_values = (
+            self.task_scope_active_key_id,
+            self.task_scope_keys,
+        )
+        if any(task_scope_values) and not all(task_scope_values):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID and "
+                "AGENTGUARD_TASK_SCOPE_KEYS must be configured together"
+            )
+        if self.task_scope_configured():
+            self.task_scope_signing_key()
+
         externally_exposed = environment == "production" or not _is_loopback_host(
             self.host
         )
@@ -235,6 +310,10 @@ class GuardApiSettings:
             raise GuardApiConfigurationError(
                 "Externally exposed startup requires an authenticated external audit "
                 "checkpoint"
+            )
+        if not self.task_scope_configured():
+            raise GuardApiConfigurationError(
+                "Externally exposed startup requires an independent task scope keyring"
             )
 
 
@@ -279,10 +358,17 @@ def _env_int(name: str, *, default: int) -> int:
 
 
 def _decode_checkpoint_key(value: str) -> bytes:
+    return _decode_base64url_key(
+        value,
+        label="AGENTGUARD_AUDIT_CHECKPOINT_KEY",
+    )
+
+
+def _decode_base64url_key(value: str, *, label: str) -> bytes:
     normalized = value.strip()
     if not _CHECKPOINT_KEY_PATTERN.fullmatch(normalized):
         raise GuardApiConfigurationError(
-            "AGENTGUARD_AUDIT_CHECKPOINT_KEY must be base64url encoded"
+            f"{label} must be base64url encoded"
         )
     padding = "=" * (-len(normalized) % 4)
     try:
@@ -293,11 +379,11 @@ def _decode_checkpoint_key(value: str) -> bytes:
         )
     except (binascii.Error, ValueError):
         raise GuardApiConfigurationError(
-            "AGENTGUARD_AUDIT_CHECKPOINT_KEY must be base64url encoded"
+            f"{label} must be base64url encoded"
         ) from None
     if len(decoded) < 32:
         raise GuardApiConfigurationError(
-            "AGENTGUARD_AUDIT_CHECKPOINT_KEY must decode to at least 32 bytes"
+            f"{label} must decode to at least 32 bytes"
         )
     return decoded
 

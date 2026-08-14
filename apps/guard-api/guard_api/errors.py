@@ -64,6 +64,11 @@ _ERROR_MESSAGES = {
     "EVALUATION_RUN_CONFLICT": (
         "Evaluation run ID is already bound to different immutable content."
     ),
+    "TASK_REVISION_CONFLICT": (
+        "Task revision is stale or conflicts with existing revision content."
+    ),
+    "TASK_NOT_FOUND": "Task was not found.",
+    "TASK_PRINCIPAL_MISMATCH": "Task is bound to a different principal.",
     "VALIDATION_ERROR": "Request validation failed.",
     "NOT_FOUND": "Resource was not found.",
     "METHOD_NOT_ALLOWED": "HTTP method is not allowed.",

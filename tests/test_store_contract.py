@@ -24,6 +24,12 @@ from agentguard_core import (
     MemoryGuardChange,
     PolicyBundle,
 )
+from agentguard_core.authority import (
+    SecurityStateScope,
+    TaskFact,
+    scope_digest_projection,
+    task_digest_projection,
+)
 from guard_api.main import create_app
 from guard_api.services import (
     ApprovalService,
@@ -48,6 +54,8 @@ from guard_api.storage.base import (
     EvaluationRunConflictError,
     MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
+    TaskFactRecord,
+    TaskRevisionConflictError,
     classify_audit_record_type,
 )
 from guard_api.storage.integrity import canonical_sha256, read_audit_integrity
@@ -1364,3 +1372,131 @@ def test_store_concurrent_commit_writes_single_transition_audit(store) -> None:
     assert transitions[0].metadata["from_status"] == "proposed"
     assert transitions[0].metadata["to_status"] == "committed"
     assert store.verify_audit_integrity().valid
+
+
+# ---------------------------------------------------------------------------
+# V21-03 TaskFact 存储契约（create/get/list 双实现一致性）
+# ---------------------------------------------------------------------------
+
+_TASK_CONTRACT_SERVER_KEY = b"agentguard-task-contract-key"
+
+
+def _task_fact_record(
+    task_id: str,
+    *,
+    revision: int,
+    expected_revision: int,
+    task_text: str = "original",
+) -> TaskFactRecord:
+    partial_scope = SecurityStateScope(
+        principal_id="cred_control",
+        runtime="langgraph",
+        runtime_binding_id="binding:control:cred_control",
+        trace_id="trace_task_contract",
+        session_id=None,
+        scope_digest="",
+    )
+    scope_digest = scope_digest_projection(
+        partial_scope, server_key=_TASK_CONTRACT_SERVER_KEY
+    )
+    pending = TaskFact(
+        task_id=task_id,
+        scope_digest=scope_digest,
+        scope_key_id="test-key-1",
+        principal_id="cred_control",
+        task_summary=task_text,
+        task_digest="sha256:pending",
+        revision=revision,
+        status="active",
+        action_constraints=[],
+        resource_constraints=[],
+        destination_constraints=[],
+        created_sequence=None,
+        producer="guard_api_task_ingress",
+        authority="authoritative",
+        evidence_refs=[],
+    )
+    task_fact = pending.model_copy(
+        update={"task_digest": task_digest_projection(pending)}
+    )
+    payload = task_fact.model_dump(mode="json")
+    return TaskFactRecord(
+        task_fact=task_fact,
+        canonical_payload=payload,
+        request_digest=canonical_sha256({"task_text": task_text, "revision": revision}),
+        expected_revision=expected_revision,
+        created_at="2026-08-14T00:00:00+00:00",
+    )
+
+
+def test_store_task_fact_create_get_list_contract(store) -> None:
+    task_id = f"task_contract_{uuid4().hex}"
+    record1 = _task_fact_record(task_id, revision=1, expected_revision=0)
+    stored = store.create_task_fact(record1)
+    assert stored.task_fact.task_id == task_id
+    assert stored.task_fact.revision == 1
+
+    head = store.get_task_fact(task_id)
+    assert head is not None and head.task_fact.revision == 1
+    first = store.get_task_fact(task_id, revision=1)
+    assert first is not None and first.task_fact.task_summary == "original"
+    assert store.get_task_fact(task_id, revision=2) is None
+    assert store.get_task_fact(f"task_missing_{uuid4().hex}") is None
+    assert store.list_task_fact_revisions(f"task_missing_{uuid4().hex}") == []
+
+    record2 = _task_fact_record(
+        task_id, revision=2, expected_revision=1, task_text="revised"
+    )
+    store.create_task_fact(record2)
+    head = store.get_task_fact(task_id)
+    assert head is not None and head.task_fact.revision == 2
+    assert head.task_fact.task_summary == "revised"
+
+    revisions = store.list_task_fact_revisions(task_id)
+    assert [record.task_fact.revision for record in revisions] == [1, 2]
+    # 旧 revision 全量保留，canonical_payload 可往返重建 TaskFact
+    assert revisions[0].task_fact.task_summary == "original"
+    assert revisions[1].task_fact.task_summary == "revised"
+    for record in revisions:
+        assert record.task_fact.model_dump(mode="json") == record.canonical_payload
+    assert revisions[0].task_fact.task_digest != revisions[1].task_fact.task_digest
+
+
+def test_store_task_fact_cas_rejects_stale_future_and_overwrite(store) -> None:
+    task_id = f"task_cas_{uuid4().hex}"
+    store.create_task_fact(_task_fact_record(task_id, revision=1, expected_revision=0))
+
+    with pytest.raises(TaskRevisionConflictError) as stale:
+        store.create_task_fact(
+            _task_fact_record(task_id, revision=2, expected_revision=0)
+        )
+    assert stale.value.expected_revision == 0
+    assert stale.value.current_revision == 1
+
+    with pytest.raises(TaskRevisionConflictError):
+        store.create_task_fact(
+            _task_fact_record(task_id, revision=3, expected_revision=5)
+        )
+
+    with pytest.raises(TaskRevisionConflictError):
+        # 同 (task_id, revision) 重写一律拒绝，旧 revision 永不覆盖
+        store.create_task_fact(
+            _task_fact_record(
+                task_id,
+                revision=1,
+                expected_revision=0,
+                task_text="overwrite attempt",
+            )
+        )
+
+    with pytest.raises(TaskRevisionConflictError):
+        # 新任务的 revision 1 必须携带 expected_revision=0
+        store.create_task_fact(
+            _task_fact_record(
+                f"task_new_{uuid4().hex}", revision=1, expected_revision=3
+            )
+        )
+
+    revisions = store.list_task_fact_revisions(task_id)
+    assert [record.task_fact.revision for record in revisions] == [1]
+    assert revisions[0].task_fact.task_summary == "original"

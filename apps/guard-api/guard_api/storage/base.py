@@ -16,6 +16,7 @@ from agentguard_core import (
     ProvenanceEdge,
     ProvenanceNode,
 )
+from agentguard_core.authority import TaskFact
 
 from guard_api.models import (
     AdapterStatusRecord,
@@ -81,6 +82,23 @@ class PolicySnapshotRecord:
     policy_bundle: PolicyBundle
     updated_at: str
     updated_by: str
+
+
+@dataclass(frozen=True, slots=True)
+class TaskFactRecord:
+    """task_facts 存储记录：TaskFact 全量 + 幂等/CAS 元数据（V21-03）。
+
+    ``canonical_payload`` 为 TaskFact 的 ``model_dump(mode="json")`` 全量
+    快照；``request_digest`` 是入口请求内容字段的受限 JCS sha256，与
+    ``expected_revision`` 组成幂等重放键；``expected_revision`` 是写入时
+    的 CAS 锚点（revision 1 对应 0）。
+    """
+
+    task_fact: TaskFact
+    canonical_payload: dict[str, Any]
+    request_digest: str
+    expected_revision: int
+    created_at: str
 
 
 def within_evaluated_range(
@@ -239,6 +257,21 @@ class PolicyRevisionConflictError(ValueError):
         self.current_revision = current_revision
         super().__init__(
             f"expected policy revision {expected_revision}, current is {current_revision}"
+        )
+
+
+class TaskRevisionConflictError(ValueError):
+    """任务修订的 CAS 锚点与当前 head revision 不一致（V21-03，01 §30）。
+
+    语义与 PolicyRevisionConflictError 对齐：revision 落后或同 revision
+    异内容均由存储层拒绝，旧 revision 永不静默覆盖。
+    """
+
+    def __init__(self, *, expected_revision: int, current_revision: int) -> None:
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
+        super().__init__(
+            f"expected task revision {expected_revision}, current is {current_revision}"
         )
 
 
@@ -534,6 +567,28 @@ class ControlPlaneStore(Protocol):
     def list_policy_snapshot_history(
         self, limit: int = 100
     ) -> list[PolicySnapshotRecord]: ...
+
+    def create_task_fact(self, record: TaskFactRecord) -> TaskFactRecord:
+        """追加式写入一条 TaskFact revision（V21-03 CAS 契约）。
+
+        契约：仅当 ``record.expected_revision`` 等于该 task_id 当前 head
+        revision（无记录为 0，revision 1 必须携带 expected_revision=0）
+        时追加；否则抛 TaskRevisionConflictError。旧 revision 永不覆盖；
+        同 (task_id, revision) 重复写入一律拒绝。
+        """
+        ...
+
+    def get_task_fact(
+        self, task_id: str, revision: int | None = None
+    ) -> TaskFactRecord | None:
+        """读取单条 TaskFact revision；``revision=None`` 时读 head。"""
+        ...
+
+    def list_task_fact_revisions(
+        self, task_id: str
+    ) -> list[TaskFactRecord]:
+        """按 revision 升序返回该任务的全部历史 revision。"""
+        ...
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest: ...
 

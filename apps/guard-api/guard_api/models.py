@@ -8,6 +8,11 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_iso
+from agentguard_core.actions.models import (
+    ActionConstraint,
+    DestinationConstraint,
+    ResourceConstraint,
+)
 from agentguard_core.decisions import ApprovalResolution
 
 ADAPTER_CREDENTIAL_SCOPES = (
@@ -328,6 +333,53 @@ class CredentialCreateRequest(BaseModel):
             raise ValueError("expires_at must be in the future")
         self.expires_at = expires_at.astimezone(timezone.utc).isoformat()
         return self
+
+
+TASK_TEXT_MAX_LENGTH = 4000
+
+
+class TaskCreateRequest(BaseModel):
+    """专用任务入口创建请求（V21-03，01 §30 L1185-1229）。
+
+    冻结语义：``task_id/revision/task_digest/scope_digest`` 一律由服务端
+    生成，请求体不得携带；``extra="forbid"`` 结构性拒绝夹带。
+    三类约束复用 core authority/actions 冻结模型。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_text: str = Field(min_length=1, max_length=TASK_TEXT_MAX_LENGTH)
+    runtime: str = Field(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    runtime_binding_id: str | None = Field(default=None, min_length=1, max_length=256)
+    trace_id: str = Field(min_length=1, max_length=128)
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    action_constraints: list[ActionConstraint] = Field(default_factory=list)
+    resource_constraints: list[ResourceConstraint] = Field(default_factory=list)
+    destination_constraints: list[DestinationConstraint] = Field(default_factory=list)
+
+
+class TaskReviseRequest(TaskCreateRequest):
+    """任务修订请求：内容字段 + ``expected_revision`` CAS 锚点。
+
+    幂等语义：同 ``expected_revision`` + 同 canonical request digest 重试
+    返回原修订；revision 落后或同 revision 异内容返回 409。
+    """
+
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class TaskIngressResponse(BaseModel):
+    """Task Ingress 响应：服务端生成的 task_id/revision/digests + status。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    revision: int = Field(ge=1)
+    task_digest: str
+    scope_digest: str
+    status: Literal["active", "cancelled", "superseded"]
 
 
 def _rfc3339_timestamp(value: str, field_name: str) -> datetime:

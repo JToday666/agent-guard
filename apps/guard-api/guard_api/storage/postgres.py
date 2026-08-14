@@ -29,6 +29,7 @@ from agentguard_core import (
     memory_change_can_transition,
     utc_now_iso,
 )
+from agentguard_core.authority import TaskFact
 from guard_api.models import (
     AdapterStatusRecord,
     ApprovalRequest,
@@ -52,6 +53,8 @@ from guard_api.storage.base import (
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
     StoredLaunchCode,
+    TaskFactRecord,
+    TaskRevisionConflictError,
     classify_audit_record_type,
     memory_change_is_replay_match,
     merge_provenance_edge,
@@ -79,6 +82,7 @@ from guard_api.storage.sqlalchemy_models import (
     policy_snapshots,
     provenance_edges,
     provenance_nodes,
+    task_facts,
 )
 
 _POLICY_SNAPSHOT_ADVISORY_LOCK_ID = 427001030001
@@ -105,6 +109,19 @@ def _compat_strip_legacy_policy_bundle_fields(payload: Any) -> Any:
 def _lock_provenance_identity(session: Session, kind: str, stable_id: str) -> None:
     lock_id = int.from_bytes(
         hashlib.sha256(f"provenance:{kind}:{stable_id}".encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+    )
+
+
+def _lock_task_identity(session: Session, task_id: str) -> None:
+    """按 task_id 加事务级 advisory lock，串行化同一任务的 revision CAS。"""
+
+    lock_id = int.from_bytes(
+        hashlib.sha256(f"task_fact:{task_id}".encode("utf-8")).digest()[:8],
         byteorder="big",
         signed=True,
     )
@@ -1016,6 +1033,81 @@ class PostgresControlPlaneStore:
             )
         return records
 
+    def create_task_fact(self, record: TaskFactRecord) -> TaskFactRecord:
+        # 事务内 advisory lock + head revision 条件校验，与 memory 语义对齐：
+        # 仅当 expected_revision 等于当前 head revision 时追加，旧 revision
+        # 永不覆盖。
+        task_fact = record.task_fact
+        with self._session_factory() as session:
+            with session.begin():
+                _lock_task_identity(session, task_fact.task_id)
+                head_revision = session.execute(
+                    select(func.max(task_facts.c.revision)).where(
+                        task_facts.c.task_id == task_fact.task_id
+                    )
+                ).scalar_one()
+                current_revision = (
+                    int(head_revision) if head_revision is not None else 0
+                )
+                if record.expected_revision != current_revision:
+                    raise TaskRevisionConflictError(
+                        expected_revision=record.expected_revision,
+                        current_revision=current_revision,
+                    )
+                session.execute(
+                    pg_insert(task_facts).values(
+                        task_id=task_fact.task_id,
+                        revision=task_fact.revision,
+                        scope_digest=task_fact.scope_digest,
+                        scope_key_id=task_fact.scope_key_id,
+                        principal_id=task_fact.principal_id,
+                        status=task_fact.status,
+                        task_digest=task_fact.task_digest,
+                        task_summary=task_fact.task_summary,
+                        canonical_payload=record.canonical_payload,
+                        request_digest=record.request_digest,
+                        expected_revision=record.expected_revision,
+                        producer=task_fact.producer,
+                        authority=task_fact.authority,
+                        created_at=record.created_at,
+                    )
+                )
+        return record
+
+    def get_task_fact(
+        self, task_id: str, revision: int | None = None
+    ) -> TaskFactRecord | None:
+        stmt = select(
+            task_facts.c.canonical_payload,
+            task_facts.c.request_digest,
+            task_facts.c.expected_revision,
+            task_facts.c.created_at,
+        ).where(task_facts.c.task_id == task_id)
+        if revision is None:
+            stmt = stmt.order_by(desc(task_facts.c.revision)).limit(1)
+        else:
+            stmt = stmt.where(task_facts.c.revision == revision)
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        if row is None:
+            return None
+        return _task_fact_record_from_row(row)
+
+    def list_task_fact_revisions(self, task_id: str) -> list[TaskFactRecord]:
+        stmt = (
+            select(
+                task_facts.c.canonical_payload,
+                task_facts.c.request_digest,
+                task_facts.c.expected_revision,
+                task_facts.c.created_at,
+            )
+            .where(task_facts.c.task_id == task_id)
+            .order_by(task_facts.c.revision)
+        )
+        with self._read_session() as session:
+            rows = session.execute(stmt).mappings().all()
+        return [_task_fact_record_from_row(row) for row in rows]
+
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         created_at = _database_datetime(approval.created_at)
         expires_at = _database_datetime(approval.expires_at)
@@ -1306,6 +1398,17 @@ def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, 1000))
+
+
+def _task_fact_record_from_row(row: Any) -> TaskFactRecord:
+    payload = row["canonical_payload"]
+    return TaskFactRecord(
+        task_fact=TaskFact.model_validate(payload),
+        canonical_payload=dict(payload),
+        request_digest=str(row["request_digest"]),
+        expected_revision=int(row["expected_revision"]),
+        created_at=str(row["created_at"]),
+    )
 
 
 def _bounded_collection_limit(limit: int) -> int:

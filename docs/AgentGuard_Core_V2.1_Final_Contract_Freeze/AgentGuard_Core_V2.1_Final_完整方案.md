@@ -553,6 +553,7 @@ class TaskFact(BaseModel):
 
     task_id: str
     scope_digest: str
+    scope_key_id: str
     principal_id: str
 
     task_summary: str
@@ -573,8 +574,9 @@ class TaskFact(BaseModel):
 
 冻结：
 
-- `task_digest` 对规范化后的完整用户任务计算，不直接由 Adapter 提供；
+- `task_digest` 只对规范化后的完整用户任务内容与约束计算，不包含 `task_id`、principal/scope 绑定、revision/status 等身份或生命周期字段，也不直接由 Adapter 提供；
 - TaskFact 必须与 `principal_id + scope_digest` 绑定；
+- `scope_key_id` 标识生成 `scope_digest` 的服务端 keyring 条目；登录凭证与 scope HMAC keyring 必须解耦，轮换时保留仍被 TaskFact 引用的旧 key；
 - Adapter 后续只能携带 `task_id`/claim，不能覆盖 authoritative TaskFact；
 - Task 更新产生新 revision；旧 revision 不静默覆盖；
 - TaskAuthorizationCompiler 读取 TaskFact，而不是直接读取 `SecurityContext.user_task` 作为 Authority。
@@ -1541,6 +1543,7 @@ RFC 8785 JCS 或项目统一 canonical JSON
 ```
 
 数组顺序只有在语义有序时保留；集合语义字段必须先按稳定 key 排序。
+`ActionConstraint.action_types`、资源/目标约束的 `values` 以及约束合取列表均按集合语义去重并稳定排序。
 
 禁止把以下字段加入安全摘要：
 
@@ -3046,6 +3049,7 @@ Shadow 输出，不改变 decision。
 
 - TaskFact；
 - 专用 `task:write` Task API；
+- 独立、版本化且支持保留旧 key 的 SecurityStateScope HMAC keyring；
 - principal/scope binding；
 - Task revision；
 - Adapter `user_task` 永久保持 claim，不得覆盖 TaskFact；
