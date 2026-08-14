@@ -1,6 +1,6 @@
 # AgentGuard V21-00 基线报告
 
-> 状态：`functional_smoke_passed`；冻结包仍为 `candidate-for-freeze`。
+> 状态：`functional_smoke_passed`；冻结包为 `frozen`。
 
 ## 回归基线
 

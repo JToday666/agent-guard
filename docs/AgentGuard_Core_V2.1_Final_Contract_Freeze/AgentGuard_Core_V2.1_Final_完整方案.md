@@ -1,13 +1,13 @@
 # AgentGuard Core V2.1-Final — 完整设计与实施方案
 
 > 本文件由分册按固定顺序聚合；分册是维护源。
-> 当前状态：Contract Freeze Candidate。
+> 当前状态：Contract Frozen。
 
 ---
 
 # 00 — AgentGuard Core V2.1-Final：最终架构与冻结边界
 
-> 当前状态：`candidate-for-freeze`。本文件描述目标契约，不代表对应代码已经实现。
+> 当前状态：`frozen`。本文件冻结目标契约，不代表对应代码已经实现。
 
 ## 1. 目标
 
@@ -5259,129 +5259,129 @@ Benign ASK <= 10%
 
 # 09 — Contract Freeze Checklist
 
-本文件用于 Candidate → Frozen 的逐项签字/Review。当前所有方框表示**尚未人工签字**，不是“文档不存在”或“代码尚未实现”的同义词。
+本文件记录 Candidate → Frozen 的逐项签字/Review。`[x]` 表示仓库所有者已签署冻结的 `DESIGN` 契约；`[ ]` 表示后续 `IMPLEMENTATION` 验收尚未完成。
 
 - `DESIGN`：正式 Frozen 前必须完成的设计/机器契约签字；
 - `IMPLEMENTATION`：后续阶段代码与实验验收，不阻止 V21-00 Candidate 形成，但阻止对应能力启用或效果声明。
 
 ## F0 不变量
 
-- [ ] Authority issuer 白名单已冻结
-- [ ] Data/Influence edge 不传 Authority
-- [ ] Missing required fact 禁止 CLEAR_ALLOW
-- [ ] Taint 无 hop decay
-- [ ] Decision ≠ runtime execution
-- [ ] Semantic timeout/invalid/stale 不产生 ALLOW
-- [ ] Required component failure 不 fail-open
-- [ ] Uncommitted fact 不进入历史状态
-- [ ] allow_once fingerprint + one-time consumption
-- [ ] authenticated producer ≠ authoritative fact
-- [ ] dedicated task ingress is the only TaskFact authority root
-- [ ] V2 allow_once requires human approval + pre-execution atomic lease consumption
+- [x] Authority issuer 白名单已冻结
+- [x] Data/Influence edge 不传 Authority
+- [x] Missing required fact 禁止 CLEAR_ALLOW
+- [x] Taint 无 hop decay
+- [x] Decision ≠ runtime execution
+- [x] Semantic timeout/invalid/stale 不产生 ALLOW
+- [x] Required component failure 不 fail-open
+- [x] Uncommitted fact 不进入历史状态
+- [x] allow_once fingerprint + one-time consumption
+- [x] authenticated producer ≠ authoritative fact
+- [x] dedicated task ingress is the only TaskFact authority root
+- [x] V2 allow_once requires human approval + pre-execution atomic lease consumption
 
 ## F1 类型
 
 以下属于 `DESIGN`：字段、身份、摘要与失败语义必须在 Candidate 中闭环；不要求 V21-00 已实现运行时代码。
 
-- [ ] EvidenceRef
-- [ ] FactRef
-- [ ] SecurityStateScope
-- [ ] SequenceRef / EvaluationClock
-- [ ] TaskFact
-- [ ] ActionEffect
-- [ ] CanonicalArguments
-- [ ] CanonicalResource typed union
-- [ ] Constraint DSL
-- [ ] ActionIR
-- [ ] SourceFact
-- [ ] FlowFact
-- [ ] DeclassificationFact
-- [ ] MemoryFact
-- [ ] CapabilityGrant
-- [ ] GrantConsumption
-- [ ] ExecutionLease
-- [ ] RecentActionFact
-- [ ] RuntimeOutcomeFact
-- [ ] BehaviorAggregate / StickyTaintSummary
-- [ ] DomainCoverage / CoverageMap
-- [ ] StateWatermarks / GapRange
-- [ ] RequiredCheckPlan
-- [ ] SecuritySnapshot
-- [ ] SecuritySignal
-- [ ] PolicyViolation
-- [ ] EvaluationDegradation
-- [ ] AuthorityVerdict / FlowVerdict
-- [ ] SemanticRoutingAssessment
-- [ ] FastAssessment
-- [ ] SemanticJudgment
-- [ ] ProjectionRecordIdentity
-- [ ] SecurityStateDeltaV21
-- [ ] DecisionEvidenceV21
+- [x] EvidenceRef
+- [x] FactRef
+- [x] SecurityStateScope
+- [x] SequenceRef / EvaluationClock
+- [x] TaskFact
+- [x] ActionEffect
+- [x] CanonicalArguments
+- [x] CanonicalResource typed union
+- [x] Constraint DSL
+- [x] ActionIR
+- [x] SourceFact
+- [x] FlowFact
+- [x] DeclassificationFact
+- [x] MemoryFact
+- [x] CapabilityGrant
+- [x] GrantConsumption
+- [x] ExecutionLease
+- [x] RecentActionFact
+- [x] RuntimeOutcomeFact
+- [x] BehaviorAggregate / StickyTaintSummary
+- [x] DomainCoverage / CoverageMap
+- [x] StateWatermarks / GapRange
+- [x] RequiredCheckPlan
+- [x] SecuritySnapshot
+- [x] SecuritySignal
+- [x] PolicyViolation
+- [x] EvaluationDegradation
+- [x] AuthorityVerdict / FlowVerdict
+- [x] SemanticRoutingAssessment
+- [x] FastAssessment
+- [x] SemanticJudgment
+- [x] ProjectionRecordIdentity
+- [x] SecurityStateDeltaV21
+- [x] DecisionEvidenceV21
 
 ## Digest / Identity
 
-- [ ] 每个安全摘要使用字段白名单
-- [ ] authorization_fingerprint 使用 keyed digest/HMAC
-- [ ] audit_fingerprint 与授权指纹分离
-- [ ] random/time/latency 不参与安全 digest
-- [ ] 集合字段稳定排序
-- [ ] Semantic 四/五重 digest binding
+- [x] 每个安全摘要使用字段白名单
+- [x] authorization_fingerprint 使用 keyed digest/HMAC
+- [x] audit_fingerprint 与授权指纹分离
+- [x] random/time/latency 不参与安全 digest
+- [x] 集合字段稳定排序
+- [x] Semantic 四/五重 digest binding
 
 ## State / Projector
 
 字段与顺序语义属于 `DESIGN`；rebuild/flooding 等动态测试属于 `IMPLEMENTATION`。
 
-- [ ] Projector only consumes committed records
-- [ ] ProjectionIdentity 不只 event_id
-- [ ] State version CAS
-- [ ] duplicate projection no-op
-- [ ] digest conflict → dirty/alert
+- [x] Projector only consumes committed records (`DESIGN`)
+- [x] ProjectionIdentity 不只 event_id (`DESIGN`)
+- [x] State version CAS (`DESIGN`)
+- [x] duplicate projection no-op (`DESIGN`)
+- [x] digest conflict → dirty/alert (`DESIGN`)
 - [ ] rebuild determinism
-- [ ] safe eviction
+- [x] safe eviction contract (`DESIGN`)
 - [ ] state flooding test
 - [ ] localized gap degradation
 
 ## Coverage
 
-- [ ] task 计算规则
-- [ ] source 计算规则
-- [ ] capability 计算规则
-- [ ] behavior 计算规则
-- [ ] dataflow 计算规则
-- [ ] memory 计算规则
-- [ ] runtime_outcome 计算规则
-- [ ] RequiredCheckPlan mapping
+- [x] task 计算规则
+- [x] source 计算规则
+- [x] capability 计算规则
+- [x] behavior 计算规则
+- [x] dataflow 计算规则
+- [x] memory 计算规则
+- [x] runtime_outcome 计算规则
+- [x] RequiredCheckPlan mapping
 
 ## Fusion
 
-- [ ] hard policy priority
-- [ ] credential flow matrix
-- [ ] sensitive flow matrix
-- [ ] untrusted influence matrix
-- [ ] memory flow matrix
-- [ ] explicit mismatch vs unknown authority 区分
-- [ ] CLEAR_ALLOW proof 10 条条件
-- [ ] evidence group dedup
+- [x] hard policy priority
+- [x] credential flow matrix
+- [x] sensitive flow matrix
+- [x] untrusted influence matrix
+- [x] memory flow matrix
+- [x] explicit mismatch vs unknown authority 区分
+- [x] CLEAR_ALLOW proof 10 条条件
+- [x] evidence group dedup
 
 ## Semantic
 
-- [ ] eligible predicate 结构化
-- [ ] no tool access
-- [ ] bounded/redacted input
-- [ ] aligned/misaligned/uncertain only
-- [ ] shadow default
-- [ ] timeout → ASK
-- [ ] stale digest invalid
-- [ ] no cache in Minimal 或 exact-key cache 契约完整
+- [x] eligible predicate 结构化
+- [x] no tool access
+- [x] bounded/redacted input
+- [x] aligned/misaligned/uncertain only
+- [x] shadow default
+- [x] timeout → ASK
+- [x] stale digest invalid
+- [x] no cache in Minimal 或 exact-key cache 契约完整
 
 ## Legacy Migration
 
-- [ ] legacy official in shadow
-- [ ] limited enable single-direction tightening
-- [ ] v21 allow 不降低 legacy ask/deny
-- [ ] rule-by-rule ownership transfer
-- [ ] rollback feature flag
-- [ ] legacy evaluate 不伪造 snapshot
+- [x] legacy official in shadow
+- [x] limited enable single-direction tightening
+- [x] v21 allow 不降低 legacy ask/deny
+- [x] rule-by-rule ownership transfer
+- [x] rollback feature flag contract
+- [x] legacy evaluate 不伪造 snapshot
 
 ## Evaluation
 

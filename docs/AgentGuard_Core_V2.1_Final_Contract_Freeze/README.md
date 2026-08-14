@@ -1,20 +1,20 @@
 # AgentGuard Core V2.1-Final — Contract Freeze
 
-> 状态：**Final Design / Contract Freeze Candidate**  
+> 状态：**Final Design / Contract Frozen**
 > 适用范围：AgentGuard 竞赛版 Minimal V2.1 + 后续生产级扩展  
 > 当前远端 `dev` 冻结检查点：`69efe2f027d9a4ba9c18623838e84f6ce30ffa62`  
 > 核心功能设计基线：其父提交 `1d9fb7ffd6fbb94dc228143c19793e0f7fe20642`；`69efe2f` 仅为 CI 修复，不改变 Core 判定设计前提。
 
 ## 1. 文档定位
 
-本目录是此前 V2、V2.1、Deep Research 与多轮评审意见的唯一候选收敛版本。自动校验与人工签字完成前保持 `candidate-for-freeze`。自正式冻结起：
+本目录是此前 V2、V2.1、Deep Research 与多轮评审意见的唯一冻结收敛版本。自动校验、V21-00 functional smoke 与仓库所有者签字已完成，权威状态为 `frozen`。自本次冻结起：
 
 - 不再维护平行的 V2.1 判定方案；
 - 新实现若偏离 F0/F1 契约，必须先修改本文档并经过安全评审；
 - 竞赛实现采用 **Minimal V2.1-Final**，生产级多 worker、共享状态和更广泛 Semantic de-escalation 明确后置；
 - “高召回、低误报、实时、可解释、高可信”是本架构支持的**目标**，不是文档本身已证明的结果；必须由最终 benchmark、消融实验、真实 Runtime Receipt 和可复现性能测试验证。
 
-Candidate 转为 Frozen 必须同时满足：机器契约通过 Schema 校验、分册与聚合文档一致、V21-00 基线证据完整、冻结清单中的设计签字项通过，并由评审者明确确认。实现期测试项不冒充设计签字项。
+本次 Candidate → Frozen 已满足：机器契约通过 Schema 校验、分册与聚合文档一致、V21-00 功能基线证据完整、冻结清单中的设计项签字通过，并由仓库所有者明确确认。未勾选的实现期测试项仍限制能力启用和效果声明。
 
 ## 2. 核心结论
 

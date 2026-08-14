@@ -1,6 +1,6 @@
 {
   "schema_version": "2.1-final-candidate",
-  "status": "candidate-for-freeze",
+  "status": "frozen",
   "repository": {
     "full_name": "JToday666/agent-guard",
     "remote_dev_sha_at_freeze": "69efe2f027d9a4ba9c18623838e84f6ce30ffa62",

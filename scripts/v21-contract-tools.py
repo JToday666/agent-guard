@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Build and validate the V2.1 Final contract-freeze candidate package."""
+"""Build and validate the V2.1 Final contract-freeze package."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,10 +46,16 @@ def render_combined() -> str:
     missing = [path.name for path in CHAPTERS if not path.is_file()]
     if missing:
         raise FileNotFoundError(f"missing contract chapters: {', '.join(missing)}")
+    metadata = _read_json_compatible_yaml(FREEZE_DIR / "FREEZE_METADATA.yaml")
+    status_label = (
+        "Contract Frozen"
+        if metadata.get("status") == "frozen"
+        else "Contract Freeze Candidate"
+    )
     header = (
         "# AgentGuard Core V2.1-Final — 完整设计与实施方案\n\n"
         "> 本文件由分册按固定顺序聚合；分册是维护源。\n"
-        "> 当前状态：Contract Freeze Candidate。\n\n"
+        f"> 当前状态：{status_label}。\n\n"
         "---\n\n"
     )
     chapters = "\n\n---\n\n".join(
@@ -89,14 +96,36 @@ def validate() -> None:
     )
     metadata = _read_json_compatible_yaml(FREEZE_DIR / "FREEZE_METADATA.yaml")
 
-    if metadata.get("status") != "candidate-for-freeze":
-        raise ValueError(
-            "FREEZE_METADATA.yaml must remain candidate-for-freeze in V21-00"
-        )
-    if contract.get("status") != "candidate-for-freeze":
-        raise ValueError(
-            "contract_freeze.yaml must remain candidate-for-freeze in V21-00"
-        )
+    status = metadata.get("status")
+    if status not in {"candidate-for-freeze", "frozen"}:
+        raise ValueError("FREEZE_METADATA.yaml has an unsupported freeze status")
+    if contract.get("status") != status:
+        raise ValueError("metadata and contract freeze statuses differ")
+    if status == "frozen":
+        signoff = metadata.get("review_signoff")
+        if not isinstance(signoff, dict) or not all(
+            signoff.get(field)
+            for field in ("confirmed_by", "confirmed_via", "confirmed_at")
+        ):
+            raise ValueError(
+                "frozen metadata requires explicit review sign-off evidence"
+            )
+        checklist = CHAPTERS[9].read_text(encoding="utf-8")
+        design_checklist = checklist.split("## Evaluation", maxsplit=1)[0]
+        allowed_implementation_items = {
+            "rebuild determinism",
+            "state flooding test",
+            "localized gap degradation",
+        }
+        unchecked_design_items = {
+            match.group(1).strip()
+            for match in re.finditer(r"^- \[ \] (.+)$", design_checklist, re.MULTILINE)
+        } - allowed_implementation_items
+        if unchecked_design_items:
+            raise ValueError(
+                "frozen package has unsigned design items: "
+                + ", ".join(sorted(unchecked_design_items))
+            )
 
     dispositions = set(contract["fast_dispositions"])
     matrix_dispositions = set(matrix["disposition_priority"])

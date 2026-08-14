@@ -589,10 +589,13 @@ def render_markdown(report: dict[str, Any]) -> str:
     regression = report["regression"]
     attack = regression["attack"]
     benign = regression["benign"]
+    freeze_metadata = json.loads(
+        (DEFAULT_OUTPUT_DIR.parent / "FREEZE_METADATA.yaml").read_text(encoding="utf-8")
+    )
     lines = [
         "# AgentGuard V21-00 基线报告",
         "",
-        f"> 状态：`{report['completion_status']}`；冻结包仍为 `candidate-for-freeze`。",
+        f"> 状态：`{report['completion_status']}`；冻结包为 `{freeze_metadata['status']}`。",
         "",
         "## 回归基线",
         "",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentguard.local/schemas/v21/contract-freeze.schema.json",
-  "title": "AgentGuard V2.1 Contract Freeze Candidate",
+  "title": "AgentGuard V2.1 Contract Freeze",
   "type": "object",
   "required": [
     "schema_version", "status", "repository", "freeze_levels", "system_invariants",
