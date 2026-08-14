@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.local/schemas/v21/fusion-matrix.schema.json",
+  "title": "AgentGuard V2.1 Fusion Matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema", "schema_version", "format", "match_semantics", "disposition_priority",
+    "selectors", "priority", "flow_rules", "influence_rules", "memory_rules",
+    "behavior_rules", "clear_allow_requires"
+  ],
+  "$defs": {
+    "disposition": {"enum": ["CLEAR_ALLOW", "CLEAR_DENY", "DEFER"]},
+    "authority": {"enum": ["authorized", "unauthorized", "unknown", "not_required", "any"]},
+    "impact": {"enum": ["low", "moderate", "high", "critical", "any"]},
+    "strength": {"enum": ["exact", "strong", "possible", "any"]},
+    "strengthList": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/strength"}
+    },
+    "impactList": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"enum": ["low", "moderate", "high", "critical"]}
+    },
+    "flowRule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "taint", "strength", "authority", "sink", "disposition"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^FLOW-[A-Z0-9-]+$"},
+        "taint": {"enum": ["CREDENTIAL", "SENSITIVE"]},
+        "strength": {"$ref": "#/$defs/strength"},
+        "authority": {"$ref": "#/$defs/authority"},
+        "sink": {"enum": ["external", "internal", "any"]},
+        "disposition": {"$ref": "#/$defs/disposition"}
+      }
+    },
+    "influenceRule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "strength", "hostile_instruction_evidence", "authority", "impact", "disposition"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^INFLUENCE-[A-Z0-9-]+$"},
+        "strength": {"$ref": "#/$defs/strengthList"},
+        "hostile_instruction_evidence": {"enum": [true, false, "any"]},
+        "authority": {"$ref": "#/$defs/authority"},
+        "impact": {"$ref": "#/$defs/impactList"},
+        "disposition": {"$ref": "#/$defs/disposition"}
+      }
+    },
+    "memoryRule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "trust_state", "taint", "retrieval_strength", "authority", "impact", "disposition"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^MEMORY-[A-Z0-9-]+$"},
+        "trust_state": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["clean", "tainted", "quarantined", "unknown"]}},
+        "taint": {"enum": ["PERSISTENT_UNTRUSTED", "UNTRUSTED", "SENSITIVE", "CREDENTIAL"]},
+        "retrieval_strength": {"$ref": "#/$defs/strengthList"},
+        "authority": {"$ref": "#/$defs/authority"},
+        "impact": {"$ref": "#/$defs/impactList"},
+        "disposition": {"$ref": "#/$defs/disposition"}
+      }
+    },
+    "behaviorRule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "pattern", "confidence", "authority", "impact", "corroborating_flow_required", "disposition"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^BEHAVIOR-[A-Z0-9-]+$"},
+        "pattern": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["B1", "B2", "B3", "B4", "B5", "B6"]}},
+        "confidence": {"enum": ["low", "medium", "high", "any"]},
+        "authority": {"$ref": "#/$defs/authority"},
+        "impact": {"oneOf": [{"$ref": "#/$defs/impactList"}, {"const": "any"}]},
+        "corroborating_flow_required": {"enum": [true, false, "any"]},
+        "disposition": {"$ref": "#/$defs/disposition"}
+      }
+    }
+  },
+  "properties": {
+    "$schema": {"const": "./fusion_matrix.schema.json"},
+    "schema_version": {"const": "2.1-final-candidate"},
+    "format": {"const": "json-compatible-yaml"},
+    "match_semantics": {"const": "all_matching_rules_then_highest_priority"},
+    "disposition_priority": {"const": ["CLEAR_DENY", "DEFER", "CLEAR_ALLOW"]},
+    "selectors": {"type": "object"},
+    "priority": {"type": "array", "minItems": 8, "uniqueItems": true, "items": {"type": "string"}},
+    "flow_rules": {"type": "array", "items": {"$ref": "#/$defs/flowRule"}},
+    "influence_rules": {"type": "array", "items": {"$ref": "#/$defs/influenceRule"}},
+    "memory_rules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/memoryRule"}},
+    "behavior_rules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/behaviorRule"}},
+    "clear_allow_requires": {"type": "array", "minItems": 10, "uniqueItems": true, "items": {"type": "string"}}
+  }
+}
