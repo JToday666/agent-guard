@@ -333,6 +333,7 @@ task_facts = Table(
     Column("task_id", Text, primary_key=True),
     Column("revision", Integer, primary_key=True),
     Column("scope_digest", Text, nullable=False),
+    Column("scope_key_id", Text, nullable=False),
     Column("principal_id", Text, nullable=False),
     Column("status", Text, nullable=False),
     Column("task_digest", Text, nullable=False),
@@ -353,6 +354,7 @@ task_facts = Table(
         name="ck_task_facts_authority_root",
     ),
     Index("ix_task_facts_principal_id", "principal_id"),
+    Index("ix_task_facts_scope_key_id", "scope_key_id"),
     Index("ix_task_facts_scope_digest", "scope_digest"),
 )
 

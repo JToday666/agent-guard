@@ -1402,6 +1402,7 @@ def _task_fact_record(
     pending = TaskFact(
         task_id=task_id,
         scope_digest=scope_digest,
+        scope_key_id="test-key-1",
         principal_id="cred_control",
         task_summary=task_text,
         task_digest="sha256:pending",

@@ -1234,6 +1234,7 @@ def test_postgres_migration_creates_task_facts_table() -> None:
             "task_id",
             "revision",
             "scope_digest",
+            "scope_key_id",
             "principal_id",
             "status",
             "task_digest",
@@ -1259,7 +1260,14 @@ def test_postgres_task_ingress_create_idempotent_and_conflict() -> None:
         client = TestClient(
             create_app(
                 store=PostgresControlPlaneStore(database_url),
-                settings=GuardApiSettings(control_token="control-secret"),
+                settings=GuardApiSettings(
+                    control_token="control-secret",
+                    task_scope_active_key_id="test-key-1",
+                    task_scope_keys=(
+                        '{"test-key-1":'
+                        '"dGFzay1zY29wZS10ZXN0LWtleS1tYXRlcmlhbC0wMDAx"}'
+                    ),
+                ),
             )
         )
         headers = {"Authorization": "Bearer control-secret"}
@@ -1284,6 +1292,7 @@ def test_postgres_task_ingress_create_idempotent_and_conflict() -> None:
         assert head is not None
         assert head.task_fact.producer == "guard_api_task_ingress"
         assert head.task_fact.authority == "authoritative"
+        assert head.task_fact.scope_key_id == "test-key-1"
 
         revision_payload = {
             **payload,

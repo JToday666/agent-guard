@@ -42,6 +42,7 @@ AUTHORITY_DIR = (
 
 SERVER_KEY = b"v21-03-test-server-key"
 OTHER_KEY = b"v21-03-test-other-server-key"
+SCOPE_KEY_ID = "test-key-1"
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,7 @@ def _build_task_fact(scope: SecurityStateScope) -> TaskFact:
     pending = TaskFact(
         task_id="task_1",
         scope_digest=scope.scope_digest,
+        scope_key_id=SCOPE_KEY_ID,
         principal_id=scope.principal_id,
         task_summary="汇总本周销售数据并生成报表",
         task_digest="sha256:pending-server-computation",
@@ -120,6 +122,7 @@ def test_task_fact_fields_frozen() -> None:
         "schema_version",
         "task_id",
         "scope_digest",
+        "scope_key_id",
         "principal_id",
         "task_summary",
         "task_digest",
@@ -200,11 +203,76 @@ def test_task_digest_excludes_self_referential_and_unstable_fields() -> None:
     assert task_digest_projection(fact) == task_digest_projection(mutated)
 
 
+def test_task_digest_is_content_addressed_and_excludes_random_identity() -> None:
+    scope = _build_scope()
+    fact = _build_task_fact(scope)
+    other_identity = fact.model_copy(
+        update={
+            "task_id": "task_random_uuid_other",
+            "scope_digest": "hmac-sha256:" + "f" * 64,
+            "scope_key_id": "rotated-key",
+            "principal_id": "principal_other",
+            "revision": 7,
+        }
+    )
+    assert task_digest_projection(fact) == task_digest_projection(other_identity)
+
+
+def test_task_digest_normalizes_constraint_set_order_and_duplicates() -> None:
+    scope = _build_scope()
+    fact = _build_task_fact(scope)
+    reordered = fact.model_copy(
+        update={
+            "action_constraints": [
+                ActionConstraint(
+                    action_types=["file.write", "file.read", "file.read"]
+                )
+            ],
+            "resource_constraints": [
+                ResourceConstraint(
+                    scheme="file", op="prefix", values=["/tmp/", "/data/"]
+                ),
+                ResourceConstraint(
+                    scheme="file", op="prefix", values=["/data/"]
+                ),
+            ],
+        }
+    )
+    baseline = fact.model_copy(
+        update={
+            "action_constraints": [
+                ActionConstraint(action_types=["file.read", "file.write"])
+            ],
+            "resource_constraints": [
+                ResourceConstraint(
+                    scheme="file", op="prefix", values=["/data/"]
+                ),
+                ResourceConstraint(
+                    scheme="file", op="prefix", values=["/data/", "/tmp/"]
+                ),
+            ],
+        }
+    )
+    assert task_digest_projection(baseline) == task_digest_projection(reordered)
+
+
 @pytest.mark.parametrize(
     ("model_cls", "forbidden"),
     [
         (SecurityStateScope, {"trace_id", "scope_digest"}),
-        (TaskFact, {"task_digest", "evidence_refs"}),
+        (
+            TaskFact,
+            {
+                "task_id",
+                "scope_digest",
+                "scope_key_id",
+                "principal_id",
+                "revision",
+                "status",
+                "task_digest",
+                "evidence_refs",
+            },
+        ),
         (CompiledTaskAuthority, {"compiled_digest"}),
     ],
 )
@@ -236,6 +304,26 @@ def test_compile_is_deterministic_field_by_field() -> None:
     assert first.compiled_digest.startswith("sha256:")
 
 
+def test_compile_uses_persisted_scope_key_id_across_key_rotation() -> None:
+    scope = _build_scope()
+    fact = _build_task_fact(scope)
+
+    compiled = compile_task_authority(
+        fact,
+        scope,
+        server_keys={SCOPE_KEY_ID: SERVER_KEY, "test-key-2": OTHER_KEY},
+    )
+    assert compiled.task_id == fact.task_id
+
+    with pytest.raises(TaskAuthorityError) as exc:
+        compile_task_authority(
+            fact,
+            scope,
+            server_keys={"test-key-2": OTHER_KEY},
+        )
+    assert exc.value.reason_code == "v21-03:unknown_scope_key_id"
+
+
 def test_compile_passthrough_and_marker() -> None:
     scope = _build_scope()
     fact = _build_task_fact(scope)
@@ -259,6 +347,28 @@ def test_projection_keys_match_digest_whitelist() -> None:
     fact = _build_task_fact(scope)
     projection = compiled_task_authority_projection(fact)
     assert set(projection) == CompiledTaskAuthority.digest_fields()
+
+
+def test_compiled_digest_projection_normalizes_constraint_set_order() -> None:
+    scope = _build_scope()
+    fact = _build_task_fact(scope)
+    reordered = fact.model_copy(
+        update={
+            "action_constraints": [
+                ActionConstraint(action_types=["file.write", "file.read"])
+            ]
+        }
+    )
+    baseline = fact.model_copy(
+        update={
+            "action_constraints": [
+                ActionConstraint(action_types=["file.read", "file.write"])
+            ]
+        }
+    )
+    assert compiled_task_authority_projection(baseline) == (
+        compiled_task_authority_projection(reordered)
+    )
 
 
 def test_compile_sensitive_to_constraint_change() -> None:

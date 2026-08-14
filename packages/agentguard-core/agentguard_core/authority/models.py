@@ -24,11 +24,16 @@ Digest 口径声明（防三套 digest 口径混用）：
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from ..actions.canonical_json import canonical_hmac_sha256, canonical_sha256
+from ..actions.canonical_json import (
+    canonical_hmac_sha256,
+    canonical_json,
+    canonical_sha256,
+)
 from ..actions.models import (
     ActionConstraint,
     DestinationConstraint,
@@ -40,6 +45,7 @@ __all__ = [
     "EvaluationClock",
     "SecurityStateScope",
     "TaskFact",
+    "canonical_constraints_projection",
     "scope_digest_projection",
     "task_digest_projection",
 ]
@@ -52,6 +58,43 @@ def _canonical_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_canonical_value(item) for item in value]
     return value
+
+
+def _canonical_constraint(constraint: BaseModel) -> dict[str, Any]:
+    """规范化约束中的集合语义成员，不改变求值语义。"""
+    payload = constraint.model_dump(mode="json")
+    if "action_types" in payload:
+        payload["action_types"] = sorted(set(payload["action_types"]))
+    if "values" in payload:
+        payload["values"] = sorted(set(payload["values"]))
+    return payload
+
+
+def _canonical_constraint_list(
+    constraints: Sequence[BaseModel],
+) -> list[dict[str, Any]]:
+    """把约束合取集合规范为去重且按受限 JCS 稳定排序的列表。"""
+    by_canonical_json = {
+        canonical_json(payload): payload
+        for payload in (_canonical_constraint(item) for item in constraints)
+    }
+    return [by_canonical_json[key] for key in sorted(by_canonical_json)]
+
+
+def canonical_constraints_projection(
+    *,
+    action_constraints: list[ActionConstraint],
+    resource_constraints: list[ResourceConstraint],
+    destination_constraints: list[DestinationConstraint],
+) -> dict[str, list[dict[str, Any]]]:
+    """三类约束的集合语义规范化投影（01 §29）。"""
+    return {
+        "action_constraints": _canonical_constraint_list(action_constraints),
+        "resource_constraints": _canonical_constraint_list(resource_constraints),
+        "destination_constraints": _canonical_constraint_list(
+            destination_constraints
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +196,7 @@ class TaskFact(BaseModel):
 
     task_id: str
     scope_digest: str
+    scope_key_id: str
     principal_id: str
 
     task_summary: str
@@ -174,26 +218,17 @@ class TaskFact(BaseModel):
     def digest_fields(cls) -> frozenset[str]:
         """参与 ``task_digest`` 的字段白名单（01 §29, L1162-1181）。
 
-        排除：``task_digest``（digest 自身）与 ``evidence_refs``
-        （溯源引用非授权内容，record id 可能含非稳定量）。禁止把
-        wall-clock latency、random UUID、display-only reason、provider
-        request id、debug metadata 与非稳定顺序日志纳入摘要。
+        只覆盖规范化任务内容；任务身份、scope/principal 绑定、revision/status
+        生命周期和签名 key id 均由独立字段承载，不进入内容摘要。禁止把
+        random UUID 或其他非稳定字段纳入摘要。
         """
         return frozenset(
             {
                 "schema_version",
-                "task_id",
-                "principal_id",
-                "scope_digest",
                 "task_summary",
-                "revision",
-                "status",
                 "action_constraints",
                 "resource_constraints",
                 "destination_constraints",
-                "created_sequence",
-                "producer",
-                "authority",
             }
         )
 
@@ -212,8 +247,13 @@ def task_digest_projection(task_fact: TaskFact) -> str:
     Adapter 不得提供。
     """
     payload: dict[str, Any] = {
-        field: _canonical_value(getattr(task_fact, field))
-        for field in sorted(TaskFact.digest_fields())
+        "schema_version": task_fact.schema_version,
+        "task_summary": task_fact.task_summary,
+        **canonical_constraints_projection(
+            action_constraints=task_fact.action_constraints,
+            resource_constraints=task_fact.resource_constraints,
+            destination_constraints=task_fact.destination_constraints,
+        ),
     }
     return canonical_sha256(payload)
 

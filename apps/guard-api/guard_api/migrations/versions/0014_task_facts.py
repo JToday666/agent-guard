@@ -23,6 +23,7 @@ def upgrade() -> None:
         sa.Column("task_id", sa.Text(), nullable=False),
         sa.Column("revision", sa.Integer(), nullable=False),
         sa.Column("scope_digest", sa.Text(), nullable=False),
+        sa.Column("scope_key_id", sa.Text(), nullable=False),
         sa.Column("principal_id", sa.Text(), nullable=False),
         sa.Column("status", sa.Text(), nullable=False),
         sa.Column("task_digest", sa.Text(), nullable=False),
@@ -53,11 +54,13 @@ def upgrade() -> None:
         "producer = 'guard_api_task_ingress' AND authority = 'authoritative'",
     )
     op.create_index("ix_task_facts_principal_id", "task_facts", ["principal_id"])
+    op.create_index("ix_task_facts_scope_key_id", "task_facts", ["scope_key_id"])
     op.create_index("ix_task_facts_scope_digest", "task_facts", ["scope_digest"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_task_facts_scope_digest", table_name="task_facts")
+    op.drop_index("ix_task_facts_scope_key_id", table_name="task_facts")
     op.drop_index("ix_task_facts_principal_id", table_name="task_facts")
     op.drop_constraint("ck_task_facts_authority_root", "task_facts", type_="check")
     op.drop_constraint("ck_task_facts_status", "task_facts", type_="check")

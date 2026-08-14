@@ -52,6 +52,8 @@ from guard_api.storage.postgres import (
 from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 
 _AUDIT_CHECKPOINT_TEST_KEY = "Y2hlY2twb2ludC10ZXN0LWtleS1tYXRlcmlhbC0zMmI"
+_TASK_SCOPE_TEST_KEY = "dGFzay1zY29wZS10ZXN0LWtleS1tYXRlcmlhbC0wMDAx"
+_TASK_SCOPE_TEST_KEYS = f'{{"test-key-1":"{_TASK_SCOPE_TEST_KEY}"}}'
 
 
 class FailingHealthStore(MemoryControlPlaneStore):
@@ -482,6 +484,11 @@ def test_production_configuration_requires_secure_cookie_and_strong_token(
     settings.audit_checkpoint_path = str(tmp_path / "agentguard-audit-checkpoints.jsonl")
     settings.audit_checkpoint_key = _AUDIT_CHECKPOINT_TEST_KEY
     settings.audit_checkpoint_key_id = "test-key-2026"
+    with pytest.raises(GuardApiConfigurationError, match="task scope keyring"):
+        settings.validate_for_startup()
+
+    settings.task_scope_active_key_id = "test-key-1"
+    settings.task_scope_keys = _TASK_SCOPE_TEST_KEYS
     settings.validate_for_startup()
 
 
@@ -498,6 +505,28 @@ def test_audit_checkpoint_configuration_is_complete_and_strong(tmp_path) -> None
     )
     with pytest.raises(GuardApiConfigurationError, match="at least 32 bytes"):
         weak.validate_for_startup()
+
+
+def test_task_scope_keyring_configuration_is_complete_and_versioned() -> None:
+    partial = GuardApiSettings(task_scope_active_key_id="test-key-1")
+    with pytest.raises(GuardApiConfigurationError, match="configured together"):
+        partial.validate_for_startup()
+
+    missing_active = GuardApiSettings(
+        task_scope_active_key_id="test-key-2",
+        task_scope_keys=_TASK_SCOPE_TEST_KEYS,
+    )
+    with pytest.raises(GuardApiConfigurationError, match="must exist"):
+        missing_active.validate_for_startup()
+
+    configured = GuardApiSettings(
+        task_scope_active_key_id="test-key-1",
+        task_scope_keys=_TASK_SCOPE_TEST_KEYS,
+    )
+    configured.validate_for_startup()
+    assert configured.task_scope_keyring() == {
+        "test-key-1": b"task-scope-test-key-material-0001"
+    }
 
 
 def test_settings_reject_invalid_environment_and_empty_control_token() -> None:
@@ -752,6 +781,8 @@ def test_browser_exchange_sets_secure_cookie_when_required(tmp_path) -> None:
         audit_checkpoint_path=str(tmp_path / "audit-checkpoints.jsonl"),
         audit_checkpoint_key=_AUDIT_CHECKPOINT_TEST_KEY,
         audit_checkpoint_key_id="test-key-2026",
+        task_scope_active_key_id="test-key-1",
+        task_scope_keys=_TASK_SCOPE_TEST_KEYS,
     )
     app = create_app(store=memory_store_with_adapter(), settings=settings)
 

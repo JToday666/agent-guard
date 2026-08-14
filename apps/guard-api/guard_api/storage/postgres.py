@@ -1059,6 +1059,7 @@ class PostgresControlPlaneStore:
                         task_id=task_fact.task_id,
                         revision=task_fact.revision,
                         scope_digest=task_fact.scope_digest,
+                        scope_key_id=task_fact.scope_key_id,
                         principal_id=task_fact.principal_id,
                         status=task_fact.status,
                         task_digest=task_fact.task_digest,

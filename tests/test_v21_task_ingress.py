@@ -16,6 +16,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from typing import cast
+from unittest.mock import Mock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -30,22 +35,39 @@ from agentguard_core.authority import (
 )
 from guard_api.auth import ApiAuthError, AuthContext
 from guard_api.main import create_app
-from guard_api.models import TaskCreateRequest
+from guard_api.models import TaskCreateRequest, TaskReviseRequest
 from guard_api.services.task_ingress import TaskIngressService
 from guard_api.settings import GuardApiSettings
+from guard_api.storage.base import ControlPlaneStore, TaskFactRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.support.auth import memory_store_with_adapter
 
 CONTROL_HEADERS = {"Authorization": "Bearer control-secret"}
 ADAPTER_HEADERS = {"Authorization": "Bearer adapter-secret"}
+TASK_SCOPE_KEY = "dGFzay1zY29wZS10ZXN0LWtleS1tYXRlcmlhbC0wMDAx"
+TASK_SCOPE_KEY_ID = "test-key-1"
 
 
 def _settings() -> GuardApiSettings:
-    return GuardApiSettings(control_token="control-secret")
+    return GuardApiSettings(
+        control_token="control-secret",
+        task_scope_active_key_id=TASK_SCOPE_KEY_ID,
+        task_scope_keys=f'{{"{TASK_SCOPE_KEY_ID}":"{TASK_SCOPE_KEY}"}}',
+    )
 
 
 def _client(store: MemoryControlPlaneStore) -> TestClient:
     return TestClient(create_app(store=store, settings=_settings()))
+
+
+def _control_auth_context() -> AuthContext:
+    return AuthContext(
+        principal_type="control",
+        principal_id="cred_control",
+        role="control",
+        scopes=["task:write"],
+        auth_method="bearer",
+    )
 
 
 def _task_payload(**overrides: object) -> dict:
@@ -150,6 +172,7 @@ def test_control_token_creates_task_fact_with_server_generated_fields() -> None:
     task_fact = record.task_fact
     assert task_fact.producer == "guard_api_task_ingress"
     assert task_fact.authority == "authoritative"
+    assert task_fact.scope_key_id == TASK_SCOPE_KEY_ID
     assert task_fact.principal_id == "cred_control"
     assert task_fact.task_summary == "汇总本周销售数据并生成报表"
     assert task_fact.task_digest == task_digest_projection(task_fact)
@@ -172,6 +195,17 @@ def test_control_token_creates_task_fact_with_server_generated_fields() -> None:
         == body["scope_digest"]
     )
     assert record.canonical_payload["scope_digest"] == body["scope_digest"]
+    assert record.canonical_payload["scope_key_id"] == TASK_SCOPE_KEY_ID
+
+
+def test_task_scope_keyring_is_independent_from_control_token_rotation() -> None:
+    original = _settings()
+    rotated = GuardApiSettings(
+        control_token="rotated-control-secret",
+        task_scope_active_key_id=TASK_SCOPE_KEY_ID,
+        task_scope_keys=original.task_scope_keys,
+    )
+    assert original.task_scope_signing_key() == rotated.task_scope_signing_key()
 
 
 def test_server_generated_fields_cannot_be_smuggled() -> None:
@@ -290,6 +324,96 @@ def test_revise_idempotent_replay_returns_original_revision() -> None:
         record.task_fact.revision
         for record in store.list_task_fact_revisions(created["task_id"])
     ] == [1, 2]
+
+
+def test_revise_idempotency_normalizes_constraint_set_order() -> None:
+    store = memory_store_with_adapter()
+    client = _client(store)
+    created = _create_task(client)
+    first_payload = _task_payload(
+        task_text="集合规范化修订",
+        action_constraints=[
+            {"op": "in", "action_types": ["file.read", "file.write"]}
+        ],
+        resource_constraints=[
+            {"scheme": "file", "op": "in", "values": ["/data/a", "/data/b"]}
+        ],
+    )
+    replay_payload = _task_payload(
+        task_text="集合规范化修订",
+        action_constraints=[
+            {
+                "op": "in",
+                "action_types": ["file.write", "file.read", "file.read"],
+            }
+        ],
+        resource_constraints=[
+            {
+                "scheme": "file",
+                "op": "in",
+                "values": ["/data/b", "/data/a", "/data/a"],
+            }
+        ],
+    )
+
+    first = client.put(
+        f"/v1/tasks/{created['task_id']}",
+        json={**first_payload, "expected_revision": 1},
+        headers=CONTROL_HEADERS,
+    )
+    replay = client.put(
+        f"/v1/tasks/{created['task_id']}",
+        json={**replay_payload, "expected_revision": 1},
+        headers=CONTROL_HEADERS,
+    )
+
+    assert first.status_code == replay.status_code == 200
+    assert replay.json() == first.json()
+    assert len(store.list_task_fact_revisions(created["task_id"])) == 2
+
+
+def test_concurrent_identical_revision_retry_returns_committed_revision() -> None:
+    store = memory_store_with_adapter()
+    settings = _settings()
+    initial_service = TaskIngressService(store=store, settings=settings)
+    created = initial_service.create_task(
+        TaskCreateRequest(**_task_payload()),
+        _control_auth_context(),
+    )
+
+    write_barrier = Barrier(2)
+    proxy = Mock(wraps=store)
+    real_create = store.create_task_fact
+
+    def racing_create(record: TaskFactRecord) -> TaskFactRecord:
+        write_barrier.wait(timeout=5)
+        return real_create(record)
+
+    proxy.create_task_fact.side_effect = racing_create
+    service = TaskIngressService(
+        store=cast(ControlPlaneStore, proxy),
+        settings=settings,
+    )
+    request = TaskReviseRequest(
+        **_task_payload(task_text="并发幂等修订"),
+        expected_revision=1,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                service.revise_task,
+                created.task_id,
+                request,
+                _control_auth_context(),
+            )
+            for _ in range(2)
+        ]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert results[0] == results[1]
+    assert results[0].revision == 2
+    assert len(store.list_task_fact_revisions(created.task_id)) == 2
 
 
 def test_revise_stale_revision_conflicts() -> None:
@@ -574,15 +698,15 @@ def test_tampered_user_task_does_not_expand_authority() -> None:
         session_id=None,
         scope_digest=rebuilt_fact.scope_digest,
     )
-    server_key = _settings().task_scope_signing_key()
+    server_keys = _settings().task_scope_keyring()
     compiled_from_memory = compile_task_authority(
-        fact.task_fact, scope, server_key=server_key
+        fact.task_fact, scope, server_keys=server_keys
     )
     compiled_from_roundtrip = compile_task_authority(
-        rebuilt_fact, scope, server_key=server_key
+        rebuilt_fact, scope, server_keys=server_keys
     )
     compiled_after_evaluate = compile_task_authority(
-        store.get_task_fact(task_id).task_fact, scope, server_key=server_key
+        store.get_task_fact(task_id).task_fact, scope, server_keys=server_keys
     )
     assert (
         compiled_from_memory.compiled_digest

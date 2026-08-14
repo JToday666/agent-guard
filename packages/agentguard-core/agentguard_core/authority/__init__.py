@@ -21,6 +21,7 @@ from .models import (
     EvaluationClock,
     SecurityStateScope,
     TaskFact,
+    canonical_constraints_projection,
     scope_digest_projection,
     task_digest_projection,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "SecurityStateScope",
     "TaskAuthorityError",
     "TaskFact",
+    "canonical_constraints_projection",
     "compile_task_authority",
     "compiled_task_authority_projection",
     "scope_digest_projection",

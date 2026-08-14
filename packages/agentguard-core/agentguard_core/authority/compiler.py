@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import hmac
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -28,6 +29,7 @@ from ..actions.models import (
 from .models import (
     SecurityStateScope,
     TaskFact,
+    canonical_constraints_projection,
     scope_digest_projection,
     task_digest_projection,
 )
@@ -42,7 +44,7 @@ __all__ = [
 ]
 
 #: 编译器版本：任何编译语义变化必须升级版本，而不是静默改变 digest。
-COMPILER_VERSION = "v21-03-task-compiler-1"
+COMPILER_VERSION = "v21-03-task-compiler-2"
 
 #: derived-authority 标记：授权派生自 authoritative TaskFact，
 #: 与 Adapter 自报 claim（trusted_claim/untrusted_claim）严格区分。
@@ -114,7 +116,7 @@ def compiled_task_authority_projection(task_fact: TaskFact) -> dict[str, Any]:
     """``compiled_digest`` 的白名单投影（测试与审计可复用）。
 
     键名与 ``CompiledTaskAuthority.digest_fields()`` 声明一一对应；
-    约束列表按出现顺序保留（语义有序，01 §29）。
+    约束合取及成员按集合语义去重并稳定排序（01 §29）。
     """
     return {
         "schema_version": task_fact.schema_version,
@@ -123,18 +125,11 @@ def compiled_task_authority_projection(task_fact: TaskFact) -> dict[str, Any]:
         "principal_id": task_fact.principal_id,
         "scope_digest": task_fact.scope_digest,
         "status": task_fact.status,
-        "action_constraints": [
-            constraint.model_dump(mode="json")
-            for constraint in task_fact.action_constraints
-        ],
-        "resource_constraints": [
-            constraint.model_dump(mode="json")
-            for constraint in task_fact.resource_constraints
-        ],
-        "destination_constraints": [
-            constraint.model_dump(mode="json")
-            for constraint in task_fact.destination_constraints
-        ],
+        **canonical_constraints_projection(
+            action_constraints=task_fact.action_constraints,
+            resource_constraints=task_fact.resource_constraints,
+            destination_constraints=task_fact.destination_constraints,
+        ),
         "derived_authority": DERIVED_AUTHORITY_MARKER,
         "compiler_version": COMPILER_VERSION,
     }
@@ -144,7 +139,8 @@ def compile_task_authority(
     task_fact: TaskFact,
     scope: SecurityStateScope,
     *,
-    server_key: bytes,
+    server_key: bytes | None = None,
+    server_keys: Mapping[str, bytes] | None = None,
 ) -> CompiledTaskAuthority:
     """把 authoritative ``TaskFact`` 编译为 ``CompiledTaskAuthority``。
 
@@ -152,7 +148,8 @@ def compile_task_authority(
 
     1. 结构校验：``producer == "guard_api_task_ingress"`` 且
        ``authority == "authoritative"``；
-    2. 绑定校验：以 ``server_key`` 重算 ``scope_digest`` 并与
+    2. 绑定校验：按持久化 ``scope_key_id`` 从 ``server_keys`` keyring
+       取验证 key（兼容纯 core 单 key 调用），重算 ``scope_digest`` 并与
        ``task_fact.scope_digest`` 恒定时间比对（``hmac.compare_digest``），
        且 ``principal_id`` 与 scope 一致；
     3. 完整性纵深防御：重算 ``task_digest_projection`` 并与
@@ -173,7 +170,23 @@ def compile_task_authority(
             f"got {task_fact.authority!r}",
         )
 
-    expected_digest = scope_digest_projection(scope, server_key=server_key)
+    if server_keys is not None:
+        verification_key = server_keys.get(task_fact.scope_key_id)
+        if verification_key is None:
+            raise TaskAuthorityError(
+                "v21-03:unknown_scope_key_id",
+                "task_fact.scope_key_id is not present in the verification keyring",
+            )
+    elif server_key is not None:
+        # 单 key 参数保留给纯 core 调用与兼容测试；持久化调用应传 keyring。
+        verification_key = server_key
+    else:
+        raise TaskAuthorityError(
+            "v21-03:missing_scope_verification_key",
+            "scope verification key material is required",
+        )
+
+    expected_digest = scope_digest_projection(scope, server_key=verification_key)
     if not hmac.compare_digest(
         expected_digest.encode("utf-8"),
         task_fact.scope_digest.encode("utf-8"),

@@ -24,6 +24,7 @@ from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority import (
     SecurityStateScope,
     TaskFact,
+    canonical_constraints_projection,
     scope_digest_projection,
     task_digest_projection,
 )
@@ -59,10 +60,13 @@ class TaskIngressService:
     ) -> TaskIngressResponse:
         binding_id = self._verify_runtime_binding(request, auth_context)
         scope = self._build_scope(request, auth_context, binding_id)
+        scope_key_id = self.settings.task_scope_active_key_id
+        assert scope_key_id is not None
         task_fact = self._build_task_fact(
             task_id=new_id("task"),
             revision=1,
             scope=scope,
+            scope_key_id=scope_key_id,
             request=request,
         )
         record = TaskFactRecord(
@@ -89,12 +93,13 @@ class TaskIngressService:
         request_digest = _canonical_request_digest(request)
         # 表驱动幂等：历史中存在 (expected_revision, request_digest) 完全相同
         # 的记录即视为同一修订的重放，直接返回原修订。
-        for record in history:
-            if (
-                record.expected_revision == request.expected_revision
-                and record.request_digest == request_digest
-            ):
-                return _ingress_response(record.task_fact)
+        replay = _find_idempotent_replay(
+            history,
+            expected_revision=request.expected_revision,
+            request_digest=request_digest,
+        )
+        if replay is not None:
+            return _ingress_response(replay.task_fact)
         head_revision = head.task_fact.revision
         if request.expected_revision != head_revision:
             raise TaskRevisionConflictError(
@@ -102,10 +107,13 @@ class TaskIngressService:
                 current_revision=head_revision,
             )
         scope = self._build_scope(request, auth_context, binding_id)
+        scope_key_id = self.settings.task_scope_active_key_id
+        assert scope_key_id is not None
         task_fact = self._build_task_fact(
             task_id=task_id,
             revision=head_revision + 1,
             scope=scope,
+            scope_key_id=scope_key_id,
             request=request,
         )
         record = TaskFactRecord(
@@ -115,7 +123,19 @@ class TaskIngressService:
             expected_revision=head_revision,
             created_at=utc_now_iso(),
         )
-        self.store.create_task_fact(record)
+        try:
+            self.store.create_task_fact(record)
+        except TaskRevisionConflictError:
+            # 两个相同 PUT 可同时通过锁外预读；CAS 失败后必须重读锁内
+            # 已提交结果并按幂等键判定，等价重试返回原修订而不是 409。
+            replay = _find_idempotent_replay(
+                self.store.list_task_fact_revisions(task_id),
+                expected_revision=request.expected_revision,
+                request_digest=request_digest,
+            )
+            if replay is not None:
+                return _ingress_response(replay.task_fact)
+            raise
         return _ingress_response(task_fact)
 
     def _verify_runtime_binding(
@@ -177,11 +197,13 @@ class TaskIngressService:
         task_id: str,
         revision: int,
         scope: SecurityStateScope,
+        scope_key_id: str,
         request: TaskCreateRequest,
     ) -> TaskFact:
         pending = TaskFact(
             task_id=task_id,
             scope_digest=scope.scope_digest,
+            scope_key_id=scope_key_id,
             principal_id=scope.principal_id,
             task_summary=request.task_text,
             task_digest=_PENDING_TASK_DIGEST,
@@ -204,7 +226,7 @@ def _canonical_request_digest(request: TaskCreateRequest) -> str:
     """入口请求内容字段的受限 JCS sha256（幂等重放键的一半）。
 
     ``expected_revision`` 不进入投影：它与本 digest 组成二元幂等键
-    （01 §30）。约束列表按出现顺序保留（语义有序，01 §29）。
+    （01 §30）。约束及其成员是集合语义，先去重并稳定排序（01 §29）。
     """
 
     projection = {
@@ -213,20 +235,28 @@ def _canonical_request_digest(request: TaskCreateRequest) -> str:
         "runtime_binding_id": request.runtime_binding_id,
         "trace_id": request.trace_id,
         "session_id": request.session_id,
-        "action_constraints": [
-            constraint.model_dump(mode="json")
-            for constraint in request.action_constraints
-        ],
-        "resource_constraints": [
-            constraint.model_dump(mode="json")
-            for constraint in request.resource_constraints
-        ],
-        "destination_constraints": [
-            constraint.model_dump(mode="json")
-            for constraint in request.destination_constraints
-        ],
+        **canonical_constraints_projection(
+            action_constraints=request.action_constraints,
+            resource_constraints=request.resource_constraints,
+            destination_constraints=request.destination_constraints,
+        ),
     }
     return canonical_sha256(projection)
+
+
+def _find_idempotent_replay(
+    history: list[TaskFactRecord],
+    *,
+    expected_revision: int,
+    request_digest: str,
+) -> TaskFactRecord | None:
+    for record in history:
+        if (
+            record.expected_revision == expected_revision
+            and record.request_digest == request_digest
+        ):
+            return record
+    return None
 
 
 def _ingress_response(task_fact: TaskFact) -> TaskIngressResponse:
