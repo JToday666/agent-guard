@@ -48,8 +48,8 @@ __all__ = [
 
 # 规范化/摘要算法版本常量：任何规范化行为变化必须升级版本，而不是静默改变
 # 既有 digest 语义（01 §29）。
-NORMALIZER_VERSION = "v21-02-normalizer-1"
-CANONICALIZATION_VERSION = "v21-02-jcs-subset-1"
+NORMALIZER_VERSION = "v21-02-normalizer-2"
+CANONICALIZATION_VERSION = "v21-02-jcs-subset-2"
 
 
 # ---------------------------------------------------------------------------

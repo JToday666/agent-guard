@@ -10,13 +10,14 @@
   计算（``sha256:`` 前缀）。
 
 Bounded computation：参数条目数量与单值长度设上限；超限不抛异常，而是
-确定性截断并标记 ``partial=True`` + reason_code，由调用方（builder）把
-reason_code 写入 ActionIR.data_refs。float 值在受限 canonical JSON 类型域
+确定性替换为完整值的有界哈希承诺并标记 ``partial=True`` + reason_code，
+由调用方（builder）把 reason_code 写入 ActionIR.data_refs。float 值在受限 canonical JSON 类型域
 之外：同样跳过并标记，绝不静默协变。
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -65,6 +66,7 @@ REASON_FLOAT_UNSUPPORTED = "arguments.float_value_unsupported"
 REASON_ITEM_LIMIT = "arguments.item_limit_exceeded"
 REASON_VALUE_TRUNCATED = "arguments.value_length_exceeded"
 REASON_VALUE_TYPE_UNSUPPORTED = "arguments.value_type_unsupported"
+_TRUNCATED_VALUE_DOMAIN = "agentguard/v21/argument-string/v1"
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,18 @@ def _is_security_relevant(pointer: str, security_keys: frozenset[str]) -> bool:
     return unescaped.casefold() in security_keys
 
 
+def _string_commitment(value: str) -> str:
+    """对完整字符串做流式域分离承诺，输出和额外内存保持有界。"""
+    hasher = hashlib.sha256()
+    hasher.update(_TRUNCATED_VALUE_DOMAIN.encode("ascii"))
+    hasher.update(b"\x00")
+    hasher.update(str(len(value)).encode("ascii"))
+    hasher.update(b"\x00")
+    for start in range(0, len(value), MAX_VALUE_LENGTH):
+        hasher.update(value[start : start + MAX_VALUE_LENGTH].encode("utf-8"))
+    return f"sha256:{hasher.hexdigest()}"
+
+
 def _flatten(
     value: Any,
     pointer: str,
@@ -170,7 +184,10 @@ def _flatten(
         scalar: str | int | bool | None
         if isinstance(value, str):
             if len(value) > MAX_VALUE_LENGTH:
-                scalar = value[:MAX_VALUE_LENGTH]
+                # 不能只保留共同前缀，否则两个不同动作可能得到相同的
+                # argument_digest/authorization_fingerprint。对完整 UTF-8 值做
+                # 域分离摘要，既保持结果有界，也保留完整动作身份承诺。
+                scalar = _string_commitment(value)
                 if REASON_VALUE_TRUNCATED not in reason_codes:
                     reason_codes.append(REASON_VALUE_TRUNCATED)
             else:

@@ -103,6 +103,10 @@ def matches_argument(
 def _resource_matches_identity(
     resource: CanonicalResource, op: str, values: list[str]
 ) -> bool:
+    # 只有已解析到最终 identity 的资源才能证明明确授权。partial/unresolved
+    # 必须交由 Runtime 二次检查，不能用词法 canonical_id 命中 capability。
+    if resource.resolution_status != "resolved":
+        return False
     identity = resource.canonical_id
     if op == "exact":
         return identity in values
@@ -159,6 +163,8 @@ def matches_destination(
     """外部目标约束：``domain`` op 覆盖目标域及其全部子域。"""
     for destination in destinations:
         if destination.kind != constraint.scheme:
+            continue
+        if destination.resolution_status != "resolved":
             continue
         identifier = _destination_identifier(destination)
         if _destination_matches_identifier(

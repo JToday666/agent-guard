@@ -15,10 +15,12 @@ from agentguard_core.actions import (
     MemoryResource,
     OtherResource,
     ProcessResource,
+    ResourceConstraint,
     ResourceNormalizationInput,
     UrlResource,
     canonical_json,
     matches_argument,
+    matches_resource,
     normalize_arguments,
     normalize_api_resource,
     normalize_email_resource,
@@ -110,6 +112,19 @@ def test_unc_escape_beyond_share_root_is_unresolved(path: str) -> None:
     assert isinstance(resource, FileResource)
     assert resource.resolution_status == "unresolved"
     assert resource.final_path is None
+
+
+def test_unresolved_resource_cannot_match_explicit_capability() -> None:
+    resource = _file("/../etc/shadow")
+    assert resource.resolution_status == "unresolved"
+
+    exact = ResourceConstraint(
+        scheme="file", op="exact", values=[resource.canonical_id]
+    )
+    prefix = ResourceConstraint(scheme="file", op="prefix", values=["file:///etc"])
+
+    assert matches_resource(exact, [resource]) is False
+    assert matches_resource(prefix, [resource]) is False
 
 
 def test_unc_dotdot_inside_share_is_not_escape() -> None:

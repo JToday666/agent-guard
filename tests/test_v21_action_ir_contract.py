@@ -396,13 +396,13 @@ def _contract_file_resource() -> FileResource:
         resource_id="res_1",
         canonical_id="file:///data/report.md",
         display_summary="/data/report.md",
-        resolution_status="partial",
+        resolution_status="resolved",
         normalizer_version=NORMALIZER_VERSION,
         normalized_path="/data/report.md",
         platform="posix",
         case_sensitive=True,
-        symlink_resolution="not_resolved",
-        final_path=None,
+        symlink_resolution="resolved",
+        final_path="/data/report.md",
     )
 
 
@@ -581,6 +581,166 @@ def test_authorization_fingerprint_is_stable_across_event_ids() -> None:
     assert first_ir.authorization_fingerprint == second_ir.authorization_fingerprint
     # audit 指纹承担关联职责：event_id 变更必须改变 audit 指纹。
     assert first_ir.audit_fingerprint != second_ir.audit_fingerprint
+
+
+def test_truncated_arguments_keep_full_value_identity_commitment() -> None:
+    prefix = "x" * 4096
+    first = normalize_arguments({"content": prefix + "a"})
+    second = normalize_arguments({"content": prefix + "b"})
+
+    assert first.partial is True
+    assert second.partial is True
+    assert first.canonical.items[0].value != second.canonical.items[0].value
+    assert first.canonical.argument_digest != second.canonical.argument_digest
+
+    first_ir = build_action_ir(
+        _sample_event(
+            {"path": "/data/report.md", "content": prefix + "a"}, "write_file"
+        ),
+        server_secret=SECRET,
+    )
+    second_ir = build_action_ir(
+        _sample_event(
+            {"path": "/data/report.md", "content": prefix + "b"}, "write_file"
+        ),
+        server_secret=SECRET,
+    )
+    assert first_ir.authorization_fingerprint != second_ir.authorization_fingerprint
+
+
+def test_file_operations_have_distinct_effects_and_authorization_identity() -> None:
+    path = {"path": "/data/report.md"}
+    write_ir = build_action_ir(_sample_event(path, "write_file"), server_secret=SECRET)
+    create_ir = build_action_ir(
+        _sample_event(path, "create_file"), server_secret=SECRET
+    )
+    delete_ir = build_action_ir(
+        _sample_event(path, "delete_file"), server_secret=SECRET
+    )
+
+    assert write_ir.effects.reversible is None
+    assert create_ir.effects.reversible is True
+    assert delete_ir.effects.destructive is True
+    assert delete_ir.effects.reversible is False
+    assert delete_ir.impact == "critical"
+    assert (
+        len(
+            {
+                write_ir.authorization_fingerprint,
+                create_ir.authorization_fingerprint,
+                delete_ir.authorization_fingerprint,
+            }
+        )
+        == 3
+    )
+
+
+def test_payload_derived_resources_are_canonicalized_and_bound() -> None:
+    def event(target: str) -> GuardEvent:
+        return GuardEvent.model_validate(
+            {
+                "event_type": "tool_call_proposed",
+                "event_id": "evt_derived",
+                "trace_id": "trace_derived",
+                "runtime": "openclaw",
+                "security_context": {
+                    "agent_id": "agent_a",
+                    "user_task": "browse",
+                },
+                "payload": {
+                    "tool": {
+                        "name": "custom_browser",
+                        "call_id": "call_derived",
+                    },
+                    "arguments": {"query": "same"},
+                    "derived_resources": [
+                        {
+                            "resource_type": "browser",
+                            "operation": "navigate",
+                            "target": target,
+                            "direction": "outbound",
+                        }
+                    ],
+                },
+            }
+        )
+
+    first = build_action_ir(event("https://one.example/path"), server_secret=SECRET)
+    second = build_action_ir(event("https://two.example/path"), server_secret=SECRET)
+
+    assert len(first.destinations) == 1
+    assert isinstance(first.destinations[0], UrlResource)
+    assert first.destinations[0].host_ascii == "one.example"
+    assert first.authorization_fingerprint != second.authorization_fingerprint
+
+
+def test_action_id_preserves_payload_identity() -> None:
+    tool_call = GuardEvent.model_validate(
+        {
+            "event_type": "tool_call_proposed",
+            "event_id": "evt_call",
+            "trace_id": "trace_action",
+            "runtime": "openclaw",
+            "payload": {
+                "tool": {"name": "read_file", "call_id": "call_action_001"},
+                "arguments": {"path": "/data/report.md"},
+                "derived_resources": [],
+            },
+        }
+    )
+    assert build_action_ir(tool_call, server_secret=SECRET).action_id == (
+        "call_action_001"
+    )
+
+    tool_result = GuardEvent.model_validate(
+        {
+            "event_type": "tool_result_produced",
+            "event_id": "evt_result",
+            "trace_id": "trace_action",
+            "runtime": "openclaw",
+            "payload": {
+                "tool": {"name": "read_file", "call_id": "call_action_001"},
+                "result": {
+                    "content_preview": "ok",
+                    "content_type": "text/plain",
+                    "size_bytes": 2,
+                },
+                "will_enter_context": False,
+                "will_persist": False,
+                "sanitized": False,
+                "contains_sensitive_data": False,
+                "contains_instruction_like_text": False,
+                "derived_resources": [],
+            },
+        }
+    )
+    assert build_action_ir(tool_result, server_secret=SECRET).action_id == (
+        "call_action_001"
+    )
+
+    memory = GuardEvent.model_validate(
+        {
+            "event_type": "memory_write_proposed",
+            "event_id": "evt_memory",
+            "trace_id": "trace_action",
+            "runtime": "langgraph",
+            "payload": {
+                "memory": {
+                    "namespace": "main",
+                    "key": "answer",
+                    "value_preview": "value",
+                    "source_trust": "trusted",
+                    "operation": "write",
+                },
+                "will_persist": True,
+                "requires_approval": False,
+                "action_id": "call_memory_001",
+            },
+        }
+    )
+    assert build_action_ir(memory, server_secret=SECRET).action_id == (
+        "call_memory_001"
+    )
 
 
 def _tool_event(tool: str, arguments: dict) -> GuardEvent:

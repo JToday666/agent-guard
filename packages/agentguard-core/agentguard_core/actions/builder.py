@@ -26,6 +26,7 @@ from ..decisions.models import GuardDecision
 from ..events.contracts import GuardEvent
 from ..events.payloads import (
     ContextBuildPayload,
+    DerivedResource,
     MemoryEventPayload,
     MessageSendPayload,
     ModelCallPayload,
@@ -81,6 +82,11 @@ _MAX_DERIVED_RESOURCES = 16
 REASON_DERIVED_RESOURCE_LIMIT = "resources.derived_limit_exceeded"
 REASON_RESOURCE_TARGET_MISSING = "resources.target_missing"
 
+_DERIVED_RESOURCE_KIND_ALIASES: Mapping[str, str] = {
+    "browser": "url",
+    "message": "email",
+}
+
 
 @dataclass(frozen=True)
 class ShadowEvaluation:
@@ -113,7 +119,20 @@ def _effects_for_tool(tool: Any) -> ActionEffect:
     if kind == "file":
         if name.startswith("read"):
             return ActionEffect()
-        return ActionEffect(mutates_state=True, persistence=True, reversible=True)
+        if name == "delete_file":
+            return ActionEffect(
+                mutates_state=True,
+                destructive=True,
+                reversible=False,
+            )
+        if name == "create_file":
+            return ActionEffect(
+                mutates_state=True,
+                persistence=True,
+                reversible=True,
+            )
+        # 覆盖写是否可逆取决于 Runtime 是否保留旧内容，不能默认可逆。
+        return ActionEffect(mutates_state=True, persistence=True, reversible=None)
     if kind == "email":
         return ActionEffect(
             external_communication=True, data_egress=True, network_access=True
@@ -236,7 +255,7 @@ def _tool_call_resources(
         reason_codes.append(REASON_RESOURCE_TARGET_MISSING)
         kind = "tool"  # 无目标时退回工具自身 identity，fail-closed。
 
-    return [
+    primary = [
         _normalize_one(
             event,
             kind=kind,
@@ -249,6 +268,68 @@ def _tool_call_resources(
             resolver=resolver,
         )
     ]
+    return _dedupe_resources(
+        [
+            *primary,
+            *_normalize_derived_resources(
+                event,
+                payload.derived_resources,
+                start_index=len(primary),
+                reason_codes=reason_codes,
+                resolver=resolver,
+            ),
+        ]
+    )
+
+
+def _normalize_derived_resources(
+    event: GuardEvent,
+    derived_resources: list[DerivedResource],
+    *,
+    start_index: int,
+    reason_codes: list[str],
+    resolver: SymlinkResolver | None,
+) -> list[CanonicalResource]:
+    bounded = derived_resources[:_MAX_DERIVED_RESOURCES]
+    if len(derived_resources) > _MAX_DERIVED_RESOURCES:
+        reason_codes.append(REASON_DERIVED_RESOURCE_LIMIT)
+
+    normalized: list[CanonicalResource] = []
+    for offset, resource in enumerate(bounded):
+        declared_kind = resource.resource_type.casefold()
+        kind = _DERIVED_RESOURCE_KIND_ALIASES.get(declared_kind, declared_kind)
+        if kind not in RESOURCE_NORMALIZERS:
+            kind = "other"
+        normalized.append(
+            _normalize_one(
+                event,
+                kind=kind,
+                target=resource.target,
+                index=start_index + offset,
+                reason_codes=reason_codes,
+                method=resource.operation if kind == "api" else None,
+                tool_name=declared_kind if kind == "tool" else None,
+                resolver=resolver,
+            )
+        )
+    return normalized
+
+
+def _dedupe_resources(
+    resources: list[CanonicalResource],
+) -> list[CanonicalResource]:
+    deduped: list[CanonicalResource] = []
+    seen: set[bytes] = set()
+    for resource in resources:
+        projection = resource.model_dump(mode="json")
+        projection.pop("resource_id", None)
+        projection.pop("display_summary", None)
+        key = canonical_json_bytes(projection)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(resource)
+    return deduped
 
 
 def _payload_resources(
@@ -286,7 +367,7 @@ def _payload_resources(
             )
         ]
     if isinstance(payload, ToolResultPayload):
-        return [
+        primary = [
             _normalize_one(
                 event,
                 kind="other",
@@ -296,6 +377,18 @@ def _payload_resources(
                 resolver=resolver,
             )
         ]
+        return _dedupe_resources(
+            [
+                *_normalize_derived_resources(
+                    event,
+                    payload.derived_resources,
+                    start_index=0,
+                    reason_codes=reason_codes,
+                    resolver=resolver,
+                ),
+                *primary,
+            ]
+        )
     if isinstance(payload, ModelCallPayload):
         return [
             _normalize_one(
@@ -416,9 +509,16 @@ def build_action_ir(
         else None
     )
 
+    if isinstance(payload, (ToolCallPayload, ToolResultPayload)):
+        action_id = payload.tool.call_id
+    elif isinstance(payload, MemoryEventPayload) and payload.action_id:
+        action_id = payload.action_id
+    else:
+        action_id = f"act_{event.event_id}"
+
     placeholder = ActionIR(
         event_id=event.event_id,
-        action_id=f"act_{event.event_id}",
+        action_id=action_id,
         trace_id=event.trace_id,
         task_id=task_id,
         task_revision=task_revision,
