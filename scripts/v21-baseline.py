@@ -577,13 +577,6 @@ def environment_manifest() -> dict[str, Any]:
             check=True,
         ).stdout.strip()
     )
-    source_tree = subprocess.run(
-        ["git", "rev-parse", "HEAD^{tree}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
     try:
         import psutil
 
@@ -592,7 +585,6 @@ def environment_manifest() -> dict[str, Any]:
         memory_bytes = "unknown"
     return {
         "commit": commit,
-        "source_tree": source_tree,
         "dirty": dirty,
         "os": platform.platform(),
         "cpu": platform.processor() or os.getenv("PROCESSOR_IDENTIFIER", "unknown"),

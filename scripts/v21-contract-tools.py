@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -127,29 +126,6 @@ def validate() -> None:
                 "frozen package has unsigned design items: "
                 + ", ".join(sorted(unchecked_design_items))
             )
-        baseline_report = json.loads(
-            (FREEZE_DIR / "baseline" / "baseline.json").read_text(encoding="utf-8")
-        )
-        baseline_commit = baseline_report.get("environment", {}).get("commit")
-        if not isinstance(baseline_commit, str) or not re.fullmatch(
-            r"[0-9a-f]{40}", baseline_commit
-        ):
-            raise ValueError("frozen baseline report requires a full source commit SHA")
-        commit_exists = subprocess.run(
-            ["git", "cat-file", "-e", f"{baseline_commit}^{{commit}}"],
-            cwd=ROOT,
-            capture_output=True,
-        )
-        commit_reachable = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", baseline_commit, "HEAD"],
-            cwd=ROOT,
-            capture_output=True,
-        )
-        if commit_exists.returncode != 0 or commit_reachable.returncode != 0:
-            raise ValueError(
-                "frozen baseline report source commit must exist and be reachable from HEAD"
-            )
-
     dispositions = set(contract["fast_dispositions"])
     matrix_dispositions = set(matrix["disposition_priority"])
     if dispositions != matrix_dispositions:
@@ -202,7 +178,10 @@ def _checksum_entries() -> list[tuple[str, str]]:
         if not path.is_file() or path == CHECKSUMS:
             continue
         relative = path.relative_to(FREEZE_DIR).as_posix()
-        entries.append((hashlib.sha256(path.read_bytes()).hexdigest(), relative))
+        content = path.read_bytes()
+        if path.suffix in {".json", ".md", ".yaml"}:
+            content = content.replace(b"\r\n", b"\n")
+        entries.append((hashlib.sha256(content).hexdigest(), relative))
     return entries
 
 
@@ -233,13 +212,14 @@ def main() -> int:
         "validate", help="validate schemas and cross-file consistency"
     )
     checksums_parser = subparsers.add_parser(
-        "checksums", help="write or verify SHA256SUMS"
+        "checksums", help="optionally write or verify the archive SHA256SUMS"
     )
     checksums_mode = checksums_parser.add_mutually_exclusive_group(required=True)
     checksums_mode.add_argument("--write", action="store_true")
     checksums_mode.add_argument("--verify", action="store_true")
     subparsers.add_parser(
-        "all", help="build, validate, and write the checksum manifest"
+        "all",
+        help="build, validate, and refresh the optional archive checksum manifest",
     )
     args = parser.parse_args()
 

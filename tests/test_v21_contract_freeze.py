@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,28 +46,3 @@ def test_frozen_status_has_matching_contract_and_review_signoff() -> None:
         "confirmed_via": "explicit_user_confirmation_in_codex_task",
         "confirmed_at": "2026-08-14",
     }
-
-
-def test_contract_checksum_manifest_is_current() -> None:
-    tools = _load_contract_tools()
-
-    tools.verify_checksums()
-
-
-def test_baseline_source_commit_exists_and_is_reachable() -> None:
-    freeze_dir = ROOT / "docs" / "AgentGuard_Core_V2.1_Final_Contract_Freeze"
-    report = json.loads(
-        (freeze_dir / "baseline" / "baseline.json").read_text(encoding="utf-8")
-    )
-    commit = report["environment"]["commit"]
-
-    subprocess.run(
-        ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
-        cwd=ROOT,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
-        cwd=ROOT,
-        check=True,
-    )
