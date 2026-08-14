@@ -8,7 +8,6 @@
     "memory_bytes": "unknown",
     "os": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13",
-    "source_tree": "622ef2139fc68c40de87ba3559f67a5799957d3a",
     "worker": "single-process TestClient; concurrent requests use threads"
   },
   "fixtures": {
