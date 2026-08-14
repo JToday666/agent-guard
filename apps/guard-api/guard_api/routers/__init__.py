@@ -14,6 +14,7 @@ from . import (
     metrics,
     policies,
     system,
+    tasks,
 )
 from .context import ApiContext
 
@@ -30,6 +31,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     credentials.register_routes(app, context)
     memory.register_routes(app, context)
     approvals.register_routes(app, context)
+    tasks.register_routes(app, context)
 
 
 __all__ = ["ApiContext", "register_routes"]

@@ -76,6 +76,7 @@ class CapabilityAuthService:
                     "credential:read",
                     "credential:write",
                     "credential:revoke",
+                    "task:write",
                 ],
                 auth_method="bearer",
             )

@@ -14,6 +14,7 @@ from guard_api.services import (
     MemoryGuardService,
     MetricService,
     PolicyService,
+    TaskIngressService,
     TraceService,
 )
 from guard_api.settings import GuardApiSettings
@@ -34,3 +35,4 @@ class ApiContext:
     trace_service: TraceService
     policy_service: PolicyService
     evaluation_service: EvaluationService
+    task_ingress_service: TaskIngressService

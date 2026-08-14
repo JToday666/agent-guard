@@ -45,6 +45,8 @@ from guard_api.storage.base import (
     ProvenanceEndpointMissingError,
     StoredBrowserSession,
     StoredLaunchCode,
+    TaskFactRecord,
+    TaskRevisionConflictError,
     classify_audit_record_type,
     memory_change_is_replay_match,
     merge_provenance_edge,
@@ -79,12 +81,14 @@ class MemoryControlPlaneStore:
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
+    task_facts: dict[str, list[TaskFactRecord]] = field(default_factory=dict)
     audit_clock: Callable[[], datetime] = field(default=_system_utc_now, repr=False)
     audit_integrity_lock: Any = field(default_factory=RLock, init=False, repr=False)
     provenance_lock: Any = field(default_factory=RLock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
     evaluation_run_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    task_fact_lock: Any = field(default_factory=Lock, init=False, repr=False)
     approval_lock: Any = field(default_factory=RLock, init=False, repr=False)
     memory_change_lock: Any = field(default_factory=RLock, init=False, repr=False)
     action_critic_lock: Any = field(default_factory=RLock, init=False, repr=False)
@@ -523,6 +527,40 @@ class MemoryControlPlaneStore:
         self, limit: int = 100
     ) -> list[PolicySnapshotRecord]:
         return list(reversed(self.policy_snapshot_history))[: _bounded_limit(limit)]
+
+    def create_task_fact(self, record: TaskFactRecord) -> TaskFactRecord:
+        # 追加式 CAS：锁内判定 head revision，旧 revision 永不覆盖。
+        task_id = record.task_fact.task_id
+        with self.task_fact_lock:
+            revisions = self.task_facts.get(task_id, [])
+            current_revision = (
+                revisions[-1].task_fact.revision if revisions else 0
+            )
+            if record.expected_revision != current_revision:
+                raise TaskRevisionConflictError(
+                    expected_revision=record.expected_revision,
+                    current_revision=current_revision,
+                )
+            self.task_facts[task_id] = [*revisions, record]
+            return record
+
+    def get_task_fact(
+        self, task_id: str, revision: int | None = None
+    ) -> TaskFactRecord | None:
+        with self.task_fact_lock:
+            revisions = self.task_facts.get(task_id)
+            if not revisions:
+                return None
+            if revision is None:
+                return revisions[-1]
+            for record in revisions:
+                if record.task_fact.revision == revision:
+                    return record
+            return None
+
+    def list_task_fact_revisions(self, task_id: str) -> list[TaskFactRecord]:
+        with self.task_fact_lock:
+            return list(self.task_facts.get(task_id, []))
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         with self.approval_lock:

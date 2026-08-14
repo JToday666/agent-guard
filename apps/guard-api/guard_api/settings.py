@@ -126,6 +126,19 @@ class GuardApiSettings:
             hashlib.sha256,
         ).digest()
 
+    def task_scope_signing_key(self) -> bytes:
+        """从控制令牌域隔离派生 SecurityStateScope HMAC 密钥（V21-03）。
+
+        照搬 audit_cursor_signing_key 的域分离范式：仅输出派生摘要，
+        不返回、不记录原始控制令牌。
+        """
+
+        return hmac.new(
+            self.control_token.encode("utf-8"),
+            b"agentguard/v21/security-state-scope/v1",
+            hashlib.sha256,
+        ).digest()
+
     def audit_checkpoint_configured(self) -> bool:
         return bool(
             self.audit_checkpoint_path
