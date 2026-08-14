@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +126,28 @@ def validate() -> None:
             raise ValueError(
                 "frozen package has unsigned design items: "
                 + ", ".join(sorted(unchecked_design_items))
+            )
+        baseline_report = json.loads(
+            (FREEZE_DIR / "baseline" / "baseline.json").read_text(encoding="utf-8")
+        )
+        baseline_commit = baseline_report.get("environment", {}).get("commit")
+        if not isinstance(baseline_commit, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", baseline_commit
+        ):
+            raise ValueError("frozen baseline report requires a full source commit SHA")
+        commit_exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{baseline_commit}^{{commit}}"],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        commit_reachable = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", baseline_commit, "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        if commit_exists.returncode != 0 or commit_reachable.returncode != 0:
+            raise ValueError(
+                "frozen baseline report source commit must exist and be reachable from HEAD"
             )
 
     dispositions = set(contract["fast_dispositions"])

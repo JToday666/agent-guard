@@ -2,12 +2,13 @@
   "blockers": [],
   "completion_status": "functional_smoke_passed",
   "environment": {
-    "commit": "5eb56bd567479731362dca9efe564191909376c6",
+    "commit": "7deea50375dd6b209a2f6b062380d091ea990b9d",
     "cpu": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
     "dirty": false,
     "memory_bytes": "unknown",
     "os": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13",
+    "source_tree": "622ef2139fc68c40de87ba3559f67a5799957d3a",
     "worker": "single-process TestClient; concurrent requests use threads"
   },
   "fixtures": {
@@ -148,17 +149,17 @@
     },
     "scenario_manifest_sha256": "d4f9952a8de84b50dc32bc127d7d3a969c3e6fd6066283ee2ee7a2614c48985b"
   },
-  "generated_at_unix_ns": 1786677312348638400,
+  "generated_at_unix_ns": 1786679677079431400,
   "performance": {
     "core": {
       "iterations": 5,
       "scenarios": {
         "code_execution": {
           "events_per_sample": 1,
-          "max_ns": 16000000,
+          "max_ns": 0,
           "p50_ns": 0,
-          "p95_ns": 16000000,
-          "p99_ns": 16000000,
+          "p95_ns": 0,
+          "p99_ns": 0,
           "payload_bytes": 916,
           "sample_count": 5
         },
@@ -173,10 +174,10 @@
         },
         "external_send": {
           "events_per_sample": 1,
-          "max_ns": 15000000,
+          "max_ns": 0,
           "p50_ns": 0,
-          "p95_ns": 15000000,
-          "p99_ns": 15000000,
+          "p95_ns": 0,
+          "p99_ns": 0,
           "payload_bytes": 1048,
           "sample_count": 5
         },
@@ -191,10 +192,10 @@
         },
         "memory": {
           "events_per_sample": 1,
-          "max_ns": 0,
+          "max_ns": 15000000,
           "p50_ns": 0,
-          "p95_ns": 0,
-          "p99_ns": 0,
+          "p95_ns": 15000000,
+          "p99_ns": 15000000,
           "payload_bytes": 935,
           "sample_count": 5
         },
@@ -209,10 +210,10 @@
         },
         "sensitive_read": {
           "events_per_sample": 1,
-          "max_ns": 0,
+          "max_ns": 16000000,
           "p50_ns": 0,
-          "p95_ns": 0,
-          "p99_ns": 0,
+          "p95_ns": 16000000,
+          "p99_ns": 16000000,
           "payload_bytes": 982,
           "sample_count": 5
         }
@@ -226,7 +227,7 @@
         "audit_mode": "synchronous_request_path",
         "concurrent": {
           "max_ns": 16000000,
-          "p50_ns": 0,
+          "p50_ns": 15000000,
           "p95_ns": 16000000,
           "p99_ns": 16000000,
           "sample_count": 3,
@@ -235,47 +236,47 @@
         "serial": {
           "code_execution": {
             "max_ns": 16000000,
-            "p50_ns": 0,
+            "p50_ns": 15000000,
             "p95_ns": 16000000,
             "p99_ns": 16000000,
             "payload_bytes": 916,
             "sample_count": 3
           },
           "degraded": {
-            "max_ns": 15000000,
-            "p50_ns": 0,
-            "p95_ns": 15000000,
-            "p99_ns": 15000000,
+            "max_ns": 16000000,
+            "p50_ns": 15000000,
+            "p95_ns": 16000000,
+            "p99_ns": 16000000,
             "payload_bytes": 912,
             "sample_count": 3
           },
           "external_send": {
             "max_ns": 16000000,
-            "p50_ns": 15000000,
+            "p50_ns": 16000000,
             "p95_ns": 16000000,
             "p99_ns": 16000000,
             "payload_bytes": 1048,
             "sample_count": 3
           },
           "low_read": {
-            "max_ns": 0,
+            "max_ns": 16000000,
             "p50_ns": 0,
-            "p95_ns": 0,
-            "p99_ns": 0,
+            "p95_ns": 16000000,
+            "p99_ns": 16000000,
             "payload_bytes": 877,
             "sample_count": 3
           },
           "memory": {
-            "max_ns": 16000000,
-            "p50_ns": 15000000,
-            "p95_ns": 16000000,
-            "p99_ns": 16000000,
+            "max_ns": 15000000,
+            "p50_ns": 0,
+            "p95_ns": 15000000,
+            "p99_ns": 15000000,
             "payload_bytes": 935,
             "sample_count": 3
           },
           "multi_event": {
             "max_ns": 16000000,
-            "p50_ns": 0,
+            "p50_ns": 15000000,
             "p95_ns": 16000000,
             "p99_ns": 16000000,
             "payload_bytes": 932,
@@ -283,7 +284,7 @@
           },
           "sensitive_read": {
             "max_ns": 16000000,
-            "p50_ns": 0,
+            "p50_ns": 15000000,
             "p95_ns": 16000000,
             "p99_ns": 16000000,
             "payload_bytes": 982,
@@ -297,10 +298,10 @@
       "postgres": {
         "audit_mode": "synchronous_request_path",
         "concurrent": {
-          "max_ns": 172000000,
-          "p50_ns": 172000000,
-          "p95_ns": 172000000,
-          "p99_ns": 172000000,
+          "max_ns": 281000000,
+          "p50_ns": 188000000,
+          "p95_ns": 281000000,
+          "p99_ns": 281000000,
           "sample_count": 3,
           "workers": 1
         },
@@ -311,58 +312,58 @@
         },
         "serial": {
           "code_execution": {
-            "max_ns": 234000000,
-            "p50_ns": 172000000,
-            "p95_ns": 234000000,
-            "p99_ns": 234000000,
+            "max_ns": 172000000,
+            "p50_ns": 156000000,
+            "p95_ns": 172000000,
+            "p99_ns": 172000000,
             "payload_bytes": 916,
             "sample_count": 3
           },
           "degraded": {
-            "max_ns": 187000000,
-            "p50_ns": 172000000,
-            "p95_ns": 187000000,
-            "p99_ns": 187000000,
-            "payload_bytes": 912,
-            "sample_count": 3
-          },
-          "external_send": {
             "max_ns": 157000000,
             "p50_ns": 156000000,
             "p95_ns": 157000000,
             "p99_ns": 157000000,
+            "payload_bytes": 912,
+            "sample_count": 3
+          },
+          "external_send": {
+            "max_ns": 172000000,
+            "p50_ns": 172000000,
+            "p95_ns": 172000000,
+            "p99_ns": 172000000,
             "payload_bytes": 1048,
             "sample_count": 3
           },
           "low_read": {
-            "max_ns": 203000000,
-            "p50_ns": 172000000,
-            "p95_ns": 203000000,
-            "p99_ns": 203000000,
+            "max_ns": 188000000,
+            "p50_ns": 188000000,
+            "p95_ns": 188000000,
+            "p99_ns": 188000000,
             "payload_bytes": 877,
             "sample_count": 3
           },
           "memory": {
             "max_ns": 172000000,
-            "p50_ns": 172000000,
+            "p50_ns": 157000000,
             "p95_ns": 172000000,
             "p99_ns": 172000000,
             "payload_bytes": 935,
             "sample_count": 3
           },
           "multi_event": {
-            "max_ns": 188000000,
+            "max_ns": 219000000,
             "p50_ns": 187000000,
-            "p95_ns": 188000000,
-            "p99_ns": 188000000,
+            "p95_ns": 219000000,
+            "p99_ns": 219000000,
             "payload_bytes": 932,
             "sample_count": 3
           },
           "sensitive_read": {
-            "max_ns": 172000000,
-            "p50_ns": 172000000,
-            "p95_ns": 172000000,
-            "p99_ns": 172000000,
+            "max_ns": 188000000,
+            "p50_ns": 187000000,
+            "p95_ns": 188000000,
+            "p99_ns": 188000000,
             "payload_bytes": 982,
             "sample_count": 3
           }

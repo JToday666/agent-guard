@@ -39,6 +39,12 @@ MULTI_EVENT_FIXTURE = V21_FIXTURE_DIR / "multi_event" / "sample_traces.jsonl"
 HOLDOUT_MANIFEST = V21_FIXTURE_DIR / "locked_holdout_manifest.json"
 LEGACY_SNAPSHOT = V21_FIXTURE_DIR / "legacy_69efe2f_snapshot.json"
 LEGACY_BASE_SHA = "69efe2f027d9a4ba9c18623838e84f6ce30ffa62"
+SUPPORTED_BACKENDS = frozenset({"memory", "postgres"})
+LEGACY_SNAPSHOT_INPUTS = (
+    "packages/agentguard-core",
+    "scripts/core-metrics-gate.py",
+    "tests/fixtures/eval_gate",
+)
 DEFAULT_OUTPUT_DIR = (
     ROOT / "docs" / "AgentGuard_Core_V2.1_Final_Contract_Freeze" / "baseline"
 )
@@ -192,21 +198,24 @@ def write_legacy_snapshot(results: list[dict[str, Any]]) -> None:
         raise ValueError(
             f"legacy snapshot can only be captured at {LEGACY_BASE_SHA}; current HEAD is {head}"
         )
-    source_diff = subprocess.run(
+    source_status = subprocess.run(
         [
             "git",
-            "diff",
-            "--quiet",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
             "--",
-            "packages/agentguard-core",
-            "scripts/core-metrics-gate.py",
-            "tests/fixtures/eval_gate",
+            *LEGACY_SNAPSHOT_INPUTS,
         ],
         cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    if source_diff.returncode != 0:
+    if source_status.stdout.strip():
         raise ValueError(
-            "cannot capture snapshot while Legacy Core or retained fixtures differ"
+            "cannot capture snapshot while Legacy Core or retained fixture inputs "
+            "have staged, unstaged, or untracked changes"
         )
     LEGACY_SNAPSHOT.write_text(
         json.dumps(_current_legacy_snapshot(results), ensure_ascii=False, indent=2)
@@ -568,6 +577,13 @@ def environment_manifest() -> dict[str, Any]:
             check=True,
         ).stdout.strip()
     )
+    source_tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
     try:
         import psutil
 
@@ -576,6 +592,7 @@ def environment_manifest() -> dict[str, Any]:
         memory_bytes = "unknown"
     return {
         "commit": commit,
+        "source_tree": source_tree,
         "dirty": dirty,
         "os": platform.platform(),
         "cpu": platform.processor() or os.getenv("PROCESSOR_IDENTIFIER", "unknown"),
@@ -651,8 +668,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def parse_backends(raw_backends: str) -> set[str]:
+    requested = {item.strip() for item in raw_backends.split(",") if item.strip()}
+    if not requested:
+        raise ValueError("at least one Guard API backend must be requested")
+    unknown = requested - SUPPORTED_BACKENDS
+    if unknown:
+        raise ValueError(
+            f"unsupported Guard API backends: {', '.join(sorted(unknown))}"
+        )
+    return requested
+
+
+def backend_blockers(
+    requested_backends: set[str], backend_results: dict[str, dict[str, Any]]
+) -> list[str]:
+    blockers: list[str] = []
+    for backend in sorted(requested_backends):
+        result = backend_results[backend]
+        if result["status"] != "measured":
+            blockers.append(
+                f"{backend} Guard API 基线未完成：{result.get('reason', result['status'])}"
+            )
+    return blockers
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    requested_backends = parse_backends(args.backends)
     formal_protocol = (200, 5000, 100, 1000, 8, 2000)
     selected_protocol = (
         args.core_warmup,
@@ -669,6 +712,13 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError(
             "formal_baseline requires Core 200/5000 and API 100/1000 plus 8 workers/2000 requests"
         )
+    if (
+        args.measurement_profile == "formal_baseline"
+        and requested_backends != SUPPORTED_BACKENDS
+    ):
+        raise ValueError("formal_baseline requires both memory and postgres backends")
+    if args.measurement_profile == "formal_baseline" and args.allow_missing_postgres:
+        raise ValueError("formal_baseline cannot allow a missing PostgreSQL result")
     regression, indexed_cases = evaluate_regression()
     if args.write_legacy_snapshot:
         write_legacy_snapshot(regression["per_case"])
@@ -683,9 +733,6 @@ def main(argv: list[str] | None = None) -> int:
         "serial_iterations": args.api_serial_iterations,
         "concurrency": args.api_concurrency,
         "concurrent_total": args.api_concurrent_total,
-    }
-    requested_backends = {
-        item.strip() for item in args.backends.split(",") if item.strip()
     }
     memory = (
         run_memory_api_benchmark(scenarios, **benchmark_args)
@@ -702,22 +749,22 @@ def main(argv: list[str] | None = None) -> int:
         blockers.append(
             "Legacy retained fixture 与固化 expected decision/rule hits 不一致。"
         )
-    if "postgres" in requested_backends and postgres["status"] != "measured":
-        blockers.append(
-            f"PostgreSQL E2E 基线未完成：{postgres.get('reason', postgres['status'])}"
+    backend_results = {"memory": memory, "postgres": postgres}
+    backend_failures = backend_blockers(requested_backends, backend_results)
+    blockers.extend(backend_failures)
+    completion_status = (
+        "blocked"
+        if blockers
+        else (
+            "formal_baseline_measured"
+            if args.measurement_profile == "formal_baseline"
+            else "functional_smoke_passed"
         )
+    )
     report = {
         "schema_version": "1.0",
         "generated_at_unix_ns": time.time_ns(),
-        "completion_status": (
-            "blocked"
-            if blockers
-            else (
-                "formal_baseline_measured"
-                if args.measurement_profile == "formal_baseline"
-                else "functional_smoke_passed"
-            )
-        ),
+        "completion_status": completion_status,
         "environment": environment_manifest(),
         "fixtures": {
             "retained_attack": _fixture_inventory(
@@ -749,8 +796,12 @@ def main(argv: list[str] | None = None) -> int:
             "measurement_profile": args.measurement_profile,
             "formal_performance_status": (
                 "measured"
-                if args.measurement_profile == "formal_baseline"
-                else "deferred_by_user_scope"
+                if completion_status == "formal_baseline_measured"
+                else (
+                    "blocked"
+                    if args.measurement_profile == "formal_baseline"
+                    else "deferred_by_user_scope"
+                )
             ),
             "core": run_core_benchmark(
                 scenarios, warmup=args.core_warmup, iterations=args.core_iterations
@@ -781,7 +832,15 @@ def main(argv: list[str] | None = None) -> int:
             ensure_ascii=False,
         )
     )
-    if blockers and not args.allow_missing_postgres:
+    allowed_postgres_gap = (
+        args.measurement_profile == "functional_smoke"
+        and args.allow_missing_postgres
+        and requested_backends == SUPPORTED_BACKENDS
+        and memory["status"] == "measured"
+        and postgres["status"] != "measured"
+        and blockers == backend_failures
+    )
+    if blockers and not allowed_postgres_gap:
         return 3
     return 0 if regression["legacy_parity"]["ok"] else 1
 
