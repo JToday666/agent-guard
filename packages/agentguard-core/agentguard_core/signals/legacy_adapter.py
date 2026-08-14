@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 from typing import Literal
 
+from ..actions.canonical_json import canonical_json_bytes
 from ..decisions.results import DetectionResult
 from .models import EvaluationDegradation, EvidenceRef, ImpactClass, SecuritySignal
 
@@ -67,19 +68,15 @@ def _impact_for_result(result: DetectionResult) -> ImpactClass:
 
 
 def _stable_evidence_digest(evidence: list[str]) -> str:
-    """对 evidence 列表计算稳定 sha256 摘要。
+    """对 evidence 列表计算稳定 sha256 摘要（受限 canonical JSON digest）。
 
-    编码先写入条数，再逐条以 ``\x00`` 前缀写入内容，保证编码单射：
-    ``["a\nb"]`` 与 ``["a", "b"]`` 不会得到相同摘要。条目顺序保持 RuleHit
-    原始顺序（语义有序）。V21-02 canonicalization（RFC 8785 JCS）落地后
-    升级为 JCS digest。
+    V21-02 升级：输入改为 evidence 列表的受限 canonical JSON 字节
+    （``actions.canonical_json``，键/元素顺序确定、紧凑分隔符、UTF-8），
+    再取 sha256。canonical JSON 对 ``list[str]`` 的编码是单射的：
+    ``["a\\nb"]`` 与 ``["a", "b"]`` 序列化后不同，不会得到相同摘要；
+    条目顺序保持 RuleHit 原始顺序（语义有序，数组顺序不重排）。
     """
-    hasher = hashlib.sha256()
-    hasher.update(str(len(evidence)).encode("utf-8"))
-    for item in evidence:
-        hasher.update(b"\x00")
-        hasher.update(item.encode("utf-8"))
-    return hasher.hexdigest()
+    return hashlib.sha256(canonical_json_bytes(list(evidence))).hexdigest()
 
 
 def _confidence_for_result(
@@ -131,8 +128,7 @@ def legacy_detection_to_signal(
       事实注册表解析的引用时才附加。
 
     EvidenceRef 的 digest 是对 ``rule_hit.evidence`` 列表的稳定 sha256
-    （单射编码）；V21-02 canonicalization（RFC 8785 JCS）落地后升级为
-    JCS digest。
+    （受限 canonical JSON digest，单射编码；V21-02 已落地）。
     """
     if result_index < 0:
         raise ValueError("result_index must be non-negative")

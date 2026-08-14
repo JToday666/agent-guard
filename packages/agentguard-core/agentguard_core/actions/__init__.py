@@ -1,0 +1,130 @@
+"""V2.1 ActionIR + Canonicalization scaffold (V21-02).
+
+纯新增模块组：ActionIR 模型、受限 canonical JSON、参数/资源规范化、
+指纹与 Constraint DSL 求值。判定路径（``engine.py`` / ``decisions/*``）
+不引用本包；顶层 ``agentguard_core/__init__.py`` 不在 V21-02 范围内改动。
+"""
+
+from __future__ import annotations
+
+from .builder import ShadowEvaluation, build_action_ir, build_shadow_evaluation
+from .canonical_json import (
+    CanonicalizationError,
+    canonical_hmac_sha256,
+    canonical_json,
+    canonical_json_bytes,
+    canonical_sha256,
+)
+from .canonical_resources import (
+    DEFAULT_SECURITY_QUERY_KEYS,
+    RESOURCE_NORMALIZERS,
+    ResourceNormalizationInput,
+    SymlinkResolver,
+    normalize_api_resource,
+    normalize_email_resource,
+    normalize_file_resource,
+    normalize_memory_resource,
+    normalize_other_resource,
+    normalize_process_resource,
+    normalize_tool_resource,
+    normalize_url_resource,
+)
+from .constraints import (
+    matches_action,
+    matches_argument,
+    matches_destination,
+    matches_resource,
+)
+from .fingerprints import (
+    AUTHORIZATION_DOMAIN_TAG,
+    audit_fingerprint,
+    audit_projection,
+    authorization_fingerprint,
+    authorization_projection,
+)
+from .models import (
+    CANONICALIZATION_VERSION,
+    NORMALIZER_VERSION,
+    ActionConstraint,
+    ActionEffect,
+    ActionIR,
+    ApiResource,
+    ArgumentConstraint,
+    CanonicalArgument,
+    CanonicalArguments,
+    CanonicalResource,
+    CanonicalScalar,
+    ConstraintOp,
+    DestinationConstraint,
+    EmailResource,
+    FileResource,
+    MemoryResource,
+    OtherResource,
+    ProcessResource,
+    ResourceBase,
+    ResourceConstraint,
+    ToolResource,
+    UrlResource,
+)
+from .normalize import (
+    DEFAULT_SECURITY_ARGUMENT_KEYS,
+    NormalizedArguments,
+    normalize_arguments,
+)
+
+__all__ = [
+    "AUTHORIZATION_DOMAIN_TAG",
+    "CANONICALIZATION_VERSION",
+    "DEFAULT_SECURITY_ARGUMENT_KEYS",
+    "DEFAULT_SECURITY_QUERY_KEYS",
+    "NORMALIZER_VERSION",
+    "RESOURCE_NORMALIZERS",
+    "ActionConstraint",
+    "ActionEffect",
+    "ActionIR",
+    "ApiResource",
+    "ArgumentConstraint",
+    "CanonicalArgument",
+    "CanonicalArguments",
+    "CanonicalResource",
+    "CanonicalScalar",
+    "CanonicalizationError",
+    "ConstraintOp",
+    "DestinationConstraint",
+    "EmailResource",
+    "FileResource",
+    "MemoryResource",
+    "NormalizedArguments",
+    "OtherResource",
+    "ProcessResource",
+    "ResourceBase",
+    "ResourceConstraint",
+    "ResourceNormalizationInput",
+    "ShadowEvaluation",
+    "SymlinkResolver",
+    "ToolResource",
+    "UrlResource",
+    "audit_fingerprint",
+    "audit_projection",
+    "authorization_fingerprint",
+    "authorization_projection",
+    "build_action_ir",
+    "build_shadow_evaluation",
+    "canonical_hmac_sha256",
+    "canonical_json",
+    "canonical_json_bytes",
+    "canonical_sha256",
+    "matches_action",
+    "matches_argument",
+    "matches_destination",
+    "matches_resource",
+    "normalize_api_resource",
+    "normalize_arguments",
+    "normalize_email_resource",
+    "normalize_file_resource",
+    "normalize_memory_resource",
+    "normalize_other_resource",
+    "normalize_process_resource",
+    "normalize_tool_resource",
+    "normalize_url_resource",
+]

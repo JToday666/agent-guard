@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 from pathlib import Path
 
 import pytest
 
+from agentguard_core.actions.canonical_json import canonical_json_bytes
 from agentguard_core.decisions.models import RuleHit
 from agentguard_core.decisions.results import DetectionResult
 from agentguard_core.signals.legacy_adapter import (
+    _stable_evidence_digest,
     legacy_detection_to_signal,
     legacy_failure_to_degradation,
 )
@@ -240,6 +243,31 @@ def test_confidence_preserves_legacy_result_semantics(
     )
 
     assert signal.confidence == expected_confidence
+
+
+# ---------------------------------------------------------------------------
+# Evidence digest: V21-02 受限 canonical JSON digest
+# ---------------------------------------------------------------------------
+
+
+def test_stable_evidence_digest_is_canonical_json_sha256() -> None:
+    evidence = ["read /etc/shadow", "high_confidence=true"]
+    expected = hashlib.sha256(canonical_json_bytes(list(evidence))).hexdigest()
+    assert _stable_evidence_digest(evidence) == expected
+
+
+def test_stable_evidence_digest_keeps_injective_encoding() -> None:
+    # 单射：["a\nb"] 与 ["a", "b"] 不得同摘要；顺序敏感（语义有序）。
+    assert _stable_evidence_digest(["a\nb"]) != _stable_evidence_digest(["a", "b"])
+    assert _stable_evidence_digest(["x", "y"]) != _stable_evidence_digest(["y", "x"])
+    assert _stable_evidence_digest([]) != _stable_evidence_digest([""])
+
+
+def test_signal_id_stays_deterministic_after_digest_upgrade() -> None:
+    result = _result(evidence=["target=/etc/shadow"])
+    first = legacy_detection_to_signal(result, event_id="evt_d", result_index=0)
+    second = legacy_detection_to_signal(result, event_id="evt_d", result_index=0)
+    assert first.signal_id == second.signal_id
 
 
 # ---------------------------------------------------------------------------
