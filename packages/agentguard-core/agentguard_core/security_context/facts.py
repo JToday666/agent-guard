@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from ..actions.canonical_json import canonical_sha256
 from ..actions.models import (
@@ -426,6 +426,47 @@ class CapabilityGrant(BaseModel):
     grant_digest: str
 
     evidence_refs: list[EvidenceRef]
+
+    @model_validator(mode="after")
+    def _enforce_approval_single_use(self) -> "CapabilityGrant":
+        """human_approval grants must satisfy the frozen one-shot contract.
+
+        When ``source_type == "human_approval"``:
+        - ``exact_authorization_fingerprint`` must not be None;
+        - ``usage_limit`` must be 1;
+        - ``remaining_uses`` must be 1 or 0;
+        - ``delegable`` must be False.
+
+        Invalid approval-derived grants cannot enter state or snapshots.
+        """
+        if self.source_type != "human_approval":
+            return self
+        errors: list[str] = []
+        if self.exact_authorization_fingerprint is None:
+            errors.append(
+                "human_approval grant requires "
+                "exact_authorization_fingerprint"
+            )
+        if self.usage_limit != 1:
+            errors.append(
+                f"human_approval grant usage_limit must be 1, "
+                f"got {self.usage_limit!r}"
+            )
+        if self.remaining_uses not in (0, 1):
+            errors.append(
+                f"human_approval grant remaining_uses must be 0 or 1, "
+                f"got {self.remaining_uses!r}"
+            )
+        if self.delegable:
+            errors.append(
+                "human_approval grant must not be delegable"
+            )
+        if errors:
+            raise ValueError(
+                "human_approval single-use invariant violated: "
+                + "; ".join(errors)
+            )
+        return self
 
     @classmethod
     def digest_fields(cls) -> frozenset[str]:

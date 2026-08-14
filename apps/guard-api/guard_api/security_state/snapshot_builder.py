@@ -49,6 +49,21 @@ def get_snapshot(
     stale 判定（02 §6.1）。
     """
 
+    # Fail-closed: reject cross-scope snapshot inputs. When scope_digest,
+    # scope.scope_digest, or task_fact_head.scope_digest disagree, a valid
+    # authoritative task from another principal/scope could be reported as
+    # complete and influence a decision for the wrong state.
+    if scope.scope_digest != scope_digest:
+        raise ValueError(
+            f"cross-scope snapshot: scope_digest parameter {scope_digest!r} "
+            f"!= scope.scope_digest {scope.scope_digest!r}"
+        )
+    if task_fact_head is not None and task_fact_head.scope_digest != scope_digest:
+        raise ValueError(
+            f"cross-scope snapshot: scope_digest parameter {scope_digest!r} "
+            f"!= task_fact_head.scope_digest {task_fact_head.scope_digest!r}"
+        )
+
     with store.scope_lock(scope_digest):
         record = store.get_security_state(scope_digest)
         if record is None or record.dirty:

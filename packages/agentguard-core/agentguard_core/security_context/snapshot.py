@@ -177,8 +177,18 @@ def build_snapshot(
     if authoritative_head_revision is None and task_fact_head is not None:
         authoritative_head_revision = task_fact_head.revision
 
+    # Ensure compute_coverage sees the authoritative task head for task
+    # domain evaluation. Direct callers of build_snapshot may pass a state
+    # where state.task is None (delta projection doesn't write task domain),
+    # while the authoritative task arrives through task_fact_head. Guard API
+    # patches the state before calling, but the public core function must
+    # not depend on that external preparation.
+    coverage_state = state
+    if task_fact_head is not None and state.task is not task_fact_head:
+        coverage_state = state.model_copy(update={"task": task_fact_head})
+
     coverage = compute_coverage(
-        state,
+        coverage_state,
         plan,
         projector_version=projector_version,
         authoritative_head_revision=authoritative_head_revision,

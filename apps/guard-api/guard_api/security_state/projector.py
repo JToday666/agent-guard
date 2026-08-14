@@ -32,6 +32,7 @@ from agentguard_core.security_context import (
     apply_delta,
     delta_digest_projection,
     project_committed_record,
+    projection_identity_key,
 )
 
 from guard_api.storage.base import (
@@ -129,11 +130,34 @@ class SecurityStateProjector:
                 if current_record is not None and (
                     existing.applied_state_version <= current_version
                 ):
-                    return ProjectApplyResult(
-                        outcome="replayed_noop",
-                        state_version=current_version,
-                        reason_codes=("v21-04:idempotent_replay_noop",),
+                    # Verify the projection key is actually reflected in the
+                    # state's applied_projections before declaring a replay.
+                    # A crash between record_projection and cas_security_state
+                    # can leave an envelope without the state being updated;
+                    # another projection may then advance the version, making
+                    # the version-only check insufficient.
+                    incoming_key = projection_identity_key(
+                        scope_digest,
+                        committed_record.source_record_type,
+                        committed_record.source_record_id,
+                        committed_record.source_revision,
+                        committed_record.projector_version,
                     )
+                    current_state = OnlineSecurityState.model_validate(
+                        current_record.canonical_payload
+                    )
+                    key_reflected = any(
+                        ap.projection_key == incoming_key
+                        for ap in current_state.applied_projections
+                    )
+                    if key_reflected:
+                        return ProjectApplyResult(
+                            outcome="replayed_noop",
+                            state_version=current_version,
+                            reason_codes=("v21-04:idempotent_replay_noop",),
+                        )
+                    # Envelope exists but state hasn't absorbed this projection
+                    # (crash window / lost CAS). Fall through to core logic.
                 # 登记存在但状态未反映（crash 窗口 / rebuild 后版本重整）：
                 # 继续走 core 幂等判定，由其三分支给出确定性结果。
 
