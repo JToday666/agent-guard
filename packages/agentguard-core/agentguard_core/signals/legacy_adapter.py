@@ -10,6 +10,7 @@ migration.
 from __future__ import annotations
 
 import hashlib
+from typing import Literal
 
 from ..decisions.results import DetectionResult
 from .models import EvaluationDegradation, EvidenceRef, ImpactClass, SecuritySignal
@@ -81,48 +82,74 @@ def _stable_evidence_digest(evidence: list[str]) -> str:
     return hasher.hexdigest()
 
 
+def _confidence_for_result(
+    result: DetectionResult,
+) -> Literal["low", "medium", "high"]:
+    """保留 legacy 检测结论的置信语义，而非实现的确定性。"""
+    normalized_evidence = {item.strip().lower() for item in result.rule_hit.evidence}
+    if "high_confidence=true" in normalized_evidence:
+        return "high"
+    if "high_confidence=false" in normalized_evidence:
+        return "medium"
+
+    severity = result.severity or result.rule_hit.severity
+    if severity == "low":
+        return "low"
+    if severity == "medium":
+        return "medium"
+    if severity in {"high", "critical"}:
+        return "high"
+
+    if result.risk_score < 40:
+        return "low"
+    if result.risk_score < 70:
+        return "medium"
+    return "high"
+
+
 def legacy_detection_to_signal(
-    result: DetectionResult, *, event_id: str
+    result: DetectionResult,
+    *,
+    event_id: str,
+    result_index: int,
+    evidence_refs: list[EvidenceRef] | None = None,
 ) -> SecuritySignal:
     """把单条 legacy DetectionResult 映射为确定性 SecuritySignal。
 
     约束：
 
-    - ``signal_id`` / digest 全部确定性派生（同一输入恒定同输出），不使用
-      uuid4；
+    - ``signal_id`` 由 event、规则、稳定 evidence digest 与结果序号共同派生，
+      同一事件内同规则的多条命中不会碰撞；
     - detector_failure 类结果的 ``detector_id`` 从
       ``rule_id`` 的 ``detector_failure:{Name}`` 格式解析（见
       ``engine.py::_detector_failure_result``），其余取 ``rule_hit.rule_id``；
     - impact 由 severity 表驱动映射，severity 为 None 时按 risk_score 阈值
       回退；legacy risk_score 仅作为迁移 metadata，不进入 Fusion 真值；
-    - legacy 检测器为确定性输出，故 ``confidence="high"``。该取值仅描述
-      scaffold 结构确定性，不代表检测器语义置信度。
+    - confidence 优先保留 evidence 中显式的 ``high_confidence``，否则按
+      severity/risk_score 保守映射；
+    - adapter 不伪造持久化 EvidenceRef；只有调用方提供已经可以从审计或
+      事实注册表解析的引用时才附加。
 
     EvidenceRef 的 digest 是对 ``rule_hit.evidence`` 列表的稳定 sha256
     （单射编码）；V21-02 canonicalization（RFC 8785 JCS）落地后升级为
     JCS digest。
     """
+    if result_index < 0:
+        raise ValueError("result_index must be non-negative")
     rule_hit = result.rule_hit
     detector_id = _parse_detector_failure_name(rule_hit.rule_id) or rule_hit.rule_id
-    signal_id = f"sig_{event_id}_{rule_hit.rule_id}"
-    evidence_ref = EvidenceRef(
-        ref_id=f"ev_{event_id}_{rule_hit.rule_id}",
-        kind="policy_rule",
-        record_type="guard_decision",
-        record_id=event_id,
-        digest=_stable_evidence_digest(rule_hit.evidence),
-        redaction_state="none",
-    )
+    evidence_digest = _stable_evidence_digest(rule_hit.evidence)
+    signal_id = f"sig_{event_id}_{rule_hit.rule_id}_{result_index}_{evidence_digest}"
     return SecuritySignal(
         signal_id=signal_id,
         detector_id=detector_id,
         category=result.category,
         scope="event",
         impact=_impact_for_result(result),
-        confidence="high",
+        confidence=_confidence_for_result(result),
         evidence_group=rule_hit.rule_id,
         reason_codes=[rule_hit.rule_id],
-        evidence_refs=[evidence_ref],
+        evidence_refs=list(evidence_refs or []),
         facts=[],
         tags=["legacy"],
     )

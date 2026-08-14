@@ -13,6 +13,7 @@ from agentguard_core.signals.legacy_adapter import (
     legacy_detection_to_signal,
     legacy_failure_to_degradation,
 )
+from agentguard_core.signals.models import EvidenceRef
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_DIR = ROOT / "packages" / "agentguard-core" / "agentguard_core"
@@ -72,8 +73,8 @@ def _failure_result(
 def test_signal_mapping_is_deterministic(decision: str) -> None:
     result = _result(decision=decision)
 
-    first = legacy_detection_to_signal(result, event_id="evt_1")
-    second = legacy_detection_to_signal(result, event_id="evt_1")
+    first = legacy_detection_to_signal(result, event_id="evt_1", result_index=0)
+    second = legacy_detection_to_signal(result, event_id="evt_1", result_index=0)
 
     assert first == second
     assert first.model_dump(mode="json") == second.model_dump(mode="json")
@@ -88,9 +89,9 @@ def test_signal_preserves_regular_result_fields() -> None:
         severity="high",
     )
 
-    signal = legacy_detection_to_signal(result, event_id="evt_42")
+    signal = legacy_detection_to_signal(result, event_id="evt_42", result_index=0)
 
-    assert signal.signal_id == "sig_evt_42_P001_sensitive_file_access"
+    assert signal.signal_id.startswith("sig_evt_42_P001_sensitive_file_access_0_")
     assert signal.detector_id == "P001_sensitive_file_access"
     assert signal.category == "sensitive_resource"
     assert signal.scope == "event"
@@ -98,40 +99,68 @@ def test_signal_preserves_regular_result_fields() -> None:
     assert signal.confidence == "high"
     assert signal.evidence_group == "P001_sensitive_file_access"
     assert signal.reason_codes == ["P001_sensitive_file_access"]
+    assert signal.evidence_refs == []
     assert signal.facts == []
     assert signal.tags == ["legacy"]
 
-    (ref,) = signal.evidence_refs
-    assert ref.kind == "policy_rule"
-    assert ref.record_type == "guard_decision"
-    assert ref.record_id == "evt_42"
-    assert ref.redaction_state == "none"
-    # digest 必须对 evidence 列表稳定。
-    ref_again = legacy_detection_to_signal(result, event_id="evt_42").evidence_refs[0]
-    assert ref.digest == ref_again.digest
-    assert len(ref.digest) == 64
+
+def test_same_rule_hits_have_distinct_stable_signal_ids() -> None:
+    first_result = _result(evidence=["target=/etc/shadow"])
+    second_result = _result(evidence=["target=/home/user/.ssh/id_rsa"])
+
+    first = legacy_detection_to_signal(
+        first_result, event_id="evt_multi", result_index=0
+    )
+    second = legacy_detection_to_signal(
+        second_result, event_id="evt_multi", result_index=1
+    )
+
+    assert first.signal_id != second.signal_id
+    assert (
+        first.signal_id
+        == legacy_detection_to_signal(
+            first_result, event_id="evt_multi", result_index=0
+        ).signal_id
+    )
 
 
-def test_evidence_digest_encoding_is_injective() -> None:
-    # 换行拼接曾使 ["a\nb"] 与 ["a", "b"] 哈希相同；单射编码必须区分。
-    single = legacy_detection_to_signal(
-        _result(evidence=["a\nb"]), event_id="evt_d"
-    ).evidence_refs[0]
-    split = legacy_detection_to_signal(
-        _result(evidence=["a", "b"]), event_id="evt_d"
-    ).evidence_refs[0]
-    assert single.digest != split.digest
+def test_signal_only_attaches_caller_supplied_persisted_evidence_ref() -> None:
+    persisted_ref = EvidenceRef(
+        ref_id="ev_audit_policy_1_rule_0",
+        kind="policy_rule",
+        record_type="policy_evaluation",
+        record_id="audit_policy_1",
+        json_pointer="/evidence/guard_decision/rule_hits/0",
+        digest="a" * 64,
+        redaction_state="none",
+    )
+
+    signal = legacy_detection_to_signal(
+        _result(),
+        event_id="evt_ref",
+        result_index=0,
+        evidence_refs=[persisted_ref],
+    )
+
+    assert signal.evidence_refs == [persisted_ref]
+
+
+def test_result_index_must_be_non_negative() -> None:
+    with pytest.raises(ValueError, match="result_index must be non-negative"):
+        legacy_detection_to_signal(_result(), event_id="evt_bad", result_index=-1)
 
 
 def test_detector_failure_signal_parses_detector_name() -> None:
     result = _failure_result()
 
-    signal = legacy_detection_to_signal(result, event_id="evt_9")
+    signal = legacy_detection_to_signal(result, event_id="evt_9", result_index=0)
 
     assert signal.detector_id == "PromptInjectionDetector"
     assert signal.category == "detector_failure"
-    assert signal.signal_id == ("sig_evt_9_detector_failure:PromptInjectionDetector")
-    assert signal.confidence == "high"
+    assert signal.signal_id.startswith(
+        "sig_evt_9_detector_failure:PromptInjectionDetector_0_"
+    )
+    assert signal.confidence == "medium"
 
 
 def test_malformed_detector_failure_rule_id_is_consistent_across_paths() -> None:
@@ -139,7 +168,7 @@ def test_malformed_detector_failure_rule_id_is_consistent_across_paths() -> None
     # 一致收敛，不得一边回退一边产出 component_id 为空的无效降级。
     result = _failure_result(rule_id="detector_failure:")
 
-    signal = legacy_detection_to_signal(result, event_id="evt_m")
+    signal = legacy_detection_to_signal(result, event_id="evt_m", result_index=0)
     assert signal.detector_id == "detector_failure:"
 
     assert legacy_failure_to_degradation(result, event_id="evt_m") is None
@@ -154,7 +183,9 @@ def test_severity_table_mapping_covers_all_four_levels() -> None:
     }
     for severity, impact in expected.items():
         signal = legacy_detection_to_signal(
-            _result(severity=severity, risk_score=50), event_id="evt_s"
+            _result(severity=severity, risk_score=50),
+            event_id="evt_s",
+            result_index=0,
         )
         assert signal.impact == impact, severity
 
@@ -176,9 +207,39 @@ def test_missing_severity_falls_back_to_score_thresholds(
     risk_score: int, expected_impact: str
 ) -> None:
     signal = legacy_detection_to_signal(
-        _result(severity=None, risk_score=risk_score), event_id="evt_f"
+        _result(severity=None, risk_score=risk_score),
+        event_id="evt_f",
+        result_index=0,
     )
     assert signal.impact == expected_impact
+
+
+@pytest.mark.parametrize(
+    ("evidence", "severity", "risk_score", "expected_confidence"),
+    [
+        (["high_confidence=true"], "medium", 64, "high"),
+        (["high_confidence=false"], "high", 84, "medium"),
+        (["ordinary evidence"], "low", 95, "low"),
+        (["ordinary evidence"], "medium", 95, "medium"),
+        (["ordinary evidence"], "critical", 10, "high"),
+        (["ordinary evidence"], None, 39, "low"),
+        (["ordinary evidence"], None, 69, "medium"),
+        (["ordinary evidence"], None, 70, "high"),
+    ],
+)
+def test_confidence_preserves_legacy_result_semantics(
+    evidence: list[str],
+    severity: str | None,
+    risk_score: int,
+    expected_confidence: str,
+) -> None:
+    signal = legacy_detection_to_signal(
+        _result(evidence=evidence, severity=severity, risk_score=risk_score),
+        event_id="evt_confidence",
+        result_index=0,
+    )
+
+    assert signal.confidence == expected_confidence
 
 
 # ---------------------------------------------------------------------------
