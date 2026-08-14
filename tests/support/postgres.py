@@ -25,6 +25,8 @@ CONTROL_PLANE_TABLES = [
     "policy_snapshot_history",
     "policy_snapshots",
     "task_facts",
+    "projection_records",
+    "security_states",
     "approval_nonces",
     "browser_sessions",
     "launch_codes",

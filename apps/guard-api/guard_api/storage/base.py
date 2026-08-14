@@ -84,6 +84,55 @@ class PolicySnapshotRecord:
     updated_by: str
 
 
+#: rebuild 输入有界读取的钳制上限（F2）：两个存储实现与 rebuild 消费方
+#: 共享本常量，避免钳制值在两处漂移导致截断判定失效。
+MAX_REBUILD_INPUT_LIMIT = 1000
+
+
+@dataclass(frozen=True, slots=True)
+class SecurityStateRecord:
+    """security_states 存储记录：OnlineSecurityState 全量快照（V21-04）。
+
+    ``canonical_payload`` 为 OnlineSecurityState 的
+    ``model_dump(mode="json")`` 全量快照，读回口径统一 ``model_validate``；
+    ``state_version`` 是单调版本链锚点（CAS V→V+1，02 §4.1）；
+    ``dirty`` / ``dirty_domains`` 承载 projector failure / digest conflict
+    的脏态标记（02 §3：失败不得解释为 complete）。
+    """
+
+    scope_digest: str
+    state_version: int
+    canonical_payload: dict[str, Any]
+    dirty: bool
+    dirty_domains: list[str]
+    projector_version: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionIdentityRecord:
+    """projection_records 存储记录：Projector 幂等键五元组（V21-04, 02 §4）。
+
+    幂等身份为 ``(scope_digest, source_record_type, source_record_id,
+    source_revision, projector_version)`` 五元组（禁止只用 event_id）；
+    ``delta_digest`` 是同身份重放时的等价性锚点，同身份异 digest 由
+    存储层拒绝（ProjectionDigestConflictError，不静默覆盖）；
+    ``delta_payload`` 为 SecurityStateDeltaV21 的
+    ``model_dump(mode="json")`` 快照，rebuild 据此按规范序重放
+    （T-Replay 确定性，05 §12）。
+    """
+
+    scope_digest: str
+    source_record_type: str
+    source_record_id: str
+    source_revision: int
+    projector_version: str
+    delta_digest: str
+    delta_payload: dict[str, Any]
+    applied_state_version: int
+    created_at: str
+
+
 @dataclass(frozen=True, slots=True)
 class TaskFactRecord:
     """task_facts 存储记录：TaskFact 全量 + 幂等/CAS 元数据（V21-03）。
@@ -272,6 +321,40 @@ class TaskRevisionConflictError(ValueError):
         self.current_revision = current_revision
         super().__init__(
             f"expected task revision {expected_revision}, current is {current_revision}"
+        )
+
+
+class StateVersionConflictError(ValueError):
+    """security state 的 CAS 锚点与当前 state_version 不一致（V21-04, 02 §4.1）。
+
+    形态对齐 TaskRevisionConflictError：仅当 ``expected_state_version``
+    等于该 scope 当前 state_version（无记录为 0）时 CAS 才可应用，
+    旧版本永不静默覆盖。
+    """
+
+    def __init__(self, *, expected_state_version: int, current_state_version: int) -> None:
+        self.expected_state_version = expected_state_version
+        self.current_state_version = current_state_version
+        super().__init__(
+            f"expected security state version {expected_state_version}, "
+            f"current is {current_state_version}"
+        )
+
+
+class ProjectionDigestConflictError(ValueError):
+    """同一投影身份五元组出现不同 delta_digest（V21-04, 02 §4.1 第 3 分支）。
+
+    形态对齐 TaskRevisionConflictError：digest 冲突 → state dirty +
+    security alert，存储层拒绝写入，不静默覆盖。
+    """
+
+    def __init__(self, *, projection_key: str, existing_digest: str, incoming_digest: str) -> None:
+        self.projection_key = projection_key
+        self.existing_digest = existing_digest
+        self.incoming_digest = incoming_digest
+        super().__init__(
+            f"projection identity {projection_key}: digest conflict "
+            f"({existing_digest} vs {incoming_digest})"
         )
 
 
@@ -588,6 +671,76 @@ class ControlPlaneStore(Protocol):
         self, task_id: str
     ) -> list[TaskFactRecord]:
         """按 revision 升序返回该任务的全部历史 revision。"""
+        ...
+
+    def get_security_state(self, scope_digest: str) -> SecurityStateRecord | None:
+        """读取该 scope 的 OnlineSecurityState 存储记录；缺省返回 None（V21-04）。"""
+        ...
+
+    def cas_security_state(
+        self,
+        scope_digest: str,
+        expected_state_version: int,
+        record: SecurityStateRecord,
+    ) -> bool:
+        """state version CAS 写入（V21-04, 02 §4.1）。
+
+        契约：仅当该 scope 当前 state_version 等于
+        ``expected_state_version``（无记录为 0）时写入 ``record``；
+        版本不匹配抛 StateVersionConflictError（memory/postgres 双实现
+        统一采用抛异常语义，不返回 False）。旧版本永不静默覆盖。
+        """
+        ...
+
+    def mark_security_state_dirty(
+        self, scope_digest: str, domains: list[str]
+    ) -> None:
+        """登记 projector failure / digest conflict 的脏态标记（V21-04, 02 §3）。
+
+        契约：把 ``domains`` 并入既有记录的 dirty_domains 并置 dirty=True，
+        ``state_version`` 保持不变（CAS 锚点不受 dirty 标记影响）；
+        state 不存在时创建 ``state_version=0`` 的空态脏记录。
+        双口径同步（F1）：dirty 域必须同时并入 canonical_payload 内的
+        ``dirty_domains``（payload 是 OnlineSecurityState 的
+        ``model_dump(mode="json")`` 口径，改动后必须能被
+        ``model_validate`` 读回），否则 projector 从 payload 重建状态
+        后回写会静默清除失败事实。
+        """
+        ...
+
+    def record_projection(
+        self, record: ProjectionIdentityRecord
+    ) -> tuple[ProjectionIdentityRecord, bool]:
+        """幂等写入一条投影登记（V21-04, 02 §4 三分支的存储侧锚点）。
+
+        契约：新身份写入成功 → ``(record, True)``；同五元组身份且
+        delta_digest 相同已存在 → ``(既有记录, False)`` no-op；同身份
+        异 delta_digest → 抛 ProjectionDigestConflictError（不静默覆盖）。
+        """
+        ...
+
+    def get_projection(
+        self,
+        scope_digest: str,
+        source_record_type: str,
+        source_record_id: str,
+        source_revision: int,
+        projector_version: str,
+    ) -> ProjectionIdentityRecord | None:
+        """按幂等键五元组读取单条投影登记；缺省返回 None。"""
+        ...
+
+    def list_rebuild_inputs(
+        self, scope_digest: str, *, limit: int
+    ) -> list[ProjectionIdentityRecord]:
+        """有界读取该 scope 的 rebuild 输入（V21-04）。
+
+        契约：按 ``applied_state_version`` 升序返回，至多 ``limit`` 条；
+        ``limit`` 被钳制到 ``[1, MAX_REBUILD_INPUT_LIMIT]``（调用方判定
+        截断时必须用钳制后的有效值）；调用方在返回条数达到有效 limit
+        时必须按 fail-closed 处理截断风险（相关域置 partial/dirty），
+        不得假设输入完整。
+        """
         ...
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest: ...

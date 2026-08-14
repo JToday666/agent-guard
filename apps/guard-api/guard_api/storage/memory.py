@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock, RLock
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, cast
 
 from agentguard_core import (
     ActionCriticReview,
@@ -37,12 +37,17 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    MAX_REBUILD_INPUT_LIMIT,
     MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
     MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
+    ProjectionDigestConflictError,
+    ProjectionIdentityRecord,
     ProvenanceEndpointMissingError,
+    SecurityStateRecord,
+    StateVersionConflictError,
     StoredBrowserSession,
     StoredLaunchCode,
     TaskFactRecord,
@@ -82,6 +87,10 @@ class MemoryControlPlaneStore:
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     task_facts: dict[str, list[TaskFactRecord]] = field(default_factory=dict)
+    security_states: dict[str, SecurityStateRecord] = field(default_factory=dict)
+    projection_records: dict[tuple[str, str, str, int, str], ProjectionIdentityRecord] = field(
+        default_factory=dict
+    )
     audit_clock: Callable[[], datetime] = field(default=_system_utc_now, repr=False)
     audit_integrity_lock: Any = field(default_factory=RLock, init=False, repr=False)
     provenance_lock: Any = field(default_factory=RLock, init=False, repr=False)
@@ -89,6 +98,7 @@ class MemoryControlPlaneStore:
     evaluation_run_lock: Any = field(default_factory=Lock, init=False, repr=False)
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     task_fact_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    security_state_lock: Any = field(default_factory=Lock, init=False, repr=False)
     approval_lock: Any = field(default_factory=RLock, init=False, repr=False)
     memory_change_lock: Any = field(default_factory=RLock, init=False, repr=False)
     action_critic_lock: Any = field(default_factory=RLock, init=False, repr=False)
@@ -562,6 +572,156 @@ class MemoryControlPlaneStore:
         with self.task_fact_lock:
             return list(self.task_facts.get(task_id, []))
 
+    def get_security_state(self, scope_digest: str) -> SecurityStateRecord | None:
+        with self.security_state_lock:
+            record = self.security_states.get(scope_digest)
+            return deepcopy(record) if record is not None else None
+
+    def cas_security_state(
+        self,
+        scope_digest: str,
+        expected_state_version: int,
+        record: SecurityStateRecord,
+    ) -> bool:
+        # 追加式 CAS：锁内判定当前 state_version（无记录为 0），
+        # 版本不匹配抛 StateVersionConflictError，旧版本永不覆盖。
+        with self.security_state_lock:
+            existing = self.security_states.get(scope_digest)
+            current_version = existing.state_version if existing is not None else 0
+            if expected_state_version != current_version:
+                raise StateVersionConflictError(
+                    expected_state_version=expected_state_version,
+                    current_state_version=current_version,
+                )
+            self.security_states[scope_digest] = deepcopy(record)
+            return True
+
+    def mark_security_state_dirty(
+        self, scope_digest: str, domains: list[str]
+    ) -> None:
+        # state_version 保持不变：dirty 标记不影响 CAS 锚点；
+        # state 不存在时创建 version=0 的空态脏记录。
+        from agentguard_core.security_context import (
+            PROJECTOR_VERSION,
+            OnlineSecurityState,
+            StateWatermarks,
+        )
+        from agentguard_core.signals.models import CoverageDomain
+
+        merged_str = sorted(set(domains))
+        merged_domains = cast("list[CoverageDomain]", merged_str)
+        with self.security_state_lock:
+            existing = self.security_states.get(scope_digest)
+            if existing is None:
+                # F1 双口径同步：payload 内的 dirty_domains 与列同时写入。
+                empty_state = OnlineSecurityState(
+                    watermarks=StateWatermarks(
+                        committed_sequence=None,
+                        projected_sequence=None,
+                        runtime_receipt_sequence=None,
+                        memory_sequence=None,
+                        gaps=[],
+                    ),
+                    dirty_domains=merged_domains,
+                )
+                self.security_states[scope_digest] = SecurityStateRecord(
+                    scope_digest=scope_digest,
+                    state_version=0,
+                    canonical_payload=empty_state.model_dump(mode="json"),
+                    dirty=True,
+                    dirty_domains=merged_str,
+                    projector_version=PROJECTOR_VERSION,
+                    updated_at=utc_now_iso(),
+                )
+                return
+            merged = sorted(set(existing.dirty_domains) | set(merged_str))
+            # F1 双口径同步：把 dirty 域并入 canonical_payload 的
+            # dirty_domains（payload 是 model_dump(mode="json") 口径，
+            # 改后仍可 model_validate 读回），否则 projector 从 payload
+            # 重建状态后回写会静默清除失败事实。
+            payload_state = OnlineSecurityState.model_validate(
+                existing.canonical_payload
+            )
+            payload_state = payload_state.model_copy(
+                update={
+                    "dirty_domains": sorted(
+                        set(payload_state.dirty_domains) | set(merged)
+                    )
+                }
+            )
+            self.security_states[scope_digest] = SecurityStateRecord(
+                scope_digest=existing.scope_digest,
+                state_version=existing.state_version,
+                canonical_payload=payload_state.model_dump(mode="json"),
+                dirty=True,
+                dirty_domains=merged,
+                projector_version=existing.projector_version,
+                updated_at=utc_now_iso(),
+            )
+
+    def record_projection(
+        self, record: ProjectionIdentityRecord
+    ) -> tuple[ProjectionIdentityRecord, bool]:
+        # 幂等三分支：新身份写入；同身份同 digest no-op；同身份异 digest 拒绝。
+        key = (
+            record.scope_digest,
+            record.source_record_type,
+            record.source_record_id,
+            record.source_revision,
+            record.projector_version,
+        )
+        with self.security_state_lock:
+            existing = self.projection_records.get(key)
+            if existing is not None:
+                if existing.delta_digest == record.delta_digest:
+                    return deepcopy(existing), False
+                raise ProjectionDigestConflictError(
+                    projection_key="|".join(
+                        [
+                            record.scope_digest,
+                            record.source_record_type,
+                            record.source_record_id,
+                            str(record.source_revision),
+                            record.projector_version,
+                        ]
+                    ),
+                    existing_digest=existing.delta_digest,
+                    incoming_digest=record.delta_digest,
+                )
+            self.projection_records[key] = deepcopy(record)
+            return record, True
+
+    def get_projection(
+        self,
+        scope_digest: str,
+        source_record_type: str,
+        source_record_id: str,
+        source_revision: int,
+        projector_version: str,
+    ) -> ProjectionIdentityRecord | None:
+        key = (
+            scope_digest,
+            source_record_type,
+            source_record_id,
+            source_revision,
+            projector_version,
+        )
+        with self.security_state_lock:
+            record = self.projection_records.get(key)
+            return deepcopy(record) if record is not None else None
+
+    def list_rebuild_inputs(
+        self, scope_digest: str, *, limit: int
+    ) -> list[ProjectionIdentityRecord]:
+        with self.security_state_lock:
+            rows = [
+                record
+                for key, record in self.projection_records.items()
+                if key[0] == scope_digest
+            ]
+            rows.sort(key=lambda item: item.applied_state_version)
+            return [deepcopy(record) for record in rows[: _bounded_limit(limit)]]
+
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         with self.approval_lock:
             existing = self.approvals.get(approval.approval_id)
@@ -758,7 +918,7 @@ def _matches_window_filters(
 
 
 def _bounded_limit(limit: int) -> int:
-    return max(1, min(limit, 1000))
+    return max(1, min(limit, MAX_REBUILD_INPUT_LIMIT))
 
 
 def _bounded_collection_limit(limit: int) -> int:
