@@ -35,8 +35,8 @@
         "evidence": "tests/test_runtime_conformance_langgraph.py"
       },
       "CF-07": {
-        "status": "PASS",
-        "evidence": "tests/test_runtime_conformance_langgraph.py"
+        "status": "NOT_SUPPORTED",
+        "note": "failed 回执语义已覆盖（test_runtime_conformance_langgraph.py CF-07 用例），但超限 error 实测显示 adapter 将 str(exc) 原样透传、无客户端截断，bounded（≤2000）保证目前仅由 Guard API 侧校验（422 拒收）承担；adapter 端截断为后续硬化项，补齐前不声明 PASS（评审 P1）。"
       },
       "CF-08": {
         "status": "PASS",
@@ -110,8 +110,8 @@
         "note": "插件 durable spool 依赖 Guard API audit_id 幂等契约；API 侧由 langgraph 矩阵 CF-11 条目同一测试覆盖。"
       },
       "CF-12": {
-        "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/mapping.test.mjs"
+        "status": "NOT_SUPPORTED",
+        "note": "mapping 层仅证明 quarantined 回执构造（mapping.test.mjs），未驱动真实结果处置；tool_result_persist 收到远端 deny 时异步处理不同步隔离，fail-closed quarantine 回执 emit 属契约 03 §7.2 条件式待补项；真实隔离闭环证明前不声明 PASS（评审 P1）。"
       }
     }
   }

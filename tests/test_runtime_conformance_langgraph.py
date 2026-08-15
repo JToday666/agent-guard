@@ -194,31 +194,43 @@ def test_cf_01_allow_executes_once_with_terminal_fact() -> None:
     runtime = ConformanceRuntime()
     gateway = _gateway(guard, runtime)
 
-    for index in (1, 2):
-        result = gateway.invoke_tool(
-            tool_name="read_file",
-            arguments={"path": f"/public/doc-{index}.txt"},
-            security={"user_task": "read public docs"},
-            trace_id=f"trace_cf01_{index}",
-            call_id=f"call_cf01_{index}",
-        )
-        assert result.executed is True
-        assert result.blocked is False
+    result = gateway.invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "/public/doc-1.txt"},
+        security={"user_task": "read public docs"},
+        trace_id="trace_cf01",
+        call_id="call_cf01",
+    )
+    assert result.executed is True
+    assert result.blocked is False
 
-    # 每个动作恰好一次 invocation，无重复执行。
-    assert len(runtime.calls) == 2
+    # 每个被接受调用恰好一次 invocation + 一份 terminal 回执。
+    assert len(runtime.calls) == 1
     receipts = guard.outcome_receipts()
     assert [r["metadata"]["outcome_kind"] for r in receipts] == [
-        "execution_completed",
-        "execution_completed",
+        "execution_completed"
     ]
-    for receipt, index in zip(receipts, (1, 2)):
-        execution = receipt["evidence"]["execution"]
-        assert execution["status"] == "executed"
-        assert execution["error"] is None
-        # C2：terminal fact 与 policy 关联齐全。
-        assert receipt["links"]["policy_audit_id"] == POLICY_AUDIT_ID
-        assert receipt["links"]["action_id"] == f"call_cf01_{index}"
+    execution = receipts[0]["evidence"]["execution"]
+    assert execution["status"] == "executed"
+    assert execution["error"] is None
+    # C2：terminal fact 与 policy 关联齐全。
+    assert receipts[0]["links"]["policy_audit_id"] == POLICY_AUDIT_ID
+    assert receipts[0]["links"]["action_id"] == "call_cf01"
+
+    # adapter 对每次被接受的调用执行一次（不做客户端重放抑制）；
+    # 同事件重放的幂等去重属于 evaluate 层语义，由 CF-10 覆盖。
+    second = gateway.invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "/public/doc-2.txt"},
+        security={"user_task": "read public docs"},
+        trace_id="trace_cf01_b",
+        call_id="call_cf01_b",
+    )
+    assert second.executed is True
+    assert len(runtime.calls) == 2
+    assert [
+        receipt["links"]["action_id"] for receipt in guard.outcome_receipts()
+    ] == ["call_cf01", "call_cf01_b"]
 
 
 def test_cf_02_deny_not_invoked() -> None:
@@ -338,26 +350,35 @@ def test_cf_05_wait_timeout_blocks_and_late_approval_does_not_resurrect() -> Non
         receipts_after_timeout[0]["evidence"]["execution"]["status"]
         == "not_invoked"
     )
+    original_event_id = receipts_after_timeout[0]["links"]["event_id"]
 
-    # 晚到审批放行只影响新动作；旧 attempt 保持终结，不被复活。
+    # 晚到审批放行送达同一 approval/动作：旧 attempt 不得被复活——
+    # 原事件不得出现 executed 终态回执；再次提交同一动作属新 attempt
+    # （新事件 id），不得复用原事件身份。
     guard.approval_resolution = {"status": "resolved", "decision": "allow_once"}
     second = gateway.invoke_tool(
         tool_name="memory_write",
-        arguments={"namespace": "user", "key": "b", "value": "2"},
+        arguments={"namespace": "user", "key": "a", "value": "1"},
         security={"user_task": "write memory"},
-        trace_id="trace_cf05_late",
-        call_id="call_cf05_new",
+        trace_id="trace_cf05",
+        call_id="call_cf05_old",
     )
     assert second.executed is True
     assert len(runtime.calls) == 1
-    assert runtime.calls[0][0] == "memory_write"
     receipts = guard.outcome_receipts()
     assert len(receipts) == 2
     # 旧 attempt 的 not_invoked 回执原样保留，无新增终态事实。
     assert receipts[0]["links"]["action_id"] == "call_cf05_old"
     assert receipts[0]["evidence"]["execution"]["status"] == "not_invoked"
-    assert receipts[1]["links"]["action_id"] == "call_cf05_new"
+    # 复活防护：原事件 id 绝不携带 executed 终态。
+    assert not any(
+        receipt["links"]["event_id"] == original_event_id
+        and receipt["evidence"]["execution"]["status"] == "executed"
+        for receipt in receipts
+    )
+    # 新 attempt 用新事件 id 记录终态。
     assert receipts[1]["metadata"]["outcome_kind"] == "execution_completed"
+    assert receipts[1]["links"]["event_id"] != original_event_id
 
 
 def test_cf_06_evaluate_unavailable_fails_closed_without_policy_receipt() -> None:
@@ -404,10 +425,19 @@ def test_cf_06_evaluate_unavailable_fails_closed_without_policy_receipt() -> Non
     assert audit_failing.outcome_receipts() == []
 
 
-def test_cf_07_tool_failure_produces_bounded_execution_failed() -> None:
+def test_cf_07_tool_failure_receipt_and_over_limit_error_passthrough() -> None:
+    """CF-07 实测：failed 回执成立；超限 error 原样透传（bounded 缺口）。
+
+    短 error 的 `len <= 2000` 断言是恒真式，不构成 bounded 证据（评审 P1）。
+    本用例用超限 error 实测：adapter 将 str(exc) 原样写入回执（evidence 为
+    自由 dict，无客户端截断），故 LangGraph 矩阵 CF-07 声明 NOT_SUPPORTED：
+    bounded 保证目前仅由 Guard API 侧 ≤2000 校验（422 拒收）承担，
+    adapter 端截断为后续硬化项。
+    """
     _case("CF-07")
+    oversized = "x" * 5000
     guard = ConformanceGuardAdapter("allow")
-    runtime = ConformanceRuntime(fail_with="upstream 503")
+    runtime = ConformanceRuntime(fail_with=oversized)
     gateway = _gateway(guard, runtime)
 
     result = gateway.invoke_tool(
@@ -428,8 +458,9 @@ def test_cf_07_tool_failure_produces_bounded_execution_failed() -> None:
     assert execution["status"] == "failed"
     assert isinstance(execution["error"], str)
     assert execution["error"]
-    # bounded error（契约 02 §9：≤2000 字符）。
-    assert len(execution["error"]) <= 2000
+    # 实测当前行为：超限 error 未被 adapter 截断（缺口记录在矩阵 note）。
+    assert len(execution["error"]) == len(oversized)
+    assert execution["error"] == oversized
 
 
 def test_cf_08_policy_and_terminal_receipts_aggregate_to_same_action() -> None:

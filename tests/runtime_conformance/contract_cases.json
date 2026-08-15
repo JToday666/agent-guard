@@ -8,7 +8,7 @@
       "title": "ALLOW Executes Once",
       "tier": 2,
       "scope": "terminal",
-      "input": { "decision": "allow", "retry_same_event": true },
+      "input": { "decision": "allow" },
       "expect": {
         "gate": "allowed",
         "invocation_count": 1,
@@ -16,7 +16,7 @@
           { "kind": "execution_completed", "execution_status": "executed" }
         ],
         "c2_required": true,
-        "notes": "重试不得产生重复 invocation；C2 runtime 必须有 terminal fact。"
+        "notes": "每个被接受调用恰好一次 invocation + 一份 terminal 回执。同事件重放的幂等去重属于 evaluate 层语义，由 CF-10 覆盖；adapter 本身对每次被接受的调用执行一次，不做客户端重放抑制。"
       }
     },
     {
@@ -118,7 +118,7 @@
           { "kind": "execution_failed", "execution_status": "failed" }
         ],
         "c2_required": true,
-        "notes": "error 必须是 bounded 非空字符串（02 §9，≤2000 字符）。"
+        "notes": "error 必须是有界非空字符串（02 §9，≤2000 字符）。声明 PASS 必须用超限 error 实测截断；仅短 error 的断言是恒真式，不构成证据。"
       }
     },
     {
