@@ -76,9 +76,17 @@ class GuardEngine:
             ]
         )
 
-    def evaluate(
+    def evaluate_with_results(
         self, event: GuardEvent, policies: PolicyBundle | None = None
-    ) -> GuardDecision:
+    ) -> tuple[GuardDecision, list[DetectionResult]]:
+        """只读旁路：返回 legacy 决策与其全部 ``DetectionResult``。
+
+        V21-08 shadow 接线点：shadow 评估需要 legacy 检测结果经
+        ``signals/legacy_adapter`` 映射为 V2.1 signal/degradation；本方法
+        与 ``evaluate()`` 共享同一条检测/聚合链，不改变任何判定语义
+        （检测器失败契约、deny 优先、started_at 计时均不变）。纯新增
+        旁路，判定路径依旧不 import actions（V21-02 AST 导入隔离守卫）。
+        """
         policy_bundle = policies or PolicyBundle()
         started_at = perf_counter()
         detections: list[DetectionResult] = []
@@ -93,7 +101,14 @@ class GuardEngine:
                     exc_info=exc,
                 )
                 detections.append(_detector_failure_result(detector, exc))
-        return build_guard_decision(detections, started_at=started_at)
+        decision = build_guard_decision(detections, started_at=started_at)
+        return decision, detections
+
+    def evaluate(
+        self, event: GuardEvent, policies: PolicyBundle | None = None
+    ) -> GuardDecision:
+        decision, _ = self.evaluate_with_results(event, policies)
+        return decision
 
 
 def _detector_failure_result(detector: Detector, exc: Exception) -> DetectionResult:
