@@ -12,6 +12,9 @@
 - `09_风险_决策记录_冻结清单.md` — 6028 bytes — `sha256:3622707e614cde1e6995efc4db39eda993259e7aaf705961f0c47ab431170cba`
 - `10_竞赛映射_创新点与演示方案.md` — 5394 bytes — `sha256:5eafe50f361ddd028d9a2b5863db3a1139fb2ecd198779fa72fb2630d45c4f69`
 - `11_代码基线与改造映射.md` — 6600 bytes — `sha256:6f513226323f411caa070ce5f130da26d8b2ad59eb186273e2cd84a419cabe10`
+- `12_未决问题处置与决策记录.md` — 11494 bytes — `sha256:96bfe5a53dfaef19022d1b33d022b06c9be5fd7364fffbcb991c9216217a11a6`
 - `AgentGuard_Context_Isolation_Taint_Tracking_完整方案.md` — 101363 bytes — `sha256:c9fcd20929e2a26c788f9622f7b92b978801f37f1bd1b182b2c32a22b4b8276d`
-- `README.md` — 6483 bytes — `sha256:3797153ea6d2aec08e99fee666e3b9d0cd2de37d7433cf89c1d88c9cad407e5c`
-- `context_taint_contract_freeze.yaml` — 3822 bytes — `sha256:c219ab3ac4357d7d20569683294345ceaa973af6ff81e7a900b5633b631e4157`
+- `CT_FREEZE_METADATA.yaml` — 696 bytes — `sha256:cb41eee5345fdc6a5061c3fd3bcf14f5c135fb5b446f5284d5f3849b392302dd`
+- `README.md` — 7154 bytes — `sha256:2bec9e94363e1c709b1756597b7416cc8968e281995ba667f460fc0263317c22`
+- `context_taint_contract_freeze.schema.json` — 11160 bytes — `sha256:f1326a754a008539015680b0bb43096579803bd62351b4799660237c033e22d9`
+- `context_taint_contract_freeze.yaml` — 7942 bytes — `sha256:9656f07442fa65b26d024f4524558c4e537558c4f55527f64f497c507807b234`
