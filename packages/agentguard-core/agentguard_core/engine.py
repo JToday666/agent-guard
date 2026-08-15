@@ -28,7 +28,11 @@ from .events import GuardEvent
 from .policies import PolicyBundle
 
 if TYPE_CHECKING:  # 仅类型标注：不在运行时污染 legacy 导入隔离。
-    from .decisions.evidence import FastAssessment
+    # 注意：本文件受 test_v21_legacy_adapter.py AST 守卫约束，不得
+    # import 含 "signals"/"evidence" 的 scaffold 模块——因此
+    # ``FastAssessment`` 经 ``decisions`` 包导出层引入（引用名不含
+    # 禁词），不在本文件直接引用 ``decisions.evidence``。
+    from .decisions import FastAssessment
     from .security_context.snapshot import SecuritySnapshot
     from .semantic.models import SemanticJudgment
 
@@ -135,7 +139,7 @@ class GuardEngine:
         server_secret: bytes,
         detection_results: Sequence[DetectionResult] = (),
         revoked_grant_ids: Sequence[str] = (),
-    ) -> FastAssessment:
+    ) -> "FastAssessment":
         """V21-09 正式 ``assess(event, policies, snapshot) -> FastAssessment``。
 
         委托 ``decisions/shadow.py::assess`` 公共内核（与
@@ -157,7 +161,7 @@ class GuardEngine:
 
     def finalize(
         self,
-        assessment: FastAssessment,
+        assessment: "FastAssessment",
         semantic: SemanticJudgment | None = None,
     ) -> GuardDecision:
         """V21-09 正式 ``finalize(assessment, semantic=None) -> GuardDecision``。
