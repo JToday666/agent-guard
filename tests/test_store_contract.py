@@ -179,10 +179,11 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
     assert audit.record_type == "policy_evaluation"
     evidence = audit.evidence
     assert isinstance(evidence, dict)
-    # V21-08（D4/D7）：decision_v21 是 append-only 审计键——flag 关时
-    # evidence 键集与现状完全一致（8 键）；flag 开时为 8 键 +
-    # decision_v21，不得出现其他键。
-    assert set(evidence) - {"decision_v21"} == {
+    # V21-08（D4/D7）/ V21-09（D2）：decision_v21 / state_delta_v21 是
+    # append-only 审计键——flag 关时 evidence 键集与现状完全一致
+    # （8 键）；flag 开时允许 8 键 + decision_v21 + state_delta_v21，
+    # 不得出现其他键。
+    assert set(evidence) - {"decision_v21", "state_delta_v21"} == {
         "guard_event",
         "guard_decision",
         "policy",
@@ -202,6 +203,7 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
         "result",
         "approval",
         "decision_v21",
+        "state_delta_v21",
     }
     # §9.3：policy 块与实际保存的快照一致。
     assert evidence["policy"] == {

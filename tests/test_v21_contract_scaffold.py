@@ -584,6 +584,21 @@ def test_decision_v21_envelope_shape() -> None:
     assert set(envelope["decision_v21"]) == {"schema_version", "payload"}
 
 
+def test_state_delta_v21_envelope_shape() -> None:
+    """07 §10 形状：与 decision_v21 同构的版本信封（V21-09 D2）。"""
+
+    payload = {"projection_id": "projection:fixture"}
+    envelope = evidence_mod.state_delta_v21_envelope(payload)
+    assert envelope == {
+        "state_delta_v21": {
+            "schema_version": "2.1",
+            "payload": {"projection_id": "projection:fixture"},
+        }
+    }
+    assert set(envelope) == {"state_delta_v21"}
+    assert set(envelope["state_delta_v21"]) == {"schema_version", "payload"}
+
+
 def test_security_signal_has_no_decision_field() -> None:
     assert "decision" not in signal_models.SecuritySignal.model_fields
 

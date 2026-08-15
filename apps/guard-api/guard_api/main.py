@@ -36,6 +36,7 @@ from guard_api.services import (
     ProvenanceWriter,
     TaskIngressService,
     TraceService,
+    V21PipelineService,
     V21ShadowService,
 )
 from guard_api.settings import GuardApiSettings
@@ -124,12 +125,22 @@ def create_app(
         store=store,
         state_service=security_state_service,
     )
+    # V21-09：四段式编排器（D4，shadow-only）。与 V21ShadowService 同一
+    # flag/secret 门控；就绪时 evaluate 编排切换为 pipeline（Phase A
+    # 事务外、Phase B 短事务），Phase A 彻底失败回退 V21-08 逐字节路径。
+    v21_pipeline_service = V21PipelineService(
+        settings=settings,
+        store=store,
+        state_service=security_state_service,
+        policy_service=policy_service,
+    )
     evaluation_service = EvaluationService(
         policy_service=policy_service,
         audit_service=audit_service,
         approval_service=approval_service,
         memory_guard_service=memory_guard_service,
         v21_shadow_service=v21_shadow_service,
+        v21_pipeline=v21_pipeline_service,
     )
     task_ingress_service = TaskIngressService(store=store, settings=settings)
 

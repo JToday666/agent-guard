@@ -35,8 +35,12 @@ PROJECTOR_VERSION、decision_v21 为 append-only 审计键）与完整方案
 全链路 try/except 收敛为降级信封或 ``None``，**绝不外抛、绝不影响
 legacy decision / approval / audit 主链**。
 
-V21-09 预留：入口签名与 T5 调用形态见 ``build_shadow_evidence``
-docstring；``shadow_assess`` 与 §15 ``assess`` 同形，届时调用点不改。
+V21-09 定位（T2 处置裁决）：四段式编排主路径已迁移至
+``services/v21_pipeline.py``（D4）；本编排器保留为 pipeline Phase A
+彻底失败时的**逐字节降级回退路径**，同时也是无 task 引用场景的
+``degraded_no_snapshot`` 语义组件。V21-09 起 revoked 桩升级为真实
+注入：有 snapshot 时撤销集经 ``read_snapshot_with_revoked`` 与
+snapshot 同源同锁读取（D3），入参退为无 snapshot 路径兜底。
 """
 
 from __future__ import annotations
@@ -248,8 +252,9 @@ class V21ShadowService:
         - ``detection_results``：缺省时经 ``evaluate_with_results`` 只读
           旁路重算（确定性，与官方决策同源）；调用方可注入已算好的结果
           避免双跑检测器；
-        - ``revoked_grant_ids``：authority 投影撤销集由存储层权威提供
-          （shadow 期缺省空，V21-09 接线）；
+        - ``revoked_grant_ids``：authority 投影撤销集。有 snapshot 路径
+          恒用存储层同源同锁读取的权威集（D3，V21-09 真实注入），
+          入参退为无 snapshot 降级路径兜底；
         - ``policy_revision``：缺省用确定性占位（snapshot 身份锚点）。
 
         返回值形状：``{"decision_v21": {"schema_version": "2.1",
@@ -311,7 +316,9 @@ class V21ShadowService:
             )
 
         try:
-            snapshot = self._resolve_snapshot(event, bundle, policy_revision)
+            snapshot, authoritative_revoked = self._resolve_snapshot(
+                event, bundle, policy_revision
+            )
         except Exception:  # noqa: BLE001 - snapshot 读取失败 → 组件降级。
             return self._component_failure_envelope(
                 event,
@@ -324,7 +331,8 @@ class V21ShadowService:
 
         if snapshot is None:
             # 无 task 引用 / claim 无权威 TaskFact：跳过 snapshot 直出
-            # degraded_no_snapshot 语义（禁伪造 Snapshot，01 §25）。
+            # degraded_no_snapshot 语义（禁伪造 Snapshot，01 §25）；
+            # 无 snapshot 同源锚点，撤销集用入参兜底（缺省空）。
             outcome = shadow_assess_with_coverage(
                 event,
                 bundle,
@@ -336,13 +344,15 @@ class V21ShadowService:
             snapshot_id = ABSENT_SNAPSHOT_ID
             state_version = 0
         else:
+            # 有 snapshot：撤销集恒取同源同锁权威读取值（D3），
+            # 覆盖入参桩值，杜绝双源不一致。
             outcome = shadow_assess_with_coverage(
                 event,
                 bundle,
                 snapshot,
                 server_secret=self._server_secret,
                 detection_results=detection_results,
-                revoked_grant_ids=revoked_grant_ids,
+                revoked_grant_ids=authoritative_revoked,
             )
             snapshot_id = snapshot.snapshot_id
             state_version = snapshot.state_version
@@ -357,21 +367,25 @@ class V21ShadowService:
         return decision_evidence_v21_envelope(evidence)
 
     def _resolve_snapshot(self, event, bundle, policy_revision):
-        """解析 task 引用 → scope → 只读 snapshot；无引用/无权威 fact → None。
+        """解析 task 引用 → scope → 只读 snapshot + 同源 revoked 集。
+
+        无引用/无权威 fact 时返回 ``(None, [])``。V21-09 起改用
+        ``read_snapshot_with_revoked``：撤销集与 snapshot 取自同一
+        ``scope_lock`` 窗口内的同一份 online state record（D3）。
 
         ``scope`` 为注入式权威输入（01 §19）：``scope_digest`` 直取权威
         TaskFact 绑定值；其余身份字段由事件重建供 ActionIR 指纹使用
         （shadow 期 authorization_fingerprint 与 Task Ingress 派生口径
-        不同源，属已知局限，V21-09 编排提供权威 scope 注入）。
+        不同源，属已知局限，V21-09 pipeline 提供权威 scope 注入）。
         """
 
         task_id = _task_claim(event)
         if task_id is None:
-            return None
+            return None, []
         record = self._store.get_task_fact(task_id)
         if record is None:
             # trusted claim 无对应权威 TaskFact：不得据此构造 snapshot。
-            return None
+            return None, []
         task_fact = record.task_fact
         scope_digest = task_fact.scope_digest
         scope = SecurityStateScope(
@@ -385,7 +399,7 @@ class V21ShadowService:
         # 既有入口语义：ensure_ready 先行 bounded rebuild 钩子，
         # read_snapshot 直读权威 task_fact_head（dirty/缺态自动 rebuild）。
         self._state_service.ensure_ready(scope_digest)
-        return self._state_service.read_snapshot(
+        return self._state_service.read_snapshot_with_revoked(
             scope_digest,
             scope=scope,
             task_fact_head=task_fact,

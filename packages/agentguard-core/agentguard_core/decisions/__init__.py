@@ -27,6 +27,7 @@ __all__ = [
     "FusionMatrix",
     "FusionMatrixError",
     "FusionMemoryRule",
+    "FastAssessment",
     "GuardDecision",
     "RuntimeOutcomeReceipt",
     "RuleHit",
@@ -52,3 +53,4 @@ from .fusion import (  # noqa: E402
     evaluate_fusion,
     load_fusion_matrix,
 )
+from .evidence import FastAssessment  # noqa: E402

@@ -45,6 +45,7 @@ for import_path in (ROOT, CORE_PATH, API_PATH):
 from agentguard_core.decisions.divergence import (  # noqa: E402
     DEGRADED_COMPONENT_FAILURE,
     DEGRADED_NO_SNAPSHOT,
+    DEGRADED_STALE_JUDGMENT,
     DIVERGENCE_GRID,
     DIVERGENCE_VOCABULARY,
 )
@@ -235,7 +236,14 @@ def aggregate_records(
                 anomalies.append(
                     {"kind": "unknown_category", "category": category, **case}
                 )
-            if category in (DEGRADED_NO_SNAPSHOT, DEGRADED_COMPONENT_FAILURE):
+            if category in (
+                DEGRADED_NO_SNAPSHOT,
+                DEGRADED_COMPONENT_FAILURE,
+                DEGRADED_STALE_JUDGMENT,
+            ):
+                # 降级类目不入九宫格交叉校验：降级优先语义
+                # （11-D2 / 12-D8），stale 是"评估成功但提交时点
+                # 漂移"，V21-10 gate 需与组件故障区分归因。
                 degraded[category] += 1
             elif (
                 category in DIVERGENCE_VOCABULARY
@@ -308,6 +316,7 @@ def build_report(
             "degraded_categories": [
                 DEGRADED_COMPONENT_FAILURE,
                 DEGRADED_NO_SNAPSHOT,
+                DEGRADED_STALE_JUDGMENT,
             ],
         },
         **aggregation,
@@ -340,6 +349,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             "",
             f"- `{DEGRADED_NO_SNAPSHOT}`：{report['degraded'].get(DEGRADED_NO_SNAPSHOT, 0)}",
             f"- `{DEGRADED_COMPONENT_FAILURE}`：{report['degraded'].get(DEGRADED_COMPONENT_FAILURE, 0)}",
+            f"- `{DEGRADED_STALE_JUDGMENT}`：{report['degraded'].get(DEGRADED_STALE_JUDGMENT, 0)}",
             "",
             "## §14 三组合专项",
             "",

@@ -71,6 +71,23 @@ class SecurityStateStoreAccess:
     def get_security_state(self, scope_digest: str) -> SecurityStateRecord | None:
         return self._store.get_security_state(scope_digest)
 
+    def read_revoked_grant_ids(self, scope_digest: str) -> list[str]:
+        """online state record 的 revoked 集只读入口（D3）。
+
+        与 snapshot 同源的 ``get_security_state`` 记录读取路径，持
+        per-scope 编排锁窗口内读取，缺态返回空表；不新增存储方法、
+        不新增写面。需要与 snapshot 严格同版本一致的消费方应用
+        ``SecurityStateService.read_snapshot_with_revoked``（同一次
+        调用链同源同锁）；本入口供仅需撤销集的轻量读取。
+        """
+
+        with self.scope_lock(scope_digest):
+            record = self._store.get_security_state(scope_digest)
+        if record is None:
+            return []
+        state = OnlineSecurityState.model_validate(record.canonical_payload)
+        return list(state.revoked_grant_ids)
+
     def cas_security_state(
         self,
         scope_digest: str,

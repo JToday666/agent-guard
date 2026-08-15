@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import copy
 import hashlib
 import importlib.util
@@ -16,6 +17,7 @@ import platform
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -41,9 +43,16 @@ HOLDOUT_MANIFEST = V21_FIXTURE_DIR / "locked_holdout_manifest.json"
 LEGACY_SNAPSHOT = V21_FIXTURE_DIR / "legacy_69efe2f_snapshot.json"
 LEGACY_BASE_SHA = "69efe2f027d9a4ba9c18623838e84f6ce30ffa62"
 SUPPORTED_BACKENDS = frozenset({"memory", "postgres"})
-#: shadow 两档开关（V21-08 T8）：off=现状；on=memory 基准档以 flag on 运行；
-#: both=flag off/on 双跑并产出 evaluate 延迟增量对照（shadow_overhead）。
-SUPPORTED_SHADOW_MODES = frozenset({"off", "on", "both"})
+#: shadow 对照档位开关（V21-08 T8 / V21-09 T5）：off=现状；on=memory 基准档
+#: 以 flag on 运行（当前代码路径，V21-09 起即四段式 pipeline）；both=flag
+#: off/on 双跑并产出 evaluate 延迟增量对照（shadow_overhead）；tri=三档对照
+#: off / shadow-v2108（flag on + pipeline 禁用，即 V21-08 语义）/ v2109
+#: （flag on + 四段式 pipeline），产出 pipeline_overhead 两两增量。
+SUPPORTED_SHADOW_MODES = frozenset({"off", "on", "both", "tri"})
+#: task 引用场景开关（V21-09 T5）：on=基准事件携带 metadata.task_id trusted
+#: claim 且 memory store 预播权威 TaskFact，shadow 走 snapshot 直出路径
+#: （补 V21-08 §7.1 遗留实测）；off=既有 degraded_no_snapshot 快路径口径。
+SUPPORTED_TASK_REF_MODES = frozenset({"off", "on"})
 #: shadow 基准专用 server secret（确定性派生、仅基准工具内部使用，
 #: 不是生产兜底密钥——编排器 fail-closed 语义不变，D3）。
 SHADOW_BENCHMARK_SECRET = base64.urlsafe_b64encode(
@@ -54,6 +63,18 @@ SHADOW_OVERHEAD_DISCLAIMER = (
     "机器结果非跨环境硬 SLO，CI 只校验工具正确性（05 §9）；基准事件不携带 "
     "task 引用，shadow 走 degraded_no_snapshot 快路径，覆盖评估侧旁路开销上界。"
 )
+TASK_REF_DISCLAIMER = (
+    "机器结果非跨环境硬 SLO，CI 只校验工具正确性（05 §9）；基准事件携带 "
+    "task 引用（metadata.task_id trusted claim + memory store 预播权威 "
+    "TaskFact），shadow/pipeline 走 snapshot 直出路径（bounded rebuild + "
+    "read_snapshot），补 V21-08 §7.1 遗留实测。"
+)
+#: 基准专用 task 引用 id（确定性常量，仅基准工具内部使用）。
+BENCHMARK_TASK_REF_ID = "task_v2109_bench"
+#: 基准专用权威 TaskFact 的身份常量（形态仿 pipeline 测试夹具；claim 只用于
+#: 定位权威 TaskFact，不参与权威判定，01 §5）。
+BENCHMARK_TASK_SCOPE_DIGEST = "hmac-sha256:" + "b9" * 32
+BENCHMARK_TASK_DIGEST = "sha256:" + "bd" * 32
 LEGACY_SNAPSHOT_INPUTS = (
     "packages/agentguard-core",
     "scripts/core-metrics-gate.py",
@@ -398,7 +419,13 @@ def run_core_benchmark(
     }
 
 
-def _api_event(event: GuardEvent, *, backend: str, sequence: int) -> dict[str, Any]:
+def _api_event(
+    event: GuardEvent,
+    *,
+    backend: str,
+    sequence: int,
+    task_ref: str | None = None,
+) -> dict[str, Any]:
     payload = event.model_dump(mode="json")
     suffix = f"{backend}_{sequence}"
     payload["event_id"] = f"evt_v2100_{suffix}"
@@ -409,7 +436,69 @@ def _api_event(event: GuardEvent, *, backend: str, sequence: int) -> dict[str, A
     tool = payload.get("payload", {}).get("tool")
     if isinstance(tool, dict):
         tool["call_id"] = f"call_v2100_{suffix}"
+    if task_ref is not None:
+        metadata = dict(payload.get("metadata") or {})
+        metadata["task_id"] = task_ref
+        payload["metadata"] = metadata
     return payload
+
+
+def _seed_benchmark_task_fact(store: Any) -> None:
+    """memory 后端预播权威 TaskFact（仅基准工具内部使用）。
+
+    task 引用场景（--task-ref on）下让 shadow/pipeline 走 snapshot 直出
+    路径：claim 指向本函数预播的权威 TaskFact head，scope 状态由编排器
+    自身的 ensure_ready 初始化（不预推进 state version）。
+    """
+
+    from agentguard_core.authority.models import TaskFact
+    from guard_api.storage.base import TaskFactRecord
+
+    task_fact = TaskFact(
+        task_id=BENCHMARK_TASK_REF_ID,
+        scope_digest=BENCHMARK_TASK_SCOPE_DIGEST,
+        scope_key_id="scope_key_bench",
+        principal_id="cred_adapter_main",
+        task_summary="v21-09 overhead smoke benchmark task",
+        task_digest=BENCHMARK_TASK_DIGEST,
+        revision=1,
+        status="active",
+        action_constraints=[],
+        resource_constraints=[],
+        destination_constraints=[],
+        created_sequence=None,
+        producer="guard_api_task_ingress",
+        authority="authoritative",
+        evidence_refs=[],
+    )
+    store.create_task_fact(
+        TaskFactRecord(
+            task_fact=task_fact,
+            canonical_payload=task_fact.model_dump(mode="json"),
+            request_digest="sha256:" + "be" * 32,
+            expected_revision=0,
+            created_at="2026-08-15T00:00:00Z",
+        )
+    )
+
+
+@contextlib.contextmanager
+def _pipeline_disabled() -> Iterator[None]:
+    """tri 档 shadow-v2108 语义的基准专用开关（非生产配置）。
+
+    临时将 ``V21PipelineService.enabled`` 钉死为 False：evaluate 编排回退
+    V21ShadowService（V21-08）逐字节路径；生产门控始终只有
+    AGENTGUARD_V21_SHADOW_ENABLED 单一 flag（12-D1）。
+    """
+
+    from guard_api.services.v21_pipeline import V21PipelineService
+
+    original = V21PipelineService.enabled
+    V21PipelineService.enabled = property(lambda self: False)  # type: ignore[misc]
+    try:
+        yield
+    finally:
+        V21PipelineService.enabled = original  # type: ignore[misc]
 
 
 def _run_api_benchmark(
@@ -422,6 +511,8 @@ def _run_api_benchmark(
     concurrency: int,
     concurrent_total: int,
     shadow_enabled: bool = False,
+    pipeline_enabled: bool = True,
+    task_ref: str | None = None,
 ) -> dict[str, Any]:
     from fastapi.testclient import TestClient
     from guard_api.main import create_app
@@ -435,7 +526,9 @@ def _run_api_benchmark(
     sequence = itertools.count(1)
 
     def next_payload(event: GuardEvent) -> dict[str, Any]:
-        return _api_event(event, backend=backend, sequence=next(sequence))
+        return _api_event(
+            event, backend=backend, sequence=next(sequence), task_ref=task_ref
+        )
 
     def post_event(client: TestClient, event: GuardEvent) -> None:
         response = client.post(
@@ -448,53 +541,61 @@ def _run_api_benchmark(
                 f"Guard API benchmark request failed with HTTP {response.status_code}"
             )
 
-    serial: dict[str, Any] = {}
-    for scenario_id, events in scenarios.items():
-        app = create_app(store=store_factory(), settings=settings)
-        with TestClient(app) as client:
-            serial[scenario_id] = {
-                **benchmark(
-                    lambda index, scenario_events=events: post_event(
-                        client, scenario_events[index % len(scenario_events)]
+    pipeline_scope = (
+        contextlib.nullcontext() if pipeline_enabled else _pipeline_disabled()
+    )
+    with pipeline_scope:
+        serial: dict[str, Any] = {}
+        for scenario_id, events in scenarios.items():
+            app = create_app(store=store_factory(), settings=settings)
+            with TestClient(app) as client:
+                serial[scenario_id] = {
+                    **benchmark(
+                        lambda index, scenario_events=events: post_event(
+                            client, scenario_events[index % len(scenario_events)]
+                        ),
+                        warmup=warmup,
+                        iterations=serial_iterations,
                     ),
-                    warmup=warmup,
-                    iterations=serial_iterations,
-                ),
-                "payload_bytes": max(
-                    len(
-                        json.dumps(
-                            event.model_dump(mode="json"), separators=(",", ":")
-                        ).encode("utf-8")
-                    )
-                    for event in events
-                ),
-            }
-        print(
-            f"guard-api {backend} serial scenario complete: {scenario_id}",
-            flush=True,
-        )
-
-    scenario_events = [event for events in scenarios.values() for event in events]
-    concurrent_samples: list[int] = []
-    concurrent_app = create_app(store=store_factory(), settings=settings)
-    with TestClient(concurrent_app) as concurrent_client:
-
-        def concurrent_request(index: int) -> int:
-            started = time.monotonic_ns()
-            post_event(concurrent_client, scenario_events[index % len(scenario_events)])
-            return time.monotonic_ns() - started
-
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            concurrent_samples = list(
-                executor.map(concurrent_request, range(concurrent_total))
+                    "payload_bytes": max(
+                        len(
+                            json.dumps(
+                                event.model_dump(mode="json"), separators=(",", ":")
+                            ).encode("utf-8")
+                        )
+                        for event in events
+                    ),
+                }
+            print(
+                f"guard-api {backend} serial scenario complete: {scenario_id}",
+                flush=True,
             )
-    print(f"guard-api {backend} concurrent complete", flush=True)
+
+        scenario_events = [event for events in scenarios.values() for event in events]
+        concurrent_samples: list[int] = []
+        concurrent_app = create_app(store=store_factory(), settings=settings)
+        with TestClient(concurrent_app) as concurrent_client:
+
+            def concurrent_request(index: int) -> int:
+                started = time.monotonic_ns()
+                post_event(
+                    concurrent_client, scenario_events[index % len(scenario_events)]
+                )
+                return time.monotonic_ns() - started
+
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                concurrent_samples = list(
+                    executor.map(concurrent_request, range(concurrent_total))
+                )
+        print(f"guard-api {backend} concurrent complete", flush=True)
 
     return {
         "status": "measured",
         "warmup_per_scenario": warmup,
         "serial_iterations_per_scenario": serial_iterations,
         "shadow_enabled": shadow_enabled,
+        "pipeline_enabled": pipeline_enabled,
+        "task_ref": task_ref,
         "serial": serial,
         "concurrent": {"workers": concurrency, **latency_summary(concurrent_samples)},
         "audit_mode": "synchronous_request_path",
@@ -505,17 +606,56 @@ def run_memory_api_benchmark(
     scenarios: dict[str, list[GuardEvent]],
     *,
     shadow_enabled: bool = False,
+    pipeline_enabled: bool = True,
+    task_ref: str | None = None,
     **benchmark_args: int,
 ) -> dict[str, Any]:
     from tests.support.auth import memory_store_with_adapter
 
+    def store_factory() -> Any:
+        store = memory_store_with_adapter(token="v21-baseline-adapter")
+        if task_ref is not None:
+            _seed_benchmark_task_fact(store)
+        return store
+
     return _run_api_benchmark(
         backend="memory",
-        store_factory=lambda: memory_store_with_adapter(token="v21-baseline-adapter"),
+        store_factory=store_factory,
         scenarios=scenarios,
         shadow_enabled=shadow_enabled,
+        pipeline_enabled=pipeline_enabled,
+        task_ref=task_ref,
         **benchmark_args,
     )
+
+
+def _latency_comparison(base: dict[str, Any], other: dict[str, Any]) -> dict[str, Any]:
+    """两组 API 基准结果的串行/并发 nearest-rank 延迟增量（只产数据）。"""
+
+    scenarios: dict[str, Any] = {}
+    for scenario_id, base_latency in base["serial"].items():
+        other_latency = other["serial"][scenario_id]
+        scenarios[scenario_id] = {
+            "base": {key: base_latency[key] for key in LATENCY_KEYS},
+            "other": {key: other_latency[key] for key in LATENCY_KEYS},
+            "delta_ns": {
+                key: other_latency[key] - base_latency[key]
+                for key in LATENCY_KEYS
+                if key != "sample_count"
+            },
+        }
+    return {
+        "scenarios": scenarios,
+        "concurrent": {
+            "base": {key: base["concurrent"][key] for key in LATENCY_KEYS},
+            "other": {key: other["concurrent"][key] for key in LATENCY_KEYS},
+            "delta_ns": {
+                key: other["concurrent"][key] - base["concurrent"][key]
+                for key in LATENCY_KEYS
+                if key != "sample_count"
+            },
+        },
+    }
 
 
 def build_shadow_overhead(off: dict[str, Any], on: dict[str, Any]) -> dict[str, Any]:
@@ -525,33 +665,54 @@ def build_shadow_overhead(off: dict[str, Any], on: dict[str, Any]) -> dict[str, 
     本函数只产数据，不做硬 SLO 判定（05 §9）。
     """
 
-    scenarios: dict[str, Any] = {}
-    for scenario_id, off_latency in off["serial"].items():
-        on_latency = on["serial"][scenario_id]
-        scenarios[scenario_id] = {
-            "off": {key: off_latency[key] for key in LATENCY_KEYS},
-            "on": {key: on_latency[key] for key in LATENCY_KEYS},
-            "delta_ns": {
-                key: on_latency[key] - off_latency[key]
-                for key in LATENCY_KEYS
-                if key != "sample_count"
-            },
-        }
+    comparison = _latency_comparison(off, on)
     return {
         "flag": "AGENTGUARD_V21_SHADOW_ENABLED",
         "backend": "memory",
         "audit_mode": "synchronous_request_path",
-        "scenarios": scenarios,
+        "scenarios": {
+            scenario_id: {
+                "off": entry["base"],
+                "on": entry["other"],
+                "delta_ns": entry["delta_ns"],
+            }
+            for scenario_id, entry in comparison["scenarios"].items()
+        },
         "concurrent": {
-            "off": {key: off["concurrent"][key] for key in LATENCY_KEYS},
-            "on": {key: on["concurrent"][key] for key in LATENCY_KEYS},
-            "delta_ns": {
-                key: on["concurrent"][key] - off["concurrent"][key]
-                for key in LATENCY_KEYS
-                if key != "sample_count"
-            },
+            "off": comparison["concurrent"]["base"],
+            "on": comparison["concurrent"]["other"],
+            "delta_ns": comparison["concurrent"]["delta_ns"],
         },
         "disclaimer": SHADOW_OVERHEAD_DISCLAIMER,
+    }
+
+
+def build_pipeline_overhead(
+    off: dict[str, Any], v2108: dict[str, Any], v2109: dict[str, Any]
+) -> dict[str, Any]:
+    """tri 三档对照（V21-09 T5）：两两延迟增量（nearest-rank 口径）。
+
+    档位：off=flag off；v2108=flag on + pipeline 禁用（V21-08 语义）；
+    v2109=flag on + 四段式 pipeline。只产数据，不做硬 SLO 判定（05 §9）。
+    """
+
+    task_ref = v2109.get("task_ref")
+    return {
+        "flag": "AGENTGUARD_V21_SHADOW_ENABLED",
+        "backend": "memory",
+        "audit_mode": "synchronous_request_path",
+        "tiers": {
+            "off": "flag off（legacy 唯一路径）",
+            "v2108": "flag on + pipeline 禁用（V21-08 shadow 语义，基准专用开关）",
+            "v2109": "flag on + 四段式 pipeline（Phase A 事务外 + Phase B 短事务 + Phase C 投影）",
+        },
+        "task_ref": task_ref,
+        "v2108_vs_off": _latency_comparison(off, v2108),
+        "v2109_vs_off": _latency_comparison(off, v2109),
+        "v2109_vs_v2108": _latency_comparison(v2108, v2109),
+        "disclaimer": (
+            TASK_REF_DISCLAIMER if task_ref else SHADOW_OVERHEAD_DISCLAIMER
+        ),
     }
 
 
@@ -681,6 +842,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"- 测量档位：`{report['performance']['measurement_profile']}`；正式性能基线：`{report['performance']['formal_performance_status']}`。",
         f"- shadow 档位：`{report['performance'].get('shadow_mode', 'off')}`。",
+        f"- task 引用场景：`{report['performance'].get('task_ref') or 'off'}`。",
         f"- Core：`{report['performance']['core']['status']}`。",
         f"- Guard API Memory：`{report['performance']['guard_api']['memory']['status']}`。",
         f"- Guard API PostgreSQL：`{report['performance']['guard_api']['postgres']['status']}`。",
@@ -710,6 +872,30 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"P99 增量 {concurrent_delta['p99_ns']}ns。"
         )
         lines.extend(["", f"> {shadow_overhead['disclaimer']}", ""])
+    pipeline_overhead = report.get("pipeline_overhead")
+    if pipeline_overhead is not None:
+        lines.extend(
+            [
+                "## 三档开销对照（off / shadow-v2108 / v2109 pipeline，memory 后端）",
+                "",
+            ]
+        )
+        comparisons = (
+            ("v2108 vs off", "v2108_vs_off"),
+            ("v2109 vs off", "v2109_vs_off"),
+            ("v2109 vs v2108", "v2109_vs_v2108"),
+        )
+        for label, key in comparisons:
+            comparison = pipeline_overhead[key]
+            p50 = [entry["delta_ns"]["p50_ns"] for entry in comparison["scenarios"].values()]
+            p95 = [entry["delta_ns"]["p95_ns"] for entry in comparison["scenarios"].values()]
+            concurrent = comparison["concurrent"]["delta_ns"]
+            lines.append(
+                f"- {label}：串行 ΔP50 {min(p50)}~{max(p50)}ns、"
+                f"ΔP95 {min(p95)}~{max(p95)}ns；并发 ΔP50 {concurrent['p50_ns']}ns、"
+                f"ΔP95 {concurrent['p95_ns']}ns。逐场景明细见机器可读 JSON。"
+            )
+        lines.extend(["", f"> {pipeline_overhead['disclaimer']}", ""])
     lines.extend(
         [
             "## 边界与阻塞",
@@ -745,11 +931,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--backends", default="memory,postgres")
     parser.add_argument(
         "--shadow",
-        choices=("off", "on", "both"),
+        choices=("off", "on", "both", "tri"),
         default="off",
         help=(
-            "V21-08 shadow 两档开关：off=现状；on=memory 档以 flag on 运行；"
-            "both=off/on 双跑并产出 shadow_overhead 延迟增量对照"
+            "shadow 对照档位开关：off=现状；on=memory 档以 flag on 运行；"
+            "both=off/on 双跑并产出 shadow_overhead 延迟增量对照；"
+            "tri=三档对照 off/shadow-v2108/v2109 并产出 pipeline_overhead"
+        ),
+    )
+    parser.add_argument(
+        "--task-ref",
+        choices=("off", "on"),
+        default="off",
+        help=(
+            "task 引用场景开关：on=基准事件携带 metadata.task_id trusted claim "
+            "且 memory store 预播权威 TaskFact（snapshot 直出路径，补 V21-08 "
+            "§7.1 遗留实测）；off=既有 degraded_no_snapshot 快路径口径"
         ),
     )
     parser.add_argument("--allow-missing-postgres", action="store_true")
@@ -813,6 +1010,24 @@ def main(argv: list[str] | None = None) -> int:
             f"unsupported shadow mode: {args.shadow}; supported: "
             f"{', '.join(sorted(SUPPORTED_SHADOW_MODES))}"
         )
+    if args.task_ref not in SUPPORTED_TASK_REF_MODES:
+        raise ValueError(
+            f"unsupported task-ref mode: {args.task_ref}; supported: "
+            f"{', '.join(sorted(SUPPORTED_TASK_REF_MODES))}"
+        )
+    if "postgres" in requested_backends and (
+        args.task_ref == "on" or args.shadow != "off"
+    ):
+        # 无效组合前置报错：postgres 基准不接收 shadow/task-ref/
+        # pipeline 参数（run_postgres_api_benchmark 只消费 benchmark_args），
+        # 该档恒为 flag off 口径；放行会使报告渲染出未参与对照的
+        # 档位组合，产生误导性结论。
+        raise ValueError(
+            "postgres backend does not participate in shadow/task-ref "
+            "comparisons; use --backends memory for --task-ref on / "
+            "--shadow on|both|tri"
+        )
+    task_ref = BENCHMARK_TASK_REF_ID if args.task_ref == "on" else None
     regression, indexed_cases = evaluate_regression()
     if args.write_legacy_snapshot:
         write_legacy_snapshot(regression["per_case"])
@@ -829,17 +1044,19 @@ def main(argv: list[str] | None = None) -> int:
         "concurrent_total": args.api_concurrent_total,
     }
     memory = (
-        run_memory_api_benchmark(scenarios, **benchmark_args)
+        run_memory_api_benchmark(scenarios, task_ref=task_ref, **benchmark_args)
         if "memory" in requested_backends
         else {"status": "not_requested"}
     )
     shadow_memory: dict[str, Any] | None = None
+    pipeline_memory: dict[str, Any] | None = None
     shadow_overhead: dict[str, Any] | None = None
+    pipeline_overhead: dict[str, Any] | None = None
     if args.shadow == "on":
         if "memory" not in requested_backends:
             raise ValueError("--shadow on requires the memory backend")
         memory = run_memory_api_benchmark(
-            scenarios, shadow_enabled=True, **benchmark_args
+            scenarios, shadow_enabled=True, task_ref=task_ref, **benchmark_args
         )
     elif args.shadow == "both":
         if memory.get("status") != "measured":
@@ -848,11 +1065,39 @@ def main(argv: list[str] | None = None) -> int:
                 "(flag off) to compare against"
             )
         shadow_memory = run_memory_api_benchmark(
-            scenarios, shadow_enabled=True, **benchmark_args
+            scenarios, shadow_enabled=True, task_ref=task_ref, **benchmark_args
         )
         if shadow_memory["status"] != "measured":
             raise ValueError("shadow-on memory benchmark failed to measure")
         shadow_overhead = build_shadow_overhead(memory, shadow_memory)
+        if task_ref is not None:
+            shadow_overhead["disclaimer"] = TASK_REF_DISCLAIMER
+    elif args.shadow == "tri":
+        if memory.get("status") != "measured":
+            raise ValueError(
+                "--shadow tri requires a measured memory backend baseline "
+                "(flag off) to compare against"
+            )
+        shadow_memory = run_memory_api_benchmark(
+            scenarios,
+            shadow_enabled=True,
+            pipeline_enabled=False,
+            task_ref=task_ref,
+            **benchmark_args,
+        )
+        if shadow_memory["status"] != "measured":
+            raise ValueError("shadow-v2108 memory benchmark failed to measure")
+        pipeline_memory = run_memory_api_benchmark(
+            scenarios, shadow_enabled=True, task_ref=task_ref, **benchmark_args
+        )
+        if pipeline_memory["status"] != "measured":
+            raise ValueError("v2109 pipeline memory benchmark failed to measure")
+        shadow_overhead = build_shadow_overhead(memory, shadow_memory)
+        if task_ref is not None:
+            shadow_overhead["disclaimer"] = TASK_REF_DISCLAIMER
+        pipeline_overhead = build_pipeline_overhead(
+            memory, shadow_memory, pipeline_memory
+        )
     postgres = (
         run_postgres_api_benchmark(scenarios, **benchmark_args)
         if "postgres" in requested_backends
@@ -909,6 +1154,7 @@ def main(argv: list[str] | None = None) -> int:
         "performance": {
             "measurement_profile": args.measurement_profile,
             "shadow_mode": args.shadow,
+            "task_ref": task_ref,
             "formal_performance_status": (
                 "measured"
                 if completion_status == "formal_baseline_measured"
@@ -932,6 +1178,8 @@ def main(argv: list[str] | None = None) -> int:
     }
     if shadow_overhead is not None:
         report["shadow_overhead"] = shadow_overhead
+    if pipeline_overhead is not None:
+        report["pipeline_overhead"] = pipeline_overhead
     redacted_report = redact_secrets(report)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "baseline.json").write_text(

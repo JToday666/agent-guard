@@ -7,6 +7,8 @@ V21-08 T4 起由 ``main.py`` 注册进 ApiContext/EvaluationService 可达
 - ``project_committed``：已 commit 权威记录的投影 + 应用编排；
 - ``read_snapshot``：判定输入快照（dirty/缺态自动 bounded rebuild，
   task 域直读权威 TaskFact head）；
+- ``read_snapshot_with_revoked``：snapshot + 同源 revoked 集（D3，
+  V21-09 编排注入 assess 的权威撤销集读取入口）；
 - ``ensure_ready``：下一次 state-dependent 决策前的 rebuild 钩子。
 """
 
@@ -35,7 +37,7 @@ from guard_api.storage.base import (
 from .models import ProjectApplyResult
 from .projector import CommittedVerifier, SecurityStateProjector
 from .rebuild import DEFAULT_REBUILD_LIMIT, rebuild_locked, state_from_record
-from .snapshot_builder import get_snapshot
+from .snapshot_builder import get_snapshot, get_snapshot_with_revoked
 from .store import SecurityStateStoreAccess, empty_online_state
 
 
@@ -85,6 +87,39 @@ class SecurityStateService:
         """
 
         return get_snapshot(
+            self._access,
+            scope_digest,
+            scope=scope,
+            task_fact_head=task_fact_head,
+            evaluation_clock=evaluation_clock,
+            policy_revision=policy_revision,
+            policy_digest=policy_digest,
+            plan=plan,
+            authoritative_head_revision=authoritative_head_revision,
+        )
+
+    def read_snapshot_with_revoked(
+        self,
+        scope_digest: str,
+        *,
+        scope: SecurityStateScope,
+        task_fact_head: TaskFact | None,
+        evaluation_clock: EvaluationClock,
+        policy_revision: str,
+        policy_digest: str,
+        plan: RequiredCheckPlan,
+        authoritative_head_revision: int | None = None,
+    ) -> tuple[SecuritySnapshot, list[str]]:
+        """读取 snapshot 并同源返回 ``revoked_grant_ids``（D3 只读入口）。
+
+        与 ``read_snapshot`` 同一调用链：revoked 集与 snapshot 取自同一
+        ``scope_lock`` 窗口内的同一份 online state record，保证两者
+        ``state_version`` 一致（``12_决策记录_V21-09前置.md`` D3）；
+        不新增存储方法、不新增写面。dirty/缺态先 bounded rebuild，
+        语义与 ``read_snapshot`` 逐字一致。
+        """
+
+        return get_snapshot_with_revoked(
             self._access,
             scope_digest,
             scope=scope,

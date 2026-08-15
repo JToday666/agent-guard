@@ -59,6 +59,13 @@ MAX_EVIDENCE_BYTES = 64 * 1024
 DECISION_V21_ARRAY_LIMIT = 64
 DECISION_V21_MAX_DEPTH = 8
 
+# state_delta_v21 引用信封专用 typed bound 通道限额（V21-09 D2，仿
+# decision_v21 通道）：信封只存投影身份引用（短 id/digest 标量，无嵌套
+# 数组），限额保守；仅对 state_delta_v21 键生效，不放宽任何全局冻结
+# 限额（07 §21.2）。
+STATE_DELTA_V21_ARRAY_LIMIT = 16
+STATE_DELTA_V21_MAX_DEPTH = 4
+
 _AUTHORIZATION_VALUE_RE = re.compile(
     r"(authorization\s*[:=]\s*)([^\s\"'`,;]+(?:\s+[A-Za-z0-9._~+/=-]{8,})?)",
     re.IGNORECASE,
@@ -215,9 +222,13 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             # coverage 第 6 层替换为 "..." 并静默截断 D4 refs，改走专用
             # typed bound 通道（DECISION_V21_* 限额）。
             v21_envelope = raw_evidence.pop("decision_v21", None)
+            # state_delta_v21 引用信封（V21-09 D2）同源口径：走专用 typed
+            # bound 通道，不经通用 bound（禁静默丢失，D4-11 号纪律）。
+            state_delta_envelope = raw_evidence.pop("state_delta_v21", None)
         else:
             replay_decision = None
             v21_envelope = None
+            state_delta_envelope = None
         bounded_evidence = bound_value(
             raw_evidence,
             text_limit=CONTENT_PREVIEW_LIMIT,
@@ -235,6 +246,13 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
                 text_limit=CONTENT_PREVIEW_LIMIT,
                 array_limit=DECISION_V21_ARRAY_LIMIT,
                 max_depth=DECISION_V21_MAX_DEPTH,
+            )
+        if isinstance(bounded_evidence, dict) and state_delta_envelope is not None:
+            bounded_evidence["state_delta_v21"] = _bound_typed_value(
+                state_delta_envelope,
+                text_limit=CONTENT_PREVIEW_LIMIT,
+                array_limit=STATE_DELTA_V21_ARRAY_LIMIT,
+                max_depth=STATE_DELTA_V21_MAX_DEPTH,
             )
         evidence = (
             enforce_evidence_budget(bounded_evidence)
@@ -286,10 +304,38 @@ def decision_v21_budget_dropped_reference(envelope: object) -> dict[str, object]
     供离线核对（可对照 shadow 侧重建的信封摘要）。
     """
 
+    return budget_dropped_reference(envelope)
+
+
+def budget_dropped_reference(envelope: object) -> dict[str, object]:
+    """v21 信封预算超限的通用降级标记（D4 禁静默丢失留痕）。
+
+    decision_v21 / state_delta_v21 两条 typed bound 通道共用：预算吃紧
+    时旁路附属信封先于 replay 权威键 guard_decision 被剥离，但留确定性
+    sha256 摘要引用供离线核对（V21-09 D2 同源口径）。
+    """
+
     digest = hashlib.sha256(
         json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return {"_budget_dropped": True, "_envelope_sha256": f"sha256:{digest}"}
+
+
+def bound_state_delta_v21_envelope(value: object) -> object:
+    """state_delta_v21 引用信封专用 bounded 投影（typed bound 通道）。
+
+    仿 ``bound_decision_v21_envelope``：先 ``redact_structure``（append-only
+    审计证据仍受 §21.1 敏感清洗），再经 ``_bound_typed_value`` 以
+    ``STATE_DELTA_V21_*`` 限额投影；信封只存投影身份引用（短 id/digest
+    标量），不放宽任何全局冻结限额（07 §21.2）。
+    """
+
+    return _bound_typed_value(
+        redact_structure(value),
+        text_limit=SUMMARY_TEXT_LIMIT,
+        array_limit=STATE_DELTA_V21_ARRAY_LIMIT,
+        max_depth=STATE_DELTA_V21_MAX_DEPTH,
+    )
 
 
 def _bound_typed_value(

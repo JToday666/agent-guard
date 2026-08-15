@@ -35,7 +35,9 @@ from .redaction import (
     SUMMARY_TEXT_LIMIT,
     bound_decision_v21_envelope,
     bound_redacted_value,
+    bound_state_delta_v21_envelope,
     bound_value,
+    budget_dropped_reference,
     decision_v21_budget_dropped_reference,
     enforce_evidence_budget,
     evidence_serialized_size,
@@ -74,6 +76,8 @@ def build_audit_event(
     extra_metadata: dict[str, object] | None = None,
     decision_dump: dict[str, object] | None = None,
     v21_evidence: dict[str, object] | None = None,
+    state_delta_evidence: dict[str, object] | None = None,
+    audit_id: str | None = None,
 ) -> AuditEvent:
     """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
 
@@ -87,6 +91,17 @@ def build_audit_event(
     bound，guard_decision replay 权威键绝不触碰）后合并写入**同一条**
     审计记录的 ``evidence.decision_v21``，不新增第二条审计记录
     （11_决策记录_V21-08前置.md D4/D7）。
+
+    ``state_delta_evidence``：V21-09 的 ``state_delta_v21`` 引用信封
+    （``contract_freeze.yaml`` L85 ``state_delta_evidence_location``；
+    12_决策记录_V21-09前置.md D2：audit evidence 只存投影身份引用，
+    全量 delta 随 projection_records）。None 时逐字节不变；非 None 时
+    仿 decision_v21 通道：专用 typed bound + 预算吃紧时 dropped-reference
+    留痕（先于 decision_v21 降级，不放宽全局预算）。
+
+    ``audit_id``：显式确定性审计身份（None 时沿用 AuditEvent 默认工厂，
+    逐字节不变）；V21-09 pipeline 路径以 ``derive_final_audit_id`` 产物
+    显式赋值，保证 replay 同输入同身份（D7-5 同源口径）。
     """
 
     description = describe_guard_event(event)
@@ -174,6 +189,50 @@ def build_audit_event(
                         for key, value in bounded.items()
                     }
                 )
+    if state_delta_evidence is not None:
+        # V21-09 D2 引用信封：专用 typed bound 通道（仿 decision_v21），
+        # 预算吃紧时 dropped-reference 留痕（禁静默丢失，D4-11 号纪律）；
+        # 降级顺序：state_delta_v21 先于 decision_v21，guard_decision
+        # replay 权威键最后才触碰/不触碰。
+        bounded_delta = bound_state_delta_v21_envelope(state_delta_evidence)
+        if isinstance(bounded_delta, dict) and bounded_delta:
+            collision = set(bounded_delta) & set(evidence)
+            if collision:
+                # fail-closed：信封不得覆盖 replay 权威键。
+                raise ValueError(
+                    "state_delta_evidence collides with reserved evidence "
+                    f"keys: {sorted(collision)}"
+                )
+            merged = dict(evidence)
+            merged.update(bounded_delta)
+            if evidence_serialized_size(merged) <= MAX_EVIDENCE_BYTES:
+                evidence = merged
+            else:
+                logger.warning(
+                    "state_delta_v21 exceeds the 64 KiB evidence budget "
+                    "after merge; degrading v21 envelopes to digest "
+                    "references (guard_decision preserved)"
+                )
+                evidence = dict(evidence)
+                evidence.update(
+                    {
+                        key: budget_dropped_reference(value)
+                        for key, value in bounded_delta.items()
+                    }
+                )
+                if evidence_serialized_size(evidence) > MAX_EVIDENCE_BYTES:
+                    # 极端场景：state_delta 引用降级后仍超限 → 同源口径
+                    # 继续降级 decision_v21（旁路附属键，先于权威键）。
+                    v21_value = evidence.get("decision_v21")
+                    if v21_value is not None:
+                        evidence["decision_v21"] = budget_dropped_reference(
+                            v21_value
+                        )
+    # 只可能携带 audit_id（str）：标注收窄为 dict[str, str]，避免
+    # **kwargs 展开时 pyright 无法把 object 值匹配到 str 参数。
+    audit_kwargs: dict[str, str] = {}
+    if audit_id is not None:
+        audit_kwargs["audit_id"] = audit_id
     return AuditEvent(
         schema_version="0.4",
         record_type="policy_evaluation",
@@ -195,6 +254,7 @@ def build_audit_event(
         latency_ms=decision.latency_ms,
         metadata=metadata,
         evidence=evidence,
+        **audit_kwargs,
     )
 
 

@@ -22,6 +22,7 @@ from agentguard_core.authority.models import EvaluationClock, SecurityStateScope
 from agentguard_core.decisions.divergence import (
     DEGRADED_COMPONENT_FAILURE,
     DEGRADED_NO_SNAPSHOT,
+    DEGRADED_STALE_JUDGMENT,
     DIVERGENCE_GRID,
     DIVERGENCE_VOCABULARY,
     SHADOW_COMPONENT_ID,
@@ -126,7 +127,8 @@ def test_section14_three_analysis_combinations_are_covered() -> None:
     assert classify_divergence("deny", "DEFER") == "legacy_deny__v21_defer"
 
 
-def test_vocabulary_is_closed_with_exactly_eight_categories() -> None:
+def test_vocabulary_is_closed_with_exactly_nine_categories() -> None:
+    """V21-09 D8：新增受控类目 ``degraded_stale_judgment`` 后词表封闭。"""
     assert DIVERGENCE_VOCABULARY == {
         "legacy_allow__v21_defer",
         "legacy_allow__v21_clear_deny",
@@ -136,6 +138,7 @@ def test_vocabulary_is_closed_with_exactly_eight_categories() -> None:
         "legacy_deny__v21_defer",
         DEGRADED_NO_SNAPSHOT,
         DEGRADED_COMPONENT_FAILURE,
+        DEGRADED_STALE_JUDGMENT,
     }
     assert set(DIVERGENCE_GRID) == {
         (legacy, disposition)

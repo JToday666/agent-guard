@@ -153,12 +153,22 @@ class AuditService:
         extra_metadata: dict[str, object] | None = None,
         decision_dump: dict[str, object] | None = None,
         v21_evidence: dict[str, object] | None = None,
+        state_delta_evidence: dict[str, object] | None = None,
+        audit_id: str | None = None,
     ) -> AuditEvent:
         """写入 policy_evaluation 审计记录。
 
         ``v21_evidence``：V21-08 shadow 旁路信封透传（None 时与现状逐字节
         一致）；写入位置为同一条记录的 ``evidence.decision_v21``，不新增
         第二条审计记录（11_决策记录_V21-08前置.md D4）。
+
+        ``state_delta_evidence``：V21-09 ``state_delta_v21`` 引用信封透传
+        （None 时逐字节不变，仿 ``v21_evidence``）；只存投影身份引用，
+        全量 delta 随 projection_records（12_决策记录_V21-09前置.md D2）。
+
+        ``audit_id``：显式确定性审计身份（None 时沿用默认工厂，逐字节
+        不变）；pipeline 路径以 ``derive_final_audit_id`` 产物显式赋值，
+        保证 replay 同输入同身份（D7-5）。
         """
 
         audit_event = build_audit_event(
@@ -174,6 +184,8 @@ class AuditService:
             extra_metadata=extra_metadata,
             decision_dump=decision_dump,
             v21_evidence=v21_evidence,
+            state_delta_evidence=state_delta_evidence,
+            audit_id=audit_id,
         )
         audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)

@@ -39,6 +39,7 @@ __all__ = [
     "RequiredCheckPlan",
     "SemanticRoutingAssessment",
     "decision_v21_envelope",
+    "state_delta_v21_envelope",
 ]
 
 
@@ -304,6 +305,22 @@ def decision_v21_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     """按 01 §28 (L1149-1158) 的版本信封形状包装 audit evidence payload。"""
     return {
         "decision_v21": {
+            "schema_version": "2.1",
+            "payload": payload,
+        }
+    }
+
+
+def state_delta_v21_envelope(payload: dict[str, Any]) -> dict[str, Any]:
+    """``state_delta_v21`` 版本信封（07 §10 L380-398 形状，仿 decision_v21）。
+
+    ``12_决策记录_V21-09前置.md`` D2：audit evidence 侧的 payload **只存
+    投影身份引用**（projection_id / delta_digest / source identity），全量
+    delta 本体随 ``projection_records`` 存储，不内嵌审计证据（规避 64 KiB
+    预算与审计锁写放大）。
+    """
+    return {
+        "state_delta_v21": {
             "schema_version": "2.1",
             "payload": payload,
         }

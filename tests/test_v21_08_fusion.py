@@ -1266,10 +1266,14 @@ def test_evaluate_fusion_is_deterministic() -> None:
     [
         "packages/agentguard-core/agentguard_core/decisions/fusion.py",
         "packages/agentguard-core/agentguard_core/security_context/projection/flow_verdict.py",
+        # V21-09 T1 新模块同受本纪律守卫约束。
+        "packages/agentguard-core/agentguard_core/decisions/finalize.py",
+        "packages/agentguard-core/agentguard_core/decisions/revalidation.py",
+        "packages/agentguard-core/agentguard_core/semantic/models.py",
     ],
 )
 def test_new_modules_have_no_clock_uuid_or_legacy_imports(relative_path: str) -> None:
-    """V21-08 新模块纪律：
+    """V21-08/V21-09 新模块纪律：
 
     - 不 import wall-clock / uuid / random（判定确定性）；
     - 不 import legacy 判定路径（engine / decisions.policy /
