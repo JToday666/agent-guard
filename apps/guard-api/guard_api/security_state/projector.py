@@ -27,7 +27,6 @@ from agentguard_core.security_context import (
     PROJECTOR_VERSION,
     CommittedRecord,
     OnlineSecurityState,
-    ProjectionError,
     SecurityStateDeltaV21,
     apply_delta,
     delta_digest_projection,
@@ -42,7 +41,9 @@ from guard_api.storage.base import (
     StateVersionConflictError,
 )
 
+from .failures import PROJECTION_FAILURE_EXCEPTIONS
 from .models import ProjectApplyResult, SecurityAlert, SecurityStateProjectError
+from .rebuild import rebuild_locked
 from .store import SecurityStateStoreAccess, empty_online_state
 
 #: 源记录 committed 状态验证钩子：返回 False 即 fail-closed 拒绝（F0-8）。
@@ -63,6 +64,20 @@ def _failure_domains(delta: Any) -> list[str]:
         if domains:
             return [str(domain) for domain in domains]
     return [str(domain) for domain in COVERAGE_DOMAINS]
+
+
+#: 投影 apply 阶段可能抛出的全部 fail-closed 异常（共享定义，与
+#: rebuild.py 复用同一元组，见 ``failures.PROJECTION_FAILURE_EXCEPTIONS``）。
+ProjectionFailure = PROJECTION_FAILURE_EXCEPTIONS
+
+
+def _exception_domains(exc: Exception, delta: Any) -> list[str]:
+    """分支异常声明的 dirty_domains（若有）；否则退回 delta 声明域。"""
+
+    declared = getattr(exc, "dirty_domains", ())
+    if declared:
+        return [str(domain) for domain in declared]
+    return _failure_domains(delta)
 
 
 class SecurityStateProjector:
@@ -156,8 +171,32 @@ class SecurityStateProjector:
                             state_version=current_version,
                             reason_codes=("v21-04:idempotent_replay_noop",),
                         )
-                    # Envelope exists but state hasn't absorbed this projection
-                    # (crash window / lost CAS). Fall through to core logic.
+                    # crash 窗口自愈（02 §4.1 版本领先/缺失 →
+                    # reconcile/rebuild 良性场景）：envelope 已存在但状态
+                    # 未吸收本投影，且版本已被其他投影推进（delta 的
+                    # base_state_version != current_version）。此时继续走
+                    # core 增量 apply 必然 base_state_version_mismatch，
+                    # 把良性场景误判为 projector failure；改走持锁
+                    # rebuild —— envelope 全量可重建，T-Replay 确定性
+                    # 保证重建结果等价。自愈：无告警、不置 dirty。
+                    if (
+                        isinstance(committed_record.delta, SecurityStateDeltaV21)
+                        and committed_record.delta.base_state_version != current_version
+                    ):
+                        rebuilt, rebuild_alert = rebuild_locked(
+                            self._store, scope_digest
+                        )
+                        if rebuild_alert is not None:
+                            # rebuild 自身 fail-closed（截断/冲突）：状态
+                            # 已置 dirty，失败不得解释为 complete，上抛。
+                            raise SecurityStateProjectError(rebuild_alert)
+                        return ProjectApplyResult(
+                            outcome="applied",
+                            state_version=rebuilt.state_version,
+                            reason_codes=("v21-04:crash_window_rebuild_recovery",),
+                        )
+                    # 版本未推进（base == current）：维持现状 fall through
+                    # 到 core 增量 apply（防回归）。
                 # 登记存在但状态未反映（crash 窗口 / rebuild 后版本重整）：
                 # 继续走 core 幂等判定，由其三分支给出确定性结果。
 
@@ -188,8 +227,8 @@ class SecurityStateProjector:
                     scope_digest=scope_digest,
                 )
                 result = apply_delta(current_state, delta)
-            except ProjectionError as exc:
-                domains = _failure_domains(committed_record.delta)
+            except ProjectionFailure as exc:
+                domains = _exception_domains(exc, committed_record.delta)
                 alert = SecurityAlert(
                     reason_code=exc.reason_code,
                     message=str(exc),
