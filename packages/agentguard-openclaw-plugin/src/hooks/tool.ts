@@ -311,6 +311,9 @@ export function registerAfterToolCall(hookContext: HookContext): void {
           approval,
           interventionType: intervention,
           invokedAt: null,
+          // Core 要求 execution.completed_at 与回执顶层 timestamp 完全一致，
+          // 两者必须同源，避免毫秒滚动导致 422 拒收。
+          timestamp: completedAt,
           completedAt,
           error:
             terminal === "failed"

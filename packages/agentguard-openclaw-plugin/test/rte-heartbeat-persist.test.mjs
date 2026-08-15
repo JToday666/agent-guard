@@ -44,12 +44,38 @@ test("capability: capacity exhaustion degrades C2 while C1 stays intact", () => 
   assert.equal(capability.evidence_degradation, 1);
 });
 
-test("capability: other degradation reasons do not demote C2", () => {
-  const tracker = new EvidenceDegradationTracker();
-  tracker.record("after_tool_call_correlation_missing");
-  const capability = buildRuntimeEnforcementCapability(tracker);
+test("capability: correlation-loss degradations stop advertising C2 and stable native identity (review P1)", () => {
+  for (const reason of [
+    "after_tool_call_missing_action_id",
+    "after_tool_call_correlation_missing",
+    "after_tool_call_policy_linkage_missing",
+    "after_tool_call_local_fallback_correlation",
+  ]) {
+    const tracker = new EvidenceDegradationTracker();
+    tracker.record(reason);
+    const capability = buildRuntimeEnforcementCapability(tracker);
+    assert.equal(capability.profiles.C2_execution_closure, false, reason);
+    assert.deepEqual(
+      capability.correlation,
+      { stable_native_action_id: false },
+      reason,
+    );
+    assert.equal(
+      capability.profiles.C1_pre_execution_enforcement,
+      true,
+      reason,
+    );
+  }
+});
+
+test("capability: clean tracker keeps C2 and stable native identity", () => {
+  // 无任何 degradation 时保持 C2 声明；只要命中 C2_DEMOTION_REASONS
+  // 中任一原因即降级（见上方用例）。
+  const capability = buildRuntimeEnforcementCapability(
+    new EvidenceDegradationTracker(),
+  );
   assert.equal(capability.profiles.C2_execution_closure, true);
-  assert.equal(capability.evidence_degradation, 1);
+  assert.deepEqual(capability.correlation, { stable_native_action_id: true });
 });
 
 test("persist linkage: correlated tool_result_persist only sets resultPersistObserved", () => {

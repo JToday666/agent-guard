@@ -361,13 +361,16 @@ function approvalEvidence(
   };
 }
 
-/** execution_failed 的 error 必须是有界非空字符串（契约 02 §9）。 */
+/** execution_failed 的 error 必须是有界非空字符串（契约 02 §9）。
+ * Core RuntimeExecutionEvidence.error 上限 2000 字符，截断时省略号计入上限，
+ * 否则长堆栈会使回执被 Guard API 422 拒收并丢失失败证据。 */
 function boundedTerminalError(value: string | null | undefined): string {
   const text =
     typeof value === "string" && value.length > 0
       ? value
       : "unknown tool failure";
-  return text.length > MAX_TERMINAL_ERROR_CHARS
-    ? `${text.slice(0, MAX_TERMINAL_ERROR_CHARS)}...`
-    : text;
+  if (text.length <= MAX_TERMINAL_ERROR_CHARS) {
+    return text;
+  }
+  return `${text.slice(0, MAX_TERMINAL_ERROR_CHARS - 3)}...`;
 }

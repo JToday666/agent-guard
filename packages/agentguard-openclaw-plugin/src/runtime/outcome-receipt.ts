@@ -28,6 +28,8 @@ export type FireRuntimeOutcomeParams = {
   invokedAt?: string | null;
   completedAt?: string;
   error?: string | null;
+  /** 显式顶层时间戳；terminal 回执须与 completedAt 同源（Core 一致性校验）。 */
+  timestamp?: string;
 };
 
 /**
@@ -54,6 +56,7 @@ export function fireRuntimeOutcomeReceipt(
     invokedAt,
     completedAt,
     error,
+    timestamp,
   } = params;
   if (!evaluation.policy_audit_id) {
     logDiagnostic(
@@ -76,6 +79,7 @@ export function fireRuntimeOutcomeReceipt(
         invokedAt,
         completedAt,
         error,
+        timestamp,
       },
     );
     delivery.submit(receipt, client, logLabel);

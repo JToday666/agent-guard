@@ -117,8 +117,27 @@ test("execution_failed: missing error falls back to a bounded placeholder and lo
     "execution_failed",
     { error: "x".repeat(5000), stage: "after_tool_call" },
   );
-  assert.equal(long.evidence.execution.error.length, 2003);
+  // Core RuntimeExecutionEvidence.error 上限 2000，省略号计入上限。
+  assert.equal(long.evidence.execution.error.length, 2000);
   assert.ok(long.evidence.execution.error.endsWith("..."));
+});
+
+test("terminal receipts keep top-level timestamp identical to execution.completed_at", () => {
+  const completedAt = "2026-08-15T00:00:09.123Z";
+  const receipt = buildRuntimeOutcomeAuditEvent(
+    GUARD_EVENT,
+    EVALUATION,
+    "execution_completed",
+    {
+      stage: "after_tool_call",
+      timestamp: completedAt,
+      completedAt,
+    },
+  );
+  // Core RuntimeOutcomeReceipt 校验 completed_at 必须等于顶层 timestamp，
+  // 两者必须同源，避免毫秒滚动导致 422 拒收。
+  assert.equal(receipt.timestamp, completedAt);
+  assert.equal(receipt.evidence.execution.completed_at, completedAt);
 });
 
 test("enforcement_violation: contradiction path keeps the real terminal fact with the violation intervention type (02 §10)", () => {

@@ -116,6 +116,8 @@ test("DoD #1: allow → after hook produces a real execution_completed terminal 
   assert.equal(receipt.evidence.execution.tool_result_entered_context, null);
   assert.equal(receipt.evidence.execution.persisted, null);
   assert.equal(receipt.links.action_id, "call-rte-300");
+  // Core 一致性校验：completed_at 必须等于顶层 timestamp（同源防毫秒滚动）。
+  assert.equal(receipt.timestamp, receipt.evidence.execution.completed_at);
 
   const state = toolCallState.get("call-rte-300");
   assert.equal(state.terminalStatus, "executed");

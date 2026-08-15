@@ -496,12 +496,15 @@ _OUTCOME_TERMINAL_PREAMBLE = f"""
 
 def test_openclaw_outcome_execution_completed_keeps_unknown_result_facts() -> None:
     event = _node_json(_OUTCOME_TERMINAL_PREAMBLE + """
+        const completedAt = '2026-08-15T00:00:02.000Z';
         console.log(JSON.stringify(buildRuntimeOutcomeAuditEvent(
           guardEvent, evaluation, 'execution_completed',
           {
             interventionType: 'runtime_observation',
             invokedAt: '2026-08-15T00:00:01.000Z',
-            completedAt: '2026-08-15T00:00:02.000Z',
+            // 顶层 timestamp 与 completed_at 必须同源（Core 一致性校验，评审 P1）。
+            timestamp: completedAt,
+            completedAt,
             stage: 'after_tool_call'
           }
         )));
@@ -512,6 +515,7 @@ def test_openclaw_outcome_execution_completed_keeps_unknown_result_facts() -> No
     assert parsed.record_type == "runtime_outcome"
     assert event["audit_id"].endswith("_execution_completed")
     assert event["links"]["action_id"] == "call_terminal_contract"
+    assert event["timestamp"] == event["evidence"]["execution"]["completed_at"]
     evidence = event["evidence"]
     assert evidence["intervention"]["type"] == "runtime_observation"
     assert evidence["execution"]["status"] == "executed"
