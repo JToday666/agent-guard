@@ -33,6 +33,7 @@ from .redaction import (
     NORMALIZED_RESOURCES_LIMIT,
     RULE_HITS_LIMIT,
     SUMMARY_TEXT_LIMIT,
+    bound_ct_transient_facts_envelope,
     bound_decision_v21_envelope,
     bound_redacted_value,
     bound_state_delta_v21_envelope,
@@ -77,6 +78,7 @@ def build_audit_event(
     decision_dump: dict[str, object] | None = None,
     v21_evidence: dict[str, object] | None = None,
     state_delta_evidence: dict[str, object] | None = None,
+    ct_facts_evidence: dict[str, object] | None = None,
     audit_id: str | None = None,
 ) -> AuditEvent:
     """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
@@ -98,6 +100,14 @@ def build_audit_event(
     全量 delta 随 projection_records）。None 时逐字节不变；非 None 时
     仿 decision_v21 通道：专用 typed bound + 预算吃紧时 dropped-reference
     留痕（先于 decision_v21 降级，不放宽全局预算）。
+
+    ``ct_facts_evidence``：CT-PR-03b 的 ``ct_transient_facts`` 信封
+    （D4：facts 本体 commit 载体，寄生同一条 policy_evaluation 审计
+    记录的 evidence 字典；零新表零迁移）。None 时逐字节不变；非 None
+    时仿 state_delta_v21 通道：专用 typed bound + 预算吃紧时
+    dropped-reference 留痕。降级序（D4 禁静默丢失纪律）：
+    ``ct_transient_facts`` 先于 ``state_delta_v21`` 先于
+    ``decision_v21``；guard_decision replay 权威键永不触碰。
 
     ``audit_id``：显式确定性审计身份（None 时沿用 AuditEvent 默认工厂，
     逐字节不变）；V21-09 pipeline 路径以 ``derive_final_audit_id`` 产物
@@ -189,11 +199,43 @@ def build_audit_event(
                         for key, value in bounded.items()
                     }
                 )
+    if ct_facts_evidence is not None:
+        # CT-PR-03b D4 commit 载体信封：专用 typed bound 通道（仿
+        # state_delta_v21）；预算吃紧时只降级本键为 digest 引用留痕
+        # （禁静默截断）——CT 旁路附属键降级优先级最高（先于
+        # state_delta_v21 / decision_v21，guard_decision 永不触碰），
+        # 故本块先于 state_delta_v21 / decision_v21 后续兜底链执行。
+        bounded_ct = bound_ct_transient_facts_envelope(ct_facts_evidence)
+        if isinstance(bounded_ct, dict) and bounded_ct:
+            collision = set(bounded_ct) & set(evidence)
+            if collision:
+                # fail-closed：信封不得覆盖 replay 权威键。
+                raise ValueError(
+                    "ct_facts_evidence collides with reserved evidence "
+                    f"keys: {sorted(collision)}"
+                )
+            merged = dict(evidence)
+            merged.update(bounded_ct)
+            if evidence_serialized_size(merged) <= MAX_EVIDENCE_BYTES:
+                evidence = merged
+            else:
+                logger.warning(
+                    "ct_transient_facts exceeds the 64 KiB evidence budget "
+                    "after merge; degrading to a digest reference "
+                    "(guard_decision preserved)"
+                )
+                evidence = dict(evidence)
+                evidence.update(
+                    {
+                        key: budget_dropped_reference(value)
+                        for key, value in bounded_ct.items()
+                    }
+                )
     if state_delta_evidence is not None:
         # V21-09 D2 引用信封：专用 typed bound 通道（仿 decision_v21），
         # 预算吃紧时 dropped-reference 留痕（禁静默丢失，D4-11 号纪律）；
-        # 降级顺序：state_delta_v21 先于 decision_v21，guard_decision
-        # replay 权威键最后才触碰/不触碰。
+        # 降级顺序：ct_transient_facts 先于 state_delta_v21 先于
+        # decision_v21，guard_decision replay 权威键最后才触碰/不触碰。
         bounded_delta = bound_state_delta_v21_envelope(state_delta_evidence)
         if isinstance(bounded_delta, dict) and bounded_delta:
             collision = set(bounded_delta) & set(evidence)
@@ -214,15 +256,34 @@ def build_audit_event(
                     "references (guard_decision preserved)"
                 )
                 evidence = dict(evidence)
-                evidence.update(
-                    {
-                        key: budget_dropped_reference(value)
-                        for key, value in bounded_delta.items()
-                    }
-                )
+                # 降级序第一优先：先剥离 ct_transient_facts（CT 旁路
+                # 附属键），再处理本键与 decision_v21。
+                ct_value = evidence.get("ct_transient_facts")
+                if isinstance(ct_value, dict) and not ct_value.get(
+                    "_budget_dropped"
+                ):
+                    evidence["ct_transient_facts"] = budget_dropped_reference(
+                        ct_value
+                    )
+                    merged = dict(evidence)
+                    merged.update(bounded_delta)
+                    if evidence_serialized_size(merged) <= MAX_EVIDENCE_BYTES:
+                        evidence = merged
+                    else:
+                        evidence = merged
+                else:
+                    evidence.update(bounded_delta)
                 if evidence_serialized_size(evidence) > MAX_EVIDENCE_BYTES:
-                    # 极端场景：state_delta 引用降级后仍超限 → 同源口径
-                    # 继续降级 decision_v21（旁路附属键，先于权威键）。
+                    # 仍超限 → 降级 state_delta 信封本体为 digest 引用。
+                    evidence.update(
+                        {
+                            key: budget_dropped_reference(value)
+                            for key, value in bounded_delta.items()
+                        }
+                    )
+                if evidence_serialized_size(evidence) > MAX_EVIDENCE_BYTES:
+                    # 极端场景：旁路附属键均已降级仍超限 → 同源口径
+                    # 最后降级 decision_v21（先于权威键）。
                     v21_value = evidence.get("decision_v21")
                     if v21_value is not None:
                         evidence["decision_v21"] = budget_dropped_reference(

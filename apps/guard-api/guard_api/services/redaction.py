@@ -66,6 +66,14 @@ DECISION_V21_MAX_DEPTH = 8
 STATE_DELTA_V21_ARRAY_LIMIT = 16
 STATE_DELTA_V21_MAX_DEPTH = 4
 
+# ct_transient_facts 信封专用 typed bound 通道限额（CT-PR-03b D4，仿
+# state_delta_v21 通道）：信封 payload 携带 bundle 规范化 dump（三类事实
+# 数组 + 嵌套 fact 模型），数组限额取宽裕上限防静默截断（D4 纪律：
+# 预算吃紧由 evidence.py 降级为 digest 引用留痕，而非截断）；仅对
+# ct_transient_facts 键生效，不放宽任何全局冻结限额（07 §21.2）。
+CT_TRANSIENT_FACTS_ARRAY_LIMIT = 512
+CT_TRANSIENT_FACTS_MAX_DEPTH = 10
+
 _AUTHORIZATION_VALUE_RE = re.compile(
     r"(authorization\s*[:=]\s*)([^\s\"'`,;]+(?:\s+[A-Za-z0-9._~+/=-]{8,})?)",
     re.IGNORECASE,
@@ -335,6 +343,24 @@ def bound_state_delta_v21_envelope(value: object) -> object:
         text_limit=SUMMARY_TEXT_LIMIT,
         array_limit=STATE_DELTA_V21_ARRAY_LIMIT,
         max_depth=STATE_DELTA_V21_MAX_DEPTH,
+    )
+
+
+def bound_ct_transient_facts_envelope(value: object) -> object:
+    """ct_transient_facts 信封专用 bounded 投影（typed bound 通道）。
+
+    仿 ``bound_state_delta_v21_envelope``：先 ``redact_structure``（append-only
+    审计证据仍受 §21.1 敏感清洗；bundle 内容均为确定性 id/digest/ref，
+    不含 raw secret——credential 值仅以指纹形态存在），再经
+    ``_bound_typed_value`` 以 ``CT_TRANSIENT_FACTS_*`` 限额投影；不放宽
+    任何全局冻结限额（07 §21.2）。
+    """
+
+    return _bound_typed_value(
+        redact_structure(value),
+        text_limit=SUMMARY_TEXT_LIMIT,
+        array_limit=CT_TRANSIENT_FACTS_ARRAY_LIMIT,
+        max_depth=CT_TRANSIENT_FACTS_MAX_DEPTH,
     )
 
 

@@ -154,6 +154,7 @@ class AuditService:
         decision_dump: dict[str, object] | None = None,
         v21_evidence: dict[str, object] | None = None,
         state_delta_evidence: dict[str, object] | None = None,
+        ct_facts_evidence: dict[str, object] | None = None,
         audit_id: str | None = None,
     ) -> AuditEvent:
         """写入 policy_evaluation 审计记录。
@@ -165,6 +166,10 @@ class AuditService:
         ``state_delta_evidence``：V21-09 ``state_delta_v21`` 引用信封透传
         （None 时逐字节不变，仿 ``v21_evidence``）；只存投影身份引用，
         全量 delta 随 projection_records（12_决策记录_V21-09前置.md D2）。
+
+        ``ct_facts_evidence``：CT-PR-03b ``ct_transient_facts`` 信封透传
+        （None 时逐字节不变，仿 ``state_delta_evidence``）；facts 本体
+        commit 载体寄生同一条审计记录 evidence（D4：零新表零迁移）。
 
         ``audit_id``：显式确定性审计身份（None 时沿用默认工厂，逐字节
         不变）；pipeline 路径以 ``derive_final_audit_id`` 产物显式赋值，
@@ -185,6 +190,7 @@ class AuditService:
             decision_dump=decision_dump,
             v21_evidence=v21_evidence,
             state_delta_evidence=state_delta_evidence,
+            ct_facts_evidence=ct_facts_evidence,
             audit_id=audit_id,
         )
         audit_event = sanitize_audit_event(audit_event)
