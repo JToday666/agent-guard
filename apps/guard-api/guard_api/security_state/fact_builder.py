@@ -32,6 +32,7 @@ reason_code 清单（统一 ``ct-fact:`` 前缀）：
 
 from __future__ import annotations
 
+import logging
 import types
 from collections.abc import Callable, Mapping
 from typing import Any, cast
@@ -66,6 +67,9 @@ from .transient import (
 
 #: 派生事实的统一 producer 标识（02 §10 fact_builder 职责行）。
 _FACT_PRODUCER = "ct-fact-builder"
+
+#: 模块 logger：handler 异常收敛为 degradation 前记录原始异常栈。
+logger = logging.getLogger(__name__)
 
 
 class FactBuildInputs(BaseModel):
@@ -193,6 +197,10 @@ def _claim_from_context_source(
     ``source_trust`` 仅取冻结三值，表外值 fail-closed 为 ``unknown``；
     ``sanitized`` 取 payload 级 transform claim（只作 claim，不清
     taint——由 fact_authority 保证）；server 证据位来自 inputs。
+
+    注：此处 claim ``source_id`` 仅作 ``verify_source_claim`` 的验证
+    入参，不作为注册引用——最终 SourceFact 注册 id 在 handler 内另行
+    构造（memory 源用 ``memory:`` 前缀，类型取 descriptor 归一化值）。
     """
     return SourceClaim(
         source_id=f"source:{source.source_type}:{event.event_id}:{index}",
@@ -324,6 +332,13 @@ def _handle_model_output_produced(
     deterministic，且该 model source taints 追加 CREDENTIAL+SENSITIVE；
     adapter claim（trusted/sanitized）不参与任何升级。
 
+    server 确定性证据位与指纹命中解耦（02 §6 deterministic server
+    evidence dominates claims）：``server_sensitive_evidence=True`` →
+    无条件追加 ``SENSITIVE``；``server_credential_evidence=True`` →
+    无条件追加 ``CREDENTIAL + SENSITIVE``（保序去重）——指纹命中与否
+    仅决定是否额外建 ``credential:<fp>`` exact derived_from 边，证据
+    位 True 而指纹库未命中（未注册密钥）不得 fail-open 为无 taint。
+
     exact credential 路径信任边界重申：``credential_bearing_text`` 必须
     是 server 侧检测证据片段（见 ``FactBuildInputs`` docstring），不得
     直接传 adapter 原始文本。
@@ -370,30 +385,36 @@ def _handle_model_output_produced(
                 )
             )
             index += 1
-    extra_taints: tuple[str, ...] = ()
+    # 02 §6：server 确定性证据位与指纹命中解耦——证据位 True 无条件
+    # 追加 taint（未注册密钥/指纹未命中不得 fail-open）；指纹命中仅
+    # 决定是否额外建 exact derived_from 边。
+    extra: list[str] = []
+    if inputs.server_credential_evidence:
+        extra.extend(("CREDENTIAL", "SENSITIVE"))
+    if inputs.server_sensitive_evidence:
+        extra.append("SENSITIVE")
+    extra_taints: tuple[str, ...] = tuple(dict.fromkeys(extra))
     if inputs.server_credential_evidence and inputs.credential_bearing_text:
         matched = [
             fingerprint
             for fingerprint in _credential_fingerprints(inputs.credential_bearing_text)
             if fingerprint in inputs.server_credential_fingerprints
         ]
-        if matched:
-            extra_taints = ("CREDENTIAL", "SENSITIVE")
-            for fingerprint in matched:
-                flow_facts.append(
-                    _flow(
-                        event=event,
-                        scope_digest=inputs.scope_digest,
-                        index=index,
-                        source_ref=f"credential:{fingerprint}",
-                        target_ref=f"model_output:{event.event_id}",
-                        relation="derived_from",
-                        strength="exact",
-                        origin="deterministic",
-                        taints=["CREDENTIAL", "SENSITIVE"],
-                    )
+        for fingerprint in matched:
+            flow_facts.append(
+                _flow(
+                    event=event,
+                    scope_digest=inputs.scope_digest,
+                    index=index,
+                    source_ref=f"credential:{fingerprint}",
+                    target_ref=f"model_output:{event.event_id}",
+                    relation="derived_from",
+                    strength="exact",
+                    origin="deterministic",
+                    taints=["CREDENTIAL", "SENSITIVE"],
                 )
-                index += 1
+            )
+            index += 1
     source_facts = (
         _source_fact_from_descriptor(
             descriptor=descriptor,
@@ -503,6 +524,10 @@ def build_transient_facts(
     空 bundle + ``ct-fact:unknown_event_type``；handler 异常 → 空
     bundle + ``ct-fact:handler_failed``。产出的 bundle 仅供后续
     assessment 读取，不写 OnlineState、不产 GuardDecision。
+
+    消费方契约：必须以 ``degradations`` 为空作为 bundle 可用的前置
+    条件——非空表示 coverage 部分缺失，消费方须显式处理降级场景，
+    不得把降级 bundle 当作完整事实图使用。
     """
     handler = _EVENT_HANDLERS.get(event.event_type)
     degradations: tuple[EvaluationDegradation, ...] = ()
@@ -519,6 +544,12 @@ def build_transient_facts(
         try:
             partial = handler(event, inputs)
         except Exception:
+            logger.warning(
+                "ct-fact-builder handler failed for event %s; "
+                "converging to degradation",
+                event.event_id,
+                exc_info=True,
+            )
             degradations = (
                 _degradation(
                     event,

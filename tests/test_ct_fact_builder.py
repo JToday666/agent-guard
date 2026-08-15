@@ -14,11 +14,11 @@ from __future__ import annotations
 import ast
 import json
 import types
-import uuid
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from pydantic import ValidationError
 
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.actions.models import (
@@ -365,9 +365,11 @@ def test_model_output_exact_credential_fingerprint_hit() -> None:
     assert SECRET not in rendered
 
 
-def test_model_output_credential_claim_without_server_fingerprint_stays_possible() -> (
+def test_model_output_credential_evidence_without_fingerprint_hit_still_taints() -> (
     None
 ):
+    # 02 §6：证据位 True + 指纹库为空（未注册密钥）不得 fail-open：
+    # taints 含 CREDENTIAL+SENSITIVE，但不建 derived_from exact 边。
     bundle = build_transient_facts(
         event=_model_event("output"),
         inputs=_inputs(
@@ -379,7 +381,54 @@ def test_model_output_credential_claim_without_server_fingerprint_stays_possible
     )
     assert all(flow.relation != "derived_from" for flow in bundle.flow_facts)
     assert all(flow.strength == "possible" for flow in bundle.flow_facts)
-    assert bundle.source_facts[0].taints == []
+    assert bundle.source_facts[0].taints == ["CREDENTIAL", "SENSITIVE"]
+
+
+def test_model_output_unregistered_key_mismatch_taints_without_exact_edge() -> None:
+    # mismatch 盲区：指纹库含其它密钥、文本含未注册密钥，证据位 True →
+    # taints 含 CREDENTIAL+SENSITIVE，无 derived_from exact 边。
+    other_fingerprint = canonical_sha256("sk-live-other-key-0000000000")
+    bundle = build_transient_facts(
+        event=_model_event("output"),
+        inputs=_inputs(
+            visible_refs=("source:web:evt-1:0",),
+            server_credential_evidence=True,
+            credential_bearing_text=f"output contains {SECRET}",
+            server_credential_fingerprints=frozenset({other_fingerprint}),
+        ),
+    )
+    assert bundle.source_facts[0].taints == ["CREDENTIAL", "SENSITIVE"]
+    assert all(flow.relation != "derived_from" for flow in bundle.flow_facts)
+
+
+def test_model_output_sensitive_evidence_adds_sensitive_taint() -> None:
+    # server_sensitive_evidence=True → model source 无条件追加 SENSITIVE。
+    bundle = build_transient_facts(
+        event=_model_event("output"),
+        inputs=_inputs(visible_refs=(), server_sensitive_evidence=True),
+    )
+    assert bundle.source_facts[0].taints == ["SENSITIVE"]
+    assert bundle.degradations == ()
+
+
+def test_model_output_both_evidence_bits_with_fingerprint_hit() -> None:
+    # 两证据位同开 + 指纹命中 → taints 与 exact 边并存（保序去重）。
+    bundle = build_transient_facts(
+        event=_model_event("output"),
+        inputs=_inputs(
+            visible_refs=("source:web:evt-1:0",),
+            server_sensitive_evidence=True,
+            server_credential_evidence=True,
+            credential_bearing_text=f"output contains {SECRET}",
+            server_credential_fingerprints=frozenset({SECRET_FP}),
+        ),
+    )
+    assert bundle.source_facts[0].taints == ["CREDENTIAL", "SENSITIVE"]
+    exact = [flow for flow in bundle.flow_facts if flow.relation == "derived_from"]
+    (flow,) = exact
+    assert flow.source_ref == f"credential:{SECRET_FP}"
+    assert flow.strength == "exact"
+    assert flow.origin == "deterministic"
 
 
 # ---------------------------------------------------------------------------
@@ -465,21 +514,32 @@ def test_tool_result_instruction_like_adds_taint() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fact_replay_same_input_same_digest(monkeypatch) -> None:
-    # 哨兵证明 builder 不依赖 uuid/时钟（事件 timestamp 为测试固定值）。
-    def _forbidden(*args, **kwargs):
-        raise AssertionError("fact builder must not use uuid/time")
-
-    monkeypatch.setattr(uuid, "uuid4", _forbidden)
-    import time
-
-    monkeypatch.setattr(time, "time", _forbidden)
+def test_fact_replay_same_input_same_digest() -> None:
+    # T-FactReplay：同输入两次独立构造 → 同 digest/同序列化；确定性
+    # 无随机/时钟源另由 AST 断言（见下方 no-uuid/no-time 用例）静态
+    # 证明，不再依赖装饰性 monkeypatch 哨兵。
     event = _context_event([_context_source(), _context_source(source_id="ctx-2")])
     inputs = _inputs(visible_refs=("source:web:evt-1:0",))
     first = build_transient_facts(event=event, inputs=inputs)
     second = build_transient_facts(event=event, inputs=inputs)
     assert first.bundle_digest == second.bundle_digest
     assert first.model_dump(mode="json") == second.model_dump(mode="json")
+
+
+def test_fact_replay_modules_do_not_import_uuid_or_time() -> None:
+    # 静态断言：fact_builder/transient 源码不得 import uuid/time（无
+    # 随机/时钟源，id 全部确定性构造，T-FactReplay）。
+    for name in ("transient", "fact_builder"):
+        path = (
+            ROOT / "apps" / "guard-api" / "guard_api" / "security_state" / f"{name}.py"
+        )
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert alias.name not in ("uuid", "time"), (name, alias.name)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                assert node.module not in ("uuid", "time"), (name, node.module)
 
 
 def test_fact_replay_content_perturbation_changes_digest() -> None:
@@ -553,7 +613,7 @@ def test_modules_do_not_import_decision_or_state_paths() -> None:
 
 
 def test_inputs_extra_fields_forbidden() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         FactBuildInputs(scope_digest=SCOPE, producer_identity=ProducerIdentity(), bogus=1)  # type: ignore[call-arg]
 
 
