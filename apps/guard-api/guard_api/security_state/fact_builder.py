@@ -23,6 +23,11 @@
 reason_code 清单（统一 ``ct-fact:`` 前缀）：
 ``ct-fact:unknown_event_type`` / ``ct-fact:handler_failed`` /
 ``ct-fact:visible_set_unavailable`` / ``ct-fact:action_ref_degraded``。
+
+预留码登记：``ct-fact:flow_ref_missing`` 为预留码，Wave 1 无发射
+路径——missing-ref 语义已由 ``visible_set_unavailable``（§8.2）与
+``action_ref_degraded``（§8.4）两码覆盖，真正的 flow ref 缺失场景
+（message_send/tool_call 的 data_ref 关联）归属 CT-PR-02b。
 """
 
 from __future__ import annotations
@@ -71,6 +76,10 @@ class FactBuildInputs(BaseModel):
     adapter claim（02 §6：确定性 server evidence 压制 claim）。
     ``visible_refs=None`` 表示 Runtime 无法提供 visible set（02 §8.2，
     降级为 degradation，不从 prompt 文本猜 provenance）。
+    ``credential_bearing_text`` 信任边界：必须是 **server 侧检测证据
+    片段**（如 CredentialExposureDetector 的 hit 片段），不得直接传
+    adapter 原始 ``content_preview``/参数原文；CT-PR-03 接线时由服务
+    端检测路径提供。
     ``upstream_descriptors`` / ``upstream_memory_facts`` 本 PR 为占位
     输入，由 CT-PR-02b 消费。
     """
@@ -288,7 +297,9 @@ def _credential_fingerprints(text: str) -> tuple[str, ...]:
     """server 端抽取候选 credential 值并指纹化（保序去重）。
 
     只产出 ``canonical_sha256(candidate)`` 指纹；raw secret 值不返回、
-    不落入任何 fact 字段。
+    不落入任何 fact 字段。输入 ``text`` 必须是 server 侧检测证据片段
+    （见 ``FactBuildInputs.credential_bearing_text`` 信任边界），不得
+    是 adapter 原始文本。
     """
     candidates = list(PROVIDER_KEY_RE.findall(text))
     candidates.extend(
@@ -312,6 +323,14 @@ def _handle_model_output_produced(
     ``credential:<fp> → model_output:<event_id>`` derived_from/exact/
     deterministic，且该 model source taints 追加 CREDENTIAL+SENSITIVE；
     adapter claim（trusted/sanitized）不参与任何升级。
+
+    exact credential 路径信任边界重申：``credential_bearing_text`` 必须
+    是 server 侧检测证据片段（见 ``FactBuildInputs`` docstring），不得
+    直接传 adapter 原始文本。
+
+    无 visible refs（``visible_refs=None``）→ 零 influence 边 +
+    ``ct-fact:visible_set_unavailable`` 降级（与 §8.2 口径对称，使
+    coverage 缺失可观测）；空 tuple 则零边且无降级。
     """
     model_source_id = f"source:model:{event.event_id}"
     claim = SourceClaim(
@@ -324,8 +343,18 @@ def _handle_model_output_produced(
         claim=claim, producer_identity=inputs.producer_identity
     )
     flow_facts: list[FlowFact] = []
+    degradations: tuple[EvaluationDegradation, ...] = ()
     index = 0
-    if inputs.visible_refs is not None:
+    if inputs.visible_refs is None:
+        # 与 §8.2 对称：visible set 缺失 → 零 influence 边 + 降级。
+        degradations = (
+            _degradation(
+                event,
+                reason_code="ct-fact:visible_set_unavailable",
+                failure_kind="unavailable",
+            ),
+        )
+    else:
         for ref in inputs.visible_refs:
             flow_facts.append(
                 _flow(
@@ -373,7 +402,11 @@ def _handle_model_output_produced(
             extra_taints=extra_taints,
         ),
     )
-    return _PartialFacts(source_facts=source_facts, flow_facts=tuple(flow_facts))
+    return _PartialFacts(
+        source_facts=source_facts,
+        flow_facts=tuple(flow_facts),
+        degradations=degradations,
+    )
 
 
 def _claim_from_tool_result(

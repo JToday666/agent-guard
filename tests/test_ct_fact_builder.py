@@ -32,6 +32,7 @@ from agentguard_core.events.contracts import GuardEvent
 from guard_api.security_state import fact_builder
 from guard_api.security_state.fact_authority import ProducerIdentity
 from guard_api.security_state.fact_builder import FactBuildInputs, build_transient_facts
+from guard_api.security_state.transient import bundle_digest_projection
 
 ROOT = Path(__file__).resolve().parents[1]
 CT_FREEZE_DIR = ROOT / "docs" / "AgentGuard_Context_Isolation_Taint_Tracking_Final_RC"
@@ -274,6 +275,16 @@ def test_model_input_without_visible_set_degrades() -> None:
     assert degradation.component_id == "ct-fact-builder"
     assert degradation.domain == "dataflow"
     assert degradation.required_for_action is False
+    # degradation 确定性 replay：degradation_id 无 uuid，同输入两次
+    # 构建 bundle_digest 相等（T-FactReplay）。
+    assert degradation.degradation_id == (
+        "degradation:evt-1:ct-fact:visible_set_unavailable"
+    )
+    replay = build_transient_facts(
+        event=_model_event("input"), inputs=_inputs(visible_refs=None)
+    )
+    assert replay.bundle_digest == bundle.bundle_digest
+    assert replay.model_dump(mode="json") == bundle.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +302,28 @@ def test_model_output_source_is_model_judgment_unknown() -> None:
     assert source.trust == "unknown"
     assert source.authority == "model_judgment"
     assert source.taints == []
+    # 空 tuple（非 None）：零 influence 边且无降级。
+    assert bundle.flow_facts == ()
+    assert bundle.degradations == ()
+
+
+def test_model_output_without_visible_refs_degrades_symmetrically() -> None:
+    # 与 §8.2 口径对称：visible set 缺失 → 零 influence 边 + 降级。
+    bundle = build_transient_facts(
+        event=_model_event("output"), inputs=_inputs(visible_refs=None)
+    )
+    (source,) = bundle.source_facts
+    assert source.source_id == "source:model:evt-1"
+    assert all(flow.relation != "influenced_by" for flow in bundle.flow_facts)
+    (degradation,) = bundle.degradations
+    assert degradation.reason_codes == ["ct-fact:visible_set_unavailable"]
+    assert degradation.degradation_id == (
+        "degradation:evt-1:ct-fact:visible_set_unavailable"
+    )
+    replay = build_transient_facts(
+        event=_model_event("output"), inputs=_inputs(visible_refs=None)
+    )
+    assert replay.bundle_digest == bundle.bundle_digest
 
 
 def test_model_output_influence_edges_are_always_possible(
@@ -382,6 +415,41 @@ def test_tool_result_without_action_ir_degrades_ref() -> None:
     assert bundle.flow_facts == ()
     (degradation,) = bundle.degradations
     assert degradation.reason_codes == ["ct-fact:action_ref_degraded"]
+    # degradation 确定性 replay：同输入两次构建 bundle_digest 相等。
+    assert degradation.degradation_id == (
+        "degradation:evt-1:ct-fact:action_ref_degraded"
+    )
+    replay = build_transient_facts(
+        event=_tool_result_event(), inputs=_inputs(action_ir=None)
+    )
+    assert replay.bundle_digest == bundle.bundle_digest
+    assert replay.model_dump(mode="json") == bundle.model_dump(mode="json")
+
+
+def test_degradations_excluded_from_bundle_digest_whitelist() -> None:
+    # 白名单设计（transient.bundle_digest_projection）：projection 只含
+    # fact_builder_version/event_id/scope_digest/source_facts/flow_facts/
+    # memory_facts，degradations 与 signals 不在白名单——因此加不加
+    # degradation 的 bundle_digest 相同（coverage 缺失不改变事实语义
+    # 摘要，属白名单设计使然，非缺陷）。
+    projection = bundle_digest_projection(
+        build_transient_facts(
+            event=_model_event("input"), inputs=_inputs(visible_refs=None)
+        )
+    )
+    assert "degradations" not in projection
+    assert "signals" not in projection
+    degraded = build_transient_facts(
+        event=_model_event("input"), inputs=_inputs(visible_refs=None)
+    )
+    assert degraded.degradations  # 确实携带降级
+    without_degradation = build_transient_facts(
+        event=_model_event("input"), inputs=_inputs(visible_refs=())
+    )
+    assert without_degradation.degradations == ()
+    # 两者 source/flow/memory 事实均为空、event_id/scope 相同 →
+    # digest 相等，证明 degradation 不进摘要。
+    assert degraded.bundle_digest == without_degradation.bundle_digest
 
 
 def test_tool_result_instruction_like_adds_taint() -> None:
