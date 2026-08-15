@@ -5403,3 +5403,11 @@ Benign ASK <= 10%
 - [ ] P50/P95/P99 环境固定
 - [ ] point estimate 与 CI claim 分离
 - [ ] ablation A-H
+
+## V21-05/06/07 前置决策（Phase -1）
+
+本节均为 `IMPLEMENTATION` 级解释性决策与策略冻结项，详见 `10_决策记录_V21-05-06-07前置.md`；不修改任何既有已签字条目。
+
+- [x] D1 ExecutionLease 权威存储（C5 选项 b）— 已确认（2026-08-15，仓库所有者确认）
+- [x] D2 Projector Version 升级与 reprojection 策略（C7）— 策略已冻结；Phase 2 集成 PR 实施验收完成（2026-08-15：PROJECTOR_VERSION bump 至 v21-07.projector.2、懒 legacy decoder 接线、reprojection state_digest 确定性测试全过）
+- [x] V21-05/06/07 中央闸门一次性接线（IMPLEMENTATION）— 验收完成（2026-08-15：11 handler 分发表 + 六域 coverage dispatch 装配、非空 typed delta 正常 apply、集成验收测试与全量回归 1185 passed）

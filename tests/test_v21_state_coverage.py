@@ -1,8 +1,11 @@
 """V21-04 Coverage 判定表与 gap localized degradation 测试（02 §6/§7）。
 
 - task 域五状态完整实现（complete/partial/stale/unknown/not_applicable）；
-- 其余 6 域 fail-closed：projector 未接线 → unknown；policy 声明不需要
-  → not_applicable；**永不返回 complete/partial/stale**；
+- 其余 6 域经 ``DOMAIN_COVERAGE_DISPATCH`` 分派到域判定纯函数
+  （V21-05/06/07 接线完成）：空状态 + 默认 ctx 下 source/dataflow/
+  memory fail-closed 判 unknown，capability/behavior/runtime_outcome
+  状态已知判 complete；dirty/not_required/eviction 优先级仍保留在
+  总分派层（v21-04 reason codes）；
 - gap localized degradation：按 02 §7 四级优先级把 gap 定位到相关域，
   仅相关域降级，禁止全局降级；
 - 驱逐后无法证明完整 → partial（与 eviction 测试互补的 coverage 侧断言）。
@@ -23,6 +26,7 @@ from agentguard_core.security_context import (
     compute_coverage,
     localize_gaps,
 )
+from agentguard_core.security_context.coverage_context import CoverageContext
 
 from tests.test_v21_security_state_models import make_watermarks
 from tests.test_v21_state_replay import make_task_fact
@@ -125,27 +129,70 @@ def test_task_not_applicable_when_policy_does_not_require() -> None:
     assert "v21-04:policy_task_not_required" in coverage.task.reason_codes
 
 
-# ---------------------------------------------------------------------------
-# 其余 6 域 fail-closed（永不 complete/partial/stale）
-# ---------------------------------------------------------------------------
+def test_task_stale_detection_consumes_context_head_revision() -> None:
+    # F5：显式构造的 context 携带 authoritative_head_revision 时，
+    # task 域 stale 检测不得被静默忽略（C3）。
+    state = make_state(task=make_task_fact())  # revision = 3
+    ctx = CoverageContext(
+        plan=plan(["task"]),
+        watermarks=state.watermarks,
+        authoritative_head_revision=4,
+    )
+    coverage = compute_coverage(
+        state, plan(["task"]), projector_version=PROJECTOR_VERSION, context=ctx
+    )
+    assert coverage.task.status == "stale"
+    assert "v21-04:task_revision_behind_head" in coverage.task.reason_codes
+
+    # 合并口径：显式入参优先于 context 携带值。
+    override = compute_coverage(
+        state,
+        plan(["task"]),
+        projector_version=PROJECTOR_VERSION,
+        authoritative_head_revision=3,
+        context=ctx,
+    )
+    assert override.task.status == "complete"
 
 
-def test_six_domains_fail_closed_unknown_or_not_applicable_only() -> None:
+# ---------------------------------------------------------------------------
+# 其余 6 域接线后语义（DOMAIN_COVERAGE_DISPATCH 分派，02 §6.2-§6.7）
+# ---------------------------------------------------------------------------
+
+#: 空 state + 默认 ctx（无 gap_context / gaps / truncated）下六域的
+#: 确定性判定（provenance 三域无 stable refs → fail-closed unknown；
+#: capability 无 required capabilities / behavior 无窗口需求 /
+#: runtime_outcome 无 pending receipt → 状态已知 complete）。
+WIRED_EMPTY_STATE_EXPECTATION = {
+    "source": ("unknown", "v21-05:source_refs_unresolvable"),
+    "capability": ("complete", "v21-06:capability_state_known"),
+    "behavior": ("complete", "v21-07:behavior_window_covered"),
+    "dataflow": ("unknown", "v21-05:flow_refs_unresolvable"),
+    "memory": ("unknown", "v21-05:memory_state_unavailable"),
+    "runtime_outcome": ("complete", "v21-07:receipt_window_covered"),
+}
+
+
+def test_six_domains_dispatch_to_wired_verdicts() -> None:
     state = make_state(task=make_task_fact())
     coverage = coverage_of(state, ["task", *NON_TASK_DOMAINS])
     for domain in NON_TASK_DOMAINS:
+        expected_status, expected_reason = WIRED_EMPTY_STATE_EXPECTATION[domain]
         domain_coverage = getattr(coverage, domain)
-        assert domain_coverage.status == "unknown", domain
-        assert (
-            "v21-04:projector_not_wired" in domain_coverage.reason_codes
+        assert domain_coverage.status == expected_status, domain
+        assert expected_reason in domain_coverage.reason_codes, domain
+        # 接线后 reason_code 用各域前缀（v21-04:projector_not_wired 退役）。
+        assert "v21-04:projector_not_wired" not in (
+            domain_coverage.reason_codes
         ), domain
-        assert domain_coverage.status not in {"complete", "partial", "stale"}
 
     coverage_na = coverage_of(state, ["task"], task_required=True)
     for domain in NON_TASK_DOMAINS:
         domain_coverage = getattr(coverage_na, domain)
         assert domain_coverage.status == "not_applicable", domain
-        assert domain_coverage.status not in {"complete", "partial", "stale"}
+        assert (
+            "v21-04:policy_not_required" in domain_coverage.reason_codes
+        ), domain
 
 
 def test_dirty_domain_is_fail_closed_unknown() -> None:
@@ -351,7 +398,10 @@ def test_gap_without_matching_refs_falls_back_not_priority_1_or_2() -> None:
 
 
 @pytest.mark.parametrize("domain", NON_TASK_DOMAINS)
-def test_fail_closed_domains_never_positive_statuses(domain: str) -> None:
+def test_wired_domains_report_real_verdicts_on_empty_state(domain: str) -> None:
+    # 接线后六域给出真实判定（不再一律 unknown）：无证据的 provenance
+    # 三域仍 fail-closed unknown，状态已知的三域判 complete。
     state = make_state(task=make_task_fact())
     coverage = coverage_of(state, ["task", *NON_TASK_DOMAINS])
-    assert getattr(coverage, domain).status in {"unknown", "not_applicable"}
+    expected_status, _ = WIRED_EMPTY_STATE_EXPECTATION[domain]
+    assert getattr(coverage, domain).status == expected_status

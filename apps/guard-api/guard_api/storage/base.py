@@ -17,6 +17,7 @@ from agentguard_core import (
     ProvenanceNode,
 )
 from agentguard_core.authority import TaskFact
+from agentguard_core.security_context import ExecutionLease, GrantConsumption
 
 from guard_api.models import (
     AdapterStatusRecord,
@@ -131,6 +132,22 @@ class ProjectionIdentityRecord:
     delta_payload: dict[str, Any]
     applied_state_version: int
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class GrantConsumptionResult:
+    """grant 原子消费结果（V21-06, C4；Phase 0 结构占位）。
+
+    ``lease_token`` 是返回给调用方的明文 lease token（可重试同一值），
+    **仅经本返回值交付一次，存储层永不落库**（落库的是
+    ``ExecutionLease.token_digest``，01 §15）；``replayed`` 标记同内容
+    幂等重放（返回同一 token，不重复扣减 remaining_uses）。
+    """
+
+    consumption: GrantConsumption
+    lease: ExecutionLease
+    lease_token: str
+    replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -742,6 +759,47 @@ class ControlPlaneStore(Protocol):
         不得假设输入完整。
         """
         ...
+
+    def consume_grant(
+        self, scope_digest: str, intent_payload: dict[str, Any]
+    ) -> GrantConsumptionResult:
+        """grant 原子消费（V21-06, 01 §15 / C4；Phase 0 结构占位）。
+
+        契约（Phase 1-V21-06 实现）：Guard API **单事务**内完成
+        校验 fingerprint/expiry/remaining_uses → CAS 扣减
+        ``remaining_uses`` → 写 GrantConsumption（UNIQUE(grant_id,
+        action_id) 幂等防双花）→ 写 ExecutionLease → 返回可重试同一
+        token。同内容重放幂等返回同一 token（``replayed=True``）；
+        异内容冲突拒绝。明文 lease token 不落库（只存 token_digest）。
+        """
+        raise NotImplementedError(
+            "V21-06: atomic grant consumption is not wired in Phase 0"
+        )
+
+    def get_execution_lease(
+        self, scope_digest: str, lease_ref: str
+    ) -> ExecutionLease | None:
+        """按 lease_id 或 token_digest 读取执行租约（V21-06, 01 §15）。
+
+        ``lease_ref`` 可为 lease_id 或 token_digest；缺省返回 None。
+        Phase 1-V21-06 实现。
+        """
+        raise NotImplementedError(
+            "V21-06: execution lease lookup is not wired in Phase 0"
+        )
+
+    def expire_or_revoke_lease(
+        self, scope_digest: str, lease_id: str, reason: str
+    ) -> ExecutionLease:
+        """把 lease 推进到 expired/revoked 终态（V21-06, 01 §15）。
+
+        契约（Phase 1-V21-06 实现）：不存在抛 KeyError；已是终态时
+        幂等返回当前记录；``reason`` 供审计引用，不落 lease 安全摘要
+        白名单。返回转换后的 lease。
+        """
+        raise NotImplementedError(
+            "V21-06: lease expiry/revocation is not wired in Phase 0"
+        )
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest: ...
 

@@ -4,6 +4,11 @@
   ``applied_state_version`` 升序），core ``rebuild_state`` 按规范序
   （幂等五元组受限 JCS 序）重放并重整版本链 —— T-Replay 确定性：同
   authoritative records + same projector_version → 相同 state digest；
+- **懒 legacy decoder**（D2/C7）：``_committed_from_projection`` 前置
+  纯函数 decoder，识别 ``v21-04.projector.1`` 旧 envelope → 断言其
+  delta 全部 typed 容器为空（否则 fail-closed）→ 以新
+  ``PROJECTOR_VERSION`` 重组 CommittedRecord；不落盘、不改存储
+  （可逆、有界）；decoder 失败经 rebuild 失败路径全域 dirty；
 - 截断判定基于存储钳制后的**有效 limit**（F2：存储层把 limit 钳制到
   ``[1, MAX_REBUILD_INPUT_LIMIT]``，用调用方原始 limit 判定会在
   limit > 钳制值时静默丢投影）：返回条数达到有效 limit → 输入可能
@@ -25,6 +30,7 @@ from __future__ import annotations
 from typing import Any, Literal, cast
 
 from agentguard_core import utc_now_iso
+from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.security_context import (
     COVERAGE_DOMAINS,
     PROJECTOR_VERSION,
@@ -33,8 +39,10 @@ from agentguard_core.security_context import (
     OnlineSecurityState,
     ProjectionError,
     SecurityStateDeltaV21,
+    delta_digest_projection,
     rebuild_state,
 )
+from agentguard_core.security_context.handlers import CONTAINER_OWNERSHIP
 
 from guard_api.storage.base import (
     MAX_REBUILD_INPUT_LIMIT,
@@ -43,11 +51,17 @@ from guard_api.storage.base import (
     StateVersionConflictError,
 )
 
+from .failures import PROJECTION_FAILURE_EXCEPTIONS
 from .models import SecurityAlert, SecurityStateProjectError
 from .store import SecurityStateStoreAccess, empty_online_state
 
 #: rebuild 有界读取默认上限（= 存储层钳制上限 MAX_REBUILD_INPUT_LIMIT）。
 DEFAULT_REBUILD_LIMIT = 1000
+
+#: 懒 legacy decoder 识别的旧 projector 版本（D2/C7）：该版本全部
+#: envelope 的 typed 容器被 unwired fail-closed 机制强制为空，重投影
+#: 无安全内容损失。
+LEGACY_PROJECTOR_VERSION = "v21-04.projector.1"
 
 _SourceRecordType = Literal[
     "policy_evaluation",
@@ -92,7 +106,11 @@ def rebuild_locked(
 
     try:
         rebuilt = rebuild_state(committed, PROJECTOR_VERSION)
-    except ProjectionError as exc:
+    except PROJECTION_FAILURE_EXCEPTIONS as exc:
+        # F7：捕获共享异常元组（与 projector.py 同一来源）：接线后
+        # typed handler 招 Provenance/Capability/Behavior 分支异常
+        # （ValueError 直接子类），只捕 ProjectionError 会穿透绕过
+        # 全域 dirty + 结构化 alert 路径（02 §3.1）。
         alert = SecurityAlert(
             reason_code=exc.reason_code,
             message=str(exc),
@@ -167,7 +185,13 @@ def rebuild_locked(
 
 
 def _committed_from_projection(row: ProjectionIdentityRecord) -> CommittedRecord:
-    """由投影登记行重组 rebuild 输入（delta_payload 是存储的权威快照）。"""
+    """由投影登记行重组 rebuild 输入（delta_payload 是存储的权威快照）。
+
+    前置懒 legacy decoder（D2/C7）：``LEGACY_PROJECTOR_VERSION`` 旧
+    envelope 经 ``_decode_legacy_delta`` 以新版本重组；不落盘、不改
+    存储，decoder 失败抛 ``ProjectionError`` 由 rebuild 失败路径全域
+    dirty fail-closed。
+    """
 
     if row.source_record_type not in SOURCE_RECORD_TYPES:
         raise ProjectionError(
@@ -176,6 +200,10 @@ def _committed_from_projection(row: ProjectionIdentityRecord) -> CommittedRecord
             "the frozen SOURCE_RECORD_TYPES enumeration",
         )
     delta = SecurityStateDeltaV21.model_validate(row.delta_payload)
+    projector_version = row.projector_version
+    if projector_version == LEGACY_PROJECTOR_VERSION:
+        delta = _decode_legacy_delta(delta)
+        projector_version = PROJECTOR_VERSION
     return CommittedRecord(
         record_id=(
             "projection:"
@@ -187,9 +215,47 @@ def _committed_from_projection(row: ProjectionIdentityRecord) -> CommittedRecord
         source_record_id=row.source_record_id,
         source_revision=row.source_revision,
         scope_digest=row.scope_digest,
-        projector_version=row.projector_version,
+        projector_version=projector_version,
         delta=delta,
         task_upsert=None,
+    )
+
+
+def _decode_legacy_delta(delta: SecurityStateDeltaV21) -> SecurityStateDeltaV21:
+    """懒 legacy decoder 纯函数（D2/C7）：旧版本 delta 重投影到新版本。
+
+    关键事实（10_决策记录 D2）：``LEGACY_PROJECTOR_VERSION`` 时期全部
+    typed 容器被 unwired fail-closed 机制强制为空，因此重投影无安全
+    内容损失：
+
+    1. 断言全部 11 个 typed 容器为空，任一非空即 fail-closed 拒绝
+       （不得静默丢弃安全内容）；
+    2. 以 ``PROJECTOR_VERSION`` 重组 delta 并重算 ``delta_digest``
+       （版本串进 digest 白名单，必须同步重算）；位置字段
+       （base/new_state_version）由 ``rebuild_state`` 重放时重整。
+
+    不落盘、不改存储：返回值仅供 rebuild 内存重放。
+    """
+
+    non_empty = sorted(
+        container for container in CONTAINER_OWNERSHIP if getattr(delta, container)
+    )
+    if non_empty:
+        raise ProjectionError(
+            "v21-04:legacy_delta_typed_content",
+            "legacy projector envelope carries non-empty typed upsert "
+            f"containers, which must be impossible for "
+            f"{LEGACY_PROJECTOR_VERSION!r}: {non_empty}",
+        )
+    if delta.projector_version != LEGACY_PROJECTOR_VERSION:
+        raise ProjectionError(
+            "v21-04:legacy_envelope_version_inconsistent",
+            "legacy projection row version does not match its delta "
+            "payload projector_version",
+        )
+    rewritten = delta.model_copy(update={"projector_version": PROJECTOR_VERSION})
+    return rewritten.model_copy(
+        update={"delta_digest": canonical_sha256(delta_digest_projection(rewritten))}
     )
 
 

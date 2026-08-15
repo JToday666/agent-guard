@@ -239,14 +239,18 @@ def test_eviction_makes_unprovable_required_domain_partial() -> None:
     assert coverage.behavior.status == "partial"
     assert "v21-04:safety_preserving_eviction" in coverage.behavior.reason_codes
 
-    # 未发生驱逐时同 plan 不降 partial（projector 未接线 → unknown）。
+    # 未发生驱逐时同 plan 不降 partial（接线后 behavior 域无驱逐无
+    # gap 无窗口需求 → 状态已知判 complete，02 §6.4）。
     coverage_clean = compute_coverage(
         state,
         plan_with_required(["behavior"]),
         projector_version=PROJECTOR_VERSION,
         task_required=False,
     )
-    assert coverage_clean.behavior.status == "unknown"
+    assert coverage_clean.behavior.status == "complete"
+    assert (
+        "v21-07:behavior_window_covered" in coverage_clean.behavior.reason_codes
+    )
 
 
 def test_no_eviction_report_keeps_state_and_leaves_no_mark() -> None:

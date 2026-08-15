@@ -16,18 +16,26 @@ import sys
 
 import pytest
 
+from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority.models import EvaluationClock, TaskFact
 from agentguard_core.decisions.evidence import RequiredCheckPlan
 from agentguard_core.security_context import (
     COVERAGE_DOMAINS,
     OnlineSecurityState,
+    SecurityStateDeltaV21,
+    delta_digest_projection,
     state_digest,
 )
 from guard_api.security_state import SecurityStateProjectError, SecurityStateService
 from guard_api.security_state.rebuild import rebuild_locked
-from guard_api.storage.base import StateVersionConflictError
+from guard_api.storage.base import ProjectionIdentityRecord, StateVersionConflictError
 from guard_api.storage.memory import MemoryControlPlaneStore
-from tests.test_v21_security_state_models import SCOPE, make_delta, make_scope
+from tests.test_v21_security_state_models import (
+    SCOPE,
+    make_delta,
+    make_scope,
+    make_source_fact,
+)
 from tests.test_v21_state_projector import make_record
 
 
@@ -185,9 +193,7 @@ def test_duplicate_projection_is_noop_and_version_unchanged() -> None:
 def test_digest_conflict_marks_dirty_without_silent_overwrite() -> None:
     service = _service()
     original = make_record(make_delta(source_record_id="rec_conflict"))
-    assert (
-        service.project_committed(original, scope_digest=SCOPE).state_version == 1
-    )
+    assert service.project_committed(original, scope_digest=SCOPE).state_version == 1
 
     # 同幂等身份、异内容（不同 projected_sequence）→ 异 delta_digest。
     forged = make_record(
@@ -215,7 +221,9 @@ def test_apply_advances_version_chain_and_watermarks() -> None:
     )
     second = service.project_committed(
         make_record(
-            make_delta(source_record_id="rec_b", base_state_version=1, projected_value=2)
+            make_delta(
+                source_record_id="rec_b", base_state_version=1, projected_value=2
+            )
         ),
         scope_digest=SCOPE,
     )
@@ -483,9 +491,7 @@ def test_snapshot_task_coverage_detects_stale_head() -> None:
     stale_head = _task_fact(revision=3)
     snapshot = service.read_snapshot(
         SCOPE,
-        **_snapshot_kwargs(
-            task_fact_head=stale_head, authoritative_head_revision=5
-        ),
+        **_snapshot_kwargs(task_fact_head=stale_head, authoritative_head_revision=5),
     )
     assert snapshot.coverage.task.status == "stale"
     assert "v21-04:task_revision_behind_head" in snapshot.coverage.task.reason_codes
@@ -493,9 +499,7 @@ def test_snapshot_task_coverage_detects_stale_head() -> None:
 
 def test_snapshot_without_task_head_is_unknown() -> None:
     service = _service()
-    snapshot = service.read_snapshot(
-        SCOPE, **_snapshot_kwargs(task_fact_head=None)
-    )
+    snapshot = service.read_snapshot(SCOPE, **_snapshot_kwargs(task_fact_head=None))
     assert snapshot.task is None
     assert snapshot.coverage.task.status == "unknown"
     assert "v21-04:no_authoritative_task" in snapshot.coverage.task.reason_codes
@@ -505,3 +509,165 @@ def _stored_state(service: SecurityStateService) -> OnlineSecurityState:
     record = service.store_access.get_security_state(SCOPE)
     assert record is not None
     return OnlineSecurityState.model_validate(record.canonical_payload)
+
+
+# ---------------------------------------------------------------------------
+# Phase -1a：crash 窗口自愈（02 §4.1 版本领先/缺失 → reconcile/rebuild）
+# ---------------------------------------------------------------------------
+
+
+def _write_envelope_only(
+    service: SecurityStateService, delta: SecurityStateDeltaV21
+) -> None:
+    """手工写 projection envelope 而不执行 CAS：模拟崩溃窗口（02 §3）。
+
+    冻结顺序为先 record_projection 再 cas_security_state；崩溃发生在
+    两者之间 → envelope 存在、state 停在原版本。
+    """
+
+    service.store_access.record_projection(
+        ProjectionIdentityRecord(
+            scope_digest=delta.scope_digest,
+            source_record_type=delta.source.source_record_type,
+            source_record_id=delta.source.source_record_id,
+            source_revision=delta.source.source_revision,
+            projector_version=delta.projector_version,
+            delta_digest=canonical_sha256(delta_digest_projection(delta)),
+            delta_payload=delta.model_dump(mode="json"),
+            applied_state_version=delta.new_state_version,
+            created_at="2026-08-15T00:00:00Z",
+        )
+    )
+
+
+def test_crash_window_with_version_advanced_self_heals_via_rebuild() -> None:
+    # 崩溃窗口 + 版本已被其他投影推进：重放必须走 rebuild 自愈，
+    # 而非误判为 projector failure（base_state_version_mismatch）。
+    service = _service()
+    delta_r = make_delta(source_record_id="rec_crash_a")
+    record_r = make_record(delta_r)
+    # 1) R 投影时崩溃：envelope 已登记，CAS 未执行，state 停在 0。
+    _write_envelope_only(service, delta_r)
+    assert service.store_access.get_security_state(SCOPE) is None
+
+    # 2) 重启后 R2 先行投影：state 0→1（版本已被推进）。
+    second = service.project_committed(
+        make_record(make_delta(source_record_id="rec_crash_b", projected_value=2)),
+        scope_digest=SCOPE,
+    )
+    assert second.outcome == "applied"
+    assert second.state_version == 1
+
+    # 3) 重放 R：自愈成功 —— 不抛错、无告警、不置 dirty。
+    replayed = service.project_committed(record_r, scope_digest=SCOPE)
+    assert replayed.outcome == "applied"
+    assert replayed.state_version == 2
+    assert "v21-04:crash_window_rebuild_recovery" in replayed.reason_codes
+
+    stored = service.store_access.get_security_state(SCOPE)
+    assert stored is not None
+    assert stored.dirty is False
+    assert stored.dirty_domains == []
+    final_state = OnlineSecurityState.model_validate(stored.canonical_payload)
+    assert final_state.dirty_domains == []
+
+    # T-Replay 确定性：与同两条记录按序投影后 rebuild 的结果等价。
+    reference = _service()
+    reference.project_committed(record_r, scope_digest=SCOPE)
+    reference.project_committed(
+        make_record(
+            make_delta(
+                source_record_id="rec_crash_b",
+                base_state_version=1,
+                projected_value=2,
+            )
+        ),
+        scope_digest=SCOPE,
+    )
+    rebuilt, alert = rebuild_locked(reference.store_access, SCOPE)
+    assert alert is None
+    assert state_digest(final_state) == state_digest(rebuilt)
+
+
+def test_crash_window_without_version_advance_still_uses_incremental_apply() -> None:
+    # 崩溃窗口 + 版本未推进：维持现状走 core 增量 apply（防回归）。
+    service = _service()
+    delta_r = make_delta(source_record_id="rec_crash_solo")
+    record_r = make_record(delta_r)
+    # 崩溃窗口：envelope 存在，state 停在 0（base == current）。
+    _write_envelope_only(service, delta_r)
+
+    # 重放 R：仍走增量 apply 成功，行为与修复前一致。
+    replayed = service.project_committed(record_r, scope_digest=SCOPE)
+    assert replayed.outcome == "applied"
+    assert replayed.state_version == 1
+    # core 增量 apply 分支的 reason code（非 rebuild 自愈路径）。
+    assert "v21-04:delta_applied" in replayed.reason_codes
+    assert "v21-04:crash_window_rebuild_recovery" not in replayed.reason_codes
+
+    stored = service.store_access.get_security_state(SCOPE)
+    assert stored is not None
+    assert stored.dirty is False
+    # 幂等登记仍只有一条（重放不重复登记）。
+    assert len(service.store_access.list_rebuild_inputs(SCOPE, limit=10)) == 1
+
+
+# ---------------------------------------------------------------------------
+# F7：rebuild 重放中 typed handler fail-closed → 全域 dirty + 结构化 alert
+# ---------------------------------------------------------------------------
+
+
+def _source_upsert_delta(
+    source_record_id: str,
+    sources: list,
+    *,
+    base: int,
+    projected_value: int,
+) -> SecurityStateDeltaV21:
+    """携带 source_upserts 的 envelope（digest 按更新后内容重算）。"""
+    delta = make_delta(
+        source_record_id=source_record_id,
+        base_state_version=base,
+        projected_value=projected_value,
+    ).model_copy(update={"source_upserts": list(sources)})
+    return delta.model_copy(
+        update={
+            "delta_digest": canonical_sha256(delta_digest_projection(delta))
+        }
+    )
+
+
+def test_rebuild_typed_handler_failure_marks_all_domains_dirty() -> None:
+    # F7：接线后 typed handler 抛 Provenance/Capability/Behavior 分支异常
+    # （ValueError 直接子类，非 ProjectionError 子类）；rebuild 必须用
+    # 共享异常元组（failures.PROJECTION_FAILURE_EXCEPTIONS）捕获并走
+    # 全域 dirty + 结构化 alert 路径，不得穿透。
+    service = _service()
+    first = _source_upsert_delta(
+        "rec_rebuild_a",
+        [make_source_fact(source_id="src_rebuild")],
+        base=0,
+        projected_value=1,
+    )
+    # 同 source_id 异内容（F6 fail-closed 语义）：rebuild 重放到第二条
+    # envelope 时 handler 抛 ProvenanceProjectionError。
+    conflict = _source_upsert_delta(
+        "rec_rebuild_b",
+        [make_source_fact(source_id="src_rebuild", trust="trusted")],
+        base=1,
+        projected_value=2,
+    )
+    _write_envelope_only(service, first)
+    _write_envelope_only(service, conflict)
+
+    _state, alert = rebuild_locked(service.store_access, SCOPE)
+    assert alert is not None
+    assert alert.reason_code == "v21-05:source_identity_conflict"
+    assert alert.scope_digest == SCOPE
+    assert set(alert.domains) == set(COVERAGE_DOMAINS)
+
+    # 全域 dirty：失败不得解释为 complete（02 §3.1）。
+    stored = service.store_access.get_security_state(SCOPE)
+    assert stored is not None
+    assert stored.dirty is True
+    assert set(stored.dirty_domains) == set(COVERAGE_DOMAINS)

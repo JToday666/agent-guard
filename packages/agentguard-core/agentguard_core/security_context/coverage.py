@@ -1,4 +1,4 @@
-"""Coverage 计算与 gap localized degradation（V21-04, 02 §6/§7）。
+"""Coverage 计算与 gap localized degradation（V21-04 总分派 + V21-05/06/07 域接线，02 §6/§7）。
 
 复用 ``decisions/evidence.py`` 已冻结的 ``DomainCoverage`` /
 ``CoverageMap`` 模型（V21-01，不得改动）。
@@ -6,9 +6,10 @@
 - **task 域**按 02 §6.1 完整实现五状态（complete/partial/stale/unknown/
   not_applicable）；task 域不走 delta 投影 —— coverage 直接对照权威
   ``TaskFact`` head 判定，天然支持 stale 检测；
-- **其余 6 域 fail-closed**：本期 projector 未接线，永不返回
-  complete/partial/stale，只可能 unknown（projector 未接线）或
-  not_applicable（policy 声明不需要）；
+- **其余 6 域**按 ``coverage_context.DOMAIN_COVERAGE_DISPATCH`` 分派到
+  各域判定纯函数（V21-05 三域 / V21-06 capability / V21-07 两域）；
+  既有优先级保留在总分派层且先于域函数：not_required→not_applicable、
+  dirty→unknown、unprovable→partial；
 - **gap 不是全局 ASK**（02 §7）：``localize_gaps`` 按四级优先级
   （parent_event_ids → stable refs → RequiredCheckPlan window →
   sequence interval 兜底）把 gap 定位到相关域，仅相关域降级。
@@ -30,6 +31,7 @@ from ..signals.models import (
 from .facts import GapRange
 
 if TYPE_CHECKING:
+    from .coverage_context import CoverageContext
     from .eviction import EvictionReport
     from .state import OnlineSecurityState
 
@@ -38,6 +40,7 @@ __all__ = [
     "GapContext",
     "RequiredHistoryWindow",
     "compute_coverage",
+    "default_coverage_context",
     "localize_gaps",
 ]
 
@@ -165,6 +168,44 @@ def _digest_well_formed(digest: str) -> bool:
     return digest.startswith(("sha256:", "hmac-sha256:")) and len(digest) > 10
 
 
+def default_coverage_context(
+    state: OnlineSecurityState,
+    plan: RequiredCheckPlan,
+    *,
+    eviction_report: EvictionReport | None = None,
+    authoritative_head_revision: int | None = None,
+) -> "CoverageContext":
+    """从 state + 现有入参构建默认 ``CoverageContext``（最小侵入工厂）。
+
+    口径声明（调用方无法立即构造完整 ctx 时的默认口径）：
+
+    - ``provider_available`` 缺省为空映射：域函数把键缺失视为
+      **未报告**（不推断为不可用），等效默认 True；
+    - ``truncated`` 缺省为空：未报告任何 bounded lookup 截断；
+    - ``gaps`` 缺省为空：gap localized 降级由调用方经
+      ``localize_gaps`` 独立消费，不在本工厂隐式注入；
+    - ``gap_context`` 缺省 None：无当前动作依赖信息。
+
+    该口径**不掩盖 fail-closed**：无证据时域函数仍各自降
+    unknown/partial（source refs 不可解析、memory 状态不可用等）；
+    需要精确降级的调用方应显式构造完整 ctx 传入 ``compute_coverage``。
+    """
+    # 函数级导入打破 coverage ↔ coverage_context 导入环（表本体在
+    # coverage_context 静态装配，无运行时注册）。
+    from .coverage_context import CoverageContext
+
+    return CoverageContext(
+        plan=plan,
+        watermarks=state.watermarks,
+        gap_context=None,
+        gaps=(),
+        eviction_report=eviction_report,
+        truncated=(),
+        provider_available={},
+        authoritative_head_revision=authoritative_head_revision,
+    )
+
+
 def compute_coverage(
     state: OnlineSecurityState,
     plan: RequiredCheckPlan,
@@ -173,22 +214,37 @@ def compute_coverage(
     task_required: bool | None = None,
     authoritative_head_revision: int | None = None,
     eviction_report: EvictionReport | None = None,
+    context: "CoverageContext | None" = None,
 ) -> CoverageMap:
     """7 域 coverage 判定（02 §6 判定表）。
 
     - task：02 §6.1 五状态完整实现（``task_required`` 缺省时按 plan
       推断：``"task" in plan.required_domains``）；
-    - 其余 6 域 fail-closed：projector 未接线 → ``unknown``；policy
-      声明不需要（不在 plan.required_domains）→ ``not_applicable``；
-      **永不返回 complete/partial/stale**；
-    - dirty 域覆盖判定：``state.dirty_domains`` 中的域 fail-closed 降
-      ``unknown``（02 §3：不得把 projector 失败解释为 complete）；
-      **task 域因权威直读豁免 dirty 降级**（本期冻结决策）：task 域
-      不走 delta 投影，snapshot 直读权威 TaskFact head，投影存储脏态
-      不影响 task 判定；其余 6 域 dirty 仍降 ``unknown``；
+    - 其余 6 域：既有优先级保留在总分派层且先于域函数 ——
+      不在 ``plan.required_domains`` → ``not_applicable``；dirty 域 →
+      ``unknown``；``eviction_report.unprovable_domains`` 命中 →
+      ``partial``；随后按 ``DOMAIN_COVERAGE_DISPATCH`` 分派到域判定
+      纯函数（消费 ``context`` 完整上下文，C3）；
+    - ``context`` 缺省时经 ``default_coverage_context`` 从 state +
+      现有入参构造（口径见该工厂 docstring：provider_available 默认
+      未报告、truncated 默认空，不掩盖 fail-closed）；
+    - dirty 域覆盖判定：**task 域因权威直读豁免 dirty 降级**（本期
+      冻结决策）：task 域不走 delta 投影，snapshot 直读权威 TaskFact
+      head，投影存储脏态不影响 task 判定；其余 6 域 dirty 仍降
+      ``unknown``；
     - 安全保持型驱逐：``eviction_report.unprovable_domains ∩
       plan.required_domains`` 降 ``partial``（02 §5.1）。
     """
+    if context is None:
+        context = default_coverage_context(
+            state,
+            plan,
+            eviction_report=eviction_report,
+            authoritative_head_revision=authoritative_head_revision,
+        )
+    # 函数级导入打破 coverage ↔ coverage_context 导入环。
+    from .coverage_context import DOMAIN_COVERAGE_DISPATCH
+
     if task_required is None:
         task_required = "task" in plan.required_domains
 
@@ -196,16 +252,26 @@ def compute_coverage(
     required = set(plan.required_domains)
     dirty = set(state.dirty_domains)
     unprovable = (
-        set(eviction_report.unprovable_domains) if eviction_report else set()
+        set(context.eviction_report.unprovable_domains)
+        if context.eviction_report
+        else set()
     )
 
     coverages: dict[CoverageDomain, DomainCoverage] = {}
+    # F5：task 域 stale 检测的 head revision 双来源合并 —— 显式入参
+    # 优先，缺省时消费 context 携带的 authoritative_head_revision
+    # （C3：显式构造完整 ctx 的调用方不得被静默忽略）。
+    head_revision = (
+        authoritative_head_revision
+        if authoritative_head_revision is not None
+        else context.authoritative_head_revision
+    )
     for domain in COVERAGE_DOMAINS:
         if domain == "task":
             coverage = _task_coverage(
                 state,
                 task_required=task_required,
-                authoritative_head_revision=authoritative_head_revision,
+                authoritative_head_revision=head_revision,
                 projector_version=projector_version,
                 as_of_sequence=as_of,
             )
@@ -234,13 +300,7 @@ def compute_coverage(
                 reason_codes=["v21-04:safety_preserving_eviction"],
             )
         else:
-            coverage = DomainCoverage(
-                domain=domain,
-                status="unknown",
-                as_of_sequence=as_of,
-                projector_version=projector_version,
-                reason_codes=["v21-04:projector_not_wired"],
-            )
+            coverage = DOMAIN_COVERAGE_DISPATCH[domain](state, context)
         coverages[domain] = coverage
 
     return CoverageMap(

@@ -17,6 +17,7 @@ from .coverage import (
     GapContext,
     RequiredHistoryWindow,
     compute_coverage,
+    default_coverage_context,
     localize_gaps,
 )
 from .delta import (
@@ -121,6 +122,7 @@ __all__ = [
     "build_snapshot",
     "compare_sequence_refs",
     "compute_coverage",
+    "default_coverage_context",
     "delta_digest_projection",
     "fact_digest",
     "fact_digest_projection",
