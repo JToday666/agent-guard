@@ -215,6 +215,53 @@ def test_default_path_resolves_to_repo_freeze_dir() -> None:
     assert path.is_file()
 
 
+# ---------------------------------------------------------------------------
+# 包内副本（package data）与 docs 冻结真值一致性（wheel 部署可用，防漂移）
+# ---------------------------------------------------------------------------
+
+
+def test_packaged_matrix_is_byte_identical_to_freeze_truth() -> None:
+    """包内副本与 docs 冻结真值逐字节一致：漂移即测试失败。
+
+    wheel 安装（Dockerfile 部署）不含仓库 docs 目录，运行时默认加载
+    走随包分发的 package data 副本；两副本任何字节差异都意味着部署
+    行为与冻结契约脱钩，必须在此拦截。
+
+    二进制口径比对：``read_text`` 的 universal newline 会把 CRLF 折叠
+    为 LF，会掩盖行尾差异，故用 ``read_bytes``。
+    """
+    from importlib import resources
+
+    packaged_bytes = (
+        resources.files("agentguard_core.decisions.data")
+        .joinpath("fusion_matrix.yaml")
+        .read_bytes()
+    )
+    frozen_bytes = FUSION_MATRIX_YAML.read_bytes()
+    assert packaged_bytes == frozen_bytes
+
+
+def test_default_load_uses_packaged_copy_and_matches_docs_semantics() -> None:
+    """默认加载（包内副本）与从 docs 真值显式加载语义一致。"""
+    default_matrix = load_fusion_matrix()
+    docs_matrix = load_fusion_matrix(FUSION_MATRIX_YAML)
+    assert default_matrix.model_dump() == docs_matrix.model_dump()
+
+
+def test_packaged_matrix_resource_is_importlib_resolvable() -> None:
+    """importlib.resources 可解析包内副本（wheel/源码检出均可用）。"""
+    from importlib import resources
+
+    resource = (
+        resources.files("agentguard_core.decisions.data")
+        .joinpath("fusion_matrix.yaml")
+    )
+    assert resource.is_file()
+    # 与 SHA256SUMS 口径无关：直接校验可解析为合法矩阵结构。
+    raw = json.loads(resource.read_text(encoding="utf-8"))
+    assert raw["schema_version"] == "2.1-final-candidate"
+
+
 def test_fusion_matrix_passes_jsonschema_cross_check() -> None:
     """依赖无关校验与冻结 JSON Schema 同口径（交叉验证）。"""
     schema = json.loads(FUSION_MATRIX_SCHEMA.read_text(encoding="utf-8"))

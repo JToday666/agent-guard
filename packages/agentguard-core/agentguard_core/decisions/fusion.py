@@ -28,6 +28,13 @@
 selector/disposition。core 包只声明 pydantic 依赖，因此 YAML（实为
 JSON-compatible）用标准库 ``json`` 解析、schema 校验用内置等价实现，
 不新增第三方依赖。
+
+部署口径（wheel 可用）：默认加载路径是随包分发的 package data
+``agentguard_core/decisions/data/fusion_matrix.yaml``（经
+``importlib.resources`` 解析，pyproject package-data 打包），wheel 安装
+后不依赖仓库 ``docs`` 目录；该副本与仓库冻结真值
+（``default_fusion_matrix_path`` 指向的 docs 契约冻结目录）由一致性
+测试保证逐字节一致（防漂移）。
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from importlib import resources
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -468,6 +476,10 @@ def default_fusion_matrix_path() -> Path:
     ``packages/agentguard-core/agentguard_core/decisions/``，向上 4 层即
     仓库根。在 worktree 中同样解析到 worktree 自身根目录，避免误读
     主工作区。
+
+    注意：此路径仅在仓库检出（源码/测试）场景可用；wheel 安装后
+    ``docs`` 目录不存在，运行时默认加载改走随包分发的 package data
+    副本（见 ``_read_packaged_matrix_text``）。
     """
     return (
         Path(__file__).resolve().parents[4]
@@ -475,6 +487,27 @@ def default_fusion_matrix_path() -> Path:
         / "AgentGuard_Core_V2.1_Final_Contract_Freeze"
         / "fusion_matrix.yaml"
     )
+
+
+def _read_packaged_matrix_text() -> str:
+    """读取随包分发的冻结矩阵副本（``importlib.resources``）。
+
+    副本位于 ``agentguard_core/decisions/data/fusion_matrix.yaml``，经
+    pyproject ``package-data`` 打包进 wheel，因此 wheel 安装（如
+    Dockerfile 部署）下不依赖仓库 ``docs`` 目录。副本与 docs 冻结真值
+    由一致性测试断言逐字节一致，漂移即测试失败。
+    """
+    try:
+        return (
+            resources.files("agentguard_core.decisions.data")
+            .joinpath("fusion_matrix.yaml")
+            .read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, ModuleNotFoundError, OSError) as exc:
+        raise FusionMatrixError(
+            "cannot read packaged fusion matrix resource "
+            f"'agentguard_core/decisions/data/fusion_matrix.yaml': {exc}"
+        ) from exc
 
 
 _FUSION_MATRIX_LOCK = threading.Lock()
@@ -489,36 +522,42 @@ def load_fusion_matrix(path: str | Path | None = None) -> FusionMatrix:
       ``json`` 解析，不引入第三方 YAML 依赖；
     - 校验口径与 ``fusion_matrix.schema.json`` 一致（见
       ``_validate_raw_matrix``），并额外禁止未定义的 selector/disposition；
-    - ``path is None`` 时结果缓存为模块级常量：一次加载，禁止每请求读盘；
+    - ``path is None`` 时从随包分发的 package data 副本加载（wheel 安装
+      可用），结果缓存为模块级常量：一次加载，禁止每请求读盘；
       显式传入 ``path`` 不加缓存（仅供测试/工具对候选文件做校验）。
     """
     global _FUSION_MATRIX_CACHE
     with _FUSION_MATRIX_LOCK:
         if path is None and _FUSION_MATRIX_CACHE is not None:
             return _FUSION_MATRIX_CACHE
-        resolved = Path(path) if path is not None else default_fusion_matrix_path()
-        try:
-            text = resolved.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise FusionMatrixError(
-                f"cannot read frozen fusion matrix at {resolved}: {exc}"
-            ) from exc
+        if path is not None:
+            resolved = Path(path)
+            try:
+                text = resolved.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise FusionMatrixError(
+                    f"cannot read frozen fusion matrix at {resolved}: {exc}"
+                ) from exc
+            source_name = resolved.name
+        else:
+            text = _read_packaged_matrix_text()
+            source_name = "fusion_matrix.yaml (packaged)"
         try:
             raw = json.loads(text)
         except json.JSONDecodeError as exc:
             raise FusionMatrixError(
-                f"{resolved.name} is not JSON-compatible YAML: {exc}"
+                f"{source_name} is not JSON-compatible YAML: {exc}"
             ) from exc
         if not isinstance(raw, dict):
             raise FusionMatrixError(
-                f"{resolved.name}: top-level value must be an object"
+                f"{source_name}: top-level value must be an object"
             )
         _validate_raw_matrix(raw)
         try:
             matrix = FusionMatrix.from_raw(raw)
         except Exception as exc:  # pydantic ValidationError 等
             raise FusionMatrixError(
-                f"{resolved.name} failed typed validation: {exc}"
+                f"{source_name} failed typed validation: {exc}"
             ) from exc
         if path is None:
             _FUSION_MATRIX_CACHE = matrix
