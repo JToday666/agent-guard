@@ -61,11 +61,15 @@
         "gate": "approval_released",
         "invocation_count": 1,
         "receipts": [
-          { "kind": "approval_release", "execution_status": "unknown" },
+          {
+            "kind_any": ["approval_release", "tool_call_started"],
+            "execution_status_any": ["unknown"],
+            "note": "放行证据 kind 按 runtime 而异：OpenClaw 为 approval_release(unknown)，LangGraph 为 tool_call_started 观察。"
+          },
           { "kind": "execution_completed", "execution_status": "executed" }
         ],
         "c2_required": true,
-        "notes": "approval_release 保持 unknown；terminal fact 由 C2 闭环补齐。"
+        "notes": "放行回执保持未观察终态；terminal fact 由 C2 闭环补齐。"
       }
     },
     {
