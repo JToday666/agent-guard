@@ -138,12 +138,14 @@ RTE Track ───────────────────────�
 - 没有 Receipt 就宣称 `not_invoked`；
 - Runtime capability 未被版本化实证时夸大支持。
 
-## 7. 推荐仓库位置
+## 7. 仓库位置
 
-若后续决定写入仓库，建议放置：
+本设计包位于：
 
 ```text
-docs/AgentGuard_Context_Isolation_Taint_Tracking_v1_RC/
+docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/
 ```
 
-本生成包本身不修改 GitHub 仓库。
+本包已于 CT-PR-00 入库，并作为机器校验源（`scripts/ct-contract-tools.py` + `tests/test_ct_contract_freeze.py`）。
+
+> **维护注记**：本特性分支（`feat/ct-pr-00-contract-freeze`）在隔离 worktree `.tmp/ct-worktree` 中开发；合入 dev 后须执行 `git worktree remove .tmp/ct-worktree` 并删除本特性分支。

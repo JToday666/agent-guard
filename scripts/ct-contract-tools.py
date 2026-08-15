@@ -40,7 +40,14 @@ if _CORE_PATH.exists() and str(_CORE_PATH) not in sys.path:
 
 
 def _read_json_compatible_yaml(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"{path.name}: file does not exist") from exc
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path.name}: not JSON-compatible YAML ({exc})") from exc
     if not isinstance(value, dict):
         raise ValueError(f"{path.name}: top-level value must be an object")
     return value
@@ -77,6 +84,12 @@ def _validate_metadata(contract: dict[str, Any]) -> None:
         raise ValueError("CT_FREEZE_METADATA.yaml has an unsupported freeze status")
     if contract.get("status") != status:
         raise ValueError("CT metadata and contract freeze statuses differ")
+    baseline_ref = metadata.get("design_baseline_ref")
+    if baseline_ref != contract["repository_baseline"]["ref"]:
+        raise ValueError(
+            "CT_FREEZE_METADATA.yaml design_baseline_ref differs from "
+            "contract repository_baseline.ref"
+        )
     if status == "frozen":
         signoff = metadata.get("review_signoff")
         if not isinstance(signoff, dict) or not all(
@@ -85,6 +98,10 @@ def _validate_metadata(contract: dict[str, Any]) -> None:
         ):
             raise ValueError(
                 "frozen metadata requires explicit review sign-off evidence"
+            )
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(signoff["confirmed_at"])):
+            raise ValueError(
+                "review_signoff.confirmed_at must be an ISO date (YYYY-MM-DD)"
             )
 
 
@@ -185,13 +202,25 @@ def _validate_v21_cross_consistency(contract: dict[str, Any]) -> None:
 
     matrix = json.loads(machine_truth.read_text(encoding="utf-8"))
     matrix_taints: set[str] = set()
-    for group in ("flow_rules", "influence_rules", "memory_rules", "behavior_rules"):
-        for rule in matrix.get(group, []):
+    rule_groups = ("flow_rules", "influence_rules", "memory_rules", "behavior_rules")
+    for group in rule_groups:
+        rules = matrix.get(group)
+        if not isinstance(rules, list):
+            raise ValueError(
+                f"fusion matrix is missing rule group '{group}'; "
+                "refusing to skip taint extraction"
+            )
+        for rule in rules:
             taint = rule.get("taint")
             if isinstance(taint, str):
                 matrix_taints.add(taint)
             elif isinstance(taint, list):
                 matrix_taints.update(item for item in taint if isinstance(item, str))
+    if not matrix_taints:
+        raise ValueError(
+            "fusion matrix taint extraction yielded an empty set; "
+            "the matrix structure likely drifted"
+        )
     if not matrix_taints <= ct_taints:
         unknown = sorted(matrix_taints - ct_taints)
         raise ValueError(
@@ -236,7 +265,8 @@ def _checksum_entries() -> list[tuple[str, int, str]]:
         content = path.read_bytes()
         if path.suffix in {".json", ".md", ".yaml"}:
             content = content.replace(b"\r\n", b"\n")
-        entries.append((path.name, len(content), hashlib.sha256(content).hexdigest()))
+        relative = path.relative_to(CT_FREEZE_DIR).as_posix()
+        entries.append((relative, len(content), hashlib.sha256(content).hexdigest()))
     return entries
 
 
@@ -245,8 +275,8 @@ def render_checksums() -> str:
         "# 文件清单与 SHA256",
         "",
     ]
-    for name, size, digest in _checksum_entries():
-        lines.append(f"- `{name}` — {size} bytes — `sha256:{digest}`")
+    for relative, size, digest in _checksum_entries():
+        lines.append(f"- `{relative}` — {size} bytes — `sha256:{digest}`")
     return "\n".join(lines) + "\n"
 
 
@@ -279,7 +309,7 @@ def main() -> int:
     checksums_mode.add_argument("--verify", action="store_true")
     subparsers.add_parser(
         "all",
-        help="validate the package and refresh the SHA256SUMS.md manifest",
+        help="validate first, then refresh and verify the SHA256SUMS.md manifest",
     )
     args = parser.parse_args()
 
@@ -288,8 +318,8 @@ def main() -> int:
     elif args.command == "checksums":
         write_checksums() if args.write else verify_checksums()
     else:
-        write_checksums()
         validate()
+        write_checksums()
         verify_checksums()
     return 0
 

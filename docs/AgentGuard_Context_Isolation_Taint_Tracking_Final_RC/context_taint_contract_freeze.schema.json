@@ -12,13 +12,16 @@
   ],
   "properties": {
     "schema_version": {"const": "ct-1.0"},
-    "status": {"enum": ["candidate-for-freeze", "frozen"]},
+    "status": {
+      "description": "两档语义为设计需求：candidate-for-freeze 允许在冻结评审期使用，frozen 表示已获仓库 owner 签字；校验工具对 frozen 额外强制 review_signoff。",
+      "enum": ["candidate-for-freeze", "frozen"]
+    },
     "repository_baseline": {
       "type": "object",
       "required": ["repo", "ref"],
       "properties": {
         "repo": {"const": "JToday666/agent-guard"},
-        "ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+        "ref": {"const": "f3f650a54921408d4cee3ed2a4a6b3932a040c5f"}
       },
       "additionalProperties": false
     },
@@ -260,19 +263,27 @@
       "type": "array",
       "minItems": 18,
       "maxItems": 18,
-      "items": {
-        "type": "object",
-        "required": ["id", "answer_ref", "decision_ref"],
-        "properties": {
-          "id": {"type": "string", "pattern": "^CT-Q-(0[1-9]|1[0-8])$"},
-          "answer_ref": {
-            "type": "string",
-            "pattern": "^12_未决问题处置与决策记录\\.md#ct-q-(0[1-9]|1[0-8])$"
-          },
-          "decision_ref": {"type": "string", "minLength": 1}
-        },
-        "additionalProperties": false
-      }
+      "prefixItems": [
+        {"$ref": "#/$defs/review_decision_CT-Q-01"},
+        {"$ref": "#/$defs/review_decision_CT-Q-02"},
+        {"$ref": "#/$defs/review_decision_CT-Q-03"},
+        {"$ref": "#/$defs/review_decision_CT-Q-04"},
+        {"$ref": "#/$defs/review_decision_CT-Q-05"},
+        {"$ref": "#/$defs/review_decision_CT-Q-06"},
+        {"$ref": "#/$defs/review_decision_CT-Q-07"},
+        {"$ref": "#/$defs/review_decision_CT-Q-08"},
+        {"$ref": "#/$defs/review_decision_CT-Q-09"},
+        {"$ref": "#/$defs/review_decision_CT-Q-10"},
+        {"$ref": "#/$defs/review_decision_CT-Q-11"},
+        {"$ref": "#/$defs/review_decision_CT-Q-12"},
+        {"$ref": "#/$defs/review_decision_CT-Q-13"},
+        {"$ref": "#/$defs/review_decision_CT-Q-14"},
+        {"$ref": "#/$defs/review_decision_CT-Q-15"},
+        {"$ref": "#/$defs/review_decision_CT-Q-16"},
+        {"$ref": "#/$defs/review_decision_CT-Q-17"},
+        {"$ref": "#/$defs/review_decision_CT-Q-18"}
+      ],
+      "items": false
     }
   },
   "additionalProperties": false,
@@ -286,6 +297,28 @@
         "initial_taints": {"const": ["UNTRUSTED"]}
       },
       "additionalProperties": false
+    },
+    "review_decision_CT-Q-01": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-01"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-01"}, "decision_ref": {"const": "D-04"}}, "additionalProperties": false},
+    "review_decision_CT-Q-02": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-02"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-02"}, "decision_ref": {"const": "yaml:claim_rules"}}, "additionalProperties": false},
+    "review_decision_CT-Q-03": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-03"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-03"}, "decision_ref": {"const": "CT-F0-07"}}, "additionalProperties": false},
+    "review_decision_CT-Q-04": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-04"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-04"}, "decision_ref": {"const": "D-07"}}, "additionalProperties": false},
+    "review_decision_CT-Q-05": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-05"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-05"}, "decision_ref": {"const": "CT-PR-04"}}, "additionalProperties": false},
+    "review_decision_CT-Q-06": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-06"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-06"}, "decision_ref": {"const": "CT-F0-09"}}, "additionalProperties": false},
+    "review_decision_CT-Q-07": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-07"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-07"}, "decision_ref": {"const": "CT-F0-08"}}, "additionalProperties": false},
+    "review_decision_CT-Q-08": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-08"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-08"}, "decision_ref": {"const": "D-09"}}, "additionalProperties": false},
+    "review_decision_CT-Q-09": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-09"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-09"}, "decision_ref": {"const": "yaml:declassification.protected_labels"}}, "additionalProperties": false},
+    "review_decision_CT-Q-10": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-10"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-10"}, "decision_ref": {"const": "D-10"}}, "additionalProperties": false},
+    "review_decision_CT-Q-11": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-11"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-11"}, "decision_ref": {"const": "CT-F0-05"}}, "additionalProperties": false},
+    "review_decision_CT-Q-12": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-12"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-12"}, "decision_ref": {"const": "D-12"}}, "additionalProperties": false},
+    "review_decision_CT-Q-13": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-13"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-13"}, "decision_ref": {"const": "D-11"}}, "additionalProperties": false},
+    "review_decision_CT-Q-14": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-14"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-14"}, "decision_ref": {"const": "CT-F0-04"}}, "additionalProperties": false},
+    "review_decision_CT-Q-15": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-15"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-15"}, "decision_ref": {"const": "R16"}}, "additionalProperties": false},
+    "review_decision_CT-Q-16": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-16"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-16"}, "decision_ref": {"const": "D-06"}}, "additionalProperties": false},
+    "review_decision_CT-Q-17": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-17"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-17"}, "decision_ref": {"const": "R17"}}, "additionalProperties": false},
+    "review_decision_CT-Q-18": {"$ref": "#/$defs/review_decision_base", "properties": {"id": {"const": "CT-Q-18"}, "answer_ref": {"const": "12_未决问题处置与决策记录.md#ct-q-18"}, "decision_ref": {"const": "INT-PR-04"}}, "additionalProperties": false},
+    "review_decision_base": {
+      "type": "object",
+      "required": ["id", "answer_ref", "decision_ref"]
     }
   }
 }
