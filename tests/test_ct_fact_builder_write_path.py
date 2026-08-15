@@ -1,8 +1,8 @@
 """CT-PR-02b 写侧事件契约测试（ct-fact-1，无接线）。
 
-本提交覆盖 02 §8.5 memory_write_proposed：transient MemoryFact +
-persisted_to 流；口径依据 04 §12 三态 / §15 ALLOW ≠ TRUST、
-02 §11 T-FactReplay（确定性、乱序无关）、§13 fail-closed。
+口径依据：02 §8.5-8.6（memory_write_proposed / message_send_proposed、
+§13 failure contract）、04 §12 三态 / §15 ALLOW ≠ TRUST、§4 sent_to
+evidence-defined、02 §11 T-FactReplay（确定性、乱序无关）。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from agentguard_core.security_context.facts import MemoryFact
 from guard_api.security_state.fact_authority import VerifiedSourceDescriptor
 from guard_api.security_state.fact_builder import build_transient_facts
 
-from tests.test_ct_fact_builder import SCOPE, _event, _inputs
+from tests.test_ct_fact_builder import SCOPE, _action_ir, _event, _inputs
 
 REF = "source:web:evt-0:0"
 
@@ -69,6 +69,27 @@ def _memory_event(
     if action_id is not None:
         payload["action_id"] = action_id
     return _event("memory_write_proposed", payload)
+
+
+def _send_event(
+    *,
+    channel: str = "email",
+    recipient: str = "User@Example.COM",
+    sensitive: bool = False,
+):
+    payload: dict = {
+        "channel": channel,
+        "recipient": recipient,
+        "content_preview": "",
+        "contains_sensitive_data": sensitive,
+        "sanitized": False,
+        "derived_resources": [],
+    }
+    return _event("message_send_proposed", payload)
+
+
+def _action_with_data_refs(*refs: str):
+    return _action_ir().model_copy(update={"data_refs": list(refs)})
 
 
 # --- 02 §8.5 memory_write_proposed：三态判定 ------------------------------
@@ -215,3 +236,95 @@ def test_memory_write_unordered_inputs_are_deterministic() -> None:
     assert first.bundle_digest == second.bundle_digest
     assert first.memory_facts[0].source_refs == second.memory_facts[0].source_refs
     assert first.memory_facts[0].source_refs == ["ref-a", "ref-b"]
+
+
+# --- 02 §8.6 message_send_proposed：sink 归一化与 sent_to 流 ---------------
+
+
+@pytest.mark.parametrize(
+    ("channel", "recipient", "expected_sink"),
+    [
+        ("Email", "User@Example.COM", "mailto:User@example.com"),
+        (
+            "webhook",
+            "https://Hooks.Example.com:443/path?b=2&a=1",
+            "https://hooks.example.com/path?a&b",
+        ),
+        ("sms", "+15551234567", "other://+15551234567"),
+    ],
+)
+def test_message_send_stable_refs_build_exact_sent_to(
+    channel: str, recipient: str, expected_sink: str
+) -> None:
+    # 04 §4 sent_to evidence-defined：稳定 ActionIR data_refs →
+    # exact/deterministic；sink 取 V21-02 canonical_id。
+    bundle = build_transient_facts(
+        event=_send_event(channel=channel, recipient=recipient),
+        inputs=_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
+    )
+    (flow,) = bundle.flow_facts
+    assert flow.source_ref == "data:artifact-1"
+    assert flow.target_ref == expected_sink
+    assert (flow.relation, flow.strength, flow.origin) == (
+        "sent_to",
+        "exact",
+        "deterministic",
+    )
+    assert flow.taints == []
+    assert bundle.degradations == ()
+
+
+def test_message_send_sensitive_evidence_taints_sent_to() -> None:
+    bundle = build_transient_facts(
+        event=_send_event(sensitive=True),
+        inputs=_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
+    )
+    assert bundle.flow_facts[0].taints == ["SENSITIVE"]
+
+
+@pytest.mark.parametrize(
+    ("event", "inputs"),
+    [
+        pytest.param(_send_event(), _inputs(), id="no-action-ir"),
+        pytest.param(
+            _send_event(), _inputs(action_ir=_action_ir()), id="empty-data-refs"
+        ),
+        pytest.param(
+            # email 归一失败（无 @）→ unresolved → 不建流。
+            _send_event(recipient="not-an-address"),
+            _inputs(action_ir=_action_with_data_refs("data:artifact-1")),
+            id="unresolvable-sink",
+        ),
+        pytest.param(
+            # will_persist=False → 不建 persisted_to 流（无降级）。
+            _memory_event(will_persist=False),
+            _inputs(upstream_descriptors={REF: _descriptor()}),
+            id="memory-without-persist",
+        ),
+    ],
+)
+def test_write_side_without_stable_flow_builds_no_flow(event, inputs) -> None:
+    # 无稳定流 → 零流；仅 message 路径伴随 flow_ref_missing 降级。
+    bundle = build_transient_facts(event=event, inputs=inputs)
+    assert bundle.flow_facts == ()
+    assert bundle.signals == ()
+    if event.event_type == "message_send_proposed":
+        assert bundle.degradations[0].reason_codes == ["ct-fact:flow_ref_missing"]
+    else:
+        assert bundle.degradations == ()
+
+
+def test_message_send_sensitive_preview_signal_without_exact_flow() -> None:
+    # 02 §8.6：只有 content preview 可疑 → Signal + uncertain 口径，
+    # 绝不伪造 exact provenance。
+    bundle = build_transient_facts(event=_send_event(sensitive=True), inputs=_inputs())
+    assert bundle.flow_facts == ()
+    (signal,) = bundle.signals
+    assert signal.signal_id == "signal:evt-1:sensitive_send"
+    assert signal.detector_id == "ct-fact-builder"
+    assert (signal.category, signal.scope) == ("ct-fact:sensitive_outbound", "flow")
+    assert (signal.impact, signal.confidence) == ("high", "low")
+    assert signal.reason_codes == ["ct-fact:sensitive_outbound_preview"]
+    assert signal.evidence_group == "eg:evt-1:sensitive_send"
+    (degradation,) = bundle.degradations
+    assert degradation.reason_codes == ["ct-fact:flow_ref_missing"]

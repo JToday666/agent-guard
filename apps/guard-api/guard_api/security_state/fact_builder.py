@@ -26,11 +26,13 @@
 reason_code 清单（统一 ``ct-fact:`` 前缀）：
 ``ct-fact:unknown_event_type`` / ``ct-fact:handler_failed`` /
 ``ct-fact:visible_set_unavailable`` / ``ct-fact:action_ref_degraded`` /
-``ct-fact:flow_ref_missing``。
+``ct-fact:flow_ref_missing`` / ``ct-fact:sensitive_outbound_preview``。
 
 ``ct-fact:flow_ref_missing`` Wave 2 激活：message_send_proposed 无稳定
 ``data_ref`` 关联时发射（02 §8.6 / §13）；tool_call_proposed 的
 ActionIR 缺失仍沿用 ``action_ref_degraded``（§8.4 先例）。
+``ct-fact:sensitive_outbound_preview``：敏感 content preview 且无稳定
+refs 时的最小 SecuritySignal（02 §8.6，不伪造 exact provenance）。
 
 版本决定（02 §12）：``FACT_BUILDER_VERSION`` 保持 ``ct-fact-1`` 不
 bump——Wave 2 只扩展事件分派与写侧语义字段（memory_facts /
@@ -49,7 +51,11 @@ from pydantic import BaseModel, ConfigDict
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.actions.canonical_resources import (
     ResourceNormalizationInput,
+    normalize_api_resource,
+    normalize_email_resource,
     normalize_memory_resource,
+    normalize_other_resource,
+    normalize_url_resource,
 )
 from agentguard_core.actions.models import ActionIR
 from agentguard_core.credentials import (
@@ -61,6 +67,7 @@ from agentguard_core.events.payloads import (
     ContextBuildPayload,
     ContextSource,
     MemoryEventPayload,
+    MessageSendPayload,
     ToolResultPayload,
 )
 from agentguard_core.security_context.facts import (
@@ -632,6 +639,102 @@ def _handle_memory_write_proposed(
     return _PartialFacts(memory_facts=(memory_fact,), flow_facts=tuple(flow_facts))
 
 
+def _canonical_sink_ref(channel: str, recipient: str) -> str | None:
+    """message sink → canonical ref（V21-02 冻结归一器）。
+
+    channel strip+lower 分派：email/mail/smtp → email；api/http/
+    https/webhook → api；其余 → url，unresolved 退 other。sink_ref
+    取 canonical_id（自带 scheme 前缀，与 02 §8.6 分型语义等价）；
+    unresolved 返回 None → 不建流（不以不稳定 identity 伪造
+    provenance）。
+    """
+    kind = channel.strip().lower()
+    inp = ResourceNormalizationInput(resource_id="", target=recipient)
+    if kind in {"email", "mail", "smtp"}:
+        resource = normalize_email_resource(inp)
+    elif kind in {"api", "http", "https", "webhook"}:
+        resource = normalize_api_resource(inp)
+    else:
+        resource = normalize_url_resource(inp)
+        if resource.resolution_status == "unresolved":
+            resource = normalize_other_resource(inp)
+    if resource.resolution_status == "unresolved":
+        return None
+    return resource.canonical_id
+
+
+def _handle_message_send_proposed(
+    event: GuardEvent, inputs: FactBuildInputs
+) -> _PartialFacts:
+    """02 §8.6：sink 归一化 + sent_to 确定性流（evidence-defined）。
+
+    只有稳定 ``data_ref`` 可关联（ActionIR.data_refs 非空）时才生成
+    ``<data_ref> → <sink_ref>`` exact/deterministic 流（04 §4：此处
+    evidence 即已归一 ActionIR 的稳定 refs）；taints：
+    contains_sensitive_data 或 server_sensitive_evidence → [SENSITIVE]。
+
+    无 ActionIR 或 data_refs 空/sink 不可归一 → 零流 +
+    ``ct-fact:flow_ref_missing`` 降级（02 §13）；若另有敏感预览 →
+    追加最小 SecuritySignal（``ct-fact:sensitive_outbound_preview``，
+    impact=high/confidence=low：严重度按“敏感出边界”保守分级，确定
+    性交 Fusion；evidence_group 确定性构造）；绝不建 exact sent_to
+    伪造 provenance。
+    """
+    payload = cast(MessageSendPayload, event.payload)
+    sink_ref = _canonical_sink_ref(payload.channel, payload.recipient)
+    degradations: tuple[EvaluationDegradation, ...] = ()
+    flow_facts: tuple[FlowFact, ...] = ()
+    signals: tuple[SecuritySignal, ...] = ()
+    action_ir = inputs.action_ir
+    data_refs = action_ir.data_refs if action_ir is not None else []
+    if sink_ref is not None and data_refs:
+        sensitive = payload.contains_sensitive_data or inputs.server_sensitive_evidence
+        flow_facts = tuple(
+            _flow(
+                event=event,
+                scope_digest=inputs.scope_digest,
+                index=index,
+                source_ref=ref,
+                target_ref=sink_ref,
+                relation="sent_to",
+                strength="exact",
+                origin="deterministic",
+                taints=(["SENSITIVE"] if sensitive else []),
+            )
+            for index, ref in enumerate(data_refs)
+        )
+    else:
+        degradations = (
+            _degradation(
+                event,
+                reason_code="ct-fact:flow_ref_missing",
+                failure_kind="unavailable",
+            ),
+        )
+        if payload.contains_sensitive_data:
+            # 敏感预览且无稳定 refs：最小 Signal，不伪造 exact 流。
+            signals = (
+                SecuritySignal(
+                    signal_id=f"signal:{event.event_id}:sensitive_send",
+                    detector_id=_FACT_PRODUCER,
+                    category="ct-fact:sensitive_outbound",
+                    scope="flow",
+                    impact="high",
+                    confidence="low",
+                    evidence_group=f"eg:{event.event_id}:sensitive_send",
+                    reason_codes=["ct-fact:sensitive_outbound_preview"],
+                    evidence_refs=[],
+                    facts=[],
+                    tags=["ct-fact", "outbound"],
+                ),
+            )
+    return _PartialFacts(
+        flow_facts=flow_facts,
+        signals=signals,
+        degradations=degradations,
+    )
+
+
 #: 事件分派表（02 §8.1-8.7）；Wave 1 读路径四事件 + Wave 2 写侧逐批
 #: 注册；未注册事件类型视为未知 → fail-closed（02 §13）。
 _EVENT_HANDLERS: types.MappingProxyType = types.MappingProxyType(
@@ -641,6 +744,7 @@ _EVENT_HANDLERS: types.MappingProxyType = types.MappingProxyType(
         "model_output_produced": _handle_model_output_produced,
         "tool_result_produced": _handle_tool_result_produced,
         "memory_write_proposed": _handle_memory_write_proposed,
+        "message_send_proposed": _handle_message_send_proposed,
     }
 )
 
