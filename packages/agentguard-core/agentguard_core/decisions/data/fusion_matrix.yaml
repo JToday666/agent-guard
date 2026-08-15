@@ -1,0 +1,45 @@
+{
+  "$schema": "./fusion_matrix.schema.json",
+  "schema_version": "2.1-final-candidate",
+  "format": "json-compatible-yaml",
+  "match_semantics": "all_matching_rules_then_highest_priority",
+  "disposition_priority": ["CLEAR_DENY", "DEFER", "CLEAR_ALLOW"],
+  "selectors": {
+    "flow_strength": ["exact", "strong", "possible", "any"],
+    "authority": ["authorized", "unauthorized", "unknown", "not_required", "any"],
+    "sink": ["external", "internal", "any"],
+    "impact": ["low", "moderate", "high", "critical", "any"],
+    "boolean": [true, false, "any"]
+  },
+  "priority": [
+    "system_invariant", "hard_policy", "confirmed_source_to_sink", "explicit_authority_mismatch",
+    "required_coverage_or_degradation", "behavior_and_influence", "clear_allow_proof", "defer_default"
+  ],
+  "flow_rules": [
+    {"id": "FLOW-CREDENTIAL-EXACT-UNAUTHORIZED", "taint": "CREDENTIAL", "strength": "exact", "authority": "unauthorized", "sink": "external", "disposition": "CLEAR_DENY"},
+    {"id": "FLOW-CREDENTIAL-STRONG-UNAUTHORIZED", "taint": "CREDENTIAL", "strength": "strong", "authority": "unauthorized", "sink": "external", "disposition": "CLEAR_DENY"},
+    {"id": "FLOW-CREDENTIAL-POSSIBLE", "taint": "CREDENTIAL", "strength": "possible", "authority": "any", "sink": "external", "disposition": "DEFER"},
+    {"id": "FLOW-SENSITIVE-EXACT-UNAUTHORIZED", "taint": "SENSITIVE", "strength": "exact", "authority": "unauthorized", "sink": "external", "disposition": "CLEAR_DENY"},
+    {"id": "FLOW-SENSITIVE-STRONG-UNAUTHORIZED", "taint": "SENSITIVE", "strength": "strong", "authority": "unauthorized", "sink": "external", "disposition": "DEFER"},
+    {"id": "FLOW-SENSITIVE-POSSIBLE", "taint": "SENSITIVE", "strength": "possible", "authority": "any", "sink": "external", "disposition": "DEFER"}
+  ],
+  "influence_rules": [
+    {"id": "INFLUENCE-HOSTILE-HIGH-MISMATCH", "strength": ["exact", "strong"], "hostile_instruction_evidence": true, "authority": "unauthorized", "impact": ["high", "critical"], "disposition": "CLEAR_DENY"},
+    {"id": "INFLUENCE-HIGH-UNKNOWN", "strength": ["exact", "strong"], "hostile_instruction_evidence": "any", "authority": "unknown", "impact": ["high", "critical"], "disposition": "DEFER"},
+    {"id": "INFLUENCE-POSSIBLE-HIGH", "strength": ["possible"], "hostile_instruction_evidence": "any", "authority": "any", "impact": ["high", "critical"], "disposition": "DEFER"}
+  ],
+  "memory_rules": [
+    {"id": "MEMORY-PERSISTENT-UNTRUSTED-HIGH-UNAUTHORIZED", "trust_state": ["tainted", "quarantined"], "taint": "PERSISTENT_UNTRUSTED", "retrieval_strength": ["exact", "strong"], "authority": "unauthorized", "impact": ["high", "critical"], "disposition": "CLEAR_DENY"},
+    {"id": "MEMORY-PERSISTENT-UNTRUSTED-HIGH-UNKNOWN", "trust_state": ["tainted", "quarantined"], "taint": "PERSISTENT_UNTRUSTED", "retrieval_strength": ["exact", "strong", "possible"], "authority": "unknown", "impact": ["high", "critical"], "disposition": "DEFER"}
+  ],
+  "behavior_rules": [
+    {"id": "BEHAVIOR-HIGH-CONFIDENCE-UNAUTHORIZED", "pattern": ["B1", "B2", "B3", "B4", "B5"], "confidence": "high", "authority": "unauthorized", "impact": ["high", "critical"], "corroborating_flow_required": true, "disposition": "CLEAR_DENY"},
+    {"id": "BEHAVIOR-ANOMALY-DEFAULT", "pattern": ["B1", "B2", "B3", "B4", "B5", "B6"], "confidence": "any", "authority": "any", "impact": "any", "corroborating_flow_required": "any", "disposition": "DEFER"}
+  ],
+  "clear_allow_requires": [
+    "no_system_invariant_violation", "no_hard_deny_or_hard_ask",
+    "all_required_domains_complete_or_not_applicable", "authority_authorized_or_not_required",
+    "flow_safe_or_not_applicable", "no_required_degradation", "no_policy_required_human_review",
+    "no_unresolved_high_confidence_behavior_chain", "no_required_semantic_ambiguity", "all_security_digests_valid"
+  ]
+}

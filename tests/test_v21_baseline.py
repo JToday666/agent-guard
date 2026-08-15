@@ -183,6 +183,175 @@ def test_postgres_benchmark_rejects_non_test_database(monkeypatch) -> None:
     assert "UnsafeTestDatabaseUrlError" in result["reason"]
 
 
+def test_shadow_argument_defaults_and_choices() -> None:
+    baseline = _load_baseline_module()
+
+    args = baseline.parse_args(["--output-dir", "x"])
+    assert args.shadow == "off"
+    args = baseline.parse_args(["--output-dir", "x", "--shadow", "both"])
+    assert args.shadow == "both"
+    args = baseline.parse_args(["--output-dir", "x", "--shadow", "on"])
+    assert args.shadow == "on"
+
+
+def test_build_shadow_overhead_computes_nearest_rank_deltas() -> None:
+    baseline = _load_baseline_module()
+    off = {
+        "serial": {
+            "scenario_a": {
+                "sample_count": 10,
+                "p50_ns": 100,
+                "p95_ns": 200,
+                "p99_ns": 300,
+                "max_ns": 400,
+            }
+        },
+        "concurrent": {
+            "workers": 2,
+            "sample_count": 10,
+            "p50_ns": 50,
+            "p95_ns": 60,
+            "p99_ns": 70,
+            "max_ns": 80,
+        },
+    }
+    on = {
+        "serial": {
+            "scenario_a": {
+                "sample_count": 10,
+                "p50_ns": 150,
+                "p95_ns": 260,
+                "p99_ns": 380,
+                "max_ns": 520,
+            }
+        },
+        "concurrent": {
+            "workers": 2,
+            "sample_count": 10,
+            "p50_ns": 55,
+            "p95_ns": 68,
+            "p99_ns": 79,
+            "max_ns": 92,
+        },
+    }
+
+    overhead = baseline.build_shadow_overhead(off, on)
+
+    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["scenarios"]["scenario_a"]["delta_ns"] == {
+        "p50_ns": 50,
+        "p95_ns": 60,
+        "p99_ns": 80,
+        "max_ns": 120,
+    }
+    assert overhead["concurrent"]["delta_ns"]["p95_ns"] == 8
+    assert overhead["disclaimer"] == baseline.SHADOW_OVERHEAD_DISCLAIMER
+
+
+def test_shadow_both_requires_measured_memory_baseline(tmp_path: Path) -> None:
+    baseline = _load_baseline_module()
+
+    with pytest.raises(ValueError, match="measured memory backend"):
+        baseline.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--measurement-profile",
+                "functional_smoke",
+                "--core-warmup",
+                "1",
+                "--core-iterations",
+                "2",
+                "--api-warmup",
+                "1",
+                "--api-serial-iterations",
+                "2",
+                "--api-concurrency",
+                "2",
+                "--api-concurrent-total",
+                "4",
+                "--backends",
+                "postgres",
+                "--allow-missing-postgres",
+                "--shadow",
+                "both",
+            ]
+        )
+
+
+def test_shadow_on_requires_memory_backend(tmp_path: Path) -> None:
+    baseline = _load_baseline_module()
+
+    with pytest.raises(ValueError, match="requires the memory backend"):
+        baseline.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--measurement-profile",
+                "functional_smoke",
+                "--core-warmup",
+                "1",
+                "--core-iterations",
+                "2",
+                "--api-warmup",
+                "1",
+                "--api-serial-iterations",
+                "2",
+                "--api-concurrency",
+                "2",
+                "--api-concurrent-total",
+                "4",
+                "--backends",
+                "postgres",
+                "--allow-missing-postgres",
+                "--shadow",
+                "on",
+            ]
+        )
+
+
+def test_shadow_both_smoke_writes_overhead_report(tmp_path: Path) -> None:
+    baseline = _load_baseline_module()
+
+    exit_code = baseline.main(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--measurement-profile",
+            "functional_smoke",
+            "--core-warmup",
+            "1",
+            "--core-iterations",
+            "2",
+            "--api-warmup",
+            "1",
+            "--api-serial-iterations",
+            "2",
+            "--api-concurrency",
+            "2",
+            "--api-concurrent-total",
+            "4",
+            "--backends",
+            "memory",
+            "--shadow",
+            "both",
+        ]
+    )
+
+    assert exit_code == 0
+    report = json.loads((tmp_path / "baseline.json").read_text(encoding="utf-8"))
+    assert report["completion_status"] == "functional_smoke_passed"
+    assert report["performance"]["shadow_mode"] == "both"
+    assert report["performance"]["guard_api"]["memory"]["shadow_enabled"] is False
+    overhead = report["shadow_overhead"]
+    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["scenarios"]
+    for entry in overhead["scenarios"].values():
+        assert set(entry["delta_ns"]) == {"p50_ns", "p95_ns", "p99_ns", "max_ns"}
+    markdown = (tmp_path / "baseline.md").read_text(encoding="utf-8")
+    assert "Shadow 开销对照" in markdown
+
+
 def test_quick_memory_baseline_writes_machine_and_human_reports(tmp_path: Path) -> None:
     baseline = _load_baseline_module()
 

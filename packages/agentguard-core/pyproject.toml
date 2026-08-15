@@ -32,4 +32,4 @@ where = ["."]
 include = ["agentguard_core*"]
 
 [tool.setuptools.package-data]
-agentguard_core = ["py.typed"]
+agentguard_core = ["py.typed", "decisions/data/*.yaml"]

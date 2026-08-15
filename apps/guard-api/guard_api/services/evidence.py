@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -28,15 +29,21 @@ from guard_api.storage.integrity import canonical_sha256
 from .redaction import (
     CONTENT_PREVIEW_LIMIT,
     CONTEXT_SOURCES_LIMIT,
+    MAX_EVIDENCE_BYTES,
     NORMALIZED_RESOURCES_LIMIT,
     RULE_HITS_LIMIT,
     SUMMARY_TEXT_LIMIT,
+    bound_decision_v21_envelope,
     bound_redacted_value,
     bound_value,
+    decision_v21_budget_dropped_reference,
     enforce_evidence_budget,
+    evidence_serialized_size,
     redact_structure,
     truncate_text,
 )
+
+logger = logging.getLogger(__name__)
 
 # §9.3 事件时策略 digest 规范化标识。
 POLICY_CANONICALIZATION = "jcs:rfc8785"
@@ -66,8 +73,21 @@ def build_audit_event(
     extra_links: dict[str, str] | None = None,
     extra_metadata: dict[str, object] | None = None,
     decision_dump: dict[str, object] | None = None,
+    v21_evidence: dict[str, object] | None = None,
 ) -> AuditEvent:
-    """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10)."""
+    """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
+
+    ``v21_evidence``：V21-08 shadow 旁路的 ``decision_v21`` 信封
+    （``contract_freeze.yaml`` L84 ``v21_evidence_location``）。None（flag
+    关 / secret 缺 / 编排器收敛放弃）时 evidence 键集与现状完全一致，
+    不插入任何键；非 None 时经**专用 typed bound 通道**（仿
+    guard_decision 保护模式，避免通用 bound 破坏 coverage 形状/静默
+    截断 D4 refs）+ **shadow-only 预算核算**（legacy 8 键已单独预算
+    达标；合并后超限只 fail-closed 降级信封为 digest 引用，不重跑全量
+    bound，guard_decision replay 权威键绝不触碰）后合并写入**同一条**
+    审计记录的 ``evidence.decision_v21``，不新增第二条审计记录
+    （11_决策记录_V21-08前置.md D4/D7）。
+    """
 
     description = describe_guard_event(event)
     links: dict[str, str] = {
@@ -114,6 +134,46 @@ def build_audit_event(
         policy_revision=policy_revision,
         approval_id=approval_id,
     )
+    if v21_evidence is not None:
+        # shadow 信封走专用 typed bound 通道（仿 guard_decision 的
+        # _bound_typed_value 保护模式）：通用 bound_redacted_value 的
+        # ARRAY_LIMIT=20 会把 D4 上限 32 的 refs 静默截到 20，
+        # MAX_NESTING_DEPTH=6 恰好把 coverage 各域第 6 层替换为 "..."，
+        # 均与 D4「禁止静默丢失」冲突；信封内容均为受控短 id/digest，
+        # 专用限额不放宽全局冻结边界（07 §21.2）。
+        bounded = bound_decision_v21_envelope(v21_evidence)
+        if isinstance(bounded, dict) and bounded:
+            collision = set(bounded) & set(evidence)
+            if collision:
+                # fail-closed：信封不得覆盖 replay 权威键（如 guard_decision）。
+                raise ValueError(
+                    "v21_evidence collides with reserved evidence keys: "
+                    f"{sorted(collision)}"
+                )
+            # shadow-only 预算核算：legacy 8 键已在
+            # _policy_evaluation_evidence 内单独达标 64 KiB 预算；不对
+            # 合并结果全量重跑 enforce_evidence_budget（会把信封形状
+            # 重新压坏，极端下 _truncated 兜底连 guard_decision 一并
+            # 丢失 → 幂等重试退化为 409）。合并后超限时 fail-closed
+            # 只降级旁路附属键 decision_v21 为 digest 引用（D4 留痕，
+            # guard_decision 最后才触碰/不触碰）。
+            merged = dict(evidence)
+            merged.update(bounded)
+            if evidence_serialized_size(merged) <= MAX_EVIDENCE_BYTES:
+                evidence = merged
+            else:
+                logger.warning(
+                    "v21_evidence exceeds the 64 KiB evidence budget after "
+                    "merge; degrading decision_v21 to a digest reference "
+                    "(guard_decision preserved)"
+                )
+                evidence = dict(evidence)
+                evidence.update(
+                    {
+                        key: decision_v21_budget_dropped_reference(value)
+                        for key, value in bounded.items()
+                    }
+                )
     return AuditEvent(
         schema_version="0.4",
         record_type="policy_evaluation",

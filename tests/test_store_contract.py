@@ -20,6 +20,7 @@ from agentguard_core import (
     ApprovalIntent,
     AuditEvent,
     GuardDecision,
+    GuardEngine,
     GuardEvent,
     MemoryGuardChange,
     PolicyBundle,
@@ -178,7 +179,10 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
     assert audit.record_type == "policy_evaluation"
     evidence = audit.evidence
     assert isinstance(evidence, dict)
-    assert set(evidence) == {
+    # V21-08（D4/D7）：decision_v21 是 append-only 审计键——flag 关时
+    # evidence 键集与现状完全一致（8 键）；flag 开时为 8 键 +
+    # decision_v21，不得出现其他键。
+    assert set(evidence) - {"decision_v21"} == {
         "guard_event",
         "guard_decision",
         "policy",
@@ -187,6 +191,17 @@ def test_contract_evaluation_writes_04_policy_evaluation_shape(store, client) ->
         "side_effects",
         "result",
         "approval",
+    }
+    assert set(evidence) <= {
+        "guard_event",
+        "guard_decision",
+        "policy",
+        "intervention",
+        "execution",
+        "side_effects",
+        "result",
+        "approval",
+        "decision_v21",
     }
     # §9.3：policy 块与实际保存的快照一致。
     assert evidence["policy"] == {
@@ -565,7 +580,11 @@ def test_contract_concurrent_ask_creates_one_audit_and_one_approval(
             approval_intent=ApprovalIntent(options=["allow_once", "deny"], resource=""),
         )
 
-    monkeypatch.setattr(evaluation_service_module, "core_evaluate", ask_decision)
+    monkeypatch.setattr(
+        GuardEngine,
+        "evaluate_with_results",
+        lambda self, event, bundle=None: (ask_decision(event, bundle), []),
+    )
     service = EvaluationService(
         policy_service=PolicyService(store=store),
         audit_service=AuditService(store=store),
@@ -615,7 +634,11 @@ def test_contract_failed_evaluation_rolls_back_all_persisted_facts(
             approval_intent=ApprovalIntent(options=["allow_once", "deny"], resource=""),
         )
 
-    monkeypatch.setattr(evaluation_service_module, "core_evaluate", ask_decision)
+    monkeypatch.setattr(
+        GuardEngine,
+        "evaluate_with_results",
+        lambda self, event, bundle=None: (ask_decision(event, bundle), []),
+    )
     audit_service = AuditService(store=store)
     original_record = audit_service.record_evaluation
 

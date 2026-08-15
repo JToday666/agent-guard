@@ -144,8 +144,9 @@ class FastAssessment(BaseModel):
     legacy 路径，不创建伪 Snapshot。
 
     V21-01 scaffold：``assessment_id`` 与各 digest 字段为必填 ``str``，由
-    调用方确定性提供（不使用 uuid default_factory）；canonical digest 计算
-    留待 V21-09，见 01 §29。
+    调用方确定性提供（不使用 uuid default_factory）；canonical digest
+    计算在 V21-08 shadow 期实现（``11_决策记录_V21-08前置.md`` D1，
+    见 01 §29），V21-09 正式 assess/finalize 复用同一计算函数。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -184,7 +185,9 @@ class FastAssessment(BaseModel):
     def digest_fields(cls) -> frozenset[str]:
         """参与安全摘要的字段白名单（01 §29, L1162-1181）。
 
-        只声明白名单，不实现摘要计算（digest 计算留待 V21-09）。禁止纳入
+        只声明白名单；摘要计算在 V21-08 shadow 期实现（``11_决策记录_
+        V21-08前置.md`` D1：``decisions/shadow.py::compute_assessment_digest``），
+        V21-09 复用同一函数。禁止纳入
         wall-clock latency、random UUID、display-only reason、provider
         request id、debug metadata；``assessment_digest`` 自身不进入自身
         摘要输入。
