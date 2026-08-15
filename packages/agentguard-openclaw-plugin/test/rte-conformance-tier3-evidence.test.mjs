@@ -2,8 +2,11 @@
 //
 // CF-08（stable action correlation）与 CF-09（blocked-call after-hook
 // semantics）属真实运行时语义，由 PR-RTE-02 rev3 live 取证工件承载证据，
-// 真实运行时复验由 CI openclaw-runtime-smoke 矩阵承担。本文件把矩阵
-// 声明与证据工件机器化绑定：工件缺失或语义退化即红。
+// 证据版本锁定 2026.7.1-2（rev5 pin bump）；版本间语义漂移由 pin 上复跑的
+// in-process spike 套件防护。CI openclaw-runtime-smoke 矩阵仅验证
+// 24-hook 集的安装/注册/heartbeat，不覆盖 CF-08/09 语义（场景扩展为
+// 后续项，评审 P1）。本文件把矩阵声明与证据工件机器化绑定：工件缺失
+// 或语义退化即红。
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -130,8 +133,13 @@ test("matrix binds CF-08/CF-09 to this Tier 3 evidence chain", () => {
       `${caseId} evidence must point at the Tier 3 binding test`,
     );
     assert.ok(existsSync(path.join(REPO_ROOT, entry.evidence)), caseId);
-    // 证据链注明 live 取证工件与真实运行时 smoke job。
+    // 证据链注明 live 取证工件；smoke 矩阵在 note 中按实际覆盖范围
+    // 描述（仅安装/注册/heartbeat，不覆盖 CF-08/09 语义）。
     assert.ok(entry.note.includes("rte02-live-evidence.json"), caseId);
     assert.ok(entry.note.includes("openclaw-runtime-smoke"), caseId);
+    assert.ok(
+      entry.note.includes("不覆盖 CF-08/09 语义"),
+      `${caseId} note must not overstate smoke coverage`,
+    );
   }
 });

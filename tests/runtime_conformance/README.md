@@ -22,7 +22,7 @@
 | LangGraph（CF-01~08、12） | `tests/test_runtime_conformance_langgraph.py` | `python` job（`uv run pytest tests ...`） |
 | Guard API 幂等/冲突（CF-10/11，两个 runtime 共享后端） | `tests/test_runtime_conformance_guard_api.py` | 同上 |
 | OpenClaw in-process（CF-01~07、12） | `packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs`（已标注 case ID） | `node` job（插件 test glob） |
-| OpenClaw Tier 3（CF-08/09） | `rte-conformance-tier3-evidence.test.mjs` 绑定 live 证据 `rte02-live-evidence.json(.jsonl)` + `openclaw-runtime-smoke` CI 矩阵 | 独立 smoke job |
+| OpenClaw Tier 3（CF-08/09） | `rte-conformance-tier3-evidence.test.mjs` 绑定 live 证据 `rte02-live-evidence.json(.jsonl)`（证据版本锁定 2026.7.1-2）；版本漂移由 pin 上复跑的 spike 套件防护。CI `openclaw-runtime-smoke` 仅验证 24-hook 集安装/注册/heartbeat，不覆盖 CF-08/09 语义（场景扩展为后续项） | 独立 smoke job |
 
 CI 零 workflow 改动：所有测试文件都在既有 job 的拾取路径内。
 

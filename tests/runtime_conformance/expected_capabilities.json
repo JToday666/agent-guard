@@ -65,41 +65,41 @@
     "openclaw": {
       "CF-01": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-02": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-03": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-gate-transitions.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-04": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-05": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-gate-transitions.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-06": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-gate-transitions.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-07": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs"
       },
       "CF-08": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/fixtures/rte02-live-evidence.json",
-        "note": "Tier 3：跨 hook 单一 toolCallId 由 live 取证与 rte-after-tool-call 单测覆盖；真实运行时复验由 CI openclaw-runtime-smoke 矩阵承担。"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-tier3-evidence.test.mjs",
+        "note": "Tier 3：跨 hook 单一 toolCallId 由 live 取证工件 rte02-live-evidence.json(.jsonl) 承载并经绑定测试机器化校验；证据版本锁定 2026.7.1-2（rev5 pin bump），版本间语义漂移由 pin 上复跑的 in-process spike 套件防护（PR-RTE-02 机制）。注意：CI openclaw-runtime-smoke 矩阵仅验证 24-hook 集的安装/注册/heartbeat，不覆盖 CF-08/09 语义；smoke 场景扩展为后续项（评审 P1）。"
       },
       "CF-09": {
         "status": "PASS",
-        "evidence": "packages/agentguard-openclaw-plugin/test/fixtures/rte02-live-evidence.json",
-        "note": "Tier 3：pin 2026.7.1-2 语义为触发但不代表 invocation（blocked 零执行 + emission-on-blocked），blocked gate 不派生 terminal fact；见 rte-after-tool-call.test.mjs Q9 回归。"
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-tier3-evidence.test.mjs",
+        "note": "Tier 3：pin 2026.7.1-2 语义为触发但不代表 invocation（blocked 零执行 + emission-on-blocked），live 取证工件 rte02-live-evidence.json 经绑定测试校验；blocked gate 不派生 terminal fact（rte-conformance-openclaw.test.mjs CF-02/CF-05 经 host harness 复证）。注意：CI openclaw-runtime-smoke 矩阵仅验证 24-hook 集的安装/注册/heartbeat，不覆盖 CF-08/09 语义；smoke 场景扩展为后续项（评审 P1）。"
       },
       "CF-10": {
         "status": "NOT_SUPPORTED",
@@ -111,7 +111,7 @@
       },
       "CF-12": {
         "status": "NOT_SUPPORTED",
-        "note": "mapping 层仅证明 quarantined 回执构造（mapping.test.mjs），未驱动真实结果处置；tool_result_persist 收到远端 deny 时异步处理不同步隔离，fail-closed quarantine 回执 emit 属契约 03 §7.2 条件式待补项；真实隔离闭环证明前不声明 PASS（评审 P1）。"
+        "note": "hook 层仅证明 modified（sanitized）处置（rte-conformance-openclaw.test.mjs CF-12 用例），quarantined 回执仅在映射构造层证明（mapping.test.mjs）；tool_result_persist 收到远端 deny 时异步处理不同步隔离，fail-closed quarantine 回执 emit 属契约 03 §7.2 条件式待补项；真实隔离闭环证明前不声明 PASS（评审 P1）。"
       }
     }
   }
