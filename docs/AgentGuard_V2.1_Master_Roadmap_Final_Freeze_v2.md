@@ -53,6 +53,9 @@ FREEZE_METADATA / SHA256SUMS / 签字锚点；其效力低于三套正式冻结�
   CT      CT-PR-00 Contract Freeze 完成
   CT      CT-PR-01 Fact Authority Matrix 已完成
   CT      CT-PR-02a 已合入 dev（PR #145，无接线）
+  CT      CT-PR-02b 已合入 dev（PR #148，写侧三事件，无接线）
+  CT      CT-PR-03a 已合入 dev（PR #149，纯函数内核，无接线）
+  CT      CT-PR-03b 已合入 dev（PR #150，接线与 DoD 状态投影，flag 门控默认关）
   RTE     RTE-01 \~ RTE-04 完成
   RTE     RTE-05 Freeze Gate 核对通过（PR #144 已合入 dev）
 
@@ -61,6 +64,9 @@ FREEZE_METADATA / SHA256SUMS / 签字锚点；其效力低于三套正式冻结�
 -   PR #144（RTE-05 Freeze Gate 八项核对）已合入：判定 RTE-05
     可开工；唯一未实现项为 consume endpoint，归属 RTE-05 本体（见 §7）；
 -   PR #145（CT-PR-02a，Verified Fact Producer 读路径，无接线）已合入 dev；
+-   PR #148（CT-PR-02b，Verified Fact Producer 写侧三事件，无接线）已合入 dev；
+-   PR #149（CT-PR-03a，Committed Delta Builder 纯函数内核，无接线）已合入 dev；
+-   PR #150（CT-PR-03b，CT 事实投影接线与 DoD 状态投影，flag 门控默认关）已合入 dev；
 -   feat/v21-09-assess-finalize 分支开发中（assess/finalize
     正式入口等），尚未合入。
 
@@ -70,7 +76,7 @@ FREEZE_METADATA / SHA256SUMS / 签字锚点；其效力低于三套正式冻结�
         V21-09（进行中）
 
     CT:
-        CT-PR-02（02a 已完成，接线推进中）
+        CT-PR-03 已完成（03a/03b 已合入 dev），下一步 CT-PR-04
 
     RTE:
         RTE-05（开工条件已具备）
