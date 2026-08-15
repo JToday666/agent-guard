@@ -19,13 +19,18 @@ from __future__ import annotations
 
 import base64
 
-from agentguard_core import GuardEvent, utc_now_iso
+from agentguard_core import GuardEvent, PolicyBundle, utc_now_iso
 from agentguard_core.authority.models import (
     EvaluationClock,
     SecurityStateScope,
     TaskFact,
 )
 from agentguard_core.decisions.evidence import RequiredCheckPlan
+from agentguard_core.decisions.evidence_builder import (
+    REVALIDATION_COMPONENT_ID,
+    build_decision_evidence_v21,
+)
+from agentguard_core.decisions.shadow import shadow_assess_with_coverage
 from agentguard_core.events.payloads import (
     SecurityContext,
     ToolCallPayload,
@@ -241,3 +246,106 @@ def test_read_snapshot_with_revoked_rebuild_path_stays_same_source() -> None:
     record = service.store_access.get_security_state(_SCOPE_DIGEST)
     assert record is not None
     assert snapshot.state_version == record.state_version
+
+
+# ---------------------------------------------------------------------------
+# D8：evidence_builder revalidation stale 参数（缺省逐字节回归）
+# ---------------------------------------------------------------------------
+
+_STALE_SECRET = b"v21-09-evidence-builder-test-secret-material"
+
+
+def _degraded_outcome():
+    """snapshot 缺态降级路径的 assessment + coverage（纯 core 构件）。"""
+
+    return shadow_assess_with_coverage(
+        _event(),
+        PolicyBundle(),
+        None,
+        server_secret=_STALE_SECRET,
+    )
+
+
+def test_evidence_builder_stale_default_byte_identical() -> None:
+    """缺省空表参数 → 行为与 V21-08 逐字节一致。"""
+
+    outcome = _degraded_outcome()
+    baseline = build_decision_evidence_v21(
+        outcome.assessment,
+        legacy_decision="allow",
+        snapshot_id="v21-08:snapshot_absent",
+        state_version=0,
+        coverage=outcome.coverage,
+    )
+    with_default = build_decision_evidence_v21(
+        outcome.assessment,
+        legacy_decision="allow",
+        snapshot_id="v21-08:snapshot_absent",
+        state_version=0,
+        coverage=outcome.coverage,
+        revalidation_stale_reason_codes=(),
+    )
+    assert with_default == baseline
+    assert with_default.model_dump(mode="json") == baseline.model_dump(
+        mode="json"
+    )
+
+
+def _present_outcome():
+    """snapshot 在场路径的 assessment + coverage（无 shadow 组件降级）。"""
+
+    service = SecurityStateService(MemoryControlPlaneStore())
+    _seed_state_with_revoked(service, revoked_grant_ids=[])
+    snapshot, _revoked = service.read_snapshot_with_revoked(
+        _SCOPE_DIGEST, **_snapshot_kwargs()
+    )
+    return shadow_assess_with_coverage(
+        _event(),
+        PolicyBundle(),
+        snapshot,
+        server_secret=_STALE_SECRET,
+    )
+
+
+def test_evidence_builder_stale_registers_degraded_stale_judgment() -> None:
+    """非空 stale codes → D8 受控类目 + failure_kind=stale 降级登记。"""
+
+    outcome = _present_outcome()
+    evidence = build_decision_evidence_v21(
+        outcome.assessment,
+        legacy_decision="allow",
+        snapshot_id="v21-04-snapshot:fixture",
+        state_version=3,
+        coverage=outcome.coverage,
+        revalidation_stale_reason_codes=["v21-09:stale_state_version"],
+    )
+    assert evidence.divergence_category == "degraded_stale_judgment"
+    assert (
+        f"v21-09-revalidation-stale:{outcome.assessment.event_id}"
+        in evidence.degradation_ids
+    )
+    # shadow 期官方决策者恒 legacy：stale 不改变 final_decision。
+    assert evidence.final_decision == "allow"
+    assert evidence.legacy_decision == "allow"
+    assert evidence.mode == "shadow"
+
+
+def test_evidence_builder_stale_priority_after_shadow_degradation() -> None:
+    """D8 优先序：shadow 组件降级先于 stale（归因更根本）。"""
+
+    outcome = _degraded_outcome()  # snapshot 缺态 → shadow 组件降级在场
+    evidence = build_decision_evidence_v21(
+        outcome.assessment,
+        legacy_decision="deny",
+        snapshot_id="v21-08:snapshot_absent",
+        state_version=0,
+        coverage=outcome.coverage,
+        revalidation_stale_reason_codes=["v21-09:stale_task_digest"],
+    )
+    assert evidence.divergence_category == "degraded_no_snapshot"
+    # stale 降级仍如实登记（不静默丢失，D4 同源口径）。
+    assert any(
+        degradation_id.startswith("v21-09-revalidation-stale:")
+        for degradation_id in evidence.degradation_ids
+    )
+    assert REVALIDATION_COMPONENT_ID != "v21-08-shadow"
