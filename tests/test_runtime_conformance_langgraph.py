@@ -425,14 +425,12 @@ def test_cf_06_evaluate_unavailable_fails_closed_without_policy_receipt() -> Non
     assert audit_failing.outcome_receipts() == []
 
 
-def test_cf_07_tool_failure_receipt_and_over_limit_error_passthrough() -> None:
-    """CF-07 实测：failed 回执成立；超限 error 原样透传（bounded 缺口）。
+def test_cf_07_tool_failure_produces_bounded_execution_failed() -> None:
+    """CF-07 实测：failed 回执成立且超限 error 在 adapter 端截断。
 
-    短 error 的 `len <= 2000` 断言是恒真式，不构成 bounded 证据（评审 P1）。
-    本用例用超限 error 实测：adapter 将 str(exc) 原样写入回执（evidence 为
-    自由 dict，无客户端截断），故 LangGraph 矩阵 CF-07 声明 NOT_SUPPORTED：
-    bounded 保证目前仅由 Guard API 侧 ≤2000 校验（422 拒收）承担，
-    adapter 端截断为后续硬化项。
+    短 error 的 `len <= 2000` 断言是恒真式，不构成 bounded 证据（评审 P1）；
+    本用例用超限 error 实测 adapter 端截断（省略号计入 2000 上限，
+    契约 02 §9，RTE-04 硬化后不再依赖 Guard API 422 兑底）。
     """
     _case("CF-07")
     oversized = "x" * 5000
@@ -458,9 +456,9 @@ def test_cf_07_tool_failure_receipt_and_over_limit_error_passthrough() -> None:
     assert execution["status"] == "failed"
     assert isinstance(execution["error"], str)
     assert execution["error"]
-    # 实测当前行为：超限 error 未被 adapter 截断（缺口记录在矩阵 note）。
-    assert len(execution["error"]) == len(oversized)
-    assert execution["error"] == oversized
+    # bounded error 实测：超限 error 恰好截断到 2000（省略号计入上限）。
+    assert len(execution["error"]) == 2000
+    assert execution["error"].endswith("...")
 
 
 def test_cf_08_policy_and_terminal_receipts_aggregate_to_same_action() -> None:
