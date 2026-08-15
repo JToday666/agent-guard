@@ -251,6 +251,8 @@ test("capability fixture: structure is complete and consistent with spike eviden
     "static_sdk_source",
     "in_process_harness",
     "in_process_host_path",
+    "simulated_host_emit",
+    "constructed_sequence",
     "isolated_runtime",
     "not_applicable",
   ]);
@@ -271,16 +273,19 @@ test("capability fixture: structure is complete and consistent with spike eviden
   assert.equal(capability.c2_gate, allYes ? "PASS" : "FAIL");
 });
 
-// --- Host-path scenario assertions (evidence layer: in_process_host_path) ---
-// These bind the capability verdicts to live behavior of the real host-side
-// execution chain exported by the pinned SDK (no simulation of dispatch).
+// --- Host-path scenario assertions ------------------------------------------
+// Real-fact assertions cover what the REAL wrapper/runBeforeToolCallHook code
+// does (invocation counts, happens-before, identity, blocked short-circuit).
+// Assertions on after_tool_call observations are explicitly scoped to
+// simulated_host_emit: they prove payload shape IF the host emits, never that
+// the real (unexported) run-attempt observer emits or its ordering.
 
-test("host path: allow success fires after_tool_call with identical toolCallId (Q4/Q5/Q8)", async () => {
+test("host path: allow success drives before -> execute with identical toolCallId (Q4/Q8)", async () => {
   const report = await runAfterToolCallSpikeScenarios();
   const scenario = report.scenarios.allow_success;
 
   assert.equal(scenario.invocation_count, 1);
-  assert.equal(scenario.after_tool_call_observed, true);
+  assert.equal(scenario.emit_method, "simulated_host_emit");
 
   const kinds = scenario.evidence.map((entry) => entry.kind);
   assert.deepEqual(kinds, ["before_tool_call", "tool_executed", "after_tool_call"]);
@@ -293,16 +298,18 @@ test("host path: allow success fires after_tool_call with identical toolCallId (
   const after = scenario.evidence.find((entry) => entry.kind === "after_tool_call");
   assert.equal(after.resultPresent, true);
   assert.equal(after.errorPresent, false);
-  assert.equal(after.durationMsType, "number");
 });
 
-test("host path: tool failure still emits after_tool_call with a bounded string error (Q6/Q7)", async () => {
+test("host path: tool failure propagates the error; after payload shape is simulated (Q6 scoped)", async () => {
   const report = await runAfterToolCallSpikeScenarios();
   const scenario = report.scenarios.tool_failure;
 
+  // Real wrapper fact: the host propagates the tool error to the caller.
   assert.equal(scenario.invocation_count, 1);
   assert.equal(scenario.host_propagated_error, true);
-  assert.equal(scenario.after_tool_call_observed, true);
+  // Simulated emission: IF the host emits, the payload carries a bounded
+  // string error and no result. Host emission on error items is NOT proven.
+  assert.equal(scenario.emit_method, "simulated_host_emit");
   assert.equal(scenario.after_error_is_string, true);
 
   const after = scenario.evidence.find((entry) => entry.kind === "after_tool_call");
@@ -310,20 +317,22 @@ test("host path: tool failure still emits after_tool_call with a bounded string 
   assert.equal(after.errorPresent, true);
 });
 
-test("host path: deny blocks invocation yet after hook still observes the blocked result (Q9)", async () => {
+test("host path: deny blocks invocation for real; blocked-item emission stays undetermined (Q9 scoped)", async () => {
   const report = await runAfterToolCallSpikeScenarios();
   const scenario = report.scenarios.deny_block;
 
-  // C1 fact: zero real invocations after block:true.
+  // Solid C1 fact from the real wrapper: zero real invocations after block:true,
+  // and the wrapped tool hands back the host blocked result.
   assert.equal(scenario.invocation_count, 0);
-  // C2 fact: the host still emits the after observation carrying the blocked
-  // result; PR-RTE-03 must therefore never derive a terminal execution fact
-  // for blocked gate states (contract 03 §5.2).
-  assert.equal(scenario.after_tool_call_observed, true);
   assert.equal(scenario.blocked_result_returned, true);
+  // The after observation below was scheduled by the probe. Whether the real
+  // observer emits for blocked items is undetermined; PR-RTE-03 must never
+  // derive terminal execution facts for blocked gate states either way.
+  assert.equal(scenario.emit_method, "simulated_host_emit");
+  assert.equal(scenario.after_tool_call_observed, true);
 });
 
-test("host path: multi-plugin rewrite keeps identity stable and feeds adjusted params to execution (Q12)", async () => {
+test("host path: multi-plugin rewrite keeps identity stable and adjusted params flow end to end (Q12, runId fixed)", async () => {
   const report = await runAfterToolCallSpikeScenarios();
   const scenario = report.scenarios.multi_plugin_rewrite;
 
@@ -332,6 +341,13 @@ test("host path: multi-plugin rewrite keeps identity stable and feeds adjusted p
     mode: "allow",
     rewrittenBy: "spike-rewriter",
   });
+
+  // With matching runId the real consumeAdjustedParamsForToolCall channel
+  // hands the adjusted params to the after event (simulated emission, real
+  // record/consume store).
+  assert.deepEqual(scenario.after_params_seen, [
+    { mode: "allow", rewrittenBy: "spike-rewriter" },
+  ]);
 
   // Every before-chain handler saw the ORIGINAL params; identity unchanged.
   const beforeEntries = scenario.evidence.filter(
@@ -344,14 +360,31 @@ test("host path: multi-plugin rewrite keeps identity stable and feeds adjusted p
   }
 });
 
-test("host path: tool_result_persist precedes the deferred after observation (Q10)", async () => {
+test("host path: persist ordering is a constructed sequence, not observed host behavior (Q10 scoped)", async () => {
   const report = await runAfterToolCallSpikeScenarios();
   const scenario = report.scenarios.persist_ordering;
 
+  // The probe arranged this sequence; it is evidence of what the probe built,
+  // labeled accordingly so Q10 stays undetermined in the capability fixture.
+  assert.equal(scenario.emit_method, "constructed_sequence");
   assert.equal(scenario.persist_before_after, true);
   assert.deepEqual(scenario.observed_sequence, [
     "before_tool_call",
     "tool_result_persist",
     "after_tool_call",
   ]);
+});
+
+test("host path: falsy successful results omit BOTH result and error fields (Q5 omission semantics)", async () => {
+  const report = await runAfterToolCallSpikeScenarios();
+  const scenario = report.scenarios.falsy_success_results;
+
+  assert.equal(scenario.cases.length, 4);
+  for (const item of scenario.cases) {
+    assert.equal(item.invocation_count, 1, item.returned);
+    // Successful execution, yet the after event carries neither result nor
+    // error: field presence must never classify success vs failure.
+    assert.equal(item.after_result_field_present, false, item.returned);
+    assert.equal(item.after_error_field_present, false, item.returned);
+  }
 });

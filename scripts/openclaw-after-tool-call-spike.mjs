@@ -137,7 +137,7 @@ function buildProbeRegistry(sink, options = {}) {
   };
 }
 
-function makeProbeTool({ name, invokeLog, behavior }) {
+function makeProbeTool({ name, invokeLog, behavior, returnValue }) {
   return {
     name,
     execute: async (toolCallId, params) => {
@@ -145,15 +145,22 @@ function makeProbeTool({ name, invokeLog, behavior }) {
       if (behavior === "throw") {
         throw new Error("spike tool failure");
       }
+      if (behavior === "falsy") {
+        return returnValue;
+      }
       return { ok: true, echo: params, marker: "spike-result" };
     },
   };
 }
 
 async function emitAfterToolCallObservation(harness, params) {
-  // Mirrors the harness observer in run-attempt: the observation is scheduled
-  // off the synchronous transcript path (setImmediate) and receives the same
-  // item identity/result/error fields the host derives.
+  // SIMULATED host emission: drives the real SDK emit helper, but the probe
+  // decides WHEN it fires. Whether the real run-attempt observer emits for
+  // error/blocked/completed items, and the real ordering against
+  // tool_result_persist, is NOT observable offline (observer is not part of
+  // any public plugin-sdk surface and the agent tool loop needs a live model
+  // turn). Scenarios using this helper must record emit_method=simulated and
+  // may not be used as proof of host scheduling.
   await new Promise((resolve) => {
     setImmediate(() => {
       harness
@@ -201,6 +208,7 @@ export async function runAfterToolCallSpikeScenarios() {
     });
     report.scenarios.allow_success = {
       evidence: sink.records,
+      emit_method: "simulated_host_emit",
       invocation_count: invokeLog.length,
       before_completed_at: beforeCompletedAt,
       executed_params: invokeLog[0]?.params ?? null,
@@ -243,6 +251,7 @@ export async function runAfterToolCallSpikeScenarios() {
     });
     report.scenarios.tool_failure = {
       evidence: sink.records,
+      emit_method: "simulated_host_emit",
       invocation_count: invokeLog.length,
       host_propagated_error: Boolean(thrown),
       after_tool_call_observed: sink.records.some(
@@ -282,6 +291,7 @@ export async function runAfterToolCallSpikeScenarios() {
     });
     report.scenarios.deny_block = {
       evidence: sink.records,
+      emit_method: "simulated_host_emit",
       invocation_count: invokeLog.length,
       blocked_result_returned: Boolean(result),
       after_tool_call_observed: sink.records.some(
@@ -300,22 +310,28 @@ export async function runAfterToolCallSpikeScenarios() {
     );
     const invokeLog = [];
     const tool = makeProbeTool({ name: "spike_probe", invokeLog });
+    // The wrapper ctx must carry the SAME runId as the later emit helper:
+    // recordAdjustedParamsForToolCall keys on (runId, toolCallId) and
+    // consumeAdjustedParamsForToolCall must hit the same key, otherwise the
+    // after event silently falls back to startArgs.
+    const scenarioRunId = "spike-run-d";
     const wrapped = harness.wrapToolWithBeforeToolCallHook(
       tool,
-      { config: {} },
+      { config: {}, runId: scenarioRunId },
       { emitDiagnostics: false },
     );
     const toolCallId = "spike-call-rewrite-1";
     const result = await wrapped.execute(toolCallId, { mode: "allow" });
     await emitAfterToolCallObservation(harness, {
       toolCallId,
-      runId: "spike-run-d",
+      runId: scenarioRunId,
       toolName: "spike_probe",
       startArgs: { mode: "allow" },
       result,
     });
     report.scenarios.multi_plugin_rewrite = {
       evidence: sink.records,
+      emit_method: "simulated_host_emit",
       executed_params: invokeLog[0]?.params ?? null,
       after_params_seen: sink.records
         .filter((r) => r.kind === "after_tool_call")
@@ -355,12 +371,62 @@ export async function runAfterToolCallSpikeScenarios() {
     const kinds = sink.records.map((r) => r.kind);
     report.scenarios.persist_ordering = {
       evidence: sink.records,
+      emit_method: "constructed_sequence",
       observed_sequence: kinds,
       persist_before_after:
         kinds.indexOf("tool_result_persist") !== -1 &&
         kinds.indexOf("tool_result_persist") < kinds.indexOf("after_tool_call"),
     };
     runtime.resetGlobalHookRunner();
+  }
+
+  // --- Scenario F: falsy successful results --------------------------------
+  // The SDK emit helper includes `result` via a truthiness check, so tools
+  // that successfully return false / 0 / "" / null produce an after event
+  // with NEITHER result NOR error. Record the omission semantics so the
+  // terminal mapper never infers success/failure from field presence.
+  {
+    const falsyCases = [];
+    for (const returnValue of [false, 0, "", null]) {
+      const sink = createEvidenceSink();
+      runtime.resetGlobalHookRunner();
+      runtime.initializeGlobalHookRunner(buildProbeRegistry(sink));
+      const invokeLog = [];
+      const tool = makeProbeTool({
+        name: "spike_probe",
+        invokeLog,
+        behavior: "falsy",
+        returnValue,
+      });
+      const wrapped = harness.wrapToolWithBeforeToolCallHook(
+        tool,
+        { config: {} },
+        { emitDiagnostics: false },
+      );
+      const toolCallId = `spike-call-falsy-${JSON.stringify(returnValue)}`;
+      const result = await wrapped.execute(toolCallId, { mode: "falsy" });
+      await emitAfterToolCallObservation(harness, {
+        toolCallId,
+        runId: "spike-run-f",
+        toolName: "spike_probe",
+        startArgs: { mode: "falsy" },
+        result,
+      });
+      const after = sink.records.find((r) => r.kind === "after_tool_call");
+      falsyCases.push({
+        returned: returnValue === null ? "null" : JSON.stringify(returnValue),
+        invocation_count: invokeLog.length,
+        emit_method: "simulated_host_emit",
+        after_result_field_present: after ? after.resultPresent : null,
+        after_error_field_present: after ? after.errorPresent : null,
+      });
+      runtime.resetGlobalHookRunner();
+    }
+    report.scenarios.falsy_success_results = {
+      cases: falsyCases,
+      omission_semantics:
+        "falsy successful result -> after event carries neither result nor error; presence must not be used to classify success/failure",
+    };
   }
 
   return report;
