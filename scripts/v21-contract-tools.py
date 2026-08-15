@@ -7,6 +7,8 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -204,6 +206,45 @@ def verify_checksums() -> None:
         raise ValueError("SHA256SUMS is stale; run the checksums --write command")
 
 
+def _parse_collected_count(output: str) -> int | None:
+    for line in reversed(output.splitlines()):
+        match = re.match(r"^(\d+) tests? collected", line.strip())
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def collect_test_count() -> int:
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            "pytest collection failed with exit code "
+            f"{result.returncode}: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    count = _parse_collected_count(result.stdout)
+    if count is None:
+        raise ValueError(
+            f"could not parse the collected test count from pytest output:\n{result.stdout}"
+        )
+    return count
+
+
+def baseline_count(minimum: int | None) -> int:
+    collected = collect_test_count()
+    print(f"collected tests: {collected}")
+    if minimum is not None and collected < minimum:
+        raise ValueError(
+            f"collected test count {collected} is below the required baseline {minimum}"
+        )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -217,6 +258,18 @@ def main() -> int:
     checksums_mode = checksums_parser.add_mutually_exclusive_group(required=True)
     checksums_mode.add_argument("--write", action="store_true")
     checksums_mode.add_argument("--verify", action="store_true")
+    baseline_parser = subparsers.add_parser(
+        "baseline-count",
+        help="collect the test suite and optionally assert a minimum test count",
+    )
+    baseline_parser.add_argument(
+        "--min",
+        dest="minimum",
+        type=int,
+        default=None,
+        metavar="N",
+        help="fail with a non-zero exit code when fewer than N tests are collected",
+    )
     subparsers.add_parser(
         "all",
         help="build, validate, and refresh the optional archive checksum manifest",
@@ -229,6 +282,8 @@ def main() -> int:
         validate()
     elif args.command == "checksums":
         write_checksums() if args.write else verify_checksums()
+    elif args.command == "baseline-count":
+        return baseline_count(args.minimum)
     else:
         build()
         validate()
