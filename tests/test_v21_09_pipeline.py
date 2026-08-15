@@ -23,6 +23,7 @@ from contextlib import contextmanager
 import pytest
 
 from agentguard_core import GuardEngine, GuardEvent, PolicyBundle, utc_now_iso
+from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority.models import (
     EvaluationClock,
     SecurityStateScope,
@@ -33,6 +34,7 @@ from agentguard_core.decisions.evidence_builder import (
     REVALIDATION_COMPONENT_ID,
     build_decision_evidence_v21,
 )
+from agentguard_core.decisions.finalize import derive_final_decision_id
 from agentguard_core.decisions.shadow import shadow_assess_with_coverage
 from agentguard_core.events.payloads import (
     SecurityContext,
@@ -65,10 +67,20 @@ _SCOPE_DIGEST = "hmac-sha256:" + "a9" * 32
 _TASK_ID = "task_pipeline_fixture"
 
 
-def _event(*, event_id: str = "evt_pipeline_1", task_id: str | None = None) -> GuardEvent:
+def _event(
+    *,
+    event_id: str = "evt_pipeline_1",
+    task_id: str | None = None,
+    call_id: str | None = None,
+) -> GuardEvent:
     metadata: dict[str, object] = {}
     if task_id is not None:
         metadata["task_id"] = task_id
+    tool_kwargs: dict[str, object] = {"name": "read_file"}
+    if call_id is not None:
+        # 确定性锚点：call_id 缺省工厂是 uuid，同输入同值类测试必须
+        # 显式固定（ActionIR 身份并入 assessment 派生输入）。
+        tool_kwargs["call_id"] = call_id
     return GuardEvent(
         event_id=event_id,
         event_type="tool_call_proposed",
@@ -76,7 +88,7 @@ def _event(*, event_id: str = "evt_pipeline_1", task_id: str | None = None) -> G
         trace_id="trace_pipeline_1",
         timestamp="2026-08-15T00:00:00+00:00",
         security_context=SecurityContext(agent_id="main", user_task="pipeline fixture"),
-        payload=ToolCallPayload(tool=ToolDescriptor(name="read_file")),
+        payload=ToolCallPayload(tool=ToolDescriptor(**tool_kwargs)),
         metadata=metadata,
     )
 
@@ -666,6 +678,167 @@ def test_pipeline_phase_b_stale_task_digest() -> None:
         _envelope_payload(outcome.envelope)["divergence_category"]
         == "degraded_stale_judgment"
     )
+
+
+# ---------------------------------------------------------------------------
+# D11：finalize 确定性引用（valid 分支产出；stale/降级/flag off 不产）
+# ---------------------------------------------------------------------------
+
+_FINALIZE_REFERENCE_KEYS = (
+    "v21_final_decision_id",
+    "v21_final_decision_digest",
+)
+
+
+def _finalize_references(metadata: dict) -> dict:
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key in _FINALIZE_REFERENCE_KEYS
+    }
+
+
+def test_pipeline_phase_b_finalize_reference_valid_only() -> None:
+    """D11：valid 分支产确定性引用（同输入同值）；降级路径恒 None。"""
+
+    pipeline, store = _pipeline_service()
+    _commit_task_fact(store)
+    event = _event(task_id=_TASK_ID)
+    materials = pipeline.run_phase_a(event)
+    assert materials is not None and materials.snapshot is not None
+
+    outcome = pipeline.build_phase_b(event, materials)
+    assert outcome is not None and outcome.revalidation.status == "valid"
+    # 引用与显式派生口径同源（derive_final_decision_id / 产物 digest）。
+    assert outcome.final_decision_id == derive_final_decision_id(
+        materials.assessment
+    )
+    expected_digest = canonical_sha256(
+        GuardEngine()
+        .finalize(materials.assessment)
+        .model_dump(mode="json")
+    )
+    assert outcome.final_decision_digest == expected_digest
+    # 确定性：同输入重复调用同值。
+    repeat = pipeline.build_phase_b(event, materials)
+    assert repeat is not None
+    assert repeat.final_decision_id == outcome.final_decision_id
+    assert repeat.final_decision_digest == outcome.final_decision_digest
+
+    # snapshot 缺态降级路径：不产引用。
+    degraded = pipeline.run_phase_a(_event(event_id="evt_phase_b_notask"))
+    assert degraded is not None and degraded.snapshot is None
+    degraded_outcome = pipeline.build_phase_b(
+        _event(event_id="evt_phase_b_notask"), degraded
+    )
+    assert degraded_outcome is not None
+    assert degraded_outcome.final_decision_id is None
+    assert degraded_outcome.final_decision_digest is None
+
+
+def test_pipeline_e2e_valid_finalize_reference_deterministic() -> None:
+    """D11：flag on valid 路径审计 metadata 含两个确定性键（同输入同值）。"""
+
+    def _run_once() -> dict:
+        store = MemoryControlPlaneStore()
+        _commit_task_fact(store)
+        evaluation_service, _ = _evaluation_stack(
+            store, settings=_pipeline_settings()
+        )
+        event = _event(
+            event_id="evt_e2e_finalize",
+            task_id=_TASK_ID,
+            call_id="call_e2e_finalize",
+        )
+        evaluation_service.evaluate(
+            event, requesting_principal_id="principal_a"
+        )
+        audit = store.get_policy_evaluation_by_event_id(event.event_id)
+        assert audit is not None
+        return dict(audit.metadata)
+
+    first = _run_once()
+    references = _finalize_references(first)
+    assert set(references) == set(_FINALIZE_REFERENCE_KEYS)
+    assert references["v21_final_decision_id"].startswith("dec:")
+    assert references["v21_final_decision_digest"].startswith("sha256:")
+    # 既有同源键不受影响。
+    assert "request_digest" in first and "policy_digest" in first
+    # 同输入必同值（replay 可复算锚点）。
+    assert _finalize_references(_run_once()) == references
+
+
+def test_pipeline_flag_off_metadata_keyset_byte_identical() -> None:
+    """D11：flag off 时审计 metadata 与无 pipeline 注入逐字节一致。"""
+
+    event = _event(
+        event_id="evt_finalize_flag_off",
+        task_id=_TASK_ID,
+        call_id="call_finalize_flag_off",
+    )
+    settings = _pipeline_settings(enabled=False)
+
+    store = MemoryControlPlaneStore()
+    _commit_task_fact(store)
+    evaluation_service, pipeline = _evaluation_stack(store, settings=settings)
+    assert pipeline.enabled is False
+    evaluation_service.evaluate(event, requesting_principal_id="principal_a")
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    assert _finalize_references(audit.metadata) == {}
+
+    # 基线：完全无 pipeline/shadow 注入的同构栈（接线前形态）。
+    baseline_store = MemoryControlPlaneStore()
+    _commit_task_fact(baseline_store)
+    baseline_policy = PolicyService(store=baseline_store)
+    baseline_service = EvaluationService(
+        policy_service=baseline_policy,
+        audit_service=AuditService(store=baseline_store),
+        approval_service=ApprovalService(
+            store=baseline_store, settings=settings
+        ),
+    )
+    baseline_service.evaluate(event, requesting_principal_id="principal_a")
+    baseline_audit = baseline_store.get_policy_evaluation_by_event_id(
+        event.event_id
+    )
+    assert baseline_audit is not None
+    # 键集逐字节不变：flag off 不引入任何新 metadata 键。
+    assert audit.metadata == baseline_audit.metadata
+
+
+def test_pipeline_e2e_stale_no_finalize_reference(monkeypatch) -> None:
+    """D11：stale 路径不产 finalize 引用（metadata 键集不变）。"""
+
+    store = MemoryControlPlaneStore()
+    _commit_task_fact(store)
+    evaluation_service, _ = _evaluation_stack(
+        store, settings=_pipeline_settings()
+    )
+
+    original_read = SecurityStateService.read_snapshot_with_revoked
+
+    def _read_then_rotate(self, scope_digest, **kwargs):
+        result = original_read(self, scope_digest, **kwargs)
+        # Phase A 读后轮换 policy snapshot → Phase B revalidate stale。
+        store.save_policy_snapshot(
+            PolicyBundle(version="p1-rotated"), expected_revision=0
+        )
+        return result
+
+    monkeypatch.setattr(
+        SecurityStateService, "read_snapshot_with_revoked", _read_then_rotate
+    )
+    event = _event(event_id="evt_e2e_finalize_stale", task_id=_TASK_ID)
+    evaluation_service.evaluate(event, requesting_principal_id="principal_a")
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    payload = _envelope_payload(audit.evidence["decision_v21"])
+    assert payload["divergence_category"] == "degraded_stale_judgment"
+    # stale 不产 finalize 引用：两键均缺席，既有同源键不受影响。
+    assert _finalize_references(audit.metadata) == {}
+    assert "request_digest" in audit.metadata
+    assert "policy_digest" in audit.metadata
 
 
 # ---------------------------------------------------------------------------

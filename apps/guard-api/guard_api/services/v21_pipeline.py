@@ -196,11 +196,20 @@ class V21PhaseBOutcome:
     V21-09 权威提交与 Phase C 投影；valid 时信封可直接供审计落盘，
     经 ``prepare_phase_c`` 产出 Phase C 投影计划与 state_delta_v21
     引用信封。
+
+    D11 finalize 确定性引用（仅 revalidate valid 且非降级路径产出；
+    stale/降级路径恒 None）：``final_decision_id`` =
+    ``derive_final_decision_id(assessment)``；``final_decision_digest``
+    = finalize 产物 dump 的 canonical sha256。完整 GuardDecision 不落
+    审计（shadow 期官方决策者恒 legacy，归 V21-11 再裁决）；引用经
+    ``record_evaluation`` extra_metadata 通道写审计 metadata。
     """
 
     envelope: dict[str, Any]
     revalidation: RevalidationResult
     materials: V21PipelineMaterials
+    final_decision_id: str | None = None
+    final_decision_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -617,10 +626,25 @@ class V21PipelineService:
             coverage=materials.coverage,
             revalidation_stale_reason_codes=stale_codes,
         )
+        final_decision_id: str | None = None
+        final_decision_digest: str | None = None
+        if revalidation.status == "valid":
+            # D11：§15 第 5 步 finalize 在 revalidate valid 分支产出；
+            # decision_id 经 derive_final_decision_id 确定性派生
+            # （GuardEngine.finalize 内部同口径，禁 uuid）；产物以
+            # 确定性引用留存审计 metadata，完整 GuardDecision 不落
+            # 审计。stale/降级路径不产引用（恒 None）。
+            final_decision = GuardEngine().finalize(materials.assessment)
+            final_decision_id = final_decision.decision_id
+            final_decision_digest = canonical_sha256(
+                final_decision.model_dump(mode="json")
+            )
         return V21PhaseBOutcome(
             envelope=decision_evidence_v21_envelope(evidence),
             revalidation=revalidation,
             materials=materials,
+            final_decision_id=final_decision_id,
+            final_decision_digest=final_decision_digest,
         )
 
     # ------------------------------------------------------------------

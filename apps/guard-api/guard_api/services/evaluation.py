@@ -296,6 +296,7 @@ class EvaluationService:
         v21_evidence = None
         state_delta_evidence = None
         phase_c_plan: "V21PhaseCPlan | None" = None
+        finalize_metadata: dict[str, str] = {}
         if self.v21_pipeline is not None:
             outcome = self.v21_pipeline.build_phase_b(event, materials)
             if outcome is not None:
@@ -303,6 +304,17 @@ class EvaluationService:
                 phase_c_plan = self.v21_pipeline.prepare_phase_c(outcome)
                 if phase_c_plan is not None:
                     state_delta_evidence = phase_c_plan.envelope
+                if outcome.final_decision_id is not None:
+                    # D11：finalize 产物确定性引用写审计 metadata
+                    # （仅 revalidate valid 且非降级路径；stale/降级/
+                    # flag off 时键集逐字节不变）。
+                    assert outcome.final_decision_digest is not None
+                    finalize_metadata = {
+                        "v21_final_decision_id": outcome.final_decision_id,
+                        "v21_final_decision_digest": (
+                            outcome.final_decision_digest
+                        ),
+                    }
         audit_event = self.audit_service.record_evaluation(
             event,
             decision,
@@ -318,6 +330,7 @@ class EvaluationService:
             extra_metadata={
                 "request_digest": request_digest,
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+                **finalize_metadata,
             },
             decision_dump=decision.model_dump(mode="json"),
             v21_evidence=v21_evidence,
