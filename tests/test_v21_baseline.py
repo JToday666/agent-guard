@@ -188,10 +188,204 @@ def test_shadow_argument_defaults_and_choices() -> None:
 
     args = baseline.parse_args(["--output-dir", "x"])
     assert args.shadow == "off"
+    assert args.task_ref == "off"
     args = baseline.parse_args(["--output-dir", "x", "--shadow", "both"])
     assert args.shadow == "both"
     args = baseline.parse_args(["--output-dir", "x", "--shadow", "on"])
     assert args.shadow == "on"
+    args = baseline.parse_args(
+        ["--output-dir", "x", "--shadow", "tri", "--task-ref", "on"]
+    )
+    assert args.shadow == "tri"
+    assert args.task_ref == "on"
+
+
+def test_api_event_attaches_task_ref_metadata() -> None:
+    baseline = _load_baseline_module()
+    from agentguard_core import GuardEvent
+
+    event = GuardEvent.model_validate(
+        {
+            "event_id": "evt_task_ref_1",
+            "event_type": "tool_call_proposed",
+            "runtime": "langgraph",
+            "trace_id": "trace_task_ref_1",
+            "timestamp": "2026-08-15T00:00:00+00:00",
+            "security_context": {"agent_id": "main", "user_task": "fixture"},
+            "payload": {
+                "tool": {"name": "read_file"},
+                "arguments": {},
+                "derived_resources": [],
+            },
+        }
+    )
+
+    without = baseline._api_event(event, backend="memory", sequence=1)
+    assert "task_id" not in (without.get("metadata") or {})
+
+    with_ref = baseline._api_event(
+        event, backend="memory", sequence=2, task_ref="task_bench"
+    )
+    assert with_ref["metadata"]["task_id"] == "task_bench"
+
+
+def test_seed_benchmark_task_fact_creates_authoritative_head() -> None:
+    baseline = _load_baseline_module()
+    from guard_api.storage.memory import MemoryControlPlaneStore
+
+    store = MemoryControlPlaneStore()
+    baseline._seed_benchmark_task_fact(store)
+
+    record = store.get_task_fact(baseline.BENCHMARK_TASK_REF_ID)
+    assert record is not None
+    assert record.task_fact.task_id == baseline.BENCHMARK_TASK_REF_ID
+    assert record.task_fact.authority == "authoritative"
+    assert record.task_fact.scope_digest == baseline.BENCHMARK_TASK_SCOPE_DIGEST
+
+
+def test_pipeline_disabled_context_restores_enabled_property() -> None:
+    baseline = _load_baseline_module()
+    from guard_api.services.v21_pipeline import V21PipelineService
+
+    original = V21PipelineService.enabled
+    with baseline._pipeline_disabled():
+        assert V21PipelineService.enabled is not original
+
+        class _Stub:
+            pass
+
+        assert V21PipelineService.enabled.fget(_Stub()) is False
+    assert V21PipelineService.enabled is original
+
+
+def test_build_pipeline_overhead_computes_pairwise_deltas() -> None:
+    baseline = _load_baseline_module()
+
+    def _result(p50: int, p95: int, *, task_ref=None) -> dict:
+        return {
+            "task_ref": task_ref,
+            "serial": {
+                "scenario_a": {
+                    "sample_count": 10,
+                    "p50_ns": p50,
+                    "p95_ns": p95,
+                    "p99_ns": p95 + 10,
+                    "max_ns": p95 + 20,
+                }
+            },
+            "concurrent": {
+                "workers": 2,
+                "sample_count": 10,
+                "p50_ns": p50,
+                "p95_ns": p95,
+                "p99_ns": p95 + 10,
+                "max_ns": p95 + 20,
+            },
+        }
+
+    off = _result(100, 200)
+    v2108 = _result(150, 260)
+    v2109 = _result(180, 300, task_ref="task_v2109_bench")
+
+    overhead = baseline.build_pipeline_overhead(off, v2108, v2109)
+
+    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["task_ref"] == "task_v2109_bench"
+    assert set(overhead) >= {"v2108_vs_off", "v2109_vs_off", "v2109_vs_v2108"}
+    assert overhead["v2108_vs_off"]["scenarios"]["scenario_a"]["delta_ns"] == {
+        "p50_ns": 50,
+        "p95_ns": 60,
+        "p99_ns": 60,
+        "max_ns": 60,
+    }
+    assert overhead["v2109_vs_off"]["scenarios"]["scenario_a"]["delta_ns"]["p50_ns"] == 80
+    assert overhead["v2109_vs_v2108"]["scenarios"]["scenario_a"]["delta_ns"]["p95_ns"] == 40
+    assert overhead["v2109_vs_v2108"]["concurrent"]["delta_ns"]["p50_ns"] == 30
+    assert overhead["disclaimer"] == baseline.TASK_REF_DISCLAIMER
+
+
+def test_shadow_tri_requires_measured_memory_baseline(tmp_path: Path) -> None:
+    baseline = _load_baseline_module()
+
+    with pytest.raises(ValueError, match="measured memory backend"):
+        baseline.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--measurement-profile",
+                "functional_smoke",
+                "--core-warmup",
+                "1",
+                "--core-iterations",
+                "2",
+                "--api-warmup",
+                "1",
+                "--api-serial-iterations",
+                "2",
+                "--api-concurrency",
+                "2",
+                "--api-concurrent-total",
+                "4",
+                "--backends",
+                "postgres",
+                "--allow-missing-postgres",
+                "--shadow",
+                "tri",
+            ]
+        )
+
+
+def test_shadow_tri_smoke_writes_pipeline_overhead_report(tmp_path: Path) -> None:
+    baseline = _load_baseline_module()
+
+    exit_code = baseline.main(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--measurement-profile",
+            "functional_smoke",
+            "--core-warmup",
+            "1",
+            "--core-iterations",
+            "2",
+            "--api-warmup",
+            "1",
+            "--api-serial-iterations",
+            "2",
+            "--api-concurrency",
+            "2",
+            "--api-concurrent-total",
+            "4",
+            "--backends",
+            "memory",
+            "--shadow",
+            "tri",
+            "--task-ref",
+            "on",
+        ]
+    )
+
+    assert exit_code == 0
+    report = json.loads((tmp_path / "baseline.json").read_text(encoding="utf-8"))
+    assert report["completion_status"] == "functional_smoke_passed"
+    assert report["performance"]["shadow_mode"] == "tri"
+    assert report["performance"]["task_ref"] == baseline.BENCHMARK_TASK_REF_ID
+    memory_result = report["performance"]["guard_api"]["memory"]
+    assert memory_result["shadow_enabled"] is False
+    assert memory_result["task_ref"] == baseline.BENCHMARK_TASK_REF_ID
+    overhead = report["pipeline_overhead"]
+    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert set(overhead) >= {"v2108_vs_off", "v2109_vs_off", "v2109_vs_v2108"}
+    for comparison in (
+        overhead["v2108_vs_off"],
+        overhead["v2109_vs_off"],
+        overhead["v2109_vs_v2108"],
+    ):
+        assert comparison["scenarios"]
+        for entry in comparison["scenarios"].values():
+            assert set(entry["delta_ns"]) == {"p50_ns", "p95_ns", "p99_ns", "max_ns"}
+    markdown = (tmp_path / "baseline.md").read_text(encoding="utf-8")
+    assert "三档开销对照" in markdown
 
 
 def test_build_shadow_overhead_computes_nearest_rank_deltas() -> None:
