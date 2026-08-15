@@ -1,4 +1,51 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+type FlowTransform = { x: number; y: number; scale: number };
+
+function parseFlowTransform(style: string | null): FlowTransform | null {
+  const match = style?.match(
+    /translate\(([-\d.]+)px,\s*([-\d.]+)px\)\s*scale\(([-\d.]+)\)/,
+  );
+  if (!match) return null;
+  return { x: Number(match[1]), y: Number(match[2]), scale: Number(match[3]) };
+}
+
+// Browser transform values carry sub-pixel rounding noise, so exact string
+// equality on the style attribute flakes. Compare parsed values with an
+// epsilon instead (CI flake: run 31862620755, 76.8909px vs 76.9677px).
+const TRANSFORM_TOLERANCE = { translate: 0.5, scale: 0.005 };
+
+function transformWithinTolerance(
+  actual: FlowTransform,
+  baseline: FlowTransform,
+): boolean {
+  return (
+    Math.abs(actual.x - baseline.x) <= TRANSFORM_TOLERANCE.translate &&
+    Math.abs(actual.y - baseline.y) <= TRANSFORM_TOLERANCE.translate &&
+    Math.abs(actual.scale - baseline.scale) <= TRANSFORM_TOLERANCE.scale
+  );
+}
+
+// The graph runs short animated fitView calls on pane-ready and on entering
+// fullscreen. Wait until the viewport transform has settled so animation
+// tails cannot leak into the wheel assertions.
+async function waitForTransformStable(
+  page: Page,
+  viewport: Locator,
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const first = parseFlowTransform(await viewport.getAttribute("style"));
+      await page.waitForTimeout(160);
+      const second = parseFlowTransform(await viewport.getAttribute("style"));
+      return (
+        first !== null &&
+        second !== null &&
+        transformWithinTolerance(first, second)
+      );
+    })
+    .toBe(true);
+}
 
 test("evidence detail uses document scrolling and the dossier does not trap the wheel", async ({
   page,
@@ -41,11 +88,19 @@ test("embedded execution graph scrolls the page and fullscreen graph owns the wh
     window.scrollTo(0, Math.max(0, graphTop - 180));
   });
   const embeddedScrollY = await page.evaluate(() => window.scrollY);
-  const embeddedTransform = await viewport.getAttribute("style");
+  await waitForTransformStable(page, viewport);
+  const embeddedBaseline = parseFlowTransform(await viewport.getAttribute("style"));
+  expect(embeddedBaseline, "embedded graph transform must be present").not.toBeNull();
+  const baseline = embeddedBaseline as FlowTransform;
   await canvas.hover();
   await page.mouse.wheel(0, 320);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(embeddedScrollY);
-  await expect(viewport).toHaveAttribute("style", embeddedTransform ?? "");
+  await expect
+    .poll(async () => {
+      const current = parseFlowTransform(await viewport.getAttribute("style"));
+      return current !== null && transformWithinTolerance(current, baseline);
+    })
+    .toBe(true);
 
   const topBarHeight = (await page.locator(".top-bar").boundingBox())?.height ?? 0;
   const viewHeaderY = (await page.locator(".trace-workspace__header").boundingBox())?.y ?? -1;
@@ -53,12 +108,19 @@ test("embedded execution graph scrolls the page and fullscreen graph owns the wh
 
   await graph.getByRole("button", { name: "全屏" }).click();
   await expect(graph).toHaveClass(/execution-flow--fullscreen/);
-  await page.waitForTimeout(250);
+  await waitForTransformStable(page, viewport);
   const fullscreenScrollY = await page.evaluate(() => window.scrollY);
-  const fullscreenTransform = await viewport.getAttribute("style");
+  const fullscreenBaseline = parseFlowTransform(await viewport.getAttribute("style"));
+  expect(fullscreenBaseline, "fullscreen graph transform must be present").not.toBeNull();
+  const fullscreenBase = fullscreenBaseline as FlowTransform;
   await canvas.hover();
   await page.mouse.wheel(0, -260);
-  await expect.poll(() => viewport.getAttribute("style")).not.toBe(fullscreenTransform);
+  await expect
+    .poll(async () => {
+      const current = parseFlowTransform(await viewport.getAttribute("style"));
+      return current !== null && !transformWithinTolerance(current, fullscreenBase);
+    })
+    .toBe(true);
   expect(await page.evaluate(() => window.scrollY)).toBe(fullscreenScrollY);
 
   await page.keyboard.press("Escape");
