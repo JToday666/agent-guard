@@ -1,0 +1,148 @@
+{
+  "spike_id": "PR-RTE-02",
+  "runtime": "openclaw",
+  "openclaw_version": "2026.6.6",
+  "generated_at": "2026-08-15",
+  "contract_source": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/03_OpenClaw实施方案.md §2",
+  "gate_rule": "C2 Gate PASS requires every criterion deterministically satisfying; any undetermined/partial/no keeps the gate FAIL and C2 stays NOT_SUPPORTED (C1 remains PASS). No time-proximity/tool-name/argument-similarity linkage guessing is permitted.",
+  "c2_gate": "PASS",
+  "evidence_layers": {
+    "static_sdk_source": "pinned openclaw@2026.6.6 d.ts declarations and dist bundle source of the host dispatch/emit path",
+    "in_process_harness": "drives the real SDK hook runner through the public plugin-sdk/plugin-runtime surface (test/after-tool-call-spike.test.mjs)",
+    "in_process_host_path": "drives the real host-side execution chain exported by plugin-sdk/agent-harness (wrapToolWithBeforeToolCallHook, runBeforeToolCallHook, runAgentHarnessAfterToolCallHook) without an LLM (scripts/openclaw-after-tool-call-spike.mjs)",
+    "not_applicable": "no probe applies within the spike scope"
+  },
+  "live_gateway_deviation": "An isolated live Gateway cannot deterministically answer the spike questions: POST /tools/invoke runs runBeforeToolCallHook but never emits after_tool_call, and the agent harness tool loop that emits after observations requires a live model turn. The in_process_host_path layer exercises the exact exported host functions that loop uses instead; the main checkout's real profile and Gateway were never touched.",
+  "questions": [
+    {
+      "id": "Q01",
+      "question": "after_tool_call exists on the pinned OpenClaw SDK/runtime",
+      "verdict": "yes",
+      "evidence_layer": "in_process_harness",
+      "evidence_ref": "PLUGIN_HOOK_NAMES includes after_tool_call; hook-types d.ts declares (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext) => Promise<void> | void; harness registers and drives the real runner"
+    },
+    {
+      "id": "Q02",
+      "question": "actual TypeScript type/fields of the handler input",
+      "verdict": "yes",
+      "evidence_layer": "static_sdk_source",
+      "evidence_ref": "PluginHookAfterToolCallEvent = { toolName: string; params: Record<string, unknown>; runId?: string; toolCallId?: string; result?: unknown; error?: string; durationMs?: number }; PluginHookToolContext = { agentId?; sessionKey?; sessionId?; runId?; trace?; toolName; toolKind?; toolInputKind?; toolCallId?; getSessionExtension?; channelId? }; host-path probe observed exactly these fields"
+    },
+    {
+      "id": "Q03",
+      "question": "event.toolCallId / ctx.toolCallId are provided stably",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "host execution chain supplies the same caller-provided toolCallId on both event and ctx in every scenario (allow/failure/deny/rewrite); both tool execution entry points (wrapped agent tool, /tools/invoke) generate and propagate toolCallId; the d.ts optional marker only reflects optional chaining at call sites"
+    },
+    {
+      "id": "Q04",
+      "question": "toolCallId identical between before_tool_call and after_tool_call",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "scenario allow_success/deny_block/multi_plugin_rewrite: before handler, real execute, and after handler all observed the identical toolCallId; emit path derives after toolCallId from the same harness item.id"
+    },
+    {
+      "id": "Q05",
+      "question": "result shape on the success path",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "after event.result is the tool return value passed through unchanged (opaque unknown); present on success, absent on throw; blocked path carries the host-built blocked result object"
+    },
+    {
+      "id": "Q06",
+      "question": "error/throw path still triggers after_tool_call",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "scenario tool_failure: execute threw, host propagated the error, and the after observation fired with error set and result absent"
+    },
+    {
+      "id": "Q07",
+      "question": "error field and duration field semantics",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "error is a bounded string (itemToolError/host String(err)); durationMs is a number derived from the host execution timer on the completed path and undefined on error/blocked observations; success-path durationMs observed as number in scenario allow_success"
+    },
+    {
+      "id": "Q08",
+      "question": "before_tool_call handler completion happens-before tool invocation",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "wrapToolWithBeforeToolCallHook awaits runBeforeToolCallHook before calling the real execute; scenario allow_success observed order before_tool_call -> tool_executed -> after_tool_call"
+    },
+    {
+      "id": "Q09",
+      "question": "blocked (block:true) calls still trigger after_tool_call",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "scenario deny_block: block:true short-circuits execution (invocation_count=0), the wrapped tool returns the host blocked result as its terminal output, and the after observation fires with that blocked result. Consequence for PR-RTE-03: an after hook firing is NOT proof of invocation; blocked gate states must not produce terminal execution facts (contract 03 §5.2)"
+    },
+    {
+      "id": "Q10",
+      "question": "ordering of after_tool_call relative to tool_result_persist",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "tool_result_persist is synchronous on the transcript append hot path; the after observation is scheduled off it via setImmediate; scenario persist_ordering observed before_tool_call -> tool_result_persist -> after_tool_call"
+    },
+    {
+      "id": "Q11",
+      "question": "runtime behavior when an after_tool_call handler throws",
+      "verdict": "yes",
+      "evidence_layer": "in_process_harness",
+      "evidence_ref": "runVoidHook catches per-handler errors under the fail-open policy (logs, does not rethrow) and sibling handlers still run; the hook-helpers wrapper additionally try/catches with a warn log; harness test proves containment with no mutation of tool facts"
+    },
+    {
+      "id": "Q12",
+      "question": "with multiple plugins, are params/result seen by AgentGuard original, pre-rewrite, or final values",
+      "verdict": "yes",
+      "evidence_layer": "in_process_host_path",
+      "evidence_ref": "before-chain handlers each see the ORIGINAL params (rewrites merge into the decision only); the real execute receives the adjusted params (recordAdjustedParamsForToolCall); the after event carries the adjusted params when recorded, else startArgs (consumeAdjustedParamsForToolCall); scenario multi_plugin_rewrite observed exactly this"
+    },
+    {
+      "id": "Q13",
+      "question": "can other plugins still rewrite params after approval and before execution",
+      "verdict": "partial",
+      "evidence_layer": "static_sdk_source",
+      "evidence_ref": "param rewrites happen only inside the single awaited before_tool_call chain that also carries requireApproval; there is no second rewrite phase between approval release and execute in the pinned host path. Live approval-lifecycle timing was not exercised (requires human approval flow), so the verdict stays partial"
+    },
+    {
+      "id": "Q14",
+      "question": "toolCallId reuse across retries",
+      "verdict": "partial",
+      "evidence_layer": "static_sdk_source",
+      "evidence_ref": "/tools/invoke derives toolCallId from the caller idempotencyKey (same key -> same id; no key -> fresh timestamp id); the agent loop assigns per-item ids, so an LLM-level retry is a new item with a new id. A live retry scenario was not exercised, so the verdict stays partial"
+    }
+  ],
+  "c2_gate_criteria": [
+    {
+      "id": "C2G-1",
+      "criterion": "stable cross-hook action id",
+      "verdict": "yes",
+      "evidence_ref": "Q03/Q04: identical host-supplied toolCallId observed across before/execute/after in every host-path scenario"
+    },
+    {
+      "id": "C2G-2",
+      "criterion": "pre hook completes before invocation",
+      "verdict": "yes",
+      "evidence_ref": "Q08: the wrapper awaits the full before chain before the real execute; observed ordering confirms happens-before"
+    },
+    {
+      "id": "C2G-3",
+      "criterion": "success/error semantics deterministic enough",
+      "verdict": "yes",
+      "evidence_ref": "Q05/Q06/Q07: success -> result passthrough + numeric durationMs; throw -> bounded string error, no result; blocked -> host blocked result, zero invocation"
+    },
+    {
+      "id": "C2G-4",
+      "criterion": "blocked-call behavior understood and testable",
+      "verdict": "yes",
+      "evidence_ref": "Q09: blocked call = zero invocation but after hook still fires carrying the blocked result; the rule 'no terminal fact for blocked gate states' is implementable and covered by the spike's deny scenario assertion"
+    },
+    {
+      "id": "C2G-5",
+      "criterion": "multi-plugin rewrites do not break security-critical identity",
+      "verdict": "yes",
+      "evidence_ref": "Q12: toolCallId identity is host-supplied and untouched by param merges; rewrites flow through the merged decision / adjusted-params channel only; scenario multi_plugin_rewrite confirms identity stability under rewrite"
+    }
+  ]
+}
