@@ -1015,6 +1015,18 @@ def main(argv: list[str] | None = None) -> int:
             f"unsupported task-ref mode: {args.task_ref}; supported: "
             f"{', '.join(sorted(SUPPORTED_TASK_REF_MODES))}"
         )
+    if "postgres" in requested_backends and (
+        args.task_ref == "on" or args.shadow != "off"
+    ):
+        # 无效组合前置报错：postgres 基准不接收 shadow/task-ref/
+        # pipeline 参数（run_postgres_api_benchmark 只消费 benchmark_args），
+        # 该档恒为 flag off 口径；放行会使报告渲染出未参与对照的
+        # 档位组合，产生误导性结论。
+        raise ValueError(
+            "postgres backend does not participate in shadow/task-ref "
+            "comparisons; use --backends memory for --task-ref on / "
+            "--shadow on|both|tri"
+        )
     task_ref = BENCHMARK_TASK_REF_ID if args.task_ref == "on" else None
     regression, indexed_cases = evaluate_regression()
     if args.write_legacy_snapshot:

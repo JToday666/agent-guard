@@ -307,7 +307,7 @@ def test_build_pipeline_overhead_computes_pairwise_deltas() -> None:
 def test_shadow_tri_requires_measured_memory_baseline(tmp_path: Path) -> None:
     baseline = _load_baseline_module()
 
-    with pytest.raises(ValueError, match="measured memory backend"):
+    with pytest.raises(ValueError, match="does not participate"):
         baseline.main(
             [
                 "--output-dir",
@@ -445,7 +445,7 @@ def test_build_shadow_overhead_computes_nearest_rank_deltas() -> None:
 def test_shadow_both_requires_measured_memory_baseline(tmp_path: Path) -> None:
     baseline = _load_baseline_module()
 
-    with pytest.raises(ValueError, match="measured memory backend"):
+    with pytest.raises(ValueError, match="does not participate"):
         baseline.main(
             [
                 "--output-dir",
@@ -476,7 +476,7 @@ def test_shadow_both_requires_measured_memory_baseline(tmp_path: Path) -> None:
 def test_shadow_on_requires_memory_backend(tmp_path: Path) -> None:
     baseline = _load_baseline_module()
 
-    with pytest.raises(ValueError, match="requires the memory backend"):
+    with pytest.raises(ValueError, match="does not participate"):
         baseline.main(
             [
                 "--output-dir",
@@ -499,6 +499,27 @@ def test_shadow_on_requires_memory_backend(tmp_path: Path) -> None:
                 "postgres",
                 "--allow-missing-postgres",
                 "--shadow",
+                "on",
+            ]
+        )
+
+
+def test_task_ref_on_rejects_postgres_backend(tmp_path: Path) -> None:
+    """S3：postgres 档不接收 task-ref 参数，无效组合参数校验阶段报错。"""
+
+    baseline = _load_baseline_module()
+
+    with pytest.raises(ValueError, match="does not participate"):
+        baseline.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--measurement-profile",
+                "functional_smoke",
+                "--backends",
+                "postgres",
+                "--allow-missing-postgres",
+                "--task-ref",
                 "on",
             ]
         )
