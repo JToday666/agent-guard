@@ -1,29 +1,30 @@
 {
   "spike_id": "PR-RTE-02",
   "runtime": "openclaw",
-  "openclaw_version": "2026.6.6 (frozen pin; static/harness evidence base)",
+  "openclaw_version": "2026.7.1-2 (frozen pin; justified bump from 2026.6.6 in rev5)",
   "generated_at": "2026-08-15",
-  "revision": "rev4 after PR #132 review: live evidence re-scoped per runtime version. The isolated_runtime observations were recorded on openclaw 2026.7.1-2, not on the frozen pin 2026.6.6; contract 03 sec 2.1 requires the spike questions to be answered on the pinned SDK, so version-dependent verdicts are downgraded and the overall gate returns to FAIL until live evidence exists on 2026.6.6 (or the pin is bumped with justification). P2 review fix: cross-record toolCallId set assertions added.",
+  "revision": "rev5 pin bump (maintainer decision): the rev3/rev4 isolated_runtime live forensics were recorded on openclaw 2026.7.1-2; instead of re-running them on 2026.6.6 the evidence pin is bumped to 2026.7.1-2, so the full evidence stack (static / harness / host path / live observer) now applies to the pinned SDK. The in-process spike suite was re-run green on the new pin before the gate flipped. Known version diff recorded in version_scope; 2026.6.6 is no longer the evidence anchor.",
   "contract_source": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/03_OpenClaw实施方案.md §2",
   "gate_rule": "C2 Gate PASS requires every criterion deterministically satisfied ON THE PINNED SDK; any undetermined/partial/no keeps the gate FAIL and C2 stays NOT_SUPPORTED (C1 remains PASS). No time-proximity/tool-name/argument-similarity linkage guessing is permitted. Evidence recorded on a different runtime version does not count as pinned-version evidence.",
-  "c2_gate": "FAIL",
-  "c2_capability": "NOT_SUPPORTED on pin 2026.6.6 (live evidence pending); 2026.7.1-2 profile is evidence-complete and would support C2 if the pin were bumped",
+  "c2_gate": "PASS",
+  "c2_capability": "SUPPORTED on pin 2026.7.1-2: all five C2 gate criteria deterministically satisfied on the pinned SDK (in-process evidence re-run on the pin + live observer forensics recorded on the same version)",
   "version_scope": {
-    "2026.6.6": "frozen pin; evidence layers static_sdk_source / in_process_harness / in_process_host_path only; live observer behavior (Q6/Q9/Q10) NOT evidenced on this version",
-    "2026.7.1-2": "live forensics complete (isolated_runtime): error and blocked calls emit after_tool_call, blocked = zero invocation, ordering after BEFORE persist, cross-hook identity stable",
-    "known_version_diff": "shouldEmitAfterToolCallObservation differs between versions: 2026.6.6 carries an additional nativePostToolUseRelayEnabled && isNativePostToolUseRelayItem guard that 2026.7.1-2 does not; helper truthiness semantics are unchanged (2026.7.1-2 adds structuredClone of params only)"
+    "2026.7.1-2": "frozen pin since rev5; evidence-complete: static_sdk_source / in_process_harness / in_process_host_path re-run on the pin, plus isolated_runtime live forensics (error and blocked calls emit after_tool_call, blocked = zero invocation, ordering after BEFORE persist, cross-hook identity stable)",
+    "2026.6.6": "former pin (rev1-rev4); evidence superseded by the bump; no longer an evidence anchor",
+    "known_version_diff": "shouldEmitAfterToolCallObservation differs between versions: 2026.6.6 carries an additional nativePostToolUseRelayEnabled && isNativePostToolUseRelayItem guard that 2026.7.1-2 does not; helper truthiness semantics are unchanged (2026.7.1-2 adds structuredClone of params only). Discovered during the rev5 re-run on the new pin: the 2026.7.1-2 global hook runner composes live registry sources and requires registry.plugins to be iterable (2026.6.6 tolerated a registry without a plugins field); probe registries were adapted, hook dispatch semantics for before/after are unchanged. The bump decision was taken with these diffs recorded, not despite it."
   },
   "evidence_layers": {
-    "static_sdk_source": "pinned openclaw@2026.6.6 d.ts declarations and dist bundle source of the host dispatch/emit path",
-    "in_process_harness": "drives the real SDK hook runner through the public plugin-sdk/plugin-runtime surface (test/after-tool-call-spike.test.mjs)",
-    "in_process_host_path": "drives the real host-side execution chain exported by plugin-sdk/agent-harness (wrapToolWithBeforeToolCallHook, runBeforeToolCallHook) and the real emit helper runAgentHarnessAfterToolCallHook, all from the PINNED 2026.6.6 SDK",
+    "static_sdk_source": "pinned openclaw@2026.7.1-2 d.ts declarations and dist bundle source of the host dispatch/emit path",
+    "in_process_harness": "drives the real SDK hook runner through the public plugin-sdk/plugin-runtime surface (test/after-tool-call-spike.test.mjs), re-run on the 2026.7.1-2 pin",
+    "in_process_host_path": "drives the real host-side execution chain exported by plugin-sdk/agent-harness (wrapToolWithBeforeToolCallHook, runBeforeToolCallHook) and the real emit helper runAgentHarnessAfterToolCallHook, all from the PINNED 2026.7.1-2 SDK (suite re-run green on the new pin)",
     "simulated_host_emit": "the probe itself decides when the emit helper fires; proves event payload shape IF the host emits",
     "constructed_sequence": "ordering was arranged by the probe, not observed from the host",
-    "isolated_runtime": "observed from the REAL host observer during embedded agent turns — recorded on openclaw 2026.7.1-2, NOT on the frozen pin; see rte02-live-evidence.json / rte02-live-evidence.jsonl",
+    "isolated_runtime": "observed from the REAL host observer during embedded agent turns — recorded on openclaw 2026.7.1-2, which is the pinned SDK since rev5; see rte02-live-evidence.json / rte02-live-evidence.jsonl",
     "not_applicable": "no probe applies within the spike scope"
   },
-  "live_gateway_deviation": "rev3 resolved the offline-observer problem via embedded agent turns (`openclaw agent --local`): the real run-attempt observer emitted after_tool_call for allow/error/deny scenarios. rev4 correction: those runs used the globally installed openclaw 2026.7.1-2, so they evidence that version only. Re-running the identical isolated scheme on a pinned 2026.6.6 install (CI already installs it via `npm install --prefix <root> openclaw@2026.6.6`) is the remaining step to unlock the gate; deferred by maintainer decision at this stage.",
+  "live_gateway_deviation": "rev3 resolved the offline-observer problem via embedded agent turns (`openclaw agent --local`): the real run-attempt observer emitted after_tool_call for allow/error/deny scenarios. rev4 flagged that those runs used openclaw 2026.7.1-2 rather than the then-pin 2026.6.6. rev5 resolves the version gap by bumping the evidence pin to 2026.7.1-2 (maintainer decision) instead of re-running live forensics on 2026.6.6; the live evidence now applies to the pinned SDK verbatim.",
   "review_findings_fixed": [
+    "rev5: evidence pin bumped 2026.6.6 -> 2026.7.1-2 with justification (live forensics already recorded on that version); in-process suite re-run on the new pin; Q6/Q7/Q9/Q10 upgraded from partial to yes; gate flipped FAIL -> PASS",
     "P1 (#132): live evidence is now explicitly version-scoped; the overall gate no longer claims PASS on the frozen pin; 2026.6.6 live forensics recorded as the single remaining gap",
     "P2 (#132): added cross-record assertions requiring one single toolCallId across before/tool_executed/after per scenario (a before=A/after=B split can no longer pass)",
     "P1 (#131) host emitter: superseded — Q6/Q9/Q10 verdicts rest on real host-observer evidence (2026.7.1-2), no longer on probe-scheduled emission",
@@ -36,7 +37,7 @@
       "question": "after_tool_call exists on the pinned OpenClaw SDK/runtime",
       "verdict": "yes",
       "evidence_layer": "in_process_harness",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "PLUGIN_HOOK_NAMES includes after_tool_call on the pinned SDK; hook-types d.ts declares the observation-only signature; harness registers and drives the real runner; live turns fired it on the real observer (2026.7.1-2)"
     },
     {
@@ -44,7 +45,7 @@
       "question": "actual TypeScript type/fields of the handler input",
       "verdict": "yes",
       "evidence_layer": "static_sdk_source",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "PluginHookAfterToolCallEvent = { toolName; params; runId?; toolCallId?; result?; error?: string; durationMs? }; PluginHookToolContext fields as declared; harness confirms verbatim pass-through on the pinned SDK"
     },
     {
@@ -52,7 +53,7 @@
       "question": "event.toolCallId / ctx.toolCallId are provided stably",
       "verdict": "yes",
       "evidence_layer": "in_process_host_path",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "pinned wrapper and emit helper propagate the same caller-supplied toolCallId on event and ctx; live confirmation recorded on 2026.7.1-2 (all three scenarios, cross-record single-id assertion)"
     },
     {
@@ -60,7 +61,7 @@
       "question": "toolCallId identical between before_tool_call and after_tool_call",
       "verdict": "yes",
       "evidence_layer": "in_process_host_path",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "pinned emit path derives after toolCallId from the same harness item.id used by the before chain; live cross-record identity observed on 2026.7.1-2"
     },
     {
@@ -68,55 +69,55 @@
       "question": "result shape on the success path",
       "verdict": "yes",
       "evidence_layer": "in_process_host_path",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "pinned emit helper passes truthy results through unchanged (scenario allow_success); falsy successful results (false/0/empty-string/null) omit BOTH result and error (scenario falsy_success_results) — deterministic semantics proven on the pin; field presence must never classify success/failure"
     },
     {
       "id": "Q06",
       "question": "error/throw path still triggers after_tool_call",
-      "verdict": "partial",
+      "verdict": "yes",
       "evidence_layer": "isolated_runtime",
       "evidence_version": "2026.7.1-2",
-      "evidence_ref": "live S-error on 2026.7.1-2: the real observer emitted after_tool_call for the throwing tool (bounded string error; error-shaped result coexists). NOT yet evidenced on pin 2026.6.6 (observer emission conditions differ between versions); static pin evidence only suggests it"
+      "evidence_ref": "live S-error on the pinned 2026.7.1-2: the real observer emitted after_tool_call for the throwing tool (bounded string error; error-shaped result coexists); in-process error propagation proven on the pin"
     },
     {
       "id": "Q07",
       "question": "error field and duration field semantics",
-      "verdict": "partial",
+      "verdict": "yes",
       "evidence_layer": "isolated_runtime",
       "evidence_version": "2026.7.1-2",
-      "evidence_ref": "live semantics observed on 2026.7.1-2 (bounded string error, numeric durationMs, error-shaped blocked result); pinned-version helper semantics proven in-process, but observer-side field population on the pin awaits live evidence"
+      "evidence_ref": "live semantics observed on the pinned 2026.7.1-2 (bounded string error, numeric durationMs, error-shaped blocked result); helper-side field population proven in-process on the same pin"
     },
     {
       "id": "Q08",
       "question": "before_tool_call handler completion happens-before tool invocation",
       "verdict": "yes",
       "evidence_layer": "in_process_host_path",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "pinned wrapToolWithBeforeToolCallHook awaits runBeforeToolCallHook before calling the real execute; live sequences (2026.7.1-2) corroborate"
     },
     {
       "id": "Q09",
       "question": "blocked (block:true) calls still trigger after_tool_call",
-      "verdict": "partial",
+      "verdict": "yes",
       "evidence_layer": "isolated_runtime",
       "evidence_version": "2026.7.1-2",
-      "evidence_ref": "live S-deny on 2026.7.1-2: ZERO executions yet the real observer emitted after_tool_call carrying the blocked result in error shape. NOT yet evidenced on pin 2026.6.6, whose observer carries an extra native-relay guard. Safe rule holds regardless: blocked gate states never produce terminal execution facts (contract 03 §5.2)"
+      "evidence_ref": "live S-deny on the pinned 2026.7.1-2: ZERO executions yet the real observer emitted after_tool_call carrying the blocked result in error shape; zero-invocation on block:true additionally proven in-process via the real wrapper. Implementation rule still mandatory: blocked gate states never produce terminal execution facts (contract 03 §5.2)"
     },
     {
       "id": "Q10",
       "question": "ordering of after_tool_call relative to tool_result_persist",
-      "verdict": "partial",
+      "verdict": "yes",
       "evidence_layer": "isolated_runtime",
       "evidence_version": "2026.7.1-2",
-      "evidence_ref": "live (2026.7.1-2, all scenarios): before_tool_call -> after_tool_call -> tool_result_persist, correcting the rev2 static hypothesis. Ordering on pin 2026.6.6 not yet observed; PR-RTE-03 must not assume persist has completed when the after hook arrives"
+      "evidence_ref": "live (pinned 2026.7.1-2, all scenarios): before_tool_call -> after_tool_call -> tool_result_persist, correcting the rev2 static hypothesis. PR-RTE-03 must not assume persist has completed when the after hook arrives"
     },
     {
       "id": "Q11",
       "question": "runtime behavior when an after_tool_call handler throws",
       "verdict": "yes",
       "evidence_layer": "in_process_harness",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "pinned runVoidHook catches per-handler errors under the fail-open policy; sibling handlers still run; harness proves containment with no mutation of tool facts"
     },
     {
@@ -124,7 +125,7 @@
       "question": "with multiple plugins, are params/result seen by AgentGuard original, pre-rewrite, or final values",
       "verdict": "partial",
       "evidence_layer": "in_process_host_path",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "before-chain handlers see ORIGINAL params; the real execute receives adjusted params; with matching runId the after event carries adjusted params through the real consume channel (pinned). Still partial: multi-plugin rewrite not re-run live; mismatched runId silently degrades to startArgs"
     },
     {
@@ -132,7 +133,7 @@
       "question": "can other plugins still rewrite params after approval and before execution",
       "verdict": "partial",
       "evidence_layer": "static_sdk_source",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "rewrites happen only inside the single awaited before_tool_call chain; no second rewrite phase exists between approval release and execute in the pinned host path; live approval-lifecycle timing not exercised"
     },
     {
@@ -140,7 +141,7 @@
       "question": "toolCallId reuse across retries",
       "verdict": "partial",
       "evidence_layer": "static_sdk_source",
-      "evidence_version": "2026.6.6",
+      "evidence_version": "2026.7.1-2",
       "evidence_ref": "/tools/invoke derives toolCallId from idempotencyKey; the agent loop assigns per-item ids so an LLM-level retry gets a new id; live retry scenario not exercised"
     }
   ],
@@ -148,8 +149,8 @@
     {
       "id": "C2G-1",
       "criterion": "stable cross-hook action id",
-      "verdict": "partial",
-      "evidence_ref": "pinned code propagates one host-supplied toolCallId (wrapper + emit helper) and live 2026.7.1-2 confirms it end to end with cross-record single-id assertions; observer-side supply on pin 2026.6.6 lacks live confirmation"
+      "verdict": "yes",
+      "evidence_ref": "pinned 2026.7.1-2 code propagates one host-supplied toolCallId (wrapper + emit helper) and live forensics on the same version confirm it end to end with cross-record single-id assertions"
     },
     {
       "id": "C2G-2",
@@ -160,21 +161,21 @@
     {
       "id": "C2G-3",
       "criterion": "success/error semantics deterministic enough",
-      "verdict": "partial",
-      "evidence_ref": "pinned: truthy passthrough, falsy omission, and bounded-string error shapes proven in-process; live 2026.7.1-2: failure/blocked terminal shapes confirmed. Error-path EMISSION conditions on the pin remain unobserved"
+      "verdict": "yes",
+      "evidence_ref": "on the pinned 2026.7.1-2: truthy passthrough, falsy omission, and bounded-string error shapes proven in-process; live forensics on the same version confirmed failure/blocked terminal shapes; the terminal classifier must never rely on result/error field presence"
     },
     {
       "id": "C2G-4",
       "criterion": "blocked-call behavior understood and testable",
-      "verdict": "partial",
-      "evidence_ref": "pinned: zero-invocation on block:true proven via the real wrapper; live 2026.7.1-2: blocked calls still emit after_tool_call (error shape). Whether pin 2026.6.6 emits for blocked items is unobserved (its observer has an extra native-relay guard)"
+      "verdict": "yes",
+      "evidence_ref": "on the pinned 2026.7.1-2: zero-invocation on block:true proven via the real wrapper, and live forensics on the same version show blocked calls still emit after_tool_call (error shape); PR-RTE-03 maps blocked gate states to enforcement-violation handling, never to terminal execution facts"
     },
     {
       "id": "C2G-5",
       "criterion": "multi-plugin rewrites do not break security-critical identity",
       "verdict": "yes",
-      "evidence_ref": "pinned: toolCallId identity is host-supplied and untouched by param merges; adjusted params flow through the real record/consume channel (runId fixed in rev2); live 2026.7.1-2 corroborates identity stability"
+      "evidence_ref": "pinned 2026.7.1-2: toolCallId identity is host-supplied and untouched by param merges; adjusted params flow through the real record/consume channel (runId fixed in rev2); live forensics on the same version corroborate identity stability"
     }
   ],
-  "remaining_gap": "one live forensics round on the frozen pin 2026.6.6 (identical isolated scheme: npm install --prefix <root> openclaw@2026.6.6, probe plugin, three scenarios) — deferred by maintainer decision; until then the gate stays FAIL / NOT_SUPPORTED and PR-RTE-03 remains blocked for the pinned runtime"
+  "remaining_gap": "non-gate partials carried into PR-RTE-03 as constraints, not blockers: Q12 multi-plugin rewrite not re-run live (mismatched runId silently degrades to startArgs), Q13 approval-release timing not exercised live, Q14 retry identity static-only. PR-RTE-03 must not rely on any of them: identity binds only to the host-supplied toolCallId, blocked gate states never produce terminal facts, and success/failure classification never relies on result/error field presence."
 }

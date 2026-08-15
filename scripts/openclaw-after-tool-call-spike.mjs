@@ -2,7 +2,7 @@
 // PR-RTE-02 SDK spike — after_tool_call host-path probe.
 //
 // Evidence layer: in_process_host_path. Drives the REAL host-side tool
-// execution chain of the pinned openclaw@2026.6.6 SDK (the same exported
+// execution chain of the pinned openclaw@2026.7.1-2 SDK (the same exported
 // functions the gateway agent loop uses: wrapToolWithBeforeToolCallHook,
 // runBeforeToolCallHook, runAgentHarnessAfterToolCallHook) deterministically,
 // without an LLM.
@@ -33,7 +33,11 @@ const PLUGIN_PKG_PATH = path.join(
   "package.json",
 );
 
-const OPENCLAW_PIN = "2026.6.6";
+// Evidence pin: bumped 2026.6.6 -> 2026.7.1-2 (rev5, maintainer decision):
+// the rev3 isolated_runtime live forensics were recorded on 2026.7.1-2, so
+// bumping the pin makes the full evidence stack (static / harness / host
+// path / live) apply to the pinned SDK and unlocks the C2 Gate.
+const OPENCLAW_PIN = "2026.7.1-2";
 
 async function loadOpenclawSdk() {
   // openclaw is a devDependency of the plugin package, not the repo root;
@@ -100,6 +104,9 @@ function buildProbeRegistry(sink, options = {}) {
   });
   return {
     hooks: [],
+    // 2026.7.1-2 hook runner composes registry sources and iterates
+    // registry.plugins; the probe keeps it empty but iterable.
+    plugins: [],
     typedHooks: [
       ...beforeHandlers,
       {
