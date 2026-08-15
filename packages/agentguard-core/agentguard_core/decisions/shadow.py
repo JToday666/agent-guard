@@ -39,6 +39,7 @@ V21-09 CAS revalidation 五元组，不留占位。
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 from ..actions.builder import build_action_ir
@@ -86,11 +87,13 @@ __all__ = [
     "ABSENT_SNAPSHOT_ID",
     "REASON_ACTION_IR_FAILED",
     "REASON_COMPONENT_FAILED",
+    "ShadowOutcome",
     "assessment_digest_projection",
     "compute_assessment_digest",
     "derive_assessment_id",
     "finalize_shadow",
     "shadow_assess",
+    "shadow_assess_with_coverage",
 ]
 
 #: snapshot 缺失时的注册标识哨兵（不伪造 Snapshot，01 §25）。
@@ -107,6 +110,20 @@ REASON_COMPONENT_FAILED = "v21-08:component_failed"
 
 #: semantic 路由为 V21-13 预留；shadow 期恒 ineligible。
 _SEMANTIC_RESERVED_REASON = "v21-08:semantic_reserved_v21-13"
+
+
+@dataclass(frozen=True)
+class ShadowOutcome:
+    """shadow 评估的完整旁路产物。
+
+    ``FastAssessment`` 冻结字段（01 §25）不含 CoverageMap；evidence 组装
+    （§14 保存项 2）必须与判定时喂给 fusion 的 coverage 同源，因此本
+    数据类把评估时实际使用的 coverage 一并透出（降级路径为七域 unknown
+    构件），禁止调用方另行重算造成双真值。
+    """
+
+    assessment: FastAssessment
+    coverage: CoverageMap
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +293,7 @@ def _legacy_signals_and_degradations(
 # ---------------------------------------------------------------------------
 
 
-def shadow_assess(
+def shadow_assess_with_coverage(
     event: GuardEvent,
     policies: PolicyBundle,
     snapshot: SecuritySnapshot | None,
@@ -284,25 +301,11 @@ def shadow_assess(
     server_secret: bytes,
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
-) -> FastAssessment:
-    """V21-08 shadow 快路径评估（纯函数；同输入必同输出）。
+) -> ShadowOutcome:
+    """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
 
-    签名与完整方案 §15 V21-09 ``GuardEngine.assess(event, policies,
-    snapshot) -> FastAssessment`` 的前三个位置参数对齐（**V21-09 零重构
-    升级点**）。shadow 期附加关键字入参：
-
-    - ``server_secret``：ActionIR 指纹所需（V21-09 同需）；
-    - ``detection_results``：legacy 检测结果，经 legacy_adapter 转
-      signals/degradations 喂给 fusion（shadow 双轨对照的输入）；
-    - ``revoked_grant_ids``：authority 投影的撤销集（snapshot 不携带，
-      见模块 docstring 局限声明）。
-
-    降级契约（绝不上抛）：
-
-    - ``snapshot is None`` → coverage 全域 unknown + ``DEFER`` +
-      ``SNAPSHOT_ABSENT_REASON`` 降级（**严禁伪造 Snapshot**，01 §25）；
-    - ActionIR 构建失败 → 保守 impact high + 全降级构件 + ``DEFER``；
-    - 任一编排组件异常 → shadow 组件降级 + ``DEFER``。
+    evidence 组装（§14 保存项 2）必须消费评估时喂给 fusion 的同一份
+    coverage，本函数是该同源真值的唯一出口。
     """
     policy_digest = canonical_sha256(policies.model_dump(mode="json"))
     signals, degradations = _legacy_signals_and_degradations(
@@ -447,7 +450,7 @@ def shadow_assess(
         assessment_digest="",
     )
     digest = compute_assessment_digest(assessment)
-    return assessment.model_copy(
+    finalized = assessment.model_copy(
         update={
             "assessment_id": derive_assessment_id(
                 event_id=event.event_id,
@@ -458,6 +461,48 @@ def shadow_assess(
             "assessment_digest": digest,
         }
     )
+    return ShadowOutcome(assessment=finalized, coverage=coverage)
+
+
+def shadow_assess(
+    event: GuardEvent,
+    policies: PolicyBundle,
+    snapshot: SecuritySnapshot | None,
+    *,
+    server_secret: bytes,
+    detection_results: Sequence[DetectionResult] = (),
+    revoked_grant_ids: Sequence[str] = (),
+) -> FastAssessment:
+    """V21-08 shadow 快路径评估（纯函数；同输入必同输出）。
+
+    签名与完整方案 §15 V21-09 ``GuardEngine.assess(event, policies,
+    snapshot) -> FastAssessment`` 的前三个位置参数对齐（**V21-09 零重构
+    升级点**）。shadow 期附加关键字入参：
+
+    - ``server_secret``：ActionIR 指纹所需（V21-09 同需）；
+    - ``detection_results``：legacy 检测结果，经 legacy_adapter 转
+      signals/degradations 喂给 fusion（shadow 双轨对照的输入）；
+    - ``revoked_grant_ids``：authority 投影的撤销集（snapshot 不携带，
+      见模块 docstring 局限声明）。
+
+    降级契约（绝不上抛）：
+
+    - ``snapshot is None`` → coverage 全域 unknown + ``DEFER`` +
+      ``SNAPSHOT_ABSENT_REASON`` 降级（**严禁伪造 Snapshot**，01 §25）；
+    - ActionIR 构建失败 → 保守 impact high + 全降级构件 + ``DEFER``；
+    - 任一编排组件异常 → shadow 组件降级 + ``DEFER``。
+
+    需要与判定同源 coverage 的调用方（evidence 组装）用
+    ``shadow_assess_with_coverage``。
+    """
+    return shadow_assess_with_coverage(
+        event,
+        policies,
+        snapshot,
+        server_secret=server_secret,
+        detection_results=detection_results,
+        revoked_grant_ids=revoked_grant_ids,
+    ).assessment
 
 
 # ---------------------------------------------------------------------------
