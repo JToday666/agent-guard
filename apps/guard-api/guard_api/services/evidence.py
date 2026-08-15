@@ -228,7 +228,9 @@ def build_audit_event(
                         evidence["decision_v21"] = budget_dropped_reference(
                             v21_value
                         )
-    audit_kwargs: dict[str, object] = {}
+    # 只可能携带 audit_id（str）：标注收窄为 dict[str, str]，避免
+    # **kwargs 展开时 pyright 无法把 object 值匹配到 str 参数。
+    audit_kwargs: dict[str, str] = {}
     if audit_id is not None:
         audit_kwargs["audit_id"] = audit_id
     return AuditEvent(
