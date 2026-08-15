@@ -123,6 +123,22 @@ class GuardApiSettings:
             default=DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS,
         )
     )
+    # V21-08 shadow feature flag（11_决策记录_V21-08前置.md D3：默认
+    # false；flag off 时 shadow 全链路不执行，evaluate 行为逐字节不变）。
+    v21_shadow_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_V21_SHADOW_ENABLED", default=False
+        )
+    )
+    # shadow ActionIR 指纹专用 server secret（base64url，≥32 字节）。
+    # 与 task scope keyring / audit checkpoint key 域隔离，不复用其他密钥。
+    # flag on 而未配置时 shadow 禁用（编排器返回 None），不得硬编码兜底。
+    v21_shadow_server_secret: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_V21_SHADOW_SERVER_SECRET"
+        ),
+        repr=False,
+    )
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
@@ -188,6 +204,21 @@ class GuardApiSettings:
                 "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID must exist in "
                 "AGENTGUARD_TASK_SCOPE_KEYS"
             ) from None
+
+    def v21_shadow_server_secret_bytes(self) -> bytes | None:
+        """解析 shadow server secret；未配置返回 None。
+
+        形态校验与既有 checkpoint key 同口径（base64url、解码后 ≥32
+        字节）；非法配置抛 ``GuardApiConfigurationError``（fail-closed，
+        编排器侧收敛为 shadow 禁用，绝不用弱密钥继续产证据）。
+        """
+
+        if self.v21_shadow_server_secret is None:
+            return None
+        return _decode_base64url_key(
+            self.v21_shadow_server_secret,
+            label="AGENTGUARD_V21_SHADOW_SERVER_SECRET",
+        )
 
     def audit_checkpoint_configured(self) -> bool:
         return bool(
