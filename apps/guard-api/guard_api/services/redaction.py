@@ -4,6 +4,19 @@ Implements the frozen contract limits from 证据链与溯源 API 目标契约 �
 sensitive key coverage, credential content scrubbing, per-field character and
 item caps, nesting depth, and the 64 KiB per-event evidence budget. Guard API
 审批 payload 清洗与策略评估 evidence 投影必须共用本工具。
+
+CT-PR-03b 评审裁决留痕（保真优先）：``ct_transient_facts`` typed bound
+通道对 bundle 本体**免除 scrub_text**（含 ``sanitize_audit_event`` 的
+前置 ``redact_structure`` 与 ``bound_ct_transient_facts_envelope`` 两
+处），仅保留结构限额（array/depth/text 长度）。依据：fact_builder
+生产侧契约保证 raw secret 绝不落入 fact 字段——credential 值仅以
+``credential:<fingerprint>``（canonical_sha256 指纹）形态存在
+（fact_builder ``_credential_fingerprints``，CT-PR-02b）。若对 bundle
+本体做字符串清洗，ActionIR 来源的 URL 形态 ref 可能被
+CREDENTIAL_ASSIGNMENT_RE/PROVIDER_KEY_RE 改写为 ``[redacted]``，导致
+持久 bundle ≠ 在线 bundle → backfill digest 失真跳过，D4/D9 闭环被
+击穿。保真守门：``tests/test_ct_state_wiring.py`` round-trip 用例
+（重建 bundle digest 与信封引用恒等）。
 """
 
 from __future__ import annotations
@@ -223,6 +236,15 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
 
     evidence: dict[str, object] | None = None
     if event.evidence is not None:
+        # 保真优先裁决（CT-PR-03b 评审 S3，见模块 docstring）：CT 信封
+        # 在 redact_structure 之前原样取出，bundle 本体免 scrub_text；
+        # 通用清洗链只处理剩余键。
+        source_evidence: object = event.evidence
+        ct_envelope = (
+            source_evidence.get("ct_transient_facts")
+            if isinstance(source_evidence, dict)
+            else None
+        )
         raw_evidence = redact_structure(event.evidence)
         if isinstance(raw_evidence, dict):
             replay_decision = raw_evidence.pop("guard_decision", None)
@@ -233,6 +255,11 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             # state_delta_v21 引用信封（V21-09 D2）同源口径：走专用 typed
             # bound 通道，不经通用 bound（禁静默丢失，D4-11 号纪律）。
             state_delta_envelope = raw_evidence.pop("state_delta_v21", None)
+            # ct_transient_facts 信封（CT-PR-03b D4，B1 评审修复）：同源
+            # 口径走专用 typed bound 通道——通用 bound 的
+            # MAX_NESTING_DEPTH=6 会把 bundle 内 fact 对象碾成 "..."，
+            # 使 backfill 的 model_validate 对任何非空 bundle 恒失败。
+            raw_evidence.pop("ct_transient_facts", None)
         else:
             replay_decision = None
             v21_envelope = None
@@ -261,6 +288,15 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
                 text_limit=CONTENT_PREVIEW_LIMIT,
                 array_limit=STATE_DELTA_V21_ARRAY_LIMIT,
                 max_depth=STATE_DELTA_V21_MAX_DEPTH,
+            )
+        if isinstance(bounded_evidence, dict) and ct_envelope is not None:
+            # 免 scrub 的 typed bound 通道（保真优先裁决，见模块
+            # docstring）：仅结构限额，bundle 本体字符串不清洗。
+            bounded_evidence["ct_transient_facts"] = _bound_typed_value(
+                ct_envelope,
+                text_limit=CONTENT_PREVIEW_LIMIT,
+                array_limit=CT_TRANSIENT_FACTS_ARRAY_LIMIT,
+                max_depth=CT_TRANSIENT_FACTS_MAX_DEPTH,
             )
         evidence = (
             enforce_evidence_budget(bounded_evidence)
@@ -349,16 +385,19 @@ def bound_state_delta_v21_envelope(value: object) -> object:
 def bound_ct_transient_facts_envelope(value: object) -> object:
     """ct_transient_facts 信封专用 bounded 投影（typed bound 通道）。
 
-    仿 ``bound_state_delta_v21_envelope``：先 ``redact_structure``（append-only
-    审计证据仍受 §21.1 敏感清洗；bundle 内容均为确定性 id/digest/ref，
-    不含 raw secret——credential 值仅以指纹形态存在），再经
-    ``_bound_typed_value`` 以 ``CT_TRANSIENT_FACTS_*`` 限额投影；不放宽
-    任何全局冻结限额（07 §21.2）。
+    仿 ``bound_state_delta_v21_envelope`` 的结构限额口径，但依保真优先
+    裁决（CT-PR-03b 评审 S3，见模块 docstring）**不经
+    ``redact_structure`` / scrub_text**：bundle 本体必须与在线 bundle
+    逐位一致，backfill 才能以 digest 对照重建投影；raw secret 由
+    fact_builder 生产侧契约保证仅以指纹形态存在。text_limit 与
+    ``sanitize_audit_event`` 通道同取 ``CONTENT_PREVIEW_LIMIT``，两遍
+    投影幂等（持久 bundle == 在线 bundle）。不放宽任何全局冻结限额
+    （07 §21.2）。
     """
 
     return _bound_typed_value(
-        redact_structure(value),
-        text_limit=SUMMARY_TEXT_LIMIT,
+        value,
+        text_limit=CONTENT_PREVIEW_LIMIT,
         array_limit=CT_TRANSIENT_FACTS_ARRAY_LIMIT,
         max_depth=CT_TRANSIENT_FACTS_MAX_DEPTH,
     )

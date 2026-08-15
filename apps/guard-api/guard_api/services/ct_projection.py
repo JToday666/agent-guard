@@ -115,8 +115,9 @@ _SENSITIVE_CATEGORIES = frozenset(
     {"sensitive_file_access", "outbound_dlp", "file_exfiltration"}
 )
 
-#: 结构化留痕：异常 base 回退跳过计数器（进程级观测信号；前向漂移由
-#: 锁内确定性 rebase 吸收，不经过本计数器）。
+#: 结构化留痕：异常 base 回退跳过计数器（进程级观测信号，非全局
+#: 聚合——仅统计当前进程内发生的跳过，多进程部署下各进程独立计数；
+#: 前向漂移由锁内确定性 rebase 吸收，不经过本计数器）。
 CT_BASE_REWIND_SKIPS: dict[str, int] = {"count": 0}
 
 
@@ -649,6 +650,17 @@ class CtProjectionService:
                 "bundle rebuild failed (fail-closed)",
                 audit.audit_id,
                 exc_info=True,
+            )
+            return
+        if bundle.bundle_digest != compute_bundle_digest(bundle):
+            # 评审 S6 digest 口径统一：_project_ct_facts 的 verify 期望值
+            # 取内嵌字段 bundle.bundle_digest，本处重建后、投影前显式
+            # 断言内嵌字段与重算值一致；不一致即跳过留痕（fail-closed）。
+            logger.warning(
+                "ct replay projection backfill skipped for audit %s: "
+                "embedded bundle_digest mismatches the recomputed digest "
+                "(fail-closed)",
+                audit.audit_id,
             )
             return
         if compute_bundle_digest(bundle) != expected_digest:

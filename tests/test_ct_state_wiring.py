@@ -12,16 +12,22 @@
 ⑥ 无 task 引用 → 跳过留痕不伪造 scope（adapter 入站无 CT 通道）；
 ⑦ pipeline + CT 双投影共存（前向漂移锁内确定性 rebase 吸收）。
 
+评审补强（CT-PR-03b 三视角评审 S1/S2/S4）：
+⑧ 持久信封 round-trip 保真守门（B1 常设守门）；
+⑨ backfill 正向重建（删登记 → replay 恢复，容器 digest 等价）；
+⑩ backfill 负向分支与前缀 fail-closed 直驱用例。
+
 契约依据：CT-PR-03 实施计划裁决 D1-D6 与 02 §3 commit→project 时序。
 """
 
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
 
-from agentguard_core import GuardEvent, utc_now_iso
+from agentguard_core import AuditEvent, GuardEvent, utc_now_iso
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority.models import (
     EvaluationClock,
@@ -38,10 +44,18 @@ from agentguard_core.events.payloads import (
     ToolResult,
     ToolResultPayload,
 )
-from agentguard_core.security_context import PROJECTOR_VERSION, OnlineSecurityState
+from agentguard_core.security_context import (
+    PROJECTOR_VERSION,
+    OnlineSecurityState,
+    projection_identity_key,
+)
 from guard_api.auth import AuthContext
 from guard_api.models import TaskCreateRequest
 from guard_api.security_state import SecurityStateService
+from guard_api.security_state.transient import (
+    TransientSecurityFacts,
+    compute_bundle_digest,
+)
 from guard_api.services import (
     ApprovalService,
     AuditService,
@@ -53,7 +67,7 @@ from guard_api.services import (
     V21ShadowService,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import ProjectionIdentityRecord
+from guard_api.storage.base import ProjectionIdentityRecord, SecurityStateRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
 
 from tests.test_v21_09_pipeline import _normalized_response_dump
@@ -367,11 +381,11 @@ def test_ct_flag_off_byte_identical() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_replay_idempotent_short_circuit(monkeypatch) -> None:
+def test_replay_idempotent_short_circuit(monkeypatch, caplog) -> None:
     store = MemoryControlPlaneStore()
     settings = _settings()
     task_id, scope_digest = _ingress_task(store, settings=settings)
-    evaluation, _, _ = _stack(store, settings=settings)
+    evaluation, state_service, _ = _stack(store, settings=settings)
     event = _ct_event(
         event_id="evt_ct_replay_1",
         event_type="tool_result_produced",
@@ -410,6 +424,24 @@ def test_replay_idempotent_short_circuit(monkeypatch) -> None:
     assert (
         store.get_security_state(scope_digest).state_version
         == version_after_first
+    )
+    # 评审强化：短路断言必须与「backfill 重建失败」可区分——登记在场
+    # （短路前置条件成立），且 replay 全程无任何 backfill 跳过/失败留痕。
+    assert (
+        state_service.store_access.get_projection(
+            scope_digest,
+            "runtime_observation",
+            f"ct-facts:{event.event_id}",
+            1,
+            PROJECTOR_VERSION,
+        )
+        is not None
+    )
+    assert not any(
+        "backfill skipped" in record.message
+        or "bundle rebuild failed" in record.message
+        or "backfill failed" in record.message
+        for record in caplog.records
     )
 
 
@@ -599,3 +631,321 @@ def test_dual_projection_coexistence_forward_drift_rebase() -> None:
     assert record.dirty is False
     assert state.source_index
     assert record.state_version >= eval_registration.applied_state_version
+
+
+# ---------------------------------------------------------------------------
+# ⑧ 评审 S1：持久信封 round-trip 保真守门（B1 常设守门）
+# ---------------------------------------------------------------------------
+
+
+def test_ct_envelope_round_trip_persistence_fidelity() -> None:
+    store = MemoryControlPlaneStore()
+    settings = _settings()
+    task_id, scope_digest = _ingress_task(store, settings=settings)
+    evaluation, _, _ = _stack(store, settings=settings)
+    event = _ct_event(
+        event_id="evt_ct_roundtrip_1",
+        event_type="tool_result_produced",
+        task_id=task_id,
+        call_id="call_roundtrip_1",
+    )
+    evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
+
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    envelope = audit.evidence["ct_transient_facts"]
+    payload = envelope["payload"]
+    raw_bundle = payload["bundle"]
+
+    # B1 守门核心：持久 bundle 未被通用 bound 碾平（无 "..." 占位），
+    # model_validate 必成功，且保真裁决（S3）下无任何 scrub 改写痕迹。
+    serialized = json.dumps(raw_bundle, sort_keys=True)
+    assert '"..."' not in serialized
+    assert "[redacted]" not in serialized
+    rebuilt = TransientSecurityFacts.model_validate(raw_bundle)
+
+    # digest 三角恒等：重建值 == 内嵌字段 == 信封引用。
+    assert compute_bundle_digest(rebuilt) == payload["bundle_digest"]
+    assert rebuilt.bundle_digest == payload["bundle_digest"]
+    assert payload["bundle_digest"].startswith("sha256:")
+
+    # 三类 facts 逐条字段等价：重建 bundle 的事实集与在线状态容器
+    # （由同一 bundle 投影，delta_builder 排序去重口径）逐条 digest 相等。
+    def _fact_digests(facts) -> set[str]:
+        return {
+            canonical_sha256(fact.model_dump(mode="json")) for fact in facts
+        }
+
+    _, state = _online_state(store, scope_digest)
+    assert rebuilt.source_facts
+    assert rebuilt.flow_facts
+    assert _fact_digests(rebuilt.source_facts) == _fact_digests(
+        state.source_index
+    )
+    assert _fact_digests(rebuilt.flow_facts) == _fact_digests(
+        state.relevant_flows
+    )
+    assert _fact_digests(rebuilt.memory_facts) == _fact_digests(
+        state.memory_index
+    )
+    # 身份字段等价。
+    assert rebuilt.event_id == event.event_id
+    assert rebuilt.scope_digest == scope_digest
+    assert all(
+        fact.scope_digest == scope_digest for fact in rebuilt.source_facts
+    )
+
+
+# ---------------------------------------------------------------------------
+# ⑨ 评审 S2：backfill 正向重建（删登记 → replay 恢复，容器 digest 等价）
+# ---------------------------------------------------------------------------
+
+
+def test_backfill_positive_rebuild_restores_registration() -> None:
+    store = MemoryControlPlaneStore()
+    settings = _settings()
+    task_id, scope_digest = _ingress_task(store, settings=settings)
+    evaluation, state_service, _ = _stack(store, settings=settings)
+    event = _ct_event(
+        event_id="evt_ct_backfill_1",
+        event_type="tool_result_produced",
+        task_id=task_id,
+        call_id="call_backfill_1",
+    )
+    first = evaluation.evaluate(
+        event, requesting_principal_id="cred_adapter_main"
+    )
+    access = state_service.store_access
+    registration = access.get_projection(
+        scope_digest,
+        "runtime_observation",
+        f"ct-facts:{event.event_id}",
+        1,
+        PROJECTOR_VERSION,
+    )
+    assert registration is not None
+    _, state_before = _online_state(store, scope_digest)
+    containers_before = _containers_dump(state_before)
+    version_before = store.get_security_state(scope_digest).state_version
+
+    # 模拟该五元组投影整体丢失：删投影登记 + 同步清除状态内
+    # applied_projections 对应条目（否则 apply 会命中 in-state 登记的
+    # rebase 前 digest → 误判 conflict；两者同删才是「登记丢失 →
+    # backfill 正向重建」的良性形态）。
+    key = (
+        scope_digest,
+        "runtime_observation",
+        f"ct-facts:{event.event_id}",
+        1,
+        PROJECTOR_VERSION,
+    )
+    with store.security_state_lock:
+        del store.projection_records[key]
+    assert (
+        access.get_projection(
+            scope_digest,
+            "runtime_observation",
+            f"ct-facts:{event.event_id}",
+            1,
+            PROJECTOR_VERSION,
+        )
+        is None
+    )
+    incoming_key = projection_identity_key(
+        scope_digest,
+        "runtime_observation",
+        f"ct-facts:{event.event_id}",
+        1,
+        PROJECTOR_VERSION,
+    )
+    record_now = store.get_security_state(scope_digest)
+    assert record_now is not None
+    state_now = OnlineSecurityState.model_validate(record_now.canonical_payload)
+    stripped = state_now.model_copy(
+        update={
+            "applied_projections": [
+                applied
+                for applied in state_now.applied_projections
+                if applied.projection_key != incoming_key
+            ]
+        }
+    )
+    assert len(stripped.applied_projections) == len(
+        state_now.applied_projections
+    ) - 1
+    assert store.cas_security_state(
+        scope_digest,
+        record_now.state_version,
+        SecurityStateRecord(
+            scope_digest=scope_digest,
+            state_version=record_now.state_version,
+            canonical_payload=stripped.model_dump(mode="json"),
+            dirty=bool(stripped.dirty_domains),
+            dirty_domains=list(stripped.dirty_domains),
+            projector_version=PROJECTOR_VERSION,
+            updated_at=utc_now_iso(),
+        ),
+    )
+
+    replay = evaluation.evaluate(
+        event, requesting_principal_id="cred_adapter_main"
+    )
+    assert replay.policy_audit_id == first.policy_audit_id
+
+    # 登记恢复且容器 digest 与原投影等价；身份派生的 projection_id
+    # 恒等（五元组与 base 无关；delta_digest 含 base，rebase 后必然
+    # 不同，不作等价断言）；补投影使投影计数 +1（state version 推进
+    # 一步）。
+    rebuilt_registration = access.get_projection(*key)
+    assert rebuilt_registration is not None
+    assert rebuilt_registration.delta_payload.get(
+        "projection_id"
+    ) == registration.delta_payload.get("projection_id")
+    record_after, state_after = _online_state(store, scope_digest)
+    assert _containers_dump(state_after) == containers_before
+    assert record_after.dirty is False
+    assert (
+        record_after.state_version == version_before + 1
+    ), "backfill 补投影应推进一次 state version（投影计数 +1）"
+
+
+# ---------------------------------------------------------------------------
+# ⑩ 评审 S4：backfill 负向分支与前缀 fail-closed 直驱用例
+# ---------------------------------------------------------------------------
+
+
+def _ct_backfill_audit(
+    *,
+    payload: dict,
+    task_id: str | None,
+) -> AuditEvent:
+    metadata: dict[str, object] = {}
+    if task_id is not None:
+        metadata["task_id"] = task_id
+    return AuditEvent(
+        schema_version="0.4",
+        record_type="policy_evaluation",
+        trace_id="trace_ct_s4",
+        event_type="tool_result_produced",
+        summary="ct backfill negative fixture",
+        decision="allow",
+        risk_score=10,
+        severity="low",
+        blocked=False,
+        reason="fixture",
+        metadata=metadata,
+        evidence={
+            "ct_transient_facts": {
+                "schema_version": "1.0",
+                "payload": payload,
+            }
+        },
+    )
+
+
+def test_backfill_negative_branches_direct_drive(caplog) -> None:
+    store = MemoryControlPlaneStore()
+    settings = _settings()
+    task_id, scope_digest = _ingress_task(store, settings=settings)
+    evaluation, state_service, ct_service = _stack(store, settings=settings)
+    # 先真实评估一次，取得合法 bundle 材料作为负向用例的改造基底。
+    evaluation.evaluate(
+        _ct_event(
+            event_id="evt_ct_s4_base",
+            event_type="tool_result_produced",
+            task_id=task_id,
+            call_id="call_s4_base",
+        ),
+        requesting_principal_id="cred_adapter_main",
+    )
+    base_audit = store.get_policy_evaluation_by_event_id("evt_ct_s4_base")
+    assert base_audit is not None
+    base_payload = copy.deepcopy(
+        base_audit.evidence["ct_transient_facts"]["payload"]
+    )
+
+    def _payload_with_source(source_record_id: str) -> dict:
+        payload = copy.deepcopy(base_payload)
+        payload["source_identity"]["source_record_id"] = source_record_id
+        return payload
+
+    access = state_service.store_access
+
+    def _assert_not_registered(source_record_id: str) -> None:
+        assert (
+            access.get_projection(
+                scope_digest,
+                "runtime_observation",
+                source_record_id,
+                1,
+                PROJECTOR_VERSION,
+            )
+            is None
+        )
+
+    def _assert_skip(fragment: str) -> None:
+        assert any(
+            fragment in record.message for record in caplog.records
+        ), f"expected skip log containing {fragment!r}"
+
+    # 用例 1：降级引用（_budget_dropped）跳过（跳过在身份解析前，
+    # 断言登记总数不变 + 留痕）。
+    caplog.clear()
+    registrations_before = len(store.projection_records)
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(
+                payload={
+                    "_budget_dropped": True,
+                    "_envelope_sha256": "sha256:" + "ab" * 32,
+                },
+                task_id=task_id,
+            )
+        )
+    _assert_skip("budget-degraded to a digest reference")
+    assert len(store.projection_records) == registrations_before
+
+    # 用例 2：bundle digest 失真（信封引用 ≠ 重建值）跳过。
+    caplog.clear()
+    bad_digest_payload = _payload_with_source("ct-facts:evt_ct_s4_digest")
+    bad_digest_payload["bundle_digest"] = "sha256:" + "ff" * 32
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(payload=bad_digest_payload, task_id=task_id)
+        )
+    _assert_skip("rebuilt bundle digest does not match")
+    _assert_not_registered("ct-facts:evt_ct_s4_digest")
+
+    # 用例 2b（评审 S6 分支）：内嵌 bundle_digest 与重算值不一致跳过。
+    caplog.clear()
+    embedded_payload = _payload_with_source("ct-facts:evt_ct_s4_embedded")
+    embedded_payload["bundle"]["event_id"] = "evt_ct_s4_tampered"
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(payload=embedded_payload, task_id=task_id)
+        )
+    _assert_skip("embedded bundle_digest mismatches")
+    _assert_not_registered("ct-facts:evt_ct_s4_embedded")
+
+    # 用例 3：audit metadata 缺 task_id 跳过。
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(
+                payload=_payload_with_source("ct-facts:evt_ct_s4_taskid"),
+                task_id=None,
+            )
+        )
+    _assert_skip("no task_id in audit metadata")
+    _assert_not_registered("ct-facts:evt_ct_s4_taskid")
+
+    # 用例 4：source_record_id 无 ct-facts: 前缀 → 拒绝不投影。
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(
+                payload=_payload_with_source("evt-x"), task_id=task_id
+            )
+        )
+    _assert_skip("ct-facts: prefix form check")
+    _assert_not_registered("evt-x")
