@@ -47,3 +47,6 @@ pnpm-debug.log*
 
 # Qoder IDE 本地工作目录（含 repowiki 与 better-harness 自动生成的本地数据）
 .qoder/
+
+# 本地临时工作区（review diff、uv 缓存副本等）
+.tmp/
