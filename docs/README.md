@@ -15,7 +15,8 @@ docs/
 ├── 05_redteam/           # AttackBench、攻击样本与评测
 ├── 06_delivery/          # 部署使用、实施路线、演示脚本
 ├── 07_auth/              # Capability Auth、前端与适配器鉴权
-└── 08_api/               # 跨端 API 目标契约、联调结构与迁移清单
+├── 08_api/               # 跨端 API 目标契约、联调结构与迁移清单
+└── AgentGuard_Runtime_Enforcement_Contract_v1_Final/  # Runtime Enforcement 契约冻结
 ```
 
 ## 2. 开发阅读路径
@@ -110,6 +111,7 @@ docs/
 | [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                               | Dashboard browser session、CSRF 和 launch code 边界                            |
 | [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 已冻结的证据链与溯源结构、示例、写入归属和验收清单                            |
 | [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort 与验收契约                    |
+| [AgentGuard_Runtime_Enforcement_Contract_v1_Final/](AgentGuard_Runtime_Enforcement_Contract_v1_Final/00_README_设计包索引.md) | Runtime Enforcement 契约冻结、字段/Schema/指标口径与 PR-RTE 实施计划 |
 
 ## 4. 维护规则
 

@@ -372,6 +372,8 @@ LangGraph Adapter 和 OpenClaw Plugin 仍主要生产 `0.3`；事件时策略快
 - `GuardEvent` 继续使用 `schema_version="0.3"`；只有 AuditEvent 目标版本升级为 `0.4`。
 - `0.4` 使用 `policy_evaluation`、`runtime_outcome`、`runtime_observation` 和
   `config_audit` 四类 `record_type`。
+- `runtime_outcome` 的执行证据、GateState 与 outcome kind 冻结语义见
+  `docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/02_字段与Schema契约冻结.md` §8/§9。
 - 非策略记录的 `decision`、`risk_score`、`severity` 和 `blocked` 允许为 `null`；
   缺失事实不得投影为允许、低风险、未执行或零副作用。
 - `GET /v1/traces/{trace_id}` 的目标窗口字段为

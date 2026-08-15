@@ -387,6 +387,8 @@ Provenance 使用独立条件请求和非对称刷新：
 7. 为 Trace 与 Provenance 分别实现完整响应 ETag 和 `304`。
 8. Memory 与 PostgreSQL 共用同一套幂等、关联和条件请求 contract tests。
 
+指针：上述 LangGraph `runtime_outcome` 写入的 outcome 映射见 `docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/02_字段与Schema契约冻结.md` §9；指标口径见 `docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md` §9（审计窗口/Dashboard 口径以 `docs/08_api/dashboard_metrics_api_contract.md` 为准）。
+
 Memory 与本机 PostgreSQL 已通过相同存储契约。`tests/test_runtime_safety_e2e.py` 使用实际
 Uvicorn 回环 HTTP 服务运行 LangGraph / AttackBench 代表性主演示场景，并分别验证两种
 存储中的审批、运行回执、Trace、独立 ETag 和 Provenance；本机只读浏览器核验又确认
