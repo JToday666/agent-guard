@@ -1,6 +1,6 @@
 # AgentGuard Context Isolation / Taint Tracking — Design & Implementation Package
 
-> **状态**：Design RC / Contract Freeze Candidate  
+> **状态**：Contract Frozen（2026-08-15，`ct-1.0`；签字见 `CT_FREEZE_METADATA.yaml`）  
 > **仓库**：`JToday666/agent-guard`  
 > **代码基线**：`dev@f3f650a54921408d4cee3ed2a4a6b3932a040c5f`（PR #133 合并后）  
 > **日期**：2026-08-15  
@@ -73,9 +73,15 @@ SecuritySnapshot + Current Event
 9. `08_实施拆PR与三轨并行计划.md` — PR 设计、依赖、DoD、回滚和集成节点。
 10. `09_风险_决策记录_冻结清单.md` — 风险、冻结决策、禁止事项、checklist。
 11. `10_竞赛映射_创新点与演示方案.md` — 命题映射、创新点和主 Demo。
-12. `context_taint_contract_freeze.yaml` — 机器可读冻结候选。
-13. `AgentGuard_Context_Isolation_Taint_Tracking_完整方案.md` — 自动合并版。
-14. `SHA256SUMS.md` — 文件摘要。
+12. `11_代码基线与改造映射.md` — 代码基线与改造映射。
+13. `12_未决问题处置与决策记录.md` — Freeze Review Questions 处置记录（18 问）与冻结接口映射。
+14. `context_taint_contract_freeze.yaml` — 机器可读冻结契约（`ct-1.0`，严格 JSON 兼容）。
+15. `context_taint_contract_freeze.schema.json` — 冻结契约 JSON Schema（Draft 2020-12）。
+16. `CT_FREEZE_METADATA.yaml` — 冻结元数据与签字记录。
+17. `AgentGuard_Context_Isolation_Taint_Tracking_完整方案.md` — 自动合并版（信息性聚合，不作为校验源）。
+18. `SHA256SUMS.md` — 文件摘要。
+
+> **校验纪律**：机器校验源为分册 + `context_taint_contract_freeze.yaml` + `CT_FREEZE_METADATA.yaml`；`完整方案.md` 仅为信息性聚合，校验工具不读取它。
 
 ## 4. 核心冻结不变量
 

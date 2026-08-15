@@ -1,164 +1,311 @@
-schema_version: "ct-1.0-rc1"
+{
+  "schema_version": "ct-1.0",
+  "status": "frozen",
 
-repository_baseline:
-  repo: "JToday666/agent-guard"
-  ref: "f3f650a54921408d4cee3ed2a4a6b3932a040c5f"
+  "repository_baseline": {
+    "repo": "JToday666/agent-guard",
+    "ref": "f3f650a54921408d4cee3ed2a4a6b3932a040c5f"
+  },
 
-status_labels:
-  - CURRENT-FROZEN
-  - TARGET-FROZEN
-  - DEFERRED
+  "status_labels": ["CURRENT-FROZEN", "TARGET-FROZEN", "DEFERRED"],
 
-invariants:
-  CT-F0-01: data_flow_never_creates_authority
-  CT-F0-02: llm_is_not_sanitizer_or_authority_issuer
-  CT-F0-03: allow_does_not_imply_trust
-  CT-F0-04: decision_does_not_prove_execution
-  CT-F0-05: missing_required_fact_is_not_safe
-  CT-F0-06: taint_does_not_decay_by_hop_or_llm
-  CT-F0-07: adapter_claim_cannot_self_elevate_trust_or_remove_taint
-  CT-F0-08: historical_state_requires_committed_authoritative_record
-  CT-F0-09: current_event_uses_transient_facts_before_commit
-  CT-F0-10: behavior_matchers_are_signal_only
-  CT-F0-11: context_compartment_is_soft_boundary
-  CT-F0-12: single_core_v21_pdp
+  "invariants": {
+    "CT-F0-01": "data_flow_never_creates_authority",
+    "CT-F0-02": "llm_is_not_sanitizer_or_authority_issuer",
+    "CT-F0-03": "allow_does_not_imply_trust",
+    "CT-F0-04": "decision_does_not_prove_execution",
+    "CT-F0-05": "missing_required_fact_is_not_safe",
+    "CT-F0-06": "taint_does_not_decay_by_hop_or_llm",
+    "CT-F0-07": "adapter_claim_cannot_self_elevate_trust_or_remove_taint",
+    "CT-F0-08": "historical_state_requires_committed_authoritative_record",
+    "CT-F0-09": "current_event_uses_transient_facts_before_commit",
+    "CT-F0-10": "behavior_matchers_are_signal_only",
+    "CT-F0-11": "context_compartment_is_soft_boundary",
+    "CT-F0-12": "single_core_v21_pdp"
+  },
 
-taint_labels:
-  - UNTRUSTED
-  - EXTERNAL_INSTRUCTION
-  - SENSITIVE
-  - CREDENTIAL
-  - PERSISTENT_UNTRUSTED
+  "taint_labels": [
+    "UNTRUSTED",
+    "EXTERNAL_INSTRUCTION",
+    "SENSITIVE",
+    "CREDENTIAL",
+    "PERSISTENT_UNTRUSTED"
+  ],
 
-flow_strength:
-  order_best_to_worst:
-    - exact
-    - strong
-    - possible
-  path_aggregation: weakest_edge
-  llm_default: possible
+  "flow_strength": {
+    "order_best_to_worst": ["exact", "strong", "possible"],
+    "path_aggregation": "weakest_edge",
+    "llm_default": "possible"
+  },
 
-flow_relations:
-  - received_from
-  - read_from
-  - derived_from
-  - assembled_into
-  - influenced_by
-  - returned_by
-  - written_to
-  - persisted_to
-  - loaded_from_memory
-  - sent_to
+  "flow_relations": [
+    "received_from",
+    "read_from",
+    "derived_from",
+    "assembled_into",
+    "influenced_by",
+    "returned_by",
+    "written_to",
+    "persisted_to",
+    "loaded_from_memory",
+    "sent_to"
+  ],
 
-context_compartments:
-  - authority
-  - authenticated_task
-  - trusted_runtime_fact
-  - untrusted_evidence
-  - memory_context
-  - model_derived
+  "context_compartments": [
+    "authority",
+    "authenticated_task",
+    "trusted_runtime_fact",
+    "untrusted_evidence",
+    "memory_context",
+    "model_derived"
+  ],
 
-context_transform_states:
-  - preserved
-  - annotated
-  - redacted
-  - quarantined
-  - summarized
-  - excluded
+  "context_transform_states": [
+    "preserved",
+    "annotated",
+    "redacted",
+    "quarantined",
+    "summarized",
+    "excluded"
+  ],
 
-source_defaults:
-  web:
-    trust: untrusted
-    fact_authority: untrusted_claim
-    initial_taints: [UNTRUSTED]
-  email:
-    trust: untrusted
-    fact_authority: untrusted_claim
-    initial_taints: [UNTRUSTED]
-  rag:
-    trust: untrusted
-    fact_authority: untrusted_claim
-    initial_taints: [UNTRUSTED]
-  tool_result:
-    trust: untrusted
-    fact_authority: untrusted_claim
-    initial_taints: [UNTRUSTED]
-  mcp:
-    trust: untrusted
-    fact_authority: untrusted_claim
-    initial_taints: [UNTRUSTED]
-  model:
-    trust: unknown
-    fact_authority: model_judgment
-    initial_taints: []
-  memory:
-    trust: inherit_memory_fact
-    fact_authority: inherit_memory_fact
-    initial_taints: inherit_memory_fact
-  file:
-    trust: unknown
-    fact_authority: untrusted_claim
-    initial_taints: []
+  "source_defaults": {
+    "web": {
+      "trust": "untrusted",
+      "fact_authority": "untrusted_claim",
+      "initial_taints": ["UNTRUSTED"]
+    },
+    "email": {
+      "trust": "untrusted",
+      "fact_authority": "untrusted_claim",
+      "initial_taints": ["UNTRUSTED"]
+    },
+    "rag": {
+      "trust": "untrusted",
+      "fact_authority": "untrusted_claim",
+      "initial_taints": ["UNTRUSTED"]
+    },
+    "tool_result": {
+      "trust": "untrusted",
+      "fact_authority": "untrusted_claim",
+      "initial_taints": ["UNTRUSTED"]
+    },
+    "mcp": {
+      "trust": "untrusted",
+      "fact_authority": "untrusted_claim",
+      "initial_taints": ["UNTRUSTED"]
+    },
+    "model": {
+      "trust": "unknown",
+      "fact_authority": "model_judgment",
+      "initial_taints": []
+    },
+    "memory": {
+      "trust": "inherit_memory_fact",
+      "fact_authority": "inherit_memory_fact",
+      "initial_taints": "inherit_memory_fact"
+    },
+    "file": {
+      "trust": "unknown",
+      "fact_authority": "untrusted_claim",
+      "initial_taints": []
+    }
+  },
 
-claim_rules:
-  risk_increasing_claims_may_be_accepted_conservatively: true
-  trust_increasing_claim_requires_server_verification: true
-  sanitized_claim_can_remove_taint: false
-  model_output_can_create_capability: false
+  "claim_rules": {
+    "risk_increasing_claims_may_be_accepted_conservatively": true,
+    "trust_increasing_claim_requires_server_verification": true,
+    "sanitized_claim_can_remove_taint": false,
+    "model_output_can_create_capability": false
+  },
 
-declassification:
-  producer: trusted_declassifier
-  adapter_sanitized_is_declassification: false
-  llm_summary_is_declassification: false
-  protected_labels:
-    - CREDENTIAL
-    - PERSISTENT_UNTRUSTED
-  protected_removal_requires_registry_permission: true
+  "declassification": {
+    "producer": "trusted_declassifier",
+    "adapter_sanitized_is_declassification": false,
+    "llm_summary_is_declassification": false,
+    "protected_labels": ["CREDENTIAL", "PERSISTENT_UNTRUSTED"],
+    "protected_removal_requires_registry_permission": true
+  },
 
-artifact_ref_schemes:
-  - source
-  - context
-  - context_chunk
-  - model_input
-  - model_output
-  - tool_result
-  - memory
-  - action
-  - resource
-  - destination
-  - credential
-  - data
+  "artifact_ref_schemes": [
+    "source",
+    "context",
+    "context_chunk",
+    "model_input",
+    "model_output",
+    "tool_result",
+    "memory",
+    "action",
+    "resource",
+    "destination",
+    "credential",
+    "data"
+  ],
 
-state:
-  add_new_online_security_state_domain: false
-  adapter_may_submit_delta: false
-  current_event_precommit_state_mutation: false
+  "state": {
+    "add_new_online_security_state_domain": false,
+    "adapter_may_submit_delta": false,
+    "current_event_precommit_state_mutation": false
+  },
 
-fusion:
-  owner: core_v2_1
-  context_taint_may_return_final_decision: false
-  behavior_signal_standalone_deny: false
-  machine_truth: "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/fusion_matrix.yaml"
+  "fusion": {
+    "owner": "core_v2_1",
+    "context_taint_may_return_final_decision": false,
+    "behavior_signal_standalone_deny": false,
+    "machine_truth": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/fusion_matrix.yaml"
+  },
 
-runtime:
-  decision_implies_not_invoked: false
-  receipt_is_execution_evidence: true
-  strong_binding_fields:
-    - action_id
-    - authorization_fingerprint
-    - runtime_binding_id
+  "runtime": {
+    "decision_implies_not_invoked": false,
+    "receipt_is_execution_evidence": true,
+    "strong_binding_fields": [
+      "action_id",
+      "authorization_fingerprint",
+      "runtime_binding_id"
+    ]
+  },
 
-budgets:
-  provenance_max_depth: 4
-  provenance_max_breadth: 32
-  provenance_node_budget: 256
-  sticky_taint_summaries: 16
-  sticky_summary_refs: 64
-  sticky_summary_evidence_refs: 64
+  "budgets": {
+    "provenance_max_depth": 4,
+    "provenance_max_breadth": 32,
+    "provenance_node_budget": 256,
+    "sticky_taint_summaries": 16,
+    "sticky_summary_refs": 64,
+    "sticky_summary_evidence_refs": 64
+  },
 
-deferred:
-  - token_level_taint
-  - global_graph_hot_path
-  - second_decision_engine
-  - new_runtime_event_universe
-  - llm_declassification
+  "deferred": [
+    "token_level_taint",
+    "global_graph_hot_path",
+    "second_decision_engine",
+    "new_runtime_event_universe",
+    "llm_declassification"
+  ],
+
+  "versions": {
+    "fact_builder": "1.0",
+    "context_builder": "1.0"
+  },
+
+  "rollout": {
+    "mode": "shadow_first",
+    "stages": ["shadow", "limited_enable", "active"],
+    "limited_enable_requires": [
+      "feature_flag",
+      "rollback",
+      "divergence_diagnostics",
+      "fixed_regression",
+      "runtime_receipt_closure"
+    ]
+  },
+
+  "benchmark_metrics": [
+    "detection_recall",
+    "intervention_recall",
+    "hard_deny_recall",
+    "hard_deny_precision",
+    "benign_deny_rate",
+    "benign_ask_rate",
+    "runtime_prevention_rate",
+    "unsafe_invocation_rate",
+    "receipt_coverage",
+    "final_asr",
+    "utility",
+    "flow_truncation_rate",
+    "coverage_degradation_rate",
+    "shadow_divergence_rate"
+  ],
+
+  "freeze_review_decisions": [
+    {
+      "id": "CT-Q-01",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-01",
+      "decision_ref": "D-04"
+    },
+    {
+      "id": "CT-Q-02",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-02",
+      "decision_ref": "yaml:claim_rules"
+    },
+    {
+      "id": "CT-Q-03",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-03",
+      "decision_ref": "CT-F0-07"
+    },
+    {
+      "id": "CT-Q-04",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-04",
+      "decision_ref": "D-07"
+    },
+    {
+      "id": "CT-Q-05",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-05",
+      "decision_ref": "CT-PR-04"
+    },
+    {
+      "id": "CT-Q-06",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-06",
+      "decision_ref": "CT-F0-09"
+    },
+    {
+      "id": "CT-Q-07",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-07",
+      "decision_ref": "CT-F0-08"
+    },
+    {
+      "id": "CT-Q-08",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-08",
+      "decision_ref": "D-09"
+    },
+    {
+      "id": "CT-Q-09",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-09",
+      "decision_ref": "yaml:declassification.protected_labels"
+    },
+    {
+      "id": "CT-Q-10",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-10",
+      "decision_ref": "D-10"
+    },
+    {
+      "id": "CT-Q-11",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-11",
+      "decision_ref": "CT-F0-05"
+    },
+    {
+      "id": "CT-Q-12",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-12",
+      "decision_ref": "D-12"
+    },
+    {
+      "id": "CT-Q-13",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-13",
+      "decision_ref": "D-11"
+    },
+    {
+      "id": "CT-Q-14",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-14",
+      "decision_ref": "CT-F0-04"
+    },
+    {
+      "id": "CT-Q-15",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-15",
+      "decision_ref": "R16"
+    },
+    {
+      "id": "CT-Q-16",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-16",
+      "decision_ref": "D-06"
+    },
+    {
+      "id": "CT-Q-17",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-17",
+      "decision_ref": "R17"
+    },
+    {
+      "id": "CT-Q-18",
+      "answer_ref": "12_未决问题处置与决策记录.md#ct-q-18",
+      "decision_ref": "INT-PR-04"
+    }
+  ]
+}
