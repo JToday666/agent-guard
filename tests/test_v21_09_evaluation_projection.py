@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 
 from agentguard_core import GuardEngine, PolicyBundle, utc_now_iso
@@ -23,6 +24,7 @@ from agentguard_core.decisions.evidence import state_delta_v21_envelope
 from agentguard_core.decisions.finalize import derive_final_audit_id
 from agentguard_core.security_context import PROJECTOR_VERSION, CommittedRecord
 from guard_api.security_state import SecurityStateService
+from guard_api.security_state.store import SecurityStateStoreAccess
 from guard_api.storage.base import ProjectionIdentityRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
 
@@ -588,6 +590,94 @@ def test_d9_replay_backfill_projection_idempotent(monkeypatch) -> None:
         event, requesting_principal_id="principal_a"
     )
     assert third.policy_audit_id == first.policy_audit_id
+    assert (
+        store.get_security_state(_SCOPE_DIGEST).state_version
+        == version_before + 1
+    )
+
+
+def test_concurrent_replay_backfill_idempotent(monkeypatch) -> None:
+    """S4：flag on replay 跳过 evaluation_transaction，D9 补投影在
+    事件级锁外——并发双 replay 同 event 必须幂等：投影登记恰一次、
+    state version 恰推进一次、响应完全一致（scope_lock + 五元组
+    幂等键承接锁外时序，该时序变化为 D4/D9 有意设计）。"""
+
+    store = MemoryControlPlaneStore()
+    _commit_task_fact(store)
+    evaluation_service, _ = _evaluation_stack(
+        store, settings=_pipeline_settings()
+    )
+
+    # 首次投影失败（crash 窗口：audit 已落盘、投影未登记）。
+    state = {"fail": True}
+    original_project = SecurityStateService.project_committed
+
+    def _flaky(self, committed_record, **kwargs):
+        if state["fail"]:
+            state["fail"] = False
+            raise RuntimeError("simulated crash before projection")
+        return original_project(self, committed_record, **kwargs)
+
+    monkeypatch.setattr(SecurityStateService, "project_committed", _flaky)
+
+    event = _event(event_id="evt_concurrent_replay", task_id=_TASK_ID)
+    first = evaluation_service.evaluate(
+        event, requesting_principal_id="principal_a"
+    )
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    ref = audit.evidence["state_delta_v21"]["payload"]
+    assert _projection_registration(store, ref) is None
+    record = store.get_security_state(_SCOPE_DIGEST)
+    assert record is not None
+    version_before = record.state_version
+
+    # 登记写面计数：幂等时投影登记必须恰一次。
+    registrations = {"count": 0}
+    original_record = SecurityStateStoreAccess.record_projection
+
+    def _counting_record(self, projection_record):
+        registrations["count"] += 1
+        return original_record(self, projection_record)
+
+    monkeypatch.setattr(
+        SecurityStateStoreAccess, "record_projection", _counting_record
+    )
+
+    # 并发双 replay（补投影在事件级锁外，barrier 同步起跑）。
+    responses: list = []
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(2)
+
+    def _replay() -> None:
+        try:
+            barrier.wait(timeout=10)
+            responses.append(
+                evaluation_service.evaluate(
+                    event, requesting_principal_id="principal_a"
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - 收集线程异常。
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_replay) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert errors == []
+    assert len(responses) == 2
+    for replay in responses:
+        assert replay.policy_audit_id == first.policy_audit_id
+        assert _normalized_response_dump(replay) == _normalized_response_dump(
+            first
+        )
+    # 幂等收敛：登记恰一次、版本恰推进一次、digest 与信封引用一致。
+    assert registrations["count"] == 1
+    registration = _projection_registration(store, ref)
+    assert registration is not None
+    assert registration.delta_digest == ref["delta_digest"]
     assert (
         store.get_security_state(_SCOPE_DIGEST).state_version
         == version_before + 1

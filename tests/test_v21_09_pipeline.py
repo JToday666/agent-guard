@@ -24,6 +24,8 @@ import pytest
 
 from agentguard_core import GuardEngine, GuardEvent, PolicyBundle, utc_now_iso
 from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.actions.fingerprints import authorization_projection
+from agentguard_core.actions.builder import build_action_ir
 from agentguard_core.authority.models import (
     EvaluationClock,
     SecurityStateScope,
@@ -977,6 +979,74 @@ def test_pipeline_phase_c_missing_state_sentinel_minus_one(
         pipeline.run_phase_c(plan)
     assert PHASE_C_BASE_DRIFT_SKIPS["count"] == before + 1
     assert "v21_phase_c_skip_reason=base_drift" in "\n".join(caplog.messages)
+
+
+# ---------------------------------------------------------------------------
+# S5：fingerprint 间接覆盖契约（task_digest 收敛口径，D11 登记）
+# ---------------------------------------------------------------------------
+
+
+def test_fingerprint_indirect_coverage_contract() -> None:
+    """S5 契约：authorization_fingerprint 经 task_digest 间接覆盖。
+
+    派生输入白名单 ⊆ {event 身份, scope_digest, task 身份}；task
+    身份与 task_digest 同源（snapshot.task），故 task 修订必同时
+    改变 task_digest 与 fingerprint——revalidate 只比 task_digest
+    即可承接 fingerprint 漂移（revalidation.py 收敛口径锚点）。
+    """
+
+    # 锚点一：派生输入白名单钉死，且逐键归入锚定集合（与 shadow
+    # assess 同源构造：build_action_ir + 权威 task/scope 注入）。
+    probe_ir = build_action_ir(
+        _event(task_id=_TASK_ID),
+        server_secret=b"v21-09-pipeline-test-secret-material",
+        task_id=_TASK_ID,
+        task_revision=1,
+        scope_digest=_SCOPE_DIGEST,
+        principal_id="principal_a",
+        runtime_binding_id="binding:principal_a",
+    )
+    probe_projection = authorization_projection(probe_ir)
+    event_identity_keys = {
+        "schema_version",
+        "action_type",
+        "resources",
+        "destinations",
+        "security_arguments",
+        "effects",
+        "argument_digest",
+    }
+    scope_keys = {"principal_id", "runtime_binding_id", "scope_digest"}
+    task_identity_keys = {"task_id", "task_revision"}
+    assert set(probe_projection) == (
+        event_identity_keys | scope_keys | task_identity_keys
+    )
+
+    # 锚点二：task 修订（新 revision + 新 task_digest）必同时改变
+    # task_digest 与 authorization_fingerprint（event/scope/policy 不变）。
+    def _assessment_for(task_digest: str, revision: int):
+        pipeline, store = _pipeline_service()
+        # 逐 revision 建链：目标 revision 落目标 digest（前置 revision
+        # 用异 digest 占位，模拟真实修订历史）。
+        for rev in range(1, revision):
+            _commit_task_fact(
+                store, task_digest="sha256:" + "bb" * 32, revision=rev
+            )
+        _commit_task_fact(store, task_digest=task_digest, revision=revision)
+        event = _event(
+            event_id="evt_fingerprint_contract", task_id=_TASK_ID
+        )
+        materials = pipeline.run_phase_a(event)
+        assert materials is not None and materials.snapshot is not None
+        return materials.assessment
+
+    assessment_v1 = _assessment_for("sha256:" + "cd" * 32, revision=1)
+    assessment_v2 = _assessment_for("sha256:" + "d2" * 32, revision=2)
+    assert assessment_v1.task_digest != assessment_v2.task_digest
+    assert (
+        assessment_v1.authorization_fingerprint
+        != assessment_v2.authorization_fingerprint
+    )
 
 
 # ---------------------------------------------------------------------------
