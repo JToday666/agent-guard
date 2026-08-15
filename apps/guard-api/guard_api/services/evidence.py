@@ -66,8 +66,17 @@ def build_audit_event(
     extra_links: dict[str, str] | None = None,
     extra_metadata: dict[str, object] | None = None,
     decision_dump: dict[str, object] | None = None,
+    v21_evidence: dict[str, object] | None = None,
 ) -> AuditEvent:
-    """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10)."""
+    """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
+
+    ``v21_evidence``：V21-08 shadow 旁路的 ``decision_v21`` 信封
+    （``contract_freeze.yaml`` L84 ``v21_evidence_location``）。None（flag
+    关 / secret 缺 / 编排器收敛放弃）时 evidence 键集与现状完全一致，
+    不插入任何键；非 None 时经 bounded dump + redaction + 64 KiB evidence
+    预算兼容后合并写入**同一条**审计记录的 ``evidence.decision_v21``，
+    不新增第二条审计记录（11_决策记录_V21-08前置.md D4/D7）。
+    """
 
     description = describe_guard_event(event)
     links: dict[str, str] = {
@@ -114,6 +123,21 @@ def build_audit_event(
         policy_revision=policy_revision,
         approval_id=approval_id,
     )
+    if v21_evidence is not None:
+        # shadow 信封与 legacy evidence 同受 §21.2 冻结边界与 64 KiB
+        # evidence 预算约束；先 bounded dump + redaction，再对合并结果
+        # 重新执行预算兼容（超限截断投影，不拒绝写入）。
+        bounded = bound_redacted_value(v21_evidence)
+        if isinstance(bounded, dict) and bounded:
+            collision = set(bounded) & set(evidence)
+            if collision:
+                # fail-closed：信封不得覆盖 replay 权威键（如 guard_decision）。
+                raise ValueError(
+                    "v21_evidence collides with reserved evidence keys: "
+                    f"{sorted(collision)}"
+                )
+            evidence.update(bounded)
+            evidence = enforce_evidence_budget(evidence)
     return AuditEvent(
         schema_version="0.4",
         record_type="policy_evaluation",

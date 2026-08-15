@@ -152,7 +152,15 @@ class AuditService:
         memory_change_id: str | None = None,
         extra_metadata: dict[str, object] | None = None,
         decision_dump: dict[str, object] | None = None,
+        v21_evidence: dict[str, object] | None = None,
     ) -> AuditEvent:
+        """写入 policy_evaluation 审计记录。
+
+        ``v21_evidence``：V21-08 shadow 旁路信封透传（None 时与现状逐字节
+        一致）；写入位置为同一条记录的 ``evidence.decision_v21``，不新增
+        第二条审计记录（11_决策记录_V21-08前置.md D4）。
+        """
+
         audit_event = build_audit_event(
             event,
             decision,
@@ -165,6 +173,7 @@ class AuditService:
             memory_change_id=memory_change_id,
             extra_metadata=extra_metadata,
             decision_dump=decision_dump,
+            v21_evidence=v21_evidence,
         )
         audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)
