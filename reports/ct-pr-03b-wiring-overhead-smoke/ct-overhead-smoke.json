@@ -1,0 +1,37 @@
+{
+  "profile": "functional_smoke",
+  "warmup": 5,
+  "iterations": 50,
+  "backend": "memory",
+  "pipeline_flag": "on（两档恒定）",
+  "ct_flag_baseline": "off",
+  "ct_flag_treatment": "on",
+  "workload": "tool_result_produced 真实形状 + task_ingress 权威 task",
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.13"
+  },
+  "baseline_ct_off": {
+    "p50_ms": 16.1624,
+    "p95_ms": 47.0873,
+    "p99_ms": 63.4896,
+    "max_ms": 63.4896,
+    "mean_ms": 17.532506,
+    "samples": 50
+  },
+  "treatment_ct_on": {
+    "p50_ms": 25.0257,
+    "p95_ms": 71.8552,
+    "p99_ms": 88.4456,
+    "max_ms": 88.4456,
+    "mean_ms": 30.538982,
+    "samples": 50
+  },
+  "ct_overhead": {
+    "delta_p50_ms": 8.863299999999999,
+    "delta_p95_ms": 24.767899999999997,
+    "delta_p99_ms": 24.955999999999996,
+    "delta_max_ms": 24.955999999999996,
+    "delta_mean_ms": 13.006476
+  }
+}
