@@ -21,8 +21,18 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
   （state version / task head / policy digest）→ ``revalidate_assessment``
   五元组 CAS → 证据构建；stale → 放弃本次 V21-09 权威提交、证据按 D8 记
   ``degraded_stale_judgment``，legacy 主链不受影响；
-- **Phase C（事务后投影）**：V21-09 shadow 期无权威提交，归 T3 预留；
-- **audit**：T5 既有 ``evidence.decision_v21`` 同条记录写面，不改。
+- **Phase C（事务提交后投影）**：``run_phase_c`` —— Phase B audit
+  commit 成功且事务退出后（02 §3 commit→project 时序：投影在事务
+  外），flag on 且 revalidation valid 时 scope_lock 内
+  ensure_ready → base 校验 → ``project_committed``（verify 钩子复核
+  审计记录存在性，F0-8）；delta 在 Phase B 以 materials 的
+  state_version 为 base 确定性构造（信封 delta_digest 冻结时刻即真实，
+  见 ``prepare_phase_c``），Phase C 锁内 base 漂移 → fail-closed
+  跳过**不置脏**；投影失败一律告警收敛、不重试（D9：replay 补投影
+  承接；重试/对账机制归 V21-10/11）；stale → 不进入 Phase C；
+- **audit**：T5 既有 ``evidence.decision_v21`` 同条记录写面；V21-09
+  追加 ``evidence.state_delta_v21`` 引用信封（D2：只存投影身份，全量
+  delta 随 projection_records）。
 
 与 ``v21_shadow.py``（V21-08 编排器）的关系（T2 处置裁决）：pipeline
 吸收四段式编排主路径；``V21ShadowService`` 保留为 Phase A 彻底失败
@@ -42,14 +52,22 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from agentguard_core import GuardDecision, GuardEngine, GuardEvent, PolicyBundle
+from agentguard_core import (
+    AuditEvent,
+    GuardDecision,
+    GuardEngine,
+    GuardEvent,
+    PolicyBundle,
+)
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority.models import EvaluationClock, SecurityStateScope
 from agentguard_core.decisions.evidence import (
     CoverageMap,
     FastAssessment,
     RequiredCheckPlan,
+    state_delta_v21_envelope,
 )
+from agentguard_core.decisions.finalize import derive_final_audit_id
 from agentguard_core.decisions.evidence_builder import (
     build_decision_evidence_v21,
     decision_evidence_v21_envelope,
@@ -64,6 +82,15 @@ from agentguard_core.decisions.shadow import (
     shadow_assess_with_coverage,
 )
 from agentguard_core.security_context.snapshot import SecuritySnapshot
+from agentguard_core.security_context import (
+    PROJECTOR_VERSION,
+    CommittedRecord,
+    ProjectionRecordIdentity,
+    SecurityStateDeltaV21,
+    WatermarkDelta,
+    delta_digest_projection,
+    projection_identity_key,
+)
 
 from guard_api.security_state import SecurityStateService
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
@@ -84,8 +111,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PIPELINE_CLOCK_VERSION",
     "V21PhaseBOutcome",
+    "V21PhaseCPlan",
     "V21PipelineMaterials",
     "V21PipelineService",
+    "build_evaluation_delta",
 ]
 
 #: D5 clock 正式化：V21-09 权威时钟版本（evaluated_at 锚定
@@ -107,6 +136,11 @@ _SNAPSHOT_DRIFT_SENTINEL = "v21-09:snapshot_drift"
 #: 无权威 policy snapshot record 时的确定性 revision 占位（与 V21-08
 #: shadow 同口径纪律，值独立归因 pipeline）。
 _UNVERSIONED_POLICY_REVISION = "v21-09:unversioned"
+
+#: policy_evaluation 权威记录无 revision 链（同 event 幂等唯一）：
+#: 投影身份五元组中的 source_revision 固定为 1（确定性，禁 uuid；
+#: 仿 approval ``_APPROVAL_SOURCE_REVISION`` 口径）。
+_EVALUATION_SOURCE_REVISION = 1
 
 
 def _pipeline_snapshot_plan() -> RequiredCheckPlan:
@@ -159,13 +193,92 @@ class V21PhaseBOutcome:
     """Phase B 产物：decision_v21 信封 + revalidation 结论 + 材料回溯。
 
     T3 消费形态：stale（``revalidation.status == "stale"``）时放弃
-    V21-09 权威提交；valid 时信封可直接供审计落盘（V21-09 shadow 期
-    到此为止，无权威 finalize 提交）。
+    V21-09 权威提交与 Phase C 投影；valid 时信封可直接供审计落盘，
+    经 ``prepare_phase_c`` 产出 Phase C 投影计划与 state_delta_v21
+    引用信封。
     """
 
     envelope: dict[str, Any]
     revalidation: RevalidationResult
     materials: V21PipelineMaterials
+
+
+@dataclass(frozen=True)
+class V21PhaseCPlan:
+    """Phase C 投影计划（Phase B 确定性构造，事务提交后消费）。
+
+    Design 裁决（契约歧义留痕）：任务字面“Phase C 内构造 delta”与
+    D2“信封（含 delta_digest）必须在 Phase B audit commit 时写入”
+    存在时序张力——delta_digest 白名单含 base_state_version，若
+    Phase C 才构造则 Phase B 信封无法持有真实 digest。故 delta 在
+    Phase B 以 materials 的 state_version 为 base 确定性构造（信封
+    引用真实）；Phase C 锁内复核 base，漂移则 fail-closed 跳过不置
+    脏（避免置脏扩散；D9 replay 补投影承接）。
+    """
+
+    audit_id: str
+    scope_digest: str
+    delta: SecurityStateDeltaV21
+    #: D2 引用信封（07 §10 形状）：只含投影身份（projection_id /
+    #: delta_digest / source identity），全量 delta 本体随
+    #: projection_records，不内嵌审计证据。
+    envelope: dict[str, Any]
+
+
+def build_evaluation_delta(
+    *, scope_digest: str, audit_id: str, base_state_version: int
+) -> SecurityStateDeltaV21:
+    """构造 policy_evaluation 权威记录的最小确定性 delta（禁 uuid）。
+
+    D6：评估权威记录 delta 仅 watermark / evaluation clock 推进——
+    PROJECTOR_VERSION 不 bump，不写任何 typed 容器（全空表）；
+    evaluation clock 推进由投影身份登记（applied_projections）与
+    state_version 推进承载（OnlineSecurityState 无独立 clock 字段）。
+    ``projection_id`` 由幂等键五元组确定性派生；``delta_digest`` 为
+    白名单投影的受限 JCS sha256（同身份同 base 重放恒定）。仿
+    approval ``_build_approval_grant_delta`` 口径。
+    """
+
+    identity = ProjectionRecordIdentity(
+        source_record_type="policy_evaluation",
+        source_record_id=audit_id,
+        source_revision=_EVALUATION_SOURCE_REVISION,
+        source_sequence=None,
+    )
+    projection_key = projection_identity_key(
+        scope_digest,
+        "policy_evaluation",
+        audit_id,
+        _EVALUATION_SOURCE_REVISION,
+        PROJECTOR_VERSION,
+    )
+    delta = SecurityStateDeltaV21(
+        projection_id=f"projection:{projection_key}",
+        scope_digest=scope_digest,
+        source=identity,
+        base_state_version=base_state_version,
+        new_state_version=base_state_version + 1,
+        projector_version=PROJECTOR_VERSION,
+        task_upsert=None,
+        source_upserts=[],
+        flow_upserts=[],
+        declassification_upserts=[],
+        memory_upserts=[],
+        grant_upserts=[],
+        grant_revocations=[],
+        grant_consumptions=[],
+        action_additions=[],
+        runtime_outcome_upserts=[],
+        behavior_aggregate_upserts=[],
+        sticky_taint_upserts=[],
+        watermark_delta=WatermarkDelta(),
+        coverage_invalidations=[],
+        dirty_domain_updates=[],
+        delta_digest="",
+    )
+    return delta.model_copy(
+        update={"delta_digest": canonical_sha256(delta_digest_projection(delta))}
+    )
 
 
 class V21PipelineService:
@@ -509,3 +622,275 @@ class V21PipelineService:
             revalidation=revalidation,
             materials=materials,
         )
+
+    # ------------------------------------------------------------------
+    # Phase C：事务提交后投影（T3；commit → project，02 §3）
+    # ------------------------------------------------------------------
+
+    def prepare_phase_c(self, outcome: V21PhaseBOutcome) -> V21PhaseCPlan | None:
+        """Phase B 确定性构造 Phase C 投影计划（仍在事务窗口内调用）。
+
+        返回 None 的语义（均不产 state_delta_v21 信封、不进入 Phase C）：
+
+        - ``revalidation.status == "stale"``：D8 放弃权威提交，stale
+          不进入 Phase C（任务约束）；
+        - snapshot 缺态降级路径（无权威 scope，禁伪造，01 §25）。
+
+        有效时：``audit_id`` 以 ``derive_final_audit_id(assessment)``
+        确定性派生（T1 预留消费点；assessment 身份含 event_id，同
+        event 幂等短路下无碰撞）；delta 以 materials 的 state_version
+        为 base 构造（信封 delta_digest 冻结时刻即真实，见
+        ``V21PhaseCPlan`` 裁决留痕）。
+        """
+
+        materials = outcome.materials
+        if outcome.revalidation.status != "valid":
+            return None
+        if materials.scope_digest is None or materials.snapshot is None:
+            return None
+        audit_id = derive_final_audit_id(materials.assessment)
+        delta = build_evaluation_delta(
+            scope_digest=materials.scope_digest,
+            audit_id=audit_id,
+            base_state_version=materials.state_version,
+        )
+        # D2 引用信封：只存投影身份（projection_id / delta_digest /
+        # source identity），全量 delta 本体随 projection_records。
+        reference = {
+            "projection_id": delta.projection_id,
+            "delta_digest": delta.delta_digest,
+            "source_record_type": delta.source.source_record_type,
+            "source_record_id": delta.source.source_record_id,
+            "source_revision": delta.source.source_revision,
+        }
+        return V21PhaseCPlan(
+            audit_id=audit_id,
+            scope_digest=materials.scope_digest,
+            delta=delta,
+            envelope=state_delta_v21_envelope(reference),
+        )
+
+    def run_phase_c(self, plan: V21PhaseCPlan | None) -> None:
+        """Phase C（D4：evaluation_transaction 提交**之后**调用）。
+
+        投影失败 / stale / CAS 冲突一律 fail-closed 收敛（告警 +
+        projector 既有 dirty 语义），**绝不影响已返回的响应与审计
+        记录**；不重试（D9：replay 幂等补投影承接；重试/对账机制归
+        V21-10/11）。**绝不外抛**。
+        """
+
+        if plan is None:
+            return
+        try:
+            self._project_evaluation(plan)
+        except Exception:  # noqa: BLE001 - 投影故障必须收敛，绝不上抛。
+            logger.warning(
+                "v21-09 evaluation projection failed for audit %s; "
+                "response and audit record are unaffected (fail-closed, "
+                "no retry; D9 replay backfill / V21-10 reconciliation)",
+                plan.audit_id,
+                exc_info=True,
+            )
+
+    def _project_evaluation(self, plan: V21PhaseCPlan) -> None:
+        """commit → project 锁内编排（照搬 approval 范本锁序）。
+
+        scope_lock(scope_digest) 内：ensure_ready → 读 base → base
+        校验（漂移 → fail-closed 跳过**不置脏**：delta_digest 已在
+        Phase B 冻结进审计信封，rebase 会使引用失真；置脏域最小化，
+        D9 replay 补投影承接）→ ``project_committed``（verify 钩子
+        复核审计记录存在性，F0-8）。
+        """
+
+        scope_digest = plan.scope_digest
+        with self._state_service.store_access.scope_lock(scope_digest):
+            self._state_service.ensure_ready(scope_digest)
+            current = self._state_service.store_access.get_security_state(
+                scope_digest
+            )
+            base_state_version = (
+                current.state_version if current is not None else 0
+            )
+            if base_state_version != plan.delta.base_state_version:
+                # base 漂移（Phase B→C 窗口内被其他投影推进）：信封
+                # 引用已冻结，不 rebase、不重试、不置脏。
+                logger.warning(
+                    "v21-09 evaluation projection skipped for audit %s: "
+                    "base state version drifted (%s -> %s); fail-closed "
+                    "without dirtying (D9 replay backfill / V21-10)",
+                    plan.audit_id,
+                    plan.delta.base_state_version,
+                    base_state_version,
+                )
+                return
+            committed_record = CommittedRecord(
+                record_id=f"policy-evaluation:{plan.audit_id}",
+                committed=True,
+                source_record_type="policy_evaluation",
+                source_record_id=plan.audit_id,
+                source_revision=_EVALUATION_SOURCE_REVISION,
+                scope_digest=scope_digest,
+                projector_version=PROJECTOR_VERSION,
+                delta=plan.delta,
+            )
+            result = self._state_service.project_committed(
+                committed_record,
+                scope_digest=scope_digest,
+                verify_source_committed=self._verify_evaluation_committed,
+            )
+        logger.info(
+            "v21-09 evaluation projection %s for audit %s "
+            "(state_version=%s)",
+            result.outcome,
+            plan.audit_id,
+            result.state_version,
+        )
+
+    def _verify_evaluation_committed(self, record: CommittedRecord) -> bool:
+        """``verify_source_committed`` 钩子（F0-8）：复核审计记录存在性。
+
+        policy_evaluation 审计记录已在 evaluation_transaction 内 commit
+        （commit→project 时序前置）；查不到 / record_type 不符即拒绝
+        投影，未提交记录不得成为后续历史状态。
+        """
+
+        audit = self._store.get_audit_event(record.source_record_id)
+        return audit is not None and audit.record_type == "policy_evaluation"
+
+    # ------------------------------------------------------------------
+    # D9：replay 幂等补投影
+    # ------------------------------------------------------------------
+
+    def backfill_projection(self, audit: AuditEvent) -> None:
+        """D9 replay 补投影：不重算 assess/semantic，仅幂等补投影。
+
+        判定口径：审计 evidence 存在 ``state_delta_v21`` 信封即“当时
+        revalidation valid 且 scope 在场”的直接标志（信封仅在
+        ``prepare_phase_c`` 成功时写入）；无信封（flag off 存量 /
+        降级 / stale）→ 不补。补投影材料全部自审计记录重建（不重
+        算）：``metadata.task_id`` → 权威 active TaskFact →
+        scope_digest；``decision_v21`` payload 的 state_version →
+        重建 delta → digest 与信封引用比对（失真即跳过留痕）；五元
+        组幂等键短路保证重复安全。无法补（缺材料）→ 静默跳过留痕。
+        **绝不外抛**。
+        """
+
+        if not self.enabled:
+            return
+        try:
+            self._backfill_projection(audit)
+        except Exception:  # noqa: BLE001 - 补投影故障必须收敛，绝不上抛。
+            logger.warning(
+                "v21-09 replay projection backfill failed for audit %s; "
+                "replayed response is unaffected (fail-closed)",
+                audit.audit_id,
+                exc_info=True,
+            )
+
+    def _backfill_projection(self, audit: AuditEvent) -> None:
+        evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
+        delta_envelope = evidence.get("state_delta_v21")
+        if not isinstance(delta_envelope, dict):
+            # 无信封：当时未产生投影计划（flag off / 降级 / stale），
+            # 无补投影可做，静默返回。
+            return
+        reference = delta_envelope.get("payload")
+        if not isinstance(reference, dict):
+            return
+        expected_digest = reference.get("delta_digest")
+        source_record_id = reference.get("source_record_id")
+        raw_revision = reference.get("source_revision")
+        source_revision = (
+            raw_revision
+            if isinstance(raw_revision, int) and not isinstance(raw_revision, bool)
+            else _EVALUATION_SOURCE_REVISION
+        )
+        if not isinstance(expected_digest, str) or not isinstance(
+            source_record_id, str
+        ):
+            logger.info(
+                "v21-09 replay projection backfill skipped for audit %s: "
+                "state_delta_v21 reference malformed (missing materials)",
+                audit.audit_id,
+            )
+            return
+
+        # scope 重建：metadata.task_id → 权威 active TaskFact（仿
+        # approval 同源口径，绝不伪造 scope）。
+        task_id = audit.metadata.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            logger.info(
+                "v21-09 replay projection backfill skipped for audit %s: "
+                "no task_id in audit metadata (missing materials)",
+                audit.audit_id,
+            )
+            return
+        task_record = self._store.get_task_fact(task_id)
+        if task_record is None or task_record.task_fact.status != "active":
+            logger.info(
+                "v21-09 replay projection backfill skipped for audit %s: "
+                "no active authoritative TaskFact for %s (missing "
+                "materials)",
+                audit.audit_id,
+                task_id,
+            )
+            return
+        scope_digest = task_record.task_fact.scope_digest
+
+        # 五元组幂等键短路：已登记 → 无补投影可做。
+        existing_projection = self._state_service.store_access.get_projection(
+            scope_digest,
+            "policy_evaluation",
+            source_record_id,
+            source_revision,
+            PROJECTOR_VERSION,
+        )
+        if existing_projection is not None:
+            return
+
+        # delta 重建：decision_v21 payload 的 state_version 即当时
+        # base（与 Phase B 构造同源）。
+        decision_envelope = evidence.get("decision_v21")
+        decision_payload = (
+            decision_envelope.get("payload")
+            if isinstance(decision_envelope, dict)
+            else None
+        )
+        raw_state_version = (
+            decision_payload.get("state_version")
+            if isinstance(decision_payload, dict)
+            else None
+        )
+        if not isinstance(raw_state_version, int) or isinstance(
+            raw_state_version, bool
+        ):
+            logger.info(
+                "v21-09 replay projection backfill skipped for audit %s: "
+                "decision_v21 payload carries no state_version (missing "
+                "materials)",
+                audit.audit_id,
+            )
+            return
+        delta = build_evaluation_delta(
+            scope_digest=scope_digest,
+            audit_id=source_record_id,
+            base_state_version=raw_state_version,
+        )
+        if delta.delta_digest != expected_digest:
+            # 信封引用与重建结果失真：不得静默覆盖，跳过留痕。
+            logger.warning(
+                "v21-09 replay projection backfill skipped for audit %s: "
+                "rebuilt delta digest does not match the envelope "
+                "reference (fail-closed)",
+                audit.audit_id,
+            )
+            return
+
+        # 与 Phase C 同一锁序：base 校验 → project_committed。
+        plan = V21PhaseCPlan(
+            audit_id=source_record_id,
+            scope_digest=scope_digest,
+            delta=delta,
+            envelope=delta_envelope,
+        )
+        self._project_evaluation(plan)

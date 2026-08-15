@@ -27,7 +27,7 @@ from .memory import MemoryGuardService
 from .policy import PolicyService
 
 if TYPE_CHECKING:
-    from .v21_pipeline import V21PipelineMaterials, V21PipelineService
+    from .v21_pipeline import V21PhaseCPlan, V21PipelineMaterials, V21PipelineService
     from .v21_shadow import V21ShadowService
 
 
@@ -135,27 +135,44 @@ class EvaluationService:
                     existing, request_digest, event.event_id
                 )
                 if replayed is not None:
+                    # D9：事务外幂等补投影（不重算；五元组幂等键短路
+                    # 保证重复安全；绝不外抛、不影响重放响应）。
+                    self.v21_pipeline.backfill_projection(existing)
                     return replayed
             else:
                 materials = self.v21_pipeline.run_phase_a(event)
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
+        backfill_audit: AuditEvent | None = None
+        phase_c_plan: "V21PhaseCPlan | None" = None
         with self.audit_service.store.evaluation_transaction(event.event_id):
+            existing = self.audit_service.store.get_policy_evaluation_by_event_id(
+                event.event_id
+            )
             replayed = self._replay_or_conflict(
-                self.audit_service.store.get_policy_evaluation_by_event_id(
-                    event.event_id
-                ),
+                existing,
                 request_digest,
                 event.event_id,
             )
             if replayed is not None:
-                return replayed
-            return self._evaluate_once(
-                event,
-                request_digest=request_digest,
-                requesting_principal_id=requesting_principal_id,
-                materials=materials,
-            )
+                response = replayed
+                backfill_audit = existing
+            else:
+                response, backfill_audit, phase_c_plan = self._evaluate_once(
+                    event,
+                    request_digest=request_digest,
+                    requesting_principal_id=requesting_principal_id,
+                    materials=materials,
+                )
+        # D4 commit → project：投影在事务提交**之后**执行，绝不影响
+        # 已 commit 的审计记录与已确定的响应；两者互斥：新评估走
+        # Phase C，重放走 D9 补投影；失败一律收敛不外抛。
+        if self.v21_pipeline is not None:
+            if phase_c_plan is not None:
+                self.v21_pipeline.run_phase_c(phase_c_plan)
+            elif backfill_audit is not None:
+                self.v21_pipeline.backfill_projection(backfill_audit)
+        return response
 
     def _evaluate_once(
         self,
@@ -164,7 +181,12 @@ class EvaluationService:
         request_digest: str,
         requesting_principal_id: str,
         materials: "V21PipelineMaterials | None" = None,
-    ) -> GuardEvaluationResponse:
+    ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
+        """事务内单次评估；返回（响应, 已落盘审计记录, Phase C 计划）。
+
+        legacy 路径后两项恒 None（无投影、无 D9 补投影语义）；flag
+        off 时行为与现状逐字节一致。
+        """
         if materials is not None:
             return self._evaluate_once_pipeline(
                 event,
@@ -228,10 +250,14 @@ class EvaluationService:
             decision_dump=decision.model_dump(mode="json"),
             v21_evidence=v21_evidence,
         )
-        return GuardEvaluationResponse(
-            decision=decision,
-            approval=self._approval_summary(approval),
-            policy_audit_id=audit_event.audit_id,
+        return (
+            GuardEvaluationResponse(
+                decision=decision,
+                approval=self._approval_summary(approval),
+                policy_audit_id=audit_event.audit_id,
+            ),
+            None,
+            None,
         )
 
     def _evaluate_once_pipeline(
@@ -241,7 +267,7 @@ class EvaluationService:
         request_digest: str,
         requesting_principal_id: str,
         materials: "V21PipelineMaterials",
-    ) -> GuardEvaluationResponse:
+    ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
 
         事务窗口内：legacy 链照常（decision/detections 直接消费 Phase A
@@ -264,12 +290,19 @@ class EvaluationService:
             event, decision, requesting_principal_id=requesting_principal_id
         )
         # Phase B（事务内）：revalidate + 证据构建；失败收敛为 None，
-        # legacy 主链不受影响。
+        # legacy 主链不受影响。valid 时同步确定性构造 Phase C 计划与
+        # state_delta_v21 引用信封（D2：信封随 audit commit 写入，
+        # delta_digest 冻结时刻即真实）；stale → 无 Phase C、无信封。
         v21_evidence = None
+        state_delta_evidence = None
+        phase_c_plan: "V21PhaseCPlan | None" = None
         if self.v21_pipeline is not None:
             outcome = self.v21_pipeline.build_phase_b(event, materials)
             if outcome is not None:
                 v21_evidence = outcome.envelope
+                phase_c_plan = self.v21_pipeline.prepare_phase_c(outcome)
+                if phase_c_plan is not None:
+                    state_delta_evidence = phase_c_plan.envelope
         audit_event = self.audit_service.record_evaluation(
             event,
             decision,
@@ -288,11 +321,21 @@ class EvaluationService:
             },
             decision_dump=decision.model_dump(mode="json"),
             v21_evidence=v21_evidence,
+            state_delta_evidence=state_delta_evidence,
+            # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
+            # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
+            audit_id=(
+                phase_c_plan.audit_id if phase_c_plan is not None else None
+            ),
         )
-        return GuardEvaluationResponse(
-            decision=decision,
-            approval=self._approval_summary(approval),
-            policy_audit_id=audit_event.audit_id,
+        return (
+            GuardEvaluationResponse(
+                decision=decision,
+                approval=self._approval_summary(approval),
+                policy_audit_id=audit_event.audit_id,
+            ),
+            audit_event,
+            phase_c_plan,
         )
 
     def _replay_or_conflict(

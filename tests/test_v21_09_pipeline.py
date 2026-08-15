@@ -733,9 +733,11 @@ def test_pipeline_transaction_window_excludes_snapshot_io(monkeypatch) -> None:
         _event(task_id=_TASK_ID), requesting_principal_id="principal_a"
     )
     assert response.decision.decision in ("allow", "ask", "deny")
-    # S8 锚点：snapshot I/O 全部发生在事务外，且各仅一次。
+    # S8 锚点：snapshot I/O 全部发生在事务外。read 仅一次（Phase A）；
+    # ensure_ready 两次均在事务外（Phase A snapshot 解析 + T3 Phase C
+    # 投影前 rebuild 钩子）。
     assert calls["read"] == [False]
-    assert calls["ensure"] == [False]
+    assert calls["ensure"] == [False, False]
     # revalidate 在短事务窗口内执行。
     assert calls["revalidate"] == [True]
 
