@@ -13,7 +13,7 @@
 - **契约**：01 §9（ActionIR 字段逐字冻结）；`ActionIR.action_id` 为必填 `str`，`extra="forbid"`。
 - **代码证据**：
   - 模型：`packages/agentguard-core/agentguard_core/actions/models.py` `class ActionIR`（`action_id: str` 必填）。
-  - 派生：`packages/agentguard-core/agentguard_core/actions/builder.py` `build_action_ir()`——`action_id = f"act_{event.event_id}"`（确定性派生，同事件同 action_id）。
+  - 派生：`packages/agentguard-core/agentguard_core/actions/builder.py` `build_action_ir()`（L512-517）——ToolCallPayload/ToolResultPayload → `payload.tool.call_id`（权威调用身份）；MemoryEventPayload → `payload.action_id`；其余回退确定性派生 `act_{event.event_id}`。
 - **测试覆盖**：`tests/test_v21_08_shadow_assessment.py`（`assessment.action_id == f"act_{event.event_id}"`）、`tests/test_v21_07_sequence.py`（action_id 序列语义）。
 - **结论**：已冻结；RTE-05 的 consume endpoint 以 `action_id` 为消费键之一（UNIQUE(grant_id, action_id)）。
 
