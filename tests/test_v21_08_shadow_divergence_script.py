@@ -407,6 +407,65 @@ def test_unknown_category_and_grid_mismatch_are_flagged(tmp_path: Path) -> None:
     assert kinds == ["category_grid_mismatch", "unknown_category"]
 
 
+def test_stale_judgment_category_counted_as_degraded(tmp_path: Path) -> None:
+    """12-D8：degraded_stale_judgment 入降级分支，九宫格交叉校验不误报。
+
+    修复前：stale 类目不在硬编码降级元组 → 落入九宫格交叉校验
+    分支，每条 stale 记录产 ``category_grid_mismatch`` 假异常
+    （ok=False 退出码 1）。夹具选 parity 对角组合（九宫格期望值
+    None），修复前必然误报。
+    """
+
+    module = _load_module()
+    deps = _build_dependencies()
+    records = [
+        _make_audit_record(
+            deps,
+            sequence=1,
+            legacy_decision="allow",
+            envelope=_make_envelope(
+                deps,
+                sequence=1,
+                legacy_decision="allow",
+                disposition="CLEAR_ALLOW",
+                divergence_category="degraded_stale_judgment",
+            ),
+        ),
+        _make_audit_record(
+            deps,
+            sequence=2,
+            legacy_decision="deny",
+            envelope=_make_envelope(
+                deps,
+                sequence=2,
+                legacy_decision="deny",
+                disposition="CLEAR_DENY",
+                divergence_category="degraded_stale_judgment",
+            ),
+        ),
+    ]
+    input_path = _write_jsonl(tmp_path, records)
+    output_dir = tmp_path / "out"
+
+    exit_code = module.main(
+        ["--input", str(input_path), "--output-dir", str(output_dir)]
+    )
+
+    assert exit_code == 0
+    report = json.loads((output_dir / "divergence.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    # 九宫格不误报：无任何异常（修复前此处为 category_grid_mismatch×2）。
+    assert report["anomalies"] == []
+    # 计数：stale 入降级分支。
+    assert report["degraded"] == {"degraded_stale_judgment": 2}
+    assert report["totals"]["divergent"] == 2
+    # vocabulary 输出含新类目。
+    assert "degraded_stale_judgment" in report["vocabulary"]["degraded_categories"]
+    # Markdown 渲染含新类目行。
+    markdown = (output_dir / "divergence.md").read_text(encoding="utf-8")
+    assert "degraded_stale_judgment" in markdown
+
+
 def test_cli_subprocess_smoke(tmp_path: Path) -> None:
     deps = _build_dependencies()
     input_path = _write_jsonl(tmp_path, _fixture_records(deps))
