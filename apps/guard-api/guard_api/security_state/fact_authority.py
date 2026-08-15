@@ -19,6 +19,16 @@
 - ``sanitized=True`` 永不减 taint（T-NoSanitizeClaim）；
 - 任何失败路径 fail-closed（对齐 ``EvaluationDegradation`` 先例），
   不 raise、不 fail-open。
+
+reason_code 清单（verify_source_claim）：
+``authenticated_owner_upgrade`` / ``producer_attribution_mismatch`` /
+``trusted_claim_ignored`` / ``sanitized_claim_ignored`` /
+``model_judgment_only`` / ``memory_inherit_pending_apply_memory_inheritance`` /
+``source_type_unknown`` / ``source_default_missing``。
+reason_code 清单（apply_memory_inheritance）：
+``memory_fact_missing`` / ``memory_inherited_from_fact`` /
+``memory_trust_state_<trust_state>`` /
+``memory_trust_state_unrecognized`` / ``memory_clean_with_taints_conflict``。
 """
 
 from __future__ import annotations
@@ -106,11 +116,14 @@ class ProducerIdentity(BaseModel):
 
     @property
     def is_authenticated_owner(self) -> bool:
-        """runtime + principal 双认证且身份可归属（02 §3 矩阵行 4）。"""
+        """runtime + principal 双认证且身份可归属（02 §3 矩阵行 4）。
+
+        空串 producer_id 不构成可归属身份。
+        """
         return (
             self.runtime_authenticated
             and self.principal_authenticated
-            and self.producer_id is not None
+            and bool(self.producer_id)
         )
 
 
@@ -190,13 +203,14 @@ CLAIM_RULES: types.MappingProxyType = types.MappingProxyType(
     }
 )
 
-#: YAML ``declassification`` 节关键值（02 §5 / CT-F0-02）。
+#: YAML ``declassification`` 节全键镜像（02 §5 / CT-F0-02）。
 DECLASSIFICATION_RULES: types.MappingProxyType = types.MappingProxyType(
     {
         "producer": "trusted_declassifier",
         "adapter_sanitized_is_declassification": False,
         "llm_summary_is_declassification": False,
         "protected_labels": ("CREDENTIAL", "PERSISTENT_UNTRUSTED"),
+        "protected_removal_requires_registry_permission": True,
     }
 )
 
@@ -238,6 +252,25 @@ def normalize_source_type(raw: str) -> tuple[str, bool]:
     return "other", True
 
 
+def _accumulate_risk_increasing_taints(claim: SourceClaim) -> tuple[TaintLabel, ...]:
+    """risk-increasing claim 保守累积（02 §5 / §6，确定性保序）。
+
+    只增不减：claimed untrusted → UNTRUSTED；instruction_like →
+    EXTERNAL_INSTRUCTION；server sensitive/credential evidence →
+    SENSITIVE / CREDENTIAL+SENSITIVE。
+    """
+    taints: set[TaintLabel] = set()
+    if claim.claimed_trust == "untrusted":
+        taints.add("UNTRUSTED")
+    if claim.instruction_like:
+        taints.add("EXTERNAL_INSTRUCTION")
+    if claim.server_sensitive_evidence:
+        taints.add("SENSITIVE")
+    if claim.server_credential_evidence:
+        taints.update(("CREDENTIAL", "SENSITIVE"))
+    return tuple(label for label in _TAINT_ORDER if label in taints)
+
+
 def verify_source_claim(
     *,
     claim: SourceClaim,
@@ -246,10 +279,13 @@ def verify_source_claim(
     """纯函数：adapter claim → verified descriptor（02 §6 算法顺序）。
 
     顺序：默认表查表 → authenticated owner 升级（仅
-    trusted/trusted_claim/verified；CT-Q-01 禁止 authoritative）→
-    risk-increasing claim 保守接受 → sanitized 与 claimed trusted 恒
+    trusted/trusted_claim/verified；CT-Q-01 禁止 authoritative；升级
+    额外要求归因一致 claim.producer == producer_identity.producer_id）
+    → risk-increasing claim 保守接受 → sanitized 与 claimed trusted 恒
     忽略（CT-F0-07，仅记 reason_code）→ model 源恒 model_judgment +
-    trust=unknown。policy 信任升级 v1 不实现。任何路径不 raise：
+    trust=unknown。memory 源早退前同样执行 risk-increasing 累积（结果
+    写入 pending descriptor，由 apply_memory_inheritance 的 ∪ 并集继
+    承）。policy 信任升级 v1 不实现。任何路径不 raise：
     未知 source_type → fail-closed descriptor + reason_code
     ``source_type_unknown``；属于 11 值 Literal 但不在 8 源默认表内
     的 source_type（如 runtime/user）→ fail-closed descriptor +
@@ -258,7 +294,12 @@ def verify_source_claim(
     source_type, unknown = normalize_source_type(claim.raw_source_type)
 
     if source_type == "memory":
-        # 三字段由 apply_memory_inheritance 用权威 MemoryFact 解析。
+        # risk-increasing 输入不得在早退时丢弃（02 §5 Claim
+        # Monotonicity）：claimed untrusted / instruction_like / server
+        # evidence 照常规累积；claimed trusted 与 sanitized 仍恒忽略
+        # （CT-F0-07，不记额外 reason_code）。trust/authority/taints
+        # 继承字段由 apply_memory_inheritance 用权威 MemoryFact 解析。
+        memory_taints = _accumulate_risk_increasing_taints(claim)
         return VerifiedSourceDescriptor(
             source_id=claim.source_id,
             scope_digest=claim.scope_digest,
@@ -267,7 +308,7 @@ def verify_source_claim(
             verification_state="unverified",
             fact_authority="untrusted_claim",
             producer=claim.producer,
-            initial_taints=(),
+            initial_taints=memory_taints,
             reason_codes=("memory_inherit_pending_apply_memory_inheritance",),
             memory_inherit_pending=True,
         )
@@ -300,32 +341,35 @@ def verify_source_claim(
         taints.update(profile.initial_taints)
 
     # authenticated owner 升级：仅身份信任（trusted/trusted_claim/
-    # verified）。model 源豁免：LLM 输出永不因身份升级（02 §8.3 +
+    # verified），且归因必须一致——adapter 可控的 claim.producer 与
+    # 服务端认证的 producer_id 不一致时不升级（防身份冒认）。model
+    # 源豁免：LLM 输出永不因身份升级（02 §8.3 +
     # claim_rules.model_output_can_create_capability=false）。
+    owner_upgraded = False
     if producer_identity.is_authenticated_owner and source_type != "model":
-        trust = "trusted"
-        authority = "trusted_claim"
-        verification = "verified"
-        reason_codes.append("authenticated_owner_upgrade")
+        if claim.producer == producer_identity.producer_id:
+            trust = "trusted"
+            authority = "trusted_claim"
+            verification = "verified"
+            owner_upgraded = True
+            reason_codes.append("authenticated_owner_upgrade")
+        else:
+            reason_codes.append("producer_attribution_mismatch")
 
     # risk-increasing claims 保守接受（02 §5 / §6）。
+    taints.update(
+        label
+        for label in _accumulate_risk_increasing_taints(claim)
+        if label not in taints
+    )
     if claim.claimed_trust == "untrusted":
         trust = "untrusted"
-        taints.add("UNTRUSTED")
-    if claim.instruction_like:
-        taints.add("EXTERNAL_INSTRUCTION")
-    if claim.server_sensitive_evidence:
-        taints.add("SENSITIVE")
-    if claim.server_credential_evidence:
-        taints.update(("CREDENTIAL", "SENSITIVE"))
 
     # sanitized=True 与 claimed trusted 恒忽略（CT-F0-07 /
     # T-NoSanitizeClaim / T-NoClaimUpgrade）：仅记 reason_code。
     if claim.sanitized:
         reason_codes.append("sanitized_claim_ignored")
-    if claim.claimed_trust == "trusted" and not (
-        producer_identity.is_authenticated_owner and source_type != "model"
-    ):
+    if claim.claimed_trust == "trusted" and not owner_upgraded:
         reason_codes.append("trusted_claim_ignored")
 
     # model 源恒 model_judgment + trust=unknown（02 §8.3）。
@@ -367,11 +411,16 @@ def apply_memory_inheritance(
 ) -> VerifiedSourceDescriptor:
     """独立纯函数：解析 memory 源的继承三字段（02 §7）。
 
-    - 有权威 ``MemoryFact``：trust 按 ``_MEMORY_TRUST_MAP`` 映射；
-      tainted/quarantined 追加 ``UNTRUSTED``；taints 为 descriptor
-      既有 taints ∪ MemoryFact.taints（按冻结顺序去重）；clean →
+    - 有权威 ``MemoryFact``：trust 按 ``_MEMORY_TRUST_MAP`` 映射（表外
+      trust_state 按 unknown fail-closed + reason_code
+      ``memory_trust_state_unrecognized``，不 raise）；tainted/
+      quarantined 追加 ``UNTRUSTED``；taints 为 descriptor 既有
+      taints ∪ MemoryFact.taints（按冻结顺序去重）；clean →
       trusted_claim，其余 → untrusted_claim（fail-closed）；
       verification_state=verified（继承自服务端 MemoryFact 记录）。
+      矛盾收紧：trust_state=clean 但 taints 非空时降为
+      unknown/untrusted_claim + reason_code
+      ``memory_clean_with_taints_conflict``（ALLOW ≠ TRUST，CT-Q-08）。
     - 无 ``MemoryFact``：fail-closed unknown + reason_code
       ``memory_fact_missing``（02 §13；不 raise）。
 
@@ -389,7 +438,16 @@ def apply_memory_inheritance(
             }
         )
 
-    trust = _MEMORY_TRUST_MAP[memory_fact.trust_state]
+    extra_reason_codes: list[str] = []
+    trust = _MEMORY_TRUST_MAP.get(memory_fact.trust_state)
+    if trust is None:
+        # 表外 trust_state：fail-closed 不 raise（02 §13）。
+        trust = "unknown"
+        extra_reason_codes.append("memory_trust_state_unrecognized")
+    if memory_fact.trust_state == "clean" and memory_fact.taints:
+        # clean 与非空 taints 矛盾：收紧为 fail-closed（CT-Q-08）。
+        trust = "unknown"
+        extra_reason_codes.append("memory_clean_with_taints_conflict")
     authority: FactAuthority = (
         "trusted_claim" if trust == "trusted" else "untrusted_claim"
     )
@@ -401,6 +459,7 @@ def apply_memory_inheritance(
     reason_codes = descriptor.reason_codes + (
         "memory_inherited_from_fact",
         f"memory_trust_state_{memory_fact.trust_state}",
+        *extra_reason_codes,
     )
     return descriptor.model_copy(
         update={

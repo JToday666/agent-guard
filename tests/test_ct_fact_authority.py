@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -55,6 +56,7 @@ def _claim(
     instruction_like: bool = False,
     server_sensitive_evidence: bool = False,
     server_credential_evidence: bool = False,
+    producer: str = "principal:owner",
 ) -> SourceClaim:
     return SourceClaim(
         source_id="source:test",
@@ -65,14 +67,19 @@ def _claim(
         instruction_like=instruction_like,
         server_sensitive_evidence=server_sensitive_evidence,
         server_credential_evidence=server_credential_evidence,
+        producer=producer,
     )
 
 
-def _identity(*, owner: bool = False) -> ProducerIdentity:
+def _identity(
+    *, owner: bool = False, producer_id: str | None = None
+) -> ProducerIdentity:
+    if producer_id is None:
+        producer_id = "principal:owner" if owner else None
     return ProducerIdentity(
         runtime_authenticated=owner,
         principal_authenticated=owner,
-        producer_id="principal:owner" if owner else None,
+        producer_id=producer_id,
     )
 
 
@@ -141,6 +148,10 @@ def test_declassification_rules_match_freeze_yaml(freeze_yaml) -> None:
         list(DECLASSIFICATION_RULES["protected_labels"])
         == yaml_declass["protected_labels"]
     )
+    assert (
+        DECLASSIFICATION_RULES["protected_removal_requires_registry_permission"]
+        == yaml_declass["protected_removal_requires_registry_permission"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +172,14 @@ def test_external_claimed_trusted_cannot_upgrade(source_type: str) -> None:
     assert "trusted_claim_ignored" in descriptor.reason_codes
 
 
-def test_sanitized_claim_never_removes_taints() -> None:
-    baseline = verify_source_claim(claim=_claim("web"), producer_identity=_identity())
+@pytest.mark.parametrize("source_type", ("web", "tool_result"))
+def test_sanitized_claim_never_removes_taints(source_type: str) -> None:
+    # 08 §4 口径：web 与 tool result 的 sanitized 声明均无减 taint 效果。
+    baseline = verify_source_claim(
+        claim=_claim(source_type), producer_identity=_identity()
+    )
     sanitized = verify_source_claim(
-        claim=_claim("web", sanitized=True), producer_identity=_identity()
+        claim=_claim(source_type, sanitized=True), producer_identity=_identity()
     )
     assert sanitized.initial_taints == baseline.initial_taints
     assert "UNTRUSTED" in sanitized.initial_taints
@@ -193,6 +208,46 @@ def test_authenticated_owner_never_reaches_authoritative() -> None:
             claim=_claim(source_type), producer_identity=_identity(owner=True)
         )
         assert descriptor.fact_authority != "authoritative"
+
+
+# ---------------------------------------------------------------------------
+# B. 行为组 — owner 升级与 producer 归因绑定（防身份冒认）
+# ---------------------------------------------------------------------------
+
+
+def test_producer_attribution_mismatch_blocks_owner_upgrade() -> None:
+    # adapter 可控的 claim.producer 与认证 producer_id 不一致 → 不升级。
+    descriptor = verify_source_claim(
+        claim=_claim("web", producer="attacker_controlled:spoof"),
+        producer_identity=_identity(owner=True),
+    )
+    assert descriptor.trust == "untrusted"
+    assert descriptor.fact_authority == "untrusted_claim"
+    assert descriptor.verification_state == "unverified"
+    assert "producer_attribution_mismatch" in descriptor.reason_codes
+    assert "authenticated_owner_upgrade" not in descriptor.reason_codes
+
+
+def test_empty_producer_id_blocks_owner_upgrade() -> None:
+    # producer_id="" 不构成可归属身份（bool("") == False）。
+    descriptor = verify_source_claim(
+        claim=_claim("web", producer=""),
+        producer_identity=_identity(owner=True, producer_id=""),
+    )
+    assert descriptor.trust == "untrusted"
+    assert descriptor.fact_authority == "untrusted_claim"
+    assert descriptor.verification_state == "unverified"
+    assert "authenticated_owner_upgrade" not in descriptor.reason_codes
+
+
+def test_mismatched_attribution_claimed_trusted_still_ignored() -> None:
+    descriptor = verify_source_claim(
+        claim=_claim("web", claimed_trust="trusted", producer="other:identity"),
+        producer_identity=_identity(owner=True),
+    )
+    assert descriptor.trust == "untrusted"
+    assert "trusted_claim_ignored" in descriptor.reason_codes
+    assert "producer_attribution_mismatch" in descriptor.reason_codes
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +330,76 @@ def test_memory_without_memory_fact_fails_closed() -> None:
     assert "memory_fact_missing" in resolved.reason_codes
 
 
+def test_memory_pending_accumulates_server_evidence_and_inheritance_preserves_it() -> (
+    None
+):
+    # 修复 #2：memory 早退不再丢弃 risk-increasing 输入；继承后 ∪ 并集保留。
+    descriptor = verify_source_claim(
+        claim=_claim("memory", server_credential_evidence=True),
+        producer_identity=_identity(),
+    )
+    assert descriptor.memory_inherit_pending is True
+    assert "CREDENTIAL" in descriptor.initial_taints
+    assert "SENSITIVE" in descriptor.initial_taints
+    resolved = apply_memory_inheritance(descriptor, _memory_fact("clean"))
+    assert "CREDENTIAL" in resolved.initial_taints
+    assert "SENSITIVE" in resolved.initial_taints
+
+
+def test_memory_unrecognized_trust_state_fails_closed_without_raising() -> None:
+    # 修复 #3：表外 trust_state（model_construct 绕过 Literal）不 raise。
+    descriptor = verify_source_claim(
+        claim=_claim("memory"), producer_identity=_identity()
+    )
+    rogue_fact = _memory_fact("clean").model_copy(update={"trust_state": "rogue_state"})
+    resolved = apply_memory_inheritance(descriptor, rogue_fact)
+    assert resolved.trust == "unknown"
+    assert resolved.fact_authority == "untrusted_claim"
+    assert "memory_trust_state_unrecognized" in resolved.reason_codes
+
+
+def test_memory_clean_with_nonempty_taints_conflict_fails_closed() -> None:
+    # 修复 #4：trust_state=clean 但 taints 非空 → 矛盾收紧（CT-Q-08）。
+    descriptor = verify_source_claim(
+        claim=_claim("memory"), producer_identity=_identity()
+    )
+    resolved = apply_memory_inheritance(
+        descriptor, _memory_fact("clean", ("CREDENTIAL",))
+    )
+    assert resolved.trust == "unknown"
+    assert resolved.fact_authority == "untrusted_claim"
+    assert "CREDENTIAL" in resolved.initial_taints
+    assert "memory_clean_with_taints_conflict" in resolved.reason_codes
+
+
+_MEMORY_NO_EFFECT_COMBOS = (
+    {},
+    {"claimed_trust": "trusted"},
+    {"sanitized": True},
+    {"claimed_trust": "trusted", "sanitized": True},
+)
+
+
+@pytest.mark.parametrize("combo", _MEMORY_NO_EFFECT_COMBOS)
+@pytest.mark.parametrize("owner", (False, True))
+def test_memory_trust_increasing_and_sanitize_claims_have_zero_effect(
+    combo: dict, owner: bool
+) -> None:
+    # memory 源不变式（修复 #2 后的精确边界）：claimed_trust=trusted 与
+    # sanitized 属 trust-increasing / 减 taint 类 claim，恒零效果；而
+    # claimed untrusted / instruction_like / server evidence 是
+    # risk-increasing，会累积，不在本不变式输入集内。
+    baseline = verify_source_claim(
+        claim=_claim("memory", producer="adapter_unattributed"),
+        producer_identity=_identity(),
+    )
+    descriptor = verify_source_claim(
+        claim=_claim("memory", producer="adapter_unattributed", **combo),
+        producer_identity=_identity(owner=owner),
+    )
+    assert descriptor == baseline
+
+
 # ---------------------------------------------------------------------------
 # B. 行为组 — risk-increasing claims 与 server evidence
 # ---------------------------------------------------------------------------
@@ -298,12 +423,53 @@ def test_credential_evidence_adds_credential_and_sensitive() -> None:
     assert "SENSITIVE" in descriptor.initial_taints
 
 
+def test_sensitive_evidence_positive_adds_sensitive_taint() -> None:
+    # 修复 #6 正向用例：server 确定性 sensitive 证据 → SENSITIVE。
+    descriptor = verify_source_claim(
+        claim=_claim("web", server_sensitive_evidence=True),
+        producer_identity=_identity(),
+    )
+    assert "SENSITIVE" in descriptor.initial_taints
+
+
 def test_sensitive_claim_false_cannot_prove_absence() -> None:
     descriptor = verify_source_claim(
         claim=_claim("web", server_sensitive_evidence=False),
         producer_identity=_identity(),
     )
     assert "SENSITIVE" not in descriptor.initial_taints
+
+
+@pytest.mark.parametrize(
+    "attempt",
+    (
+        {"sanitized": True},
+        {"claimed_trust": "trusted"},
+        {"sanitized": True, "claimed_trust": "trusted"},
+    ),
+)
+def test_no_claim_flag_can_remove_existing_sensitive_taint(attempt: dict) -> None:
+    # 对照实验：先构造含 SENSITIVE 的基线（server evidence 与 credential
+    # evidence 两条路径），任何 adapter 可控的 claim flag 组合都不得移除
+    # 已存在的 SENSITIVE（sensitive_claim=false 不得反向证明；
+    # server_sensitive_evidence 本身是 server 确定性输入，不属 adapter
+    # claim flag，故不在 attempt 输入集内）。
+    baseline_variants: tuple[dict[str, Any], ...] = (
+        {"server_sensitive_evidence": True},
+        {"server_credential_evidence": True},
+    )
+    for baseline_kwargs in baseline_variants:
+        baseline = verify_source_claim(
+            claim=_claim("web", **baseline_kwargs), producer_identity=_identity()
+        )
+        assert "SENSITIVE" in baseline.initial_taints
+        merged_kwargs: dict[str, Any] = {**baseline_kwargs, **attempt}
+        attempted = verify_source_claim(
+            claim=_claim("web", **merged_kwargs),
+            producer_identity=_identity(),
+        )
+        assert "SENSITIVE" in attempted.initial_taints
+        assert set(attempted.initial_taints) >= set(baseline.initial_taints)
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +558,10 @@ def test_claim_matrix_never_self_elevates_or_shrinks_taints(
     assert descriptor.fact_authority != "authoritative"
 
     if descriptor.memory_inherit_pending:
-        pytest.skip("memory 三字段由 apply_memory_inheritance 解析")
+        pytest.skip(
+            "memory 三字段由 apply_memory_inheritance 解析，接线后随 "
+            "CT-PR-02/05 更新"
+        )
 
     profile = SOURCE_DEFAULTS[source_type]
     if source_type == "model":
