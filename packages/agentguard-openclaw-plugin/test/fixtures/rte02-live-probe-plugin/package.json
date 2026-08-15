@@ -1,0 +1,13 @@
+{
+  "name": "rte02-live-probe",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "One-shot evidence probe for PR-RTE-02 live forensics (not published).",
+  "main": "./index.js",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
+}

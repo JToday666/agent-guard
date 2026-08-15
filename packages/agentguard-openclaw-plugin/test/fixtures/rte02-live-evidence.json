@@ -1,0 +1,60 @@
+{
+  "spike_id": "PR-RTE-02",
+  "phase": "live_forensics_rev3",
+  "generated_at": "2026-08-15",
+  "runtime": {
+    "openclaw_cli_version": "2026.7.1-2",
+    "install": "global npm (D:/Tools/nodejs/node_modules/openclaw)",
+    "execution_mode": "embedded agent turn via `openclaw agent --local` (plugin registry preload + real agent tool loop + real run-attempt observer)",
+    "model": "qwen/qwen3.7-flash (user's existing dedicated MaaS endpoint; ~3 short turns)",
+    "profile": "isolated OPENCLAW_HOME (never ~/.openclaw; deleted after forensics)"
+  },
+  "probe_plugin": {
+    "path": "packages/agentguard-openclaw-plugin/test/fixtures/rte02-live-probe-plugin",
+    "mechanism": "registers rte_probe_ok / rte_probe_fail / rte_probe_deny; before/after/persist handlers append ordered JSONL; the only enforcement action is block:true for rte_probe_deny",
+    "evidence_discipline": "handlers only observe and record; emission was produced by the real host observer, never by the probe"
+  },
+  "version_diff_2026_6_6_vs_2026_7_1_2": {
+    "runAgentHarnessAfterToolCallHook": "unchanged semantics: result/error still included via truthiness checks; 2026.7.1-2 adds structuredClone of params before dispatch (no semantic change)",
+    "emitAfterToolCallObservation": "same guards: shouldSynthesizeToolProgressForItem + status != running + setImmediate dispatch; toolCallId = item.id",
+    "note": "live run was on 2026.7.1-2; conclusions below apply to that version; the pinned 2026.6.6 emit helper shares the same truthiness/identity semantics"
+  },
+  "scenarios": [
+    {
+      "id": "S-allow",
+      "tool": "rte_probe_ok",
+      "session": "spike-allow",
+      "cli_tool_summary": { "calls": 1, "failures": 0 },
+      "observed_sequence": ["before_tool_call", "tool_executed", "after_tool_call", "tool_result_persist"],
+      "findings": [
+        "Q3/Q4 live: identical toolCallId (call_3f46e8fc8b77446585f59b54) across event.toolCallId and ctx.toolCallId in before and after",
+        "Q5 live: success result passed through as an object; durationMs is a number; error absent",
+        "Q10 live: the real host emitted after_tool_call BEFORE tool_result_persist — the opposite of the rev2 static hypothesis; the deferred setImmediate observation still lands before transcript persistence for plugin tools"
+      ]
+    },
+    {
+      "id": "S-error",
+      "tool": "rte_probe_fail",
+      "session": "spike-error",
+      "cli_tool_summary": { "calls": 1, "failures": 1 },
+      "observed_sequence": ["before_tool_call", "tool_executed", "after_tool_call", "tool_result_persist"],
+      "findings": [
+        "Q6 live YES: the host emitted after_tool_call for the throwing tool",
+        "error is a bounded string; durationMs present; the host ALSO populates result (error-shaped tool result object), so error and result coexist on failure"
+      ]
+    },
+    {
+      "id": "S-deny",
+      "tool": "rte_probe_deny",
+      "session": "spike-deny",
+      "observed_sequence": ["before_tool_call", "after_tool_call", "tool_result_persist"],
+      "findings": [
+        "C1 fact reconfirmed live: block:true produced ZERO tool executions (no tool_executed record)",
+        "Q9 live YES: the real host STILL emitted after_tool_call for the blocked call, carrying the blocked result in error shape (resultPresent=true, errorPresent=true, errorIsString=true)",
+        "consequence: an after_tool_call arrival is NOT proof of invocation; PR-RTE-03 must never derive terminal execution facts for blocked gate states regardless of after-hook arrival (contract 03 §5.2)"
+      ]
+    }
+  ],
+  "raw_evidence_file": "packages/agentguard-openclaw-plugin/test/fixtures/rte02-live-evidence.jsonl",
+  "raw_evidence_line_count": 11
+}

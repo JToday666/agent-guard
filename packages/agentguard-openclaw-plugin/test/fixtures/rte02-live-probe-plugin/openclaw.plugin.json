@@ -1,0 +1,17 @@
+{
+  "id": "rte02-live-probe",
+  "name": "RTE-02 Live Probe",
+  "description": "One-shot evidence probe for PR-RTE-02 live forensics: records before/after/persist hook observations to JSONL. No Guard API, no side effects beyond the deny scenario.",
+  "version": "0.0.1",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "contracts": {
+    "tools": ["rte_probe_ok", "rte_probe_fail", "rte_probe_deny"]
+  }
+}
