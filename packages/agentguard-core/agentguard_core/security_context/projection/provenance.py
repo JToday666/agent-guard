@@ -63,6 +63,7 @@ __all__ = [
     "apply_source_upserts",
     "apply_sticky_taint_upserts",
     "propagate_taints",
+    "replay_declassification_effects",
 ]
 
 #: 冻结的五类 taint label（contract_freeze.yaml ``taint_labels`` 逐字）。
@@ -468,3 +469,34 @@ PROVENANCE_TYPED_UPSERT_HANDLERS: tuple[tuple[str, TypedUpsertHandler], ...] = (
     ("memory_upserts", apply_memory_upserts),
     ("sticky_taint_upserts", apply_sticky_taint_upserts),
 )
+
+
+# ---------------------------------------------------------------------------
+# 组合后处理：declassification / sticky 声明序兼容（01 §27 顺序不动）
+# ---------------------------------------------------------------------------
+
+
+def replay_declassification_effects(
+    state: OnlineSecurityState, items: list[DeclassificationFact]
+) -> OnlineSecurityState:
+    """同 delta 两类 upsert 并存时的确定性后处理（幂等重放）。
+
+    中央分发表按 01 §27 字段声明序应用容器（**顺序冻结不动**）：
+    ``declassification_upserts`` 先于 ``sticky_taint_upserts`` 执行。若
+    同一 delta 同时携带两类 upsert，declassification handler 运行时
+    sticky 新摘要尚未入 state，效果无法施加，新增摘要会保留已被
+    trusted declassifier 移除的 label。本函数由编排层
+    （``handlers.apply_typed_updates``）在全部容器按声明序应用完毕
+    后调用，重放同一 delta 的 declassification 效果：
+
+    - 移除操作天然幂等：重放不改变既有摘要已应用的效果；
+    - ``sticky_taint_upserts`` 新增/合并的摘要按 ref 命中移除
+      ``removed_taints``；
+    - 由此同一 delta 内两类容器的施加顺序不再影响结果：增量路径与
+      rebuild 路径得到相同 state digest（T-Replay 确定性）。
+
+    ``items`` 为空时原样返回输入 state（不复制、不修改）。
+    """
+    if not items:
+        return state
+    return apply_declassification_upserts(state, items)

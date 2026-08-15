@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ...actions.canonical_json import canonical_sha256
 from ...actions.constraints import (
+    matches_argument,
     matches_destination,
     matches_resource,
 )
@@ -134,12 +135,18 @@ def compute_authority_verdict(
        投影层预检）；
     3. expiry：``expires_at`` 存在而 ``evaluated_at`` 缺失 → 无法证明
        有效，fail-closed 不匹配；两者可比且已过期 → 不匹配；
-    4. fingerprint：human_approval grant 必须携带
+    4. scope 绑定：``grant.scope_digest`` 必须与
+       ``action_ir.scope_digest`` 一致（与 ``build_consumption_intent``
+       同口径）—— OnlineSecurityState 不携带 scope_digest 字段（02 §5
+       十四子域冻结），因此必须逐 grant 比对；调用方传入其他 scope 的
+       state 时，跨 scope grant 一律不匹配（防误用/缓存错配）；
+    5. fingerprint：human_approval grant 必须携带
        ``exact_authorization_fingerprint`` 且与
        ``action_ir.authorization_fingerprint`` 恒定时间语义一致；
-    5. action_type / resource / destination 约束：复用
-       ``matches_resource`` / ``matches_destination``（空约束列表视为
-       无限制；约束非空而动作未命中 → explicit scope mismatch）。
+    6. action_type / resource / destination / argument 约束：复用
+       ``matches_resource`` / ``matches_destination`` /
+       ``matches_argument``（空约束列表视为无限制；约束非空而动作未
+       命中 → explicit scope mismatch）。
 
     ``matched_grant_ids`` 非空 → ``authorized``；否则 ``unauthorized``
     并在 ``missing_capabilities`` / ``explicit_scope_mismatches`` 给出
@@ -173,6 +180,9 @@ def compute_authority_verdict(
             if evaluated_moment >= expires_moment:
                 mismatches.append(f"{grant.grant_id}:expired")
                 continue
+        if grant.scope_digest != action_ir.scope_digest:
+            mismatches.append(f"{grant.grant_id}:verdict_scope_mismatch")
+            continue
         if grant.source_type == "human_approval":
             expected_fingerprint = grant.exact_authorization_fingerprint
             if expected_fingerprint is None:
@@ -196,6 +206,12 @@ def compute_authority_verdict(
             for constraint in grant.destination_constraints
         ):
             mismatches.append(f"{grant.grant_id}:destination_scope_mismatch")
+            continue
+        if grant.argument_constraints and not all(
+            matches_argument(constraint, action_ir.canonical_arguments)
+            for constraint in grant.argument_constraints
+        ):
+            mismatches.append(f"{grant.grant_id}:argument_scope_mismatch")
             continue
         matched.append(grant.grant_id)
 

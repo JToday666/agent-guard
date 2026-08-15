@@ -38,6 +38,7 @@ from agentguard_core.security_context.projection.provenance import (
     apply_source_upserts,
     apply_sticky_taint_upserts,
     propagate_taints,
+    replay_declassification_effects,
 )
 from agentguard_core.security_context.projection.provenance_lookup import (
     bounded_relevant_flow_lookup,
@@ -46,6 +47,7 @@ from agentguard_core.security_context.state import state_digest
 from agentguard_core.signals.models import SequenceRef
 
 from tests.test_v21_security_state_models import (
+    make_delta,
     make_source_fact,
     make_watermarks,
 )
@@ -462,6 +464,80 @@ def test_declassification_conflict_fail_closed() -> None:
     with pytest.raises(ProvenanceProjectionError) as excinfo:
         apply_declassification_upserts(state, [conflicting])
     assert excinfo.value.reason_code == "v21-05:declassification_conflict"
+
+
+# ---------------------------------------------------------------------------
+# 4b. Codex P1-4：同 delta declassification + sticky_taint 并存的顺序兼容
+# ---------------------------------------------------------------------------
+
+
+def _declass_and_sticky_items() -> tuple[
+    list[DeclassificationFact], list[StickyTaintSummary]
+]:
+    declass = make_declass(
+        "d1",
+        "artifact:x",
+        "artifact:y",
+        removed=["CREDENTIAL"],
+        retained=["SENSITIVE"],
+    )
+    incoming = make_summary(
+        "s_new",
+        ["CREDENTIAL", "SENSITIVE"],
+        flow_refs=["artifact:x"],
+    )
+    return [declass], [incoming]
+
+
+def test_same_delta_declass_and_sticky_new_summary_is_cleaned() -> None:
+    # 中央分发表按 01 §27 声明序：declassification_upserts 先于
+    # sticky_taint_upserts；同 delta 并存时，新增摘要必须经后处理
+    # 重放后移除被 trusted declassifier 移除的 label。
+    declasses, stickies = _declass_and_sticky_items()
+    delta = make_delta().model_copy(
+        update={
+            "declassification_upserts": declasses,
+            "sticky_taint_upserts": stickies,
+        }
+    )
+    result = handlers.apply_typed_updates(empty_state(), delta)
+    summary = next(
+        s for s in result.sticky_taint_summaries if s.summary_id == "s_new"
+    )
+    assert summary.taints == ["SENSITIVE"]  # CREDENTIAL 已被净化
+
+
+def test_declass_sticky_order_independence_deterministic() -> None:
+    # 确定性断言：同一 delta 两类容器以两种顺序施加（模拟增量路径与
+    # rebuild 重排序路径）结果一致 —— state digest 相同且 label 已净化。
+    declasses, stickies = _declass_and_sticky_items()
+
+    # 顺序 A（01 §27 声明序 + 后处理）：declass → sticky → replay。
+    order_a = apply_declassification_upserts(empty_state(), declasses)
+    order_a = apply_sticky_taint_upserts(order_a, stickies)
+    order_a = replay_declassification_effects(order_a, declasses)
+
+    # 顺序 B（逆序）：sticky → declass（对新摘要直接生效）→ replay（幂等）。
+    order_b = apply_sticky_taint_upserts(empty_state(), stickies)
+    order_b = apply_declassification_upserts(order_b, declasses)
+    order_b = replay_declassification_effects(order_b, declasses)
+
+    assert state_digest(order_a) == state_digest(order_b)
+    for state in (order_a, order_b):
+        summary = next(
+            s for s in state.sticky_taint_summaries if s.summary_id == "s_new"
+        )
+        assert summary.taints == ["SENSITIVE"]
+
+
+def test_replay_declassification_effects_idempotent_and_empty_noop() -> None:
+    declasses, stickies = _declass_and_sticky_items()
+    base = apply_sticky_taint_upserts(empty_state(), stickies)
+    once = replay_declassification_effects(base, declasses)
+    twice = replay_declassification_effects(once, declasses)
+    assert state_digest(twice) == state_digest(once)
+    # 空 items 原样返回（不复制、不修改）。
+    assert replay_declassification_effects(base, []) is base
 
 
 # ---------------------------------------------------------------------------

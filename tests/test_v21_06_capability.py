@@ -28,6 +28,8 @@ from agentguard_core.actions.models import (
     ActionConstraint,
     ActionEffect,
     ActionIR,
+    ArgumentConstraint,
+    CanonicalArgument,
     CanonicalArguments,
     DestinationConstraint,
     FileResource,
@@ -55,6 +57,8 @@ from agentguard_core.security_context.projection import (
     compute_authority_verdict,
     consumption_intent_digest,
 )
+
+from tests.test_v21_security_state_models import make_grant
 
 SCOPE = "hmac-sha256:v21_06_scope"
 OTHER_SCOPE = "hmac-sha256:v21_06_other_scope"
@@ -650,6 +654,141 @@ def test_verdict_no_grants_unauthorized() -> None:
     )
     assert verdict.status == "unauthorized"
     assert verdict.missing_capabilities == ["file.write"]
+
+
+# ---------------------------------------------------------------------------
+# Codex P1-1：verdict 路径 scope_digest 比对（跨 scope state fail-closed）
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_cross_scope_grant_rejected() -> None:
+    # 调用方选错/缓存错 state：其他 scope 的 grant 不得用于本动作。
+    grant = _approval_grant().model_copy(
+        update={"scope_digest": OTHER_SCOPE}
+    )
+    state = state_with_grants([grant])
+    verdict = compute_authority_verdict(
+        state, make_action_ir(), evaluated_at="2026-08-15T00:00:00Z"
+    )
+    assert verdict.status == "unauthorized"
+    assert (
+        f"{grant.grant_id}:verdict_scope_mismatch"
+        in verdict.explicit_scope_mismatches
+    )
+
+
+def test_verdict_cross_scope_state_denied_even_with_matching_constraints() -> None:
+    # 跨 scope grant 即便 action/resource/destination 全部命中也必须拒绝；
+    # 同 state 中同 scope grant 不受影响（逐 grant 过滤，非全局降级）。
+    foreign = _approval_grant().model_copy(
+        update={"grant_id": "grant_foreign", "scope_digest": OTHER_SCOPE}
+    )
+    local = _approval_grant()
+    state = state_with_grants([foreign, local])
+    verdict = compute_authority_verdict(
+        state, make_action_ir(), evaluated_at="2026-08-15T00:00:00Z"
+    )
+    assert verdict.status == "authorized"
+    assert verdict.matched_grant_ids == [local.grant_id]
+    assert (
+        "grant_foreign:verdict_scope_mismatch"
+        in verdict.explicit_scope_mismatches
+    )
+
+
+def test_verdict_same_scope_path_no_regression() -> None:
+    grant = _approval_grant()
+    assert grant.scope_digest == SCOPE
+    state = state_with_grants([grant])
+    verdict = compute_authority_verdict(
+        state,
+        make_action_ir(scope_digest=SCOPE),
+        evaluated_at="2026-08-15T00:00:00Z",
+    )
+    assert verdict.status == "authorized"
+    assert verdict.matched_grant_ids == [grant.grant_id]
+
+
+# ---------------------------------------------------------------------------
+# Codex P1-2：verdict 路径 argument_constraints 校验（fail-closed）
+# ---------------------------------------------------------------------------
+
+
+def _policy_grant_with_argument_constraint() -> CapabilityGrant:
+    # 无精确 fingerprint 的 system_policy grant（非 human_approval 分支），
+    # 携带受限参数约束：/mode 必须等于 "safe"。
+    return make_grant(
+        scope_digest=SCOPE,
+        source_type="system_policy",
+        exact_authorization_fingerprint=None,
+        action_types=["file.write"],
+        expires_at=None,
+        argument_constraints=[
+            ArgumentConstraint(json_pointer="/mode", op="eq", value="safe")
+        ],
+    )
+
+
+def _action_ir_with_argument(value: str) -> ActionIR:
+    action = make_action_ir(action_type="file.write")
+    return action.model_copy(
+        update={
+            "canonical_arguments": CanonicalArguments(
+                items=[
+                    CanonicalArgument(
+                        json_pointer="/mode",
+                        value=value,
+                        security_relevant=True,
+                    )
+                ],
+                canonicalization_version=CANONICALIZATION_VERSION,
+                argument_digest=action.argument_digest,
+            )
+        }
+    )
+
+
+def test_verdict_argument_constraint_violation_rejected() -> None:
+    grant = _policy_grant_with_argument_constraint()
+    state = state_with_grants([grant])
+    verdict = compute_authority_verdict(
+        state,
+        _action_ir_with_argument("unsafe"),
+        evaluated_at="2026-08-15T00:00:00Z",
+    )
+    assert verdict.status == "unauthorized"
+    assert (
+        f"{grant.grant_id}:argument_scope_mismatch"
+        in verdict.explicit_scope_mismatches
+    )
+
+
+def test_verdict_argument_constraint_satisfied_authorized() -> None:
+    grant = _policy_grant_with_argument_constraint()
+    state = state_with_grants([grant])
+    verdict = compute_authority_verdict(
+        state,
+        _action_ir_with_argument("safe"),
+        evaluated_at="2026-08-15T00:00:00Z",
+    )
+    assert verdict.status == "authorized"
+    assert verdict.matched_grant_ids == [grant.grant_id]
+
+
+def test_verdict_argument_constraint_unprovable_fails_closed() -> None:
+    # 动作未携带对应 security_relevant 规范参数 → 无法证明满足约束 →
+    # fail-closed 不匹配（不得因参数缺失而放行）。
+    grant = _policy_grant_with_argument_constraint()
+    state = state_with_grants([grant])
+    verdict = compute_authority_verdict(
+        state, make_action_ir(action_type="file.write"),
+        evaluated_at="2026-08-15T00:00:00Z",
+    )
+    assert verdict.status == "unauthorized"
+    assert (
+        f"{grant.grant_id}:argument_scope_mismatch"
+        in verdict.explicit_scope_mismatches
+    )
 
 
 # ---------------------------------------------------------------------------

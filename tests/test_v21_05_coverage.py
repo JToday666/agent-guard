@@ -376,6 +376,41 @@ def test_memory_required_refs_missing_is_partial() -> None:
     assert "v21-05:memory_refs_missing" in result.reason_codes
 
 
+def test_memory_required_refs_partially_matched_is_partial() -> None:
+    # Codex P1-3：required refs 部分命中不得误判 complete，
+    # 任一缺失即 partial（02 §6.6 fail-closed 口径）。
+    state = empty_state().model_copy(
+        update={
+            "memory_index": [
+                make_memory("mem_1"),
+                make_memory("mem_2"),
+            ]
+        }
+    )
+    ctx = make_ctx(stable_refs=("mem_1", "mem_2", "mem_missing"))
+    result = memory_coverage(state, ctx)
+    assert result.status == "partial"
+    assert "v21-05:memory_refs_missing" in result.reason_codes
+
+
+def test_memory_required_refs_all_matched_is_complete() -> None:
+    # 全命中且 lifecycle/trust/source link 完整 → complete（不回归）。
+    state = empty_state().model_copy(
+        update={
+            "memory_index": [
+                make_memory("mem_1"),
+                make_memory("mem_2"),
+                # 非 required 的额外索引项不影响判定。
+                make_memory("mem_extra", trust_state="unknown"),
+            ]
+        }
+    )
+    ctx = make_ctx(stable_refs=("mem_2", "mem_1"))
+    result = memory_coverage(state, ctx)
+    assert result.status == "complete"
+    assert "v21-05:memory_complete" in result.reason_codes
+
+
 def test_memory_missing_lifecycle_or_source_link_is_partial() -> None:
     state = empty_state().model_copy(
         update={

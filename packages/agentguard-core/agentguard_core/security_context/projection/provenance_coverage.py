@@ -351,9 +351,10 @@ def memory_coverage(
     """memory 域判定（02 §6.6 判定表）。
 
     - complete：required memory refs、change lifecycle、trust/taint、
-      retrieval link 已知；
-    - partial：retrieval origin / source link 缺失、lifecycle 未知、
-      trust=unknown、gap 定位命中；
+      retrieval link 已知（required refs 必须**全部**命中，任一缺失
+      即 partial，不得因部分命中而 complete）；
+    - partial：required refs 部分缺失、retrieval origin / source link
+      缺失、lifecycle 未知、trust=unknown、gap 定位命中；
     - stale：memory lifecycle/taint watermark 落后；
     - unknown：memory state 不可用（provider 不可用 / 域 dirty /
       required 但 memory_index 为空）。
@@ -381,7 +382,9 @@ def memory_coverage(
     refs = _required_refs(ctx)
     if refs:
         matched = [facts[ref] for ref in refs if ref in facts]
-        if not matched:
+        # required refs 必须全量命中：任一缺失（含全部缺失）→ partial，
+        # 禁止“部分命中即 complete”的误判（02 §6.6 fail-closed 口径）。
+        if len(matched) != len(refs):
             return _result(
                 state, domain, "partial", ["v21-05:memory_refs_missing"]
             )

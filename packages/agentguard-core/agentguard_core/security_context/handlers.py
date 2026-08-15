@@ -86,6 +86,7 @@ from .projection.provenance import (  # noqa: E402
     apply_memory_upserts,
     apply_source_upserts,
     apply_sticky_taint_upserts,
+    replay_declassification_effects,
 )
 
 #: 中央分发表：(容器名, handler) 的不可变 tuple，按 tuple 序确定性
@@ -115,6 +116,13 @@ def apply_typed_updates(
     items，非空则调用 handler 返回新状态；容器为空自然跳过，全部
     为空时原样返回输入 state（不复制、不修改）。
 
+    组合后处理（01 §27 声明序兼容，中央表顺序不动）：
+    ``declassification_upserts`` 声明序先于 ``sticky_taint_upserts``，
+    同 delta 两类并存时 declassification 效果无法施加于 sticky 新增
+    摘要；全部容器应用完毕后统一重放同一 delta 的 declassification
+    效果（幂等，见 ``provenance.replay_declassification_effects``），
+    保证两类容器的施加顺序不影响结果（增量/rebuild 确定性）。
+
     handler 失败抛各自分支的 fail-closed 异常（``v21-05:`` /
     ``v21-06:`` / ``v21-07:`` 前缀），由编排方置脏相关域；不得静默
     丢弃内容而照常推进 version。
@@ -124,4 +132,8 @@ def apply_typed_updates(
         items = getattr(delta, container)
         if items:
             result = handler(result, list(items))
+    if delta.declassification_upserts and delta.sticky_taint_upserts:
+        result = replay_declassification_effects(
+            result, list(delta.declassification_upserts)
+        )
     return result
