@@ -111,8 +111,9 @@
         "note": "插件 durable spool 依赖 Guard API audit_id 幂等契约；API 侧由 langgraph 矩阵 CF-11 条目同一测试覆盖。"
       },
       "CF-12": {
-        "status": "NOT_SUPPORTED",
-        "note": "hook 层仅证明 modified（sanitized）处置（rte-conformance-openclaw.test.mjs CF-12 用例），quarantined 回执仅在映射构造层证明（mapping.test.mjs）；tool_result_persist 收到远端 deny 时异步处理不同步隔离，fail-closed quarantine 回执 emit 属契约 03 §7.2 条件式待补项；真实隔离闭环证明前不声明 PASS（评审 P1）。"
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs",
+        "note": "真实隔离闭环已证明（RTE-04 硬化，契约 03 §7.2）：hook 层 modified（sanitized）处置 + fail-closed quarantine 在能关联原 action/policy 时同步替换结果并发 tool_result_quarantined 回执（executed + quarantined）；无关联时仅诊断不伪造 policy link。quarantined 回执构造层另有 mapping.test.mjs 覆盖。"
       }
     }
   }
