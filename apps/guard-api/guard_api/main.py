@@ -94,12 +94,17 @@ def create_app(
     )
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
     memory_guard_service = MemoryGuardService(store=store, audit_service=audit_service)
+    # V21-08：安全状态门面（构造无 I/O；flag off 时不产生任何 I/O）。
+    # 提前创建以便 ApprovalService 承接 human allow_once → grant 投影（T6），
+    # 且与 V21ShadowService 共用同一实例，不重复注册。
+    security_state_service = SecurityStateService(store)
     approval_service = ApprovalService(
         store=store,
         settings=settings,
         llm_reviewer=llm_approval_reviewer
         or HttpLlmApprovalReviewer.from_settings(settings),
         provenance_writer=provenance_writer,
+        state_service=security_state_service,
     )
     metric_service = MetricService(store=store)
     trace_service = TraceService(
@@ -111,10 +116,9 @@ def create_app(
         policy_bundle=policy_bundle,
         policy_provider=policy_provider,
     )
-    # V21-08：安全状态门面 + shadow 旁路编排器（flag 默认关闭，D3）。
+    # V21-08：shadow 旁路编排器（flag 默认关闭，D3）。
     # 构造无 I/O；flag off 时 build_shadow_evidence 仅一次布尔判断，
     # evaluate 热路径不引入任何额外状态读取。
-    security_state_service = SecurityStateService(store)
     v21_shadow_service = V21ShadowService(
         settings=settings,
         store=store,
