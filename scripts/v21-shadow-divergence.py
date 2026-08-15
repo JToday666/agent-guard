@@ -16,6 +16,13 @@ bounded projection）后，``DecisionEvidenceV21`` 的全部浅层标量字段�
 可能被收敛为 "..."，一律不作为聚合依据。
 
 只读约束：不写库、不改契约、不接 Dashboard、不新增依赖。
+
+数据库防护口径：本命令全路径只读（仅经 ``read_audit_events_bounded``
+执行有界 SELECT，显式 limit，不写不删）。默认仍复用破坏性测试防护
+（``assert_safe_test_database_url``，拒绝非 ``*_test`` 库）防误连生产；
+分析生产 shadow 数据（V21-10 pre-enable gate 用途）时需显式传
+``--allow-production`` 切换到只读防护：仅校验连接串可规范化，随后
+只执行有界读取。
 """
 
 from __future__ import annotations
@@ -87,19 +94,36 @@ def load_jsonl_records(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def load_postgres_records(database_url: str, *, limit: int) -> list[dict[str, Any]]:
+def load_postgres_records(
+    database_url: str, *, limit: int, allow_production: bool = False
+) -> list[dict[str, Any]]:
     """经既有存储层有界读取接口取回 policy_evaluation 审计记录。
 
     只读语义：``read_audit_events_bounded``（契约 §5.2/§6.1，上界取当前
-    链头），record_type 过滤到 policy_evaluation；测试库安全断言沿用
-    ``tests/support/postgres.py`` 口径。
+    链头），record_type 过滤到 policy_evaluation，显式 limit；本函数
+    全路径不写库。
+
+    防护口径：
+
+    - 默认（``allow_production=False``）：沿用破坏性测试防护
+      ``assert_safe_test_database_url``（仅 ``agent_guard_test``/``*_test``
+      库），防止误连生产；
+    - ``allow_production=True``：切换到只读防护——仅校验连接串可经
+      ``PostgresControlPlaneStore`` 规范化，不再要求测试库名；供
+      V21-10 pre-enable gate 分析生产 shadow 数据。调用方需理解：
+      放行的是只读路径，本脚本不执行任何写入/变更语句。
     """
 
-    from tests.support.postgres import assert_safe_test_database_url
     from guard_api.storage.postgres import PostgresControlPlaneStore
     from guard_api.storage.base import AuditWindowQuery
 
-    safe_url = assert_safe_test_database_url(database_url)
+    if allow_production:
+        # 只读防护：仅规范化校验（连接串合法性），不限制库名。
+        safe_url = PostgresControlPlaneStore(database_url).database_url
+    else:
+        from tests.support.postgres import assert_safe_test_database_url
+
+        safe_url = assert_safe_test_database_url(database_url)
     store = PostgresControlPlaneStore(safe_url)
     events = store.read_audit_events_bounded(
         AuditWindowQuery(record_type="policy_evaluation", limit=limit)
@@ -373,6 +397,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, default=5000, help="store 读取上限")
     parser.add_argument(
+        "--allow-production",
+        action="store_true",
+        help=(
+            "切换到只读防护：允许非测试库（含生产库）的有界只读分析。"
+            "默认拒绝非 *_test 库（破坏性测试防护口径）。本命令全路径"
+            "只读（仅有界 SELECT），该开关只放宽库名校验，不引入写操作。"
+        ),
+    )
+    parser.add_argument(
         "--case-limit", type=int, default=50, help="单类目 case 列表上限"
     )
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -394,7 +427,11 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "--store postgres 需要 --database-url 或 AGENTGUARD_TEST_DATABASE_URL"
             )
-        records = load_postgres_records(database_url, limit=args.limit)
+        records = load_postgres_records(
+            database_url,
+            limit=args.limit,
+            allow_production=args.allow_production,
+        )
         source = "postgres:policy_evaluation"
     report = build_report(records, source=source, case_limit=args.case_limit)
     args.output_dir.mkdir(parents=True, exist_ok=True)

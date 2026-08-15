@@ -447,3 +447,62 @@ def test_input_and_store_are_mutually_exclusive(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
+
+
+# ---------------------------------------------------------------------------
+# Codex review P2：postgres 只读路径的防护口径
+# ---------------------------------------------------------------------------
+
+PRODUCTION_LIKE_URL = "postgresql+psycopg://user:pass@db.example:5432/agent_guard"
+
+
+def test_postgres_default_rejects_non_test_database() -> None:
+    """默认沿用破坏性测试防护：非 *_test 库名拒绝（防误连生产）。"""
+    module = _load_module()
+
+    with pytest.raises(ValueError, match="_test"):
+        module.load_postgres_records(PRODUCTION_LIKE_URL, limit=10)
+
+
+def test_postgres_allow_production_switches_to_readonly_guard(monkeypatch) -> None:
+    """--allow-production 切换到只读防护：放行非测试库名，仅执行
+    有界只读 SELECT（record_type 过滤 + 显式 limit），不写库。"""
+    module = _load_module()
+    import guard_api.storage.postgres as postgres_module
+
+    captured: dict = {}
+
+    class _FakeStore:
+        def __init__(self, database_url: str) -> None:
+            self.database_url = database_url
+
+        def read_audit_events_bounded(self, query):
+            captured["query"] = query
+            return []
+
+    monkeypatch.setattr(
+        postgres_module, "PostgresControlPlaneStore", _FakeStore
+    )
+
+    records = module.load_postgres_records(
+        PRODUCTION_LIKE_URL, limit=7, allow_production=True
+    )
+    assert records == []
+    # 只读有界口径：record_type 过滤 + 显式 limit 透传。
+    assert captured["query"].record_type == "policy_evaluation"
+    assert captured["query"].limit == 7
+
+
+def test_allow_production_flag_is_parsed() -> None:
+    module = _load_module()
+
+    args = module.parse_args(
+        ["--store", "postgres", "--allow-production", "--output-dir", "out"]
+    )
+    assert args.allow_production is True
+
+    default_args = module.parse_args(
+        ["--store", "postgres", "--output-dir", "out"]
+    )
+    assert default_args.allow_production is False
+
