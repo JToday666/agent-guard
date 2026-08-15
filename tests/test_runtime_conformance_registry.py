@@ -1,0 +1,133 @@
+"""RTE-04 Conformance Suite — 注册表自洽与能力矩阵 guard（契约 05 §5）。
+
+守护 ``tests/runtime_conformance/`` 两份 fixture 的完整性与真实性：
+
+1. case ID 集合与矩阵键集合一致（CF-01~CF-12，P0 第一批）；
+2. 结果状态只允许 05 §5 四值，禁止 PARTIAL PASS；
+3. 每个 PASS 条目必须带存在的 evidence 工件；Python 侧 evidence 必须
+   实际引用对应 CF case（矩阵声明与测试漂移即红）；
+4. NOT_SUPPORTED / BLOCKED_BY_DEPENDENCY 必须带原因 note。
+
+非 Python evidence（Node 插件测试 / live 证据工件）在 PR-04a 只做存在性
+校验；PR-04b 为 OpenClaw profile 标注 case ID 后再收紧为引用校验。
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+CASES_PATH = ROOT / "tests" / "runtime_conformance" / "contract_cases.json"
+MATRIX_PATH = ROOT / "tests" / "runtime_conformance" / "expected_capabilities.json"
+
+EXPECTED_CASE_IDS = [f"CF-{index:02d}" for index in range(1, 13)]
+ALLOWED_STATUSES = {"PASS", "FAIL", "NOT_SUPPORTED", "BLOCKED_BY_DEPENDENCY"}
+EXPECTED_RUNTIMES = {"langgraph", "openclaw"}
+REQUIRED_CASE_FIELDS = {"id", "title", "tier", "scope", "input", "expect"}
+
+
+def _load_cases() -> dict:
+    return json.loads(CASES_PATH.read_text(encoding="utf-8"))
+
+
+def _load_matrix() -> dict:
+    return json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
+
+
+def test_registry_schema_marker_and_case_id_sequence() -> None:
+    registry = _load_cases()
+    assert registry["schema"] == "rte-04-contract-cases/1"
+
+    case_ids = [case["id"] for case in registry["cases"]]
+    # P0 第一批 CF-01~CF-12 连续且无重复；CF-13+ 属 P1 不得混入。
+    assert case_ids == EXPECTED_CASE_IDS
+
+
+def test_registry_cases_carry_complete_machine_readable_fields() -> None:
+    registry = _load_cases()
+    for case in registry["cases"]:
+        missing = REQUIRED_CASE_FIELDS - set(case)
+        assert not missing, f"{case.get('id')} missing fields: {missing}"
+        assert case["tier"] in {1, 2, 3}
+        expect = case["expect"]
+        if case["scope"] == "idempotency":
+            assert expect["same_content"] == "idempotent_replay"
+            assert expect["different_content"] == "conflict"
+        else:
+            assert isinstance(expect["invocation_count"], int)
+            for receipt in expect["receipts"]:
+                # 每个 receipt 断言必须带精确 kind 或 runtime 差异 kind_any。
+                assert ("kind" in receipt) ^ ("kind_any" in receipt), case["id"]
+
+
+def test_matrix_status_enum_matches_contract_05_section_5() -> None:
+    matrix = _load_matrix()
+    assert matrix["schema"] == "rte-04-capability-matrix/1"
+    assert set(matrix["allowed_statuses"]) == ALLOWED_STATUSES
+    # 任何条目的实际状态都不得超出四值枚举（变相 PARTIAL 即红）。
+    for runtime, entries in matrix["runtimes"].items():
+        for case_id, entry in entries.items():
+            assert entry["status"] in ALLOWED_STATUSES, (runtime, case_id)
+
+
+def test_matrix_keys_cover_every_case_for_every_runtime() -> None:
+    matrix = _load_matrix()
+    assert set(matrix["runtimes"]) == EXPECTED_RUNTIMES
+    for runtime, entries in matrix["runtimes"].items():
+        assert set(entries) == set(EXPECTED_CASE_IDS), runtime
+        for case_id, entry in entries.items():
+            assert entry["status"] in ALLOWED_STATUSES, (runtime, case_id)
+            if entry["status"] in {"NOT_SUPPORTED", "BLOCKED_BY_DEPENDENCY"}:
+                assert str(entry.get("note") or "").strip(), (runtime, case_id)
+
+
+def test_matrix_pass_entries_have_existing_evidence_artifacts() -> None:
+    matrix = _load_matrix()
+    for runtime, entries in matrix["runtimes"].items():
+        for case_id, entry in entries.items():
+            if entry["status"] != "PASS":
+                continue
+            evidence = entry.get("evidence")
+            assert evidence, (runtime, case_id, "PASS requires evidence")
+            assert (ROOT / evidence).is_file(), (runtime, case_id, evidence)
+
+
+def test_python_evidence_files_reference_their_claimed_case_ids() -> None:
+    """矩阵 guard：Python 侧 PASS 声明必须有引用该 CF case 的测试。
+
+    任何声明与实测漂移（测试改名/删除/未覆盖）都会使本断言变红。
+    """
+    matrix = _load_matrix()
+    for runtime, entries in matrix["runtimes"].items():
+        for case_id, entry in entries.items():
+            if entry["status"] != "PASS":
+                continue
+            evidence = str(entry["evidence"])
+            if not evidence.endswith(".py"):
+                # Node/live 证据工件：PR-04b 标注 case ID 后收紧。
+                continue
+            body = (ROOT / evidence).read_text(encoding="utf-8")
+            assert case_id in body, (
+                f"{runtime} {case_id}: evidence {evidence} does not "
+                "reference the case id"
+            )
+
+
+@pytest.mark.parametrize("runtime", sorted(EXPECTED_RUNTIMES))
+def test_matrix_terminal_cases_align_with_c2_requirements(runtime: str) -> None:
+    """c2_required 的 case 在该 runtime 声明 PASS 时不得自相矛盾。"""
+    registry = {case["id"]: case for case in _load_cases()["cases"]}
+    entries = _load_matrix()["runtimes"][runtime]
+    for case_id, case in registry.items():
+        if not case["expect"].get("c2_required"):
+            continue
+        entry = entries[case_id]
+        if runtime == "openclaw" and case_id in {"CF-08", "CF-09"}:
+            # Tier 3：真实运行时语义，证据为 live 取证工件 + smoke job。
+            assert entry["status"] == "PASS"
+            assert "rte02-live-evidence.json" in entry["evidence"]
+        elif entry["status"] == "PASS":
+            assert entry.get("evidence"), (runtime, case_id)
