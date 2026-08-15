@@ -429,6 +429,39 @@ test("live evidence: report structure covers the three scenarios on a real runti
   assert.deepEqual(ids, ["S-allow", "S-error", "S-deny"]);
 });
 
+test("live evidence: version scoping — live observations are bound to 2026.7.1-2, not the frozen pin", () => {
+  const capability = loadCapability();
+  const evidence = loadLiveEvidence();
+
+  // The frozen pin anchors the capability fixture...
+  assert.ok(capability.openclaw_version.startsWith("2026.6.6"));
+  // ...while the live evidence declares the runtime it was recorded on.
+  assert.equal(evidence.runtime.openclaw_cli_version, "2026.7.1-2");
+
+  // Every question answered by isolated_runtime evidence must carry the
+  // matching evidence_version so 2026.7.1-2 observations are never silently
+  // attributed to the pinned 2026.6.6.
+  const liveQuestions = capability.questions.filter(
+    (question) => question.evidence_layer === "isolated_runtime",
+  );
+  assert.ok(liveQuestions.length >= 3);
+  for (const question of liveQuestions) {
+    assert.equal(
+      question.evidence_version,
+      "2026.7.1-2",
+      `${question.id} live evidence must be version-scoped`,
+    );
+  }
+
+  // Conservative gate rule on the pin: with pinned-version criteria not all
+  // yes, the overall gate must stay FAIL until 2026.6.6 live evidence exists.
+  assert.equal(capability.c2_gate, "FAIL");
+  const pinnedNotAllYes = capability.c2_gate_criteria.some(
+    (criterion) => criterion.verdict !== "yes",
+  );
+  assert.equal(pinnedNotAllYes, true);
+});
+
 test("live evidence: blocked call has zero executions yet after_tool_call was emitted by the real host (Q9)", () => {
   const records = loadLiveJsonl();
   const denyRecords = records.filter(
@@ -489,5 +522,42 @@ test("live evidence: toolCallId identical across before and after hooks in every
   for (const record of hooked) {
     assert.ok(record.toolCallId, "toolCallId must be present");
     assert.equal(record.ctxToolCallId, record.toolCallId);
+  }
+});
+
+test("live evidence: one single toolCallId spans before/execute/after per scenario (cross-record identity)", () => {
+  const records = loadLiveJsonl();
+  const scenarioToolByRecord = (record) => record.toolName ?? record.tool;
+  const scenarioTools = [...new Set(records.map(scenarioToolByRecord))];
+
+  assert.deepEqual(scenarioTools.sort(), [
+    "rte_probe_deny",
+    "rte_probe_fail",
+    "rte_probe_ok",
+  ]);
+
+  for (const toolName of scenarioTools) {
+    const scenarioRecords = records.filter(
+      (record) => scenarioToolByRecord(record) === toolName,
+    );
+    const before = scenarioRecords.filter((r) => r.kind === "before_tool_call");
+    const executed = scenarioRecords.filter((r) => r.kind === "tool_executed");
+    const after = scenarioRecords.filter((r) => r.kind === "after_tool_call");
+
+    assert.equal(before.length, 1, `${toolName} must have one before record`);
+    assert.equal(after.length, 1, `${toolName} must have one after record`);
+    if (toolName === "rte_probe_deny") {
+      assert.equal(executed.length, 0, "blocked call must never execute");
+    } else {
+      assert.equal(executed.length, 1, `${toolName} must execute exactly once`);
+    }
+
+    // before ID == tool_executed ID == after ID: one identity across hooks.
+    const ids = new Set(scenarioRecords.map((r) => r.toolCallId));
+    assert.equal(
+      ids.size,
+      1,
+      `${toolName} scenario must carry a single toolCallId across records`,
+    );
   }
 });
