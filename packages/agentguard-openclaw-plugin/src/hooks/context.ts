@@ -2,7 +2,11 @@ import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry"
 
 import { GuardApiClient, buildPluginConfig } from "../guard-api-client.js";
 import type { RuntimeOutcomeDelivery } from "../runtime/outcome-delivery.js";
-import type { SessionState, ToolCallState } from "../runtime/state.js";
+import type {
+  EvidenceDegradationTracker,
+  SessionState,
+  ToolCallState,
+} from "../runtime/state.js";
 
 type PluginApi = Parameters<
   NonNullable<OpenClawPluginDefinition["register"]>
@@ -15,4 +19,5 @@ export type HookContext = {
   outcomeDelivery: RuntimeOutcomeDelivery;
   sessionState: Map<string, SessionState>;
   toolCallState: Map<string, ToolCallState>;
+  degradations: EvidenceDegradationTracker;
 };

@@ -13,8 +13,10 @@ import {
 } from "../security.js";
 import {
   asRecord,
+  patchToolCallState,
   rememberSessionState,
   rememberToolCallState,
+  stringMaybe,
   withCachedRuntimeFields,
   withCachedToolContext,
 } from "../runtime/state.js";
@@ -26,6 +28,12 @@ import {
   isObserve,
   quarantinedToolResultMessage,
 } from "../runtime/enforcement.js";
+import type {
+  GuardEvaluationResponse,
+  GuardEvent,
+  ToolCallPayload,
+} from "../types.js";
+import type { ToolCallState } from "../runtime/state.js";
 import type { HookContext } from "./context.js";
 
 export function registerBeforeToolCall(hookContext: HookContext): void {
@@ -36,6 +44,7 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
     outcomeDelivery,
     sessionState,
     toolCallState,
+    degradations,
   } = hookContext;
   api.on(
     "before_tool_call",
@@ -51,10 +60,32 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
           cached.event,
           cached.context,
         );
-        rememberToolCallState(toolCallState, guardEvent);
+        const callId = (guardEvent.payload as ToolCallPayload).tool.call_id;
+        const nativeToolCallId =
+          stringMaybe(asRecord(event).toolCallId) ??
+          stringMaybe(asRecord(context).toolCallId) ??
+          null;
+        rememberToolCallState(toolCallState, guardEvent, {
+          nativeToolCallId,
+          tracker: degradations,
+        });
         const decision = await client.evaluate(guardEvent);
+        // §4 冻结不变量：policy linkage 必须在 handler 返回前同步写入
+        // correlation state，禁止 fire-and-forget。
+        linkToolCallDecision(toolCallState, callId, guardEvent, decision);
         if (isObserve(config)) {
+          patchToolCallState(toolCallState, callId, { gateState: "allowed" });
           return undefined;
+        }
+        const guardDecision = decision.decision.decision;
+        if (guardDecision === "allow") {
+          patchToolCallState(toolCallState, callId, { gateState: "allowed" });
+        } else if (guardDecision === "ask") {
+          patchToolCallState(toolCallState, callId, {
+            gateState: "approval_pending",
+            approvalId: decision.approval?.approval_id ?? null,
+            approvalStatus: "pending",
+          });
         }
         return await decisionToToolResult(
           decision,
@@ -62,6 +93,26 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
             waitForApproval: (approvalId) => client.waitForApproval(approvalId),
           },
           (outcome) => {
+            if (outcome.kind === "pre_execution_deny") {
+              // ask 等待超时/expired → timed_out；其余拒绝路径 → blocked。
+              patchToolCallState(toolCallState, callId, {
+                gateState:
+                  outcome.approval?.status === "expired"
+                    ? "timed_out"
+                    : "blocked",
+                approvalId:
+                  outcome.approval?.approvalId ??
+                  decision.approval?.approval_id ??
+                  null,
+                approvalStatus: outcome.approval?.status ?? "unknown",
+              });
+            } else {
+              patchToolCallState(toolCallState, callId, {
+                gateState: "approval_released",
+                approvalId: outcome.approval.approvalId,
+                approvalStatus: outcome.approval.status,
+              });
+            }
             fireRuntimeOutcomeReceipt({
               client,
               config,
@@ -73,17 +124,58 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
               logLabel: "before_tool_call",
               delivery: outcomeDelivery,
             });
+            // 回执已入 durable spool 或被确定性跳过（缺 policy_audit_id）；
+            // 两种结果都终结了回执链路，允许后续生命周期驱逐（§8.2）。
+            patchToolCallState(toolCallState, callId, { receiptQueued: true });
           },
         );
       } catch (error) {
         logDiagnostic(config, "before_tool_call failed closed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        return isObserve(config) ? undefined : failClosedToolResult();
+        if (!isObserve(config)) {
+          markFailedClosedGate(toolCallState, event, context);
+          return failClosedToolResult();
+        }
+        return undefined;
       }
     },
     { priority: 100, timeoutMs: blockingApprovalHookTimeoutMs(config) },
   );
+}
+
+/** 同步写入 decision linkage（policyAuditId/decisionId/decision + 完整关联）。 */
+export function linkToolCallDecision(
+  toolCallState: Map<string, ToolCallState>,
+  callId: string,
+  guardEvent: GuardEvent,
+  evaluation: GuardEvaluationResponse,
+): void {
+  patchToolCallState(toolCallState, callId, {
+    policyAuditId: evaluation.policy_audit_id ?? undefined,
+    decisionId: evaluation.decision.decision_id,
+    decision: evaluation.decision.decision,
+    guardEvent,
+    evaluation,
+  });
+}
+
+/** fail-closed 路径：尝试把当前调用标记为 blocked（无回执待投，直接可驱逐）。 */
+function markFailedClosedGate(
+  toolCallState: Map<string, ToolCallState>,
+  event: unknown,
+  context: unknown,
+): void {
+  const callId =
+    stringMaybe(asRecord(event).toolCallId) ??
+    stringMaybe(asRecord(context).toolCallId);
+  if (!callId) {
+    return;
+  }
+  patchToolCallState(toolCallState, callId, {
+    gateState: "blocked",
+    receiptQueued: true,
+  });
 }
 
 export function registerToolResultPersist(hookContext: HookContext): void {

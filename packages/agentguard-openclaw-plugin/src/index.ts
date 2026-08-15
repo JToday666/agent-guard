@@ -32,7 +32,11 @@ import {
 import { scheduleHeartbeat } from "./runtime/heartbeat.js";
 import { RuntimeOutcomeDelivery } from "./runtime/outcome-delivery.js";
 import { evaluatePluginRegistration } from "./runtime/registration-gate.js";
-import type { SessionState, ToolCallState } from "./runtime/state.js";
+import {
+  EvidenceDegradationTracker,
+  type SessionState,
+  type ToolCallState,
+} from "./runtime/state.js";
 import type { OpenClawPluginConfigInput } from "./types.js";
 
 const PLUGIN_VERSION = "0.1.0-beta.1";
@@ -103,6 +107,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       outcomeDelivery,
       sessionState: new Map<string, SessionState>(),
       toolCallState: new Map<string, ToolCallState>(),
+      degradations: new EvidenceDegradationTracker(),
     };
 
     let stopHeartbeat: (() => void) | null = null;
