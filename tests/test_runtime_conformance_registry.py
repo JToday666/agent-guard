@@ -4,12 +4,10 @@
 
 1. case ID 集合与矩阵键集合一致（CF-01~CF-12，P0 第一批）；
 2. 结果状态只允许 05 §5 四值，禁止 PARTIAL PASS；
-3. 每个 PASS 条目必须带存在的 evidence 工件；Python 侧 evidence 必须
-   实际引用对应 CF case（矩阵声明与测试漂移即红）；
+3. 每个 PASS 条目必须带存在的 evidence 工件，且 evidence 文件必须
+   实际引用对应 CF case（矩阵声明与测试漂移即红，PR-04b 起对 Python/
+   Node 证据一律收紧）；
 4. NOT_SUPPORTED / BLOCKED_BY_DEPENDENCY 必须带原因 note。
-
-非 Python evidence（Node 插件测试 / live 证据工件）在 PR-04a 只做存在性
-校验；PR-04b 为 OpenClaw profile 标注 case ID 后再收紧为引用校验。
 """
 
 from __future__ import annotations
@@ -95,10 +93,11 @@ def test_matrix_pass_entries_have_existing_evidence_artifacts() -> None:
             assert (ROOT / evidence).is_file(), (runtime, case_id, evidence)
 
 
-def test_python_evidence_files_reference_their_claimed_case_ids() -> None:
-    """矩阵 guard：Python 侧 PASS 声明必须有引用该 CF case 的测试。
+def test_evidence_files_reference_their_claimed_case_ids() -> None:
+    """矩阵 guard：PASS 声明的 evidence 必须实际引用该 CF case。
 
     任何声明与实测漂移（测试改名/删除/未覆盖）都会使本断言变红。
+    PR-04b 起 Python/Node 证据一律收紧为引用校验。
     """
     matrix = _load_matrix()
     for runtime, entries in matrix["runtimes"].items():
@@ -106,9 +105,6 @@ def test_python_evidence_files_reference_their_claimed_case_ids() -> None:
             if entry["status"] != "PASS":
                 continue
             evidence = str(entry["evidence"])
-            if not evidence.endswith(".py"):
-                # Node/live 证据工件：PR-04b 标注 case ID 后收紧。
-                continue
             body = (ROOT / evidence).read_text(encoding="utf-8")
             assert case_id in body, (
                 f"{runtime} {case_id}: evidence {evidence} does not "
@@ -126,8 +122,13 @@ def test_matrix_terminal_cases_align_with_c2_requirements(runtime: str) -> None:
             continue
         entry = entries[case_id]
         if runtime == "openclaw" and case_id in {"CF-08", "CF-09"}:
-            # Tier 3：真实运行时语义，证据为 live 取证工件 + smoke job。
+            # Tier 3：真实运行时语义，evidence 为绑定测试，其内校验
+            # live 取证工件；真实运行时复验由 smoke 矩阵承担。
             assert entry["status"] == "PASS"
-            assert "rte02-live-evidence.json" in entry["evidence"]
+            assert entry["evidence"].endswith(
+                "rte-conformance-tier3-evidence.test.mjs"
+            )
+            assert "rte02-live-evidence.json" in entry["note"]
+            assert "openclaw-runtime-smoke" in entry["note"]
         elif entry["status"] == "PASS":
             assert entry.get("evidence"), (runtime, case_id)
