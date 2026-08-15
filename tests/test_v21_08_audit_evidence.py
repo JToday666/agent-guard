@@ -23,15 +23,17 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from agentguard_core import GuardEvent
+from agentguard_core import GuardDecision, GuardEvent, PolicyBundle
 from agentguard_core.authority.models import TaskFact
 from agentguard_core.decisions.divergence import DIVERGENCE_VOCABULARY
 from agentguard_core.decisions.shadow import ABSENT_SNAPSHOT_ID
 from guard_api.main import create_app
 from guard_api.services.evaluation import canonical_request_dump
+from guard_api.services.evidence import build_audit_event
 from guard_api.services.redaction import (
     MAX_EVIDENCE_BYTES,
     evidence_serialized_size,
+    sanitize_audit_event,
 )
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import AuditEventFilters, TaskFactRecord
@@ -353,10 +355,171 @@ def test_flag_on_large_payload_evidence_within_budget() -> None:
 
     evidence = _policy_audits(store, "trace_v21_08_budget")[0].evidence
     assert evidence_serialized_size(evidence) <= MAX_EVIDENCE_BYTES
-    # 截断投影不丢 replay 权威快照；信封随预算兼容后仍在（或整体兜底）。
-    assert evidence.get("guard_decision") is not None or evidence.get("_truncated")
-    if "decision_v21" in evidence:
-        assert evidence["decision_v21"]["schema_version"] == "2.1"
+    # shadow-only 预算核算：不重跑全量 bound，guard_decision（replay 权威键）
+    # 绝不触碰；信封超限时降级为 digest 引用而非静默丢弃（D4 留痕）。
+    assert evidence.get("guard_decision") is not None
+    decision_v21 = evidence.get("decision_v21")
+    assert decision_v21 is not None
+    assert decision_v21.get("schema_version") == "2.1" or (
+        decision_v21.get("_budget_dropped") is True
+        and str(decision_v21.get("_envelope_sha256", "")).startswith("sha256:")
+    )
+
+
+def test_flag_on_degraded_envelope_coverage_shape_survives_persistence() -> None:
+    """Major 1 回归：coverage 各域第 6 层 reason_codes/as_of_sequence 存活。
+
+    旧实现用通用 bound（MAX_NESTING_DEPTH=6）恰好把
+    evidence→decision_v21→payload→coverage→<domain>→reason_codes
+    替换为 "..."；降级路径 reason_codes 非空，最能暴露该破坏。
+    """
+    store = memory_store_with_adapter()
+    payload = _event_payload(
+        event_id="evt_v21_08_coverage_shape", trace_id="trace_v21_08_coverage_shape"
+    )
+    assert (
+        _post_evaluate(_client(store, shadow_enabled=True), payload).status_code == 200
+    )
+
+    evidence = _policy_audits(store, "trace_v21_08_coverage_shape")[0].evidence
+    payload_v21 = _envelope_payload(evidence)
+    coverage = payload_v21["coverage"]
+    assert len(coverage) == 7
+    for domain_coverage in coverage.values():
+        assert isinstance(domain_coverage, dict)
+        # as_of_sequence 键存活（未被深度 bound 剥除）。
+        assert "as_of_sequence" in domain_coverage
+        # reason_codes 是完整 list（降级路径非空），而非 "..." 占位。
+        reason_codes = domain_coverage["reason_codes"]
+        assert isinstance(reason_codes, list)
+        assert reason_codes
+        assert all(isinstance(code, str) for code in reason_codes)
+
+
+def _unit_event(event_id: str, *, arguments: dict[str, Any] | None = None) -> GuardEvent:
+    return GuardEvent.model_validate(
+        _event_payload(event_id=event_id, trace_id="trace_unit", arguments=arguments)
+    )
+
+
+def _unit_decision() -> GuardDecision:
+    return GuardDecision(
+        decision="allow", risk_score=5, severity="low", reason="unit fixture"
+    )
+
+
+def _synthetic_envelope(payload_extra: dict[str, Any]) -> dict[str, Any]:
+    """合成 decision_v21 信封（形状仿 shadow 编排器输出，01 §28）。"""
+
+    coverage = {
+        domain: {
+            "domain": domain,
+            "status": "complete",
+            "as_of_sequence": None,
+            "projector_version": "v21-07.projector.2",
+            "reason_codes": [],
+        }
+        for domain in (
+            "task",
+            "source",
+            "capability",
+            "behavior",
+            "dataflow",
+            "memory",
+            "runtime_outcome",
+        )
+    }
+    payload: dict[str, Any] = {
+        "mode": "shadow",
+        "legacy_decision": "allow",
+        "final_decision": "allow",
+        "v21_fast_disposition": "CLEAR_ALLOW",
+        "divergence_category": None,
+        "snapshot_id": "v21-04-snapshot:unit",
+        "snapshot_digest": "sha256:" + "11" * 32,
+        "state_version": 1,
+        "assessment_digest": "sha256:" + "22" * 32,
+        "semantic_judgment_id": None,
+        "semantic_digest": None,
+        "coverage": coverage,
+    }
+    payload.update(payload_extra)
+    return {"decision_v21": {"schema_version": "2.1", "payload": payload}}
+
+
+def test_typed_bound_channel_keeps_32_signal_ids_through_sanitize() -> None:
+    """Major 1 回归：D4 上限 32 条 refs 不被通用 ARRAY_LIMIT=20 静默截断。"""
+    signal_ids = [f"sig_unit_{index:02d}" for index in range(32)]
+    envelope = _synthetic_envelope(
+        {
+            "signal_ids": signal_ids,
+            "degradation_ids": [],
+            "flow_path_refs": [],
+        }
+    )
+
+    audit_event = build_audit_event(
+        _unit_event("evt_unit_refs"),
+        _unit_decision(),
+        policy_bundle=PolicyBundle(),
+        policy_revision=1,
+        v21_evidence=envelope,
+    )
+    merged = audit_event.evidence["decision_v21"]
+    assert merged["payload"]["signal_ids"] == signal_ids
+
+    # 落盘前第二层 sanitize 亦走专用 typed bound 通道，32 条仍存活。
+    sanitized = sanitize_audit_event(audit_event)
+    persisted = sanitized.evidence["decision_v21"]
+    assert persisted["schema_version"] == "2.1"
+    assert persisted["payload"]["signal_ids"] == signal_ids
+    assert persisted["payload"]["coverage"]["task"]["reason_codes"] == []
+
+
+def test_budget_overflow_degrades_envelope_and_preserves_guard_decision() -> None:
+    """S4 shadow-only 限额核算：合并超限只降级 decision_v21 为 digest 引用。
+
+    不对合并结果全量重跑 bound（极端下 _truncated 兜底会连
+    guard_decision 一并丢弃，破坏幂等重放）。
+    """
+    envelope = _synthetic_envelope(
+        {
+            # 3 个数组各被专用限额截到 64 条 × ~460B ≈ 88 KiB，合并后必超
+            # 64 KiB 预算 → 只降级 decision_v21。
+            "signal_ids": ["sig-budget-probe-" + "s" * 440 for _ in range(128)],
+            "degradation_ids": ["deg-budget-probe-" + "d" * 440 for _ in range(128)],
+            "flow_path_refs": [
+                "flow-path-ref-probe-" + "x" * 440 for _ in range(128)
+            ],
+        }
+    )
+
+    audit_event = build_audit_event(
+        _unit_event(
+            "evt_unit_budget",
+            arguments={"content": "agentguard-budget-probe-" * 6000},  # ≈147 KiB
+        ),
+        _unit_decision(),
+        policy_bundle=PolicyBundle(),
+        policy_revision=1,
+        v21_evidence=envelope,
+    )
+    evidence = audit_event.evidence
+    assert evidence_serialized_size(evidence) <= MAX_EVIDENCE_BYTES
+    # replay 权威键完整存活（不触碰）。
+    assert evidence["guard_decision"]["decision"] == "allow"
+    # 信封降级为 digest 引用（D4 留痕，可离线核对）。
+    dropped = evidence["decision_v21"]
+    assert dropped == {
+        "_budget_dropped": True,
+        "_envelope_sha256": dropped["_envelope_sha256"],
+    }
+    assert dropped["_envelope_sha256"].startswith("sha256:")
+
+    # sanitize 层不得把降级引用误伤为其他形状。
+    sanitized = sanitize_audit_event(audit_event)
+    assert sanitized.evidence["decision_v21"] == dropped
+    assert sanitized.evidence["guard_decision"]["decision"] == "allow"
 
 
 def test_flag_on_audit_integrity_chain_not_regressed() -> None:

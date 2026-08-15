@@ -48,6 +48,17 @@ OBJECT_KEY_TEXT_LIMIT = 128
 MAX_NESTING_DEPTH = 6
 MAX_EVIDENCE_BYTES = 64 * 1024
 
+# decision_v21 信封专用 typed bound 通道限额（V21-08 评审修复，非全局放宽）：
+# 信封内容均为受控短 id/digest（core 已按 D4 上限截断：signal/policy/
+# degradation refs 32、flow_path_refs 16），通用 ARRAY_LIMIT=20 会把 32 条
+# refs 静默截到 20、MAX_NESTING_DEPTH=6 恰好把
+# evidence→decision_v21→payload→coverage→<domain>→reason_codes 这第 6 层
+# 替换为 "..."，两者都与 D4「禁止静默丢失」冲突。该通道仿 guard_decision
+# 的 ``_bound_typed_value`` 保护模式，只对 decision_v21 键生效；全局
+# ARRAY_LIMIT / MAX_NESTING_DEPTH 冻结边界（07 §21.2）不变。
+DECISION_V21_ARRAY_LIMIT = 64
+DECISION_V21_MAX_DEPTH = 8
+
 _AUTHORIZATION_VALUE_RE = re.compile(
     r"(authorization\s*[:=]\s*)([^\s\"'`,;]+(?:\s+[A-Za-z0-9._~+/=-]{8,})?)",
     re.IGNORECASE,
@@ -198,11 +209,15 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
     evidence: dict[str, object] | None = None
     if event.evidence is not None:
         raw_evidence = redact_structure(event.evidence)
-        replay_decision = (
-            raw_evidence.pop("guard_decision", None)
-            if isinstance(raw_evidence, dict)
-            else None
-        )
+        if isinstance(raw_evidence, dict):
+            replay_decision = raw_evidence.pop("guard_decision", None)
+            # decision_v21 信封仿 guard_decision 保护模式：通用 bound 会把
+            # coverage 第 6 层替换为 "..." 并静默截断 D4 refs，改走专用
+            # typed bound 通道（DECISION_V21_* 限额）。
+            v21_envelope = raw_evidence.pop("decision_v21", None)
+        else:
+            replay_decision = None
+            v21_envelope = None
         bounded_evidence = bound_value(
             raw_evidence,
             text_limit=CONTENT_PREVIEW_LIMIT,
@@ -213,6 +228,13 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
                 replay_decision,
                 text_limit=CONTENT_PREVIEW_LIMIT,
                 array_limit=RULE_HITS_LIMIT,
+            )
+        if isinstance(bounded_evidence, dict) and v21_envelope is not None:
+            bounded_evidence["decision_v21"] = _bound_typed_value(
+                v21_envelope,
+                text_limit=CONTENT_PREVIEW_LIMIT,
+                array_limit=DECISION_V21_ARRAY_LIMIT,
+                max_depth=DECISION_V21_MAX_DEPTH,
             )
         evidence = (
             enforce_evidence_budget(bounded_evidence)
@@ -236,6 +258,38 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             "evidence": evidence,
         }
     )
+
+
+def bound_decision_v21_envelope(value: object) -> object:
+    """decision_v21 信封专用 bounded 投影（typed bound 通道）。
+
+    先 ``redact_structure``（append-only 审计证据仍受 §21.1 敏感清洗），
+    再经 ``_bound_typed_value`` 以 ``DECISION_V21_*`` 限额投影：与通用
+    ``bound_value`` 不同，typed 容器不会被替换为 "..."（coverage 形状
+    存活），数组限额 ≥ D4 refs 上限 32（不静默截断）。不放宽任何全局
+    冻结限额（07 §21.2）。
+    """
+
+    return _bound_typed_value(
+        redact_structure(value),
+        text_limit=SUMMARY_TEXT_LIMIT,
+        array_limit=DECISION_V21_ARRAY_LIMIT,
+        max_depth=DECISION_V21_MAX_DEPTH,
+    )
+
+
+def decision_v21_budget_dropped_reference(envelope: object) -> dict[str, object]:
+    """信封预算超限的降级标记：只保留确定性 sha256 摘要引用。
+
+    D4 禁止静默丢失：预算吃紧时 decision_v21（append-only 旁路附属
+    证据）先于 replay 权威键 guard_decision 被剥离，但留 digest 引用
+    供离线核对（可对照 shadow 侧重建的信封摘要）。
+    """
+
+    digest = hashlib.sha256(
+        json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {"_budget_dropped": True, "_envelope_sha256": f"sha256:{digest}"}
 
 
 def _bound_typed_value(
