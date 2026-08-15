@@ -1,0 +1,197 @@
+{
+  "schema": "rte-04-contract-cases/1",
+  "contract_source": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md §3",
+  "scope_note": "P0 第一批 CF-01~CF-12（06 §6）；CF-13~CF-17 属 P1 Strong Binding，不在本注册表。",
+  "cases": [
+    {
+      "id": "CF-01",
+      "title": "ALLOW Executes Once",
+      "tier": 2,
+      "scope": "terminal",
+      "input": { "decision": "allow" },
+      "expect": {
+        "gate": "allowed",
+        "invocation_count": 1,
+        "receipts": [
+          { "kind": "execution_completed", "execution_status": "executed" }
+        ],
+        "c2_required": true,
+        "notes": "每个被接受调用恰好一次 invocation + 一份 terminal 回执。同事件重放的幂等去重属于 evaluate 层语义，由 CF-10 覆盖；adapter 本身对每次被接受的调用执行一次，不做客户端重放抑制。"
+      }
+    },
+    {
+      "id": "CF-02",
+      "title": "DENY Not Invoked",
+      "tier": 2,
+      "scope": "pre_exec",
+      "input": { "decision": "deny" },
+      "expect": {
+        "gate": "blocked",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "block:true / 零调用 + not_invoked proof。"
+      }
+    },
+    {
+      "id": "CF-03",
+      "title": "ASK + Human Deny",
+      "tier": 2,
+      "scope": "pre_exec",
+      "input": { "decision": "ask", "approval_resolution": "deny" },
+      "expect": {
+        "gate": "blocked",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "审批拒绝后不得执行。"
+      }
+    },
+    {
+      "id": "CF-04",
+      "title": "ASK + Allow Once",
+      "tier": 2,
+      "scope": "terminal",
+      "input": { "decision": "ask", "approval_resolution": "allow_once" },
+      "expect": {
+        "gate": "approval_released",
+        "invocation_count": 1,
+        "receipts": [
+          {
+            "kind_any": ["approval_release", "tool_call_started"],
+            "execution_status_any": ["unknown"],
+            "note": "放行证据 kind 按 runtime 而异：OpenClaw 为 approval_release(unknown)，LangGraph 为 tool_call_started 观察。"
+          },
+          { "kind": "execution_completed", "execution_status": "executed" }
+        ],
+        "c2_required": true,
+        "notes": "放行回执保持未观察终态；terminal fact 由 C2 闭环补齐。"
+      }
+    },
+    {
+      "id": "CF-05",
+      "title": "Runtime Wait Timeout + Late Approval",
+      "tier": 2,
+      "scope": "pre_exec",
+      "input": {
+        "decision": "ask",
+        "approval_resolution": "timeout_then_late_allow_once"
+      },
+      "expect": {
+        "gate": "timed_out",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "晚到审批不得复活已终结 attempt（RTE-020）。"
+      }
+    },
+    {
+      "id": "CF-06",
+      "title": "Evaluate Unavailable",
+      "tier": 2,
+      "scope": "pre_exec",
+      "input": { "decision": null, "guard_api": "unavailable", "mode": "enforce" },
+      "expect": {
+        "gate": "blocked",
+        "invocation_count": 0,
+        "receipts": [],
+        "c2_required": false,
+        "notes": "fail-closed infrastructure block；无 policy fact 不产 policy-link receipt，且不计入 detector TP（05 §7 / §9.6）。"
+      }
+    },
+    {
+      "id": "CF-07",
+      "title": "Tool Failure",
+      "tier": 2,
+      "scope": "terminal",
+      "input": { "decision": "allow", "tool_behavior": "throw" },
+      "expect": {
+        "gate": "allowed",
+        "invocation_count": 1,
+        "receipts": [
+          { "kind": "execution_failed", "execution_status": "failed" }
+        ],
+        "c2_required": true,
+        "notes": "error 必须是有界非空字符串（02 §9，≤2000 字符）。声明 PASS 必须用超限 error 实测截断；仅短 error 的断言是恒真式，不构成证据。"
+      }
+    },
+    {
+      "id": "CF-08",
+      "title": "Stable Action Correlation",
+      "tier": 3,
+      "scope": "correlation",
+      "input": { "decision": "allow" },
+      "expect": {
+        "gate": "allowed",
+        "invocation_count": 1,
+        "receipts": [
+          { "kind": "execution_completed", "execution_status": "executed" }
+        ],
+        "c2_required": true,
+        "notes": "before action_id == after action_id；policy receipt 与 terminal receipt 聚合到同一 action。native ID 缺失必须 NOT_SUPPORTED，不得猜。"
+      }
+    },
+    {
+      "id": "CF-09",
+      "title": "Blocked-Call After-Hook Semantics",
+      "tier": 3,
+      "scope": "correlation",
+      "input": { "decision": "deny" },
+      "expect": {
+        "gate": "blocked",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "三种合法语义之一：blocked 不触发 after hook；触发但不代表 invocation（本仓库 pin 2026.7.1-2 属此类，不得派生 terminal fact）；若代表真实 invocation 必须产生 enforcement_violation。"
+      }
+    },
+    {
+      "id": "CF-10",
+      "title": "Duplicate Evaluation",
+      "tier": 1,
+      "scope": "idempotency",
+      "input": { "endpoint": "/v1/guard/evaluate" },
+      "expect": {
+        "same_content": "idempotent_replay",
+        "different_content": "conflict",
+        "notes": "same event_id + same digest → 幂等重放；same event_id + different content → 冲突。"
+      }
+    },
+    {
+      "id": "CF-11",
+      "title": "Duplicate Runtime Receipt",
+      "tier": 1,
+      "scope": "idempotency",
+      "input": { "endpoint": "/v1/audit/events", "record_type": "runtime_outcome" },
+      "expect": {
+        "same_content": "idempotent_replay",
+        "different_content": "conflict",
+        "notes": "same audit_id + same content → 幂等；same audit_id + different content → 409 冲突（02 §12.3）。"
+      }
+    },
+    {
+      "id": "CF-12",
+      "title": "Result Quarantine",
+      "tier": 2,
+      "scope": "quarantine",
+      "input": { "decision": "allow", "tool_result": "requires_quarantine" },
+      "expect": {
+        "gate": "allowed",
+        "invocation_count": 1,
+        "receipts": [
+          { "kind": "tool_result_quarantined", "execution_status": "executed" }
+        ],
+        "c2_required": false,
+        "notes": "工具真实执行后结果被隔离：execution=executed + disposition=quarantined。"
+      }
+    }
+  ]
+}

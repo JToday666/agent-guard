@@ -1,0 +1,118 @@
+{
+  "schema": "rte-04-capability-matrix/1",
+  "contract_source": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md §5",
+  "allowed_statuses": [
+    "PASS",
+    "FAIL",
+    "NOT_SUPPORTED",
+    "BLOCKED_BY_DEPENDENCY"
+  ],
+  "status_note": "禁止 PARTIAL PASS（05 §5）；部分能力必须拆成更细 case。evidence 指向可复现的测试或证据工件路径。",
+  "runtimes": {
+    "langgraph": {
+      "CF-01": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-02": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-03": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-04": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-05": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-06": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-07": {
+        "status": "NOT_SUPPORTED",
+        "note": "failed 回执语义已覆盖（test_runtime_conformance_langgraph.py CF-07 用例），但超限 error 实测显示 adapter 将 str(exc) 原样透传、无客户端截断，bounded（≤2000）保证目前仅由 Guard API 侧校验（422 拒收）承担；adapter 端截断为后续硬化项，补齐前不声明 PASS（评审 P1）。"
+      },
+      "CF-08": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py",
+        "note": "reference boundary 使用稳定 call_id 关联 policy 与 terminal receipt。"
+      },
+      "CF-09": {
+        "status": "NOT_SUPPORTED",
+        "note": "LangGraph reference boundary 为同步 wrap_tool_call 包裹，无 after-hook emission 语义；blocked-call after 语义不适用。"
+      },
+      "CF-10": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_guard_api.py",
+        "note": "经共享 Guard API 后端覆盖。"
+      },
+      "CF-11": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_guard_api.py",
+        "note": "经共享 Guard API 后端覆盖。"
+      },
+      "CF-12": {
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py"
+      }
+    },
+    "openclaw": {
+      "CF-01": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+      },
+      "CF-02": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+      },
+      "CF-03": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-gate-transitions.test.mjs"
+      },
+      "CF-04": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+      },
+      "CF-05": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-gate-transitions.test.mjs"
+      },
+      "CF-06": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-gate-transitions.test.mjs"
+      },
+      "CF-07": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte-after-tool-call.test.mjs"
+      },
+      "CF-08": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/fixtures/rte02-live-evidence.json",
+        "note": "Tier 3：跨 hook 单一 toolCallId 由 live 取证与 rte-after-tool-call 单测覆盖；真实运行时复验由 CI openclaw-runtime-smoke 矩阵承担。"
+      },
+      "CF-09": {
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/fixtures/rte02-live-evidence.json",
+        "note": "Tier 3：pin 2026.7.1-2 语义为触发但不代表 invocation（blocked 零执行 + emission-on-blocked），blocked gate 不派生 terminal fact；见 rte-after-tool-call.test.mjs Q9 回归。"
+      },
+      "CF-10": {
+        "status": "NOT_SUPPORTED",
+        "note": "插件不实现 evaluate 幂等语义，委托 Guard API；API 侧由 langgraph 矩阵 CF-10 条目同一测试覆盖。"
+      },
+      "CF-11": {
+        "status": "NOT_SUPPORTED",
+        "note": "插件 durable spool 依赖 Guard API audit_id 幂等契约；API 侧由 langgraph 矩阵 CF-11 条目同一测试覆盖。"
+      },
+      "CF-12": {
+        "status": "NOT_SUPPORTED",
+        "note": "mapping 层仅证明 quarantined 回执构造（mapping.test.mjs），未驱动真实结果处置；tool_result_persist 收到远端 deny 时异步处理不同步隔离，fail-closed quarantine 回执 emit 属契约 03 §7.2 条件式待补项；真实隔离闭环证明前不声明 PASS（评审 P1）。"
+      }
+    }
+  }
+}
