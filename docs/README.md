@@ -111,6 +111,7 @@ docs/
 | [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                               | Dashboard browser session、CSRF 和 launch code 边界                            |
 | [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 已冻结的证据链与溯源结构、示例、写入归属和验收清单                            |
 | [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort 与验收契约                    |
+| [AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md](AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md) | CORE / CT / RTE 三轨实施总路线图候选稿（Implementation Freeze Candidate；效力低于三套正式冻结分册，冲突时以分册为准） |
 | [AgentGuard_Runtime_Enforcement_Contract_v1_Final/](AgentGuard_Runtime_Enforcement_Contract_v1_Final/00_README_设计包索引.md) | Runtime Enforcement 契约冻结、字段/Schema/指标口径与 PR-RTE 实施计划 |
 
 ## 4. 维护规则
