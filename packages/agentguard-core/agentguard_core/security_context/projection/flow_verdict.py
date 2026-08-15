@@ -43,7 +43,7 @@ __all__ = [
 #: 构成"危险 flow"判定的 taint 集合（03 §7.1 数据外发矩阵覆盖
 #: CREDENTIAL/SENSITIVE；PERSISTENT_UNTRUSTED 为 memory 持久不可信内容，
 #: 外发同样是危险流，fail-closed 一并纳入）。
-DANGEROUS_TAINTS: frozenset[str] = frozenset(
+DANGEROUS_TAINTS: frozenset[TaintLabel] = frozenset(
     {"CREDENTIAL", "SENSITIVE", "PERSISTENT_UNTRUSTED"}
 )
 
@@ -99,7 +99,7 @@ def _dangerous_sticky_taints(
     summaries: Iterable[StickyTaintSummary],
 ) -> list[TaintLabel]:
     """sticky taint 摘要中携带危险 taint 的标签（确定性排序）。"""
-    labels = {
+    labels: set[TaintLabel] = {
         taint
         for summary in summaries
         for taint in summary.taints
