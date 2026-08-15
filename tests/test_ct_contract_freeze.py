@@ -60,8 +60,8 @@ def test_ct_frozen_status_requires_review_signoff(ct_contract, ct_metadata) -> N
     assert ct_metadata["status"] == "frozen"
     assert ct_contract["status"] == ct_metadata["status"]
     assert ct_metadata["review_signoff"] == {
-        "confirmed_by": "TODAY",
-        "confirmed_via": "codex_web_ui_manual_approval",
+        "confirmed_by": "repository_owner",
+        "confirmed_via": "explicit_user_confirmation_in_qoder_task",
         "confirmed_at": "2026-08-15",
     }
 
