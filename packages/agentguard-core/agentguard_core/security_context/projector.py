@@ -49,28 +49,17 @@ __all__ = [
 
 #: Projector 版本（02 §4.2）：resource normalization / taint propagation /
 #: flow construction / behavior aggregation / capability projection /
-#: coverage computation 任一逻辑变化必须提升版本。
-PROJECTOR_VERSION = "v21-04.projector.1"
+#: coverage computation 任一逻辑变化必须提升版本。V21-05/06/07 集成
+#: PR 唯一一次 bump（D2/C7）：typed upsert 全部接线，旧版本
+#: ``v21-04.projector.1`` envelope 由 guard-api 懒 legacy decoder 重投影。
+PROJECTOR_VERSION = "v21-07.projector.2"
 
 ApplyOutcome = Literal["applied", "noop", "conflict", "needs_rebuild"]
 
-#: V21-04 尚未接线的 typed upsert 容器（01 §27）。本期 delta 中这些
-#: 列表必须为空；非空即 fail-closed 拒绝（``apply_delta`` 入口），
-#: 避免内容被静默丢弃而 version 照常推进。V21-05/06/07 接线时逐容器
-#: 从本清单移除以放开。
-_UNWIRED_TYPED_UPSERT_CONTAINERS: tuple[str, ...] = (
-    "source_upserts",
-    "flow_upserts",
-    "declassification_upserts",
-    "memory_upserts",
-    "grant_upserts",
-    "grant_revocations",
-    "grant_consumptions",
-    "action_additions",
-    "runtime_outcome_upserts",
-    "behavior_aggregate_upserts",
-    "sticky_taint_upserts",
-)
+# 置于 PROJECTOR_VERSION 之后导入：handlers 装配链（projection 子包 →
+# behavior_coverage → 本模块 PROJECTOR_VERSION）依赖该常量先定义，
+# 该顺序打破导入环。
+from .handlers import apply_typed_updates  # noqa: E402
 
 
 class ProjectionError(ValueError):
@@ -274,25 +263,14 @@ def apply_delta(
        ``state_version + 1``，登记 applied projection → ``applied``；
     4. 版本领先/缺失 → ``needs_rebuild``（原状态返回，不修改）。
 
-    typed update 本期实现：watermarks 推进、dirty_domains 合并、
-    coverage_invalidations 并入 dirty、幂等登记；其余 typed 容器
-    （grants/sources/flows/...）由 V21-05/06/07 的 projector 规则接线，
-    本期 delta 中这些列表为空 —— 任何非空 typed upsert 列表在入口
-    fail-closed 抛 ``v21-04:typed_upsert_not_wired``（不得静默丢弃内容
-    而照常推进 version），接线后逐容器放开。
+    typed update 实现（V21-05/06/07 接线）：watermarks 推进、
+    dirty_domains 合并、coverage_invalidations 并入 dirty、幂等登记，
+    以及经 ``handlers.apply_typed_updates`` 按中央分发表 tuple 序
+    （01 §27 字段声明序）确定性应用全部非空 typed 容器（容器为空
+    自然跳过）。handler 失败抛各自分支的 fail-closed 异常
+    （``v21-05:`` / ``v21-06:`` / ``v21-07:`` 前缀）并向上传播，
+    由编排方置脏相关域，version 不推进。
     """
-    non_empty_containers = sorted(
-        name
-        for name in _UNWIRED_TYPED_UPSERT_CONTAINERS
-        if getattr(delta, name)
-    )
-    if non_empty_containers:
-        raise ProjectionError(
-            "v21-04:typed_upsert_not_wired",
-            "typed upsert containers are not wired in V21-04 "
-            f"(V21-05/06/07 will enable them per container): "
-            f"{non_empty_containers}",
-        )
     projection_key = projection_identity_key(
         delta.scope_digest,
         delta.source.source_record_type,
@@ -377,7 +355,11 @@ def apply_delta(
         | set(delta.coverage_invalidations)
     )
 
-    new_state = state.model_copy(
+    # typed update 按中央分发表 tuple 序应用（容器为空自然跳过）；
+    # handler 失败即抛分支 fail-closed 异常，version 不推进。
+    typed_state = apply_typed_updates(state, delta)
+
+    new_state = typed_state.model_copy(
         update={
             "watermarks": new_watermarks,
             "state_version": delta.new_state_version,

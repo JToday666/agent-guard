@@ -336,20 +336,24 @@ def test_watermarks_fixture_is_complete_shape() -> None:
 
 
 # ---------------------------------------------------------------------------
-# F4：非空 typed upsert 列表 fail-closed（不得静默丢弃而推进 version）
+# V21-05/06/07 接线后：非空 typed upsert 列表经中央分发表应用
 # ---------------------------------------------------------------------------
 
 
-def test_apply_delta_rejects_non_empty_typed_upsert_lists() -> None:
+def test_apply_delta_applies_non_empty_typed_upsert_lists() -> None:
     state = empty_state()
     delta = make_delta(base_state_version=0)
 
     wired_grants = delta.model_copy(update={"grant_upserts": [make_grant()]})
-    with pytest.raises(ProjectionError) as excinfo:
-        apply_delta(state, wired_grants)
-    assert excinfo.value.reason_code == "v21-04:typed_upsert_not_wired"
-    # state_version 不推进，输入状态不被修改。
+    result = apply_delta(state, wired_grants)
+    assert result.outcome == "applied"
+    assert result.state.state_version == 1
+    assert [grant.grant_id for grant in result.state.active_grants] == [
+        "grant_1"
+    ]
+    # state_version 推进且输入状态不被修改（纯函数）。
     assert state.state_version == 0
+    assert state.active_grants == []
 
     wired_multi = delta.model_copy(
         update={
@@ -358,11 +362,13 @@ def test_apply_delta_rejects_non_empty_typed_upsert_lists() -> None:
             "sticky_taint_upserts": [],
         }
     )
-    with pytest.raises(ProjectionError) as excinfo:
-        apply_delta(state, wired_multi)
-    assert excinfo.value.reason_code == "v21-04:typed_upsert_not_wired"
-    assert "action_additions" in str(excinfo.value)
-    assert "source_upserts" in str(excinfo.value)
+    result_multi = apply_delta(state, wired_multi)
+    assert result_multi.outcome == "applied"
+    assert [s.source_id for s in result_multi.state.source_index] == ["src_1"]
+    assert [
+        action.action_id for action in result_multi.state.recent_actions
+    ] == ["action_1"]
+    assert result_multi.state.sticky_taint_summaries == []
     assert state.state_version == 0
 
 

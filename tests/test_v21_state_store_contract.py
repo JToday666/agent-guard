@@ -27,7 +27,9 @@ from tests.support.postgres import get_test_database_url, reset_control_plane_sc
 
 SCOPE = "hmac-sha256:state_contract_scope"
 OTHER_SCOPE = "hmac-sha256:state_contract_other"
-PROJECTOR_VERSION = "v21-04.projector.1"
+# 版本断言随 Phase 2 集成 bump（仅用于存储记录载荷字段，非历史
+# envelope fixture；legacy decoder 路径由 rebuild 契约测试覆盖）。
+PROJECTOR_VERSION = "v21-07.projector.2"
 
 
 @pytest.fixture(params=["memory", "postgres"])
