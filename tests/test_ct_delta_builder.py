@@ -24,7 +24,7 @@ from agentguard_core.security_context import (
     delta_digest_projection,
     projection_identity_key,
 )
-from agentguard_core.security_context.facts import DeclassificationFact
+from agentguard_core.security_context.facts import DeclassificationFact, fact_digest
 from guard_api.security_state import delta_builder
 from guard_api.security_state.delta_builder import (
     CT_DELTA_BUILDER_VERSION,
@@ -35,10 +35,10 @@ from guard_api.security_state.transient import TransientSecurityFacts
 
 from tests.test_ct_fact_builder import (
     SCOPE,
-    _context_source,
-    _event,
-    _inputs,
-    _model_event,
+    ct_context_source,
+    ct_event,
+    ct_inputs,
+    ct_model_event,
 )
 
 MODULE_PATH = Path(delta_builder.__file__)
@@ -73,14 +73,14 @@ def build_bundle(
     *, event_id: str = "evt-1", visible_refs=()
 ) -> TransientSecurityFacts:
     """复用 fact_builder 契约夹具构造非降级 bundle。"""
-    event = _event(
+    event = ct_event(
         "context_assembled",
         {
             "sources": [
-                _context_source(),
-                # 第二条带 instruction-like taint → digest 语义区分，
-                # 避免两条同口径 web 源被语义去重折叠。
-                _context_source(source_id="ctx-2", instruction_like=True),
+                ct_context_source(),
+                # 第二条带 instruction-like taint，与第一条形成语义
+                # 区分（两条源/两条 flow 均入容器）。
+                ct_context_source(source_id="ctx-2", instruction_like=True),
             ],
             "will_enter_context": True,
             "sanitized": False,
@@ -89,7 +89,7 @@ def build_bundle(
     )
     return build_transient_facts(
         event=event,
-        inputs=_inputs(visible_refs=visible_refs),
+        inputs=ct_inputs(visible_refs=visible_refs),
     )
 
 
@@ -114,7 +114,8 @@ def test_deterministic_replay_same_digest_and_dump() -> None:
 
 
 def test_fact_order_in_bundle_does_not_affect_delta() -> None:
-    # 输入事实顺序打乱后，upserts 按 digest 排序 → delta 全等。
+    # 输入事实顺序打乱后，upserts 按全量内容 canonical sha256 排序
+    # → delta 全等。
     bundle = build_bundle()
     shuffled = bundle.model_copy(
         update={
@@ -125,9 +126,9 @@ def test_fact_order_in_bundle_does_not_affect_delta() -> None:
     assert _delta(bundle=bundle) == _delta(bundle=shuffled)
 
 
-def test_semantic_duplicates_are_deduped() -> None:
-    # 白名单字段全同的事实 digest 相等 → 去重仅保留一条，且与输入
-    # 顺序/位置无关（tie-breaker 取全量内容 canonical dump）。
+def test_identical_duplicates_are_deduped() -> None:
+    # 去重键为全量内容（含注册 id）canonical sha256：完全相同的事实
+    # 合并为一条，与输入顺序/位置无关。
     bundle = build_bundle()
     duplicate = bundle.source_facts[0].model_copy()
     padded = bundle.model_copy(
@@ -137,6 +138,61 @@ def test_semantic_duplicates_are_deduped() -> None:
     delta = _delta(bundle=padded)
     assert delta is not None
     assert len(delta.source_upserts) == len(bundle.source_facts)
+
+
+def test_same_digest_different_source_id_both_kept_no_dangling_flow() -> None:
+    # 回归（评审项）：digest 白名单排除 source_id，两条白名单字段全同、
+    # 仅注册 id 不同的 SourceFact 的 fact_digest 相等；但去重键已收紧
+    # 为全量内容 canonical sha256 → ①两条都保留（不折叠）；②输出与
+    # 输入顺序无关；③各自 flow 的 source_ref 均可解析（无悬空引用）。
+    bundle = build_transient_facts(
+        event=ct_event(
+            "context_assembled",
+            {
+                "sources": [
+                    ct_context_source(),
+                    ct_context_source(source_id="ctx-2"),
+                ],
+                "will_enter_context": True,
+                "sanitized": False,
+            },
+        ),
+        inputs=ct_inputs(),
+    )
+    assert len(bundle.source_facts) == 2
+    first, second = bundle.source_facts
+    # 前置：白名单语义全同（digest 相等）但注册 id 不同。
+    assert fact_digest(first) == fact_digest(second)
+    assert first.source_id != second.source_id
+
+    delta = build_ct_facts_delta(
+        scope_digest=SCOPE,
+        source_record_id=_record_id(),
+        base_state_version=BASE,
+        bundle=bundle,
+    )
+    assert delta is not None
+    kept_ids = {fact.source_id for fact in delta.source_upserts}
+    # ① 两条都保留，不因 digest 相等而折叠。
+    assert kept_ids == {first.source_id, second.source_id}
+    # ③ flow 端点引用均可解析（无悬空）。
+    assert len(delta.flow_upserts) == 2
+    for flow in delta.flow_upserts:
+        assert flow.source_ref in kept_ids
+    # ② 与输入顺序无关：源/flow 顺序全打乱后 delta 全等。
+    shuffled = bundle.model_copy(
+        update={
+            "source_facts": (second, first),
+            "flow_facts": tuple(reversed(bundle.flow_facts)),
+        }
+    )
+    replayed = build_ct_facts_delta(
+        scope_digest=SCOPE,
+        source_record_id=_record_id(),
+        base_state_version=BASE,
+        bundle=shuffled,
+    )
+    assert replayed == delta
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +292,7 @@ def test_bundle_declassifications_never_mapped() -> None:
 
 def test_degraded_bundle_returns_none() -> None:
     degraded = build_transient_facts(
-        event=_model_event("input"), inputs=_inputs(visible_refs=None)
+        event=ct_model_event("input"), inputs=ct_inputs(visible_refs=None)
     )
     assert degraded.degradations  # 前置：确为降级 bundle
     assert (
@@ -263,16 +319,16 @@ def test_digest_insensitive_to_timestamp_only() -> None:
     # 同 event_id 不同 timestamp：时间戳不入白名单 → digest 恒定。
     def _bundle_at(timestamp: str) -> TransientSecurityFacts:
         return build_transient_facts(
-            event=_event(
+            event=ct_event(
                 "context_assembled",
                 {
-                    "sources": [_context_source()],
+                    "sources": [ct_context_source()],
                     "will_enter_context": True,
                     "sanitized": False,
                 },
                 event_id="evt-ts",
             ).model_copy(update={"timestamp": timestamp}),
-            inputs=_inputs(),
+            inputs=ct_inputs(),
         )
 
     early = _delta(bundle=_bundle_at("2026-08-15T00:00:00Z"))
