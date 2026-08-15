@@ -1,0 +1,63 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_006_tool_result_quarantined",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_006",
+  "case_id": null,
+  "runtime": "langgraph",
+  "timestamp": "2026-08-15T08:25:06+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Executed tool result was quarantined and withheld from model context.",
+  "decision": "allow",
+  "risk_score": 70,
+  "severity": "high",
+  "blocked": false,
+  "resource_targets": ["https://mail.example.internal/inbox"],
+  "rule_hits": ["Q006"],
+  "reason": "Hook evidence shows the tool result was quarantined before it could enter model context.",
+  "links": {
+    "event_id": "evt_rte_fixture_006",
+    "decision_id": "dec_rte_fixture_006",
+    "policy_audit_id": "audit_policy_rte_fixture_006",
+    "action_id": "act_rte_fixture_006"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "tool_result_quarantined"
+  },
+  "evidence": {
+    "intervention": {
+      "type": "result_quarantine",
+      "reason": "Quarantine policy withheld the tool result from model context."
+    },
+    "execution": {
+      "status": "executed",
+      "receipt_recorded": true,
+      "invoked_at": "2026-08-15T08:25:05+00:00",
+      "completed_at": "2026-08-15T08:25:06+00:00",
+      "error": null,
+      "tool_result_entered_context": false,
+      "persisted": false
+    },
+    "side_effects": {
+      "measurement_status": "not_measured",
+      "count": null,
+      "summary": "Side effects not measured; intervention quarantined the result only."
+    },
+    "result": {
+      "disposition": "quarantined",
+      "summary": "Tool result quarantined and withheld from model context.",
+      "sanitized": false
+    },
+    "approval": {
+      "approval_id": null,
+      "status": "not_required",
+      "decision": null,
+      "resolved_at": null
+    }
+  }
+}

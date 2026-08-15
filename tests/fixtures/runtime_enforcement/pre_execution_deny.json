@@ -1,0 +1,63 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_001_pre_execution_deny",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_001",
+  "case_id": null,
+  "runtime": "langgraph",
+  "timestamp": "2026-08-15T08:00:01+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Action blocked before invocation; runtime never executed the tool call.",
+  "decision": "deny",
+  "risk_score": 85,
+  "severity": "high",
+  "blocked": true,
+  "resource_targets": ["file:///workspace/report.md"],
+  "rule_hits": ["P001"],
+  "reason": "Guard decision denied the action prior to execution; no invocation occurred.",
+  "links": {
+    "event_id": "evt_rte_fixture_001",
+    "decision_id": "dec_rte_fixture_001",
+    "policy_audit_id": "audit_policy_rte_fixture_001",
+    "action_id": "act_rte_fixture_001"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "pre_execution_deny"
+  },
+  "evidence": {
+    "intervention": {
+      "type": "pre_execution_deny",
+      "reason": "Policy evaluation denied the proposed tool call before dispatch."
+    },
+    "execution": {
+      "status": "not_invoked",
+      "receipt_recorded": true,
+      "invoked_at": null,
+      "completed_at": "2026-08-15T08:00:01+00:00",
+      "error": null,
+      "tool_result_entered_context": false,
+      "persisted": false
+    },
+    "side_effects": {
+      "measurement_status": "measured",
+      "count": 0,
+      "summary": "No invocation; zero side effects observed."
+    },
+    "result": {
+      "disposition": "not_applicable",
+      "summary": "No tool result produced because the action was not invoked.",
+      "sanitized": false
+    },
+    "approval": {
+      "approval_id": null,
+      "status": "not_required",
+      "decision": null,
+      "resolved_at": null
+    }
+  }
+}

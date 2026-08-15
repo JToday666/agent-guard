@@ -1,0 +1,64 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_002_approval_release",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_002",
+  "case_id": null,
+  "runtime": "langgraph",
+  "timestamp": "2026-08-15T08:05:02+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Human approval granted once; action released for execution.",
+  "decision": "ask",
+  "risk_score": 60,
+  "severity": "medium",
+  "blocked": false,
+  "resource_targets": ["file:///workspace/export.csv"],
+  "rule_hits": ["A002"],
+  "reason": "Approval gate resolved with allow_once; receipt records the release, execution outcome remains unknown at release time.",
+  "links": {
+    "event_id": "evt_rte_fixture_002",
+    "decision_id": "dec_rte_fixture_002",
+    "policy_audit_id": "audit_policy_rte_fixture_002",
+    "action_id": "act_rte_fixture_002",
+    "approval_id": "apr_rte_fixture_002"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "approval_release"
+  },
+  "evidence": {
+    "intervention": {
+      "type": "approval_gate",
+      "reason": "Action required human approval before execution; approval was granted."
+    },
+    "execution": {
+      "status": "unknown",
+      "receipt_recorded": true,
+      "invoked_at": null,
+      "completed_at": "2026-08-15T08:05:02+00:00",
+      "error": null,
+      "tool_result_entered_context": null,
+      "persisted": null
+    },
+    "side_effects": {
+      "measurement_status": "unknown",
+      "count": null,
+      "summary": "Side effects not yet observable at approval release time."
+    },
+    "result": {
+      "disposition": "unknown",
+      "summary": "No tool result available yet; the action was just released.",
+      "sanitized": null
+    },
+    "approval": {
+      "approval_id": "apr_rte_fixture_002",
+      "status": "allowed",
+      "decision": "allow_once",
+      "resolved_at": "2026-08-15T08:05:02+00:00"
+    }
+  }
+}

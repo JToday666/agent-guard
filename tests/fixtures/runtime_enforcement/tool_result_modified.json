@@ -1,0 +1,63 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_005_tool_result_modified",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_005",
+  "case_id": null,
+  "runtime": "langgraph",
+  "timestamp": "2026-08-15T08:20:05+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Executed tool result was modified by the sanitizer before entering context.",
+  "decision": "allow",
+  "risk_score": 45,
+  "severity": "medium",
+  "blocked": false,
+  "resource_targets": ["file:///workspace/inbox.log"],
+  "rule_hits": ["S005"],
+  "reason": "Tool result contained instruction-like content; the sanitizer rewrote it before context entry.",
+  "links": {
+    "event_id": "evt_rte_fixture_005",
+    "decision_id": "dec_rte_fixture_005",
+    "policy_audit_id": "audit_policy_rte_fixture_005",
+    "action_id": "act_rte_fixture_005"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "tool_result_modified"
+  },
+  "evidence": {
+    "intervention": {
+      "type": "result_sanitization",
+      "reason": "Sanitizer detected instruction-like text in the tool result and rewrote it."
+    },
+    "execution": {
+      "status": "executed",
+      "receipt_recorded": true,
+      "invoked_at": "2026-08-15T08:20:04+00:00",
+      "completed_at": "2026-08-15T08:20:05+00:00",
+      "error": null,
+      "tool_result_entered_context": true,
+      "persisted": false
+    },
+    "side_effects": {
+      "measurement_status": "not_measured",
+      "count": null,
+      "summary": "Side effects not measured; intervention applied to the result only."
+    },
+    "result": {
+      "disposition": "modified",
+      "summary": "Tool result rewritten by the sanitizer before entering model context.",
+      "sanitized": true
+    },
+    "approval": {
+      "approval_id": null,
+      "status": "not_required",
+      "decision": null,
+      "resolved_at": null
+    }
+  }
+}

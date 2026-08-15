@@ -1,0 +1,63 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_004_execution_failed",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_004",
+  "case_id": null,
+  "runtime": "langgraph",
+  "timestamp": "2026-08-15T08:15:04+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Allowed action attempted but the runtime reported a bounded error.",
+  "decision": "allow",
+  "risk_score": 20,
+  "severity": "medium",
+  "blocked": false,
+  "resource_targets": ["https://api.internal/records"],
+  "rule_hits": [],
+  "reason": "Runtime attempted the approved tool call and failed with a bounded error message.",
+  "links": {
+    "event_id": "evt_rte_fixture_004",
+    "decision_id": "dec_rte_fixture_004",
+    "policy_audit_id": "audit_policy_rte_fixture_004",
+    "action_id": "act_rte_fixture_004"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "execution_failed"
+  },
+  "evidence": {
+    "intervention": {
+      "type": "none",
+      "reason": "No runtime intervention; execution failed on its own."
+    },
+    "execution": {
+      "status": "failed",
+      "receipt_recorded": true,
+      "invoked_at": "2026-08-15T08:15:03+00:00",
+      "completed_at": "2026-08-15T08:15:04+00:00",
+      "error": "HTTP 503 from upstream service; retry budget exhausted.",
+      "tool_result_entered_context": false,
+      "persisted": false
+    },
+    "side_effects": {
+      "measurement_status": "not_measured",
+      "count": null,
+      "summary": "Failed execution; side effects not measured."
+    },
+    "result": {
+      "disposition": "not_applicable",
+      "summary": "No tool result produced because execution failed.",
+      "sanitized": null
+    },
+    "approval": {
+      "approval_id": null,
+      "status": "not_required",
+      "decision": null,
+      "resolved_at": null
+    }
+  }
+}

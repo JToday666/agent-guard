@@ -348,6 +348,8 @@ enforcement_coverage
 
 授权率的分母是已进入授权终态的动作；确认阻止率的分母是有已知执行回执的动作。两者不得使用策略评估数作为分母。
 
+交叉引用：AttackBench/评测运行口径的 Confirmed Prevention 等指标定义见 `docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md` §9；审计窗口/Dashboard 口径以本文为准。
+
 ## 8. 独立评测运行
 
 `GET /v1/evaluations/latest` 与两个审计指标作用域没有数据依赖。

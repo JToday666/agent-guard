@@ -1,0 +1,63 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_003_execution_completed",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_003",
+  "case_id": null,
+  "runtime": "langgraph",
+  "timestamp": "2026-08-15T08:10:03+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Allowed action executed to completion without runtime errors.",
+  "decision": "allow",
+  "risk_score": 10,
+  "severity": "low",
+  "blocked": false,
+  "resource_targets": ["file:///workspace/notes.txt"],
+  "rule_hits": [],
+  "reason": "Runtime executed the approved tool call and reported normal completion.",
+  "links": {
+    "event_id": "evt_rte_fixture_003",
+    "decision_id": "dec_rte_fixture_003",
+    "policy_audit_id": "audit_policy_rte_fixture_003",
+    "action_id": "act_rte_fixture_003"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "execution_completed"
+  },
+  "evidence": {
+    "intervention": {
+      "type": "none",
+      "reason": "No runtime intervention was required; the action was allowed and executed."
+    },
+    "execution": {
+      "status": "executed",
+      "receipt_recorded": true,
+      "invoked_at": "2026-08-15T08:10:02+00:00",
+      "completed_at": "2026-08-15T08:10:03+00:00",
+      "error": null,
+      "tool_result_entered_context": true,
+      "persisted": false
+    },
+    "side_effects": {
+      "measurement_status": "not_measured",
+      "count": null,
+      "summary": "Runtime did not measure side effects for this execution."
+    },
+    "result": {
+      "disposition": "unknown",
+      "summary": "Tool result returned without an enforcement disposition.",
+      "sanitized": null
+    },
+    "approval": {
+      "approval_id": null,
+      "status": "not_required",
+      "decision": null,
+      "resolved_at": null
+    }
+  }
+}
