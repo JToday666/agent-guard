@@ -54,6 +54,7 @@ from guard_api.services import (
     V21PipelineService,
     V21ShadowService,
 )
+from guard_api.services.v21_pipeline import PHASE_C_BASE_DRIFT_SKIPS
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import SecurityStateRecord, TaskFactRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
@@ -885,6 +886,97 @@ def test_pipeline_policy_revision_frozen_at_phase_a(monkeypatch) -> None:
     assert policy_evidence["canonical_digest"] == canonical_sha256(
         PolicyBundle(version="p1-seeded").model_dump(mode="json")
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase C：S1 base 漂移跳过结构化留痕 / S2 缺态哨兵统一为 -1
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_phase_c_base_drift_skip_structured_trace(caplog) -> None:
+    """S1：base 漂移跳过必产结构化留痕（计数器 + 日志键），不置脏、
+    不投影、不上抛；D9 补投影不可达，V21-10 对账承接（docstring 口径）。"""
+
+    pipeline, store = _pipeline_service()
+    _commit_task_fact(store)
+    event = _event(task_id=_TASK_ID)
+    materials = pipeline.run_phase_a(event)
+    assert materials is not None and materials.scope_digest is not None
+    outcome = pipeline.build_phase_b(event, materials)
+    assert outcome is not None
+    plan = pipeline.prepare_phase_c(outcome)
+    assert plan is not None
+
+    # Phase B→C 窗口内并发投影推进 base（其他事件先行落盘）。
+    record = store.get_security_state(materials.scope_digest)
+    assert record is not None
+    state = OnlineSecurityState.model_validate(record.canonical_payload)
+    bumped = state.model_copy(
+        update={"state_version": record.state_version + 1}
+    )
+    assert store.cas_security_state(
+        materials.scope_digest,
+        record.state_version,
+        SecurityStateRecord(
+            scope_digest=materials.scope_digest,
+            state_version=record.state_version + 1,
+            canonical_payload=bumped.model_dump(mode="json"),
+            dirty=False,
+            dirty_domains=[],
+            projector_version=PROJECTOR_VERSION,
+            updated_at=utc_now_iso(),
+        ),
+    )
+
+    before = PHASE_C_BASE_DRIFT_SKIPS["count"]
+    with caplog.at_level("WARNING", logger="guard_api.services.v21_pipeline"):
+        pipeline.run_phase_c(plan)  # 绝不上抛。
+    # 结构化留痕：计数器增一 + 日志含结构化键。
+    assert PHASE_C_BASE_DRIFT_SKIPS["count"] == before + 1
+    messages = "\n".join(caplog.messages)
+    assert "v21_phase_c_skip_reason=base_drift" in messages
+    assert "v21_phase_c_skip_total=" in messages
+    # fail-closed 不置脏、不推进版本（跳过分支不再触碰存储）。
+    after = store.get_security_state(materials.scope_digest)
+    assert after is not None
+    assert after.state_version == record.state_version + 1
+    assert after.dirty is False and after.dirty_domains == []
+
+
+def test_pipeline_phase_c_missing_state_sentinel_minus_one(
+    monkeypatch, caplog
+) -> None:
+    """S2：Phase C 缺态哨兵统一为 -1——不与任何真实 state_version
+    （empty_online_state 初始版本 0）碰撞，缺态必然 fail-closed 跳过
+    而非误投影。"""
+
+    pipeline, store = _pipeline_service()
+    _commit_task_fact(store)
+    event = _event(task_id=_TASK_ID)
+    materials = pipeline.run_phase_a(event)
+    assert materials is not None
+    outcome = pipeline.build_phase_b(event, materials)
+    assert outcome is not None
+    plan = pipeline.prepare_phase_c(outcome)
+    assert plan is not None
+    assert plan.delta.base_state_version >= 0
+
+    # 模拟 ensure_ready 后仍缺态的极端窗口。
+    monkeypatch.setattr(SecurityStateService, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        MemoryControlPlaneStore, "get_security_state", lambda *_a, **_k: None
+    )
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("missing state must fail-closed, never project")
+
+    monkeypatch.setattr(SecurityStateService, "project_committed", _forbidden)
+
+    before = PHASE_C_BASE_DRIFT_SKIPS["count"]
+    with caplog.at_level("WARNING", logger="guard_api.services.v21_pipeline"):
+        pipeline.run_phase_c(plan)
+    assert PHASE_C_BASE_DRIFT_SKIPS["count"] == before + 1
+    assert "v21_phase_c_skip_reason=base_drift" in "\n".join(caplog.messages)
 
 
 # ---------------------------------------------------------------------------

@@ -109,6 +109,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "PHASE_C_BASE_DRIFT_SKIPS",
     "PIPELINE_CLOCK_VERSION",
     "V21PhaseBOutcome",
     "V21PhaseCPlan",
@@ -141,6 +142,13 @@ _UNVERSIONED_POLICY_REVISION = "v21-09:unversioned"
 #: 投影身份五元组中的 source_revision 固定为 1（确定性，禁 uuid；
 #: 仿 approval ``_APPROVAL_SOURCE_REVISION`` 口径）。
 _EVALUATION_SOURCE_REVISION = 1
+
+#: S1 结构化留痕：Phase C base 漂移跳过计数器（进程级观测信号）。
+#: 该场景下投影永久缺失而信封在场，D9 replay 补投影**不可达**
+#: （补投影同样锁内复核 base，漂移时同样 fail-closed 跳过）——
+#: 只能由 V21-10 离线对账（audit 信封 × projection_records 差集）
+#: 承接；计数器供运维观测该窗口发生频率。
+PHASE_C_BASE_DRIFT_SKIPS: dict[str, int] = {"count": 0}
 
 
 def _pipeline_snapshot_plan() -> RequiredCheckPlan:
@@ -732,19 +740,32 @@ class V21PipelineService:
             current = self._state_service.store_access.get_security_state(
                 scope_digest
             )
+            # S2 缺态哨兵口径统一（与 Phase B 同为 -1）：ensure_ready
+            # 后 current 正常必在场；-1 不与任何真实 state_version
+            # （empty_online_state 初始版本为 0）碰撞，缺态时必然
+            # 触发 base 漂移跳过分支（fail-closed）而非误投影。
             base_state_version = (
-                current.state_version if current is not None else 0
+                current.state_version if current is not None else -1
             )
             if base_state_version != plan.delta.base_state_version:
                 # base 漂移（Phase B→C 窗口内被其他投影推进）：信封
-                # 引用已冻结，不 rebase、不重试、不置脏。
+                # 引用已冻结，不 rebase、不重试、不置脏。S1 结构化
+                # 留痕：计数器 + 结构化日志键（进程级观测信号）；
+                # D9 replay 补投影对该场景不可达（补投影锁内同样
+                # 复核 base，漂移时同样跳过），由 V21-10 离线对账
+                # （audit 信封 × projection_records 差集）承接。
+                PHASE_C_BASE_DRIFT_SKIPS["count"] += 1
                 logger.warning(
                     "v21-09 evaluation projection skipped for audit %s: "
                     "base state version drifted (%s -> %s); fail-closed "
-                    "without dirtying (D9 replay backfill / V21-10)",
+                    "without dirtying "
+                    "(v21_phase_c_skip_reason=base_drift, "
+                    "v21_phase_c_skip_total=%s; D9 backfill unreachable "
+                    "for this scenario, V21-10 reconciliation owns it)",
                     plan.audit_id,
                     plan.delta.base_state_version,
                     base_state_version,
+                    PHASE_C_BASE_DRIFT_SKIPS["count"],
                 )
                 return
             committed_record = CommittedRecord(
