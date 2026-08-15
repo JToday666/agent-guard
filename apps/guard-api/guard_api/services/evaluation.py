@@ -8,10 +8,10 @@ from agentguard_core import (
     ActionCritic,
     AuditEvent,
     GuardDecision,
+    GuardEngine,
     GuardEvent,
     MemoryEventPayload,
     MemoryGuardChange,
-    evaluate as core_evaluate,
 )
 from guard_api.models import (
     ApprovalRequest,
@@ -103,9 +103,9 @@ class EvaluationService:
         self.approval_service = approval_service
         self.memory_guard_service = memory_guard_service
         self.action_critic = action_critic or ActionCritic()
-        # V21-08 shadow 旁路编排器（flag 默认关闭）。T4 只注册可达性；
-        # 审计证据接线在 T5 于 audit 落盘前调用，本类判定/审批/审计
-        # 主流程不使用它（legacy = 唯一官方决策者，04 §1-§2）。
+        # V21-08 shadow 旁路编排器（flag 默认关闭）。T5 在 audit 落盘前
+        # 调用它旁路产出 decision_v21 信封；判定/审批主流程不使用它
+        # （legacy = 唯一官方决策者，04 §1-§2）。
         self.v21_shadow_service = v21_shadow_service
 
     def evaluate(
@@ -145,7 +145,10 @@ class EvaluationService:
             bundle = snapshot_record.policy_bundle
         else:
             bundle = self.policy_service.current_snapshot()
-        decision = core_evaluate(event, bundle)
+        # 与 module-level evaluate 同一实现路径（engine.evaluate 委托
+        # evaluate_with_results）：decision 语义逐字节不变，仅额外外露
+        # DetectionResult 供 shadow 同源注入，避免编排器双跑检测器。
+        decision, detections = GuardEngine().evaluate_with_results(event, bundle)
         critic_review = self.action_critic.review(event, decision)
         approval = self.approval_service.create_for_decision(
             event,
@@ -156,6 +159,23 @@ class EvaluationService:
         memory_change = self._record_memory_change(
             event, decision, requesting_principal_id=requesting_principal_id
         )
+        # V21-08 shadow 审计侧信道：audit 落盘前旁路产出 decision_v21
+        # 信封。flag 关/secret 缺时编排器内部一次布尔判断即返回 None，
+        # audit 路径与现状逐字节一致；旁路故障由编排器自行收敛，绝不
+        # 影响 legacy decision/approval/audit 主链。
+        v21_evidence = None
+        if self.v21_shadow_service is not None:
+            v21_evidence = self.v21_shadow_service.build_shadow_evidence(
+                event,
+                bundle,
+                legacy_decision=decision.decision,
+                detection_results=detections,
+                policy_revision=(
+                    str(snapshot_record.revision)
+                    if snapshot_record is not None
+                    else None
+                ),
+            )
         # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
         audit_event = self.audit_service.record_evaluation(
             event,
@@ -174,6 +194,7 @@ class EvaluationService:
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
             },
             decision_dump=decision.model_dump(mode="json"),
+            v21_evidence=v21_evidence,
         )
         return GuardEvaluationResponse(
             decision=decision,
