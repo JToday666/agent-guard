@@ -841,6 +841,52 @@ def test_pipeline_e2e_stale_no_finalize_reference(monkeypatch) -> None:
     assert "policy_digest" in audit.metadata
 
 
+def test_pipeline_policy_revision_frozen_at_phase_a(monkeypatch) -> None:
+    """W1：审计 policy_revision 恒等于 Phase A 冻结值（同源同时点）。
+
+    并发策略滚动场景：Phase A 冻结后、事务内落盘前 policy 滚到
+    新 revision；审计记录不得出现 "revision N+1 × digest(bundle N)"
+    矛盾组合（事务内不再重读 current_snapshot_record，S8 口径）。
+    """
+
+    store = MemoryControlPlaneStore()
+    _commit_task_fact(store)
+    seeded = store.save_policy_snapshot(
+        PolicyBundle(version="p1-seeded"), expected_revision=0
+    )
+    evaluation_service, _ = _evaluation_stack(
+        store, settings=_pipeline_settings()
+    )
+
+    original_read = SecurityStateService.read_snapshot_with_revoked
+
+    def _read_then_roll(self, scope_digest, **kwargs):
+        result = original_read(self, scope_digest, **kwargs)
+        # 模拟并发策略滚动：Phase A 冻结时点后 policy 推进新 revision。
+        store.save_policy_snapshot(
+            PolicyBundle(version="p1-rolled"), expected_revision=seeded.revision
+        )
+        return result
+
+    monkeypatch.setattr(
+        SecurityStateService, "read_snapshot_with_revoked", _read_then_roll
+    )
+    event = _event(event_id="evt_e2e_w1", task_id=_TASK_ID)
+    evaluation_service.evaluate(event, requesting_principal_id="principal_a")
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    # 前置：并发滚动确实发生（当前链头已是新 revision）。
+    rolled = store.get_policy_snapshot_record()
+    assert rolled is not None and rolled.revision == seeded.revision + 1
+    # 同源同时点：revision 与 digest 均取 Phase A 冻结值（bundle N ×
+    # revision N），无矛盾组合。
+    policy_evidence = audit.evidence["policy"]
+    assert policy_evidence["revision"] == seeded.revision
+    assert policy_evidence["canonical_digest"] == canonical_sha256(
+        PolicyBundle(version="p1-seeded").model_dump(mode="json")
+    )
+
+
 # ---------------------------------------------------------------------------
 # S8 消除锚点：事务窗口内无 snapshot I/O（evaluate 端到端）
 # ---------------------------------------------------------------------------

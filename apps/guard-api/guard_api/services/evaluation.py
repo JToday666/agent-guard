@@ -272,10 +272,16 @@ class EvaluationService:
 
         事务窗口内：legacy 链照常（decision/detections 直接消费 Phase A
         单跑结果，不双跑检测器）+ Phase B 短事务 revalidate 与证据构建；
-        **无 snapshot/task 全量 I/O**（S8 消除）。legacy 决策与 flag off
-        路径同源同实现（evaluate_with_results 同内核），官方响应不变。
+        **无 snapshot/task/policy 全量 I/O**（S8 消除）。legacy 决策与
+        flag off 路径同源同实现（evaluate_with_results 同内核），官方
+        响应不变。
+
+        审计 policy_revision 直接用 ``materials.policy_revision``（Phase A
+        冻结值，与 bundle/policy_digest 同源同时点）：事务内重读
+        ``current_snapshot_record()`` 会在并发策略滚动时落新 revision，
+        与 Phase A 冻结 bundle 的 digest 组成"revision N+1 × digest
+        (bundle N)"矛盾组合（TOCTOU），故删除事务内 policy I/O。
         """
-        snapshot_record = self.policy_service.current_snapshot_record()
         bundle = materials.bundle
         # Phase A 单跑的 legacy 官方决策（同源同实现，不双跑检测器）。
         decision = materials.decision
@@ -319,8 +325,13 @@ class EvaluationService:
             event,
             decision,
             policy_bundle=bundle,
+            # W1 修复：同源同时点冻结值（str 形态 → 审计契约 int），
+            # 不在事务内重读 policy 面（避免并发策略滚动时
+            # "revision N+1 × digest(bundle N)" TOCTOU 矛盾组合）。
             policy_revision=(
-                snapshot_record.revision if snapshot_record is not None else None
+                int(materials.policy_revision)
+                if materials.policy_revision is not None
+                else None
             ),
             approval_id=approval.approval_id if approval is not None else None,
             critic_review=critic_review,
