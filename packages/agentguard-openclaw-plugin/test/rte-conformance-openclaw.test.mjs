@@ -401,7 +401,7 @@ test("CF-07 tool failure produces execution_failed with bounded error", async ()
   );
 });
 
-test("CF-12 proven subset: modified disposition driven through persist hook; quarantined mapping-only", async () => {
+test("CF-12 result quarantine closure: modified + fail-closed quarantined receipts driven through the hook", async () => {
   const spec = contractCase("CF-12");
   assert.equal(spec.expect.receipts[0].kind, "tool_result_quarantined");
 
@@ -478,9 +478,60 @@ test("CF-12 proven subset: modified disposition driven through persist hook; qua
   assert.equal(modified[0].evidence.result.disposition, "modified");
   assert.equal(modified[0].evidence.result.sanitized, true);
 
-  // 矩阵口径：openclaw CF-12 在真实隔离闭环证明前声明 NOT_SUPPORTED。
+  // 真实隔离闭环（契约 03 §7.2，RTE-04 硬化）：fail-closed quarantine
+  // 能关联原 action/policy 时，结果同步替换 + quarantined 回执必须同时成立。
+  const closureHarness = makeHookContext({ decision: "allow" });
+  registerAll(closureHarness.context);
+  await runHostToolCall(closureHarness, { toolCallId: "call-cf12-closure" });
+  // persist 阶段评估同步不可用 → fail-closed quarantine。
+  closureHarness.context.makeClient().evaluate = () => {
+    throw new Error("guard api unavailable");
+  };
+  const quarantinedResult = closureHarness.handlers.tool_result_persist(
+    {
+      toolName: "spike_probe",
+      toolCallId: "call-cf12-closure",
+      runId: "run-cf",
+      result: "sensitive payload",
+      message: "sensitive payload",
+    },
+    { toolName: "spike_probe", toolCallId: "call-cf12-closure", runId: "run-cf" },
+  );
+  // 结果被同步替换（隔离）。
+  assert.ok(quarantinedResult);
+  assert.ok(String(quarantinedResult.message).includes("quarantined"));
+  await flush();
+  const quarantinedReceipts = closureHarness.submitted.filter(
+    (receipt) => receipt.metadata.outcome_kind === "tool_result_quarantined",
+  );
+  assert.equal(quarantinedReceipts.length, 1);
+  assert.equal(quarantinedReceipts[0].evidence.execution.status, "executed");
+  assert.equal(quarantinedReceipts[0].evidence.result.disposition, "quarantined");
+  assert.equal(quarantinedReceipts[0].links.action_id, "call-cf12-closure");
+
+  // 无关联时仅诊断，不伪造 policy link。
+  const unlinkedHarness = makeHookContext({ decision: "allow" });
+  registerAll(unlinkedHarness.context);
+  unlinkedHarness.context.makeClient().evaluate = () => {
+    throw new Error("guard api unavailable");
+  };
+  const unlinkedResult = unlinkedHarness.handlers.tool_result_persist(
+    {
+      toolName: "spike_probe",
+      toolCallId: "call-cf12-unlinked",
+      runId: "run-cf",
+      result: "x",
+      message: "x",
+    },
+    { toolName: "spike_probe", toolCallId: "call-cf12-unlinked", runId: "run-cf" },
+  );
+  assert.ok(unlinkedResult);
+  assert.ok(String(unlinkedResult.message).includes("quarantined"));
+  assert.equal(unlinkedHarness.submitted.length, 0, "无关联不伪造回执");
+
+  // 矩阵口径：真实隔离闭环已证明，openclaw CF-12 声明 PASS。
   const entry = loadMatrix().runtimes.openclaw["CF-12"];
-  assert.equal(entry.status, "NOT_SUPPORTED");
+  assert.equal(entry.status, "PASS");
   assert.ok(String(entry.note).length > 0);
 });
 
