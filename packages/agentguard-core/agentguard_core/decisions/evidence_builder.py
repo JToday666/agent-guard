@@ -141,8 +141,9 @@ def build_decision_evidence_v21(
     )
 
     # degradation_ids：assessment 降级 + 截断降级一并登记；若合并后仍超
-    # 上限，保留前 31 条原始降级 + 1 条合并截断降级（确定性、单轮收敛，
-    # 保证截断留痕记录自身不被截断丢失）。
+    # 上限，为 overflow 截断降级与合并截断降级预留槽位后再裁剪原始
+    # 降级（确定性、单轮收敛）：多类截断时各类的截断留痕记录不得被
+    # 静默丢弃，合并截断降级自身也恒定在场（D4 禁止静默丢失）。
     degradation_ids = [
         degradation.degradation_id for degradation in assessment.degradations
     ]
@@ -150,23 +151,21 @@ def build_decision_evidence_v21(
         degradation.degradation_id for degradation in overflow_degradations
     )
     if len(degradation_ids) > MAX_DEGRADATION_IDS:
+        overflow_ids = [
+            degradation.degradation_id for degradation in overflow_degradations
+        ]
+        # 预留 overflow 截断登记 + 1 条合并截断降级的槽位。
+        original_slots = MAX_DEGRADATION_IDS - len(overflow_ids) - 1
         kept_original = [
             degradation.degradation_id
             for degradation in assessment.degradations
-        ][: MAX_DEGRADATION_IDS - 1]
-        dropped = len(degradation_ids) - len(kept_original) - 1
+        ][: max(original_slots, 0)]
+        dropped = len(degradation_ids) - len(kept_original) - len(overflow_ids) - 1
         merged = _truncation_degradation(
             event_id=event_id, field="degradation_ids", dropped=dropped
         )
-        overflow_degradations = [
-            *[
-                degradation
-                for degradation in overflow_degradations
-                if degradation.degradation_id in kept_original
-            ],
-            merged,
-        ]
-        degradation_ids = [*kept_original, merged.degradation_id]
+        overflow_degradations = [*overflow_degradations, merged]
+        degradation_ids = [*kept_original, *overflow_ids, merged.degradation_id]
 
     # divergence 分类：assessment 降级 + 截断降级一并传入（截断与
     # degraded_component_failure 同类语义，D4）。

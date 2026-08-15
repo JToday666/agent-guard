@@ -559,6 +559,58 @@ def test_degradation_ids_truncation_keeps_overflow_record_visible() -> None:
     assert evidence.divergence_category == DEGRADED_COMPONENT_FAILURE
 
 
+def test_multi_field_truncation_keeps_all_overflow_records_visible() -> None:
+    """S3：多类截断叠加且合并后超上限时，各类截断留痕与合并截断降级
+    必须同时在场（预留槽位，不得静默丢弃 overflow 登记）。"""
+    event, policies = _first_case()
+    snapshot = _snapshot()
+    detections = [_detection(i) for i in range(35)]  # signal_ids 截断
+    assessment = shadow_assess(
+        event,
+        policies,
+        snapshot,
+        server_secret=SERVER_SECRET,
+        detection_results=detections,
+    )
+    many = [
+        EvaluationDegradation(
+            degradation_id=f"deg-{i:03d}",
+            component_id=f"component-{i}",
+            domain=None,
+            required_for_action=False,
+            failure_kind="unavailable",
+            reason_codes=[f"fixture:{i}"],
+            evidence_refs=[],
+        )
+        for i in range(40)
+    ]
+    assessment = assessment.model_copy(update={"degradations": many})
+
+    evidence = build_decision_evidence_v21(
+        assessment,
+        legacy_decision="allow",
+        snapshot_id=snapshot.snapshot_id,
+        state_version=snapshot.state_version,
+        coverage=snapshot.coverage,
+    )
+
+    assert len(evidence.degradation_ids) == MAX_DEGRADATION_IDS
+    # signal_ids 截断留痕不被合并截断静默丢弃。
+    signal_overflow_id = (
+        f"v21-08-refs-truncated:{event.event_id}:signal_ids"
+    )
+    assert signal_overflow_id in evidence.degradation_ids
+    # 合并截断降级恒定在场（尾位）。
+    merged_id = evidence.degradation_ids[-1]
+    assert merged_id.startswith("v21-08-refs-truncated:")
+    assert merged_id.endswith(":degradation_ids")
+    # 原始降级保留槽位 = 32 - 1（overflow）- 1（合并）= 30。
+    assert evidence.degradation_ids[:30] == [
+        f"deg-{i:03d}" for i in range(30)
+    ]
+    assert evidence.divergence_category == DEGRADED_COMPONENT_FAILURE
+
+
 def test_truncation_degradation_reason_codes_leave_trace() -> None:
     event, policies = _first_case()
     snapshot = _snapshot()
