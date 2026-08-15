@@ -139,6 +139,15 @@ class GuardApiSettings:
         ),
         repr=False,
     )
+    # CT-PR-03b CT 事实投影独立 flag（裁决 D3：默认 false，与 V21
+    # shadow flag 解耦；flag off 时 CT 全链路不执行，evaluate 行为
+    # 逐字节不变。生效另需 pipeline 材料就绪，server secret 复用
+    # AGENTGUARD_V21_SHADOW_SERVER_SECRET）。
+    ct_fact_projection_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_CT_FACT_PROJECTION_ENABLED", default=False
+        )
+    )
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)

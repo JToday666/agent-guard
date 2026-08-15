@@ -28,6 +28,7 @@ from guard_api.services import (
     AuditWindowRequestError,
     AuditWindowService,
     ConfigAuditService,
+    CtProjectionService,
     EvaluationService,
     MemoryGuardService,
     MetricService,
@@ -134,6 +135,14 @@ def create_app(
         state_service=security_state_service,
         policy_service=policy_service,
     )
+    # CT-PR-03b：CT 事实投影编排器（D2/D3：独立 flag，默认关闭；
+    # 仅 pipeline 材料就绪时生效）。构造无 I/O；flag off 时全部入口
+    # 仅一次布尔判断，evaluate 热路径零新增开销。
+    ct_projection_service = CtProjectionService(
+        settings=settings,
+        store=store,
+        state_service=security_state_service,
+    )
     evaluation_service = EvaluationService(
         policy_service=policy_service,
         audit_service=audit_service,
@@ -141,6 +150,7 @@ def create_app(
         memory_guard_service=memory_guard_service,
         v21_shadow_service=v21_shadow_service,
         v21_pipeline=v21_pipeline_service,
+        ct_projection_service=ct_projection_service,
     )
     task_ingress_service = TaskIngressService(store=store, settings=settings)
 
