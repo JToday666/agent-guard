@@ -57,6 +57,9 @@ export function registerBeforeInstall(hookContext: HookContext): void {
 export function registerObservationHooks(hookContext: HookContext): void {
   const { api, config, makeClient, sessionState } = hookContext;
   for (const hookName of OPENCLAW_OBSERVATION_HOOKS as readonly PluginHookName[]) {
+    // RTE-03：after_tool_call 的通用观察事件照旧注册；另有专用 terminal
+    // closure handler 额外产出 runtime_outcome 回执（两者互补，spike Q11
+    // 证明同 hook 多 handler 均会运行且异常隔离）。
     api.on(
       hookName,
       (event: unknown, context: Record<string, unknown>) => {

@@ -26,13 +26,18 @@ import {
   registerLlmOutput,
 } from "./hooks/model.js";
 import {
+  registerAfterToolCall,
   registerBeforeToolCall,
   registerToolResultPersist,
 } from "./hooks/tool.js";
 import { scheduleHeartbeat } from "./runtime/heartbeat.js";
 import { RuntimeOutcomeDelivery } from "./runtime/outcome-delivery.js";
 import { evaluatePluginRegistration } from "./runtime/registration-gate.js";
-import type { SessionState, ToolCallState } from "./runtime/state.js";
+import {
+  EvidenceDegradationTracker,
+  type SessionState,
+  type ToolCallState,
+} from "./runtime/state.js";
 import type { OpenClawPluginConfigInput } from "./types.js";
 
 const PLUGIN_VERSION = "0.1.0-beta.1";
@@ -103,6 +108,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       outcomeDelivery,
       sessionState: new Map<string, SessionState>(),
       toolCallState: new Map<string, ToolCallState>(),
+      degradations: new EvidenceDegradationTracker(),
     };
 
     let stopHeartbeat: (() => void) | null = null;
@@ -116,6 +122,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           makeClient,
           PLUGIN_VERSION,
           runtimeVersion,
+          hookContext.degradations,
         );
       },
       stop() {
@@ -136,6 +143,8 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     registerBeforeMessageWrite(hookContext);
     registerBeforeAgentFinalize(hookContext);
     registerObservationHooks(hookContext);
+    // 注册顺序与 hook-contract.mjs OPENCLAW_REQUIRED_HOOKS 一致（观察组末尾）。
+    registerAfterToolCall(hookContext);
   },
 });
 

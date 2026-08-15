@@ -10,14 +10,51 @@ import {
   logDiagnostic,
 } from "../guard-api-client.js";
 import { isDisabled } from "./enforcement.js";
+import type { EvidenceDegradationTracker } from "./state.js";
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
+
+/**
+ * RTE-03（契约 02 §11 TARGET 子集）：结构化 enforcement 能力声明。
+ * 任何使 terminal closure 不成立或降级的事件都不得继续声称 C2：
+ * 容量耗尽、native action id 缺失、correlation 丢失或 local_fallback
+ * 关联都会使 after hook 跳过终态闭环（评审 P1）。
+ */
+export const C2_DEMOTION_REASONS = [
+  "tool_call_state_capacity_exhausted",
+  "after_tool_call_missing_action_id",
+  "after_tool_call_correlation_missing",
+  "after_tool_call_policy_linkage_missing",
+  "after_tool_call_local_fallback_correlation",
+] as const;
+
+export function buildRuntimeEnforcementCapability(
+  degradations?: EvidenceDegradationTracker,
+): Record<string, unknown> {
+  const snapshot = degradations?.snapshot();
+  const byReason = snapshot?.byReason ?? {};
+  const c2Demoted = C2_DEMOTION_REASONS.some(
+    (reason) => (byReason[reason] ?? 0) > 0,
+  );
+  return {
+    contract: "1.0",
+    profiles: {
+      C0_observe: true,
+      C1_pre_execution_enforcement: true,
+      C2_execution_closure: !c2Demoted,
+      C4_result_isolation: true,
+    },
+    correlation: { stable_native_action_id: !c2Demoted },
+    evidence_degradation: snapshot?.total ?? 0,
+  };
+}
 
 export function scheduleHeartbeat(
   config: ReturnType<typeof buildPluginConfig>,
   makeClient: () => GuardApiClient,
   pluginVersion: string,
   runtimeVersion: string,
+  degradations?: EvidenceDegradationTracker,
 ): () => void {
   if (!config.adapterToken || isDisabled(config)) {
     return () => undefined;
@@ -54,6 +91,8 @@ export function scheduleHeartbeat(
           fail_closed_stages: [...OPENCLAW_FAIL_CLOSED_HOOKS],
           enforcement_mode: config.enforcementMode,
           redaction: { enabled: true, preview_limit: 2_000 },
+          runtime_enforcement_contract:
+            buildRuntimeEnforcementCapability(degradations),
         },
       })
       .catch((error) => {

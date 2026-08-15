@@ -25,7 +25,8 @@ test("reliability runner plans every registered hook for each iteration", async 
     message_send_proposed: 2,
     config_audit: 2,
     tool_result_produced: 2,
-    runtime_observation: 34,
+    // RTE-03：after_tool_call 进入观察组 → 18 个观察 hook × 2 轮。
+    runtime_observation: 36,
   });
   assert.deepEqual(expectedReliabilityEventCounts(50), {
     tool_call_proposed: 50,
@@ -34,7 +35,7 @@ test("reliability runner plans every registered hook for each iteration", async 
     message_send_proposed: 50,
     config_audit: 50,
     tool_result_produced: 50,
-    runtime_observation: 850,
+    runtime_observation: 900,
   });
 
   for (const hookName of RELIABILITY_HOOKS) {
@@ -114,9 +115,10 @@ test("reliability runner fetches missing traces beyond audit list cap", async ()
   );
   const summary = summarizeReliabilityEvents(plan, events);
 
-  assert.equal(latestPage.length, 1050);
+  // RTE-03：24 hook × 50 轮 = 1200 case；cap 内 100 个 trace 需补拉。
+  assert.equal(latestPage.length, 1100);
   assert.equal(fetchedTraceIds.length, 100);
-  assert.equal(events.length, 1150);
+  assert.equal(events.length, 1200);
   assert.deepEqual(summary.missing_traces, []);
   assert.equal(summary.ok, true);
 });

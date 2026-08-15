@@ -3,6 +3,7 @@ import {
   buildRuntimeOutcomeAuditEvent,
   type OutcomeApprovalEvidence,
   type RuntimeOutcomeKind,
+  type TerminalInterventionType,
 } from "../mapping/audit-outcomes.js";
 import type {
   AgentGuardPluginConfig,
@@ -22,6 +23,13 @@ export type FireRuntimeOutcomeParams = {
   stage?: string;
   logLabel: string;
   delivery: RuntimeOutcomeDelivery;
+  // RTE-03 terminal closure（契约 03 §6）
+  interventionType?: TerminalInterventionType;
+  invokedAt?: string | null;
+  completedAt?: string;
+  error?: string | null;
+  /** 显式顶层时间戳；terminal 回执须与 completedAt 同源（Core 一致性校验）。 */
+  timestamp?: string;
 };
 
 /**
@@ -44,6 +52,11 @@ export function fireRuntimeOutcomeReceipt(
     stage,
     logLabel,
     delivery,
+    interventionType,
+    invokedAt,
+    completedAt,
+    error,
+    timestamp,
   } = params;
   if (!evaluation.policy_audit_id) {
     logDiagnostic(
@@ -62,12 +75,17 @@ export function fireRuntimeOutcomeReceipt(
         approval,
         resultDisposition,
         stage,
+        interventionType,
+        invokedAt,
+        completedAt,
+        error,
+        timestamp,
       },
     );
     delivery.submit(receipt, client, logLabel);
-  } catch (error) {
+  } catch (error_) {
     logDiagnostic(config, `${logLabel}: runtime outcome mapping failed`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error_ instanceof Error ? error_.message : String(error_),
     });
   }
 }

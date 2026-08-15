@@ -8,12 +8,20 @@ import type {
 
 /**
  * runtime_outcome 干预种类（契约 §9.4 / §13）。
- * 插件只产生自己可确证的三类：执行前拒绝、审批后放行、工具结果隔离/改写。
+ * 插件只产生自己可确证的干预：执行前拒绝、审批后放行、工具结果隔离/改写，
+ * 以及 RTE-03 terminal closure 的 execution_completed / execution_failed。
  */
 export type RuntimeOutcomeKind =
   | "pre_execution_deny"
   | "approval_release"
-  | "tool_result_quarantine";
+  | "tool_result_quarantine"
+  | "execution_completed"
+  | "execution_failed";
+
+/** RTE-03（契约 02 §10）：terminal 回执的干预类型；不新增 outcome kind。 */
+export type TerminalInterventionType =
+  | "runtime_observation"
+  | "enforcement_violation";
 
 export type OutcomeApprovalEvidence = {
   approvalId: string;
@@ -29,13 +37,22 @@ export type RuntimeOutcomeOptions = {
   timestamp?: string;
   reason?: string;
   stage?: string;
+  // RTE-03 terminal closure（契约 03 §6）
+  interventionType?: TerminalInterventionType;
+  invokedAt?: string | null;
+  completedAt?: string;
+  error?: string | null;
 };
 
 const INTERVENTION_REASON: Record<RuntimeOutcomeKind, string> = {
   pre_execution_deny: "策略拒绝后插件在动作执行前终止",
   approval_release: "人工审批仅本次放行后继续执行",
   tool_result_quarantine: "工具结果在持久化前被隔离或改写",
+  execution_completed: "Runtime 观察到已放行调用真实执行完成",
+  execution_failed: "Runtime 观察到已放行调用真实执行失败",
 };
+
+const MAX_TERMINAL_ERROR_CHARS = 2_000;
 
 /**
  * 构造 runtime_outcome AuditEvent（契约 §8.2/§8.3/§12.2/§13）。
@@ -114,7 +131,7 @@ export function buildRuntimeOutcomeAuditEvent(
     },
     evidence: {
       intervention: {
-        type: kind,
+        type: interventionType(kind, options),
         reason: options.reason ?? INTERVENTION_REASON[kind],
       },
       execution: executionEvidence(kind, timestamp, options),
@@ -123,6 +140,17 @@ export function buildRuntimeOutcomeAuditEvent(
       approval: approvalEvidence(kind, approval, evaluation),
     },
   };
+}
+
+/** terminal 回执用 runtime_observation/enforcement_violation；其余回执用 kind 自身。 */
+function interventionType(
+  kind: RuntimeOutcomeKind,
+  options: RuntimeOutcomeOptions,
+): string {
+  if (kind === "execution_completed" || kind === "execution_failed") {
+    return options.interventionType ?? "runtime_observation";
+  }
+  return kind;
 }
 
 function receiptKind(
@@ -168,6 +196,12 @@ function outcomeSummary(
   if (kind === "approval_release") {
     return "OpenClaw 在人工审批放行后继续执行";
   }
+  if (kind === "execution_completed") {
+    return "OpenClaw 观察到已放行调用真实执行完成";
+  }
+  if (kind === "execution_failed") {
+    return "OpenClaw 观察到已放行调用真实执行失败";
+  }
   return "OpenClaw 在持久化前隔离或改写了工具结果";
 }
 
@@ -196,6 +230,29 @@ function executionEvidence(
       invoked_at: null,
       completed_at: timestamp,
       error: null,
+      tool_result_entered_context: null,
+      persisted: null,
+    };
+  }
+  if (kind === "execution_completed") {
+    // RTE-03 §6：after hook 不能证明 result 已进入上下文或已持久化，保持 null。
+    return {
+      status: "executed",
+      receipt_recorded: true,
+      invoked_at: options.invokedAt ?? null,
+      completed_at: options.completedAt ?? timestamp,
+      error: null,
+      tool_result_entered_context: null,
+      persisted: null,
+    };
+  }
+  if (kind === "execution_failed") {
+    return {
+      status: "failed",
+      receipt_recorded: true,
+      invoked_at: options.invokedAt ?? null,
+      completed_at: options.completedAt ?? timestamp,
+      error: boundedTerminalError(options.error),
       tool_result_entered_context: null,
       persisted: null,
     };
@@ -248,6 +305,21 @@ function resultEvidence(
       sanitized: null,
     };
   }
+  if (kind === "execution_completed") {
+    // §6：不得因 after hook 携带 result 就断言进入上下文/已持久化。
+    return {
+      disposition: "unknown",
+      summary: null,
+      sanitized: null,
+    };
+  }
+  if (kind === "execution_failed") {
+    return {
+      disposition: "not_applicable",
+      summary: "执行失败，没有可用工具结果",
+      sanitized: null,
+    };
+  }
   const disposition = options.resultDisposition ?? "quarantined";
   return {
     disposition,
@@ -287,4 +359,18 @@ function approvalEvidence(
     decision: null,
     resolved_at: null,
   };
+}
+
+/** execution_failed 的 error 必须是有界非空字符串（契约 02 §9）。
+ * Core RuntimeExecutionEvidence.error 上限 2000 字符，截断时省略号计入上限，
+ * 否则长堆栈会使回执被 Guard API 422 拒收并丢失失败证据。 */
+function boundedTerminalError(value: string | null | undefined): string {
+  const text =
+    typeof value === "string" && value.length > 0
+      ? value
+      : "unknown tool failure";
+  if (text.length <= MAX_TERMINAL_ERROR_CHARS) {
+    return text;
+  }
+  return `${text.slice(0, MAX_TERMINAL_ERROR_CHARS - 3)}...`;
 }

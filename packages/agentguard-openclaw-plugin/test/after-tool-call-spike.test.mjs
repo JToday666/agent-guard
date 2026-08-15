@@ -1,7 +1,7 @@
 // PR-RTE-02 SDK spike — in-process harness for OpenClaw `after_tool_call`.
 //
 // Evidence layer: in_process_harness. Drives the REAL hook runner of the pinned
-// openclaw@2026.6.6 SDK through its public `plugin-sdk/hook-runtime` subpath;
+// openclaw@2026.7.1-2 SDK through its public `plugin-sdk/hook-runtime` subpath;
 // no host simulation of dispatch semantics is involved. Runtime questions that
 // the in-process layer cannot settle (blocked-call emission, real toolCallId
 // stability, hook ordering against tool_result_persist, retry identity) are
@@ -31,7 +31,9 @@ function loadCapability() {
 }
 
 function makeRegistry(typedHooks) {
-  return { hooks: [], typedHooks };
+  // 2026.7.1-2 hook runner composes registry sources and iterates
+  // registry.plugins; keep it empty but iterable.
+  return { hooks: [], plugins: [], typedHooks };
 }
 
 function typedHook(pluginId, hookName, handler, options = {}) {
@@ -242,7 +244,7 @@ test("capability fixture: structure is complete and consistent with spike eviden
 
   assert.equal(capability.runtime, "openclaw");
   assert.ok(
-    capability.openclaw_version.startsWith("2026.6.6"),
+    capability.openclaw_version.startsWith("2026.7.1-2"),
     "capability must stay anchored to the pinned SDK",
   );
   assert.ok(["PASS", "FAIL"].includes(capability.c2_gate));
@@ -429,18 +431,18 @@ test("live evidence: report structure covers the three scenarios on a real runti
   assert.deepEqual(ids, ["S-allow", "S-error", "S-deny"]);
 });
 
-test("live evidence: version scoping — live observations are bound to 2026.7.1-2, not the frozen pin", () => {
+test("live evidence: pin alignment — live observations were recorded on the same version as the frozen pin (rev5)", () => {
   const capability = loadCapability();
   const evidence = loadLiveEvidence();
 
   // The frozen pin anchors the capability fixture...
-  assert.ok(capability.openclaw_version.startsWith("2026.6.6"));
-  // ...while the live evidence declares the runtime it was recorded on.
+  assert.ok(capability.openclaw_version.startsWith("2026.7.1-2"));
+  // ...and the live evidence declares the SAME runtime: rev5 bumped the
+  // evidence pin to the version the live forensics were recorded on.
   assert.equal(evidence.runtime.openclaw_cli_version, "2026.7.1-2");
 
   // Every question answered by isolated_runtime evidence must carry the
-  // matching evidence_version so 2026.7.1-2 observations are never silently
-  // attributed to the pinned 2026.6.6.
+  // matching evidence_version so live observations are always version-scoped.
   const liveQuestions = capability.questions.filter(
     (question) => question.evidence_layer === "isolated_runtime",
   );
@@ -453,13 +455,13 @@ test("live evidence: version scoping — live observations are bound to 2026.7.1
     );
   }
 
-  // Conservative gate rule on the pin: with pinned-version criteria not all
-  // yes, the overall gate must stay FAIL until 2026.6.6 live evidence exists.
-  assert.equal(capability.c2_gate, "FAIL");
-  const pinnedNotAllYes = capability.c2_gate_criteria.some(
-    (criterion) => criterion.verdict !== "yes",
+  // Gate rule on the pin: every criterion deterministically satisfied on the
+  // pinned SDK flips the gate PASS; any regression below all-yes must fail.
+  const allYes = capability.c2_gate_criteria.every(
+    (criterion) => criterion.verdict === "yes",
   );
-  assert.equal(pinnedNotAllYes, true);
+  assert.equal(allYes, true);
+  assert.equal(capability.c2_gate, "PASS");
 });
 
 test("live evidence: blocked call has zero executions yet after_tool_call was emitted by the real host (Q9)", () => {

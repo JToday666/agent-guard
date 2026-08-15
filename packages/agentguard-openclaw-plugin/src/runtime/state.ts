@@ -1,5 +1,10 @@
 import { redactUnknownCredentials, stringPreview } from "../security.js";
-import type { DerivedResource, GuardEvent, JsonObject } from "../types.js";
+import type {
+  DerivedResource,
+  GuardEvaluationResponse,
+  GuardEvent,
+  JsonObject,
+} from "../types.js";
 
 export type SessionState = {
   userTask?: string;
@@ -17,6 +22,21 @@ export type TaskExtractionOptions = {
   contentFallback?: boolean;
 };
 
+/** RTE-03（契约 03 §3.1）：before_tool_call 显式 gate 状态机。 */
+export type EnforcementGateState =
+  | "evaluating"
+  | "allowed"
+  | "approval_pending"
+  | "approval_released"
+  | "blocked"
+  | "timed_out"
+  | "binding_failed";
+
+/** RTE-03（契约 03 §3.2）：correlation 身份来源；local_fallback 不具备 C2 资格。 */
+export type ToolCallCorrelationSource =
+  | "native_tool_call_id"
+  | "local_fallback";
+
 export type ToolCallState = {
   userTask?: string;
   sourceTrust?: string;
@@ -29,7 +49,121 @@ export type ToolCallState = {
   derivedResources: DerivedResource[];
   derivedPaths: string[];
   toolParams: JsonObject;
+
+  // RTE P0（契约 03 §3.1）
+  correlationSource: ToolCallCorrelationSource;
+  guardEventId: string;
+  traceId: string;
+  policyAuditId?: string;
+  decisionId?: string;
+  decision?: "allow" | "ask" | "deny";
+  gateState: EnforcementGateState;
+  approvalId?: string | null;
+  approvalStatus?: "pending" | "allowed" | "denied" | "expired" | "unknown";
+  terminalStatus?: "executed" | "failed";
+  terminalObservedAt?: string;
+  resultPersistObserved?: boolean;
+  /** 回执已入 durable spool（或被确定性跳过）后置 true，驱动可驱逐判定（§8.2）。 */
+  receiptQueued?: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+  /** terminal 回执构造所需的完整关联，避免 after hook 重查（§5.1）。 */
+  guardEvent?: GuardEvent;
+  evaluation?: GuardEvaluationResponse;
 };
+
+/** RTE-03 §8：active correlation state 硬容量；耗尽时不淘汰受保护状态。 */
+export const TOOL_CALL_STATE_ACTIVE_LIMIT = 500;
+/** §8.3：execution_completed 后保留 grace TTL，供 tool_result_persist 补充标记。 */
+export const TERMINAL_COMPLETION_GRACE_MS = 30_000;
+
+export type EvidenceDegradationReason =
+  | "after_tool_call_missing_action_id"
+  | "after_tool_call_correlation_missing"
+  | "after_tool_call_policy_linkage_missing"
+  | "after_tool_call_local_fallback_correlation"
+  | "tool_call_state_capacity_exhausted";
+
+const DEGRADATION_COUNT_CAP = 10_000;
+
+/** 有界 evidence degradation 计数（§8.5），由 heartbeat 能力声明暴露。 */
+export class EvidenceDegradationTracker {
+  private total = 0;
+  private readonly byReason = new Map<EvidenceDegradationReason, number>();
+
+  record(reason: EvidenceDegradationReason): void {
+    if (this.total < DEGRADATION_COUNT_CAP) {
+      this.total += 1;
+    }
+    const current = this.byReason.get(reason) ?? 0;
+    if (current < DEGRADATION_COUNT_CAP) {
+      this.byReason.set(reason, current + 1);
+    }
+  }
+
+  snapshot(): { total: number; byReason: Record<string, number> } {
+    return {
+      total: this.total,
+      byReason: Object.fromEntries(this.byReason.entries()),
+    };
+  }
+}
+
+/** §8.4：这些状态不得因普通容量压力被静默淘汰。 */
+export function isToolCallStateProtected(state: ToolCallState): boolean {
+  if (
+    state.gateState === "evaluating" ||
+    state.gateState === "approval_pending"
+  ) {
+    return true;
+  }
+  return (
+    (state.gateState === "allowed" ||
+      state.gateState === "approval_released") &&
+    state.terminalStatus === undefined
+  );
+}
+
+/** §8.2/§8.3：生命周期驱逐判定；受保护状态永远 false。 */
+export function canEvictToolCallState(
+  state: ToolCallState,
+  nowMs: number,
+): boolean {
+  if (isToolCallStateProtected(state)) {
+    return false;
+  }
+  if (
+    state.gateState === "blocked" ||
+    state.gateState === "timed_out" ||
+    state.gateState === "binding_failed"
+  ) {
+    return state.receiptQueued === true;
+  }
+  if (state.terminalStatus === "failed") {
+    return state.receiptQueued === true;
+  }
+  if (state.terminalStatus === "executed") {
+    return nowMs - state.updatedAtMs >= TERMINAL_COMPLETION_GRACE_MS;
+  }
+  return false;
+}
+
+/** 更新已关联状态并刷新时间戳；不存在时返回 undefined。 */
+export function patchToolCallState(
+  cache: Map<string, ToolCallState>,
+  callId: string,
+  patch: Partial<ToolCallState>,
+  nowMs: number = Date.now(),
+): ToolCallState | undefined {
+  const state = cache.get(callId);
+  if (!state) {
+    return undefined;
+  }
+  Object.assign(state, patch, { updatedAtMs: nowMs });
+  cache.delete(callId);
+  cache.set(callId, state);
+  return state;
+}
 
 export function rememberSessionState(
   cache: Map<string, SessionState>,
@@ -285,9 +419,18 @@ export function withCachedToolContext<T extends object, C extends object>(
   };
 }
 
+export type RememberToolCallStateOptions = {
+  /** before hook 观察到的原生 toolCallId；缺失时 correlation 降级为 local_fallback。 */
+  nativeToolCallId?: string | null;
+  tracker?: EvidenceDegradationTracker;
+  nowMs?: number;
+  limit?: number;
+};
+
 export function rememberToolCallState(
   cache: Map<string, ToolCallState>,
   event: GuardEvent,
+  options: RememberToolCallStateOptions = {},
 ): void {
   if (
     event.event_type !== "tool_call_proposed" ||
@@ -298,7 +441,34 @@ export function rememberToolCallState(
   }
   const payload = event.payload;
   const callId = payload.tool.call_id;
-  setLimited(cache, callId, {
+  const nativeToolCallId =
+    typeof options.nativeToolCallId === "string" &&
+    options.nativeToolCallId.length > 0
+      ? options.nativeToolCallId
+      : undefined;
+  const correlationSource: ToolCallCorrelationSource =
+    nativeToolCallId && nativeToolCallId === callId
+      ? "native_tool_call_id"
+      : "local_fallback";
+  const nowMs = options.nowMs ?? Date.now();
+  const limit = options.limit ?? TOOL_CALL_STATE_ACTIVE_LIMIT;
+  if (!cache.has(callId) && cache.size >= limit) {
+    // §8.4/§8.5：容量耗尽时先回收可驱逐状态；回收失败则不静默淘汰
+    // 受保护状态——本次调用放弃 C2 correlation，C1 enforcement 照常继续。
+    let reclaimed = false;
+    for (const [key, state] of cache) {
+      if (canEvictToolCallState(state, nowMs)) {
+        cache.delete(key);
+        reclaimed = true;
+        break;
+      }
+    }
+    if (!reclaimed) {
+      options.tracker?.record("tool_call_state_capacity_exhausted");
+      return;
+    }
+  }
+  cache.set(callId, {
     userTask: event.security_context.user_task,
     sourceTrust: event.security_context.source_trust,
     sourceType: event.security_context.source_type,
@@ -310,6 +480,12 @@ export function rememberToolCallState(
     derivedResources: payload.derived_resources,
     derivedPaths: event.security_context.derived_paths,
     toolParams: payload.arguments,
+    correlationSource,
+    guardEventId: event.event_id,
+    traceId: event.trace_id,
+    gateState: "evaluating",
+    createdAtMs: nowMs,
+    updatedAtMs: nowMs,
   });
 }
 

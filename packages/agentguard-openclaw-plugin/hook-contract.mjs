@@ -26,6 +26,8 @@ const observationHooks = [
   "model_call_ended",
   "cron_changed",
   "resolve_exec_env",
+  // RTE-03：观察型 terminal closure hook；非 fail-closed，不参与阻断。
+  "after_tool_call",
 ];
 
 export const OPENCLAW_OBSERVATION_HOOKS = Object.freeze(observationHooks);

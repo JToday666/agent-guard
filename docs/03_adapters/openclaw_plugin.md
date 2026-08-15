@@ -61,7 +61,8 @@ packages/agentguard-openclaw-plugin/
 
 | Hook                                      | 状态                                     | 行为                                                                                                                                                            |
 | ----------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `before_tool_call`                        | 已实现并通过本机 OpenClaw runtime 验证   | 映射为 `tool_call_proposed`；`allow` 放行，`deny` block，`ask` 等待 Guard approval                                                                              |
+| `before_tool_call`                        | 已实现并通过本机 OpenClaw runtime 验证   | 映射为 `tool_call_proposed`；`allow` 放行，`deny` block，`ask` 等待 Guard approval；同步写入 GateState 与 policy linkage（RTE-03）                                    |
+| `after_tool_call`                         | 已实现（PR-RTE-03 terminal closure）     | 观察型：对已放行调用产 `execution_completed/failed` runtime_outcome 回执；blocked gate 不派生 terminal fact（Q9），成败不依赖字段存在性（Q5）              |
 | `message_sending`                         | 已实现并通过本机 OpenClaw runtime 验证   | 映射为 `message_send_proposed`；`allow` 放行，`deny`/拒绝/超时 cancel                                                                                           |
 | `before_prompt_build`                     | 已实现                                   | 观察最终 prompt 构造前状态并缓存关联字段；不返回该 hook 不支持的 `block`                                                                                        |
 | `before_agent_run`                        | 已实现                                   | 正式输入 gate：并行评估当前输入 `model_input_prepared` 与历史工具消息 `context_assembled`；任一 `deny`/`ask` 即返回 `outcome=block`，API 异常 fail closed       |
@@ -80,7 +81,9 @@ packages/agentguard-openclaw-plugin/
 
 ## 5. 事件映射
 
-`before_tool_call` 使用 OpenClaw 的 `toolName`、`params`、`toolKind`、`toolInputKind`、`toolCallId`、`runId` 构造 `tool_call_proposed`。`derivedPaths` 只作为 best-effort 资源提示，不作为唯一安全解析依据。
+`before_tool_call` 使用 OpenClaw 的 `toolName`、`params`、`toolKind`、`toolInputKind`、`toolCallId`、`runId` 构造 `tool_call_proposed`。`derivedPaths` 只作为 best-effort 资源提示，不作为唯一安全解析依据。RTE-03 起，该 hook 在返回前同步写入 GateState（`evaluating/allowed/approval_pending/approval_released/blocked/timed_out/binding_failed`）与 policy linkage（`policy_audit_id/decision_id/decision`），禁止 fire-and-forget；native `toolCallId` 缺失时 correlation 降级 `local_fallback`，后续不伪造 C2 terminal 事实。
+
+`after_tool_call` 是 RTE-03 terminal closure 的观察面：对 gate 预期执行（`allowed/approval_released`）且原生身份关联成立的调用，根据 SDK 事件产 `execution_completed`（`status=executed`）或 `execution_failed`（`status=failed` + bounded error）的 runtime_outcome 回执，`intervention.type=runtime_observation`。两条硬安全约束：Q9——pin `openclaw@2026.7.1-2` 已证明 blocked 调用也会触发 after hook（零执行），故 `blocked/timed_out/binding_failed` gate 下只记诊断、绝不派生 terminal fact；Q5——falsy 成功结果的 after 事件既无 `result` 也无 `error`，成败只能用非空 `error` 字符串判定。回执中 `tool_result_entered_context/persisted` 保持 `null`（after hook 不能证明），`side_effects` 一律 `not_measured`。
 
 `message_sending` 使用 `to`、`content`、`channelId`、`sessionKey`、`messageId` 构造 `message_send_proposed`。该 hook 不强依赖 `runId`，优先用 `sessionKey` 关联 trace。
 
@@ -152,7 +155,7 @@ pnpm openclaw:plugin:verify
   "plugin": {
     "id": "agentguard-security",
     "status": "loaded",
-    "hookCount": 23
+    "hookCount": 24
   },
   "shape": "hook-only",
   "typedHooks": [
@@ -178,7 +181,8 @@ pnpm openclaw:plugin:verify
     { "name": "model_call_started", "priority": 0 },
     { "name": "model_call_ended", "priority": 0 },
     { "name": "cron_changed", "priority": 0 },
-    { "name": "resolve_exec_env", "priority": 0 }
+    { "name": "resolve_exec_env", "priority": 0 },
+    { "name": "after_tool_call", "priority": 0 }
   ]
 }
 ```

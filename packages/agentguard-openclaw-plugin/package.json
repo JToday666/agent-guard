@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@types/node": "25.9.1",
-    "openclaw": "2026.6.6",
+    "openclaw": "2026.7.1-2",
     "typescript": "6.0.3"
   },
   "openclaw": {
@@ -60,8 +60,8 @@
       "minGatewayVersion": "2026.6.6"
     },
     "build": {
-      "openclawVersion": "2026.6.6",
-      "pluginSdkVersion": "2026.6.6"
+      "openclawVersion": "2026.7.1-2",
+      "pluginSdkVersion": "2026.7.1-2"
     }
   }
 }

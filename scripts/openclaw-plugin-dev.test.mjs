@@ -1074,7 +1074,7 @@ test("executeVerify fails when inspect hookCount=0 and heartbeat is stale", asyn
     world.deps.heartbeatTimeoutMs = 5;
     await assert.rejects(
       () => executeVerify(world.deps),
-      /expected hookCount=23, got 0/,
+      /expected hookCount=24, got 0/,
     );
   } finally {
     world.cleanup();
@@ -1091,7 +1091,7 @@ test("executeVerify fails when fresh heartbeat lacks loaded/23 hooks", async () 
     });
     await assert.rejects(
       () => executeVerify(world.deps),
-      /expected hookCount=23, got 0/,
+      /expected hookCount=24, got 0/,
     );
   } finally {
     world.cleanup();
