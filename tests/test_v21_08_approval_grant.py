@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import base64
+import threading
 
 import pytest
 
@@ -41,7 +42,11 @@ from guard_api.services.approval import (
     derive_approval_grant_fingerprint,
 )
 from guard_api.settings import GuardApiSettings
-from guard_api.storage.base import ApprovalStateConflictError, TaskFactRecord
+from guard_api.storage.base import (
+    ApprovalStateConflictError,
+    SecurityStateRecord,
+    TaskFactRecord,
+)
 from guard_api.storage.memory import MemoryControlPlaneStore
 
 #: ≥32 字节的 base64url 测试密钥（与 T4 shadow 测试同口径）。
@@ -331,6 +336,113 @@ def test_projection_replay_is_noop_without_duplicate_grant() -> None:
         rig.store.get_security_state(_SCOPE_DIGEST).state_version
         == version_after_first
     )
+
+
+def test_grant_projection_survives_version_advanced_by_other_producer() -> None:
+    """Major 2：版本已被其他投影推进后，新 grant 投影持锁重读最新 base。"""
+    rig = _Rig()
+    rig.commit_task_fact()
+    first = rig.open_pending_approval(event_id="evt_concurrent_a")
+    rig.approval_service.resolve_approval(
+        first.approval_id, "allow_once", resolution_source="human"
+    )
+    assert len(rig.active_grants()) == 1
+
+    # 并发推进者：另一 approval 的投影把同 scope 版本 1→2。
+    second = rig.open_pending_approval(event_id="evt_concurrent_b")
+    rig.approval_service.resolve_approval(
+        second.approval_id, "allow_once", resolution_source="human"
+    )
+    assert rig.store.get_security_state(_SCOPE_DIGEST).state_version == 2
+
+    # 新 grant 投影仍须成功：版本推进、grant 在场、不留全域 dirty。
+    third = rig.open_pending_approval(event_id="evt_concurrent_c")
+    rig.approval_service.resolve_approval(
+        third.approval_id, "allow_once", resolution_source="human"
+    )
+    assert len(rig.active_grants()) == 3
+    record = rig.store.get_security_state(_SCOPE_DIGEST)
+    assert record.state_version == 3
+    assert record.dirty is False
+    assert record.dirty_domains == []
+
+
+def test_grant_projection_base_read_and_apply_are_atomic_under_scope_lock(
+    monkeypatch,
+) -> None:
+    """Major 2：base 读取 → delta 构造 → project_committed 整段持锁原子。
+
+    在 delta 构造点注入一个同样竞争 scope_lock 的并发推进者：
+    修复后 base 读取已持锁，并发者阻塞至本投影完成（base 新鲜，
+    投影成功）；旧实现锁外读取会让并发者抢先推进 → CAS 版本冲突
+    （base_state_version 已陈旧）→ fail-closed，grant 永久不投影。
+    """
+    rig = _Rig()
+    rig.commit_task_fact()
+    seed = rig.open_pending_approval(event_id="evt_lock_seed")
+    rig.approval_service.resolve_approval(
+        seed.approval_id, "allow_once", resolution_source="human"
+    )
+    assert rig.store.get_security_state(_SCOPE_DIGEST).state_version == 1
+
+    target = rig.open_pending_approval(event_id="evt_lock_target")
+    access = rig.state_service.store_access
+    racing = threading.Event()
+
+    def _racing_advance() -> None:
+        # 并发推进者：竞争同一 scope_lock 后做 CAS 版本 bump（payload 不变）。
+        with access.scope_lock(_SCOPE_DIGEST):
+            latest = access.get_security_state(_SCOPE_DIGEST)
+            assert latest is not None
+            bumped = SecurityStateRecord(
+                scope_digest=_SCOPE_DIGEST,
+                state_version=latest.state_version + 1,
+                canonical_payload=latest.canonical_payload,
+                dirty=latest.dirty,
+                dirty_domains=list(latest.dirty_domains),
+                projector_version=latest.projector_version,
+                updated_at=latest.updated_at,
+            )
+            access.cas_security_state(
+                _SCOPE_DIGEST, latest.state_version, bumped
+            )
+        racing.set()
+
+    original_build = approval_module._build_approval_grant_delta
+
+    def _build_with_racing_advance(*args, **kwargs):
+        delta = original_build(*args, **kwargs)
+        thread = threading.Thread(target=_racing_advance)
+        thread.start()
+        # 修复后并发者被锁阻塞至本投影完成 → 等待超时；旧实现锁外
+        # 构造时并发者会立即完成推进。两种情形下均继续返回旧 base
+        # 构造的 delta，由后续断言判定成败。
+        thread.join(timeout=2.0)
+        return delta
+
+    monkeypatch.setattr(
+        approval_module, "_build_approval_grant_delta", _build_with_racing_advance
+    )
+
+    resolved = rig.approval_service.resolve_approval(
+        target.approval_id, "allow_once", resolution_source="human"
+    )
+    assert resolved.status == "resolved"
+
+    # 投影成功：target grant 在场且不留 dirty（旧实现此处 fail-closed）。
+    grants = rig.active_grants()
+    assert len(grants) == 2
+    assert any(
+        grant.source_ref == f"approval:{target.approval_id}" for grant in grants
+    )
+    record = rig.store.get_security_state(_SCOPE_DIGEST)
+    assert record.dirty is False
+    assert record.dirty_domains == []
+
+    # 并发推进者在锁释放后完成 bump（1→2 投影 + 2→3 bump）。
+    racing.wait(timeout=5.0)
+    assert racing.is_set()
+    assert rig.store.get_security_state(_SCOPE_DIGEST).state_version == 3
 
 
 # ---------------------------------------------------------------------------

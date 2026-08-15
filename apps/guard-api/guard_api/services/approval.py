@@ -284,11 +284,15 @@ class ApprovalService:
            → ``SecurityStateService.project_committed``（经注入的
            ``verify_source_committed`` 钩子复核审批终态，F0-8）。
 
-        幂等：同 approval 重复触发由 projector 五元组幂等键短路为
-        replayed_noop，不重复投影。grant 携带 usage_limit=1、
-        remaining_uses=1、delegable=false（core 强制）；expires_at 置
-        None（单次消费 + fingerprint 精确绑定即授权边界；生命周期语义
-        随 lease consume 端点决策记录承接，见模块 docstring 限制）。
+        幂等：同 approval 重复触发且 scope 状态版本未变时，由 projector
+        五元组幂等键（delta_digest 含 base_state_version）短路为
+        replayed_noop；若 base_state_version 已被其他投影推进，重放时
+        delta_digest 不同，不会命中 replayed_noop，而是命中
+        digest-conflict fail-closed 路径（不得静默覆盖）。grant 携带
+        usage_limit=1、remaining_uses=1、delegable=false（core 强制）；
+        expires_at 置 None（单次消费 + fingerprint 精确绑定即授权边界；
+        生命周期语义随 lease consume 端点决策记录承接，见模块 docstring
+        限制）。
         """
 
         if self.state_service is None:
@@ -353,32 +357,40 @@ class ApprovalService:
         grant = compile_approval_to_grant(projection_input, policy_context)
 
         # commit → project：先经既有 rebuild 钩子确保 scope 状态就绪，
-        # 再以读到的 state_version 为 CAS base 构造 delta（并发推进时
-        # core 抛 base_state_version_mismatch，由外层收敛为告警）。
-        self.state_service.ensure_ready(scope_digest)
-        current = self.state_service.store_access.get_security_state(scope_digest)
-        base_state_version = current.state_version if current is not None else 0
-        delta = _build_approval_grant_delta(
-            approval,
-            grant,
-            scope_digest=scope_digest,
-            base_state_version=base_state_version,
-        )
-        committed_record = CommittedRecord(
-            record_id=f"approval-grant:{approval.approval_id}",
-            committed=True,
-            source_record_type="approval",
-            source_record_id=approval.approval_id,
-            source_revision=_APPROVAL_SOURCE_REVISION,
-            scope_digest=scope_digest,
-            projector_version=PROJECTOR_VERSION,
-            delta=delta,
-        )
-        result = self.state_service.project_committed(
-            committed_record,
-            scope_digest=scope_digest,
-            verify_source_committed=self._verify_approval_committed,
-        )
+        # 再以读到的 state_version 为 CAS base 构造 delta。base 读取 →
+        # delta 构造 → project_committed 整段必须持 per-scope 编排锁
+        # （RLock，project_and_apply 内部重入无碍）：否则并发推进会
+        # 使 base 陈旧 → CAS 版本冲突 / base_state_version_mismatch →
+        # fail-closed 且置脏，grant 永久不投影。
+        with self.state_service.store_access.scope_lock(scope_digest):
+            self.state_service.ensure_ready(scope_digest)
+            current = self.state_service.store_access.get_security_state(
+                scope_digest
+            )
+            base_state_version = (
+                current.state_version if current is not None else 0
+            )
+            delta = _build_approval_grant_delta(
+                approval,
+                grant,
+                scope_digest=scope_digest,
+                base_state_version=base_state_version,
+            )
+            committed_record = CommittedRecord(
+                record_id=f"approval-grant:{approval.approval_id}",
+                committed=True,
+                source_record_type="approval",
+                source_record_id=approval.approval_id,
+                source_revision=_APPROVAL_SOURCE_REVISION,
+                scope_digest=scope_digest,
+                projector_version=PROJECTOR_VERSION,
+                delta=delta,
+            )
+            result = self.state_service.project_committed(
+                committed_record,
+                scope_digest=scope_digest,
+                verify_source_committed=self._verify_approval_committed,
+            )
         logger.info(
             "v21-08 approval grant projection %s for approval %s "
             "(grant_id=%s, state_version=%s)",
@@ -476,6 +488,11 @@ def approval_grant_fingerprint_projection(
 
     只投影创建期即固定的身份字段（确定性、禁 uuid / 随机量）；
     ``kind`` 判别键与 ActionIR 指纹投影空间域分离。
+
+    白名单字段均为 ``ApprovalRequest`` 创建期固定的身份字段，
+    其中 ``action_id`` 有意参与：它是创建期绑定的动作身份（非运行期
+    可变状态），剔除反而会放宽指纹绑定面、允许同 approval 被
+    投影到非预期动作。
     """
 
     return {
