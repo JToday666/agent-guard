@@ -17,8 +17,10 @@
 
 - 纯模型 + 纯函数 digest：无 state mutation、无 I/O、不产生
   ``GuardDecision``、不写 store；
-- ``declassifications`` 恒空、``current_action`` 恒 None、
-  ``memory_facts`` 由后续 PR 生产（占位语义登记在模型 docstring）。
+- ``declassifications`` 恒空（净化只能由 ``trusted_declassifier``
+  服务端记录表达，02 §5/CT-F0-02）；自 CT-PR-02b 起
+  ``memory_facts`` / ``current_action`` 由 fact_builder 写侧
+  handler 生产（占位语义历史登记见模型 docstring）。
 """
 
 from __future__ import annotations
@@ -54,11 +56,12 @@ class TransientSecurityFacts(BaseModel):
     保证不可变与确定性顺序（与 CT-PR-01 ``VerifiedSourceDescriptor``
     惯例一致）；JSON 序列化仍为数组。
 
-    本 PR（CT-PR-02a）占位语义：``declassifications`` 恒空（净化只能
-    由 ``trusted_declassifier`` 服务端记录表达，02 §5/CT-F0-02）、
-    ``current_action`` 恒 None、``memory_facts`` 待 2b 生产；
-    ``bundle_digest`` 由 ``compute_bundle_digest`` 装配后回填，
-    构造期默认空串。
+    字段生产口径：``declassifications`` 恒空（净化只能由
+    ``trusted_declassifier`` 服务端记录表达，02 §5/CT-F0-02）；
+    ``memory_facts`` / ``current_action`` 自 CT-PR-02b 起由
+    fact_builder 写侧 handler 生产（02a 阶段恒空/None 的占位
+    语义已由 02b 解除）；``bundle_digest`` 由
+    ``compute_bundle_digest`` 装配后回填，构造期默认空串。
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

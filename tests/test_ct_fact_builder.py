@@ -52,7 +52,8 @@ def freeze_yaml() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 构造工厂
+# 构造工厂（以下符号被 test_ct_fact_builder_write_path.py 导入复用，
+# 修改签名须同提交运行 write_path 套件）
 # ---------------------------------------------------------------------------
 
 
@@ -562,8 +563,9 @@ def test_fact_replay_content_perturbation_changes_digest() -> None:
 
 
 def test_unknown_event_type_yields_empty_bundle_with_degradation() -> None:
+    # 虚构事件类型（写侧三事件已在 Wave 2 注册，不能再用作未知样本）。
     event = _context_event([_context_source()]).model_copy(
-        update={"event_type": "memory_write_proposed"}
+        update={"event_type": "nonexistent_event_probe"}
     )
     bundle = build_transient_facts(event=event, inputs=_inputs())
     assert bundle.source_facts == ()

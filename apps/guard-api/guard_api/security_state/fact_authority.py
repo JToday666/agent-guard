@@ -58,9 +58,10 @@ TrustLevel = Literal["trusted", "untrusted", "unknown"]
 #: 默认表 trust 字段：memory 源为哨兵（YAML source_defaults.memory）。
 MemoryInheritTrust = TrustLevel | Literal["inherit_memory_fact"]
 
-#: 冻结 taint 标签顺序（YAML ``taint_labels``）：保证 descriptor
-#: ``initial_taints`` 的确定性排序（02 §11 T-FactReplay）。
-_TAINT_ORDER: tuple[TaintLabel, ...] = (
+#: 冻结 taint 标签顺序（YAML ``taint_labels``）：保证 ``initial_taints`` 确定性
+#: 排序（02 §11 T-FactReplay）；CT-PR-02b 起公开导出（fact_builder 写侧复用
+#: 保序去重），原名 ``_TAINT_ORDER``、无兼容别名，消费方应使用 ``TAINT_ORDER``。
+TAINT_ORDER: tuple[TaintLabel, ...] = (
     "UNTRUSTED",
     "EXTERNAL_INSTRUCTION",
     "SENSITIVE",
@@ -268,7 +269,7 @@ def _accumulate_risk_increasing_taints(claim: SourceClaim) -> tuple[TaintLabel, 
         taints.add("SENSITIVE")
     if claim.server_credential_evidence:
         taints.update(("CREDENTIAL", "SENSITIVE"))
-    return tuple(label for label in _TAINT_ORDER if label in taints)
+    return tuple(label for label in TAINT_ORDER if label in taints)
 
 
 def verify_source_claim(
@@ -379,7 +380,7 @@ def verify_source_claim(
         reason_codes.append("model_judgment_only")
 
     ordered_taints: tuple[TaintLabel, ...] = tuple(
-        label for label in _TAINT_ORDER if label in taints
+        label for label in TAINT_ORDER if label in taints
     )
     return VerifiedSourceDescriptor(
         source_id=claim.source_id,
@@ -455,7 +456,7 @@ def apply_memory_inheritance(
     taints.update(memory_fact.taints)
     if memory_fact.trust_state in {"tainted", "quarantined"}:
         taints.add("UNTRUSTED")
-    ordered_taints = tuple(label for label in _TAINT_ORDER if label in taints)
+    ordered_taints = tuple(label for label in TAINT_ORDER if label in taints)
     reason_codes = descriptor.reason_codes + (
         "memory_inherited_from_fact",
         f"memory_trust_state_{memory_fact.trust_state}",
