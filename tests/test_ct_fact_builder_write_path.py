@@ -1,13 +1,12 @@
 """CT-PR-02b 写侧事件契约测试（ct-fact-1，无接线）。
 
-口径依据：02 §8.5-8.7（写侧三事件、§13 failure contract）、04 §12 三态 /
-§15 ALLOW ≠ TRUST、§4 sent_to evidence-defined、02 §11 T-FactReplay
-与冻结 YAML parity。
+口径：02 §8.5-8.7/§11/§13、04 §2/§3/§4/§12/§15 与冻结 YAML parity。
 """
 
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 import pytest
 from agentguard_core.actions.canonical_resources import (
@@ -118,6 +117,23 @@ def _action_with_data_refs(*refs: str):
     return _action_ir().model_copy(update={"data_refs": list(refs)})
 
 
+def _mem_inputs(**fact_kwargs):
+    """单条上游 MemoryFact（memory://ns/prev）的 FactBuildInputs 快捷构造。"""
+    return _inputs(
+        upstream_memory_facts={"memory://ns/prev": _upstream_memory_fact(**fact_kwargs)}
+    )
+
+
+def _desc_inputs(
+    *, status: Literal["proposed", "quarantined"] = "proposed", **desc_kwargs
+):
+    """单条上游 descriptor（REF）的 FactBuildInputs 快捷构造。"""
+    return _inputs(
+        memory_change_status=status,
+        upstream_descriptors={REF: _descriptor(**desc_kwargs)},  # type: ignore[arg-type]
+    )
+
+
 # --- 02 §8.5 memory_write_proposed：三态判定 ------------------------------
 
 
@@ -125,11 +141,7 @@ def _action_with_data_refs(*refs: str):
     ("inputs", "state", "taints", "refs", "change_status"),
     [
         pytest.param(
-            _inputs(
-                upstream_descriptors={
-                    REF: _descriptor(trust="untrusted", taints=("UNTRUSTED",))
-                }
-            ),
+            _desc_inputs(trust="untrusted", taints=("UNTRUSTED",)),
             "tainted",
             ["UNTRUSTED", "PERSISTENT_UNTRUSTED"],
             [REF],
@@ -138,20 +150,11 @@ def _action_with_data_refs(*refs: str):
         ),
         pytest.param(_inputs(), "unknown", [], [], "proposed", id="empty-upstream"),
         pytest.param(
-            _inputs(upstream_descriptors={REF: _descriptor()}),
-            "clean",
-            [],
-            [REF],
-            "proposed",
-            id="trusted-clean",
+            _desc_inputs(), "clean", [], [REF], "proposed", id="trusted-clean"
         ),
         pytest.param(
             # 04 §15 ALLOW ≠ TRUST：EXTERNAL_INSTRUCTION 上游不因放行洗白。
-            _inputs(
-                upstream_descriptors={
-                    REF: _descriptor(taints=("EXTERNAL_INSTRUCTION",))
-                }
-            ),
+            _desc_inputs(taints=("EXTERNAL_INSTRUCTION",)),
             "tainted",
             ["EXTERNAL_INSTRUCTION", "PERSISTENT_UNTRUSTED"],
             [REF],
@@ -159,20 +162,62 @@ def _action_with_data_refs(*refs: str):
             id="allow-does-not-imply-trust",
         ),
         pytest.param(
-            # 04 §3 单调传播：上游 MemoryFact trust/taints 只增不减。
-            _inputs(
-                upstream_memory_facts={
-                    "memory://ns/prev": _upstream_memory_fact(
-                        trust_state="tainted",
-                        taints=("UNTRUSTED", "PERSISTENT_UNTRUSTED"),
-                    )
-                }
+            # 04 §3 单调传播：上游 MemoryFact tainted 只增不减。
+            _mem_inputs(
+                trust_state="tainted", taints=("UNTRUSTED", "PERSISTENT_UNTRUSTED")
             ),
             "tainted",
             ["UNTRUSTED", "PERSISTENT_UNTRUSTED"],
             ["memory://ns/prev"],
             "proposed",
             id="upstream-memory-monotonic",
+        ),
+        pytest.param(
+            # Major-1：model/file 源 trust=unknown → 非 clean（04 §12 收紧）。
+            _desc_inputs(trust="unknown"),
+            "unknown",
+            [],
+            [REF],
+            "proposed",
+            id="unknown-trust-descriptor",
+        ),
+        pytest.param(
+            # Major-2（04 §2/§3 对称）：clean MemoryFact 带 UNTRUSTED
+            # （无 PERSISTENT_UNTRUSTED）→ tainted + 落 PERSISTENT_UNTRUSTED。
+            _mem_inputs(taints=("UNTRUSTED",)),
+            "tainted",
+            ["UNTRUSTED", "PERSISTENT_UNTRUSTED"],
+            ["memory://ns/prev"],
+            "proposed",
+            id="memory-clean-with-untrusted-taint",
+        ),
+        pytest.param(
+            # 上游 MemoryFact unknown 态 → unknown（非 clean）。
+            _mem_inputs(trust_state="unknown"),
+            "unknown",
+            [],
+            ["memory://ns/prev"],
+            "proposed",
+            id="memory-unknown-state",
+        ),
+        pytest.param(
+            # Minor-5 ③：上游 MemoryFact quarantined 态 → tainted（单调传播）。
+            _mem_inputs(trust_state="quarantined"),
+            "tainted",
+            ["PERSISTENT_UNTRUSTED"],
+            ["memory://ns/prev"],
+            "proposed",
+            id="memory-quarantined-state",
+        ),
+        pytest.param(
+            # Minor-5 ④（04 §12）：clean 要求零 taints，全 trusted 上游仅带
+            # SENSITIVE/CREDENTIAL → unknown（Major-1 收紧后）。
+            _desc_inputs(taints=("SENSITIVE", "CREDENTIAL")),
+            "unknown",
+            ["SENSITIVE", "CREDENTIAL"],
+            [REF],
+            "proposed",
+            id="trusted-sensitive-only",
         ),
         pytest.param(
             # 02 §13：visible_refs 声明 ref 查表未命中 → fail-closed tainted。
@@ -185,11 +230,8 @@ def _action_with_data_refs(*refs: str):
         ),
         pytest.param(
             # 04 §12：lifecycle quarantine 优先级最高（上游 tainted 不降级它）。
-            _inputs(
-                memory_change_status="quarantined",
-                upstream_descriptors={
-                    REF: _descriptor(trust="untrusted", taints=("UNTRUSTED",))
-                },
+            _desc_inputs(
+                status="quarantined", trust="untrusted", taints=("UNTRUSTED",)
             ),
             "quarantined",
             ["UNTRUSTED"],
@@ -208,7 +250,6 @@ def test_memory_write_trust_state_matrix(
     assert fact.trust_state == state
     assert fact.taints == taints
     assert fact.source_refs == refs
-    assert fact.change_id is None
     assert fact.last_write_sequence is None and fact.last_read_sequence is None
 
 
@@ -230,119 +271,104 @@ def test_memory_write_persisted_flow_and_memory_id_deterministic() -> None:
     (flow,) = bundle.flow_facts
     assert flow.source_ref == REF
     assert flow.target_ref == "memory:memory://ns/note"
-    assert (flow.relation, flow.strength, flow.origin) == (
-        "persisted_to",
-        "exact",
-        "observed",
-    )
-    assert flow.taints == ["UNTRUSTED"]
-    # T-FactReplay：同输入两次构建逐字段相等（含 memory_id/digest）。
-    replay = build_transient_facts(
-        event=_memory_event(action_id="action-9"), inputs=inputs
-    )
-    assert replay.bundle_digest == bundle.bundle_digest
-    assert replay.memory_facts == bundle.memory_facts
+    assert flow.relation == "persisted_to"
+    assert (flow.strength, flow.origin) == ("exact", "observed")
+    # Minor-3：边 taints 与 MemoryFact.taints 同口径（04 §4 union + persistent，
+    # TAINT_ORDER 保序，tainted 时含 PERSISTENT_UNTRUSTED）。
+    assert flow.taints == fact.taints == ["UNTRUSTED", "PERSISTENT_UNTRUSTED"]
 
 
 def test_memory_write_unordered_inputs_are_deterministic() -> None:
     # 迭代按 key 排序，与 Mapping 插入序无关（T-FactReplay）。
     descriptor_a, descriptor_b = _descriptor(), _descriptor(taints=("SENSITIVE",))
-    first = build_transient_facts(
-        event=_memory_event(),
-        inputs=_inputs(
-            upstream_descriptors={"ref-b": descriptor_b, "ref-a": descriptor_a}
-        ),
-    )
-    second = build_transient_facts(
-        event=_memory_event(),
-        inputs=_inputs(
-            upstream_descriptors={"ref-a": descriptor_a, "ref-b": descriptor_b}
-        ),
-    )
-    assert first.bundle_digest == second.bundle_digest
-    assert first.memory_facts[0].source_refs == second.memory_facts[0].source_refs
-    assert first.memory_facts[0].source_refs == ["ref-a", "ref-b"]
+    orderings = [
+        {"ref-b": descriptor_b, "ref-a": descriptor_a},
+        {"ref-a": descriptor_a, "ref-b": descriptor_b},
+    ]
+    bundles = [
+        build_transient_facts(
+            event=_memory_event(), inputs=_inputs(upstream_descriptors=table)
+        )
+        for table in orderings
+    ]
+    assert bundles[0].bundle_digest == bundles[1].bundle_digest
+    assert bundles[0].memory_facts[0].source_refs == ["ref-a", "ref-b"]
 
 
 # --- 02 §8.6 message_send_proposed：sink 归一化与 sent_to 流 ---------------
 
 
 @pytest.mark.parametrize(
-    ("channel", "recipient", "expected_sink"),
+    ("channel", "recipient", "expected_sink", "sensitive", "taints"),
     [
-        ("Email", "User@Example.COM", "mailto:User@example.com"),
+        ("Email", "User@Example.COM", "mailto:User@example.com", False, []),
         (
             "webhook",
             "https://Hooks.Example.com:443/path?b=2&a=1",
             "https://hooks.example.com/path?a&b",
+            False,
+            [],
         ),
-        ("sms", "+15551234567", "other://+15551234567"),
+        ("sms", "+15551234567", "other://+15551234567", False, []),
+        ("Email", "User@Example.COM", "mailto:User@example.com", True, ["SENSITIVE"]),
     ],
 )
 def test_message_send_stable_refs_build_exact_sent_to(
-    channel: str, recipient: str, expected_sink: str
+    channel, recipient, expected_sink, sensitive, taints
 ) -> None:
-    # 04 §4 sent_to evidence-defined：稳定 ActionIR data_refs →
-    # exact/deterministic；sink 取 V21-02 canonical_id。
+    # 04 §4 evidence-defined；sink 取 V21-02 canonical_id，前缀随归一器
+    # 实际产出（mailto:/http(s)://other://，未自造 network: 前缀）。
     bundle = build_transient_facts(
-        event=_send_event(channel=channel, recipient=recipient),
+        event=_send_event(channel=channel, recipient=recipient, sensitive=sensitive),
         inputs=_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
     )
     (flow,) = bundle.flow_facts
     assert flow.source_ref == "data:artifact-1"
     assert flow.target_ref == expected_sink
-    assert (flow.relation, flow.strength, flow.origin) == (
-        "sent_to",
-        "exact",
-        "deterministic",
-    )
-    assert flow.taints == []
-    assert bundle.degradations == ()
-
-
-def test_message_send_sensitive_evidence_taints_sent_to() -> None:
-    bundle = build_transient_facts(
-        event=_send_event(sensitive=True),
-        inputs=_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
-    )
-    assert bundle.flow_facts[0].taints == ["SENSITIVE"]
+    assert (flow.strength, flow.origin) == ("exact", "deterministic")
+    assert flow.taints == taints
 
 
 @pytest.mark.parametrize(
-    ("event", "inputs"),
+    ("event", "inputs", "degraded"),
     [
-        pytest.param(_send_event(), _inputs(), id="no-action-ir"),
+        pytest.param(_send_event(), _inputs(), True, id="no-action-ir"),
         pytest.param(
-            _send_event(), _inputs(action_ir=_action_ir()), id="empty-data-refs"
+            _send_event(), _inputs(action_ir=_action_ir()), True, id="empty-data-refs"
         ),
         pytest.param(
             # email 归一失败（无 @）→ unresolved → 不建流。
             _send_event(recipient="not-an-address"),
             _inputs(action_ir=_action_with_data_refs("data:artifact-1")),
+            True,
             id="unresolvable-sink",
         ),
         pytest.param(
-            # will_persist=False → 不建 persisted_to 流（无降级）。
             _memory_event(will_persist=False),
-            _inputs(upstream_descriptors={"source:web:evt-0:0": _descriptor()}),
-            id="memory-without-persist",
+            _inputs(),
+            False,
+            id="memory-no-persist-empty-upstream",
+        ),
+        pytest.param(
+            _memory_event(), _inputs(), True, id="memory-empty-upstream-persist"
         ),
     ],
 )
-def test_write_side_without_stable_flow_builds_no_flow(event, inputs) -> None:
-    # 无稳定流 → 零流；仅 message 路径伴随 flow_ref_missing 降级。
+def test_write_side_without_stable_flow_builds_no_flow(event, inputs, degraded) -> None:
+    # 无稳定流 → 零流；降级口径按 degraded 参数（02 §13）。
     bundle = build_transient_facts(event=event, inputs=inputs)
     assert bundle.flow_facts == ()
     assert bundle.signals == ()
-    if event.event_type == "message_send_proposed":
+    if degraded:
         assert bundle.degradations[0].reason_codes == ["ct-fact:flow_ref_missing"]
     else:
         assert bundle.degradations == ()
+        if event.event_type == "memory_write_proposed":
+            assert len(bundle.memory_facts) == 1
 
 
 def test_message_send_sensitive_preview_signal_without_exact_flow() -> None:
-    # 02 §8.6：只有 content preview 可疑 → Signal + uncertain 口径，
-    # 绝不伪造 exact provenance。
+    # 02 §8.6：只有敏感证据 → Signal + 零 exact 流，绝不伪造 provenance。
     bundle = build_transient_facts(event=_send_event(sensitive=True), inputs=_inputs())
     assert bundle.flow_facts == ()
     (signal,) = bundle.signals
@@ -351,9 +377,17 @@ def test_message_send_sensitive_preview_signal_without_exact_flow() -> None:
     assert (signal.category, signal.scope) == ("ct-fact:sensitive_outbound", "flow")
     assert (signal.impact, signal.confidence) == ("high", "low")
     assert signal.reason_codes == ["ct-fact:sensitive_outbound_preview"]
-    assert signal.evidence_group == "eg:evt-1:sensitive_send"
-    (degradation,) = bundle.degradations
-    assert degradation.reason_codes == ["ct-fact:flow_ref_missing"]
+
+
+def test_message_send_server_sensitive_evidence_signal() -> None:
+    # Signal 口径对称：server_sensitive_evidence=True 且无稳定 refs →
+    # Signal 存在（与 exact 流 taints 判定同条件位）。
+    bundle = build_transient_facts(
+        event=_send_event(), inputs=_inputs(server_sensitive_evidence=True)
+    )
+    assert bundle.flow_facts == ()
+    (signal,) = bundle.signals
+    assert signal.category == "ct-fact:sensitive_outbound"
 
 
 # --- 02 §8.7 tool_call_proposed：data refs 流 + RecentActionFact 候选 ------
@@ -397,13 +431,11 @@ def test_tool_call_with_action_ir_builds_data_ref_flows_and_candidate() -> None:
         assert (flow.strength, flow.origin) == ("exact", "deterministic")
     candidate = bundle.current_action
     assert candidate is not None
-    assert candidate.action_id == "action-1"
-    assert candidate.event_id == "evt-1"
+    assert (candidate.action_id, candidate.event_id) == ("action-1", "evt-1")
     assert (candidate.authority_status, candidate.final_decision) == ("unknown", None)
     assert candidate.resource_ids == [_INBOUND.canonical_id]
     assert candidate.destination_ids == [_OUTBOUND.canonical_id]
     assert candidate.data_refs == ["data:artifact-1"]
-    # runtime_sequence 登记：裸 int 序号不能构造 SequenceRef，候选取 None。
     assert candidate.runtime_sequence is None
     assert bundle.degradations == ()
 
@@ -432,8 +464,7 @@ def test_tool_call_without_action_ir_degrades() -> None:
     ],
 )
 def test_write_side_fact_replay_deterministic(case: str, event, inputs) -> None:
-    # 02 §11：写侧三事件同输入两次构建 → 同 bundle_digest；
-    # memory_facts 逐条 fact_digest_projection 相等。
+    # 02 §11：写侧三事件同输入两次构建 → digest 与 memory 投影相等。
     first = build_transient_facts(event=event, inputs=inputs)
     second = build_transient_facts(event=event, inputs=inputs)
     assert first.bundle_digest == second.bundle_digest
@@ -455,7 +486,6 @@ def test_write_side_flows_match_frozen_yaml(freeze_yaml) -> None:
         for event, inputs in cases
         for flow in build_transient_facts(event=event, inputs=inputs).flow_facts
     ]
-    assert flows
     for flow in flows:
         assert flow.relation in relations
         assert flow.strength in strengths

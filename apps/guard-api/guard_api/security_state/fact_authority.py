@@ -58,9 +58,9 @@ TrustLevel = Literal["trusted", "untrusted", "unknown"]
 #: 默认表 trust 字段：memory 源为哨兵（YAML source_defaults.memory）。
 MemoryInheritTrust = TrustLevel | Literal["inherit_memory_fact"]
 
-#: 冻结 taint 标签顺序（YAML ``taint_labels``）：保证 descriptor
-#: ``initial_taints`` 的确定性排序（02 §11 T-FactReplay）。CT-PR-02b
-#: 起提升为公共导出（fact_builder 写侧 handler 复用保序去重）。
+#: 冻结 taint 标签顺序（YAML ``taint_labels``）：保证 ``initial_taints`` 确定性
+#: 排序（02 §11 T-FactReplay）；CT-PR-02b 起公开导出（fact_builder 写侧复用
+#: 保序去重），原名 ``_TAINT_ORDER``、无兼容别名，消费方应使用 ``TAINT_ORDER``。
 TAINT_ORDER: tuple[TaintLabel, ...] = (
     "UNTRUSTED",
     "EXTERNAL_INSTRUCTION",

@@ -543,19 +543,27 @@ def _handle_memory_write_proposed(
     ``memory_id`` 取 ``normalize_memory_resource`` canonical_id
     （V21-02 冻结归一器；注册为 CT-PR-05 memory 身份锚点）。
 
-    upstream 判定（按 key 排序迭代两表，与插入序无关，
-    T-FactReplay）：任一 descriptor taints ∩ {UNTRUSTED,
-    EXTERNAL_INSTRUCTION} 非空或 trust=="untrusted"，或上游
-    MemoryFact trust_state ∈ {tainted, quarantined}/含
-    PERSISTENT_UNTRUSTED → tainted + taints += PERSISTENT_UNTRUSTED
-    （TAINT_ORDER 保序去重）；visible_refs 声明 ref 查表未命中 →
+    upstream 判定（按 key 排序迭代两表，T-FactReplay）：descriptor
+    taints ∩ {UNTRUSTED, EXTERNAL_INSTRUCTION} 非空或 trust==
+    "untrusted"，或上游 MemoryFact trust_state ∈ {tainted,
+    quarantined}/含 PERSISTENT_UNTRUSTED/含 UNTRUSTED/
+    EXTERNAL_INSTRUCTION（04 §2/§3 对称）/trust_state=="clean" 而
+    taints 非空（矛盾态 fail-closed）→ tainted + taints +=
+    PERSISTENT_UNTRUSTED（TAINT_ORDER 保序）；visible_refs 未命中 →
     fail-closed tainted（02 §13）；memory_change_status=="quarantined"
-    → quarantined（优先级最高）；空上游 → unknown；其余 → clean。
-    ALLOW ≠ TRUST（04 §15）：tainted 不因放行洗白。
+    → quarantined（优先级最高）。clean 收紧（04 §12 / CT-F0-05）：
+    上游非空 且 descriptor 全 trusted 且零 initial_taints 且上游
+    MemoryFact 全 clean 且零 taints；其余（含 unknown trust/带
+    SENSITIVE 等）→ unknown，杜绝 model 输出经 memory 读回升级
+    trusted。ALLOW ≠ TRUST（04 §15）：tainted 不因放行洗白。
 
     persisted_to 流（will_persist=True）：每上游 ref →
-    ``memory:<canonical_id>``，exact/observed，taints=上游并集（04 §4）；
-    will_persist=False → 不建流。
+    ``memory:<canonical_id>``，exact/observed；边 taints 与
+    MemoryFact.taints 同口径（并集 + tainted 时 PERSISTENT_UNTRUSTED，
+    TAINT_ORDER 保序；04 §4 union + persistent）；will_persist=False →
+    不建流。两上游表均空且 will_persist=True →
+    ``ct-fact:flow_ref_missing`` 降级（02 §13，与 message 路径同
+    口径）；visible_refs 只参与 fail-closed trust 判定。
     """
     payload = cast(MemoryEventPayload, event.payload)
     canonical = normalize_memory_resource(
@@ -583,7 +591,8 @@ def _handle_memory_write_proposed(
         upstream_refs.append(key)
         upstream_taints.extend(memory_fact.taints)
         if memory_fact.trust_state in {"tainted", "quarantined"} or (
-            "PERSISTENT_UNTRUSTED" in memory_fact.taints
+            set(memory_fact.taints) & {"UNTRUSTED", "EXTERNAL_INSTRUCTION"}
+            or (memory_fact.trust_state == "clean" and memory_fact.taints)
         ):
             tainted_upstream = True
     if inputs.visible_refs is not None:
@@ -598,10 +607,21 @@ def _handle_memory_write_proposed(
         trust_state = "quarantined"
     elif tainted_upstream:
         trust_state = "tainted"
-    elif not upstream_refs:
-        trust_state = "unknown"
-    else:
+    elif (
+        upstream_refs
+        and all(
+            descriptor.trust == "trusted" and not descriptor.initial_taints
+            for descriptor in inputs.upstream_descriptors.values()
+        )
+        and all(
+            memory_fact.trust_state == "clean" and not memory_fact.taints
+            for memory_fact in inputs.upstream_memory_facts.values()
+        )
+    ):
+        # clean 收紧（04 §12）：零 unknown/零 taints，否则 fail-closed unknown。
         trust_state = "clean"
+    else:
+        trust_state = "unknown"
     union_taints = set(upstream_taints)
     if trust_state == "tainted":
         union_taints.add("PERSISTENT_UNTRUSTED")
@@ -632,11 +652,25 @@ def _handle_memory_write_proposed(
                 relation="persisted_to",
                 strength="exact",
                 origin="observed",
-                taints=list(dict.fromkeys(upstream_taints)),
+                taints=list(memory_taints),
             )
             for index, ref in enumerate(upstream_refs)
         ]
-    return _PartialFacts(memory_facts=(memory_fact,), flow_facts=tuple(flow_facts))
+    degradations: tuple[EvaluationDegradation, ...] = ()
+    if payload.will_persist and not upstream_refs:
+        # 两上游表均空且请求持久化 → 无 ref 可建 persisted_to 流（02 §13 同口径）。
+        degradations = (
+            _degradation(
+                event,
+                reason_code="ct-fact:flow_ref_missing",
+                failure_kind="unavailable",
+            ),
+        )
+    return _PartialFacts(
+        memory_facts=(memory_fact,),
+        flow_facts=tuple(flow_facts),
+        degradations=degradations,
+    )
 
 
 def _canonical_sink_ref(channel: str, recipient: str) -> str | None:
@@ -672,10 +706,12 @@ def _handle_message_send_proposed(
     ``<data_ref> → <sink_ref>`` exact/deterministic 流（04 §4：此处
     evidence 即已归一 ActionIR 的稳定 refs）；taints：
     contains_sensitive_data 或 server_sensitive_evidence → [SENSITIVE]。
+    channel→canonical 前缀登记：采用 V21-02 归一器实际产出（mailto:/http(s)://other://），未自造 network: 前缀。
 
     无 ActionIR 或 data_refs 空/sink 不可归一 → 零流 +
-    ``ct-fact:flow_ref_missing`` 降级（02 §13）；若另有敏感预览 →
-    追加最小 SecuritySignal（``ct-fact:sensitive_outbound_preview``，
+    ``ct-fact:flow_ref_missing`` 降级（02 §13）；若另有敏感证据
+    （contains_sensitive_data 或 server_sensitive_evidence，与 exact
+    流 taints 口径对称）→ 追加最小 SecuritySignal（``ct-fact:sensitive_outbound_preview``，
     impact=high/confidence=low：严重度按“敏感出边界”保守分级，确定
     性交 Fusion；evidence_group 确定性构造）；绝不建 exact sent_to
     伪造 provenance。
@@ -711,8 +747,9 @@ def _handle_message_send_proposed(
                 failure_kind="unavailable",
             ),
         )
-        if payload.contains_sensitive_data:
-            # 敏感预览且无稳定 refs：最小 Signal，不伪造 exact 流。
+        sensitive = payload.contains_sensitive_data or inputs.server_sensitive_evidence
+        if sensitive:
+            # 敏感证据且无稳定 refs：最小 Signal，不伪造 exact 流。
             signals = (
                 SecuritySignal(
                     signal_id=f"signal:{event.event_id}:sensitive_send",
