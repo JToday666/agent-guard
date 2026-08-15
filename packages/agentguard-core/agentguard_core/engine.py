@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from time import perf_counter
+from typing import TYPE_CHECKING, Sequence
 
 from .decisions import DetectionResult, GuardDecision, RuleHit, build_guard_decision
 from .detectors import (
@@ -25,6 +26,11 @@ from .detectors import (
 )
 from .events import GuardEvent
 from .policies import PolicyBundle
+
+if TYPE_CHECKING:  # 仅类型标注：不在运行时污染 legacy 导入隔离。
+    from .decisions.evidence import FastAssessment
+    from .security_context.snapshot import SecuritySnapshot
+    from .semantic.models import SemanticJudgment
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +115,74 @@ class GuardEngine:
     ) -> GuardDecision:
         decision, _ = self.evaluate_with_results(event, policies)
         return decision
+
+    # ------------------------------------------------------------------
+    # V21-09 正式 Core API（完整方案 §15，L3181-3198）：薄委托。
+    #
+    # lazy import：不在模块级引入 decisions.shadow / decisions.finalize
+    # （前者依赖 actions/security_context），保证 legacy 判定路径的
+    # 导入隔离不被污染（V21-02 AST 守卫）。evaluate()/
+    # evaluate_with_results() 的 legacy 官方语义零变化（D1：官方
+    # 决策者恒 legacy；finalize 产物只进证据信封与权威记录）。
+    # ------------------------------------------------------------------
+
+    def assess(
+        self,
+        event: GuardEvent,
+        policies: PolicyBundle,
+        snapshot: SecuritySnapshot | None,
+        *,
+        server_secret: bytes,
+        detection_results: Sequence[DetectionResult] = (),
+        revoked_grant_ids: Sequence[str] = (),
+    ) -> FastAssessment:
+        """V21-09 正式 ``assess(event, policies, snapshot) -> FastAssessment``。
+
+        委托 ``decisions/shadow.py::assess`` 公共内核（与
+        ``shadow_assess`` 同源，同输入必同输出）；按 01 §25 **必须有
+        Snapshot**：``snapshot is None`` 抛 ``ValueError``（严禁伪造
+        Snapshot；shadow 期降级语义由 ``shadow_assess`` 承载）。纯新增
+        旁路，``evaluate()`` 判定语义零变化。
+        """
+        from .decisions.shadow import assess as _assess  # noqa: PLC0415
+
+        return _assess(
+            event,
+            policies,
+            snapshot,
+            server_secret=server_secret,
+            detection_results=detection_results,
+            revoked_grant_ids=revoked_grant_ids,
+        )
+
+    def finalize(
+        self,
+        assessment: FastAssessment,
+        semantic: SemanticJudgment | None = None,
+    ) -> GuardDecision:
+        """V21-09 正式 ``finalize(assessment, semantic=None) -> GuardDecision``。
+
+        委托 ``decisions/finalize.py::finalize_v21``（03 §14 优先级 +
+        D7 全字段口径）；``decision_id`` 经 ``derive_final_decision_id``
+        确定性派生显式传入（禁 uuid 默认工厂，同输入必同 id）。V21-09
+        semantic 恒 None（D1），产物只进证据信封与权威记录，绝不取代
+        ``evaluate()`` 的 legacy 响应。
+        """
+        from .decisions.finalize import (  # noqa: PLC0415
+            derive_final_decision_id,
+            finalize_v21,
+        )
+
+        semantic_digest = (
+            semantic.semantic_digest if semantic is not None else None
+        )
+        return finalize_v21(
+            assessment,
+            semantic,
+            decision_id=derive_final_decision_id(
+                assessment, semantic_digest=semantic_digest
+            ),
+        )
 
 
 def _detector_failure_result(detector: Detector, exc: Exception) -> DetectionResult:

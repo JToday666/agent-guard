@@ -1,14 +1,17 @@
-"""V21-08 shadow 快路径评估纯函数（纯新增，零接线）。
+"""V21-08 shadow 快路径评估纯函数 + V21-09 正式 assess 入口。
 
-``shadow_assess`` 的**前三个位置参数**与完整方案 §15（L3181-3198）
-V21-09 正式 API ``GuardEngine.assess(event, policies, snapshot) ->
-FastAssessment`` 同形 —— 这是 **V21-09 零重构升级点**：V21-09 只需把
-本函数挂到 ``GuardEngine.assess``，并把 ``snapshot=None`` 降级分支收敛
-为 §25 的入参校验即可，调用方无需改动。shadow 期额外允许
-``snapshot is None``（入参缺态）：按 01 §25 **严禁伪造 Snapshot**，
-此时产出 coverage 全域 unknown + ``DEFER`` + 结构化降级。
+V21-09 起本模块承载两个入口（共享同一编排骨架）：
 
-内部编排（与 V21-09 assess 同一编排骨架）：
+- ``assess``：完整方案 §15（L3181-3198）正式 Core API
+  ``GuardEngine.assess(event, policies, snapshot) -> FastAssessment``
+  的函数形态落地——按 01 §25 **必须有 Snapshot**，``snapshot is None``
+  收敛为 ``ValueError`` 入参校验（不产出降级产物，严禁伪造 Snapshot）；
+- ``shadow_assess`` / ``shadow_assess_with_coverage``：V21-08 shadow
+  期入口，**前三个位置参数**与正式 API 同形（**零重构升级点**），
+  附加允许 ``snapshot is None``（入参缺态）：按 01 §25 不伪造
+  Snapshot，产出 coverage 全域 unknown + ``DEFER`` + 结构化降级。
+
+内部编排（公共内核 ``_assess_kernel``，两入口同源）：
 
 1. ``build_action_ir``（V21-02）：GuardEvent → ActionIR；
 2. legacy detections 经 ``signals/legacy_adapter`` 转
@@ -88,6 +91,7 @@ __all__ = [
     "REASON_ACTION_IR_FAILED",
     "REASON_COMPONENT_FAILED",
     "ShadowOutcome",
+    "assess",
     "assessment_digest_projection",
     "compute_assessment_digest",
     "derive_assessment_id",
@@ -289,11 +293,11 @@ def _legacy_signals_and_degradations(
 
 
 # ---------------------------------------------------------------------------
-# shadow_assess（V21-09 GuardEngine.assess 零重构升级点）
+# 公共评估内核 + assess 正式入口 / shadow_assess（V21-09 零重构升级点）
 # ---------------------------------------------------------------------------
 
 
-def shadow_assess_with_coverage(
+def _assess_kernel(
     event: GuardEvent,
     policies: PolicyBundle,
     snapshot: SecuritySnapshot | None,
@@ -302,7 +306,13 @@ def shadow_assess_with_coverage(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
 ) -> ShadowOutcome:
-    """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
+    """V21-08 shadow 与 V21-09 正式 assess 的**唯一**编排主体。
+
+    编排骨架见模块 docstring（1-7 步）；``snapshot is None`` 的降级
+    分支仅由 shadow 期入口（``shadow_assess`` /
+    ``shadow_assess_with_coverage``）可达，正式入口 ``assess`` 在调用
+    前已收敛为 ``ValueError``（01 §25）。同输入必同输出；任何组件
+    异常收敛为 shadow 降级，绝不上抛。
 
     evidence 组装（§14 保存项 2）必须消费评估时喂给 fusion 的同一份
     coverage，本函数是该同源真值的唯一出口。
@@ -473,6 +483,68 @@ def shadow_assess_with_coverage(
     return ShadowOutcome(assessment=finalized, coverage=coverage)
 
 
+def assess(
+    event: GuardEvent,
+    policies: PolicyBundle,
+    snapshot: SecuritySnapshot | None,
+    *,
+    server_secret: bytes,
+    detection_results: Sequence[DetectionResult] = (),
+    revoked_grant_ids: Sequence[str] = (),
+) -> FastAssessment:
+    """V21-09 正式 Core API（完整方案 §15，L3181-3198）。
+
+    与 ``shadow_assess`` 共享同一公共内核 ``_assess_kernel``，同输入
+    必同输出（assessment_digest 逐字节相等，D1 锚点）；唯一差异是
+    01 §25 入参校验：**assess() 必须有 Snapshot**，``snapshot is None``
+    抛 ``ValueError``（不产出降级产物、严禁伪造 Snapshot）；shadow 期
+    降级语义继续由 ``shadow_assess`` 承载。
+
+    关键字入参语义与 ``shadow_assess`` 一致：``server_secret``（ActionIR
+    指纹）、``detection_results``（legacy 双轨对照输入）、
+    ``revoked_grant_ids``（authority 投影撤销集，V21-09 由存储层
+    权威提供，D3）。
+    """
+    if snapshot is None:
+        raise ValueError(
+            "assess() requires a SecuritySnapshot (01 §25: V2.1 assess must "
+            "have a Snapshot; never fabricate one) - use shadow_assess() for "
+            "the V21-08 shadow degraded semantics"
+        )
+    return _assess_kernel(
+        event,
+        policies,
+        snapshot,
+        server_secret=server_secret,
+        detection_results=detection_results,
+        revoked_grant_ids=revoked_grant_ids,
+    ).assessment
+
+
+def shadow_assess_with_coverage(
+    event: GuardEvent,
+    policies: PolicyBundle,
+    snapshot: SecuritySnapshot | None,
+    *,
+    server_secret: bytes,
+    detection_results: Sequence[DetectionResult] = (),
+    revoked_grant_ids: Sequence[str] = (),
+) -> ShadowOutcome:
+    """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
+
+    V21-09 起委托公共内核 ``_assess_kernel``（与正式入口 ``assess``
+    同源）；snapshot 缺失降级分支保留（shadow 期语义零变化）。
+    """
+    return _assess_kernel(
+        event,
+        policies,
+        snapshot,
+        server_secret=server_secret,
+        detection_results=detection_results,
+        revoked_grant_ids=revoked_grant_ids,
+    )
+
+
 def shadow_assess(
     event: GuardEvent,
     policies: PolicyBundle,
@@ -515,7 +587,7 @@ def shadow_assess(
 
 
 # ---------------------------------------------------------------------------
-# finalize_shadow（V21-09 预留接入点）
+# finalize_shadow（V21-08 离线对照；V21-09 由 finalize_v21 取代）
 # ---------------------------------------------------------------------------
 
 #: finalize 最小映射（完整方案"V21-09 预留接入点"节）：
@@ -530,7 +602,9 @@ _SHADOW_FINALIZE_MAP: dict[str, Decision] = {
 def finalize_shadow(assessment: FastAssessment) -> Decision:
     """shadow 期 v21 disposition → legacy Decision 的最小映射。
 
-    V21-09 ``GuardEngine.finalize`` 的预留投影（shadow 期官方决策者仍是
-    legacy，本函数只用于离线对照分析，不参与线上决策）。
+    .. superseded:: V21-09
+        正式 finalize 由 ``decisions/finalize.py::finalize_v21`` 承接
+        （03 §14 完整优先级 + D7 全字段口径）；本函数保留 **V21-08
+        离线对照语义**，行为逐字不变，仍不参与线上决策。
     """
     return _SHADOW_FINALIZE_MAP[assessment.disposition]
