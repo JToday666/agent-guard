@@ -21,23 +21,27 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from agentguard_core import GuardEvent, PolicyBundle
+from agentguard_core import GuardEvent, PolicyBundle, utc_now_iso
 from agentguard_core.authority.models import TaskFact
 from agentguard_core.decisions.divergence import DIVERGENCE_VOCABULARY
 from agentguard_core.decisions.models import RuleHit
 from agentguard_core.decisions.results import DetectionResult
-from agentguard_core.decisions.shadow import ABSENT_SNAPSHOT_ID
+from agentguard_core.decisions.shadow import (
+    ABSENT_SNAPSHOT_ID,
+    shadow_assess_with_coverage,
+)
 from agentguard_core.engine import GuardEngine
 from agentguard_core.events.payloads import (
     SecurityContext,
     ToolCallPayload,
     ToolDescriptor,
 )
+from agentguard_core.security_context import PROJECTOR_VERSION, OnlineSecurityState
 from guard_api.main import create_app
 from guard_api.security_state import SecurityStateService
 from guard_api.services import V21ShadowService
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
-from guard_api.storage.base import TaskFactRecord
+from guard_api.storage.base import SecurityStateRecord, TaskFactRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.support.auth import memory_store_with_adapter
 
@@ -301,6 +305,69 @@ def test_flag_on_with_task_fact_produces_snapshot_envelope() -> None:
     assert replay == envelope
 
 
+def _seed_revoked_state(
+    store: MemoryControlPlaneStore, revoked_grant_ids: list[str]
+) -> None:
+    """向 online state record 写入权威 revoked 集（CAS 推进一版）。"""
+
+    state_service = SecurityStateService(store)
+    if store.get_security_state(_SCOPE_DIGEST) is None:
+        state_service.ensure_ready(_SCOPE_DIGEST)
+    record = store.get_security_state(_SCOPE_DIGEST)
+    assert record is not None
+    state = OnlineSecurityState.model_validate(record.canonical_payload)
+    next_version = record.state_version + 1
+    updated = state.model_copy(
+        update={
+            "revoked_grant_ids": list(revoked_grant_ids),
+            "state_version": next_version,
+        }
+    )
+    assert store.cas_security_state(
+        _SCOPE_DIGEST,
+        record.state_version,
+        SecurityStateRecord(
+            scope_digest=_SCOPE_DIGEST,
+            state_version=next_version,
+            canonical_payload=updated.model_dump(mode="json"),
+            dirty=False,
+            dirty_domains=[],
+            projector_version=PROJECTOR_VERSION,
+            updated_at=utc_now_iso(),
+        ),
+    )
+
+
+def test_flag_on_with_task_fact_injects_authoritative_revoked(monkeypatch) -> None:
+    """V21-09 真实注入：有 snapshot 路径 revoked 恒取同源同锁权威值（D3）。
+
+    入参桩值（即使非空）必须被存储层权威读取值覆盖，杜绝双源不一致。
+    """
+    service, store = _service()
+    _commit_task_fact(store)
+    _seed_revoked_state(store, ["grant:revoked_a"])
+
+    captured: list[list[str]] = []
+    original = shadow_assess_with_coverage
+
+    def _spy(event, policies, snapshot, **kwargs):
+        captured.append(list(kwargs.get("revoked_grant_ids", ())))
+        return original(event, policies, snapshot, **kwargs)
+
+    monkeypatch.setattr(
+        "guard_api.services.v21_shadow.shadow_assess_with_coverage", _spy
+    )
+    envelope = service.build_shadow_evidence(
+        _event(task_id=_TASK_ID),
+        PolicyBundle(),
+        legacy_decision="allow",
+        revoked_grant_ids=["grant:stub_should_be_overridden"],
+    )
+    assert envelope is not None
+    assert captured == [["grant:revoked_a"]]
+    assert _payload(envelope)["divergence_category"] != "degraded_no_snapshot"
+
+
 # ---------------------------------------------------------------------------
 # 故障注入：snapshot 读取 / 旁路评估异常一律收敛为降级信封，不上抛
 # ---------------------------------------------------------------------------
@@ -315,7 +382,8 @@ def test_snapshot_read_failure_converges_to_component_failure(
     def _boom(*_args, **_kwargs):
         raise RuntimeError("simulated snapshot read failure")
 
-    monkeypatch.setattr(SecurityStateService, "read_snapshot", _boom)
+    # V21-09 起 shadow 编排改经 read_snapshot_with_revoked（D3 同源同锁）。
+    monkeypatch.setattr(SecurityStateService, "read_snapshot_with_revoked", _boom)
     envelope = service.build_shadow_evidence(
         _event(task_id=_TASK_ID), PolicyBundle(), legacy_decision="allow"
     )
@@ -375,7 +443,8 @@ def test_component_failure_envelope_preserves_injected_detection_results(
     def _boom(*_args, **_kwargs):
         raise RuntimeError("simulated snapshot read failure")
 
-    monkeypatch.setattr(SecurityStateService, "read_snapshot", _boom)
+    # V21-09 起 shadow 编排改经 read_snapshot_with_revoked（D3 同源同锁）。
+    monkeypatch.setattr(SecurityStateService, "read_snapshot_with_revoked", _boom)
     envelope = service.build_shadow_evidence(
         _event(task_id=_TASK_ID),
         PolicyBundle(),

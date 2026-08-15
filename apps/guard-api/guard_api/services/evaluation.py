@@ -27,6 +27,7 @@ from .memory import MemoryGuardService
 from .policy import PolicyService
 
 if TYPE_CHECKING:
+    from .v21_pipeline import V21PipelineMaterials, V21PipelineService
     from .v21_shadow import V21ShadowService
 
 
@@ -97,6 +98,7 @@ class EvaluationService:
         memory_guard_service: MemoryGuardService | None = None,
         action_critic: ActionCritic | None = None,
         v21_shadow_service: V21ShadowService | None = None,
+        v21_pipeline: "V21PipelineService | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -105,8 +107,13 @@ class EvaluationService:
         self.action_critic = action_critic or ActionCritic()
         # V21-08 shadow 旁路编排器（flag 默认关闭）。T5 在 audit 落盘前
         # 调用它旁路产出 decision_v21 信封；判定/审批主流程不使用它
-        # （legacy = 唯一官方决策者，04 §1-§2）。
+        # （legacy = 唯一官方决策者，04 §1-§2）。V21-09 起它同时是
+        # pipeline Phase A 彻底失败时的逐字节降级回退路径。
         self.v21_shadow_service = v21_shadow_service
+        # V21-09 四段式编排器（D4；flag 门控与 V21ShadowService 同源）。
+        # 就绪时 evaluate 编排切换为 pipeline：Phase A 事务外、Phase B
+        # 短事务内消费材料；未就绪时既有路径逐字节不变。
+        self.v21_pipeline = v21_pipeline
 
     def evaluate(
         self, event: GuardEvent, *, requesting_principal_id: str
@@ -115,6 +122,22 @@ class EvaluationService:
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
         request_digest = canonical_sha256(canonical_request_dump(event))
+        # V21-09 D4/D9：pipeline Phase A 在 evaluation_transaction 之前
+        # 执行（事务外只读）；replay 不重算 assess——已存在幂等评估
+        # 时直接走事务内 replay 检查，不跑 Phase A。
+        materials = None
+        if self.v21_pipeline is not None and self.v21_pipeline.enabled:
+            existing = self.audit_service.store.get_policy_evaluation_by_event_id(
+                event.event_id
+            )
+            if existing is not None:
+                replayed = self._replay_or_conflict(
+                    existing, request_digest, event.event_id
+                )
+                if replayed is not None:
+                    return replayed
+            else:
+                materials = self.v21_pipeline.run_phase_a(event)
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         with self.audit_service.store.evaluation_transaction(event.event_id):
@@ -131,6 +154,7 @@ class EvaluationService:
                 event,
                 request_digest=request_digest,
                 requesting_principal_id=requesting_principal_id,
+                materials=materials,
             )
 
     def _evaluate_once(
@@ -139,7 +163,15 @@ class EvaluationService:
         *,
         request_digest: str,
         requesting_principal_id: str,
+        materials: "V21PipelineMaterials | None" = None,
     ) -> GuardEvaluationResponse:
+        if materials is not None:
+            return self._evaluate_once_pipeline(
+                event,
+                request_digest=request_digest,
+                requesting_principal_id=requesting_principal_id,
+                materials=materials,
+            )
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
             bundle = snapshot_record.policy_bundle
@@ -177,6 +209,67 @@ class EvaluationService:
                 ),
             )
         # §9.9：links 只放稳定 ID；digest 经 metadata 传入 writer。
+        audit_event = self.audit_service.record_evaluation(
+            event,
+            decision,
+            policy_bundle=bundle,
+            policy_revision=(
+                snapshot_record.revision if snapshot_record is not None else None
+            ),
+            approval_id=approval.approval_id if approval is not None else None,
+            critic_review=critic_review,
+            memory_change_id=(
+                memory_change.change_id if memory_change is not None else None
+            ),
+            extra_metadata={
+                "request_digest": request_digest,
+                "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+            },
+            decision_dump=decision.model_dump(mode="json"),
+            v21_evidence=v21_evidence,
+        )
+        return GuardEvaluationResponse(
+            decision=decision,
+            approval=self._approval_summary(approval),
+            policy_audit_id=audit_event.audit_id,
+        )
+
+    def _evaluate_once_pipeline(
+        self,
+        event: GuardEvent,
+        *,
+        request_digest: str,
+        requesting_principal_id: str,
+        materials: "V21PipelineMaterials",
+    ) -> GuardEvaluationResponse:
+        """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
+
+        事务窗口内：legacy 链照常（decision/detections 直接消费 Phase A
+        单跑结果，不双跑检测器）+ Phase B 短事务 revalidate 与证据构建；
+        **无 snapshot/task 全量 I/O**（S8 消除）。legacy 决策与 flag off
+        路径同源同实现（evaluate_with_results 同内核），官方响应不变。
+        """
+        snapshot_record = self.policy_service.current_snapshot_record()
+        bundle = materials.bundle
+        # Phase A 单跑的 legacy 官方决策（同源同实现，不双跑检测器）。
+        decision = materials.decision
+        critic_review = self.action_critic.review(event, decision)
+        approval = self.approval_service.create_for_decision(
+            event,
+            decision,
+            requesting_principal_id=requesting_principal_id,
+        )
+        approval = self.approval_service.auto_review_with_llm(approval)
+        memory_change = self._record_memory_change(
+            event, decision, requesting_principal_id=requesting_principal_id
+        )
+        # Phase B（事务内）：revalidate + 证据构建；失败收敛为 None，
+        # legacy 主链不受影响。
+        v21_evidence = None
+        if self.v21_pipeline is not None:
+            outcome = self.v21_pipeline.build_phase_b(event, materials)
+            if outcome is not None:
+                v21_evidence = outcome.envelope
         audit_event = self.audit_service.record_evaluation(
             event,
             decision,

@@ -13,6 +13,7 @@ from .policy import PolicyService, PolicyValidationError
 from .provenance import ProvenanceWriter
 from .task_ingress import TaskIngressService
 from .trace import TraceService
+from .v21_pipeline import V21PhaseBOutcome, V21PipelineMaterials, V21PipelineService
 from .v21_shadow import V21ShadowService
 
 __all__ = [
@@ -31,6 +32,9 @@ __all__ = [
     "ProvenanceWriter",
     "TaskIngressService",
     "TraceService",
+    "V21PhaseBOutcome",
+    "V21PipelineMaterials",
+    "V21PipelineService",
     "V21ShadowService",
     "build_audit_event",
     "describe_guard_event",
