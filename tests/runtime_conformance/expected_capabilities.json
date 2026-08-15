@@ -35,8 +35,9 @@
         "evidence": "tests/test_runtime_conformance_langgraph.py"
       },
       "CF-07": {
-        "status": "NOT_SUPPORTED",
-        "note": "failed 回执语义已覆盖（test_runtime_conformance_langgraph.py CF-07 用例），但超限 error 实测显示 adapter 将 str(exc) 原样透传、无客户端截断，bounded（≤2000）保证目前仅由 Guard API 侧校验（422 拒收）承担；adapter 端截断为后续硬化项，补齐前不声明 PASS（评审 P1）。"
+        "status": "PASS",
+        "evidence": "tests/test_runtime_conformance_langgraph.py",
+        "note": "超限 error 在 adapter 端截断（省略号计入 2000 上限，契约 02 §9）：conformance CF-07 用例用 5000 字符 error 实测恰好截断到 2000；adapter 单测 packages/agentguard-langgraph-adapter/tests/test_runtime_receipts_bounded_error.py 覆盖截断语义。RTE-04 硬化项已补齐。"
       },
       "CF-08": {
         "status": "PASS",
