@@ -7,6 +7,13 @@ import {
 } from "../../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { MockDashboardDataSource } from "./mock-data-source.ts";
 
+test("mock preview source exposes reads only", () => {
+  const source = new MockDashboardDataSource(0);
+
+  assert.equal("resolveApproval" in source, false);
+  assert.equal(Object.hasOwn(source, "resolveApproval"), false);
+});
+
 test("mock provenance graph contains evidence nodes and event references", async () => {
   const source = new MockDashboardDataSource(0);
   const response = await source.getTraceProvenance("trace_002");

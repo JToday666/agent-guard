@@ -15,6 +15,12 @@
     </div>
 
     <div class="top-bar__status" aria-label="全局状态">
+      <StatusBadge
+        class="top-bar__source"
+        :data-source-mode="dataSourceMode"
+        :label="sourceLabel"
+        :tone="isMockPreview ? 'warning' : 'neutral'"
+      />
       <RouterLink class="top-bar__status-link" to="/system">
         <StatusBadge :label="healthLabel" :tone="healthTone" />
       </RouterLink>
@@ -38,7 +44,7 @@
       <kbd aria-hidden="true">/</kbd>
     </form>
 
-    <RouterLink class="top-bar__pending" to="/approvals">
+    <RouterLink class="top-bar__pending" :to="approvalsRoute">
       <span>待审批</span>
       <strong>{{ pendingCount }}</strong>
     </RouterLink>
@@ -50,6 +56,7 @@ import { Search } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
+import { dashboardDataSourceHandle } from "../../data/sources";
 import type { DataStatus, HealthStatus } from "../../types/dashboard";
 import DataFreshness from "../common/DataFreshness.vue";
 import StatusBadge from "../common/StatusBadge.vue";
@@ -61,6 +68,12 @@ defineOptions({
 const router = useRouter();
 const searchInput = ref<HTMLInputElement | null>(null);
 const searchText = ref("");
+const dataSourceMode = dashboardDataSourceHandle.descriptor.dataSourceMode;
+const isMockPreview = dataSourceMode === "mock_preview";
+const sourceLabel = isMockPreview ? "MOCK PREVIEW · READ ONLY" : "LIVE API";
+const approvalsRoute = isMockPreview
+  ? { path: "/approvals", query: { readonly: "1" } }
+  : "/approvals";
 const props = defineProps<{
   apiStatus: HealthStatus["api"];
   dataStatus: DataStatus;
@@ -214,6 +227,11 @@ function handleSearch(): void {
   text-decoration: none;
 }
 
+.top-bar__source {
+  flex: 0 0 auto;
+  letter-spacing: 0.035em;
+}
+
 .top-bar :deep(.freshness) {
   color: var(--color-shell-muted);
 }
@@ -350,6 +368,11 @@ function handleSearch(): void {
   .top-bar__status {
     flex-wrap: nowrap;
     grid-area: status;
+  }
+
+  .top-bar__status-link,
+  .top-bar :deep(.freshness) {
+    display: none;
   }
 
   .top-bar__search {

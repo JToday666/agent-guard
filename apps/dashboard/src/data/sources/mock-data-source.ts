@@ -26,7 +26,7 @@ import { mergeApprovalsWithAuditEvidence } from "../approvals/evidence.ts";
 import { createAuditWindow } from "../dashboard/metrics.ts";
 import { buildProvenanceGraphFromEvidence } from "../evidence/provenance-builder.ts";
 import { buildTraceEvidenceViewModel } from "../evidence/trace-evidence.ts";
-import type { ApprovalRequest, AuditEventRow, ProvenanceGraph } from "../../types/dashboard";
+import type { AuditEventRow, ProvenanceGraph } from "../../types/dashboard";
 import {
   OPENCLAW_REQUIRED_HOOK_COUNT,
   OPENCLAW_REQUIRED_HOOKS,
@@ -34,7 +34,7 @@ import {
 import type {
   ConditionalRequestOptions,
   ConfigAuditFindingFilters,
-  DashboardDataSource,
+  DashboardReadDataSource,
   EventFilters,
 } from "./dashboard-data-source";
 import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
@@ -383,7 +383,7 @@ function toProvenanceDto(graph: ProvenanceGraph): GuardProvenanceDto {
   };
 }
 
-export class MockDashboardDataSource implements DashboardDataSource {
+export class MockDashboardDataSource implements DashboardReadDataSource {
   private readonly approvalDtos = createMockApprovalDtos();
   private readonly delayMs: number;
 
@@ -417,16 +417,6 @@ export class MockDashboardDataSource implements DashboardDataSource {
   async getPendingApprovals(signal?: AbortSignal) {
     await wait(this.delayMs, signal);
     return this.approvalDtos.filter((approval) => approval.status === "pending").map(mapApproval);
-  }
-
-  async resolveApproval(approval: ApprovalRequest, decision: "allow_once" | "deny") {
-    await wait(this.delayMs);
-    const target = this.approvalDtos.find((item) => item.approval_id === approval.id);
-    if (!target || target.status !== "pending") throw new Error("审批已处理或不存在");
-    target.status = "resolved";
-    target.decision = decision;
-    target.resolved_at = new Date().toISOString();
-    return { approvalId: target.approval_id, status: "resolved", decision } as const;
   }
 
   async getHealth(signal?: AbortSignal) {

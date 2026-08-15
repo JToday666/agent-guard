@@ -59,43 +59,23 @@ test("approval detail exposes explicit control-flow evidence fields", async ({ p
   expect(content?.indexOf("判定原因")).toBeLessThan(content?.indexOf("放行影响") ?? -1);
 });
 
-test("one-time approval requires confirmation and restores trigger focus", async ({ page }) => {
-  await page.goto("/approvals");
+test("mock preview approval is read only and never sends a resolution request", async ({
+  page,
+}) => {
+  const resolutionRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/approvals/") && request.url().endsWith("/resolve")) {
+      resolutionRequests.push(request.url());
+    }
+  });
+  await page.goto("/approvals?readonly=1");
 
-  const trigger = page.getByRole("button", { name: "仅本次放行" });
-  await trigger.click();
-
-  const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("该动作将绕过当前安全判断并继续执行一次");
-  await expect(page.getByRole("button", { name: "取消" })).toBeFocused();
-  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
-    /confirm-dialog__signal--warning/,
-  );
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
-});
-
-test("deny approval uses a danger confirmation and restores trigger focus", async ({ page }) => {
-  await page.goto("/approvals");
-
-  const trigger = page.getByRole("button", { name: "拒绝授权" });
-  await expect(trigger).toHaveCSS("min-height", "44px");
-  await trigger.click();
-
-  const dialog = page.getByRole("dialog", { name: "确认拒绝本次授权？" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("本次授权将被拒绝");
-  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
-    /confirm-dialog__signal--danger/,
-  );
-  await expect(page.getByRole("button", { name: "确认拒绝授权" })).toHaveCSS("min-height", "44px");
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await expect(page.getByText("只读审批视图")).toBeVisible();
+  await expect(page.getByText(/Mock Preview 使用固定合成样例/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "仅本次放行" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "拒绝授权" })).toBeDisabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(resolutionRequests).toEqual([]);
 });
 
 test("evidence detail keeps related approval and evaluation destinations", async ({ page }) => {
@@ -105,7 +85,7 @@ test("evidence detail keeps related approval and evaluation destinations", async
   const evaluationLink = page.getByRole("link", { name: "查看评测样本" });
 
   await expect(approvalLink).toBeVisible();
-  await expect(approvalLink).toHaveAttribute("href", /\/approvals\/ask_001$/);
+  await expect(approvalLink).toHaveAttribute("href", /\/approvals\/ask_001\?readonly=1$/);
   await expect(evaluationLink).toBeVisible();
   await expect(evaluationLink).toHaveAttribute("href", /\/evaluation\?case_id=PI-002$/);
 });

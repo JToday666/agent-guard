@@ -21,7 +21,7 @@ export const useAuthStore = defineStore("auth", () => {
   async function bootstrap(): Promise<void> {
     if (status.value === "loading" || status.value === "authenticated") return;
     if (import.meta.env.MODE === "mock") {
-      csrfToken.value = "mock_csrf";
+      csrfToken.value = "";
       expiresAt.value = new Date(Date.now() + 60 * 60_000).toISOString();
       status.value = "authenticated";
       return;

@@ -13,6 +13,14 @@
       </header>
 
       <InlineNotice
+        v-if="isMockPreview"
+        class="trace-preview-notice"
+        title="MOCK PREVIEW · READ ONLY"
+        tone="warning"
+      >
+        <p>固定合成样例，不是真实运行结果；本页仅用于监督控制台交互预览。</p>
+      </InlineNotice>
+      <InlineNotice
         v-if="traceDetailError && traceEvents.length"
         class="trace-detail-alert"
         title="证据刷新未完成"
@@ -90,7 +98,7 @@
               <RouterLink
                 v-if="evidenceModel.primary?.approval.approvalId"
                 class="page-action"
-                :to="`/approvals/${evidenceModel.primary.approval.approvalId}`"
+                :to="approvalDetailRoute(evidenceModel.primary.approval.approvalId)"
               >
                 查看关联审批
               </RouterLink>
@@ -332,6 +340,7 @@ import { buildExecutionTrace, shouldContinueTracePolling } from "../data/evidenc
 import type { ExecutionTraceLayout } from "../data/evidence/execution-flow-layout";
 import { buildTraceEvidenceViewModel } from "../data/evidence/trace-evidence";
 import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigations";
+import { dashboardDataSourceHandle } from "../data/sources";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ExecutionStepViewModel, ProvenanceNode, TracePollingState } from "../types/dashboard";
 import { formatDashboardDateTime } from "../utils/dashboard-formatters";
@@ -357,11 +366,19 @@ const ProvenanceGraph = defineAsyncComponent(
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardStore();
+const isMockPreview = dashboardDataSourceHandle.descriptor.dataSourceMode === "mock_preview";
 const isPageActive = ref(false);
 const provenanceSyncMessage = ref("");
 const finalTraceReconciledId = ref("");
 const terminalSyncTraceId = ref("");
 const traceId = computed(() => String(route.params.trace_id ?? ""));
+
+function approvalDetailRoute(approvalId: string) {
+  return {
+    path: `/approvals/${approvalId}`,
+    query: isMockPreview ? { readonly: "1" } : {},
+  };
+}
 const traceDetail = computed(() => store.traceDetails[traceId.value]);
 const traceDetailError = computed(() => store.traceDetailErrors[traceId.value] ?? "");
 const isTraceLoading = computed(() => store.traceDetailLoadingId === traceId.value);
