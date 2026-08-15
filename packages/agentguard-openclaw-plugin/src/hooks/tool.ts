@@ -414,6 +414,44 @@ export function registerToolResultPersist(hookContext: HookContext): void {
           error: error instanceof Error ? error.message : String(error),
         });
         if (isEnforcing(config)) {
+          // 契约 03 §7.2：fail-closed quarantine 能关联原 action/policy 时
+          // 写 tool_result_quarantined 回执；无关联时仅诊断，不伪造 policy link。
+          const failCallId =
+            stringMaybe(asRecord(event).toolCallId) ??
+            stringMaybe(asRecord(context).toolCallId);
+          const failState = failCallId
+            ? toolCallState.get(failCallId)
+            : undefined;
+          if (
+            failCallId &&
+            failState &&
+            failState.guardEvent &&
+            failState.evaluation &&
+            failState.policyAuditId &&
+            failState.decisionId &&
+            failState.decision
+          ) {
+            fireRuntimeOutcomeReceipt({
+              client,
+              config,
+              guardEvent: failState.guardEvent,
+              evaluation: failState.evaluation,
+              kind: "tool_result_quarantine",
+              resultDisposition: "quarantined",
+              stage: "tool_result_persist",
+              logLabel: "tool_result_persist",
+              delivery: outcomeDelivery,
+            });
+            patchToolCallState(toolCallState, failCallId, {
+              receiptQueued: true,
+            });
+          } else {
+            logDiagnostic(
+              config,
+              "tool_result_persist fail-closed quarantine without policy linkage; diagnostic only",
+              { toolCallId: failCallId ?? null },
+            );
+          }
           return {
             message: quarantinedToolResultMessage(
               message,
