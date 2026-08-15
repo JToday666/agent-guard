@@ -81,10 +81,19 @@ from .behavior_matchers import (
     select_predecessor,
 )
 
+# V21-08 FlowVerdict 生成器（纯新增，零接线）。
+from .flow_verdict import (
+    DANGEROUS_TAINTS,
+    EXTERNAL_DESTINATION_KINDS,
+    compute_flow_verdict,
+)
+
 __all__ = [
     "B6_ANOMALY_COUNT_THRESHOLD",
     "BEHAVIOR_PROVIDER_KEY",
     "CAPABILITY_COMPILER_VERSION",
+    "DANGEROUS_TAINTS",
+    "EXTERNAL_DESTINATION_KINDS",
     "MAX_STICKY_TAINT_SUMMARIES",
     "PROVENANCE_TYPED_UPSERT_HANDLERS",
     "RUNTIME_OUTCOME_PROVIDER_KEY",
@@ -113,6 +122,7 @@ __all__ = [
     "compile_approval_to_grant",
     "compile_task_to_grants",
     "compute_authority_verdict",
+    "compute_flow_verdict",
     "consumption_intent_digest",
     "derive_grant_id",
     "generate_behavior_signals",
