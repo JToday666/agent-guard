@@ -1,7 +1,7 @@
 """V21-04 guard-api 安全状态编排包（State Projection / Snapshot）。
 
-纯新增顶层包：本期不接线 evaluation 编排 / main / routers（接线属
-V21-08），不新增 HTTP 路由与环境变量。模块分工（07 §3 六文件口径 +
+顶层包：V21-08 T4 起由 main 注册 service 门面供 shadow 旁路只读
+消费；不新增 HTTP 路由。模块分工（07 §3 六文件口径 +
 service 门面）：
 
 - ``ordering``：SequenceRef 同域同 producer 比较入口（转调 core）；

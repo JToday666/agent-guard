@@ -1,7 +1,8 @@
 """SecurityStateService：V21-04 安全状态对外 API 门面。
 
-本期纯新增：不接线 evaluation 编排 / main / routers（接线属 V21-08），
-不新增 HTTP 路由与环境变量。对外三个入口：
+V21-08 T4 起由 ``main.py`` 注册进 ApiContext/EvaluationService 可达
+位置，供 shadow 旁路编排（``services/v21_shadow.py``）只读消费；
+不新增 HTTP 路由。对外三个入口：
 
 - ``project_committed``：已 commit 权威记录的投影 + 应用编排；
 - ``read_snapshot``：判定输入快照（dirty/缺态自动 bounded rebuild，

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentguard_core import (
     ActionCritic,
@@ -25,6 +25,9 @@ from .approval import ApprovalService
 from .audit import AuditService
 from .memory import MemoryGuardService
 from .policy import PolicyService
+
+if TYPE_CHECKING:
+    from .v21_shadow import V21ShadowService
 
 
 class EvaluationConflictError(ValueError):
@@ -93,12 +96,17 @@ class EvaluationService:
         approval_service: ApprovalService,
         memory_guard_service: MemoryGuardService | None = None,
         action_critic: ActionCritic | None = None,
+        v21_shadow_service: V21ShadowService | None = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
         self.approval_service = approval_service
         self.memory_guard_service = memory_guard_service
         self.action_critic = action_critic or ActionCritic()
+        # V21-08 shadow 旁路编排器（flag 默认关闭）。T4 只注册可达性；
+        # 审计证据接线在 T5 于 audit 落盘前调用，本类判定/审批/审计
+        # 主流程不使用它（legacy = 唯一官方决策者，04 §1-§2）。
+        self.v21_shadow_service = v21_shadow_service
 
     def evaluate(
         self, event: GuardEvent, *, requesting_principal_id: str

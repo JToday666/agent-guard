@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from guard_api.auth import CapabilityAuthService
+from guard_api.security_state import SecurityStateService
 from guard_api.services import (
     ApprovalService,
     AuditService,
@@ -16,6 +17,7 @@ from guard_api.services import (
     PolicyService,
     TaskIngressService,
     TraceService,
+    V21ShadowService,
 )
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
@@ -36,3 +38,7 @@ class ApiContext:
     policy_service: PolicyService
     evaluation_service: EvaluationService
     task_ingress_service: TaskIngressService
+    # V21-08：安全状态门面（snapshot 只读入口）与 shadow 旁路编排器
+    # （flag 默认关闭；不新增 HTTP 路由，仅供 T5 审计证据接线可达）。
+    security_state_service: SecurityStateService
+    v21_shadow_service: V21ShadowService

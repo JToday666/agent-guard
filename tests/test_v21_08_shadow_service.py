@@ -16,8 +16,10 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 from agentguard_core import GuardEvent, PolicyBundle
 from agentguard_core.authority.models import TaskFact
@@ -29,11 +31,13 @@ from agentguard_core.events.payloads import (
     ToolCallPayload,
     ToolDescriptor,
 )
+from guard_api.main import create_app
 from guard_api.security_state import SecurityStateService
 from guard_api.services import V21ShadowService
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import TaskFactRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
+from tests.support.auth import memory_store_with_adapter
 
 #: ≥32 字节的 base64url 测试密钥（形态与 checkpoint key 校验同口径）。
 _TEST_SECRET = base64.urlsafe_b64encode(
@@ -375,6 +379,55 @@ def test_unrecoverable_failure_returns_none_without_raising(monkeypatch) -> None
         )
         is None
     )
+
+
+# ---------------------------------------------------------------------------
+# create_app 注册与 evaluate 响应隔离（envelope 不进入响应任何字段）
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_once_via_api(settings: GuardApiSettings) -> dict:
+    app = create_app(store=memory_store_with_adapter(), settings=settings)
+    client = TestClient(app)
+    payload = {
+        "schema_version": "0.3",
+        "event_id": "evt_shadow_api_1",
+        "event_type": "tool_call_proposed",
+        "runtime": "langgraph",
+        "trace_id": "trace_shadow_api",
+        "timestamp": "2026-08-15T00:00:00+00:00",
+        "security_context": {"agent_id": "main", "user_task": "fixture"},
+        "payload": {
+            "tool": {"name": "read_file"},
+            "arguments": {},
+            "derived_resources": [],
+        },
+        "metadata": {},
+    }
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_create_app_registers_services_and_response_excludes_envelope() -> None:
+    flag_off = _evaluate_once_via_api(_settings(shadow_enabled=False))
+    flag_on = _evaluate_once_via_api(_settings(shadow_enabled=True))
+
+    # decision_v21 envelope 不进入 GuardEvaluationResponse 任何字段
+    # （T4 不接线审计落盘；T5 也只写审计 evidence，不改响应）。
+    assert "decision_v21" not in json.dumps(flag_off)
+    assert "decision_v21" not in json.dumps(flag_on)
+    # 响应顶层形状一致；官方决策不因 flag 改变。
+    assert set(flag_off) == set(flag_on) == {
+        "decision",
+        "approval",
+        "policy_audit_id",
+    }
+    assert flag_off["decision"]["decision"] == flag_on["decision"]["decision"]
 
 
 # ---------------------------------------------------------------------------

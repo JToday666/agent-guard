@@ -20,6 +20,7 @@ from guard_api.errors import error_response, http_error_code, validation_error_d
 from guard_api.llm_approval import HttpLlmApprovalReviewer, LlmApprovalReviewer
 from guard_api.middleware import RequestBodyLimitMiddleware
 from guard_api.routers import ApiContext, register_routes
+from guard_api.security_state import SecurityStateService
 from guard_api.services import (
     ApprovalService,
     AuditCheckpointService,
@@ -35,6 +36,7 @@ from guard_api.services import (
     ProvenanceWriter,
     TaskIngressService,
     TraceService,
+    V21ShadowService,
 )
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
@@ -109,11 +111,21 @@ def create_app(
         policy_bundle=policy_bundle,
         policy_provider=policy_provider,
     )
+    # V21-08：安全状态门面 + shadow 旁路编排器（flag 默认关闭，D3）。
+    # 构造无 I/O；flag off 时 build_shadow_evidence 仅一次布尔判断，
+    # evaluate 热路径不引入任何额外状态读取。
+    security_state_service = SecurityStateService(store)
+    v21_shadow_service = V21ShadowService(
+        settings=settings,
+        store=store,
+        state_service=security_state_service,
+    )
     evaluation_service = EvaluationService(
         policy_service=policy_service,
         audit_service=audit_service,
         approval_service=approval_service,
         memory_guard_service=memory_guard_service,
+        v21_shadow_service=v21_shadow_service,
     )
     task_ingress_service = TaskIngressService(store=store, settings=settings)
 
@@ -260,6 +272,8 @@ def create_app(
             policy_service=policy_service,
             evaluation_service=evaluation_service,
             task_ingress_service=task_ingress_service,
+            security_state_service=security_state_service,
+            v21_shadow_service=v21_shadow_service,
         ),
     )
     return app
