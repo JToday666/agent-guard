@@ -283,6 +283,7 @@ class V21ShadowService:
                     bundle,
                     legacy_decision=legacy_decision,
                     detection_results=detection_results,
+                    revoked_grant_ids=revoked_grant_ids,
                     reason_code=REASON_COMPONENT_FAILED,
                 )
             except Exception:  # noqa: BLE001 - 兜底再失败则放弃证据。
@@ -317,6 +318,7 @@ class V21ShadowService:
                 bundle,
                 legacy_decision=legacy_decision,
                 detection_results=detection_results,
+                revoked_grant_ids=revoked_grant_ids,
                 reason_code=REASON_SNAPSHOT_READ_FAILED,
             )
 
@@ -403,10 +405,13 @@ class V21ShadowService:
         *,
         legacy_decision: Decision,
         detection_results: Sequence[DetectionResult] | None,
+        revoked_grant_ids: Sequence[str] = (),
         reason_code: str,
     ) -> dict[str, Any] | None:
         """组件故障降级信封：snapshot 缺态评估 + 重分类为组件失败。
 
+        调用方注入的 ``detection_results`` / ``revoked_grant_ids`` 必须
+        透传（兜底路径与正常路径同源输入，不得静默丢弃权威输入）。
         自身任何异常上抛由外层 ``build_shadow_evidence`` 兜底收敛。
         """
 
@@ -419,6 +424,7 @@ class V21ShadowService:
             detection_results=(
                 detection_results if detection_results is not None else ()
             ),
+            revoked_grant_ids=revoked_grant_ids,
         )
         assessment = _recategorize_shadow_degradation(
             outcome.assessment, reason_code=reason_code

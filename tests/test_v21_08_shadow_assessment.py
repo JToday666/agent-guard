@@ -305,6 +305,37 @@ def test_snapshot_present_full_pipeline_and_revalidation_tuple() -> None:
     assert finalize_shadow(assessment) in ("allow", "ask", "deny")
 
 
+def test_snapshot_with_task_fact_projects_task_digest() -> None:
+    """S1：snapshot 携带权威 TaskFact 时 assessment.task_digest 同源非空。"""
+    from agentguard_core.authority.models import TaskFact
+
+    task = TaskFact(
+        task_id="task_shadow_assessment_fixture",
+        scope_digest="sha256:" + "0" * 64,
+        scope_key_id="scope_key_test",
+        principal_id="principal-1",
+        task_summary="shadow assessment fixture task",
+        task_digest="sha256:" + "cd" * 32,
+        revision=1,
+        status="active",
+        action_constraints=[],
+        resource_constraints=[],
+        destination_constraints=[],
+        created_sequence=None,
+        producer="guard_api_task_ingress",
+        authority="authoritative",
+        evidence_refs=[],
+    )
+    snapshot = _snapshot().model_copy(update={"task": task})
+    event, policies = _first_case()
+
+    assessment = shadow_assess(
+        event, policies, snapshot, server_secret=SERVER_SECRET
+    )
+    assert assessment.task_digest is not None
+    assert assessment.task_digest == task.task_digest
+
+
 def test_finalize_shadow_minimal_mapping() -> None:
     event, policies = _first_case()
     assessment = shadow_assess(

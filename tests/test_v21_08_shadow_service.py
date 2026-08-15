@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 from agentguard_core import GuardEvent, PolicyBundle
 from agentguard_core.authority.models import TaskFact
 from agentguard_core.decisions.divergence import DIVERGENCE_VOCABULARY
+from agentguard_core.decisions.models import RuleHit
+from agentguard_core.decisions.results import DetectionResult
 from agentguard_core.decisions.shadow import ABSENT_SNAPSHOT_ID
 from agentguard_core.engine import GuardEngine
 from agentguard_core.events.payloads import (
@@ -341,6 +343,56 @@ def test_ensure_ready_failure_converges_to_component_failure(
     assert (
         _payload(envelope)["divergence_category"]
         == "degraded_component_failure"
+    )
+
+
+def _detection_result(index: int) -> DetectionResult:
+    return DetectionResult(
+        decision="ask",
+        risk_score=55,
+        category="command_risk",
+        rule_hit=RuleHit(
+            rule_id=f"rule_{index:03d}",
+            rule_name=f"rule {index}",
+            severity="medium",
+            evidence=[f"evidence-{index}"],
+        ),
+        reason="test fixture detection",
+    )
+
+
+def test_component_failure_envelope_preserves_injected_detection_results(
+    monkeypatch,
+) -> None:
+    """S5：兜底降级信封必须透传调用方注入的 detection_results。
+
+    snapshot 读取故障 → 兜底信封；注入的检测结果派生的 legacy
+    signals 不得被静默丢弃（兜底路径与正常路径同源输入）。
+    """
+    service, store = _service()
+    _commit_task_fact(store)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated snapshot read failure")
+
+    monkeypatch.setattr(SecurityStateService, "read_snapshot", _boom)
+    envelope = service.build_shadow_evidence(
+        _event(task_id=_TASK_ID),
+        PolicyBundle(),
+        legacy_decision="allow",
+        detection_results=[_detection_result(0), _detection_result(1)],
+    )
+    assert envelope is not None
+    payload = _payload(envelope)
+    assert payload["divergence_category"] == "degraded_component_failure"
+    assert payload["snapshot_id"] == ABSENT_SNAPSHOT_ID
+    # 注入检测结果派生的 legacy signals 在兜底信封中存活。
+    assert len(payload["signal_ids"]) == 2
+    # 组件故障降级登记在案（divergence 降级优先的输入）。
+    assert payload["degradation_ids"]
+    assert any(
+        degradation_id.startswith("v21-08-shadow-degrade:")
+        for degradation_id in payload["degradation_ids"]
     )
 
 
