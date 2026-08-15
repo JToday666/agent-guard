@@ -735,8 +735,85 @@ def _handle_message_send_proposed(
     )
 
 
-#: 事件分派表（02 §8.1-8.7）；Wave 1 读路径四事件 + Wave 2 写侧逐批
-#: 注册；未注册事件类型视为未知 → fail-closed（02 §13）。
+def _handle_tool_call_proposed(
+    event: GuardEvent, inputs: FactBuildInputs
+) -> _PartialFacts:
+    """02 §8.7：data refs 流 + RecentActionFact 候选（无接线）。
+
+    ActionIR 继续由 Core normalizer 拥有；Context Track 只补 data refs
+    流（exact/deterministic）与 current RecentActionFact 候选
+    （Pre-decision，非 final decision）。
+
+    资源方向约定：CanonicalResource/DerivedResource 无独立方向
+    字段，按 ActionIR 字段语义登记——destinations（出站）→
+    ``written_to``；resources（入站/读取）→ ``read_from``（04 §4
+    两 relation 默认均 exact）。
+
+    无 ActionIR → 零流、无候选、``ct-fact:action_ref_degraded``
+    降级（02 §8.4 先例 / §13 flow ref missing）。
+
+    runtime_sequence 登记：ActionIR.runtime_sequence 是裸整数
+    序号，而 RecentActionFact 要求 SequenceRef（domain +
+    producer_binding_id + value，01 §5 且禁止跨 domain 比较）；
+    事实生产者无合法依据构造完整锚点，候选取 None，由持有
+    producer 上下文的后续链（CT-PR-04/05 接线）填充。
+    """
+    action_ir = inputs.action_ir
+    if action_ir is None:
+        return _PartialFacts(
+            degradations=(
+                _degradation(
+                    event,
+                    reason_code="ct-fact:action_ref_degraded",
+                    failure_kind="unavailable",
+                ),
+            )
+        )
+    flow_facts: list[FlowFact] = []
+    index = 0
+    for relation, resources in (
+        ("written_to", action_ir.destinations),
+        ("read_from", action_ir.resources),
+    ):
+        for resource in resources:
+            flow_facts.append(
+                _flow(
+                    event=event,
+                    scope_digest=inputs.scope_digest,
+                    index=index,
+                    source_ref=f"action:{action_ir.action_id}",
+                    target_ref=resource.canonical_id,
+                    relation=cast(Any, relation),
+                    strength="exact",
+                    origin="deterministic",
+                    taints=[],
+                )
+            )
+            index += 1
+    current_action = RecentActionFact(
+        action_id=action_ir.action_id,
+        event_id=action_ir.event_id,
+        agent_id=action_ir.agent_id,
+        branch_id=action_ir.branch_id,
+        parent_event_ids=list(action_ir.parent_event_ids),
+        # 见 docstring runtime_sequence 登记：裸 int 不能构造 SequenceRef。
+        runtime_sequence=None,
+        action_type=action_ir.action_type,
+        impact=action_ir.impact,
+        effects=action_ir.effects,
+        resource_ids=[resource.canonical_id for resource in action_ir.resources],
+        destination_ids=[resource.canonical_id for resource in action_ir.destinations],
+        data_refs=list(action_ir.data_refs),
+        # Pre-decision 候选：authority/decision 由 Core 评估链后置填充。
+        authority_status="unknown",
+        final_decision=None,
+        evidence_refs=[],
+    )
+    return _PartialFacts(flow_facts=tuple(flow_facts), current_action=current_action)
+
+
+#: 事件分派表（02 §8.1-8.7）：Wave 1 读路径四事件 + Wave 2 写侧三
+#: 事件；未注册事件类型视为未知 → fail-closed（02 §13）。
 _EVENT_HANDLERS: types.MappingProxyType = types.MappingProxyType(
     {
         "context_assembled": _handle_context_assembled,
@@ -745,6 +822,7 @@ _EVENT_HANDLERS: types.MappingProxyType = types.MappingProxyType(
         "tool_result_produced": _handle_tool_result_produced,
         "memory_write_proposed": _handle_memory_write_proposed,
         "message_send_proposed": _handle_message_send_proposed,
+        "tool_call_proposed": _handle_tool_call_proposed,
     }
 )
 

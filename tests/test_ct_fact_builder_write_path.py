@@ -1,19 +1,45 @@
 """CT-PR-02b 写侧事件契约测试（ct-fact-1，无接线）。
 
-口径依据：02 §8.5-8.6（memory_write_proposed / message_send_proposed、
-§13 failure contract）、04 §12 三态 / §15 ALLOW ≠ TRUST、§4 sent_to
-evidence-defined、02 §11 T-FactReplay（确定性、乱序无关）。
+口径依据：02 §8.5-8.7（写侧三事件、§13 failure contract）、04 §12 三态 /
+§15 ALLOW ≠ TRUST、§4 sent_to evidence-defined、02 §11 T-FactReplay
+与冻结 YAML parity。
 """
 
 from __future__ import annotations
 
+import json
+
 import pytest
-from agentguard_core.security_context.facts import MemoryFact
+from agentguard_core.actions.canonical_resources import (
+    ResourceNormalizationInput,
+    normalize_email_resource,
+    normalize_file_resource,
+)
+from agentguard_core.security_context.facts import MemoryFact, fact_digest_projection
 from guard_api.security_state.fact_authority import VerifiedSourceDescriptor
 from guard_api.security_state.fact_builder import build_transient_facts
 
-from tests.test_ct_fact_builder import SCOPE, _action_ir, _event, _inputs
+from tests.test_ct_fact_builder import (
+    CT_FREEZE_DIR,
+    SCOPE,
+    _action_ir,
+    _event,
+    _inputs,
+)
 
+
+@pytest.fixture(scope="module")
+def freeze_yaml() -> dict:
+    path = CT_FREEZE_DIR / "context_taint_contract_freeze.yaml"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+_INBOUND = normalize_file_resource(
+    ResourceNormalizationInput(resource_id="", target="/data/report.csv")
+)
+_OUTBOUND = normalize_email_resource(
+    ResourceNormalizationInput(resource_id="", target="sink@example.com")
+)
 REF = "source:web:evt-0:0"
 
 
@@ -298,7 +324,7 @@ def test_message_send_sensitive_evidence_taints_sent_to() -> None:
         pytest.param(
             # will_persist=False → 不建 persisted_to 流（无降级）。
             _memory_event(will_persist=False),
-            _inputs(upstream_descriptors={REF: _descriptor()}),
+            _inputs(upstream_descriptors={"source:web:evt-0:0": _descriptor()}),
             id="memory-without-persist",
         ),
     ],
@@ -328,3 +354,108 @@ def test_message_send_sensitive_preview_signal_without_exact_flow() -> None:
     assert signal.evidence_group == "eg:evt-1:sensitive_send"
     (degradation,) = bundle.degradations
     assert degradation.reason_codes == ["ct-fact:flow_ref_missing"]
+
+
+# --- 02 §8.7 tool_call_proposed：data refs 流 + RecentActionFact 候选 ------
+
+
+def _tool_call_event():
+    payload: dict = {
+        "tool": {
+            "name": "web_search",
+            "category": "tool",
+            "kind": "web_search",
+            "input_kind": "text",
+            "call_id": "call-1",
+        },
+        "arguments": {},
+        "derived_resources": [],
+    }
+    return _event("tool_call_proposed", payload)
+
+
+def _tool_call_action_ir():
+    return _action_ir().model_copy(
+        update={
+            "resources": [_INBOUND],
+            "destinations": [_OUTBOUND],
+            "data_refs": ["data:artifact-1"],
+        }
+    )
+
+
+def test_tool_call_with_action_ir_builds_data_ref_flows_and_candidate() -> None:
+    bundle = build_transient_facts(
+        event=_tool_call_event(), inputs=_inputs(action_ir=_tool_call_action_ir())
+    )
+    # 方向约定：destinations → written_to；resources → read_from。
+    assert [flow.relation for flow in bundle.flow_facts] == ["written_to", "read_from"]
+    assert bundle.flow_facts[0].target_ref == _OUTBOUND.canonical_id
+    assert bundle.flow_facts[1].target_ref == _INBOUND.canonical_id
+    for flow in bundle.flow_facts:
+        assert flow.source_ref == "action:action-1"
+        assert (flow.strength, flow.origin) == ("exact", "deterministic")
+    candidate = bundle.current_action
+    assert candidate is not None
+    assert candidate.action_id == "action-1"
+    assert candidate.event_id == "evt-1"
+    assert (candidate.authority_status, candidate.final_decision) == ("unknown", None)
+    assert candidate.resource_ids == [_INBOUND.canonical_id]
+    assert candidate.destination_ids == [_OUTBOUND.canonical_id]
+    assert candidate.data_refs == ["data:artifact-1"]
+    # runtime_sequence 登记：裸 int 序号不能构造 SequenceRef，候选取 None。
+    assert candidate.runtime_sequence is None
+    assert bundle.degradations == ()
+
+
+def test_tool_call_without_action_ir_degrades() -> None:
+    bundle = build_transient_facts(event=_tool_call_event(), inputs=_inputs())
+    assert bundle.flow_facts == ()
+    assert bundle.current_action is None
+    (degradation,) = bundle.degradations
+    assert degradation.reason_codes == ["ct-fact:action_ref_degraded"]
+
+
+# --- T-FactReplay 与 YAML parity（写侧三事件） ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("case", "event", "inputs"),
+    [
+        (
+            "memory",
+            _memory_event(),
+            _inputs(upstream_descriptors={REF: _descriptor(taints=("UNTRUSTED",))}),
+        ),
+        ("message", _send_event(sensitive=True), _inputs()),
+        ("tool_call", _tool_call_event(), _inputs(action_ir=_tool_call_action_ir())),
+    ],
+)
+def test_write_side_fact_replay_deterministic(case: str, event, inputs) -> None:
+    # 02 §11：写侧三事件同输入两次构建 → 同 bundle_digest；
+    # memory_facts 逐条 fact_digest_projection 相等。
+    first = build_transient_facts(event=event, inputs=inputs)
+    second = build_transient_facts(event=event, inputs=inputs)
+    assert first.bundle_digest == second.bundle_digest
+    assert first.model_dump(mode="json") == second.model_dump(mode="json")
+    for fact_a, fact_b in zip(first.memory_facts, second.memory_facts):
+        assert fact_digest_projection(fact_a) == fact_digest_projection(fact_b)
+
+
+def test_write_side_flows_match_frozen_yaml(freeze_yaml) -> None:
+    relations = set(freeze_yaml["flow_relations"])
+    strengths = set(freeze_yaml["flow_strength"]["order_best_to_worst"])
+    cases = (
+        (_memory_event(), _inputs(upstream_descriptors={REF: _descriptor()})),
+        (_send_event(), _inputs(action_ir=_action_with_data_refs("data:artifact-1"))),
+        (_tool_call_event(), _inputs(action_ir=_tool_call_action_ir())),
+    )
+    flows = [
+        flow
+        for event, inputs in cases
+        for flow in build_transient_facts(event=event, inputs=inputs).flow_facts
+    ]
+    assert flows
+    for flow in flows:
+        assert flow.relation in relations
+        assert flow.strength in strengths
