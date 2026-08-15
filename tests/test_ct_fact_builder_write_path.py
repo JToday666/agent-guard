@@ -21,9 +21,9 @@ from guard_api.security_state.fact_builder import build_transient_facts
 from tests.test_ct_fact_builder import (
     CT_FREEZE_DIR,
     SCOPE,
-    _action_ir,
-    _event,
-    _inputs,
+    ct_action_ir,
+    ct_event,
+    ct_inputs,
 )
 
 
@@ -93,7 +93,7 @@ def _memory_event(
     }
     if action_id is not None:
         payload["action_id"] = action_id
-    return _event("memory_write_proposed", payload)
+    return ct_event("memory_write_proposed", payload)
 
 
 def _send_event(
@@ -110,16 +110,16 @@ def _send_event(
         "sanitized": False,
         "derived_resources": [],
     }
-    return _event("message_send_proposed", payload)
+    return ct_event("message_send_proposed", payload)
 
 
 def _action_with_data_refs(*refs: str):
-    return _action_ir().model_copy(update={"data_refs": list(refs)})
+    return ct_action_ir().model_copy(update={"data_refs": list(refs)})
 
 
 def _mem_inputs(**fact_kwargs):
     """单条上游 MemoryFact（memory://ns/prev）的 FactBuildInputs 快捷构造。"""
-    return _inputs(
+    return ct_inputs(
         upstream_memory_facts={"memory://ns/prev": _upstream_memory_fact(**fact_kwargs)}
     )
 
@@ -128,7 +128,7 @@ def _desc_inputs(
     *, status: Literal["proposed", "quarantined"] = "proposed", **desc_kwargs
 ):
     """单条上游 descriptor（REF）的 FactBuildInputs 快捷构造。"""
-    return _inputs(
+    return ct_inputs(
         memory_change_status=status,
         upstream_descriptors={REF: _descriptor(**desc_kwargs)},  # type: ignore[arg-type]
     )
@@ -148,7 +148,7 @@ def _desc_inputs(
             "proposed",
             id="untrusted-descriptor",
         ),
-        pytest.param(_inputs(), "unknown", [], [], "proposed", id="empty-upstream"),
+        pytest.param(ct_inputs(), "unknown", [], [], "proposed", id="empty-upstream"),
         pytest.param(
             _desc_inputs(), "clean", [], [REF], "proposed", id="trusted-clean"
         ),
@@ -221,7 +221,7 @@ def _desc_inputs(
         ),
         pytest.param(
             # 02 §13：visible_refs 声明 ref 查表未命中 → fail-closed tainted。
-            _inputs(visible_refs=("source:web:evt-0:missing",)),
+            ct_inputs(visible_refs=("source:web:evt-0:missing",)),
             "tainted",
             ["PERSISTENT_UNTRUSTED"],
             ["source:web:evt-0:missing"],
@@ -257,7 +257,7 @@ def test_memory_write_trust_state_matrix(
 
 
 def test_memory_write_persisted_flow_and_memory_id_deterministic() -> None:
-    inputs = _inputs(
+    inputs = ct_inputs(
         upstream_descriptors={REF: _descriptor(taints=("UNTRUSTED",))},
         visible_refs=(REF,),
     )
@@ -287,7 +287,7 @@ def test_memory_write_unordered_inputs_are_deterministic() -> None:
     ]
     bundles = [
         build_transient_facts(
-            event=_memory_event(), inputs=_inputs(upstream_descriptors=table)
+            event=_memory_event(), inputs=ct_inputs(upstream_descriptors=table)
         )
         for table in orderings
     ]
@@ -320,7 +320,7 @@ def test_message_send_stable_refs_build_exact_sent_to(
     # 实际产出（mailto:/http(s)://other://，未自造 network: 前缀）。
     bundle = build_transient_facts(
         event=_send_event(channel=channel, recipient=recipient, sensitive=sensitive),
-        inputs=_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
+        inputs=ct_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
     )
     (flow,) = bundle.flow_facts
     assert flow.source_ref == "data:artifact-1"
@@ -332,25 +332,25 @@ def test_message_send_stable_refs_build_exact_sent_to(
 @pytest.mark.parametrize(
     ("event", "inputs", "degraded"),
     [
-        pytest.param(_send_event(), _inputs(), True, id="no-action-ir"),
+        pytest.param(_send_event(), ct_inputs(), True, id="no-action-ir"),
         pytest.param(
-            _send_event(), _inputs(action_ir=_action_ir()), True, id="empty-data-refs"
+            _send_event(), ct_inputs(action_ir=ct_action_ir()), True, id="empty-data-refs"
         ),
         pytest.param(
             # email 归一失败（无 @）→ unresolved → 不建流。
             _send_event(recipient="not-an-address"),
-            _inputs(action_ir=_action_with_data_refs("data:artifact-1")),
+            ct_inputs(action_ir=_action_with_data_refs("data:artifact-1")),
             True,
             id="unresolvable-sink",
         ),
         pytest.param(
             _memory_event(will_persist=False),
-            _inputs(),
+            ct_inputs(),
             False,
             id="memory-no-persist-empty-upstream",
         ),
         pytest.param(
-            _memory_event(), _inputs(), True, id="memory-empty-upstream-persist"
+            _memory_event(), ct_inputs(), True, id="memory-empty-upstream-persist"
         ),
     ],
 )
@@ -369,7 +369,7 @@ def test_write_side_without_stable_flow_builds_no_flow(event, inputs, degraded) 
 
 def test_message_send_sensitive_preview_signal_without_exact_flow() -> None:
     # 02 §8.6：只有敏感证据 → Signal + 零 exact 流，绝不伪造 provenance。
-    bundle = build_transient_facts(event=_send_event(sensitive=True), inputs=_inputs())
+    bundle = build_transient_facts(event=_send_event(sensitive=True), inputs=ct_inputs())
     assert bundle.flow_facts == ()
     (signal,) = bundle.signals
     assert signal.signal_id == "signal:evt-1:sensitive_send"
@@ -383,7 +383,7 @@ def test_message_send_server_sensitive_evidence_signal() -> None:
     # Signal 口径对称：server_sensitive_evidence=True 且无稳定 refs →
     # Signal 存在（与 exact 流 taints 判定同条件位）。
     bundle = build_transient_facts(
-        event=_send_event(), inputs=_inputs(server_sensitive_evidence=True)
+        event=_send_event(), inputs=ct_inputs(server_sensitive_evidence=True)
     )
     assert bundle.flow_facts == ()
     (signal,) = bundle.signals
@@ -405,11 +405,11 @@ def _tool_call_event():
         "arguments": {},
         "derived_resources": [],
     }
-    return _event("tool_call_proposed", payload)
+    return ct_event("tool_call_proposed", payload)
 
 
 def _tool_call_action_ir():
-    return _action_ir().model_copy(
+    return ct_action_ir().model_copy(
         update={
             "resources": [_INBOUND],
             "destinations": [_OUTBOUND],
@@ -420,7 +420,7 @@ def _tool_call_action_ir():
 
 def test_tool_call_with_action_ir_builds_data_ref_flows_and_candidate() -> None:
     bundle = build_transient_facts(
-        event=_tool_call_event(), inputs=_inputs(action_ir=_tool_call_action_ir())
+        event=_tool_call_event(), inputs=ct_inputs(action_ir=_tool_call_action_ir())
     )
     # 方向约定：destinations → written_to；resources → read_from。
     assert [flow.relation for flow in bundle.flow_facts] == ["written_to", "read_from"]
@@ -441,7 +441,7 @@ def test_tool_call_with_action_ir_builds_data_ref_flows_and_candidate() -> None:
 
 
 def test_tool_call_without_action_ir_degrades() -> None:
-    bundle = build_transient_facts(event=_tool_call_event(), inputs=_inputs())
+    bundle = build_transient_facts(event=_tool_call_event(), inputs=ct_inputs())
     assert bundle.flow_facts == ()
     assert bundle.current_action is None
     (degradation,) = bundle.degradations
@@ -457,10 +457,10 @@ def test_tool_call_without_action_ir_degrades() -> None:
         (
             "memory",
             _memory_event(),
-            _inputs(upstream_descriptors={REF: _descriptor(taints=("UNTRUSTED",))}),
+            ct_inputs(upstream_descriptors={REF: _descriptor(taints=("UNTRUSTED",))}),
         ),
-        ("message", _send_event(sensitive=True), _inputs()),
-        ("tool_call", _tool_call_event(), _inputs(action_ir=_tool_call_action_ir())),
+        ("message", _send_event(sensitive=True), ct_inputs()),
+        ("tool_call", _tool_call_event(), ct_inputs(action_ir=_tool_call_action_ir())),
     ],
 )
 def test_write_side_fact_replay_deterministic(case: str, event, inputs) -> None:
@@ -477,9 +477,9 @@ def test_write_side_flows_match_frozen_yaml(freeze_yaml) -> None:
     relations = set(freeze_yaml["flow_relations"])
     strengths = set(freeze_yaml["flow_strength"]["order_best_to_worst"])
     cases = (
-        (_memory_event(), _inputs(upstream_descriptors={REF: _descriptor()})),
-        (_send_event(), _inputs(action_ir=_action_with_data_refs("data:artifact-1"))),
-        (_tool_call_event(), _inputs(action_ir=_tool_call_action_ir())),
+        (_memory_event(), ct_inputs(upstream_descriptors={REF: _descriptor()})),
+        (_send_event(), ct_inputs(action_ir=_action_with_data_refs("data:artifact-1"))),
+        (_tool_call_event(), ct_inputs(action_ir=_tool_call_action_ir())),
     )
     flows = [
         flow

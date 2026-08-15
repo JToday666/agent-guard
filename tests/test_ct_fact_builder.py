@@ -52,12 +52,14 @@ def freeze_yaml() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 构造工厂（以下符号被 test_ct_fact_builder_write_path.py 导入复用，
-# 修改签名须同提交运行 write_path 套件）
+# 构造工厂（共享夹具，供 CT 系列契约测试复用，改动需同步）：
+# ct_inputs / ct_event / ct_context_source / ct_model_event / ct_action_ir
+# 被 test_ct_fact_builder_write_path.py 与 test_ct_delta_builder.py
+# 导入复用，修改签名须同提交运行上述套件；故公开命名（无下划线前缀）。
 # ---------------------------------------------------------------------------
 
 
-def _inputs(**overrides) -> FactBuildInputs:
+def ct_inputs(**overrides) -> FactBuildInputs:
     base: dict = {
         "scope_digest": SCOPE,
         "producer_identity": ProducerIdentity(),
@@ -66,7 +68,7 @@ def _inputs(**overrides) -> FactBuildInputs:
     return FactBuildInputs(**base)
 
 
-def _context_source(
+def ct_context_source(
     source_id: str = "ctx-1",
     source_type: str = "web",
     source_trust: str = "trusted",
@@ -82,7 +84,7 @@ def _context_source(
     }
 
 
-def _event(event_type: str, payload: dict, event_id: str = "evt-1") -> GuardEvent:
+def ct_event(event_type: str, payload: dict, event_id: str = "evt-1") -> GuardEvent:
     return GuardEvent(
         event_id=event_id,
         event_type=event_type,  # type: ignore[arg-type]
@@ -96,11 +98,11 @@ def _event(event_type: str, payload: dict, event_id: str = "evt-1") -> GuardEven
 def _context_event(sources: list[dict], **payload_overrides) -> GuardEvent:
     payload = {"sources": sources, "will_enter_context": True, "sanitized": False}
     payload.update(payload_overrides)
-    return _event("context_assembled", payload)
+    return ct_event("context_assembled", payload)
 
 
-def _model_event(phase: str) -> GuardEvent:
-    return _event(
+def ct_model_event(phase: str) -> GuardEvent:
+    return ct_event(
         f"model_{'input_prepared' if phase == 'input' else 'output_produced'}",
         {
             "phase": phase,
@@ -127,10 +129,10 @@ def _tool_result_event(**payload_overrides) -> GuardEvent:
         "contains_instruction_like_text": False,
     }
     payload.update(payload_overrides)
-    return _event("tool_result_produced", payload)
+    return ct_event("tool_result_produced", payload)
 
 
-def _action_ir(action_id: str = "action-1", binding: str = "binding-1") -> ActionIR:
+def ct_action_ir(action_id: str = "action-1", binding: str = "binding-1") -> ActionIR:
     return ActionIR(
         event_id="evt-1",
         action_id=action_id,
@@ -171,7 +173,7 @@ def _action_ir(action_id: str = "action-1", binding: str = "binding-1") -> Actio
 
 def test_context_assembled_web_source_mapping() -> None:
     bundle = build_transient_facts(
-        event=_context_event([_context_source()]), inputs=_inputs()
+        event=_context_event([ct_context_source()]), inputs=ct_inputs()
     )
     (source,) = bundle.source_facts
     assert source.source_id == "source:web:evt-1:0"
@@ -194,8 +196,8 @@ def test_context_assembled_web_source_mapping() -> None:
 
 def test_context_assembled_memory_source_uses_memory_ref() -> None:
     bundle = build_transient_facts(
-        event=_context_event([_context_source(source_type="memory")]),
-        inputs=_inputs(),
+        event=_context_event([ct_context_source(source_type="memory")]),
+        inputs=ct_inputs(),
     )
     (source,) = bundle.source_facts
     assert source.source_id == "memory:evt-1:0"
@@ -208,8 +210,8 @@ def test_context_assembled_memory_source_uses_memory_ref() -> None:
 
 def test_context_assembled_instruction_like_adds_taint() -> None:
     bundle = build_transient_facts(
-        event=_context_event([_context_source(instruction_like=True)]),
-        inputs=_inputs(),
+        event=_context_event([ct_context_source(instruction_like=True)]),
+        inputs=ct_inputs(),
     )
     assert "EXTERNAL_INSTRUCTION" in bundle.source_facts[0].taints
     assert "EXTERNAL_INSTRUCTION" in bundle.flow_facts[0].taints
@@ -221,8 +223,8 @@ def test_context_assembled_adapter_trust_claim_cannot_upgrade(
 ) -> None:
     # T-NoClaimUpgrade：web 源 adapter trusted 声明不可洗白。
     bundle = build_transient_facts(
-        event=_context_event([_context_source(source_trust=source_trust)]),
-        inputs=_inputs(),
+        event=_context_event([ct_context_source(source_trust=source_trust)]),
+        inputs=ct_inputs(),
     )
     assert bundle.source_facts[0].trust == "untrusted"
     assert bundle.source_facts[0].authority == "untrusted_claim"
@@ -231,16 +233,16 @@ def test_context_assembled_adapter_trust_claim_cannot_upgrade(
 def test_context_assembled_sanitized_claim_keeps_taints() -> None:
     # T-NoSanitizeClaim：sanitized=true 只作 transform claim，不清 taint。
     bundle = build_transient_facts(
-        event=_context_event([_context_source()], sanitized=True),
-        inputs=_inputs(),
+        event=_context_event([ct_context_source()], sanitized=True),
+        inputs=ct_inputs(),
     )
     assert bundle.source_facts[0].taints == ["UNTRUSTED"]
 
 
 def test_context_assembled_without_context_entry_builds_no_flow() -> None:
     bundle = build_transient_facts(
-        event=_context_event([_context_source()], will_enter_context=False),
-        inputs=_inputs(),
+        event=_context_event([ct_context_source()], will_enter_context=False),
+        inputs=ct_inputs(),
     )
     assert len(bundle.source_facts) == 1
     assert bundle.flow_facts == ()
@@ -253,8 +255,8 @@ def test_context_assembled_without_context_entry_builds_no_flow() -> None:
 
 def test_model_input_visible_refs_build_assembled_flows() -> None:
     bundle = build_transient_facts(
-        event=_model_event("input"),
-        inputs=_inputs(visible_refs=("source:web:evt-1:0", "memory:evt-1:0")),
+        event=ct_model_event("input"),
+        inputs=ct_inputs(visible_refs=("source:web:evt-1:0", "memory:evt-1:0")),
     )
     assert bundle.flow_facts[0].source_ref == "source:web:evt-1:0"
     assert bundle.flow_facts[1].source_ref == "memory:evt-1:0"
@@ -268,7 +270,7 @@ def test_model_input_visible_refs_build_assembled_flows() -> None:
 
 def test_model_input_without_visible_set_degrades() -> None:
     bundle = build_transient_facts(
-        event=_model_event("input"), inputs=_inputs(visible_refs=None)
+        event=ct_model_event("input"), inputs=ct_inputs(visible_refs=None)
     )
     assert bundle.flow_facts == ()
     (degradation,) = bundle.degradations
@@ -282,7 +284,7 @@ def test_model_input_without_visible_set_degrades() -> None:
         "degradation:evt-1:ct-fact:visible_set_unavailable"
     )
     replay = build_transient_facts(
-        event=_model_event("input"), inputs=_inputs(visible_refs=None)
+        event=ct_model_event("input"), inputs=ct_inputs(visible_refs=None)
     )
     assert replay.bundle_digest == bundle.bundle_digest
     assert replay.model_dump(mode="json") == bundle.model_dump(mode="json")
@@ -295,7 +297,7 @@ def test_model_input_without_visible_set_degrades() -> None:
 
 def test_model_output_source_is_model_judgment_unknown() -> None:
     bundle = build_transient_facts(
-        event=_model_event("output"), inputs=_inputs(visible_refs=())
+        event=ct_model_event("output"), inputs=ct_inputs(visible_refs=())
     )
     (source,) = bundle.source_facts
     assert source.source_id == "source:model:evt-1"
@@ -311,7 +313,7 @@ def test_model_output_source_is_model_judgment_unknown() -> None:
 def test_model_output_without_visible_refs_degrades_symmetrically() -> None:
     # 与 §8.2 口径对称：visible set 缺失 → 零 influence 边 + 降级。
     bundle = build_transient_facts(
-        event=_model_event("output"), inputs=_inputs(visible_refs=None)
+        event=ct_model_event("output"), inputs=ct_inputs(visible_refs=None)
     )
     (source,) = bundle.source_facts
     assert source.source_id == "source:model:evt-1"
@@ -322,7 +324,7 @@ def test_model_output_without_visible_refs_degrades_symmetrically() -> None:
         "degradation:evt-1:ct-fact:visible_set_unavailable"
     )
     replay = build_transient_facts(
-        event=_model_event("output"), inputs=_inputs(visible_refs=None)
+        event=ct_model_event("output"), inputs=ct_inputs(visible_refs=None)
     )
     assert replay.bundle_digest == bundle.bundle_digest
 
@@ -331,8 +333,8 @@ def test_model_output_influence_edges_are_always_possible(
     freeze_yaml,
 ) -> None:
     bundle = build_transient_facts(
-        event=_model_event("output"),
-        inputs=_inputs(visible_refs=("source:web:evt-1:0", "context:evt-0")),
+        event=ct_model_event("output"),
+        inputs=ct_inputs(visible_refs=("source:web:evt-1:0", "context:evt-0")),
     )
     llm_default = freeze_yaml["flow_strength"]["llm_default"]
     assert llm_default == "possible"
@@ -345,8 +347,8 @@ def test_model_output_influence_edges_are_always_possible(
 
 def test_model_output_exact_credential_fingerprint_hit() -> None:
     bundle = build_transient_facts(
-        event=_model_event("output"),
-        inputs=_inputs(
+        event=ct_model_event("output"),
+        inputs=ct_inputs(
             visible_refs=("source:web:evt-1:0",),
             server_credential_evidence=True,
             credential_bearing_text=f"output contains {SECRET}",
@@ -372,8 +374,8 @@ def test_model_output_credential_evidence_without_fingerprint_hit_still_taints()
     # 02 §6：证据位 True + 指纹库为空（未注册密钥）不得 fail-open：
     # taints 含 CREDENTIAL+SENSITIVE，但不建 derived_from exact 边。
     bundle = build_transient_facts(
-        event=_model_event("output"),
-        inputs=_inputs(
+        event=ct_model_event("output"),
+        inputs=ct_inputs(
             visible_refs=("source:web:evt-1:0",),
             server_credential_evidence=True,
             credential_bearing_text=f"output contains {SECRET}",
@@ -390,8 +392,8 @@ def test_model_output_unregistered_key_mismatch_taints_without_exact_edge() -> N
     # taints 含 CREDENTIAL+SENSITIVE，无 derived_from exact 边。
     other_fingerprint = canonical_sha256("sk-live-other-key-0000000000")
     bundle = build_transient_facts(
-        event=_model_event("output"),
-        inputs=_inputs(
+        event=ct_model_event("output"),
+        inputs=ct_inputs(
             visible_refs=("source:web:evt-1:0",),
             server_credential_evidence=True,
             credential_bearing_text=f"output contains {SECRET}",
@@ -405,8 +407,8 @@ def test_model_output_unregistered_key_mismatch_taints_without_exact_edge() -> N
 def test_model_output_sensitive_evidence_adds_sensitive_taint() -> None:
     # server_sensitive_evidence=True → model source 无条件追加 SENSITIVE。
     bundle = build_transient_facts(
-        event=_model_event("output"),
-        inputs=_inputs(visible_refs=(), server_sensitive_evidence=True),
+        event=ct_model_event("output"),
+        inputs=ct_inputs(visible_refs=(), server_sensitive_evidence=True),
     )
     assert bundle.source_facts[0].taints == ["SENSITIVE"]
     assert bundle.degradations == ()
@@ -415,8 +417,8 @@ def test_model_output_sensitive_evidence_adds_sensitive_taint() -> None:
 def test_model_output_both_evidence_bits_with_fingerprint_hit() -> None:
     # 两证据位同开 + 指纹命中 → taints 与 exact 边并存（保序去重）。
     bundle = build_transient_facts(
-        event=_model_event("output"),
-        inputs=_inputs(
+        event=ct_model_event("output"),
+        inputs=ct_inputs(
             visible_refs=("source:web:evt-1:0",),
             server_sensitive_evidence=True,
             server_credential_evidence=True,
@@ -440,7 +442,7 @@ def test_model_output_both_evidence_bits_with_fingerprint_hit() -> None:
 def test_tool_result_with_action_ir_builds_returned_by_flow() -> None:
     bundle = build_transient_facts(
         event=_tool_result_event(),
-        inputs=_inputs(action_ir=_action_ir()),
+        inputs=ct_inputs(action_ir=ct_action_ir()),
     )
     (source,) = bundle.source_facts
     assert source.source_id == "tool_result:binding-1:action-1"
@@ -458,7 +460,7 @@ def test_tool_result_with_action_ir_builds_returned_by_flow() -> None:
 
 def test_tool_result_without_action_ir_degrades_ref() -> None:
     bundle = build_transient_facts(
-        event=_tool_result_event(), inputs=_inputs(action_ir=None)
+        event=_tool_result_event(), inputs=ct_inputs(action_ir=None)
     )
     (source,) = bundle.source_facts
     assert source.source_id == "tool_result:evt-1"
@@ -470,7 +472,7 @@ def test_tool_result_without_action_ir_degrades_ref() -> None:
         "degradation:evt-1:ct-fact:action_ref_degraded"
     )
     replay = build_transient_facts(
-        event=_tool_result_event(), inputs=_inputs(action_ir=None)
+        event=_tool_result_event(), inputs=ct_inputs(action_ir=None)
     )
     assert replay.bundle_digest == bundle.bundle_digest
     assert replay.model_dump(mode="json") == bundle.model_dump(mode="json")
@@ -484,17 +486,17 @@ def test_degradations_excluded_from_bundle_digest_whitelist() -> None:
     # 摘要，属白名单设计使然，非缺陷）。
     projection = bundle_digest_projection(
         build_transient_facts(
-            event=_model_event("input"), inputs=_inputs(visible_refs=None)
+            event=ct_model_event("input"), inputs=ct_inputs(visible_refs=None)
         )
     )
     assert "degradations" not in projection
     assert "signals" not in projection
     degraded = build_transient_facts(
-        event=_model_event("input"), inputs=_inputs(visible_refs=None)
+        event=ct_model_event("input"), inputs=ct_inputs(visible_refs=None)
     )
     assert degraded.degradations  # 确实携带降级
     without_degradation = build_transient_facts(
-        event=_model_event("input"), inputs=_inputs(visible_refs=())
+        event=ct_model_event("input"), inputs=ct_inputs(visible_refs=())
     )
     assert without_degradation.degradations == ()
     # 两者 source/flow/memory 事实均为空、event_id/scope 相同 →
@@ -505,7 +507,7 @@ def test_degradations_excluded_from_bundle_digest_whitelist() -> None:
 def test_tool_result_instruction_like_adds_taint() -> None:
     bundle = build_transient_facts(
         event=_tool_result_event(contains_instruction_like_text=True),
-        inputs=_inputs(action_ir=_action_ir()),
+        inputs=ct_inputs(action_ir=ct_action_ir()),
     )
     assert "EXTERNAL_INSTRUCTION" in bundle.source_facts[0].taints
 
@@ -519,8 +521,8 @@ def test_fact_replay_same_input_same_digest() -> None:
     # T-FactReplay：同输入两次独立构造 → 同 digest/同序列化；确定性
     # 无随机/时钟源另由 AST 断言（见下方 no-uuid/no-time 用例）静态
     # 证明，不再依赖装饰性 monkeypatch 哨兵。
-    event = _context_event([_context_source(), _context_source(source_id="ctx-2")])
-    inputs = _inputs(visible_refs=("source:web:evt-1:0",))
+    event = _context_event([ct_context_source(), ct_context_source(source_id="ctx-2")])
+    inputs = ct_inputs(visible_refs=("source:web:evt-1:0",))
     first = build_transient_facts(event=event, inputs=inputs)
     second = build_transient_facts(event=event, inputs=inputs)
     assert first.bundle_digest == second.bundle_digest
@@ -544,13 +546,13 @@ def test_fact_replay_modules_do_not_import_uuid_or_time() -> None:
 
 
 def test_fact_replay_content_perturbation_changes_digest() -> None:
-    inputs = _inputs()
+    inputs = ct_inputs()
     baseline = build_transient_facts(
-        event=_context_event([_context_source()]), inputs=inputs
+        event=_context_event([ct_context_source()]), inputs=inputs
     )
     perturbed = build_transient_facts(
         event=_context_event(
-            [_context_source(), _context_source(source_id="ctx-2", source_type="rag")]
+            [ct_context_source(), ct_context_source(source_id="ctx-2", source_type="rag")]
         ),
         inputs=inputs,
     )
@@ -564,10 +566,10 @@ def test_fact_replay_content_perturbation_changes_digest() -> None:
 
 def test_unknown_event_type_yields_empty_bundle_with_degradation() -> None:
     # 虚构事件类型（写侧三事件已在 Wave 2 注册，不能再用作未知样本）。
-    event = _context_event([_context_source()]).model_copy(
+    event = _context_event([ct_context_source()]).model_copy(
         update={"event_type": "nonexistent_event_probe"}
     )
-    bundle = build_transient_facts(event=event, inputs=_inputs())
+    bundle = build_transient_facts(event=event, inputs=ct_inputs())
     assert bundle.source_facts == ()
     assert bundle.flow_facts == ()
     (degradation,) = bundle.degradations
@@ -584,7 +586,7 @@ def test_handler_exception_converges_to_degradation(monkeypatch) -> None:
         types.MappingProxyType({"context_assembled": _boom}),
     )
     bundle = build_transient_facts(
-        event=_context_event([_context_source()]), inputs=_inputs()
+        event=_context_event([ct_context_source()]), inputs=ct_inputs()
     )
     assert bundle.source_facts == () and bundle.flow_facts == ()
     (degradation,) = bundle.degradations
@@ -630,17 +632,17 @@ def test_all_produced_flows_match_frozen_yaml(freeze_yaml) -> None:
     bundles = [
         build_transient_facts(
             event=_context_event(
-                [_context_source(), _context_source(source_type="memory")]
+                [ct_context_source(), ct_context_source(source_type="memory")]
             ),
-            inputs=_inputs(),
+            inputs=ct_inputs(),
         ),
         build_transient_facts(
-            event=_model_event("input"),
-            inputs=_inputs(visible_refs=("source:web:evt-1:0",)),
+            event=ct_model_event("input"),
+            inputs=ct_inputs(visible_refs=("source:web:evt-1:0",)),
         ),
         build_transient_facts(
-            event=_model_event("output"),
-            inputs=_inputs(
+            event=ct_model_event("output"),
+            inputs=ct_inputs(
                 visible_refs=("source:web:evt-1:0",),
                 server_credential_evidence=True,
                 credential_bearing_text=f"x {SECRET}",
@@ -648,7 +650,7 @@ def test_all_produced_flows_match_frozen_yaml(freeze_yaml) -> None:
             ),
         ),
         build_transient_facts(
-            event=_tool_result_event(), inputs=_inputs(action_ir=_action_ir())
+            event=_tool_result_event(), inputs=ct_inputs(action_ir=ct_action_ir())
         ),
     ]
     flows = [flow for bundle in bundles for flow in bundle.flow_facts]
