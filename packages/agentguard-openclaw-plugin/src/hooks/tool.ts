@@ -361,6 +361,15 @@ export function registerToolResultPersist(hookContext: HookContext): void {
           context,
         );
         const eventRecord = asRecord(cached.event);
+        // RTE-03 §8.3：grace 期内关联命中只补标记，不重发回执。
+        const persistCallId =
+          stringMaybe(eventRecord.toolCallId) ??
+          stringMaybe(asRecord(cached.context).toolCallId);
+        if (persistCallId) {
+          patchToolCallState(toolCallState, persistCallId, {
+            resultPersistObserved: true,
+          });
+        }
         const resultValue = eventRecord.result ?? eventRecord.message;
         message = eventRecord.message;
         const redacted = redactUnknownCredentials(resultValue);

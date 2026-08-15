@@ -122,6 +122,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           makeClient,
           PLUGIN_VERSION,
           runtimeVersion,
+          hookContext.degradations,
         );
       },
       stop() {
