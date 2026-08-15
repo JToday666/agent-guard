@@ -20,6 +20,19 @@ TraceLifecycleState = Literal[
     "trace_started", "trace_completed", "trace_failed", "trace_cancelled"
 ]
 
+# 契约 02 §9：execution.error 上限 2000 字符，截断时省略号计入上限，
+# 与 OpenClaw 插件 boundedTerminalError 语义一致（RTE-04 CF-07 硬化）。
+MAX_TERMINAL_ERROR_CHARS = 2_000
+
+
+def bounded_terminal_error(error: str | None) -> str | None:
+    """将 execution.error 截断到契约上限；None 保持 None。"""
+    if error is None:
+        return None
+    if len(error) <= MAX_TERMINAL_ERROR_CHARS:
+        return error
+    return f"{error[: MAX_TERMINAL_ERROR_CHARS - 3]}..."
+
 
 def runtime_receipts_enabled(guard_adapter: Any) -> bool:
     config = getattr(guard_adapter, "config", None)
@@ -183,7 +196,7 @@ def build_runtime_outcome(
                 "receipt_recorded": True,
                 "invoked_at": invoked_at,
                 "completed_at": completed,
-                "error": error,
+                "error": bounded_terminal_error(error),
                 "tool_result_entered_context": (
                     True
                     if execution_status == "executed" and disposition != "quarantined"
