@@ -336,7 +336,10 @@ import ExecutionTrace from "../components/evidence/ExecutionTrace.vue";
 import ProvenanceInspector from "../components/evidence/ProvenanceInspector.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
-import { buildExecutionTrace, shouldContinueTracePolling } from "../data/evidence/execution-trace";
+import {
+  buildRuntimeSupervisionViewModel,
+  shouldContinueTracePolling,
+} from "../data/evidence/execution-trace";
 import type { ExecutionTraceLayout } from "../data/evidence/execution-flow-layout";
 import { buildTraceEvidenceViewModel } from "../data/evidence/trace-evidence";
 import { buildInvestigationIndex, resolveInvestigationEvent } from "../data/investigations";
@@ -401,9 +404,16 @@ const evidenceModel = computed(() =>
     traceDetail.value?.auditWindow,
   ),
 );
-const executionTrace = computed(() =>
-  buildExecutionTrace(evidenceModel.value.events, traceApprovals.value),
+const runtimeSupervision = computed(() =>
+  buildRuntimeSupervisionViewModel({
+    approvals: traceApprovals.value,
+    dataSource: dashboardDataSourceHandle.descriptor,
+    elementSourceMode: isMockPreview ? "mock" : "live",
+    events: evidenceModel.value.events,
+    traceId: traceId.value,
+  }),
 );
+const executionTrace = computed(() => runtimeSupervision.value.execution);
 const isExecutionWindowPartial = computed(
   () =>
     evidenceModel.value.integrity.mayBeTruncated ||

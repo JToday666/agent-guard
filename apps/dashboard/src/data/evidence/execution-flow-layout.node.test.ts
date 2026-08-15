@@ -6,6 +6,7 @@ import type {
   ExecutionStepKind,
   ExecutionStepViewModel,
 } from "../../types/dashboard.ts";
+import { projectExecutionStepSupervision } from "./step-supervision.ts";
 import {
   buildExecutionFlowLayout,
   EXECUTION_FLOW_LANE_HEADER_HEIGHT,
@@ -20,6 +21,7 @@ function step(
   category: ExecutionStepCategory,
   kind: ExecutionStepKind = "checkpoint",
 ): ExecutionStepViewModel {
+  const stableStepId = `${kind === "action" ? "action" : "event"}:${stepId}` as const;
   return {
     actionId: kind === "action" ? stepId : null,
     actionName: null,
@@ -50,7 +52,25 @@ function step(
     settled: false,
     severity: "unknown",
     statusLabel: "已完成安全判断",
-    stepId,
+    stepId: stableStepId,
+    supervision: projectExecutionStepSupervision({
+      traceId: "trace-layout-test",
+      elementSourceMode: "mock",
+      stepId: stableStepId,
+      category,
+      phase: "evaluated",
+      actionId: kind === "action" ? stepId : null,
+      actionName: null,
+      resources: [],
+      stepEvents: [],
+      primary: null,
+      policyConflicted: false,
+      approval: { conflicted: false, id: null, request: null, status: "unknown" },
+      outcome: null,
+      outcomeConflicted: false,
+      identityConflicted: false,
+      hasExplicitStart: false,
+    }),
   };
 }
 
@@ -74,7 +94,7 @@ test("uses audit order edges without asserting an unrecorded causal relation", (
 
   assert.deepEqual(
     layout.nodes.map((node) => node.id),
-    ["one", "two", "three"],
+    ["event:one", "action:two", "event:three"],
   );
   assert.deepEqual(
     layout.edges.map(({ source, target, relation, label }) => ({
@@ -84,8 +104,18 @@ test("uses audit order edges without asserting an unrecorded causal relation", (
       target,
     })),
     [
-      { label: "随后记录", relation: "audit_order", source: "one", target: "two" },
-      { label: "随后记录", relation: "audit_order", source: "two", target: "three" },
+      {
+        label: "随后记录",
+        relation: "audit_order",
+        source: "event:one",
+        target: "action:two",
+      },
+      {
+        label: "随后记录",
+        relation: "audit_order",
+        source: "action:two",
+        target: "event:three",
+      },
     ],
   );
 });

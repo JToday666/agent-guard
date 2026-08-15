@@ -1,3 +1,8 @@
+import type {
+  ExecutionStepSupervisionDetails,
+  TraceLifecycleSupervisionDetails,
+} from "./runtime-supervision.ts";
+
 export type PolicyDecision = "allow" | "deny" | "ask";
 
 export type DecisionStatus = PolicyDecision | "unknown";
@@ -290,6 +295,7 @@ export interface ExecutionStepViewModel {
   observationAuditIds: string[];
   outcomeAuditIds: string[];
   events: ExecutionStepEvent[];
+  supervision: ExecutionStepSupervisionDetails;
 }
 
 export type TraceLifecycleState =
@@ -300,6 +306,7 @@ export interface ExecutionTraceViewModel {
   lifecycleState: TraceLifecycleState;
   lifecycleLabel: string;
   lifecycleAuditId: string | null;
+  lifecycleSupervision: TraceLifecycleSupervisionDetails;
 }
 
 export interface EvidenceFact {

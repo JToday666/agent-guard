@@ -1,3 +1,6 @@
+import type { DashboardDataSourceDescriptor } from "../data/sources/dashboard-data-source.ts";
+import type { ExecutionTraceViewModel } from "./dashboard.ts";
+
 /**
  * Frozen presentation contracts for the runtime supervision console.
  *
@@ -371,4 +374,42 @@ export interface ProvenancePresentationViewModel {
 export interface TraceLifecycleSupervisionDetails {
   confirmedTerminal: boolean;
   completionReason: string | null;
+}
+
+export interface SupervisionCompleteness {
+  auditEvents: Availability;
+  approvals: Availability;
+  provenance: Availability;
+  contextManifest: Availability;
+  runtimeReceipts: Availability;
+  truncatedReasons: string[];
+}
+
+export interface SupervisionCapabilities {
+  facts: Availability;
+  contextManifest: Availability;
+  approvalBasis: Availability;
+  enforcementEvidence: Availability;
+  runtimeReceipts: Availability;
+  traceCompare: Availability;
+}
+
+/**
+ * Lightweight S0 wrapper around the one authoritative execution projection.
+ * Empty maps are explicit capability placeholders, not alternate fact stores.
+ */
+export interface RuntimeSupervisionViewModel {
+  schemaVersion: "runtime-supervision/0.1";
+  traceId: string;
+  dataSource: DashboardDataSourceDescriptor;
+  temporalState: TemporalState;
+  runtime: string | null;
+  agentId: string | null;
+  execution: ExecutionTraceViewModel;
+  approvalBasisById: Record<string, never>;
+  contextManifestByEventId: Record<string, never>;
+  provenancePresentation: ProvenancePresentationViewModel;
+  completeness: SupervisionCompleteness;
+  capabilities: SupervisionCapabilities;
+  warnings: SupervisionWarning[];
 }
