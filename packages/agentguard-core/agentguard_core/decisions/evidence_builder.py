@@ -20,8 +20,11 @@ refs 上限与截断（``11_决策记录_V21-08前置.md`` D4，IMPLEMENTATION �
 - 超限**截断并记录 degradation**（``failure_kind="overflow"``，登记进
   ``degradation_ids`` 并在其 ``reason_codes`` 留痕，防止静默丢失与
   fail-open）；
-- shadow 期 ``mode="shadow"``、``final_decision = legacy_decision``
-  （04 §1-§2：legacy 是唯一官方决策者）；
+- V21-09 起 ``mode`` 解除硬编码：参数默认 ``"shadow"``，默认输出与
+  V21-08 逐字节一致（``12_决策记录_V21-09前置.md`` D1：mode 恒
+  shadow，``limited_enable``/``active`` 归 V21-11 启用范畴）；
+- ``final_decision = legacy_decision``（04 §1-§2：shadow 期 legacy 是
+  唯一官方决策者）；
 - ``semantic_judgment_id`` / ``semantic_digest`` 恒 ``None``（V21-13
   预留）；
 - envelope 复用既有 ``decision_v21_envelope()``（不改）。
@@ -31,7 +34,7 @@ refs 上限与截断（``11_决策记录_V21-08前置.md`` D4，IMPLEMENTATION �
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from ..signals.models import Decision, EvaluationDegradation
 from .divergence import SHADOW_COMPONENT_ID, classify_divergence
@@ -48,9 +51,13 @@ __all__ = [
     "MAX_POLICY_VIOLATION_IDS",
     "MAX_SIGNAL_IDS",
     "REASON_REFS_TRUNCATED",
+    "EvidenceMode",
     "build_decision_evidence_v21",
     "decision_evidence_v21_envelope",
 ]
+
+#: ``DecisionEvidenceV21.mode`` 的 Literal 全集（01 §28，逐字同步）。
+EvidenceMode = Literal["shadow", "limited_enable", "active"]
 
 #: D4 refs 上限（signal/policy/degradation 每类 32，flow_path_refs 16）。
 MAX_SIGNAL_IDS = 32
@@ -94,6 +101,7 @@ def build_decision_evidence_v21(
     snapshot_id: str,
     state_version: int,
     coverage: CoverageMap,
+    mode: EvidenceMode = "shadow",
 ) -> DecisionEvidenceV21:
     """组装 shadow 期 ``DecisionEvidenceV21``（§14 九项逐项落字段）。
 
@@ -106,7 +114,13 @@ def build_decision_evidence_v21(
     - ``snapshot_id`` / ``state_version``：snapshot 注册身份（snapshot
       缺失时由调用方传 ``shadow.ABSENT_SNAPSHOT_ID`` / ``0`` 哨兵）；
     - ``coverage``：判定时使用的七域 CoverageMap（FastAssessment 冻结
-      字段不含 coverage，由编排层注入同一份真值）。
+      字段不含 coverage，由编排层注入同一份真值）；
+    - ``mode``：运行模式（``DecisionEvidenceV21.mode`` 的 Literal
+      全集），默认 ``"shadow"``（``12_决策记录_V21-09前置.md`` D1：
+      V21-09 阶段 mode 恒 shadow，调用方只传默认值）。传入
+      ``"limited_enable"`` / ``"active"`` 属 V21-11 启用范畴，仅解除
+      硬编码预留传值通道；无论何种 mode，``final_decision`` 恒取
+      ``legacy_decision``（shadow 期官方决策者是 legacy）。
 
     refs 只存 id 并按 D4 上限截断；截断降级登记进 ``degradation_ids``
     且参与 divergence 分类（降级优先）。``matched_grant_ids`` 不在 D4
@@ -195,7 +209,7 @@ def build_decision_evidence_v21(
         legacy_decision=legacy_decision,
         v21_fast_disposition=assessment.disposition,
         final_decision=legacy_decision,  # shadow 期官方决策者是 legacy。
-        mode="shadow",
+        mode=mode,
         divergence_category=divergence_category,
         evidence_refs=[],
     )
