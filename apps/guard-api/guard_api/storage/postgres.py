@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import hmac as hmac_module
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, cast
+from typing import Any, Iterator, Literal, cast
 
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import CursorResult, create_engine, desc, func, select, text, update
-from sqlalchemy import Boolean, CheckConstraint, Column, Index, Integer, Table, Text
+from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKeyConstraint, Index, Integer, Table, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
@@ -32,6 +33,8 @@ from agentguard_core import (
     utc_now_iso,
 )
 from agentguard_core.authority import TaskFact
+from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.security_context import ExecutionLease, GrantConsumption
 from guard_api.models import (
     AdapterStatusRecord,
     ApprovalRequest,
@@ -47,6 +50,7 @@ from guard_api.storage.base import (
     AuditIntegrityStatus,
     AuditWindowQuery,
     EvaluationRunConflictError,
+    GrantConsumptionResult,
     MAX_REBUILD_INPUT_LIMIT,
     MemoryChangeAlreadyExistsError,
     MemoryChangeTransitionError,
@@ -73,6 +77,22 @@ from guard_api.storage.integrity import (
     read_audit_integrity,
     verify_audit_chain,
 )
+from guard_api.security_state.lease_service import (
+    GrantConsumptionConflictError,
+    GrantExpiredError,
+    GrantFingerprintMismatchError,
+    GrantNotRegisteredError,
+    GrantRevokedError,
+    GrantScopeMismatchError,
+    GrantUsesExhaustedError,
+    LeaseExpiredError,
+    LeaseRevokedError,
+    LeaseStoreError,
+    LeaseTokenMismatchError,
+    LeaseTransitionError,
+    lease_token_digest,
+    validate_intent_payload,
+)
 from guard_api.storage.sqlalchemy_models import (
     action_critic_reviews,
     adapter_statuses,
@@ -92,6 +112,8 @@ from guard_api.storage.sqlalchemy_models import (
     provenance_nodes,
     task_facts,
 )
+
+_GRANT_RUNTIME_STATUSES = ("active", "expired", "revoked")
 
 _POLICY_SNAPSHOT_ADVISORY_LOCK_ID = 427001030001
 _AUDIT_INTEGRITY_ADVISORY_LOCK_ID = 427001030002
@@ -151,6 +173,39 @@ def _lock_security_state_scope(session: Session, scope_digest: str) -> None:
     )
 
 
+def _lock_grant_identity(session: Session, grant_id: str) -> None:
+    """按 grant_id 加事务级 advisory lock，串行化同一 grant 的原子消费（V21-06）。
+
+    与 provenance/task/security_state 同范式：
+    ``pg_advisory_xact_lock(sha256("grant:" + grant_id)[:8])``。
+    """
+
+    lock_id = int.from_bytes(
+        hashlib.sha256(f"grant:{grant_id}".encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+    )
+
+
+def _derive_consumption_id(grant_id: str, action_id: str) -> str:
+    """consumption_id 确定性派生（受限 JCS sha256，禁 uuid）。"""
+    suffix = canonical_sha256(
+        {"action_id": action_id, "grant_id": grant_id}
+    ).removeprefix("sha256:")
+    return f"consumption:{suffix}"
+
+
+def _derive_lease_id(consumption_id: str) -> str:
+    """lease_id 确定性派生（受限 JCS sha256，禁 uuid）。"""
+    suffix = canonical_sha256(
+        {"consumption_id": consumption_id}
+    ).removeprefix("sha256:")
+    return f"lease:{suffix}"
+
+
 # V21-04 security state 表元数据（与迁移 0015_security_state 对齐）。
 security_states = Table(
     "security_states",
@@ -165,6 +220,82 @@ security_states = Table(
     CheckConstraint(
         "state_version >= 0",
         name="ck_security_states_state_version_non_negative",
+    ),
+)
+
+# V21-06 capability/lease 三表元数据（与迁移 0016_capability_lease 对齐）。
+# C5 决策：execution_leases 只存本权威 lease store，不与 security_states /
+# projection_records 交互。
+capability_grant_runtime = Table(
+    "capability_grant_runtime",
+    metadata,
+    Column("grant_id", Text, primary_key=True),
+    Column("scope_digest", Text, nullable=False),
+    Column("remaining_uses", Integer, nullable=False),
+    Column("expires_at", Text, nullable=True),
+    Column("authorization_fingerprint", Text, nullable=True),
+    Column("status", Text, nullable=False),
+    CheckConstraint(
+        "remaining_uses >= 0",
+        name="ck_capability_grant_runtime_remaining_uses_non_negative",
+    ),
+    CheckConstraint(
+        "status IN ('active', 'expired', 'revoked')",
+        name="ck_capability_grant_runtime_status",
+    ),
+    Index(
+        "ix_capability_grant_runtime_scope",
+        "scope_digest",
+    ),
+)
+
+grant_consumptions = Table(
+    "grant_consumptions",
+    metadata,
+    Column("consumption_id", Text, primary_key=True),
+    Column("grant_id", Text, nullable=False),
+    Column("action_id", Text, nullable=False),
+    Column("authorization_fingerprint", Text, nullable=False),
+    Column("consumed_at", Text, nullable=False),
+    # F10：与 migration 0016 对齐的 FK 元数据。
+    ForeignKeyConstraint(
+        ["grant_id"],
+        ["capability_grant_runtime.grant_id"],
+        name="fk_grant_consumptions_grant_id",
+    ),
+    UniqueConstraint(
+        "grant_id", "action_id", name="uq_grant_consumptions_grant_action"
+    ),
+)
+
+execution_leases = Table(
+    "execution_leases",
+    metadata,
+    Column("lease_id", Text, primary_key=True),
+    Column("token_digest", Text, nullable=False),
+    Column("consumption_id", Text, nullable=False),
+    Column("approval_id", Text, nullable=False),
+    Column("grant_id", Text, nullable=False),
+    Column("action_id", Text, nullable=False),
+    Column("authorization_fingerprint", Text, nullable=False),
+    Column("runtime_binding_id", Text, nullable=False),
+    Column("issued_at", Text, nullable=False),
+    Column("expires_at", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    # F10：与 migration 0016 对齐的 FK 元数据。
+    ForeignKeyConstraint(
+        ["consumption_id"],
+        ["grant_consumptions.consumption_id"],
+        name="fk_execution_leases_consumption_id",
+    ),
+    UniqueConstraint("token_digest", name="uq_execution_leases_token_digest"),
+    CheckConstraint(
+        "status IN ('consumed', 'expired', 'revoked')",
+        name="ck_execution_leases_status",
+    ),
+    Index(
+        "ix_execution_leases_consumption_id",
+        "consumption_id",
     ),
 )
 
@@ -196,6 +327,38 @@ projection_records = Table(
         "applied_state_version",
     ),
 )
+
+
+def _grant_consumption_from_row(row: Any) -> GrantConsumption:
+    """grant_consumptions 行 → 冻结模型（consumed_at 仅落库，不入模型）。"""
+    return GrantConsumption(
+        consumption_id=str(row["consumption_id"]),
+        grant_id=str(row["grant_id"]),
+        action_id=str(row["action_id"]),
+        authorization_fingerprint=str(row["authorization_fingerprint"]),
+        sequence=None,
+        evidence_refs=[],
+    )
+
+
+def _execution_lease_from_row(row: Any) -> ExecutionLease:
+    """execution_leases 行 → 冻结模型（只存 token_digest，明文不落库）。"""
+    return ExecutionLease(
+        lease_id=str(row["lease_id"]),
+        consumption_id=str(row["consumption_id"]),
+        approval_id=str(row["approval_id"]),
+        grant_id=str(row["grant_id"]),
+        action_id=str(row["action_id"]),
+        authorization_fingerprint=str(row["authorization_fingerprint"]),
+        runtime_binding_id=str(row["runtime_binding_id"]),
+        issued_at=str(row["issued_at"]),
+        expires_at=str(row["expires_at"]),
+        token_digest=str(row["token_digest"]),
+        status=cast(
+            "Literal['consumed', 'expired', 'revoked']", str(row["status"])
+        ),
+        evidence_refs=[],
+    )
 
 
 @dataclass(slots=True)
@@ -1449,6 +1612,388 @@ class PostgresControlPlaneStore:
         with self._read_session() as session:
             rows = session.execute(stmt).mappings().all()
         return [_projection_identity_record_from_row(row) for row in rows]
+
+    # V21-06 lease 协议方法权威实现（migration 0016 已建表）。
+    # C4：原子消费的全部校验与写入在单事务内完成；行锁序固定
+    # grant→consumption→lease（advisory lock 串行化同一 grant）。
+
+    def seed_capability_grant_runtime(
+        self,
+        *,
+        grant_id: str,
+        scope_digest: str,
+        remaining_uses: int,
+        expires_at: str | None = None,
+        authorization_fingerprint: str | None = None,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        """注册 grant 运行时行（权威写入入口；Phase 2 projector 复用）。"""
+        if status not in _GRANT_RUNTIME_STATUSES:
+            raise ValueError(f"unsupported grant status: {status!r}")
+        if remaining_uses < 0:
+            raise ValueError("remaining_uses must be >= 0")
+        # 事务内 advisory lock + 存在即拒绝（与 create_task_fact 同范式）：
+        # ON CONFLICT DO NOTHING 在 asyncpg 下 rowcount 恒为 -1，不能
+        # 作为插入生效判据。
+        with self._session_factory() as session:
+            with session.begin():
+                _lock_grant_identity(session, grant_id)
+                existing = session.execute(
+                    select(capability_grant_runtime.c.grant_id).where(
+                        capability_grant_runtime.c.grant_id == grant_id
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    raise ValueError(f"grant already registered: {grant_id}")
+                session.execute(
+                    pg_insert(capability_grant_runtime).values(
+                        grant_id=grant_id,
+                        scope_digest=scope_digest,
+                        remaining_uses=remaining_uses,
+                        expires_at=expires_at,
+                        authorization_fingerprint=authorization_fingerprint,
+                        status=status,
+                    )
+                )
+        return {
+            "grant_id": grant_id,
+            "scope_digest": scope_digest,
+            "remaining_uses": remaining_uses,
+            "expires_at": expires_at,
+            "authorization_fingerprint": authorization_fingerprint,
+            "status": status,
+        }
+
+    def get_capability_grant_runtime(
+        self, grant_id: str
+    ) -> dict[str, Any] | None:
+        """读 grant 运行时行（消费后 remaining_uses 校验/Phase 2 读路径）。"""
+        stmt = select(capability_grant_runtime).where(
+            capability_grant_runtime.c.grant_id == grant_id
+        )
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        if row is None:
+            return None
+        expires_at = row["expires_at"]
+        fingerprint = row["authorization_fingerprint"]
+        return {
+            "grant_id": str(row["grant_id"]),
+            "scope_digest": str(row["scope_digest"]),
+            "remaining_uses": int(row["remaining_uses"]),
+            "expires_at": str(expires_at) if expires_at is not None else None,
+            "authorization_fingerprint": (
+                str(fingerprint) if fingerprint is not None else None
+            ),
+            "status": str(row["status"]),
+        }
+
+    def consume_grant(
+        self, scope_digest: str, intent_payload: dict[str, Any]
+    ) -> GrantConsumptionResult:
+        validate_intent_payload(intent_payload)
+        grant_id = str(intent_payload["grant_id"])
+        action_id = str(intent_payload["action_id"])
+        fingerprint = str(intent_payload["authorization_fingerprint"])
+        consumption_id = _derive_consumption_id(grant_id, action_id)
+        lease_id = _derive_lease_id(consumption_id)
+        lease_token = str(intent_payload["lease_token"])
+        with self._session_factory() as session:
+            with session.begin():
+                # 锁序第一：grant 身份 advisory lock + 行锁。
+                _lock_grant_identity(session, grant_id)
+                grant_row = (
+                    session.execute(
+                        select(capability_grant_runtime)
+                        .where(
+                            capability_grant_runtime.c.grant_id == grant_id
+                        )
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if grant_row is None:
+                    raise GrantNotRegisteredError(
+                        "v21-06:grant_not_registered",
+                        f"grant {grant_id!r} is not registered",
+                    )
+                if grant_row["scope_digest"] != scope_digest:
+                    raise GrantScopeMismatchError(
+                        "v21-06:grant_scope_mismatch",
+                        "grant scope_digest does not match the request scope",
+                    )
+                # 锁序第二：consumption（UNIQUE(grant_id, action_id)）幂等
+                # 重放分支必须先于 remaining_uses 校验（重试时用量可能已归零）。
+                existing = (
+                    session.execute(
+                        select(grant_consumptions).where(
+                            grant_consumptions.c.consumption_id
+                            == consumption_id
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing is not None:
+                    if not hmac_module.compare_digest(
+                        str(existing["authorization_fingerprint"]).encode(
+                            "utf-8"
+                        ),
+                        fingerprint.encode("utf-8"),
+                    ):
+                        raise GrantConsumptionConflictError(
+                            "v21-06:consumption_conflict",
+                            "double-spend attempt: same (grant_id, action_id) "
+                            "with a different authorization_fingerprint",
+                        )
+                    lease_row = (
+                        session.execute(
+                            select(execution_leases).where(
+                                execution_leases.c.lease_id == lease_id
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if lease_row is None:
+                        raise LeaseStoreError(
+                            "v21-06:lease_missing",
+                            "consumption exists but its execution lease is "
+                            "missing",
+                        )
+                    # F1：终态校验先于 expires_at —— revoked/expired 状态
+                    # 的 lease 不得被幂等重放绕过（撤销/过期语义
+                    # fail-closed）。
+                    lease_status = str(lease_row["status"])
+                    if lease_status == "revoked":
+                        raise LeaseRevokedError(
+                            "v21-06:execution_lease_revoked",
+                            "same-key retry after lease revocation must not "
+                            "replay a revoked lease",
+                        )
+                    if lease_status == "expired":
+                        raise LeaseExpiredError(
+                            "v21-06:execution_lease_expired",
+                            "same-key retry after lease expiry must not "
+                            "issue a new lease",
+                        )
+                    if parse_audit_timestamp(
+                        str(lease_row["expires_at"])
+                    ) <= datetime.now(timezone.utc):
+                        raise LeaseExpiredError(
+                            "v21-06:execution_lease_expired",
+                            "same-key retry after lease expiry must not "
+                            "issue a new lease",
+                        )
+                    # F3：重放返回前恒定时间校验调用方 token 与存储
+                    # token_digest 一致，伪造 token 的重放拒绝。
+                    if not hmac_module.compare_digest(
+                        lease_token_digest(lease_token).encode("utf-8"),
+                        str(lease_row["token_digest"]).encode("utf-8"),
+                    ):
+                        raise LeaseTokenMismatchError(
+                            "v21-06:lease_token_mismatch",
+                            "replay token digest does not match the stored "
+                            "lease token digest",
+                        )
+                    return GrantConsumptionResult(
+                        consumption=_grant_consumption_from_row(existing),
+                        lease=_execution_lease_from_row(lease_row),
+                        lease_token=lease_token,
+                        replayed=True,
+                    )
+                # 锁序第三前置：grant 校验 revoked/expiry/fingerprint。
+                if grant_row["status"] == "revoked":
+                    raise GrantRevokedError(
+                        "v21-06:grant_revoked",
+                        f"grant {grant_id!r} is revoked",
+                    )
+                grant_expires_at = grant_row["expires_at"]
+                if grant_row["status"] == "expired" or (
+                    grant_expires_at is not None
+                    and parse_audit_timestamp(str(grant_expires_at))
+                    <= datetime.now(timezone.utc)
+                ):
+                    raise GrantExpiredError(
+                        "v21-06:grant_expired",
+                        f"grant {grant_id!r} is expired",
+                    )
+                expected_fingerprint = grant_row["authorization_fingerprint"]
+                if expected_fingerprint is not None and not (
+                    hmac_module.compare_digest(
+                        str(expected_fingerprint).encode("utf-8"),
+                        fingerprint.encode("utf-8"),
+                    )
+                ):
+                    raise GrantFingerprintMismatchError(
+                        "v21-06:grant_fingerprint_mismatch",
+                        "authorization_fingerprint does not match the grant",
+                    )
+                # 行级 CAS 扣减：条件 UPDATE remaining_uses-1，rowcount==1
+                # 判定；不碰 security_states.canonical_payload。
+                cas_result = cast(
+                    "CursorResult[Any]",
+                    session.execute(
+                        update(capability_grant_runtime)
+                        .where(
+                            capability_grant_runtime.c.grant_id == grant_id
+                        )
+                        .where(
+                            capability_grant_runtime.c.remaining_uses > 0
+                        )
+                        .values(
+                            remaining_uses=(
+                                capability_grant_runtime.c.remaining_uses - 1
+                            )
+                        )
+                    ),
+                )
+                if cas_result.rowcount != 1:
+                    raise GrantUsesExhaustedError(
+                        "v21-06:grant_uses_exhausted",
+                        f"grant {grant_id!r} has no remaining uses",
+                    )
+                # 写 GrantConsumption（明文 token 不落库）。
+                consumption = GrantConsumption(
+                    consumption_id=consumption_id,
+                    grant_id=grant_id,
+                    action_id=action_id,
+                    authorization_fingerprint=fingerprint,
+                    sequence=None,
+                    evidence_refs=[],
+                )
+                session.execute(
+                    pg_insert(grant_consumptions).values(
+                        consumption_id=consumption_id,
+                        grant_id=grant_id,
+                        action_id=action_id,
+                        authorization_fingerprint=fingerprint,
+                        consumed_at=str(intent_payload["issued_at"]),
+                    )
+                )
+                # 写 ExecutionLease（只存 token_digest）。
+                lease = ExecutionLease(
+                    lease_id=lease_id,
+                    consumption_id=consumption_id,
+                    approval_id=str(intent_payload["approval_id"]),
+                    grant_id=grant_id,
+                    action_id=action_id,
+                    authorization_fingerprint=fingerprint,
+                    runtime_binding_id=str(intent_payload["runtime_binding_id"]),
+                    issued_at=str(intent_payload["issued_at"]),
+                    expires_at=str(intent_payload["expires_at"]),
+                    token_digest=lease_token_digest(lease_token),
+                    status="consumed",
+                    evidence_refs=[],
+                )
+                session.execute(
+                    pg_insert(execution_leases).values(
+                        lease_id=lease.lease_id,
+                        token_digest=lease.token_digest,
+                        consumption_id=lease.consumption_id,
+                        approval_id=lease.approval_id,
+                        grant_id=lease.grant_id,
+                        action_id=lease.action_id,
+                        authorization_fingerprint=(
+                            lease.authorization_fingerprint
+                        ),
+                        runtime_binding_id=lease.runtime_binding_id,
+                        issued_at=lease.issued_at,
+                        expires_at=lease.expires_at,
+                        status=lease.status,
+                    )
+                )
+                return GrantConsumptionResult(
+                    consumption=consumption,
+                    lease=lease,
+                    lease_token=lease_token,
+                    replayed=False,
+                )
+
+    def get_execution_lease(
+        self, scope_digest: str, lease_ref: str
+    ) -> ExecutionLease | None:
+        stmt = select(execution_leases).where(
+            (execution_leases.c.lease_id == lease_ref)
+            | (execution_leases.c.token_digest == lease_ref)
+        )
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().first()
+            if row is None:
+                return None
+            grant_scope = session.execute(
+                select(capability_grant_runtime.c.scope_digest).where(
+                    capability_grant_runtime.c.grant_id == row["grant_id"]
+                )
+            ).scalar_one_or_none()
+        if grant_scope != scope_digest:
+            return None
+        return _execution_lease_from_row(row)
+
+    def expire_or_revoke_lease(
+        self, scope_digest: str, lease_id: str, reason: str
+    ) -> ExecutionLease:
+        if reason == "expired":
+            target = "expired"
+        elif reason == "revoked":
+            target = "revoked"
+        else:
+            raise LeaseTransitionError(
+                "v21-06:unsupported_lease_transition",
+                f"lease transition reason must be 'expired' or 'revoked', "
+                f"got {reason!r}",
+            )
+        with self._session_factory() as session:
+            with session.begin():
+                row = (
+                    session.execute(
+                        select(execution_leases).where(
+                            execution_leases.c.lease_id == lease_id
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is None:
+                    raise KeyError(lease_id)
+                grant_scope = session.execute(
+                    select(capability_grant_runtime.c.scope_digest).where(
+                        capability_grant_runtime.c.grant_id
+                        == row["grant_id"]
+                    )
+                ).scalar_one_or_none()
+                if grant_scope != scope_digest:
+                    raise KeyError(lease_id)
+                current_status = str(row["status"])
+                if current_status in ("expired", "revoked"):
+                    return _execution_lease_from_row(row)
+                cas_result = cast(
+                    "CursorResult[Any]",
+                    session.execute(
+                        update(execution_leases)
+                        .where(
+                            execution_leases.c.lease_id == lease_id,
+                            execution_leases.c.status == current_status,
+                        )
+                        .values(status=target)
+                    ),
+                )
+                if cas_result.rowcount != 1:
+                    # 并发已推进终态：回读返回（幂等语义）。
+                    latest = (
+                        session.execute(
+                            select(execution_leases).where(
+                                execution_leases.c.lease_id == lease_id
+                            )
+                        )
+                        .mappings()
+                        .one()
+                    )
+                    return _execution_lease_from_row(latest)
+                updated = dict(row)
+                updated["status"] = target
+                return _execution_lease_from_row(updated)
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
         created_at = _database_datetime(approval.created_at)
