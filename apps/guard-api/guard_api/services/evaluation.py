@@ -27,6 +27,7 @@ from .memory import MemoryGuardService
 from .policy import PolicyService
 
 if TYPE_CHECKING:
+    from .ct_projection import CtCommitPlan, CtProjectionService
     from .v21_pipeline import V21PhaseCPlan, V21PipelineMaterials, V21PipelineService
     from .v21_shadow import V21ShadowService
 
@@ -99,6 +100,7 @@ class EvaluationService:
         action_critic: ActionCritic | None = None,
         v21_shadow_service: V21ShadowService | None = None,
         v21_pipeline: "V21PipelineService | None" = None,
+        ct_projection_service: "CtProjectionService | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -114,6 +116,9 @@ class EvaluationService:
         # 就绪时 evaluate 编排切换为 pipeline：Phase A 事务外、Phase B
         # 短事务内消费材料；未就绪时既有路径逐字节不变。
         self.v21_pipeline = v21_pipeline
+        # CT-PR-03b CT 事实投影编排器（D2/D3：独立 flag，仅 pipeline
+        # 材料就绪时生效；事务外构建 → 事务内信封 → 事务后投影）。
+        self.ct_projection_service = ct_projection_service
 
     def evaluate(
         self, event: GuardEvent, *, requesting_principal_id: str
@@ -138,9 +143,17 @@ class EvaluationService:
                     # D9：事务外幂等补投影（不重算；五元组幂等键短路
                     # 保证重复安全；绝不外抛、不影响重放响应）。
                     self.v21_pipeline.backfill_projection(existing)
+                    if self.ct_projection_service is not None:
+                        self.ct_projection_service.backfill(existing)
                     return replayed
             else:
                 materials = self.v21_pipeline.run_phase_a(event)
+        # CT-PR-03b：事务外构建 bundle 与 commit 计划（纯 CPU）。
+        ct_plan: "CtCommitPlan | None" = None
+        if self.ct_projection_service is not None and materials is not None:
+            ct_plan = self.ct_projection_service.build_commit_bundle(
+                event, materials
+            )
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         backfill_audit: AuditEvent | None = None
@@ -157,12 +170,14 @@ class EvaluationService:
             if replayed is not None:
                 response = replayed
                 backfill_audit = existing
+                ct_plan = None  # replay：无新 commit，走 D9 同构 backfill。
             else:
                 response, backfill_audit, phase_c_plan = self._evaluate_once(
                     event,
                     request_digest=request_digest,
                     requesting_principal_id=requesting_principal_id,
                     materials=materials,
+                    ct_plan=ct_plan,
                 )
         # D4 commit → project：投影在事务提交**之后**执行，绝不影响
         # 已 commit 的审计记录与已确定的响应；两者互斥：新评估走
@@ -172,6 +187,12 @@ class EvaluationService:
                 self.v21_pipeline.run_phase_c(phase_c_plan)
             elif backfill_audit is not None:
                 self.v21_pipeline.backfill_projection(backfill_audit)
+        # CT-PR-03b：新评估 → 事务退出后投影；重放 → backfill 补投影。
+        if self.ct_projection_service is not None:
+            if ct_plan is not None:
+                self.ct_projection_service.project_after_commit(ct_plan)
+            elif backfill_audit is not None:
+                self.ct_projection_service.backfill(backfill_audit)
         return response
 
     def _evaluate_once(
@@ -181,6 +202,7 @@ class EvaluationService:
         request_digest: str,
         requesting_principal_id: str,
         materials: "V21PipelineMaterials | None" = None,
+        ct_plan: "CtCommitPlan | None" = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """事务内单次评估；返回（响应, 已落盘审计记录, Phase C 计划）。
 
@@ -193,6 +215,7 @@ class EvaluationService:
                 request_digest=request_digest,
                 requesting_principal_id=requesting_principal_id,
                 materials=materials,
+                ct_plan=ct_plan,
             )
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
@@ -267,6 +290,7 @@ class EvaluationService:
         request_digest: str,
         requesting_principal_id: str,
         materials: "V21PipelineMaterials",
+        ct_plan: "CtCommitPlan | None" = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
 
@@ -346,6 +370,10 @@ class EvaluationService:
             decision_dump=decision.model_dump(mode="json"),
             v21_evidence=v21_evidence,
             state_delta_evidence=state_delta_evidence,
+            # CT-PR-03b D4：facts 信封随同一条审计记录原子提交。
+            ct_facts_evidence=(
+                ct_plan.envelope if ct_plan is not None else None
+            ),
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
             audit_id=(
