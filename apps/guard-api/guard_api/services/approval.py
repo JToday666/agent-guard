@@ -1,4 +1,12 @@
-"""Human and LLM approval service."""
+"""Human and LLM approval service.
+
+V21-08（承接 ``10_决策记录_V21-05-06-07前置.md`` D4，L116-134）：
+V2 flag（``settings.v21_shadow_enabled``）开启时 LLM Reviewer 只能
+deny 或保持 pending，不得生成 allow（``_llm_can_allow_once`` 恒
+False）；flag off 保持现状（legacy official）。投影层另有
+fail-closed 双保险（capability.py ``compile_approval_to_grant``
+拒绝非 human 来源），接线侧不重复实现状态机。
+"""
 
 from __future__ import annotations
 
@@ -109,7 +117,10 @@ class ApprovalService:
                 resolution_reason=review.reason,
                 llm_review=review.model_copy(update={"status": "resolved"}),
             )
-        if review.decision == "allow_once" and _llm_can_allow_once(approval):
+        # D4/D5：V2 flag 开启时 LLM Reviewer 只能 deny 或保持 pending。
+        if review.decision == "allow_once" and _llm_can_allow_once(
+            approval, v2_enabled=self.settings.v21_shadow_enabled
+        ):
             return self.resolve_approval(
                 approval.approval_id,
                 "allow_once",
@@ -158,7 +169,19 @@ class ApprovalService:
         return stored
 
 
-def _llm_can_allow_once(approval: ApprovalRequest) -> bool:
+def _llm_can_allow_once(
+    approval: ApprovalRequest, *, v2_enabled: bool = False
+) -> bool:
+    """LLM Reviewer 是否可自动 ``allow_once``。
+
+    D4/D5（``10_决策记录`` L116-134 / ``11_决策记录_V21-08前置.md``
+    D5）：V2 flag 开启时恒 False——LLM Reviewer V2 路径只能 deny 或
+    保持 pending，不得生成 allow；flag off 保持现状（legacy official：
+    low/medium 且选项含 allow_once 时可自动批准）。
+    """
+
+    if v2_enabled:
+        return False
     if "allow_once" not in approval.decision_options:
         return False
     return approval.severity.lower() in {"low", "medium"}
