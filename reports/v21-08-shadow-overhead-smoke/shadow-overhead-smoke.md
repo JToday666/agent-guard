@@ -77,6 +77,19 @@ attacks: 29/30 blocked | benign: 0/13 blocked | missed: EG-AA-004（既有基线
 4. V21-10 pre-enable gate 前建议：按 05 §9 完整协议档位复测 shadow-on/off，
    并评估信封落盘热路径（redaction/budget 序列化）的优化空间。
 
+## 7. 已知局限与开启前建议（评审后补，不改代码）
+
+1. **延迟告警（无 task 流量）**：本次 smoke 的 flag on 增量上界（ΔP50
+   +16~31ms）基于不携带 task 引用的基准事件（`degraded_no_snapshot`
+   快路径）；正式开启前建议先接 task ingress 流量实测，确认携带
+   task 的 snapshot 直出路径（bounded rebuild + read_snapshot）开销
+   仍在 05 §8.2 预算余量内。
+2. **事务窗口（S8）**：flag on 时 shadow 编排（get_task_fact /
+   ensure_ready / read_snapshot 存储往返）整体位于
+   evaluation_transaction 串行事务内，会拉长事务持有窗口（postgres
+   下更明显，本 smoke 数据基于 memory 后端）。**shadow I/O 计入
+   evaluate 事务窗口；正式开启前建议评估只读解析前移事务外**。
+
 ## 机器可读证据
 
 - `baseline-smoke.json`：本次 smoke 运行的 `scripts/v21-baseline.py` 完整
