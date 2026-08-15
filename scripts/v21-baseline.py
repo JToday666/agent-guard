@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -40,6 +41,19 @@ HOLDOUT_MANIFEST = V21_FIXTURE_DIR / "locked_holdout_manifest.json"
 LEGACY_SNAPSHOT = V21_FIXTURE_DIR / "legacy_69efe2f_snapshot.json"
 LEGACY_BASE_SHA = "69efe2f027d9a4ba9c18623838e84f6ce30ffa62"
 SUPPORTED_BACKENDS = frozenset({"memory", "postgres"})
+#: shadow 两档开关（V21-08 T8）：off=现状；on=memory 基准档以 flag on 运行；
+#: both=flag off/on 双跑并产出 evaluate 延迟增量对照（shadow_overhead）。
+SUPPORTED_SHADOW_MODES = frozenset({"off", "on", "both"})
+#: shadow 基准专用 server secret（确定性派生、仅基准工具内部使用，
+#: 不是生产兜底密钥——编排器 fail-closed 语义不变，D3）。
+SHADOW_BENCHMARK_SECRET = base64.urlsafe_b64encode(
+    hashlib.sha256(b"v21-08-shadow-benchmark-secret").digest()
+).decode("ascii")
+LATENCY_KEYS = ("sample_count", "p50_ns", "p95_ns", "p99_ns", "max_ns")
+SHADOW_OVERHEAD_DISCLAIMER = (
+    "机器结果非跨环境硬 SLO，CI 只校验工具正确性（05 §9）；基准事件不携带 "
+    "task 引用，shadow 走 degraded_no_snapshot 快路径，覆盖评估侧旁路开销上界。"
+)
 LEGACY_SNAPSHOT_INPUTS = (
     "packages/agentguard-core",
     "scripts/core-metrics-gate.py",
@@ -407,12 +421,17 @@ def _run_api_benchmark(
     serial_iterations: int,
     concurrency: int,
     concurrent_total: int,
+    shadow_enabled: bool = False,
 ) -> dict[str, Any]:
     from fastapi.testclient import TestClient
     from guard_api.main import create_app
     from guard_api.settings import GuardApiSettings
 
-    settings = GuardApiSettings(control_token="v21-baseline-control")
+    settings = GuardApiSettings(
+        control_token="v21-baseline-control",
+        v21_shadow_enabled=shadow_enabled,
+        v21_shadow_server_secret=(SHADOW_BENCHMARK_SECRET if shadow_enabled else None),
+    )
     sequence = itertools.count(1)
 
     def next_payload(event: GuardEvent) -> dict[str, Any]:
@@ -475,6 +494,7 @@ def _run_api_benchmark(
         "status": "measured",
         "warmup_per_scenario": warmup,
         "serial_iterations_per_scenario": serial_iterations,
+        "shadow_enabled": shadow_enabled,
         "serial": serial,
         "concurrent": {"workers": concurrency, **latency_summary(concurrent_samples)},
         "audit_mode": "synchronous_request_path",
@@ -482,7 +502,10 @@ def _run_api_benchmark(
 
 
 def run_memory_api_benchmark(
-    scenarios: dict[str, list[GuardEvent]], **benchmark_args: int
+    scenarios: dict[str, list[GuardEvent]],
+    *,
+    shadow_enabled: bool = False,
+    **benchmark_args: int,
 ) -> dict[str, Any]:
     from tests.support.auth import memory_store_with_adapter
 
@@ -490,8 +513,46 @@ def run_memory_api_benchmark(
         backend="memory",
         store_factory=lambda: memory_store_with_adapter(token="v21-baseline-adapter"),
         scenarios=scenarios,
+        shadow_enabled=shadow_enabled,
         **benchmark_args,
     )
+
+
+def build_shadow_overhead(off: dict[str, Any], on: dict[str, Any]) -> dict[str, Any]:
+    """shadow-on vs shadow-off 的 evaluate 串行延迟增量（nearest-rank 口径）。
+
+    对照锚点：T1 冻结预算以 05 §8.2 Fast Path P95≤50ms target 余量为锚；
+    本函数只产数据，不做硬 SLO 判定（05 §9）。
+    """
+
+    scenarios: dict[str, Any] = {}
+    for scenario_id, off_latency in off["serial"].items():
+        on_latency = on["serial"][scenario_id]
+        scenarios[scenario_id] = {
+            "off": {key: off_latency[key] for key in LATENCY_KEYS},
+            "on": {key: on_latency[key] for key in LATENCY_KEYS},
+            "delta_ns": {
+                key: on_latency[key] - off_latency[key]
+                for key in LATENCY_KEYS
+                if key != "sample_count"
+            },
+        }
+    return {
+        "flag": "AGENTGUARD_V21_SHADOW_ENABLED",
+        "backend": "memory",
+        "audit_mode": "synchronous_request_path",
+        "scenarios": scenarios,
+        "concurrent": {
+            "off": {key: off["concurrent"][key] for key in LATENCY_KEYS},
+            "on": {key: on["concurrent"][key] for key in LATENCY_KEYS},
+            "delta_ns": {
+                key: on["concurrent"][key] - off["concurrent"][key]
+                for key in LATENCY_KEYS
+                if key != "sample_count"
+            },
+        },
+        "disclaimer": SHADOW_OVERHEAD_DISCLAIMER,
+    }
 
 
 def _dotenv_value(name: str) -> str | None:
@@ -619,15 +680,42 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## 性能与执行证据",
         "",
         f"- 测量档位：`{report['performance']['measurement_profile']}`；正式性能基线：`{report['performance']['formal_performance_status']}`。",
+        f"- shadow 档位：`{report['performance'].get('shadow_mode', 'off')}`。",
         f"- Core：`{report['performance']['core']['status']}`。",
         f"- Guard API Memory：`{report['performance']['guard_api']['memory']['status']}`。",
         f"- Guard API PostgreSQL：`{report['performance']['guard_api']['postgres']['status']}`。",
         "- Semantic：`not_applicable`（尚未实现）。",
         "- Final ASR：`not_measured`；Runtime Prevention：`not_measured`（没有完整 runtime attack bench）。",
         "",
-        "## 边界与阻塞",
-        "",
     ]
+    shadow_overhead = report.get("shadow_overhead")
+    if shadow_overhead is not None:
+        lines.extend(
+            [
+                "## Shadow 开销对照（flag off vs on，memory 后端）",
+                "",
+            ]
+        )
+        for scenario_id, entry in sorted(shadow_overhead["scenarios"].items()):
+            delta = entry["delta_ns"]
+            lines.append(
+                f"- 串行 `{scenario_id}`：P50 增量 {delta['p50_ns']}ns、"
+                f"P95 增量 {delta['p95_ns']}ns、P99 增量 {delta['p99_ns']}ns、"
+                f"max 增量 {delta['max_ns']}ns。"
+            )
+        concurrent_delta = shadow_overhead["concurrent"]["delta_ns"]
+        lines.append(
+            f"- 并发：P50 增量 {concurrent_delta['p50_ns']}ns、"
+            f"P95 增量 {concurrent_delta['p95_ns']}ns、"
+            f"P99 增量 {concurrent_delta['p99_ns']}ns。"
+        )
+        lines.extend(["", f"> {shadow_overhead['disclaimer']}", ""])
+    lines.extend(
+        [
+            "## 边界与阻塞",
+            "",
+        ]
+    )
     blockers = report["blockers"] or ["无"]
     lines.extend(f"- {blocker}" for blocker in blockers)
     lines.extend(
@@ -655,6 +743,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-concurrency", type=int, default=8)
     parser.add_argument("--api-concurrent-total", type=int, default=2000)
     parser.add_argument("--backends", default="memory,postgres")
+    parser.add_argument(
+        "--shadow",
+        choices=("off", "on", "both"),
+        default="off",
+        help=(
+            "V21-08 shadow 两档开关：off=现状；on=memory 档以 flag on 运行；"
+            "both=off/on 双跑并产出 shadow_overhead 延迟增量对照"
+        ),
+    )
     parser.add_argument("--allow-missing-postgres", action="store_true")
     parser.add_argument("--write-legacy-snapshot", action="store_true")
     return parser.parse_args(argv)
@@ -711,6 +808,11 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("formal_baseline requires both memory and postgres backends")
     if args.measurement_profile == "formal_baseline" and args.allow_missing_postgres:
         raise ValueError("formal_baseline cannot allow a missing PostgreSQL result")
+    if args.shadow not in SUPPORTED_SHADOW_MODES:
+        raise ValueError(
+            f"unsupported shadow mode: {args.shadow}; supported: "
+            f"{', '.join(sorted(SUPPORTED_SHADOW_MODES))}"
+        )
     regression, indexed_cases = evaluate_regression()
     if args.write_legacy_snapshot:
         write_legacy_snapshot(regression["per_case"])
@@ -731,6 +833,26 @@ def main(argv: list[str] | None = None) -> int:
         if "memory" in requested_backends
         else {"status": "not_requested"}
     )
+    shadow_memory: dict[str, Any] | None = None
+    shadow_overhead: dict[str, Any] | None = None
+    if args.shadow == "on":
+        if "memory" not in requested_backends:
+            raise ValueError("--shadow on requires the memory backend")
+        memory = run_memory_api_benchmark(
+            scenarios, shadow_enabled=True, **benchmark_args
+        )
+    elif args.shadow == "both":
+        if memory.get("status") != "measured":
+            raise ValueError(
+                "--shadow both requires a measured memory backend baseline "
+                "(flag off) to compare against"
+            )
+        shadow_memory = run_memory_api_benchmark(
+            scenarios, shadow_enabled=True, **benchmark_args
+        )
+        if shadow_memory["status"] != "measured":
+            raise ValueError("shadow-on memory benchmark failed to measure")
+        shadow_overhead = build_shadow_overhead(memory, shadow_memory)
     postgres = (
         run_postgres_api_benchmark(scenarios, **benchmark_args)
         if "postgres" in requested_backends
@@ -786,6 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         "regression": regression,
         "performance": {
             "measurement_profile": args.measurement_profile,
+            "shadow_mode": args.shadow,
             "formal_performance_status": (
                 "measured"
                 if completion_status == "formal_baseline_measured"
@@ -807,6 +930,8 @@ def main(argv: list[str] | None = None) -> int:
         },
         "blockers": blockers,
     }
+    if shadow_overhead is not None:
+        report["shadow_overhead"] = shadow_overhead
     redacted_report = redact_secrets(report)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "baseline.json").write_text(
