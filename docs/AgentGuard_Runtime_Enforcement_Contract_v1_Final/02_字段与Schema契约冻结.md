@@ -263,6 +263,13 @@ class EnforcementBinding(BaseModel):
 - Adapter 不得本地重新计算另一套授权 fingerprint；
 - `audit_fingerprint` 不能替代 `authorization_fingerprint`。
 
+Additive 语义澄清（Freeze Gate 核对补齐，ADDITIVE/TARGET）：
+
+- **在场条件**：`enforcement_binding` MAY 仅在 `decision ∈ {allow, ask}` 且该 action 具备 C2+ 资格时返回；其余情形 MUST NOT 返回（不得对 deny/基础设施阻断附带 binding）。
+- **缺失降级**：`enforcement_binding` 缺失时，Runtime MUST NOT 猜 binding、MUST NOT 发起 lease consume；按 C1 语义继续（pre-exec enforcement 成立，terminal execution 保持 unknown），并在 heartbeat capability 如实声明 C2 降级。
+- **回显纪律**：`authorization_fingerprint` 仅供 Runtime 在 consume 请求中 exact 回传；MUST NOT 写入 Audit/Dashboard/Receipt/日志（与 §7.6 `lease_token` 纪律一致）；审计关联只使用 `audit_fingerprint`。
+- **exact 比对**：Runtime 在进入 lease 消费前 MUST 以 `action_id + authorization_fingerprint + runtime_binding_id` 与本次评估上下文 exact 比对；不一致 → `binding_failed` + `not_invoked`（06 §8）。
+
 ---
 
 ## 7. Execution Lease API — 服从 V2.1 Frozen Contract

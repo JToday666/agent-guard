@@ -2,7 +2,7 @@
 
 > 依据：`06_迁移_PR与实施计划.md` §7——PR-RTE-05（Strong Approval Binding）前必须确认的 8 项冻结。
 > 核对时间：2026-08-15；核对基线：`dev@71b5a96`（含 #143）。
-> 结论先行：**6 项已冻结且已实现，1 项需 additive 冻结（本 PR 补齐），1 项契约已冻结但实现归 RTE-05 本体**；production evaluate wiring（06 §11 C3）未完成，列入 RTE-05 依赖跟踪。RTE-05 在完成 enforcement_binding additive 冻结后即可开工。
+> 结论先行：**七项已冻结（其中 6 项已实现，1 项实现归 RTE-05），1 项 additive 冻结文本已存在但缺实现**；production evaluate wiring（06 §11 C3）未完成，列入 RTE-05 依赖跟踪。本 PR 对 02 §6 补 additive 语义澄清（在场/降级/回显/exact 比对）并增防漂移 guard 测试；RTE-05 可开工。
 
 ---
 
@@ -72,11 +72,12 @@
 - **测试覆盖**：`tests/test_v21_08_approval_grant.py`（LLM 来源拒绝路径）。
 - **结论**：已冻结 + 已实现（投影 + 消费双层 fail-closed）。
 
-### 1.8 evaluation response enforcement_binding —— 未冻结 ❌（本 PR 补齐）
+### 1.8 evaluation response enforcement_binding —— additive 冻结文本已存在，实现未完成 ⚠️
 
-- **现状**：全库零命中；evaluate 响应当前无 binding 回传，Runtime 无法在 wait→consume 流程中做 exact binding。
-- **处置**：本 PR commit 2 在 `02_字段与Schema契约冻结.md` 增 additive 小节（ADDITIVE/TARGET，不动既有冻结字段）；JSON Schema 与实现归 RTE-05。
-- **结论**：核对后补齐冻结文本；RTE-05 开工的前置条件。
+- **核对修正**：初核时代码层 grep 零命中曾误判为"未冻结"；复查确认 **02 §6 已存在 additive 冻结文本**（TARGET-P1）：字段集 `schema_version/action_id/authorization_fingerprint/runtime_binding_id/requires_execution_lease` + 4 条冻结要求（action_id 一致、fingerprint 仅服务端产生、Adapter 不得本地重算、audit_fingerprint 不可替代）。
+- **缺口**：实现层零命中（evaluate 响应未输出 binding，依赖 C3 production wiring）；且原 §6 未定义在场条件/缺失降级/回显纪律/exact 比对语义。
+- **处置**：本 PR commit 2 在 02 §6 补 4 条 additive 语义澄清（在场条件、缺失降级、回显纪律、exact 比对 → binding_failed + not_invoked）；JSON Schema 与实现归 RTE-05。
+- **结论**：冻结文本完备（本 PR 补齐语义边界）；实现归 RTE-05。
 
 ---
 
@@ -93,10 +94,10 @@
 
 | 缺口 | 归属 | 备注 |
 |---|---|---|
-| enforcement_binding additive 冻结文本 | 本 PR（commit 2） | 02 文档 additive 小节 |
+| enforcement_binding additive 语义澄清 | 本 PR（commit 2） | 02 §6 补在场/降级/回显/exact 比对 4 条（字段集原已冻结） |
 | enforcement_binding JSON Schema + evaluate 响应实现 | RTE-05 | 依赖 C3 production wiring 的评估输出 |
 | `POST /v1/approvals/{id}/execution-leases/consume` 端点 | RTE-05 | 复用 lease_service 单事务编排 |
 | production evaluate wiring（C3） | V21-09 / RTE-05 跟踪 | shadow 已同形，零重构升级 |
 | 冻结不变量防漂移 guard 测试 | 本 PR（commit 3） | `tests/test_v21_freeze_gate_invariants.py` |
 
-**判定**：八项中 6 项已冻结且实现，enforcement_binding 由本 PR 补齐冻结文本，consume endpoint 实现明确归属 RTE-05——**Freeze Gate 核对通过，RTE-05 可在 enforcement_binding additive 合入后开工**。
+**判定**：八项中 7 项已冻结（6 项已实现；consume endpoint 与 enforcement_binding 实现明确归属 RTE-05）；本 PR 补齐 02 §6 additive 语义澄清与防漂移 guard 测试——**Freeze Gate 核对通过，RTE-05 可开工**。
