@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.local/schemas/ct/context-taint-contract-freeze.schema.json",
+  "title": "AgentGuard Context/Taint Runtime Contract Freeze (ct-1.0)",
+  "type": "object",
+  "required": [
+    "schema_version", "status", "repository_baseline", "status_labels", "invariants",
+    "taint_labels", "flow_strength", "flow_relations", "context_compartments",
+    "context_transform_states", "source_defaults", "claim_rules", "declassification",
+    "artifact_ref_schemes", "state", "fusion", "runtime", "budgets", "deferred",
+    "versions", "rollout", "benchmark_metrics", "freeze_review_decisions"
+  ],
+  "properties": {
+    "schema_version": {"const": "ct-1.0"},
+    "status": {"enum": ["candidate-for-freeze", "frozen"]},
+    "repository_baseline": {
+      "type": "object",
+      "required": ["repo", "ref"],
+      "properties": {
+        "repo": {"const": "JToday666/agent-guard"},
+        "ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      },
+      "additionalProperties": false
+    },
+    "status_labels": {"const": ["CURRENT-FROZEN", "TARGET-FROZEN", "DEFERRED"]},
+    "invariants": {
+      "type": "object",
+      "required": [
+        "CT-F0-01", "CT-F0-02", "CT-F0-03", "CT-F0-04", "CT-F0-05", "CT-F0-06",
+        "CT-F0-07", "CT-F0-08", "CT-F0-09", "CT-F0-10", "CT-F0-11", "CT-F0-12"
+      ],
+      "minProperties": 12,
+      "maxProperties": 12,
+      "propertyNames": {"pattern": "^CT-F0-(0[1-9]|1[0-2])$"},
+      "properties": {
+        "CT-F0-01": {"const": "data_flow_never_creates_authority"},
+        "CT-F0-02": {"const": "llm_is_not_sanitizer_or_authority_issuer"},
+        "CT-F0-03": {"const": "allow_does_not_imply_trust"},
+        "CT-F0-04": {"const": "decision_does_not_prove_execution"},
+        "CT-F0-05": {"const": "missing_required_fact_is_not_safe"},
+        "CT-F0-06": {"const": "taint_does_not_decay_by_hop_or_llm"},
+        "CT-F0-07": {"const": "adapter_claim_cannot_self_elevate_trust_or_remove_taint"},
+        "CT-F0-08": {"const": "historical_state_requires_committed_authoritative_record"},
+        "CT-F0-09": {"const": "current_event_uses_transient_facts_before_commit"},
+        "CT-F0-10": {"const": "behavior_matchers_are_signal_only"},
+        "CT-F0-11": {"const": "context_compartment_is_soft_boundary"},
+        "CT-F0-12": {"const": "single_core_v21_pdp"}
+      },
+      "additionalProperties": false
+    },
+    "taint_labels": {
+      "const": ["UNTRUSTED", "EXTERNAL_INSTRUCTION", "SENSITIVE", "CREDENTIAL", "PERSISTENT_UNTRUSTED"]
+    },
+    "flow_strength": {
+      "type": "object",
+      "required": ["order_best_to_worst", "path_aggregation", "llm_default"],
+      "properties": {
+        "order_best_to_worst": {"const": ["exact", "strong", "possible"]},
+        "path_aggregation": {"const": "weakest_edge"},
+        "llm_default": {"const": "possible"}
+      },
+      "additionalProperties": false
+    },
+    "flow_relations": {
+      "const": [
+        "received_from", "read_from", "derived_from", "assembled_into", "influenced_by",
+        "returned_by", "written_to", "persisted_to", "loaded_from_memory", "sent_to"
+      ]
+    },
+    "context_compartments": {
+      "const": [
+        "authority", "authenticated_task", "trusted_runtime_fact",
+        "untrusted_evidence", "memory_context", "model_derived"
+      ]
+    },
+    "context_transform_states": {
+      "const": ["preserved", "annotated", "redacted", "quarantined", "summarized", "excluded"]
+    },
+    "source_defaults": {
+      "type": "object",
+      "required": ["web", "email", "rag", "tool_result", "mcp", "model", "memory", "file"],
+      "minProperties": 8,
+      "maxProperties": 8,
+      "properties": {
+        "web": {"$ref": "#/$defs/untrusted_source_default"},
+        "email": {"$ref": "#/$defs/untrusted_source_default"},
+        "rag": {"$ref": "#/$defs/untrusted_source_default"},
+        "tool_result": {"$ref": "#/$defs/untrusted_source_default"},
+        "mcp": {"$ref": "#/$defs/untrusted_source_default"},
+        "model": {
+          "type": "object",
+          "required": ["trust", "fact_authority", "initial_taints"],
+          "properties": {
+            "trust": {"const": "unknown"},
+            "fact_authority": {"const": "model_judgment"},
+            "initial_taints": {"const": []}
+          },
+          "additionalProperties": false
+        },
+        "memory": {
+          "type": "object",
+          "required": ["trust", "fact_authority", "initial_taints"],
+          "properties": {
+            "trust": {"const": "inherit_memory_fact"},
+            "fact_authority": {"const": "inherit_memory_fact"},
+            "initial_taints": {"const": "inherit_memory_fact"}
+          },
+          "additionalProperties": false
+        },
+        "file": {
+          "type": "object",
+          "required": ["trust", "fact_authority", "initial_taints"],
+          "properties": {
+            "trust": {"const": "unknown"},
+            "fact_authority": {"const": "untrusted_claim"},
+            "initial_taints": {"const": []}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim_rules": {
+      "type": "object",
+      "required": [
+        "risk_increasing_claims_may_be_accepted_conservatively",
+        "trust_increasing_claim_requires_server_verification",
+        "sanitized_claim_can_remove_taint",
+        "model_output_can_create_capability"
+      ],
+      "properties": {
+        "risk_increasing_claims_may_be_accepted_conservatively": {"const": true},
+        "trust_increasing_claim_requires_server_verification": {"const": true},
+        "sanitized_claim_can_remove_taint": {"const": false},
+        "model_output_can_create_capability": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "declassification": {
+      "type": "object",
+      "required": [
+        "producer", "adapter_sanitized_is_declassification",
+        "llm_summary_is_declassification", "protected_labels",
+        "protected_removal_requires_registry_permission"
+      ],
+      "properties": {
+        "producer": {"const": "trusted_declassifier"},
+        "adapter_sanitized_is_declassification": {"const": false},
+        "llm_summary_is_declassification": {"const": false},
+        "protected_labels": {"const": ["CREDENTIAL", "PERSISTENT_UNTRUSTED"]},
+        "protected_removal_requires_registry_permission": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "artifact_ref_schemes": {
+      "const": [
+        "source", "context", "context_chunk", "model_input", "model_output",
+        "tool_result", "memory", "action", "resource", "destination", "credential", "data"
+      ]
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "add_new_online_security_state_domain",
+        "adapter_may_submit_delta",
+        "current_event_precommit_state_mutation"
+      ],
+      "properties": {
+        "add_new_online_security_state_domain": {"const": false},
+        "adapter_may_submit_delta": {"const": false},
+        "current_event_precommit_state_mutation": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "fusion": {
+      "type": "object",
+      "required": [
+        "owner", "context_taint_may_return_final_decision",
+        "behavior_signal_standalone_deny", "machine_truth"
+      ],
+      "properties": {
+        "owner": {"const": "core_v2_1"},
+        "context_taint_may_return_final_decision": {"const": false},
+        "behavior_signal_standalone_deny": {"const": false},
+        "machine_truth": {"const": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/fusion_matrix.yaml"}
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "decision_implies_not_invoked",
+        "receipt_is_execution_evidence",
+        "strong_binding_fields"
+      ],
+      "properties": {
+        "decision_implies_not_invoked": {"const": false},
+        "receipt_is_execution_evidence": {"const": true},
+        "strong_binding_fields": {
+          "const": ["action_id", "authorization_fingerprint", "runtime_binding_id"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "budgets": {
+      "type": "object",
+      "required": [
+        "provenance_max_depth", "provenance_max_breadth", "provenance_node_budget",
+        "sticky_taint_summaries", "sticky_summary_refs", "sticky_summary_evidence_refs"
+      ],
+      "properties": {
+        "provenance_max_depth": {"const": 4},
+        "provenance_max_breadth": {"const": 32},
+        "provenance_node_budget": {"const": 256},
+        "sticky_taint_summaries": {"const": 16},
+        "sticky_summary_refs": {"const": 64},
+        "sticky_summary_evidence_refs": {"const": 64}
+      },
+      "additionalProperties": false
+    },
+    "deferred": {
+      "const": [
+        "token_level_taint", "global_graph_hot_path", "second_decision_engine",
+        "new_runtime_event_universe", "llm_declassification"
+      ]
+    },
+    "versions": {
+      "type": "object",
+      "required": ["fact_builder", "context_builder"],
+      "properties": {
+        "fact_builder": {"const": "1.0"},
+        "context_builder": {"const": "1.0"}
+      },
+      "additionalProperties": false
+    },
+    "rollout": {
+      "type": "object",
+      "required": ["mode", "stages", "limited_enable_requires"],
+      "properties": {
+        "mode": {"const": "shadow_first"},
+        "stages": {"const": ["shadow", "limited_enable", "active"]},
+        "limited_enable_requires": {
+          "const": [
+            "feature_flag", "rollback", "divergence_diagnostics",
+            "fixed_regression", "runtime_receipt_closure"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "benchmark_metrics": {
+      "const": [
+        "detection_recall", "intervention_recall", "hard_deny_recall", "hard_deny_precision",
+        "benign_deny_rate", "benign_ask_rate", "runtime_prevention_rate", "unsafe_invocation_rate",
+        "receipt_coverage", "final_asr", "utility", "flow_truncation_rate",
+        "coverage_degradation_rate", "shadow_divergence_rate"
+      ]
+    },
+    "freeze_review_decisions": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 18,
+      "items": {
+        "type": "object",
+        "required": ["id", "answer_ref", "decision_ref"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^CT-Q-(0[1-9]|1[0-8])$"},
+          "answer_ref": {
+            "type": "string",
+            "pattern": "^12_未决问题处置与决策记录\\.md#ct-q-(0[1-9]|1[0-8])$"
+          },
+          "decision_ref": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "untrusted_source_default": {
+      "type": "object",
+      "required": ["trust", "fact_authority", "initial_taints"],
+      "properties": {
+        "trust": {"const": "untrusted"},
+        "fact_authority": {"const": "untrusted_claim"},
+        "initial_taints": {"const": ["UNTRUSTED"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

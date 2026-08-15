@@ -1,0 +1,18 @@
+{
+  "name": "AgentGuard Context/Taint Runtime Contract v1",
+  "status": "frozen",
+  "prepared_at": "2026-08-15",
+  "frozen_at": "2026-08-15",
+  "review_signoff": {
+    "confirmed_by": "repository_owner",
+    "confirmed_via": "explicit_user_confirmation_in_qoder_task",
+    "confirmed_at": "2026-08-15"
+  },
+  "repository": "JToday666/agent-guard",
+  "design_baseline_ref": "f3f650a54921408d4cee3ed2a4a6b3932a040c5f",
+  "notes": [
+    "CT-PR-00 只冻结契约与设计产物，不改变任何 production behavior",
+    "所有实施指标（FPR/Recall/ASR/性能）均为 Target/Gate Proposal，未实测",
+    "AgentGuard_Context_Isolation_Taint_Tracking_完整方案.md 为信息性聚合，不作为校验源"
+  ]
+}
