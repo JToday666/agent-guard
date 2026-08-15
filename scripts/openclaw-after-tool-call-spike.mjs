@@ -39,10 +39,19 @@ const PLUGIN_PKG_PATH = path.join(
 // path / live) apply to the pinned SDK and unlocks the C2 Gate.
 const OPENCLAW_PIN = "2026.7.1-2";
 
-async function loadOpenclawSdk() {
+// RTE-04 Tier 3 硬化：smoke 矩阵通过 AGENTGUARD_OPENCLAW_SPIKE_ROOT 指向
+// 工作区外安装的 openclaw，在安装版本上复跑探针，探测版本间语义漂移。
+function spikeResolveBase(explicit = null) {
+  return (
+    explicit ?? process.env.AGENTGUARD_OPENCLAW_SPIKE_ROOT ?? PLUGIN_PKG_PATH
+  );
+}
+
+async function loadOpenclawSdk(resolveFrom = null) {
   // openclaw is a devDependency of the plugin package, not the repo root;
   // resolve it from the plugin package to stay pinned to the workspace copy.
-  const requireFromPlugin = createRequire(PLUGIN_PKG_PATH);
+  const base = spikeResolveBase(resolveFrom);
+  const requireFromPlugin = createRequire(base);
   const runtimeUrl = pathToFileURL(
     requireFromPlugin.resolve("openclaw/plugin-sdk/plugin-runtime"),
   ).href;
@@ -51,7 +60,23 @@ async function loadOpenclawSdk() {
   ).href;
   const runtime = await import(runtimeUrl);
   const harness = await import(harnessUrl);
-  return { runtime, harness };
+  // openclaw 的 exports 不暴露 ./package.json：沿解析出的入口向上查找。
+  let resolvedVersion = "unknown";
+  let probeDir = path.dirname(
+    requireFromPlugin.resolve("openclaw/plugin-sdk/plugin-runtime"),
+  );
+  for (let depth = 0; depth < 6; depth += 1) {
+    const candidate = path.join(probeDir, "package.json");
+    if (fs.existsSync(candidate)) {
+      const pkg = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (pkg.name === "openclaw") {
+        resolvedVersion = pkg.version;
+        break;
+      }
+    }
+    probeDir = path.dirname(probeDir);
+  }
+  return { runtime, harness, resolvedFrom: base, resolvedVersion };
 }
 
 function createEvidenceSink() {
@@ -178,12 +203,15 @@ async function emitAfterToolCallObservation(harness, params) {
   });
 }
 
-export async function runAfterToolCallSpikeScenarios() {
-  const { runtime, harness } = await loadOpenclawSdk();
+export async function runAfterToolCallSpikeScenarios(options = {}) {
+  const { runtime, harness, resolvedFrom, resolvedVersion } =
+    await loadOpenclawSdk(options.resolveFrom ?? null);
   const report = {
     spike_id: "PR-RTE-02",
     layer: "in_process_host_path",
     openclaw_version: OPENCLAW_PIN,
+    resolved_from: resolvedFrom,
+    resolved_version: resolvedVersion,
     sdk_advertises_after_tool_call:
       [...runtime.PLUGIN_HOOK_NAMES].includes("after_tool_call"),
     scenarios: {},

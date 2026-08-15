@@ -607,6 +607,70 @@ async function runSmoke(options) {
       version: scopeVersion,
     });
 
+    // Step 3.5 CF-08/09 语义复验（RTE-04 Tier 3 硬化）：在安装版本上
+    // 复跑 spike 探针，探测版本间语义漂移（跨 hook 单一 toolCallId、
+    // blocked 零调用 + block 结果返回、失败传播）。live observer emission
+    // 仍需模型 turn，继续由归档取证工件锁定（见 conformance 矩阵 note）。
+    const spikeScript = path.join(
+      ROOT,
+      "scripts",
+      "openclaw-after-tool-call-spike.mjs",
+    );
+    const spikeReportPath = path.join(workDir, "rte-spike-probe-report.json");
+    const spikeResult = runTool(
+      "node",
+      [spikeScript, spikeReportPath],
+      {
+        capture: true,
+        allowFailure: true,
+        env: {
+          ...process.env,
+          AGENTGUARD_OPENCLAW_SPIKE_ROOT: path.join(
+            openclawRoot,
+            "package.json",
+          ),
+        },
+      },
+    );
+    if (spikeResult.status !== 0) {
+      record("cf08-cf09-spike-probe", false, {
+        error: combinedOutput(spikeResult).slice(0, 2000),
+      });
+      throw new Error("spike 探针在安装的 openclaw 版本上执行失败");
+    }
+    const spikeReport = JSON.parse(
+      fs.readFileSync(spikeReportPath, "utf8"),
+    );
+    const probeAllow = spikeReport.scenarios.allow_success;
+    const probeDeny = spikeReport.scenarios.deny_block;
+    const probeFailure = spikeReport.scenarios.tool_failure;
+    const probeAllowIds = new Set(
+      probeAllow.evidence.map(
+        (entry) => entry.toolCallId ?? entry.ctxToolCallId,
+      ),
+    );
+    const probeOk =
+      spikeReport.resolved_version === scopeVersion &&
+      probeAllow.invocation_count === 1 &&
+      probeAllowIds.size === 1 &&
+      probeDeny.invocation_count === 0 &&
+      probeDeny.blocked_result_returned === true &&
+      probeFailure.invocation_count === 1 &&
+      probeFailure.host_propagated_error === true;
+    record("cf08-cf09-spike-probe", probeOk, {
+      resolved_version: spikeReport.resolved_version,
+      allow_invocations: probeAllow.invocation_count,
+      allow_identity_size: probeAllowIds.size,
+      deny_invocations: probeDeny.invocation_count,
+      deny_blocked_result: probeDeny.blocked_result_returned,
+      failure_propagated: probeFailure.host_propagated_error,
+    });
+    if (!probeOk) {
+      throw new Error(
+        "CF-08/09 spike 探针语义在安装的 openclaw 版本上发生漂移",
+      );
+    }
+
     // Step 4 真实 Guard API（_test 库）：随机端口、重置测试库、前台启动
     let adapterToken = process.env.AGENTGUARD_ADAPTER_TOKEN ?? null;
     let guardApiBaseUrl = null;
