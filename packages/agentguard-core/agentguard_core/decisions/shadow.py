@@ -384,7 +384,16 @@ def shadow_assess_with_coverage(
                 action_ir,
                 evaluated_at=snapshot.evaluation_clock.evaluated_at,
             )
-            flow = compute_flow_verdict(snapshot, action_ir)
+            flow = compute_flow_verdict(
+                snapshot,
+                action_ir,
+                # flow verdict 的 dataflow 口径用当前动作 plan 派生的
+                # coverage（02 §6.5）：bootstrap snapshot 是全七域视图，
+                # 低影响动作无存储 flow 时 dataflow 报 unknown 会导致
+                # verdict 恒 uncertain；当前 plan 不要求 dataflow 时应为
+                # not_applicable，无危险 flow 即构成安全证据。
+                dataflow_status=coverage.dataflow.status,
+            )
         except Exception:  # noqa: BLE001 - 组件异常收敛为 shadow 降级。
             degraded_reason = REASON_COMPONENT_FAILED
             plan = _degraded_plan(impact, REASON_COMPONENT_FAILED)

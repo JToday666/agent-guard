@@ -358,12 +358,60 @@ def test_not_applicable_when_no_flow_requirement() -> None:
     assert verdict.strongest_strength is None
 
 
-def test_not_applicable_not_used_when_flows_exist() -> None:
+def test_not_applicable_holds_with_non_dangerous_flows_present() -> None:
+    """02 §6.5：dataflow=not_applicable 时未发现危险 flow 即构成安全
+    证据，不得要求 complete；非危险 flow 不构成阻碍（危险 flow 已在
+    violation 分支先行拦截）。"""
     snapshot = _snapshot(
         dataflow_status="not_applicable",
         flows=[_flow_fact("flow-1", taints=["UNTRUSTED"], strength="strong")],
     )
     verdict = compute_flow_verdict(snapshot, _action_ir())
+    assert verdict.status == "not_applicable"
+
+
+def test_not_applicable_overrides_bootstrap_unknown_coverage() -> None:
+    """Codex review P1-2 回归：bootstrap snapshot 无存储 flow 时把
+    dataflow 报为 unknown，但当前动作 plan 派生的 coverage 为
+    not_applicable（低影响动作）——flow verdict 必须用后者，否则恒
+    uncertain、fusion 永远无法 CLEAR_ALLOW。"""
+    snapshot = _snapshot(dataflow_status="unknown")
+    verdict = compute_flow_verdict(
+        snapshot, _action_ir(), dataflow_status="not_applicable"
+    )
+    assert verdict.status == "not_applicable"
+
+
+def test_dangerous_flow_is_violation_even_with_not_applicable_coverage() -> None:
+    """not_applicable 不赦免危险 flow：violation 分支先行拦截。"""
+    snapshot = _snapshot(
+        dataflow_status="unknown",
+        flows=[_flow_fact("flow-1", taints=["CREDENTIAL"], strength="exact")],
+    )
+    verdict = compute_flow_verdict(
+        snapshot, _action_ir(), dataflow_status="not_applicable"
+    )
+    assert verdict.status == "violation"
+
+
+def test_dangerous_sticky_taint_blocks_not_applicable() -> None:
+    snapshot = _snapshot(
+        dataflow_status="unknown", sticky=[_sticky(taints=["CREDENTIAL"])]
+    )
+    verdict = compute_flow_verdict(
+        snapshot, _action_ir(), dataflow_status="not_applicable"
+    )
+    assert verdict.status == "uncertain"
+    assert verdict.taints == ["CREDENTIAL"]
+
+
+def test_current_coverage_unknown_stays_uncertain_fail_closed() -> None:
+    """高影响动作：当前 plan 派生的 dataflow 仍为 unknown → 不得
+    解释为安全（02 §6.5），fail-closed 保持 uncertain。"""
+    snapshot = _snapshot(dataflow_status="unknown")
+    verdict = compute_flow_verdict(
+        snapshot, _action_ir(), dataflow_status="unknown"
+    )
     assert verdict.status == "uncertain"
 
 

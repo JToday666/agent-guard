@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from ...actions.models import ActionIR
-from ...signals.models import FlowStrength, FlowVerdict, TaintLabel
+from ...signals.models import CoverageStatus, FlowStrength, FlowVerdict, TaintLabel
 from ..facts import FlowFact, StickyTaintSummary
 from ..snapshot import SecuritySnapshot
 
@@ -111,9 +111,21 @@ def _dangerous_sticky_taints(
 def compute_flow_verdict(
     snapshot: SecuritySnapshot,
     action_ir: ActionIR,
+    *,
+    dataflow_status: CoverageStatus | None = None,
 ) -> FlowVerdict:
     """由 ``SecuritySnapshot``（flows / sticky taint summaries）与
     ``ActionIR`` sink 信息生成 ``FlowVerdict``。
+
+    ``dataflow_status`` 口径（02 §6.5）：优先消费**当前动作 plan 派生**
+    的 dataflow coverage 状态（调用方显式传入）；缺省退回 snapshot 自带
+    的 bootstrap coverage（兼容旧调用方/测试夹具）。bootstrap snapshot
+    是全七域视图，无存储 flow 时把 dataflow 报为 ``unknown``；而低影响
+    动作的当前 plan 通常不要求 dataflow（``not_applicable``）——若
+    误用 bootstrap 口径，flow verdict 恒 ``uncertain``，fusion 永远无法
+    CLEAR_ALLOW，shadow divergence 系统性偏向 DEFER。
+    ``not_applicable`` 语义：当前动作无数据/影响流安全要求，未发现
+    危险 flow 即可构成安全证据，不得要求 ``complete``。
 
     判定顺序（fail-closed）：
 
@@ -123,7 +135,8 @@ def compute_flow_verdict(
        收集危险 flow 的 ``flow_id``；``taints`` 为危险 flow taint 的
        确定性排序并集。
     2. **not_applicable**：dataflow coverage 为 ``not_applicable`` 且
-       无任何 flow、无危险 sticky taint（动作无数据/影响流安全要求）。
+       无危险 sticky taint（动作无数据/影响流安全要求；危险 flow 已在
+       第 1 步拦截，非危险 flow 不构成阻碍）。
     3. **safe**：必须**同时**满足（02 §6.5 双前提）——
        - 未发现危险 flow（含 sticky taint 摘要无危险 taint）；
        - dataflow coverage ``complete``；
@@ -159,14 +172,14 @@ def compute_flow_verdict(
             evidence_refs=[],
         )
 
-    dataflow_status = snapshot.coverage.dataflow.status
+    dataflow_status_resolved = (
+        dataflow_status
+        if dataflow_status is not None
+        else snapshot.coverage.dataflow.status
+    )
     sticky_dangerous = _dangerous_sticky_taints(snapshot.sticky_taint_summaries)
 
-    if (
-        dataflow_status == "not_applicable"
-        and not snapshot.flows
-        and not sticky_dangerous
-    ):
+    if dataflow_status_resolved == "not_applicable" and not sticky_dangerous:
         return FlowVerdict(
             status="not_applicable",
             strongest_strength=None,
@@ -180,7 +193,7 @@ def compute_flow_verdict(
         flow.strength == "possible" for flow in snapshot.flows
     )
     safe = (
-        dataflow_status == "complete"
+        dataflow_status_resolved == "complete"
         and not _flow_data_truncated(snapshot)
         and not possible_link_present
         and not sticky_dangerous

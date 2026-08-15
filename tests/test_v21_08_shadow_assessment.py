@@ -28,6 +28,7 @@ from agentguard_core.decisions.shadow import (
     compute_assessment_digest,
     finalize_shadow,
     shadow_assess,
+    shadow_assess_with_coverage,
 )
 from agentguard_core.engine import GuardEngine
 from agentguard_core.security_context.facts import StateWatermarks
@@ -399,6 +400,42 @@ def test_component_failure_degrades_without_raising(monkeypatch) -> None:
         if item.degradation_id == shadow_ids[0]
     )
     assert REASON_COMPONENT_FAILED in degradation.reason_codes
+
+
+def test_flow_verdict_consumes_current_plan_coverage_not_bootstrap(
+    monkeypatch,
+) -> None:
+    """Codex review P1-2 接线回归：flow verdict 的 dataflow 口径必须用
+    当前动作 plan 派生的 coverage，而非 bootstrap snapshot coverage。
+
+    判别力构造：bootstrap coverage 的 dataflow 故意置为 unknown；
+    若接线误用 snapshot 口径，spy 捕到的将是 unknown。
+    """
+    captured: dict = {}
+    real = shadow_module.compute_flow_verdict
+
+    def _spy(snapshot, action_ir, **kwargs):
+        captured.update(kwargs)
+        return real(snapshot, action_ir, **kwargs)
+
+    monkeypatch.setattr(shadow_module, "compute_flow_verdict", _spy)
+
+    event, policies = _first_case()
+    snapshot = _snapshot().model_copy(
+        update={"coverage": _coverage(dataflow_status="unknown")}
+    )
+    outcome = shadow_assess_with_coverage(
+        event, policies, snapshot, server_secret=SERVER_SECRET
+    )
+
+    assert "dataflow_status" in captured
+    assert captured["dataflow_status"] == outcome.coverage.dataflow.status
+    # 当前 plan 派生的 coverage 与喂给 fusion/evidence 的同源真值一致。
+    assert (
+        captured["dataflow_status"]
+        != snapshot.coverage.dataflow.status
+        or outcome.coverage.dataflow.status == "unknown"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -808,6 +808,21 @@ def test_clear_allow_proof_all_conditions_met() -> None:
     assert codes == [CLEAR_ALLOW_PROOF_REASON]
 
 
+def test_clear_allow_reachable_with_not_applicable_flow() -> None:
+    """Codex review P1-2 闭环：低影响动作 flow verdict 为
+    not_applicable（当前 plan 不要求 dataflow，无危险 flow）时，
+    CLEAR_ALLOW 可达——不得因 bootstrap coverage unknown 系统性 DEFER。"""
+    kwargs = _green_kwargs()
+    kwargs["flow"] = _flow("not_applicable")
+    # 当前 plan 不要求 dataflow：required 域不含 dataflow，coverage
+    # 中 dataflow 为 not_applicable（二者同源口径）。
+    kwargs["required_domains"] = ("task",)
+    kwargs["coverage"] = _coverage(dataflow="not_applicable")
+    disposition, codes = evaluate_fusion(**kwargs)
+    assert disposition == "CLEAR_ALLOW"
+    assert codes == [CLEAR_ALLOW_PROOF_REASON]
+
+
 @pytest.mark.parametrize(
     ("condition", "mutate", "expected", "expected_code"),
     [
