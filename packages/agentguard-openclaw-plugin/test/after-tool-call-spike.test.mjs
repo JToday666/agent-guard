@@ -241,7 +241,10 @@ test("capability fixture: structure is complete and consistent with spike eviden
   const capability = loadCapability();
 
   assert.equal(capability.runtime, "openclaw");
-  assert.equal(capability.openclaw_version, "2026.6.6");
+  assert.ok(
+    capability.openclaw_version.startsWith("2026.6.6"),
+    "capability must stay anchored to the pinned SDK",
+  );
   assert.ok(["PASS", "FAIL"].includes(capability.c2_gate));
   assert.equal(capability.questions.length, 14);
   assert.equal(capability.c2_gate_criteria.length, 5);
@@ -386,5 +389,105 @@ test("host path: falsy successful results omit BOTH result and error fields (Q5 
     // error: field presence must never classify success vs failure.
     assert.equal(item.after_result_field_present, false, item.returned);
     assert.equal(item.after_error_field_present, false, item.returned);
+  }
+});
+
+// --- Live forensics evidence (evidence layer: isolated_runtime) -------------
+// Recorded from REAL host observer emissions during embedded agent turns
+// (openclaw 2026.7.1-2, isolated profile). These assertions bind the rev3
+// capability verdicts (Q6/Q9/Q10) to the archived evidence files.
+
+const LIVE_EVIDENCE_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "rte02-live-evidence.json",
+);
+const LIVE_EVIDENCE_JSONL_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "rte02-live-evidence.jsonl",
+);
+
+function loadLiveEvidence() {
+  return JSON.parse(readFileSync(LIVE_EVIDENCE_PATH, "utf8"));
+}
+
+function loadLiveJsonl() {
+  return readFileSync(LIVE_EVIDENCE_JSONL_PATH, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line));
+}
+
+test("live evidence: report structure covers the three scenarios on a real runtime", () => {
+  const evidence = loadLiveEvidence();
+
+  assert.equal(evidence.phase, "live_forensics_rev3");
+  assert.ok(evidence.runtime.openclaw_cli_version);
+  assert.equal(evidence.scenarios.length, 3);
+  const ids = evidence.scenarios.map((s) => s.id);
+  assert.deepEqual(ids, ["S-allow", "S-error", "S-deny"]);
+});
+
+test("live evidence: blocked call has zero executions yet after_tool_call was emitted by the real host (Q9)", () => {
+  const records = loadLiveJsonl();
+  const denyRecords = records.filter(
+    (r) => r.toolName === "rte_probe_deny" || r.tool === "rte_probe_deny",
+  );
+
+  // C1 fact: the deny tool never executed.
+  assert.ok(
+    !denyRecords.some((r) => r.kind === "tool_executed"),
+    "blocked call must have zero executions",
+  );
+  // Q9 live fact: the real host observer still emitted after_tool_call.
+  const denyAfter = denyRecords.filter((r) => r.kind === "after_tool_call");
+  assert.equal(denyAfter.length, 1);
+  assert.equal(denyAfter[0].errorPresent, true);
+  assert.equal(denyAfter[0].errorIsString, true);
+});
+
+test("live evidence: error path emitted after_tool_call with bounded string error (Q6)", () => {
+  const records = loadLiveJsonl();
+  const failAfter = records.filter(
+    (r) => r.kind === "after_tool_call" && r.toolName === "rte_probe_fail",
+  );
+
+  assert.equal(failAfter.length, 1);
+  assert.equal(failAfter[0].errorPresent, true);
+  assert.equal(failAfter[0].errorIsString, true);
+  assert.equal(failAfter[0].durationMsType, "number");
+});
+
+test("live evidence: after_tool_call lands BEFORE tool_result_persist in every scenario (Q10 correction)", () => {
+  const records = loadLiveJsonl();
+  const callIds = [...new Set(records.map((r) => r.toolCallId).filter(Boolean))];
+
+  assert.ok(callIds.length >= 3);
+  for (const callId of callIds) {
+    const seq = records
+      .filter((r) => r.toolCallId === callId)
+      .map((r) => r.kind);
+    const afterIndex = seq.indexOf("after_tool_call");
+    const persistIndex = seq.indexOf("tool_result_persist");
+    assert.ok(afterIndex !== -1, `after_tool_call missing for ${callId}`);
+    assert.ok(persistIndex !== -1, `tool_result_persist missing for ${callId}`);
+    assert.ok(
+      afterIndex < persistIndex,
+      `expected after before persist for ${callId}, got ${seq.join(" -> ")}`,
+    );
+  }
+});
+
+test("live evidence: toolCallId identical across before and after hooks in every scenario (Q3/Q4 live)", () => {
+  const records = loadLiveJsonl();
+  const hooked = records.filter(
+    (r) => r.kind === "before_tool_call" || r.kind === "after_tool_call",
+  );
+
+  assert.ok(hooked.length >= 6);
+  for (const record of hooked) {
+    assert.ok(record.toolCallId, "toolCallId must be present");
+    assert.equal(record.ctxToolCallId, record.toolCallId);
   }
 });
