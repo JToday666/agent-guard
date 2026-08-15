@@ -26,6 +26,7 @@ import {
   registerLlmOutput,
 } from "./hooks/model.js";
 import {
+  registerAfterToolCall,
   registerBeforeToolCall,
   registerToolResultPersist,
 } from "./hooks/tool.js";
@@ -141,6 +142,8 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     registerBeforeMessageWrite(hookContext);
     registerBeforeAgentFinalize(hookContext);
     registerObservationHooks(hookContext);
+    // 注册顺序与 hook-contract.mjs OPENCLAW_REQUIRED_HOOKS 一致（观察组末尾）。
+    registerAfterToolCall(hookContext);
   },
 });
 

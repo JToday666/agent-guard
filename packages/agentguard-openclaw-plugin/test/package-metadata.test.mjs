@@ -72,8 +72,12 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
 });
 
 test("hook contract uses supported OpenClaw enforcement surfaces", () => {
-  assert.equal(OPENCLAW_REQUIRED_HOOKS.length, 23);
+  // RTE-03：after_tool_call 观察组新增 → 24 个 REQUIRED hook。
+  assert.equal(OPENCLAW_REQUIRED_HOOKS.length, 24);
   assert.ok(OPENCLAW_REQUIRED_HOOKS.includes("before_agent_run"));
+  assert.ok(OPENCLAW_REQUIRED_HOOKS.includes("after_tool_call"));
+  // terminal closure 是观察型能力：不进阻断/fail-closed 清单。
+  assert.equal(OPENCLAW_ENFORCEMENT_HOOKS.includes("after_tool_call"), false);
   assert.equal(
     OPENCLAW_ENFORCEMENT_HOOKS.includes("before_prompt_build"),
     false,

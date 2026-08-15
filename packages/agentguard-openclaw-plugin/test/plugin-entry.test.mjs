@@ -49,10 +49,12 @@ test("plugin entry evaluates hooks with OpenClaw api.pluginConfig", async () => 
       },
     });
 
-    assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+    // RTE-03：after_tool_call 同时注册通用观察 handler（REQUIRED 清单内）与
+    // 专用 terminal closure handler（清单外额外一个），共 REQUIRED+1 个注册。
+    assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT + 1);
     assert.deepEqual(
       registered.map((entry) => entry.name),
-      [...OPENCLAW_REQUIRED_HOOKS],
+      [...OPENCLAW_REQUIRED_HOOKS, "after_tool_call"],
     );
 
     let authHeader = null;
@@ -686,7 +688,8 @@ test("full registration succeeds when a persisted SecretRef resolves to a runtim
 
     assert.equal(services.length, 1);
     assert.equal(services[0].id, "agentguard-security-runtime");
-    assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+    // RTE-03：额外一个专用 after_tool_call terminal closure handler。
+    assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT + 1);
   } finally {
     clearRuntimeConfigSnapshot();
   }
@@ -839,5 +842,6 @@ test("undefined registration mode keeps the plaintext compatibility path", async
 
   assert.equal(services.length, 1);
   assert.equal(services[0].id, "agentguard-security-runtime");
-  assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT);
+  // RTE-03：额外一个专用 after_tool_call terminal closure handler。
+  assert.equal(registered.length, OPENCLAW_REQUIRED_HOOK_COUNT + 1);
 });

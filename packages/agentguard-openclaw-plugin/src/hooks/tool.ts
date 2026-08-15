@@ -33,7 +33,11 @@ import type {
   GuardEvent,
   ToolCallPayload,
 } from "../types.js";
-import type { ToolCallState } from "../runtime/state.js";
+import type {
+  EnforcementGateState,
+  ToolCallState,
+} from "../runtime/state.js";
+import type { TerminalInterventionType } from "../mapping/audit-outcomes.js";
 import type { HookContext } from "./context.js";
 
 export function registerBeforeToolCall(hookContext: HookContext): void {
@@ -176,6 +180,160 @@ function markFailedClosedGate(
     gateState: "blocked",
     receiptQueued: true,
   });
+}
+
+/**
+ * Spike 证据锚点（rev5 Q9，pin 2026.7.1-2）：真实 host observer 对 blocked
+ * 调用也会发出 after_tool_call（零执行、error 形状），因此 blocked gate 下
+ * 的 after 到达不代表 invocation，不得派生任何 terminal fact。
+ */
+export const AFTER_HOOK_FIRES_ON_BLOCKED = true;
+
+const BLOCKED_GATE_STATES: ReadonlySet<EnforcementGateState> = new Set([
+  "blocked",
+  "timed_out",
+  "binding_failed",
+]);
+
+/**
+ * Q5 硬约束：成败只能用 error 字符串判定。falsy 成功结果（false/0/""/null）
+ * 的 after 事件既无 result 也无 error，字段存在性永远不得参与分类。
+ */
+export function classifyAfterToolCall(event: unknown): "completed" | "failed" {
+  const error = asRecord(event).error;
+  return typeof error === "string" && error.length > 0 ? "failed" : "completed";
+}
+
+/**
+ * 矛盾判定：gate 预期阻断但观察到真实 terminal 时的干预类型。
+ * 当前 pin 已证明 blocked 也会发 after hook（emitsOnBlocked=true），故 blocked
+ * gate 一律 skip（只记诊断）；注入 emitsOnBlocked=false 保留矛盾分支可测（DoD #5）。
+ */
+export function terminalInterventionType(
+  gateState: EnforcementGateState,
+  options: { emitsOnBlocked: boolean } = {
+    emitsOnBlocked: AFTER_HOOK_FIRES_ON_BLOCKED,
+  },
+): TerminalInterventionType | "skip" {
+  const gateExpectedExecution =
+    gateState === "allowed" || gateState === "approval_released";
+  if (gateExpectedExecution) {
+    return "runtime_observation";
+  }
+  if (BLOCKED_GATE_STATES.has(gateState)) {
+    return options.emitsOnBlocked ? "skip" : "enforcement_violation";
+  }
+  // evaluating/approval_pending 阶段不应有 terminal 观察；不派生事实。
+  return "skip";
+}
+
+/**
+ * RTE-03 §5：after_tool_call → execution_completed/failed terminal closure。
+ * 观察型 hook：任何异常只记 bounded diagnostic，绝不影响工具结果（RTE-039）。
+ */
+export function registerAfterToolCall(hookContext: HookContext): void {
+  const {
+    api,
+    config,
+    makeClient,
+    outcomeDelivery,
+    toolCallState,
+    degradations,
+  } = hookContext;
+  api.on(
+    "after_tool_call",
+    (event, context) => {
+      if (isDisabled(config)) {
+        return;
+      }
+      try {
+        const eventRecord = asRecord(event);
+        const callId =
+          stringMaybe(eventRecord.toolCallId) ??
+          stringMaybe(asRecord(context).toolCallId);
+        if (!callId) {
+          degradations.record("after_tool_call_missing_action_id");
+          logDiagnostic(
+            config,
+            "after_tool_call skipped: missing native action id",
+          );
+          return;
+        }
+        const state = toolCallState.get(callId);
+        if (!state) {
+          degradations.record("after_tool_call_correlation_missing");
+          return;
+        }
+        if (state.correlationSource !== "native_tool_call_id") {
+          // C2 要求稳定原生身份；local fallback 不伪造 terminal fact。
+          degradations.record("after_tool_call_local_fallback_correlation");
+          return;
+        }
+        if (
+          !state.policyAuditId ||
+          !state.decisionId ||
+          !state.decision ||
+          !state.guardEvent ||
+          !state.evaluation
+        ) {
+          degradations.record("after_tool_call_policy_linkage_missing");
+          return;
+        }
+        const intervention = terminalInterventionType(state.gateState);
+        if (intervention === "skip") {
+          // Q9：blocked/timed_out/binding_failed + after 到达不是矛盾而是 pin
+          // 已证明的 emission-on-blocked；只记诊断，不派生 terminal fact。
+          logDiagnostic(
+            config,
+            "after_tool_call observed for blocked gate state; no terminal fact derived",
+            { toolCallId: callId, gateState: state.gateState },
+          );
+          return;
+        }
+        const client = makeClient();
+        const terminal = classifyAfterToolCall(event);
+        const completedAt = new Date().toISOString();
+        const approval =
+          state.gateState === "approval_released" && state.approvalId
+            ? {
+                approvalId: state.approvalId,
+                status: "allowed" as const,
+                decision: "allow_once" as const,
+                resolvedAt: null,
+              }
+            : undefined;
+        fireRuntimeOutcomeReceipt({
+          client,
+          config,
+          guardEvent: state.guardEvent,
+          evaluation: state.evaluation,
+          kind: terminal === "failed" ? "execution_failed" : "execution_completed",
+          approval,
+          interventionType: intervention,
+          invokedAt: null,
+          completedAt,
+          error:
+            terminal === "failed"
+              ? (stringMaybe(eventRecord.error) ?? null)
+              : null,
+          stage: "after_tool_call",
+          logLabel: "after_tool_call",
+          delivery: outcomeDelivery,
+        });
+        patchToolCallState(toolCallState, callId, {
+          terminalStatus: terminal === "failed" ? "failed" : "executed",
+          terminalObservedAt: completedAt,
+          // 回执已入 durable spool 或被确定性跳过；failed 终态因此可驱逐（§8.2）。
+          receiptQueued: true,
+        });
+      } catch (error) {
+        logDiagnostic(config, "after_tool_call mapping failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    { priority: 0, timeoutMs: 2000 },
+  );
 }
 
 export function registerToolResultPersist(hookContext: HookContext): void {

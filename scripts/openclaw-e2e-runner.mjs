@@ -1028,6 +1028,21 @@ async function triggerReliabilityHook(runner, item) {
         },
         reliabilityToolContext(traceId, "fetch"),
       );
+    case "after_tool_call":
+      // RTE-03：通用观察 handler 产 runtime_observation；专用 terminal
+      // handler 因无关联 before 只记 degradation（不伪造事实），
+      // 两者都不影响本 case 的期望事件。
+      return runner.runAfterToolCall(
+        {
+          toolName: "read_file",
+          params: { path: "/private/token.txt" },
+          toolCallId: `call_${traceId}`,
+          runId: traceId,
+          result: { content: "reliability observation only" },
+          durationMs: 5,
+        },
+        reliabilityToolContext(traceId, "read_file"),
+      );
     case "gateway_start":
       return runner.runGatewayStart(
         reliabilityObservationEvent(traceId, item),
