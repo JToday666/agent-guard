@@ -29,7 +29,7 @@ from .rebuild import rebuild_locked, state_from_record
 from .store import SecurityStateStoreAccess
 
 
-def get_snapshot(
+def get_snapshot_with_revoked(
     store: SecurityStateStoreAccess,
     scope_digest: str,
     *,
@@ -40,13 +40,15 @@ def get_snapshot(
     policy_digest: str,
     plan: RequiredCheckPlan,
     authoritative_head_revision: int | None = None,
-) -> SecuritySnapshot:
-    """构建不可变 ``SecuritySnapshot``（判定输入快照）。
+) -> tuple[SecuritySnapshot, list[str]]:
+    """构建快照并同源返回 ``revoked_grant_ids``（D3 只读入口）。
 
-    ``scope`` 与 ``task_fact_head`` 同为注入式权威输入（01 §19）；
-    ``authoritative_head_revision`` 缺省时 core 取
-    ``task_fact_head.revision``；传入更小的 head revision 会触发 task 域
-    stale 判定（02 §6.1）。
+    ``12_决策记录_V21-09前置.md`` D3：revoked 集与 snapshot 构建**同源
+    同锁**——两者取自同一 ``scope_lock`` 窗口内读取的同一份 online
+    state record（rebuild 后的重建态亦同源），保证 revoked 集与
+    snapshot 的 ``state_version`` 一致，不出现半新半旧组合。
+    ``SecuritySnapshot`` 冻结字段不含 revoked（01 §19 逐字不动），
+    撤销集以元组第二项透出，维持入参注入形态。
     """
 
     # Fail-closed: reject cross-scope snapshot inputs. When scope_digest,
@@ -71,6 +73,10 @@ def get_snapshot(
         else:
             state = state_from_record(record)
 
+        # D3 同源读取：revoked 集取自构建 snapshot 的同一 state 对象
+        # （task_fact_head 注入仅替换 task 域，不影响撤销集）。
+        revoked_grant_ids = list(state.revoked_grant_ids)
+
         # task 域不走 delta 投影：把权威 TaskFact head 注入快照输入态，
         # 使 coverage 能对照 head revision 完成 stale 检测（02 §6.1）。
         # 该注入仅存在于快照构建的临时态，不回写存储（task 域不参与
@@ -87,7 +93,7 @@ def get_snapshot(
                 "policy_digest": policy_digest,
             }
         )
-        return build_snapshot(
+        snapshot = build_snapshot(
             state,
             snapshot_id=snapshot_id,
             scope=scope,
@@ -98,3 +104,39 @@ def get_snapshot(
             task_fact_head=task_fact_head,
             authoritative_head_revision=authoritative_head_revision,
         )
+    return snapshot, revoked_grant_ids
+
+
+def get_snapshot(
+    store: SecurityStateStoreAccess,
+    scope_digest: str,
+    *,
+    scope: SecurityStateScope,
+    task_fact_head: TaskFact | None,
+    evaluation_clock: EvaluationClock,
+    policy_revision: str,
+    policy_digest: str,
+    plan: RequiredCheckPlan,
+    authoritative_head_revision: int | None = None,
+) -> SecuritySnapshot:
+    """构建不可变 ``SecuritySnapshot``（判定输入快照）。
+
+    ``scope`` 与 ``task_fact_head`` 同为注入式权威输入（01 §19）；
+    ``authoritative_head_revision`` 缺省时 core 取
+    ``task_fact_head.revision``；传入更小的 head revision 会触发 task 域
+    stale 判定（02 §6.1）。行为与 V21-08 逐字一致（委托
+    ``get_snapshot_with_revoked``，仅不透出同源 revoked 集）。
+    """
+
+    snapshot, _revoked = get_snapshot_with_revoked(
+        store,
+        scope_digest,
+        scope=scope,
+        task_fact_head=task_fact_head,
+        evaluation_clock=evaluation_clock,
+        policy_revision=policy_revision,
+        policy_digest=policy_digest,
+        plan=plan,
+        authoritative_head_revision=authoritative_head_revision,
+    )
+    return snapshot
