@@ -1,38 +1,44 @@
 {
-  "schema_version": "1.0.0",
-  "id": "R05",
-  "exact_title": "PR-RTE-05 — Strong Approval Binding",
-  "kind": "task",
-  "roles": ["task"],
-  "lane": "rte",
-  "lifecycle": "in_progress",
-  "revision": 1,
-  "optional": false,
-  "blocked": false,
-  "hold": false,
+  "blocked": true,
   "change_surfaces": [
+    "audit-schema-and-storage",
     "core-evaluation-activation",
     "guard-api-production-wiring",
     "runtime-binding-activation"
   ],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
-      "heading": "## 8. PR-RTE-05 — Strong Approval Binding",
-      "line_hint": 186
-    }
+  "evidence_refs": [
+    "evidence/R05/EV-R05-WORKTREE.json"
   ],
-  "evidence_refs": ["evidence/R05/EV-R05-WORKTREE.json"],
-  "work": {
-    "branch": "codex/rte-05-integration",
-    "worktree_slug": "agent-guard-rte05-integration",
-    "owner": "implementation-owner",
-    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
-    "started_at": null,
-    "substate": "active"
-  },
+  "exact_title": "PR-RTE-05 — Strong Approval Binding",
+  "hold": false,
+  "id": "R05",
+  "kind": "task",
+  "lane": "rte",
+  "lifecycle": "in_progress",
   "notes": [
     "Active dirty worktree proves implementation has started, not that RTE-05 Integration or Gate B has passed.",
-    "Its exclusive activation surfaces overlap I01 and require serialized integration."
-  ]
+    "Its exclusive activation surfaces overlap I01 and require serialized integration.",
+    "BLOCKED: openclaw@2026.7.1-2 lacks atomic replace-and-seal and an authoritative invocation-start hook; CF-13/C3 cannot be verified without an upstream host capability"
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "## 8. PR-RTE-05 — Strong Approval Binding",
+      "line_hint": 186,
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md"
+    }
+  ],
+  "work": {
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "branch": "codex/rte-05-integration",
+    "owner": "implementation-owner",
+    "started_at": null,
+    "substate": "active",
+    "worktree_slug": "agent-guard-rte05-integration"
+  }
 }

@@ -59,9 +59,11 @@
       "id": "runtime-binding-activation",
       "label": "Runtime binding and activation",
       "path_patterns": [
+        "agentguard_langgraph_bench/**",
         "packages/agentguard-langgraph-adapter/**",
         "packages/agentguard-openclaw-plugin/**",
         "packages/agentguard-openclaw-bench-tools/**",
+        "scripts/openclaw-rte05-host-chain.mjs",
         "tests/runtime_conformance/**",
         "apps/guard-api/**",
         "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/**"
