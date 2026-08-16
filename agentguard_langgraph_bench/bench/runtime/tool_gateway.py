@@ -17,7 +17,13 @@ from agentguard_langgraph_adapter.runtime_receipts import (
     runtime_receipts_enabled,
     submit_runtime_receipt,
 )
-from agentguard_langgraph_adapter.tool_gateway import adapter_submits_policy_audit
+from agentguard_langgraph_adapter.tool_gateway import (
+    _apply_tool_result_guard,
+    _compatibility_from_event,
+    _evaluate_memory_write_gate,
+    _evaluate_message_send_gate,
+    adapter_submits_policy_audit,
+)
 from agentguard_langgraph_bench.adapter.event_models import (
     ToolExecutionResult,
     new_id,
@@ -245,6 +251,34 @@ class GuardedToolGateway:
                     runtime_receipt_error=receipt_error,
                 )
 
+        compatibility_payload = compatibility or _compatibility_from_event(event)
+        secondary_gate = _evaluate_memory_write_gate(
+            self.guard_adapter,
+            tool_name=tool_name,
+            arguments=arguments,
+            security=security_for_event,
+            trace_id=trace_id,
+            call_id=call_id,
+            compatibility=compatibility_payload,
+        )
+        if secondary_gate is None:
+            secondary_gate = _evaluate_message_send_gate(
+                self.guard_adapter,
+                tool_name=tool_name,
+                arguments=arguments,
+                security=security_for_event,
+                trace_id=trace_id,
+                call_id=call_id,
+                compatibility=compatibility_payload,
+            )
+        if secondary_gate is not None:
+            return _annotate_result(
+                secondary_gate,
+                approval_mode=self.approval_mode,
+                runtime_terminal=True,
+                terminal_reason=secondary_gate.block_semantics or "secondary_gate",
+            )
+
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
         if self._supports_action_receipts(decision):
@@ -284,17 +318,7 @@ class GuardedToolGateway:
         try:
             result = self.tool_runtime.invoke(tool_name, arguments)
             side_effects = self.tool_runtime.diff(before)
-            receipt_error = self._record_outcome(
-                event,
-                decision,
-                execution_status="executed",
-                approval_resolution=(approval_resolution if decision.decision == "ask" else None),
-                invoked_at=invoked_at,
-                side_effects=side_effects,
-                side_effects_measured=True,
-                parent_audit_id=start_audit_id,
-            )
-            return ToolExecutionResult(
+            payload = ToolExecutionResult(
                 tool_name=tool_name,
                 call_id=call_id,
                 executed=True,
@@ -321,8 +345,35 @@ class GuardedToolGateway:
                 rag_answer_provenance=result.get("rag_answer_provenance") if tool_name == "rag_answer" and isinstance(result, dict) else None,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
-                runtime_receipt_error=receipt_error,
+                runtime_receipt_error=None,
             )
+            payload, result_outcome_attempted = _apply_tool_result_guard(
+                self.guard_adapter,
+                payload=payload,
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result,
+                side_effects=side_effects,
+                security=security_for_event,
+                trace_id=trace_id,
+                call_id=call_id,
+                invoked_at=invoked_at,
+                side_effects_measured=True,
+            )
+            if not result_outcome_attempted:
+                payload.runtime_receipt_error = self._record_outcome(
+                    event,
+                    decision,
+                    execution_status="executed",
+                    approval_resolution=(
+                        approval_resolution if decision.decision == "ask" else None
+                    ),
+                    invoked_at=invoked_at,
+                    side_effects=side_effects,
+                    side_effects_measured=True,
+                    parent_audit_id=start_audit_id,
+                )
+            return payload
         except Exception as exc:
             side_effects = self.tool_runtime.diff(before)
             receipt_error = self._record_outcome(

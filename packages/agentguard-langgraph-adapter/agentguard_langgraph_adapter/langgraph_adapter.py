@@ -245,6 +245,24 @@ class LangGraphAdapter:
         )
         return event, self.evaluate_guard_event(event)
 
+    def evaluate_message_send(
+        self,
+        *,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+        sanitized: bool = False,
+    ) -> tuple[RuntimeGuardEvent, PolicyDecision]:
+        event = self.build_message_send_event(
+            arguments=arguments,
+            security=security,
+            trace_id=trace_id,
+            call_id=call_id,
+            sanitized=sanitized,
+        )
+        return event, self.evaluate_guard_event(event)
+
     def build_tool_call_event(
         self,
         *,
@@ -261,10 +279,14 @@ class LangGraphAdapter:
             if isinstance(security.get("metadata"), dict)
             else {}
         )
-        event_metadata = {
-            "adapter": "agentguard_langgraph_bench",
+        event_metadata = _trusted_event_metadata(
+            security,
+            adapter="agentguard_langgraph_bench",
+            hook="tool_call_proposed",
+            extra={
             **mcp_hijacking_metadata(arguments, security_metadata),
-        }
+            },
+        )
         if "compatibility" in security_metadata:
             event_metadata["compatibility"] = security_metadata["compatibility"]
         context = SecurityContext.model_validate(
@@ -279,6 +301,7 @@ class LangGraphAdapter:
                 "derived_paths": [
                     item.target for item in resources if item.resource_type == "file"
                 ],
+                "visible_source_refs": _visible_source_refs(security),
                 "metadata": {
                     **security_metadata,
                     **mcp_hijacking_metadata(arguments, security_metadata),
@@ -335,10 +358,9 @@ class LangGraphAdapter:
                 "will_enter_context": will_enter_context,
                 "sanitized": sanitized,
             },
-            metadata={
-                "adapter": "agentguard_langgraph_adapter",
-                "hook": "context_assembled",
-            },
+            metadata=_trusted_event_metadata(
+                security, adapter="agentguard_langgraph_adapter", hook="context_assembled"
+            ),
         )
 
     def build_model_event(
@@ -387,7 +409,9 @@ class LangGraphAdapter:
                 "sanitized": sanitized,
                 "tool_plan": tool_plan or [],
             },
-            metadata={"adapter": "agentguard_langgraph_adapter", "hook": current_step},
+            metadata=_trusted_event_metadata(
+                security, adapter="agentguard_langgraph_adapter", hook=current_step
+            ),
         )
 
     def build_tool_result_event(
@@ -448,10 +472,11 @@ class LangGraphAdapter:
                     for resource in derive_resources(tool_name, arguments)
                 ],
             },
-            metadata={
-                "adapter": "agentguard_langgraph_adapter",
-                "hook": "tool_result_produced",
-            },
+            metadata=_trusted_event_metadata(
+                security,
+                adapter="agentguard_langgraph_adapter",
+                hook="tool_result_produced",
+            ),
         )
 
     def build_memory_write_event(
@@ -500,10 +525,64 @@ class LangGraphAdapter:
                 "requires_approval": bool(arguments.get("requires_approval"))
                 or source_trust.lower() not in TRUSTED_SOURCE_TRUST,
             },
-            metadata={
-                "adapter": "agentguard_langgraph_adapter",
-                "hook": "memory_write_proposed",
+            metadata=_trusted_event_metadata(
+                security,
+                adapter="agentguard_langgraph_adapter",
+                hook="memory_write_proposed",
+            ),
+        )
+
+    def build_message_send_event(
+        self,
+        *,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+        sanitized: bool = False,
+    ) -> RuntimeGuardEvent:
+        recipient = str(arguments.get("to") or arguments.get("recipient") or "")
+        content = "\n".join(
+            str(value)
+            for value in (
+                arguments.get("subject"),
+                arguments.get("body"),
+                arguments.get("content"),
+                arguments.get("message"),
+            )
+            if value
+        )
+        preview = _preview(content)
+        resources = derive_resources("send_email", {**arguments, "to": recipient})
+        context = _security_context(
+            security,
+            current_step="message_send_proposed",
+            runtime=self.config.runtime,
+            agent_id=_config_agent_id(self.config),
+            resources=resources,
+        )
+        return RuntimeGuardEvent(
+            event_type="message_send_proposed",
+            runtime=self.config.runtime,
+            trace_id=trace_id,
+            case_id=security.get("case_id"),
+            attack_type=security.get("attack_type"),
+            is_malicious=security.get("is_malicious"),
+            pre_execution=True,
+            security_context=context,
+            payload={
+                "channel": "email",
+                "recipient": recipient,
+                "content_preview": preview,
+                "contains_sensitive_data": _contains_sensitive_text(preview),
+                "sanitized": sanitized,
+                "derived_resources": [resource.model_dump() for resource in resources],
             },
+            metadata=_trusted_event_metadata(
+                security,
+                adapter="agentguard_langgraph_adapter",
+                hook="message_send_proposed",
+            ),
         )
 
     def build_audit_event(
@@ -672,6 +751,29 @@ def _config_agent_id(config: Any) -> str:
     return str(getattr(config, "agent_id", None) or "langgraph_demo")
 
 
+def _visible_source_refs(security: dict[str, Any]) -> list[str] | None:
+    """Copy refs only from the trusted invocation context, never free metadata."""
+    raw = security.get("visible_source_refs")
+    if not isinstance(raw, (list, tuple)):
+        return None
+    refs = [str(value).strip() for value in raw if str(value).strip()]
+    return list(dict.fromkeys(refs)) or None
+
+
+def _trusted_event_metadata(
+    security: dict[str, Any],
+    *,
+    adapter: str,
+    hook: str,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"adapter": adapter, "hook": hook, **(extra or {})}
+    task_id = security.get("task_id")
+    if isinstance(task_id, str) and task_id.strip():
+        metadata["task_id"] = task_id.strip()
+    return metadata
+
+
 def _security_context(
     security: dict[str, Any],
     *,
@@ -697,6 +799,7 @@ def _security_context(
             "derived_paths": [
                 item.target for item in resources or [] if item.resource_type == "file"
             ],
+            "visible_source_refs": _visible_source_refs(security),
             "metadata": {"runtime": runtime, **metadata},
         }
     )

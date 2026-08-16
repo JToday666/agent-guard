@@ -119,6 +119,18 @@ class GuardedToolGateway:
         if memory_gate is not None:
             return memory_gate
 
+        message_gate = _evaluate_message_send_gate(
+            self.guard_adapter,
+            tool_name=tool_name,
+            arguments=arguments,
+            security=security_for_event,
+            trace_id=trace_id,
+            call_id=call_id,
+            compatibility=compatibility or _compatibility_from_event(event),
+        )
+        if message_gate is not None:
+            return message_gate
+
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
         if _supports_runtime_outcome(self.guard_adapter, decision):
@@ -325,6 +337,77 @@ def _evaluate_memory_write_gate(
                 else "approval_not_obtained"
             ),
             intervention_reason="The memory write gate stopped the action before the runtime was invoked.",
+        ),
+    )
+    return ToolExecutionResult.model_validate(
+        tool_result_with_compatibility(payload.model_dump(), compatibility)
+    )
+
+
+def _evaluate_message_send_gate(
+    guard_adapter: Any,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    security: dict[str, Any],
+    trace_id: str,
+    call_id: str,
+    compatibility: dict[str, Any],
+) -> ToolExecutionResult | None:
+    if tool_name != "send_email" or not hasattr(
+        guard_adapter, "evaluate_message_send"
+    ):
+        return None
+    event, decision = guard_adapter.evaluate_message_send(
+        arguments=arguments,
+        security=security,
+        trace_id=trace_id,
+        call_id=call_id,
+    )
+    audit_event: AuditEvent | None = None
+    if adapter_submits_policy_audit(guard_adapter):
+        audit_event = guard_adapter.build_audit_event(event, decision)
+        assert audit_event is not None
+        audit_error = _submit_audit_event(guard_adapter, audit_event)
+        if audit_error is not None:
+            return _audit_failure_result(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                audit_event=audit_event,
+                error=audit_error,
+                compatibility=compatibility,
+            )
+    approval_blocked, approval_resolution = _resolve_approval(guard_adapter, decision)
+    if decision.decision != "deny" and not approval_blocked:
+        return None
+    payload = ToolExecutionResult(
+        tool_name=tool_name,
+        call_id=call_id,
+        executed=False,
+        blocked=True,
+        decision=decision.decision,
+        status="blocked",
+        result=None,
+        safe_message=decision.safe_message
+        or "The outbound message was blocked by AgentGuard.",
+        side_effects=[],
+        event=_dump_event(event),
+        audit_event=_dump_audit_event(audit_event),
+        block_semantics=_block_semantics(decision),
+        counts_as_effective_block=decision.decision == "deny",
+        runtime_receipt_error=_submit_runtime_outcome(
+            guard_adapter,
+            event,
+            decision,
+            execution_status="not_invoked",
+            approval_resolution=approval_resolution,
+            intervention_type=(
+                "policy_deny"
+                if decision.decision == "deny"
+                else "approval_not_obtained"
+            ),
+            intervention_reason="The message gate stopped outbound delivery before the runtime was invoked.",
         ),
     )
     return ToolExecutionResult.model_validate(

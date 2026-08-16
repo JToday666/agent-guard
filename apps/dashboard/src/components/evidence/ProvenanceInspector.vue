@@ -74,6 +74,18 @@
           <dt>关系确定性</dt>
           <dd>{{ adjacentCertainties.join(" · ") }}</dd>
         </div>
+        <div v-if="presentationNode?.semantics.sourceRefs.length">
+          <dt>EvidenceRef</dt>
+          <dd>
+            <code>
+              {{
+                presentationNode.semantics.sourceRefs
+                  .map((item) => `${item.kind}:${item.id}`)
+                  .join(" · ")
+              }}
+            </code>
+          </dd>
+        </div>
       </dl>
 
       <button
