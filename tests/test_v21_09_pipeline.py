@@ -1330,7 +1330,6 @@ def _postgres_store():
     return store
 
 
-@pytest.mark.postgres
 def test_pipeline_postgres_backend() -> None:
     try:
         store = _postgres_store()

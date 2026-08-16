@@ -40,7 +40,3 @@ extend-exclude = "(^|/)(agentguard_langgraph_bench|migrations|node_modules)/"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-  "e2e: exercises a real multi-process or browser-facing runtime path",
-  "postgres: requires the PostgreSQL integration service",
-]

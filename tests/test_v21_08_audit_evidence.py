@@ -21,7 +21,6 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from agentguard_core import GuardDecision, GuardEvent, PolicyBundle
@@ -547,7 +546,6 @@ def test_flag_on_audit_integrity_chain_not_regressed() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.postgres
 def test_v21_08_audit_evidence_postgres_backend() -> None:
     from guard_api.storage.postgres import PostgresControlPlaneStore
     from tests.support.postgres import (

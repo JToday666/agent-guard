@@ -697,7 +697,6 @@ def _postgres_store():
     return store
 
 
-@pytest.mark.postgres
 def test_approval_grant_projection_postgres_backend() -> None:
     rig = _Rig(store=_postgres_store())
     rig.commit_task_fact()

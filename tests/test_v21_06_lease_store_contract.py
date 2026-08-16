@@ -62,9 +62,7 @@ CONTROL_TOKEN = "test-control-token-v21-06"
 LEASE_KEY = derive_lease_token_key(CONTROL_TOKEN)
 
 
-@pytest.fixture(
-    params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)]
-)
+@pytest.fixture(params=["memory", "postgres"])
 def store(request):
     if request.param == "memory":
         return MemoryControlPlaneStore()

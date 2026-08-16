@@ -91,9 +91,7 @@ def _audit_window_service(store) -> AuditWindowService:
     )
 
 
-@pytest.fixture(
-    params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)]
-)
+@pytest.fixture(params=["memory", "postgres"])
 def store(request):
     if request.param == "memory":
         return memory_store_with_adapter()
@@ -1099,7 +1097,6 @@ def test_contract_rejects_audit_timestamp_without_timezone(store) -> None:
         store.add_audit_event(event)
 
 
-@pytest.mark.postgres
 def test_contract_memory_and_postgres_window_parity() -> None:
     database_url = get_test_database_url()
     reset_control_plane_schema(database_url)

@@ -1451,7 +1451,6 @@ def test_fingerprint_and_lease_token_are_excluded_from_all_public_read_surfaces(
     assert lease_token not in private_text
 
 
-@pytest.mark.postgres
 def test_postgres_exact_success_and_replay_match_memory_contract(
     postgres_rig: _ServiceRig,
 ) -> None:
@@ -1476,7 +1475,6 @@ def test_postgres_exact_success_and_replay_match_memory_contract(
 
 
 @pytest.mark.parametrize("drift", ["action", "fingerprint"])
-@pytest.mark.postgres
 def test_postgres_binding_drift_is_409_class_and_zero_consume(
     postgres_rig: _ServiceRig,
     drift: str,
@@ -1506,7 +1504,6 @@ def test_postgres_binding_drift_is_409_class_and_zero_consume(
     assert _postgres_authority_counts(postgres_rig.store) == (1, 1, 0, 0)
 
 
-@pytest.mark.postgres
 def test_postgres_approval_expiry_is_fail_closed(
     postgres_rig: _ServiceRig,
 ) -> None:
@@ -1528,7 +1525,6 @@ def test_postgres_approval_expiry_is_fail_closed(
     assert _postgres_authority_counts(postgres_rig.store) == (1, 1, 0, 0)
 
 
-@pytest.mark.postgres
 def test_postgres_expired_approval_with_missing_registration_is_terminal(
     postgres_rig: _ServiceRig,
 ) -> None:
@@ -1573,7 +1569,6 @@ def test_postgres_expired_approval_with_missing_registration_is_terminal(
     assert _postgres_authority_counts(postgres_rig.store) == (1, 0, 0, 0)
 
 
-@pytest.mark.postgres
 def test_postgres_lease_expiry_is_fail_closed(
     postgres_rig: _ServiceRig,
 ) -> None:
@@ -1602,7 +1597,6 @@ def test_postgres_lease_expiry_is_fail_closed(
     assert _postgres_authority_counts(postgres_rig.store) == (1, 1, 1, 1)
 
 
-@pytest.mark.postgres
 def test_postgres_exact_replay_after_approval_expiry_is_lease_expired(
     postgres_rig: _ServiceRig,
 ) -> None:
@@ -1626,7 +1620,6 @@ def test_postgres_exact_replay_after_approval_expiry_is_lease_expired(
     assert _postgres_authority_counts(postgres_rig.store) == (1, 1, 1, 1)
 
 
-@pytest.mark.postgres
 def test_postgres_concurrent_same_key_has_one_create_and_exact_replays(
     postgres_rig: _ServiceRig,
 ) -> None:
@@ -1651,7 +1644,6 @@ def test_postgres_concurrent_same_key_has_one_create_and_exact_replays(
     assert _postgres_authority_counts(postgres_rig.store) == (1, 1, 1, 1)
 
 
-@pytest.mark.postgres
 def test_postgres_late_unique_failure_rolls_back_target_consume(
     postgres_rig: _ServiceRig,
 ) -> None:

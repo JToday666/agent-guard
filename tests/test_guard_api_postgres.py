@@ -30,9 +30,6 @@ from tests.support.postgres import (
 )
 
 
-pytestmark = pytest.mark.postgres
-
-
 def test_postgres_store_exposes_control_plane_lifecycle_methods() -> None:
     store = PostgresControlPlaneStore(
         "postgresql://postgres:123456@127.0.0.1:5432/agent_guard"

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -293,7 +292,6 @@ def test_memory_guard_change_lifecycle() -> None:
     assert rolled_back.json()["status"] == "rolled_back"
 
 
-@pytest.mark.postgres
 def test_postgres_store_roundtrips_integrity_provenance_config_and_memory() -> None:
     database_url = get_test_database_url()
 
