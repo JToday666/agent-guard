@@ -178,6 +178,7 @@ class GuardedToolGateway:
         if memory_gate is not None:
             return memory_gate
         if memory_release is not None:
+            assert memory_receipt_context is not None
             if strong_release is not None:
                 failure = _multiple_binding_failure(memory_release)
                 return _strong_binding_failure_result(
