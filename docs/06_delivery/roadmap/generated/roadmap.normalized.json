@@ -7682,12 +7682,6 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
@@ -7735,12 +7729,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -7767,12 +7755,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -7824,12 +7806,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -7856,12 +7832,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -7913,12 +7883,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -7945,12 +7909,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8002,12 +7960,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8034,12 +7986,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8093,12 +8039,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8125,12 +8065,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8182,12 +8116,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8214,12 +8142,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8271,12 +8193,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8303,12 +8219,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8360,12 +8270,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8392,12 +8296,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8451,12 +8349,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8483,12 +8375,6 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8543,12 +8429,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8572,23 +8452,9 @@
       "work": null
     },
     {
-      "activation_blockers": [
-        "E-161-G-A-C10"
-      ],
+      "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "G-A",
-          "id": "E-161-G-A-C10",
-          "rationale": "The current program overlay requires Gate A before V21-10 may formally start or land, even though the CORE-internal DAG starts at C09."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -8607,9 +8473,7 @@
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
-      "exit_blockers": [
-        "E-161-G-A-C10"
-      ],
+      "exit_blockers": [],
       "hold": false,
       "id": "C10",
       "incoming_edges": [
@@ -8633,12 +8497,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8659,9 +8517,7 @@
         }
       ],
       "topological_rank": 10,
-      "unmet_dependencies": [
-        "E-161-G-A-C10"
-      ],
+      "unmet_dependencies": [],
       "work": null
     },
     {
@@ -8675,12 +8531,6 @@
           "from": "C10",
           "id": "E-015-C10-C13",
           "rationale": "C13 requires C10."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
         },
         {
           "constraint": "start/activate/exit",
@@ -8718,12 +8568,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8759,12 +8603,6 @@
           "from": "G-SEM",
           "id": "E-017-G-SEM-C14",
           "rationale": "Semantic upgrade-only starts only after its admission evidence passes."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
         },
         {
           "constraint": "start/activate/exit",
@@ -8805,12 +8643,6 @@
         "E-160-C14-S6"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -8864,12 +8696,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
@@ -8913,12 +8739,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation"
@@ -8959,12 +8779,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
@@ -9002,12 +8816,6 @@
         "E-141-C12-MASTER-FINAL"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -9342,12 +9150,6 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: guard-api-production-wiring"
@@ -9399,12 +9201,6 @@
         "E-103-CT03B-FE06"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -9526,23 +9322,9 @@
       "work": null
     },
     {
-      "activation_blockers": [
-        "E-026-G-A-CT04"
-      ],
+      "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "G-A",
-          "id": "E-026-G-A-CT04",
-          "rationale": "Formal Context Builder production work is held at the program-level Gate A."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -9561,9 +9343,7 @@
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "CT-PR-04 — Context Builder",
-      "exit_blockers": [
-        "E-026-G-A-CT04"
-      ],
+      "exit_blockers": [],
       "hold": false,
       "id": "CT04",
       "incoming_edges": [
@@ -9588,12 +9368,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "guard-api-production-wiring"
@@ -9613,9 +9387,7 @@
         }
       ],
       "topological_rank": 10,
-      "unmet_dependencies": [
-        "E-026-G-A-CT04"
-      ],
+      "unmet_dependencies": [],
       "work": null
     },
     {
@@ -9689,12 +9461,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: guard-api-production-wiring"
@@ -9730,12 +9496,6 @@
         "E-158-CT04M-C11"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -9782,12 +9542,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: guard-api-production-wiring"
@@ -9827,12 +9581,6 @@
         "E-156-CT06-G-A"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -10163,12 +9911,6 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
@@ -10242,13 +9984,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "core-evaluation-activation",
@@ -10284,16 +10019,9 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
       "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation",
@@ -10347,15 +10075,7 @@
         "E-113-R05-FE08",
         "E-116-R05-S4"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -10549,14 +10269,76 @@
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": true,
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
       "change_surfaces": [],
-      "effective_status": "ready",
+      "effective_status": "completed",
       "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
+      "evidence_items": [
+        {
+          "id": "EV-RSC-CT01-5DC863BA6BF4",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RSC-CT01",
+          "recorded_at": "2026-08-16T13:54:06Z",
+          "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A, CT, V21 and storage parity suites passed"
+        },
+        {
+          "id": "EV-RSC-CT01-70D4DC0F3B56",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "RSC-CT01",
+          "recorded_at": "2026-08-16T13:53:59Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Merged Gate A integration in PR #156"
+        },
+        {
+          "id": "EV-RSC-CT01-710B472209CA",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "RSC-CT01",
+          "recorded_at": "2026-08-16T13:54:11Z",
+          "ref": "https://github.com/JToday666/agent-guard/actions/runs/31948367126/job/95167884022",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Python 3.12 and PostgreSQL 16 CI passed"
+        },
+        {
+          "id": "EV-RSC-CT01-78830BD125FD",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "RSC-CT01",
+          "recorded_at": "2026-08-16T13:54:16Z",
+          "ref": "https://github.com/JToday666/agent-guard/pull/156",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A integration reviewed and merged"
+        },
+        {
+          "id": "EV-RSC-CT01-C2511C2C3FA2",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "RSC-CT01",
+          "recorded_at": "2026-08-16T13:54:21Z",
+          "ref": "tests/test_gate_a_int_pr_01.py::test_flag_rollback_stops_new_overlay_and_preserves_committed_history",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Flag rollback preserves committed history and disables new overlay"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/RSC-CT01/EV-RSC-CT01-5DC863BA6BF4.json",
+        "evidence/RSC-CT01/EV-RSC-CT01-70D4DC0F3B56.json",
+        "evidence/RSC-CT01/EV-RSC-CT01-710B472209CA.json",
+        "evidence/RSC-CT01/EV-RSC-CT01-78830BD125FD.json",
+        "evidence/RSC-CT01/EV-RSC-CT01-C2511C2C3FA2.json"
+      ],
       "exact_title": "INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback",
       "exit_blockers": [],
       "hold": false,
@@ -10567,8 +10349,10 @@
       ],
       "kind": "task",
       "lane": "integration",
-      "lifecycle": "not_started",
-      "notes": [],
+      "lifecycle": "completed",
+      "notes": [
+        "PR #156 verified scoped three-gate activation, secret-safe readiness, live Trace readback and flag rollback."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-032-RSC-CT01-G-CTACT",
@@ -10578,7 +10362,7 @@
         "E-102-RSC-CT01-FE06"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -10592,35 +10376,32 @@
       ],
       "topological_rank": 6,
       "unmet_dependencies": [],
-      "work": null
+      "work": {
+        "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+        "branch": "codex/gate-a-int-pr-01",
+        "completed_commit": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+        "owner": "implementation-owner",
+        "started_at": null,
+        "substate": "closed",
+        "worktree_slug": "agent-guard-gate-a"
+      }
     },
     {
-      "activation_blockers": [
-        "E-033-RSC-CT01-RSC-CTPROV"
-      ],
+      "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "RSC-CT01",
-          "id": "E-033-RSC-CT01-RSC-CTPROV",
-          "rationale": "RSC-CTPROV requires RSC-CT01."
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
       "change_surfaces": [
         "audit-schema-and-storage"
       ],
-      "effective_status": "not_ready",
+      "effective_status": "ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "INT-RSC-CT-PROV — Typed Provenance writer",
-      "exit_blockers": [
-        "E-033-RSC-CT01-RSC-CTPROV"
-      ],
+      "exit_blockers": [],
       "hold": false,
       "id": "RSC-CTPROV",
       "incoming_edges": [
@@ -10649,23 +10430,13 @@
         }
       ],
       "topological_rank": 7,
-      "unmet_dependencies": [
-        "E-033-RSC-CT01-RSC-CTPROV"
-      ],
+      "unmet_dependencies": [],
       "work": null
     },
     {
-      "activation_blockers": [
-        "E-034-RSC-CT01-I01"
-      ],
+      "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "RSC-CT01",
-          "id": "E-034-RSC-CT01-I01",
-          "rationale": "I01 requires RSC-CT01."
-        },
         {
           "constraint": "start/activate/exit",
           "from": "R05",
@@ -10680,9 +10451,64 @@
         "guard-api-production-wiring",
         "core-evaluation-activation"
       ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
+      "effective_status": "completed",
+      "evidence_gap": false,
       "evidence_items": [
+        {
+          "id": "EV-I01-40C28139410C",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "I01",
+          "recorded_at": "2026-08-16T13:54:37Z",
+          "ref": "https://github.com/JToday666/agent-guard/actions/runs/31948367126/job/95167884022",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Python 3.12 and PostgreSQL 16 CI passed"
+        },
+        {
+          "id": "EV-I01-4CAE97DF476F",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "I01",
+          "recorded_at": "2026-08-16T13:54:47Z",
+          "ref": "tests/test_gate_a_int_pr_01.py::test_flag_rollback_stops_new_overlay_and_preserves_committed_history",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Flag rollback preserves committed history and disables new overlay"
+        },
+        {
+          "id": "EV-I01-6E28F9EE76C3",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "I01",
+          "recorded_at": "2026-08-16T13:54:30Z",
+          "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A, CT, V21 and storage parity suites passed"
+        },
+        {
+          "id": "EV-I01-D45104021BBA",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "I01",
+          "recorded_at": "2026-08-16T13:54:42Z",
+          "ref": "https://github.com/JToday666/agent-guard/pull/156",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A integration reviewed and merged"
+        },
+        {
+          "id": "EV-I01-D5E86EBAA6BB",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "I01",
+          "recorded_at": "2026-08-16T13:54:25Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Merged Gate A integration in PR #156"
+        },
         {
           "id": "EV-I01-WORKTREE",
           "kind": "worktree",
@@ -10716,13 +10542,16 @@
         }
       ],
       "evidence_refs": [
+        "evidence/I01/EV-I01-40C28139410C.json",
+        "evidence/I01/EV-I01-4CAE97DF476F.json",
+        "evidence/I01/EV-I01-6E28F9EE76C3.json",
+        "evidence/I01/EV-I01-D45104021BBA.json",
+        "evidence/I01/EV-I01-D5E86EBAA6BB.json",
         "evidence/I01/EV-I01-WORKTREE-F435BFF.json",
         "evidence/I01/EV-I01-WORKTREE.json"
       ],
       "exact_title": "INT-PR-01 — Fact → Snapshot → Shadow Fusion",
-      "exit_blockers": [
-        "E-034-RSC-CT01-I01"
-      ],
+      "exit_blockers": [],
       "hold": false,
       "id": "I01",
       "incoming_edges": [
@@ -10732,10 +10561,9 @@
       ],
       "kind": "task",
       "lane": "integration",
-      "lifecycle": "in_progress",
+      "lifecycle": "completed",
       "notes": [
-        "Active worktree was rebased to f435bff and now overlaps R05 exclusive activation surfaces; integration owner must serialize the shared surface.",
-        "Gate A remains unpassed until I01 acceptance is closed on origin/dev."
+        "INT-PR-01 and its production Snapshot-to-shadow evidence landed on origin/dev in PR #156."
       ],
       "optional": false,
       "outgoing_edges": [
@@ -10750,7 +10578,7 @@
           ]
         }
       ],
-      "revision": 2,
+      "revision": 3,
       "roles": [
         "task"
       ],
@@ -10763,15 +10591,14 @@
         }
       ],
       "topological_rank": 8,
-      "unmet_dependencies": [
-        "E-034-RSC-CT01-I01"
-      ],
+      "unmet_dependencies": [],
       "work": {
         "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
         "branch": "codex/gate-a-int-pr-01",
+        "completed_commit": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
         "owner": "implementation-owner",
         "started_at": null,
-        "substate": "active",
+        "substate": "closed",
         "worktree_slug": "agent-guard-gate-a"
       }
     },
@@ -10793,12 +10620,6 @@
           "from": "R05",
           "id": "E-055-R05-I02A",
           "rationale": "I02A requires R05."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         },
         {
           "constraint": "start/activate/exit",
@@ -10840,13 +10661,6 @@
         "E-117-I02A-S4"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -10903,12 +10717,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: guard-api-production-wiring"
@@ -10949,12 +10757,6 @@
         "E-144-I03-MASTER-FINAL"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11010,12 +10812,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
@@ -11056,13 +10852,6 @@
         "E-130-I02B-S5O"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11120,12 +10909,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
@@ -11167,13 +10950,6 @@
         "E-145-I04-MASTER-FINAL"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11217,12 +10993,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
@@ -11258,13 +11028,6 @@
         "E-077-C12-R-G-SR"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11312,12 +11075,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
@@ -11358,13 +11115,6 @@
         "E-131-ROL1-S5O"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11413,12 +11163,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "I01",
-          "id": "resource:I01",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
@@ -11456,13 +11200,6 @@
         "E-078-I03-R-G-SR"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "I01",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11808,6 +11545,53 @@
       "work": null
     },
     {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
+      "change_surfaces": [
+        "dashboard-types-mappers-store"
+      ],
+      "effective_status": "ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "FE06",
+      "incoming_edges": [
+        "E-102-RSC-CT01-FE06",
+        "E-103-CT03B-FE06"
+      ],
+      "kind": "task",
+      "lane": "fe",
+      "lifecycle": "not_started",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-104-FE06-FE07"
+      ],
+      "resource_conflicts": [],
+      "revision": 0,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 13. 前端 PR 拆分",
+          "line_hint": 662,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 7,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
       "activation_blockers": [
         "E-098-CT03R-FE05"
       ],
@@ -11864,66 +11648,6 @@
       "topological_rank": 7,
       "unmet_dependencies": [
         "E-098-CT03R-FE05"
-      ],
-      "work": null
-    },
-    {
-      "activation_blockers": [
-        "E-102-RSC-CT01-FE06"
-      ],
-      "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "RSC-CT01",
-          "id": "E-102-RSC-CT01-FE06",
-          "rationale": "FE06 requires RSC-CT01."
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
-      "change_surfaces": [
-        "dashboard-types-mappers-store"
-      ],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
-      "exit_blockers": [
-        "E-102-RSC-CT01-FE06"
-      ],
-      "hold": false,
-      "id": "FE06",
-      "incoming_edges": [
-        "E-102-RSC-CT01-FE06",
-        "E-103-CT03B-FE06"
-      ],
-      "kind": "task",
-      "lane": "fe",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-104-FE06-FE07"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 13. 前端 PR 拆分",
-          "line_hint": 662,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 7,
-      "unmet_dependencies": [
-        "E-102-RSC-CT01-FE06"
       ],
       "work": null
     },
@@ -12485,12 +12209,6 @@
       "blocked_reasons": [
         {
           "constraint": "exit",
-          "from": "G-CTACT",
-          "id": "E-106-G-CTACT-S2",
-          "rationale": "S2 requires G-CTACT."
-        },
-        {
-          "constraint": "exit",
           "from": "RSC-CTPROV",
           "id": "E-107-RSC-CTPROV-S2",
           "rationale": "S2 requires RSC-CTPROV."
@@ -12598,7 +12316,6 @@
       "evidence_refs": [],
       "exact_title": "S2 — Live Fact & Content Flow",
       "exit_blockers": [
-        "E-106-G-CTACT-S2",
         "E-107-RSC-CTPROV-S2",
         "E-108-FE07-S2",
         "E-A-S2-01-S2",
@@ -12676,12 +12393,6 @@
         },
         {
           "constraint": "exit",
-          "from": "G-A",
-          "id": "E-111-G-A-S3",
-          "rationale": "S3 requires G-A."
-        },
-        {
-          "constraint": "exit",
           "from": "A-S3-01",
           "id": "E-A-S3-01-S3",
           "rationale": "S3 cannot exit until this documented acceptance item is verified."
@@ -12754,7 +12465,6 @@
       "exact_title": "S3 — Context Shadow / Gate A",
       "exit_blockers": [
         "E-110-S2-S3",
-        "E-111-G-A-S3",
         "E-A-S3-01-S3",
         "E-A-S3-02-S3",
         "E-A-S3-03-S3",
@@ -14007,61 +13717,79 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "exit",
-          "from": "RSC-CT01",
-          "id": "E-032-RSC-CT01-G-CTACT",
-          "rationale": "The scoped activation gate passes only after readiness, live commit readback and rollback evidence."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GCTACT-01",
-          "id": "E-A-GCTACT-01-G-CTACT",
-          "rationale": "G-CTACT cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GCTACT-02",
-          "id": "E-A-GCTACT-02-G-CTACT",
-          "rationale": "G-CTACT cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GCTACT-03",
-          "id": "E-A-GCTACT-03-G-CTACT",
-          "rationale": "G-CTACT cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GCTACT-04",
-          "id": "E-A-GCTACT-04-G-CTACT",
-          "rationale": "G-CTACT cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GCTACT-05",
-          "id": "E-A-GCTACT-05-G-CTACT",
-          "rationale": "G-CTACT cannot exit until this documented acceptance item is verified."
-        }
-      ],
-      "can_activate": true,
+      "blocked_reasons": [],
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [],
-      "effective_status": "not_ready",
+      "effective_status": "completed",
       "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "CT scoped activation readiness and commit readback",
-      "exit_blockers": [
-        "E-032-RSC-CT01-G-CTACT",
-        "E-A-GCTACT-01-G-CTACT",
-        "E-A-GCTACT-02-G-CTACT",
-        "E-A-GCTACT-03-G-CTACT",
-        "E-A-GCTACT-04-G-CTACT",
-        "E-A-GCTACT-05-G-CTACT"
+      "evidence_items": [
+        {
+          "id": "EV-G-CTACT-0F2B7679A4B4",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "G-CTACT",
+          "recorded_at": "2026-08-16T13:54:52Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Merged Gate A integration in PR #156"
+        },
+        {
+          "id": "EV-G-CTACT-223E30F32511",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "G-CTACT",
+          "recorded_at": "2026-08-16T13:55:02Z",
+          "ref": "https://github.com/JToday666/agent-guard/actions/runs/31948367126/job/95167884022",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Python 3.12 and PostgreSQL 16 CI passed"
+        },
+        {
+          "id": "EV-G-CTACT-757CF72533EB",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "G-CTACT",
+          "recorded_at": "2026-08-16T13:54:57Z",
+          "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A, CT, V21 and storage parity suites passed"
+        },
+        {
+          "id": "EV-G-CTACT-8B05E9B511D8",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "G-CTACT",
+          "recorded_at": "2026-08-16T13:55:15Z",
+          "ref": "tests/test_gate_a_int_pr_01.py::test_flag_rollback_stops_new_overlay_and_preserves_committed_history",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Flag rollback preserves committed history and disables new overlay"
+        },
+        {
+          "id": "EV-G-CTACT-FF5E159DC223",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "G-CTACT",
+          "recorded_at": "2026-08-16T13:55:10Z",
+          "ref": "https://github.com/JToday666/agent-guard/pull/156",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A integration reviewed and merged"
+        }
       ],
+      "evidence_refs": [
+        "evidence/G-CTACT/EV-G-CTACT-0F2B7679A4B4.json",
+        "evidence/G-CTACT/EV-G-CTACT-223E30F32511.json",
+        "evidence/G-CTACT/EV-G-CTACT-757CF72533EB.json",
+        "evidence/G-CTACT/EV-G-CTACT-8B05E9B511D8.json",
+        "evidence/G-CTACT/EV-G-CTACT-FF5E159DC223.json"
+      ],
+      "exact_title": "CT scoped activation readiness and commit readback",
+      "exit_blockers": [],
       "hold": false,
       "id": "G-CTACT",
       "incoming_edges": [
@@ -14074,14 +13802,16 @@
       ],
       "kind": "gate",
       "lane": "gate",
-      "lifecycle": "not_started",
-      "notes": [],
+      "lifecycle": "completed",
+      "notes": [
+        "Scoped activation/readback gate passed in PR #156; defaults remain off outside the designated profile."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-106-G-CTACT-S2"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "gate"
       ],
@@ -14100,89 +13830,79 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "exit",
-          "from": "I01",
-          "id": "E-036-I01-G-A",
-          "rationale": "Gate A requires production Snapshot to V2 shadow integration."
-        },
-        {
-          "constraint": "exit",
-          "from": "RSC-CT01",
-          "id": "E-037-RSC-CT01-G-A",
-          "rationale": "Gate A requires scoped CT activation/readback evidence."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-01",
-          "id": "E-A-GA-01-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-02",
-          "id": "E-A-GA-02-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-03",
-          "id": "E-A-GA-03-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-04",
-          "id": "E-A-GA-04-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-05",
-          "id": "E-A-GA-05-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-06",
-          "id": "E-A-GA-06-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-07",
-          "id": "E-A-GA-07-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "exit",
-          "from": "A-GA-08",
-          "id": "E-A-GA-08-G-A",
-          "rationale": "G-A cannot exit until this documented acceptance item is verified."
-        }
-      ],
-      "can_activate": true,
+      "blocked_reasons": [],
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [],
-      "effective_status": "not_ready",
+      "effective_status": "completed",
       "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "Gate A：CT → CORE Shadow",
-      "exit_blockers": [
-        "E-036-I01-G-A",
-        "E-037-RSC-CT01-G-A",
-        "E-A-GA-01-G-A",
-        "E-A-GA-02-G-A",
-        "E-A-GA-03-G-A",
-        "E-A-GA-04-G-A",
-        "E-A-GA-05-G-A",
-        "E-A-GA-06-G-A",
-        "E-A-GA-07-G-A",
-        "E-A-GA-08-G-A"
+      "evidence_items": [
+        {
+          "id": "EV-G-A-1A49040EEE47",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "G-A",
+          "recorded_at": "2026-08-16T13:55:30Z",
+          "ref": "https://github.com/JToday666/agent-guard/actions/runs/31948367126/job/95167884022",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Python 3.12 and PostgreSQL 16 CI passed"
+        },
+        {
+          "id": "EV-G-A-55B4E2A7F9FA",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "G-A",
+          "recorded_at": "2026-08-16T13:55:25Z",
+          "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A, CT, V21 and storage parity suites passed"
+        },
+        {
+          "id": "EV-G-A-760C364DD2B7",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "G-A",
+          "recorded_at": "2026-08-16T13:55:43Z",
+          "ref": "tests/test_gate_a_int_pr_01.py::test_flag_rollback_stops_new_overlay_and_preserves_committed_history",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Flag rollback preserves committed history and disables new overlay"
+        },
+        {
+          "id": "EV-G-A-84BC573EFAA1",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "G-A",
+          "recorded_at": "2026-08-16T13:55:20Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Merged Gate A integration in PR #156"
+        },
+        {
+          "id": "EV-G-A-9D6504B1D2E1",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "G-A",
+          "recorded_at": "2026-08-16T13:55:35Z",
+          "ref": "https://github.com/JToday666/agent-guard/pull/156",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Gate A integration reviewed and merged"
+        }
       ],
+      "evidence_refs": [
+        "evidence/G-A/EV-G-A-1A49040EEE47.json",
+        "evidence/G-A/EV-G-A-55B4E2A7F9FA.json",
+        "evidence/G-A/EV-G-A-760C364DD2B7.json",
+        "evidence/G-A/EV-G-A-84BC573EFAA1.json",
+        "evidence/G-A/EV-G-A-9D6504B1D2E1.json"
+      ],
+      "exact_title": "Gate A：CT → CORE Shadow",
+      "exit_blockers": [],
       "hold": false,
       "id": "G-A",
       "incoming_edges": [
@@ -14202,8 +13922,10 @@
       ],
       "kind": "gate",
       "lane": "gate",
-      "lifecycle": "not_started",
-      "notes": [],
+      "lifecycle": "completed",
+      "notes": [
+        "Gate A passed on origin/dev@0f3652e through PR #156; this does not complete S3, C10, CT04, or Gate B."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-026-G-A-CT04",
@@ -14211,7 +13933,7 @@
         "E-161-G-A-C10"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "gate"
       ],
@@ -15853,350 +15575,6 @@
       "work": null
     },
     {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "SourceFact/FlowFact 真实生成",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-01",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-01-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 218,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "committed record 先于 projection",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-02",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-02-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 219,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "delta identity/digest 确定",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-03",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-03-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 220,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "projection failure 进入 dirty/degraded",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-04",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-04-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 221,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "replay/rebuild 后 state digest 一致",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-05",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-05-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 222,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "relevant Context Taint / FlowFact 已进入 SecuritySnapshot，且 coverage/degradation 可解释",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-06",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-06-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 223,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "DecisionEvidenceV21.mode=shadow 可查询",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-07",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-07-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 224,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-A",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "legacy/current official response 不变",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GA-08",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GA-08-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "### 5.1 Gate A：CT → CORE Shadow",
-          "line_hint": 225,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
       "acceptance_parent": "G-ADDITIVE",
       "activation_blockers": [],
       "blocked": false,
@@ -17609,221 +16987,6 @@
           "heading": "#### Evidence / Claim Gate",
           "line_hint": 281,
           "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/05_评测_性能_可信验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-CTACT",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "AGENTGUARD_V21_SHADOW_ENABLED=true for the designated profile",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GCTACT-01",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GCTACT-01-G-CTACT"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 4. 推荐依赖主线",
-          "line_hint": 94,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-CTACT",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "V21 server secret readiness recorded without the secret value",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GCTACT-02",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GCTACT-02-G-CTACT"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 4. 推荐依赖主线",
-          "line_hint": 94,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-CTACT",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "AGENTGUARD_CT_FACT_PROJECTION_ENABLED=true",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GCTACT-03",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GCTACT-03-G-CTACT"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 4. 推荐依赖主线",
-          "line_hint": 95,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-CTACT",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "Phase-A materials are ready",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GCTACT-04",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GCTACT-04-G-CTACT"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 4. 推荐依赖主线",
-          "line_hint": 95,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
-      "acceptance_parent": "G-CTACT",
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "full ct_transient_facts Trace readback and rollback evidence exist",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "A-GCTACT-05",
-      "incoming_edges": [],
-      "kind": "acceptance",
-      "lane": "acceptance",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-A-GCTACT-05-G-CTACT"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "acceptance"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 4. 推荐依赖主线",
-          "line_hint": 96,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
         }
       ],
       "topological_rank": 0,
@@ -23292,6 +22455,462 @@
       "work": null
     },
     {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-01-F3570D9A9553",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-01",
+          "recorded_at": "2026-08-16T13:56:18Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-01/EV-A-GA-01-F3570D9A9553.json"
+      ],
+      "exact_title": "SourceFact/FlowFact 真实生成",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-01",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-01-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 218,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-02-465CC82D1C8B",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-02",
+          "recorded_at": "2026-08-16T13:56:24Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-02/EV-A-GA-02-465CC82D1C8B.json"
+      ],
+      "exact_title": "committed record 先于 projection",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-02",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-02-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 219,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-03-05DA43CD12A2",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-03",
+          "recorded_at": "2026-08-16T13:56:30Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-03/EV-A-GA-03-05DA43CD12A2.json"
+      ],
+      "exact_title": "delta identity/digest 确定",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-03",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-03-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 220,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-04-EA2E48A3169B",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-04",
+          "recorded_at": "2026-08-16T13:56:36Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-04/EV-A-GA-04-EA2E48A3169B.json"
+      ],
+      "exact_title": "projection failure 进入 dirty/degraded",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-04",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-04-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 221,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-05-5D4B76885065",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-05",
+          "recorded_at": "2026-08-16T13:56:43Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-05/EV-A-GA-05-5D4B76885065.json"
+      ],
+      "exact_title": "replay/rebuild 后 state digest 一致",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-05",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-05-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 222,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-06-159B09D1A942",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-06",
+          "recorded_at": "2026-08-16T13:56:52Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-06/EV-A-GA-06-159B09D1A942.json"
+      ],
+      "exact_title": "relevant Context Taint / FlowFact 已进入 SecuritySnapshot，且 coverage/degradation 可解释",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-06",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-06-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 223,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-07-DE6AFE0EDC0A",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-07",
+          "recorded_at": "2026-08-16T13:56:58Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-07/EV-A-GA-07-DE6AFE0EDC0A.json"
+      ],
+      "exact_title": "DecisionEvidenceV21.mode=shadow 可查询",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-07",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-07-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 224,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-A",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GA-08-1D063D49F260",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GA-08",
+          "recorded_at": "2026-08-16T13:57:04Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GA-08/EV-A-GA-08-1D063D49F260.json"
+      ],
+      "exact_title": "legacy/current official response 不变",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GA-08",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GA-08-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### 5.1 Gate A：CT → CORE Shadow",
+          "line_hint": 225,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
       "acceptance_parent": "G-C2",
       "activation_blockers": [],
       "blocked": false,
@@ -23585,6 +23204,291 @@
           "heading": "### 2.2 C2 Gate 判据",
           "line_hint": 63,
           "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/03_OpenClaw实施方案.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-CTACT",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GCTACT-01-472689294E5C",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GCTACT-01",
+          "recorded_at": "2026-08-16T13:55:49Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GCTACT-01/EV-A-GCTACT-01-472689294E5C.json"
+      ],
+      "exact_title": "AGENTGUARD_V21_SHADOW_ENABLED=true for the designated profile",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GCTACT-01",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GCTACT-01-G-CTACT"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 推荐依赖主线",
+          "line_hint": 94,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-CTACT",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GCTACT-02-DEAB27E75697",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GCTACT-02",
+          "recorded_at": "2026-08-16T13:55:54Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GCTACT-02/EV-A-GCTACT-02-DEAB27E75697.json"
+      ],
+      "exact_title": "V21 server secret readiness recorded without the secret value",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GCTACT-02",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GCTACT-02-G-CTACT"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 推荐依赖主线",
+          "line_hint": 94,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-CTACT",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GCTACT-03-CC026969C4A2",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GCTACT-03",
+          "recorded_at": "2026-08-16T13:56:00Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GCTACT-03/EV-A-GCTACT-03-CC026969C4A2.json"
+      ],
+      "exact_title": "AGENTGUARD_CT_FACT_PROJECTION_ENABLED=true",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GCTACT-03",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GCTACT-03-G-CTACT"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 推荐依赖主线",
+          "line_hint": 95,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-CTACT",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GCTACT-04-1BFAF1BF50B2",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GCTACT-04",
+          "recorded_at": "2026-08-16T13:56:05Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GCTACT-04/EV-A-GCTACT-04-1BFAF1BF50B2.json"
+      ],
+      "exact_title": "Phase-A materials are ready",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GCTACT-04",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GCTACT-04-G-CTACT"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 推荐依赖主线",
+          "line_hint": 95,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "acceptance_parent": "G-CTACT",
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-A-GCTACT-05-070081893EC4",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "A-GCTACT-05",
+          "recorded_at": "2026-08-16T13:56:11Z",
+          "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Atomic Gate A acceptance item verified by PR #156"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/A-GCTACT-05/EV-A-GCTACT-05-070081893EC4.json"
+      ],
+      "exact_title": "full ct_transient_facts Trace readback and rollback evidence exist",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "A-GCTACT-05",
+      "incoming_edges": [],
+      "kind": "acceptance",
+      "lane": "acceptance",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-A-GCTACT-05-G-CTACT"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "acceptance"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 推荐依赖主线",
+          "line_hint": 96,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
         }
       ],
       "topological_rank": 0,
@@ -26763,20 +26667,10 @@
   "ready_queue": [
     "CT03R",
     "CT05",
-    "RSC-CT01"
+    "RSC-CTPROV",
+    "FE06"
   ],
-  "resource_conflicts": [
-    {
-      "nodes": [
-        "I01",
-        "R05"
-      ],
-      "surfaces": [
-        "core-evaluation-activation",
-        "guard-api-production-wiring"
-      ]
-    }
-  ],
+  "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "8287136d60b3f798d1903214494cae9290eb85ccb93818e14cf7e8644431c8dc"
+  "source_digest": "cb599f2cd93ad0586b53c8ac9f810620398bb472901ffe72c605a27a62ba68f7"
 }

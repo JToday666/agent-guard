@@ -7,8 +7,8 @@
     "acceptance"
   ],
   "lane": "acceptance",
-  "lifecycle": "not_started",
-  "revision": 0,
+  "lifecycle": "completed",
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -20,7 +20,7 @@
       "line_hint": 219
     }
   ],
-  "evidence_refs": [],
+  "evidence_refs": ["evidence/A-GA-02/EV-A-GA-02-465CC82D1C8B.json"],
   "acceptance_parent": "G-A",
   "work": null,
   "notes": []

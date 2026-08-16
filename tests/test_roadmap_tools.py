@@ -51,6 +51,34 @@ def assert_validation_failure(
     assert any(term.lower() in diagnostic for term in expected_terms), diagnostic
 
 
+def git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *arguments],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def initialize_git_fixture(root: Path, branch: str = "codex/ct03r-test") -> None:
+    assert git(root, "init", "-b", branch).returncode == 0
+    assert git(root, "config", "user.name", "Roadmap Test").returncode == 0
+    assert git(root, "config", "user.email", "roadmap@example.invalid").returncode == 0
+    assert git(root, "remote", "add", "origin", str(REPOSITORY_ROOT)).returncode == 0
+    assert (
+        git(
+            root,
+            "fetch",
+            "origin",
+            "refs/remotes/origin/dev:refs/remotes/origin/dev",
+        ).returncode
+        == 0
+    )
+    assert git(root, "add", ".").returncode == 0
+    assert git(root, "commit", "-m", "roadmap fixture").returncode == 0
+
+
 def read_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     assert isinstance(value, dict)
@@ -140,11 +168,11 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     document = build_normalized(roadmap_root)
     nodes = normalized_nodes(document)
 
-    for node_id in ("FE04", "S1", "R05P"):
+    for node_id in ("FE04", "S1", "R05P", "RSC-CT01", "I01", "G-A"):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("I01", "R05", "RM-00"):
+    for node_id in ("R05", "RM-00"):
         assert nodes[node_id]["effective_status"] == "in_progress"
-    for node_id in ("RSC-CT01", "CT05", "CT03R"):
+    for node_id in ("RSC-CTPROV", "FE06", "CT05", "CT03R"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
     assert nodes["C10"]["effective_status"] == "not_ready"
@@ -154,8 +182,18 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"RSC-CT01", "CT05", "CT03R"} <= ready_ids
-    assert {"FE04", "S1", "I01", "R05P", "R05", "RM-00", "C10"}.isdisjoint(ready_ids)
+    assert {"RSC-CTPROV", "FE06", "CT05", "CT03R"} <= ready_ids
+    assert {
+        "FE04",
+        "S1",
+        "RSC-CT01",
+        "I01",
+        "G-A",
+        "R05P",
+        "R05",
+        "RM-00",
+        "C10",
+    }.isdisjoint(ready_ids)
 
 
 def test_ready_is_derived_and_cannot_be_written_into_machine_source(
@@ -168,20 +206,24 @@ def test_ready_is_derived_and_cannot_be_written_into_machine_source(
     assert_validation_failure(result, "ready", "additional", "unknown")
 
 
-def test_start_constraint_reports_unmet_dependencies(roadmap_root: Path) -> None:
+def test_satisfied_start_dependencies_still_report_resource_conflict(
+    roadmap_root: Path,
+) -> None:
     nodes = normalized_nodes(build_normalized(roadmap_root))
     core_v21_10 = nodes["C10"]
 
     assert core_v21_10["can_start"] is False
     assert core_v21_10["effective_status"] == "not_ready"
-    assert core_v21_10["unmet_dependencies"]
+    assert core_v21_10["unmet_dependencies"] == []
+    assert core_v21_10["resource_conflicts"]
 
     result = run_tool(roadmap_root, "explain", "C10", "--json")
     assert_succeeds(result)
     explanation = json.loads(result.stdout)
     assert explanation["id"] == "C10"
     assert explanation["can_start"] is False
-    assert explanation["unmet_dependencies"]
+    assert explanation["unmet_dependencies"] == []
+    assert explanation["resource_conflicts"]
 
 
 def test_active_exclusive_surface_conflict_removes_otherwise_ready_node(
@@ -292,15 +334,15 @@ def test_completed_lifecycle_requires_verified_completion_evidence(
 def test_gate_exit_is_blocked_by_each_unfinished_atomic_acceptance(
     roadmap_root: Path,
 ) -> None:
-    gate = normalized_nodes(build_normalized(roadmap_root))["G-A"]
+    gate = normalized_nodes(build_normalized(roadmap_root))["G-B"]
 
     assert gate["can_exit"] is False
     acceptance_blockers = {
         item["from"]
         for item in gate["blocked_reasons"]
-        if str(item.get("from", "")).startswith("A-GA-")
+        if str(item.get("from", "")).startswith("A-GB-")
     }
-    assert acceptance_blockers == {f"A-GA-{index:02d}" for index in range(1, 9)}
+    assert acceptance_blockers == {f"A-GB-{index:02d}" for index in range(1, 9)}
 
 
 def test_append_only_evidence_is_referenced_atomically_when_task_closes(
@@ -332,20 +374,21 @@ def test_append_only_evidence_is_referenced_atomically_when_task_closes(
     }
     assert after_claim_generated != before_generated
 
-    evidence = run_tool(
-        roadmap_root,
-        "add-evidence",
-        "CT03R",
-        "--kind",
-        "commit",
-        "--ref",
-        "deadbee",
-        "--summary",
-        "merged test implementation",
-        "--status",
-        "verified",
-    )
-    assert_succeeds(evidence)
+    for kind in ("commit", "test", "ci", "review", "rollback"):
+        evidence = run_tool(
+            roadmap_root,
+            "add-evidence",
+            "CT03R",
+            "--kind",
+            kind,
+            "--ref",
+            "deadbee" if kind == "commit" else f"proof:{kind}",
+            "--summary",
+            f"verified {kind} proof",
+            "--status",
+            "verified",
+        )
+        assert_succeeds(evidence)
     assert {
         name: (generated_dir(roadmap_root) / name).read_bytes()
         for name in GENERATED_FILENAMES
@@ -368,23 +411,191 @@ def test_append_only_evidence_is_referenced_atomically_when_task_closes(
     assert_succeeds(run_tool(roadmap_root, "validate"))
 
 
-def test_close_rejects_unmet_start_exit_and_resource_blockers(
+def test_close_requires_complete_verified_exit_evidence_before_mutation(
     roadmap_root: Path,
 ) -> None:
-    before = read_json(object_path(roadmap_root, "nodes", "I01"))
+    assert_succeeds(
+        run_tool(
+            roadmap_root,
+            "claim",
+            "CT03R",
+            "--branch",
+            "codex/ct03r-test",
+            "--owner",
+            "test-owner",
+            "--worktree-slug",
+            "ct03r-test",
+            "--base-sha",
+            "cdf3625",
+            "--expected-revision",
+            "0",
+        )
+    )
+    assert_succeeds(
+        run_tool(
+            roadmap_root,
+            "add-evidence",
+            "CT03R",
+            "--kind",
+            "commit",
+            "--ref",
+            "deadbee",
+            "--summary",
+            "commit only is insufficient",
+            "--status",
+            "verified",
+        )
+    )
+    before = read_json(object_path(roadmap_root, "nodes", "CT03R"))
 
     result = run_tool(
         roadmap_root,
         "close",
-        "I01",
+        "CT03R",
         "--commit",
         "deadbee",
         "--expected-revision",
         "1",
     )
 
-    assert_validation_failure(result, "cannot exit", "rsc-ct01", "resource")
-    assert read_json(object_path(roadmap_root, "nodes", "I01")) == before
+    assert_validation_failure(result, "required", "ci", "review", "rollback", "test")
+    assert read_json(object_path(roadmap_root, "nodes", "CT03R")) == before
+
+
+def test_unreferenced_evidence_is_excluded_from_render_until_close(
+    roadmap_root: Path,
+) -> None:
+    before = build_normalized(roadmap_root)
+    assert_succeeds(
+        run_tool(
+            roadmap_root,
+            "add-evidence",
+            "CT03R",
+            "--kind",
+            "test",
+            "--ref",
+            "pytest:pending",
+            "--summary",
+            "pending feature-worktree proof",
+        )
+    )
+
+    after = build_normalized(roadmap_root)
+
+    assert after["source_digest"] == before["source_digest"]
+    assert normalized_nodes(after)["CT03R"]["evidence_items"] == []
+
+
+def test_evidence_only_diff_must_belong_to_current_branch_claim(
+    roadmap_root: Path,
+) -> None:
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "CT03R",
+        lifecycle="in_progress",
+        revision=1,
+        work={
+            "branch": "codex/ct03r-test",
+            "worktree_slug": "ct03r-test",
+            "owner": "test-owner",
+            "base_sha": "cdf3625",
+            "started_at": None,
+            "substate": "active",
+        },
+    )
+    initialize_git_fixture(roadmap_root)
+    evidence_dir = machine_dir(roadmap_root) / "evidence" / "RSC-CT01"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        evidence_dir / "EV-RSC-CT01-WRONG-BRANCH.json",
+        {
+            "schema_version": "1.0.0",
+            "id": "EV-RSC-CT01-WRONG-BRANCH",
+            "node_id": "RSC-CT01",
+            "kind": "test",
+            "ref": "pytest:wrong-owner",
+            "status": "pending",
+            "summary": "must not be accepted from CT03R branch",
+            "recorded_at": None,
+            "metadata": {},
+        },
+    )
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "wrong evidence owner").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+
+    assert_validation_failure(result, "evidence-only", "active roadmap claim")
+
+
+def test_evidence_rename_cannot_evade_append_only_check(roadmap_root: Path) -> None:
+    source = (
+        machine_dir(roadmap_root) / "evidence" / "CT03R" / "EV-CT03R-UNREFERENCED.json"
+    )
+    source.parent.mkdir(parents=True, exist_ok=True)
+    write_json(
+        source,
+        {
+            "schema_version": "1.0.0",
+            "id": "EV-CT03R-UNREFERENCED",
+            "node_id": "CT03R",
+            "kind": "test",
+            "ref": "pytest:pending",
+            "status": "pending",
+            "summary": "unreferenced append-only proof",
+            "recorded_at": None,
+            "metadata": {},
+        },
+    )
+    initialize_git_fixture(roadmap_root)
+    destination = (
+        machine_dir(roadmap_root)
+        / "evidence"
+        / "CT03R"
+        / "archived"
+        / "EV-CT03R-UNREFERENCED.json"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    assert git(roadmap_root, "mv", str(source), str(destination)).returncode == 0
+    assert git(roadmap_root, "commit", "-m", "rename evidence").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+
+    assert_validation_failure(result, "append-only", "forbidden diff status")
+
+
+def test_close_rejects_unmet_start_exit_and_resource_blockers(
+    roadmap_root: Path,
+) -> None:
+    before = read_json(object_path(roadmap_root, "nodes", "C10"))
+
+    result = run_tool(
+        roadmap_root,
+        "close",
+        "C10",
+        "--commit",
+        "deadbee",
+        "--expected-revision",
+        "0",
+    )
+
+    assert_validation_failure(result, "cannot exit", "resource", "r05")
+    assert read_json(object_path(roadmap_root, "nodes", "C10")) == before
 
 
 def test_build_is_deterministic_and_check_detects_stale_artifacts(

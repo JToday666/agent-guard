@@ -16,6 +16,7 @@
     "lanes",
     "exclusive_surfaces",
     "state_palette",
+    "completion_evidence_policy",
     "authorities"
   ],
   "properties": {
@@ -76,6 +77,20 @@
         "not_ready": { "$ref": "#/$defs/state_style" }
       }
     },
+    "completion_evidence_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "gate", "stage", "acceptance", "join", "baseline", "final"],
+      "properties": {
+        "task": { "$ref": "#/$defs/evidence_kinds" },
+        "gate": { "$ref": "#/$defs/evidence_kinds" },
+        "stage": { "$ref": "#/$defs/evidence_kinds" },
+        "acceptance": { "$ref": "#/$defs/evidence_kinds" },
+        "join": { "$ref": "#/$defs/evidence_kinds" },
+        "baseline": { "$ref": "#/$defs/evidence_kinds" },
+        "final": { "$ref": "#/$defs/evidence_kinds" }
+      }
+    },
     "authorities": {
       "type": "array",
       "minItems": 1,
@@ -93,6 +108,14 @@
     }
   },
   "$defs": {
+    "evidence_kinds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["commit", "test", "ci", "review", "rollback", "e2e", "doc", "worktree"]
+      }
+    },
     "state_style": {
       "type": "object",
       "additionalProperties": false,

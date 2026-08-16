@@ -50,20 +50,21 @@ no active exclusive-surface conflict
 start 条件但仍有 activation/exit 门槛时，蓝色节点带锁徽标；这表示“可以开发”，不表示
 “可以启用或宣称完成”。
 
-当前 `origin/dev@f435bff` 快照：
+当前 `origin/dev@0f3652e` 快照：
 
 - 绿色：B0、CORE C00–C09、CT00/01/02A/02B/03A/03B、RTE01–04、R05P、
-  Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1；
-- 琥珀色：`I01`（`codex/gate-a-int-pr-01`）、正式 `R05`
-  （`codex/rte-05-integration`）以及控制面 bootstrap `RM-00`
+  Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1，以及 `RSC-CT01`、
+  CT scoped activation、`I01`、Gate A；
+- 琥珀色：正式 `R05`（`codex/rte-05-integration`）以及控制面 bootstrap `RM-00`
   （`codex/roadmap-control`）；
-- 蓝色：`RSC-CT01`、`CT05`、可选 `CT03R`；
-- 灰色：Gate A、CT04、C10、S2 及其后续。
+- 蓝色：`RSC-CTPROV`、`FE06`、`CT05`、可选 `CT03R`；
+- 灰色：C10、CT04、S2 及其后续。C10/CT04 的 Gate A 前置已满足，但仍因
+  R05 active claim 的共享 activation surface 冲突而不可 claim。
 
-I01 与 R05 的独立代码可并行，但两者声明的 evaluation/production activation 共享表面
-必须由 integration owner 串行收口；Gate A、RTE-05 Integration 和 Gate B 均未因此通过。
-需要关闭其中一个节点时，integration owner 先 `block` 暂停另一个并释放共享表面，完成
-串行合入和 `close` 后再 `resume`；不得绕过资源冲突直接宣称完成。
+R05 Integration 的脏 worktree 证明工作正在实施，不代表 RTE-05 Integration 或 Gate B
+已经通过。它当前独占 evaluation、Guard API production wiring 与 runtime binding activation
+表面；C10/CT04 可继续不触及正式 activation 的研究和测试准备，但正式 claim 必须等资源
+冲突解除。
 
 ## 3. 节点和边契约
 
@@ -137,10 +138,11 @@ uv run python scripts/roadmap-tools.py check-diff \
 
 ## 5. 最快并行路线
 
-1. S1 已进入基线；并行推进 I01、R05P，并 claim RSC-CT01、CT05；有资源时做 CT03R。
-2. RSC-CT01 后分成 `RSC-CTPROV→FE06/07→S2` 与 `I01→Gate A` 两支；R05、CT05
-   同时继续。
-3. Gate A 后 C10、CT04、S3 并行；C10+R05 后立即 I02A→Gate B。
+1. S1、RSC-CT01、I01 和 Gate A 已进入基线；当前可并行 claim
+   `RSC-CTPROV`、`FE06`、`CT05`，有资源时做可选 CT03R。
+2. RSC-CTPROV 与 FE06 汇合到 FE07/S2；R05 Integration 同时继续，但其共享
+   activation surface 由 integration owner 串行收口。
+3. R05 释放共享表面后，C10、CT04、S3 并行；C10+R05 后立即 I02A→Gate B。
 4. Gate B 后最大并行 C11/C12、CT04M/S5-C、CT06、I03、R06、R07、I04、I02B
    和 FE08/S4；共享 activation 仍串行集成。
 5. S5 与 Stateful Rollout Gate 汇合 Competition S6；C13→Semantic Gate→C14 单独汇合

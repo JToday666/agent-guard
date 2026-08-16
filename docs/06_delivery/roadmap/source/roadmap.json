@@ -103,6 +103,15 @@
       "icon": "○"
     }
   },
+  "completion_evidence_policy": {
+    "task": ["commit", "test", "ci", "review", "rollback"],
+    "gate": ["commit", "test", "ci", "review", "rollback"],
+    "stage": ["commit", "test", "ci", "review", "rollback"],
+    "acceptance": ["commit"],
+    "join": ["commit"],
+    "baseline": ["commit"],
+    "final": ["commit", "test", "ci", "review", "rollback"]
+  },
   "authorities": [
     {
       "rank": 1,

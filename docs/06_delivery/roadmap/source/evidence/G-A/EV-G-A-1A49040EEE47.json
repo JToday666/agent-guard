@@ -1,0 +1,11 @@
+{
+  "id": "EV-G-A-1A49040EEE47",
+  "kind": "ci",
+  "metadata": {},
+  "node_id": "G-A",
+  "recorded_at": "2026-08-16T13:55:30Z",
+  "ref": "https://github.com/JToday666/agent-guard/actions/runs/31948367126/job/95167884022",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Python 3.12 and PostgreSQL 16 CI passed"
+}

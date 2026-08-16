@@ -7,8 +7,8 @@
     "gate"
   ],
   "lane": "gate",
-  "lifecycle": "not_started",
-  "revision": 0,
+  "lifecycle": "completed",
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -20,7 +20,15 @@
       "line_hint": 93
     }
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/G-CTACT/EV-G-CTACT-0F2B7679A4B4.json",
+    "evidence/G-CTACT/EV-G-CTACT-223E30F32511.json",
+    "evidence/G-CTACT/EV-G-CTACT-757CF72533EB.json",
+    "evidence/G-CTACT/EV-G-CTACT-8B05E9B511D8.json",
+    "evidence/G-CTACT/EV-G-CTACT-FF5E159DC223.json"
+  ],
   "work": null,
-  "notes": []
+  "notes": [
+    "Scoped activation/readback gate passed in PR #156; defaults remain off outside the designated profile."
+  ]
 }

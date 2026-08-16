@@ -34,12 +34,12 @@ The implementation control plane lives at
   owner serializes evaluation activation, Guard API production wiring, Audit
   schema/storage, runtime binding activation, Dashboard mappers/store and the
   roadmap catalog/generated artifacts.
-- `I01` and `R05` currently reserve overlapping evaluation/production activation
-  surfaces; they may develop independently, but their shared production wiring
-  must be integrated serially. Neither active worktree means Gate A, RTE-05
-  Integration or Gate B has passed. Before closing one, the integration
-  owner must `block` the other to release the exclusive surface, then `resume` it
-  after the first node is closed.
+- `I01`, `RSC-CT01`, CT scoped activation and Gate A landed in
+  `origin/dev@0f3652e`. Active `R05` now exclusively reserves the evaluation,
+  Guard API production wiring and runtime-binding activation surfaces. C10 and
+  CT04 have cleared their Gate A dependency but remain resource-blocked until the
+  integration owner serializes or closes the R05 activation work; do not bypass
+  that conflict merely because their documented start dependencies are green.
 
 ## Roadmap invariants
 

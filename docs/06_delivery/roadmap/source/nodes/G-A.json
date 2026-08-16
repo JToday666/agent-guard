@@ -7,8 +7,8 @@
     "gate"
   ],
   "lane": "gate",
-  "lifecycle": "not_started",
-  "revision": 0,
+  "lifecycle": "completed",
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -20,7 +20,15 @@
       "line_hint": 205
     }
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/G-A/EV-G-A-1A49040EEE47.json",
+    "evidence/G-A/EV-G-A-55B4E2A7F9FA.json",
+    "evidence/G-A/EV-G-A-760C364DD2B7.json",
+    "evidence/G-A/EV-G-A-84BC573EFAA1.json",
+    "evidence/G-A/EV-G-A-9D6504B1D2E1.json"
+  ],
   "work": null,
-  "notes": []
+  "notes": [
+    "Gate A passed on origin/dev@0f3652e through PR #156; this does not complete S3, C10, CT04, or Gate B."
+  ]
 }

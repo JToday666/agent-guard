@@ -20,7 +20,6 @@ from typing import Any, Sequence
 
 from jsonschema import Draft202012Validator
 
-
 SCHEMA_VERSION = "1.0.0"
 NON_SCHEDULING_RELATIONS = {"non_blocking", "observed_sequence"}
 GENERATED_FILENAMES = ("roadmap.normalized.json", "roadmap.md", "index.html")
@@ -245,6 +244,20 @@ class Roadmap:
                 )
             if item.get("id") not in evidence_map:
                 errors.append(f"evidence has invalid id: {item.get('id')}")
+        for path in sorted(self.evidence_dir.glob("**/*.json")):
+            item = _load_json(path)
+            relative = path.relative_to(self.evidence_dir)
+            owner = relative.parts[0] if len(relative.parts) > 1 else None
+            if owner != item.get("node_id"):
+                errors.append(
+                    f"evidence {item.get('id')}: directory owner {owner} does not "
+                    f"match node_id {item.get('node_id')}"
+                )
+            if path.stem != item.get("id"):
+                errors.append(
+                    f"evidence {item.get('id')}: filename must be "
+                    f"{item.get('id')}.json, found {path.name}"
+                )
 
         for edge in self.edges:
             edge_id = edge.get("id")
@@ -430,6 +443,14 @@ class Roadmap:
     def normalize(self) -> dict[str, Any]:
         self.validate()
         node_map = {node["id"]: node for node in self.nodes}
+        referenced_evidence_ids = {
+            _load_json(self.source_dir / reference)["id"]
+            for node in self.nodes
+            for reference in node.get("evidence_refs", [])
+        }
+        rendered_evidence = [
+            item for item in self.evidence if item["id"] in referenced_evidence_ids
+        ]
         incoming: dict[str, list[dict[str, Any]]] = defaultdict(list)
         outgoing: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in self.edges:
@@ -444,7 +465,7 @@ class Roadmap:
             and not node.get("hold")
         ]
         evidence_by_node: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for item in self.evidence:
+        for item in rendered_evidence:
             evidence_by_node[item["node_id"]].append(item)
         ranks = self._topological_ranks()
         normalized_nodes: list[dict[str, Any]] = []
@@ -625,7 +646,7 @@ class Roadmap:
             "catalog": self.catalog,
             "nodes": sorted(self.nodes, key=lambda item: item["id"]),
             "edges": sorted(self.edges, key=lambda item: item["id"]),
-            "evidence": sorted(self.evidence, key=lambda item: item["id"]),
+            "evidence": sorted(rendered_evidence, key=lambda item: item["id"]),
             "decisions": sorted(self.decisions, key=lambda item: item.get("id", "")),
         }
         source_digest = hashlib.sha256(
@@ -1155,8 +1176,11 @@ def _git_changed_paths(
             continue
         fields = line.split("\t")
         status = fields[0]
-        path = fields[-1]
-        changed.append((status, path))
+        paths = fields[1:]
+        if status.startswith(("R", "C")) and len(paths) == 2:
+            changed.extend((status, path) for path in paths)
+        elif paths:
+            changed.append((status, paths[-1]))
     return changed
 
 
@@ -1291,12 +1315,38 @@ def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
         for status, path in changes
         if status == "A" and path.startswith(evidence_prefix)
     }
+    branch = _current_branch(roadmap.root)
+    push_context = os.environ.get("GITHUB_EVENT_NAME") == "push" or branch in {
+        "dev",
+        "main",
+    }
+    if (
+        added_evidence_nodes
+        and not bootstrap
+        and not implementation_paths
+        and not changed_node_paths
+    ):
+        if push_context:
+            candidates = [
+                node
+                for node in roadmap.nodes
+                if node.get("id") in added_evidence_nodes
+                and node.get("lifecycle") == "in_progress"
+            ]
+        else:
+            candidates = [
+                node
+                for node in roadmap.nodes
+                if node.get("lifecycle") == "in_progress"
+                and (node.get("work") or {}).get("branch") == branch
+            ]
+        if len(candidates) != 1 or added_evidence_nodes != {candidates[0]["id"]}:
+            raise RoadmapError(
+                "evidence-only diff must map to exactly one active roadmap claim; "
+                f"branch={branch or '<detached>'}, evidence_nodes="
+                + ",".join(sorted(added_evidence_nodes))
+            )
     if implementation_paths:
-        branch = _current_branch(roadmap.root)
-        push_context = os.environ.get("GITHUB_EVENT_NAME") == "push" or branch in {
-            "dev",
-            "main",
-        }
         if push_context:
             candidates = [
                 node
@@ -1383,7 +1433,18 @@ def build_parser() -> argparse.ArgumentParser:
     evidence = commands.add_parser("add-evidence")
     evidence.add_argument("node")
     evidence.add_argument(
-        "--kind", required=True, choices=["commit", "test", "ci", "doc", "worktree"]
+        "--kind",
+        required=True,
+        choices=[
+            "commit",
+            "test",
+            "ci",
+            "review",
+            "rollback",
+            "e2e",
+            "doc",
+            "worktree",
+        ],
     )
     evidence.add_argument("--ref", required=True)
     evidence.add_argument("--summary", required=True)
@@ -1532,21 +1593,34 @@ def run(args: argparse.Namespace) -> None:
         evidence_paths: dict[str, Path] = {}
         for path in sorted((roadmap.evidence_dir / args.node).glob("*.json")):
             evidence_paths[_load_json(path)["id"]] = path
-        matching_evidence = [
+        verified_evidence = [
             item
             for item in roadmap.evidence
-            if item.get("node_id") == args.node
-            and item.get("status") == "verified"
-            and item.get("kind") == "commit"
+            if item.get("node_id") == args.node and item.get("status") == "verified"
+        ]
+        matching_evidence = [
+            item
+            for item in verified_evidence
+            if item.get("kind") == "commit"
             and _git_same_commit(roadmap.root, str(item.get("ref")), args.commit)
         ]
         if not matching_evidence:
             raise RoadmapError(
                 f"node {args.node} needs verified commit evidence matching {args.commit}"
             )
+        required_kinds = set(
+            roadmap.catalog["completion_evidence_policy"].get(effective["kind"], [])
+        )
+        verified_kinds = {str(item.get("kind")) for item in verified_evidence}
+        missing_kinds = sorted(required_kinds - verified_kinds)
+        if missing_kinds:
+            raise RoadmapError(
+                f"node {args.node} lacks required verified exit evidence: "
+                + ", ".join(missing_kinds)
+            )
         node = roadmap.mutate_node(args.node, args.expected_revision)
         evidence_refs = set(node.get("evidence_refs", []))
-        for item in matching_evidence:
+        for item in verified_evidence:
             evidence_path = evidence_paths[item["id"]]
             evidence_refs.add(str(evidence_path.relative_to(roadmap.source_dir)))
         node["evidence_refs"] = sorted(evidence_refs)

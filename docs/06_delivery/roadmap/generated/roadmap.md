@@ -1,6 +1,6 @@
 # AgentGuard 全轨实施路线图
 
-> Source digest: `8287136d60b3f798d1903214494cae9290eb85ccb93818e14cf7e8644431c8dc`
+> Source digest: `cb599f2cd93ad0586b53c8ac9f810620398bb472901ffe72c605a27a62ba68f7`
 
 状态：🟢 已完成 · 🟠 正在实施 · 🔵 可启动 · ⚪ 未实施且不可启动。
 
@@ -70,8 +70,8 @@ flowchart LR
     N_FE02["FE02 · FE-RSC-02 — Unique execution projector and required supervision ViewModel"]
     N_FE03["FE03 · FE-RSC-03 — Three-lane action capsule and detail skeleton"]
     N_FE04["FE04 · FE-RSC-04 — Approval basis mapper and private Live mutation selector"]
-    N_FE05["FE05 · FE-RSC-05 — Replay Artifact importer"]
     N_FE06["FE06 · FE-RSC-06 — CT fact and Provenance compatibility mapper"]
+    N_FE05["FE05 · FE-RSC-05 — Replay Artifact importer"]
     N_FE07["FE07 · FE-RSC-07 — Source/Flow presentation and Provenance deep links"]
     N_FE08["FE08 · FE-RSC-08 — Display-safe RTE binding and consume state"]
     N_FE09["FE09 · FE-RSC-09 — Two-Trace aggregate comparison"]
@@ -279,10 +279,10 @@ flowchart LR
   N_S5 -. "none · non_blocking" .-> N_C12
   N_C14 -. "none · non_blocking" .-> N_S6
   N_G_A == "start · hard_dependency" ==> N_C10
-  class N_B0,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_R01,N_R02,N_R03,N_R04,N_R05P,N_FE00,N_FE01,N_FE02,N_FE03,N_FE04,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD completed
-  class N_RM_00,N_R05,N_I01 inProgress
-  class N_CT03R,N_CT05,N_RSC_CT01 ready
-  class N_C10,N_C13,N_C14,N_C11,N_C12,N_CT04,N_CT_O1,N_CT04M,N_CT06,N_CT_O2,N_R06,N_R07,N_RSC_CTPROV,N_I02A,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE06,N_FE07,N_FE08,N_FE09,N_FE10A,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_CTACT,N_G_A,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
+  class N_B0,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_R01,N_R02,N_R03,N_R04,N_R05P,N_RSC_CT01,N_I01,N_FE00,N_FE01,N_FE02,N_FE03,N_FE04,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD,N_G_CTACT,N_G_A completed
+  class N_RM_00,N_R05 inProgress
+  class N_CT03R,N_CT05,N_RSC_CTPROV,N_FE06 ready
+  class N_C10,N_C13,N_C14,N_C11,N_C12,N_CT04,N_CT_O1,N_CT04M,N_CT06,N_CT_O2,N_R06,N_R07,N_I02A,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE07,N_FE08,N_FE09,N_FE10A,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
   classDef completed fill:#1F9D63,color:#fff,stroke:#126540
   classDef inProgress fill:#D99000,color:#111,stroke:#8a5900
   classDef ready fill:#2774D8,color:#fff,stroke:#174985
@@ -293,7 +293,8 @@ flowchart LR
 
 - `CT03R`
 - `CT05`
-- `RSC-CT01`
+- `RSC-CTPROV`
+- `FE06`
 
 ## 完整节点表
 
@@ -337,9 +338,9 @@ flowchart LR
 | `R05` | rte | task | in_progress | 否 | PR-RTE-05 — Strong Approval Binding |
 | `R06` | rte | task | not_ready | 否 | PR-RTE-06 — Result Evidence Hardening |
 | `R07` | rte | task | not_ready | 否 | PR-RTE-07 — Reliability Evidence |
-| `RSC-CT01` | integration | task | ready | 是 | INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback |
-| `RSC-CTPROV` | integration | task | not_ready | 否 | INT-RSC-CT-PROV — Typed Provenance writer |
-| `I01` | integration | task | in_progress | 否 | INT-PR-01 — Fact → Snapshot → Shadow Fusion |
+| `RSC-CT01` | integration | task | completed | 否 | INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback |
+| `RSC-CTPROV` | integration | task | ready | 是 | INT-RSC-CT-PROV — Typed Provenance writer |
+| `I01` | integration | task | completed | 否 | INT-PR-01 — Fact → Snapshot → Shadow Fusion |
 | `I02A` | integration | task | not_ready | 否 | INT-PR-02A — Current official decision → RTE |
 | `I03` | integration | task | not_ready | 否 | INT-PR-03 — Cross-session Memory E2E |
 | `I02B` | integration | task | not_ready | 否 | INT-PR-02B — V2 limited-enable official decision → RTE |
@@ -352,8 +353,8 @@ flowchart LR
 | `FE02` | fe | task | completed | 否 | FE-RSC-02 — Unique execution projector and required supervision ViewModel |
 | `FE03` | fe | task | completed | 否 | FE-RSC-03 — Three-lane action capsule and detail skeleton |
 | `FE04` | fe | task | completed | 否 | FE-RSC-04 — Approval basis mapper and private Live mutation selector |
+| `FE06` | fe | task | ready | 是 | FE-RSC-06 — CT fact and Provenance compatibility mapper |
 | `FE05` | fe | task | not_ready | 否 | FE-RSC-05 — Replay Artifact importer |
-| `FE06` | fe | task | not_ready | 否 | FE-RSC-06 — CT fact and Provenance compatibility mapper |
 | `FE07` | fe | task | not_ready | 否 | FE-RSC-07 — Source/Flow presentation and Provenance deep links |
 | `FE08` | fe | task | not_ready | 否 | FE-RSC-08 — Display-safe RTE binding and consume state |
 | `FE09` | fe | task | not_ready | 否 | FE-RSC-09 — Two-Trace aggregate comparison |
@@ -376,8 +377,8 @@ flowchart LR
 | `G-NATIVE-ID` | gate | gate | completed | 否 | OpenClaw native ID Gate |
 | `G-C2` | gate | gate | completed | 否 | C2 Gate 判据 |
 | `RTE-P0-DOD` | gate | gate | completed | 否 | P0 完成定义 |
-| `G-CTACT` | gate | gate | not_ready | 否 | CT scoped activation readiness and commit readback |
-| `G-A` | gate | gate | not_ready | 否 | Gate A：CT → CORE Shadow |
+| `G-CTACT` | gate | gate | completed | 否 | CT scoped activation readiness and commit readback |
+| `G-A` | gate | gate | completed | 否 | Gate A：CT → CORE Shadow |
 | `G-ADDITIVE` | gate | gate | not_ready | 否 | Additive 字段准入 Gate |
 | `RTE-P1-DOD` | gate | gate | not_ready | 否 | P1 完成定义 |
 | `G-SCHEMA-DIFF` | gate | gate | not_ready | 否 | Trace Diff 独立 schema Gate |
@@ -400,14 +401,6 @@ flowchart LR
 | `A-CTFINAL-08` | acceptance | acceptance | not_ready | 否 | Receipt closure |
 | `A-CTFINAL-09` | acceptance | acceptance | not_ready | 否 | AttackBench + benign-hard |
 | `A-CTFINAL-10` | acceptance | acceptance | not_ready | 否 | Shadow/Limited/Active rollout |
-| `A-GA-01` | acceptance | acceptance | not_ready | 否 | SourceFact/FlowFact 真实生成 |
-| `A-GA-02` | acceptance | acceptance | not_ready | 否 | committed record 先于 projection |
-| `A-GA-03` | acceptance | acceptance | not_ready | 否 | delta identity/digest 确定 |
-| `A-GA-04` | acceptance | acceptance | not_ready | 否 | projection failure 进入 dirty/degraded |
-| `A-GA-05` | acceptance | acceptance | not_ready | 否 | replay/rebuild 后 state digest 一致 |
-| `A-GA-06` | acceptance | acceptance | not_ready | 否 | relevant Context Taint / FlowFact 已进入 SecuritySnapshot，且 coverage/degradation 可解释 |
-| `A-GA-07` | acceptance | acceptance | not_ready | 否 | DecisionEvidenceV21.mode=shadow 可查询 |
-| `A-GA-08` | acceptance | acceptance | not_ready | 否 | legacy/current official response 不变 |
 | `A-GADD-01` | acceptance | acceptance | not_ready | 否 | 归属：明确权威 producer 和禁止 producer |
 | `A-GADD-02` | acceptance | acceptance | not_ready | 否 | Schema：版本、枚举、extra policy、缺失/未知语义 |
 | `A-GADD-03` | acceptance | acceptance | not_ready | 否 | 身份：稳定 ID、trace scope、引用端点和幂等规则 |
@@ -441,11 +434,6 @@ flowchart LR
 | `A-GCLAIM-02` | acceptance | acceptance | not_ready | 否 | FPR/Benign Deny 95% CI upper bound |
 | `A-GCLAIM-03` | acceptance | acceptance | not_ready | 否 | ASK 95% CI |
 | `A-GCLAIM-04` | acceptance | acceptance | not_ready | 否 | per-category CI |
-| `A-GCTACT-01` | acceptance | acceptance | not_ready | 否 | AGENTGUARD_V21_SHADOW_ENABLED=true for the designated profile |
-| `A-GCTACT-02` | acceptance | acceptance | not_ready | 否 | V21 server secret readiness recorded without the secret value |
-| `A-GCTACT-03` | acceptance | acceptance | not_ready | 否 | AGENTGUARD_CT_FACT_PROJECTION_ENABLED=true |
-| `A-GCTACT-04` | acceptance | acceptance | not_ready | 否 | Phase-A materials are ready |
-| `A-GCTACT-05` | acceptance | acceptance | not_ready | 否 | full ct_transient_facts Trace readback and rollback evidence exist |
 | `A-GENG-01` | acceptance | acceptance | not_ready | 否 | Recall point estimate >= target |
 | `A-GENG-02` | acceptance | acceptance | not_ready | 否 | Benign Deny point estimate <= target |
 | `A-GENG-03` | acceptance | acceptance | not_ready | 否 | Benign ASK point estimate <= target |
@@ -573,11 +561,24 @@ flowchart LR
 | `A-S6-13` | acceptance | acceptance | not_ready | 否 | CH-01/02/03/04 reliability scenarios 通过 |
 | `A-S6-14` | acceptance | acceptance | not_ready | 否 | 跨 Trace 用稳定引用定位，不自动合并两个 Session |
 | `A-S6-15` | acceptance | acceptance | not_ready | 否 | Competition Final 的 CORE/CT/RTE 门槛均有可查询证据 |
+| `A-GA-01` | acceptance | acceptance | completed | 否 | SourceFact/FlowFact 真实生成 |
+| `A-GA-02` | acceptance | acceptance | completed | 否 | committed record 先于 projection |
+| `A-GA-03` | acceptance | acceptance | completed | 否 | delta identity/digest 确定 |
+| `A-GA-04` | acceptance | acceptance | completed | 否 | projection failure 进入 dirty/degraded |
+| `A-GA-05` | acceptance | acceptance | completed | 否 | replay/rebuild 后 state digest 一致 |
+| `A-GA-06` | acceptance | acceptance | completed | 否 | relevant Context Taint / FlowFact 已进入 SecuritySnapshot，且 coverage/degradation 可解释 |
+| `A-GA-07` | acceptance | acceptance | completed | 否 | DecisionEvidenceV21.mode=shadow 可查询 |
+| `A-GA-08` | acceptance | acceptance | completed | 否 | legacy/current official response 不变 |
 | `A-GC2-01` | acceptance | acceptance | completed | 否 | stable cross-hook action id = yes |
 | `A-GC2-02` | acceptance | acceptance | completed | 否 | pre hook completes before invocation = yes |
 | `A-GC2-03` | acceptance | acceptance | completed | 否 | success/error semantics = deterministic enough |
 | `A-GC2-04` | acceptance | acceptance | completed | 否 | blocked-call behavior = understood and testable |
 | `A-GC2-05` | acceptance | acceptance | completed | 否 | multi-plugin rewrites do not break security-critical identity = yes |
+| `A-GCTACT-01` | acceptance | acceptance | completed | 否 | AGENTGUARD_V21_SHADOW_ENABLED=true for the designated profile |
+| `A-GCTACT-02` | acceptance | acceptance | completed | 否 | V21 server secret readiness recorded without the secret value |
+| `A-GCTACT-03` | acceptance | acceptance | completed | 否 | AGENTGUARD_CT_FACT_PROJECTION_ENABLED=true |
+| `A-GCTACT-04` | acceptance | acceptance | completed | 否 | Phase-A materials are ready |
+| `A-GCTACT-05` | acceptance | acceptance | completed | 否 | full ct_transient_facts Trace readback and rollback evidence exist |
 | `A-GR05F-01` | acceptance | acceptance | completed | 否 | ActionIR action_id frozen |
 | `A-GR05F-02` | acceptance | acceptance | completed | 否 | authorization_fingerprint algorithm/version frozen |
 | `A-GR05F-03` | acceptance | acceptance | completed | 否 | runtime_binding_id authority frozen |

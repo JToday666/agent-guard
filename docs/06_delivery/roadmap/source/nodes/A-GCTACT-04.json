@@ -7,8 +7,8 @@
     "acceptance"
   ],
   "lane": "acceptance",
-  "lifecycle": "not_started",
-  "revision": 0,
+  "lifecycle": "completed",
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -20,7 +20,7 @@
       "line_hint": 95
     }
   ],
-  "evidence_refs": [],
+  "evidence_refs": ["evidence/A-GCTACT-04/EV-A-GCTACT-04-1BFAF1BF50B2.json"],
   "acceptance_parent": "G-CTACT",
   "work": null,
   "notes": []

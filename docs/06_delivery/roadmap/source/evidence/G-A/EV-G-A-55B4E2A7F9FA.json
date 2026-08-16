@@ -1,0 +1,11 @@
+{
+  "id": "EV-G-A-55B4E2A7F9FA",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "G-A",
+  "recorded_at": "2026-08-16T13:55:25Z",
+  "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Gate A, CT, V21 and storage parity suites passed"
+}
