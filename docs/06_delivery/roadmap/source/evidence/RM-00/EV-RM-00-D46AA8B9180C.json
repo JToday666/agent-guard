@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-D46AA8B9180C",
+  "kind": "commit",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-16T17:53:20Z",
+  "ref": "f65a2a1d34f9f1d6b1c58fffcb4b353f8ea58e97",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Final ownership-compliant ci.yml-only fast gate implementation; pending merge into origin/dev"
+}
