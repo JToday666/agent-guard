@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT05-718A2F92D931",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "CT05",
+  "recorded_at": "2026-08-16T17:30:27Z",
+  "ref": "local:pytest-ct05-141",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "141 focused lifecycle, replay, restart, provenance, and delta tests passed"
+}

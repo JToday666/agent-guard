@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT05-9AE547A4229C",
+  "kind": "e2e",
+  "metadata": {},
+  "node_id": "CT05",
+  "recorded_at": "2026-08-16T17:30:31Z",
+  "ref": "local:memory-restart-loaded-from-memory",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "service restart rebuild preserves PERSISTENT_UNTRUSTED on loaded_from_memory flow"
+}
