@@ -797,13 +797,6 @@ def _trusted_event_metadata(
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {"adapter": adapter, "hook": hook, **(extra or {})}
     task_id = security.get("task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        security_metadata = security.get("metadata")
-        task_id = (
-            security_metadata.get("task_id")
-            if isinstance(security_metadata, dict)
-            else None
-        )
     if isinstance(task_id, str) and task_id.strip():
         normalized_task_id = task_id.strip()
         if len(normalized_task_id) <= 160:

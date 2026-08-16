@@ -342,7 +342,7 @@ def _invoke(
             "source_trust": "untrusted",
             "agent_id": "main",
             "case_id": f"RTE-05-{backend}",
-            "metadata": {"task_id": TASK_ID},
+            "task_id": TASK_ID,
         },
         trace_id=f"trace_rte05_{gateway_kind}_{backend}",
         call_id=f"call_rte05_{gateway_kind}_{backend}",
