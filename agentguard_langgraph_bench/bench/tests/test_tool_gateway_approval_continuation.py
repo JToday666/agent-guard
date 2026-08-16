@@ -226,6 +226,40 @@ def test_gateway_records_approval_release_start_and_terminal_outcome(tmp_path) -
     assert outcome["evidence"]["side_effects"]["measurement_status"] == "measured"
 
 
+def test_gateway_records_allow_start_before_terminal_outcome(tmp_path) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _ReceiptAllowGuard()
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+        approval_mode="wait",
+        approval_timeout=1.0,
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="write_file",
+        arguments={"path": "/reports/allowed.txt", "content": "allowed"},
+        security={
+            "case_id": "BN-ALLOW",
+            "attack_type": "benign",
+            "is_malicious": False,
+        },
+        trace_id="trace_allow_receipt",
+        call_id="call_allow_receipt",
+    )
+
+    assert result.executed is True
+    assert [event["record_type"] for event in guard.submitted] == [
+        "runtime_observation",
+        "runtime_outcome",
+    ]
+    started, outcome = guard.submitted
+    assert started["event_type"] == "tool_call_started"
+    assert started["evidence"]["approval"]["status"] == "not_required"
+    assert outcome["links"]["parent_audit_id"] == started["audit_id"]
+    assert outcome["evidence"]["execution"]["status"] == "executed"
+
+
 def test_gateway_records_not_invoked_for_approval_deny(tmp_path) -> None:
     ensure_sandbox(tmp_path)
     guard = _ReceiptAskApprovalGuard(
@@ -371,3 +405,31 @@ class _ReceiptAskApprovalGuard(_AskApprovalGuard):
     def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
         self.submitted.append(audit_event.model_dump(mode="json"))
         return {"ok": True, "audit_id": audit_event.audit_id}
+
+
+class _ReceiptAllowGuard(_ReceiptAskApprovalGuard):
+    def __init__(self) -> None:
+        super().__init__({"status": "not_required", "decision": None})
+
+    def evaluate_before_tool(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+    ) -> tuple[ToolCallEvent, PolicyDecision]:
+        event, decision = super().evaluate_before_tool(
+            tool_name=tool_name,
+            arguments=arguments,
+            security=security,
+            trace_id=trace_id,
+            call_id=call_id,
+        )
+        decision.decision = "allow"
+        decision.risk_score = 0
+        decision.severity = "low"
+        decision.reason = "allowed by test policy"
+        decision.approval = None
+        return event, decision

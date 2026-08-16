@@ -40,6 +40,7 @@ apps/dashboard/dist-ssr/
 apps/dashboard/playwright-report/
 apps/dashboard/test-results/
 apps/dashboard/test-results-api/
+apps/dashboard/test-results-s1-live-*/
 
 # Logs
 *.log
