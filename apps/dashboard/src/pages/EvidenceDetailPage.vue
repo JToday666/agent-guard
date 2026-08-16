@@ -374,7 +374,15 @@ const isPageActive = ref(false);
 const provenanceSyncMessage = ref("");
 const finalTraceReconciledId = ref("");
 const terminalSyncTraceId = ref("");
-const traceId = computed(() => String(route.params.trace_id ?? ""));
+// This page is kept alive. During navigation Vue updates the shared route before
+// deactivating the cached page, so reading route.params directly would briefly
+// erase the trace id and invalidate the execution projection.
+const traceId = ref(String(route.params.trace_id ?? ""));
+watch([() => route.name, () => route.params.trace_id], ([routeName, nextTraceId]) => {
+  if (routeName === "evidence-detail" && typeof nextTraceId === "string" && nextTraceId) {
+    traceId.value = nextTraceId;
+  }
+});
 
 function approvalDetailRoute(approvalId: string) {
   return {

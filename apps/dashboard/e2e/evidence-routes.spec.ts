@@ -88,6 +88,11 @@ test("evidence detail keeps related approval and evaluation destinations", async
   await expect(approvalLink).toHaveAttribute("href", /\/approvals\/ask_001\?readonly=1$/);
   await expect(evaluationLink).toBeVisible();
   await expect(evaluationLink).toHaveAttribute("href", /\/evaluation\?case_id=PI-002$/);
+
+  await approvalLink.click();
+  await expect(page).toHaveURL(/\/approvals(?:\/[^?]+)?\?readonly=1$/);
+  await expect(page.getByRole("heading", { name: "人工审批" })).toBeVisible();
+  await expect(page.getByText("页面渲染异常")).toHaveCount(0);
 });
 
 test("evidence detail surfaces the final security conclusion", async ({ page }) => {
