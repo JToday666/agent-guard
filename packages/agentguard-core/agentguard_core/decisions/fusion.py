@@ -359,9 +359,7 @@ def _validate_raw_matrix(raw: dict[str, Any]) -> None:
                 raise _fail(f"{context}: missing keys {', '.join(missing_keys)}")
             extra_keys = [key for key in rule if key not in required]
             if extra_keys:
-                raise _fail(
-                    f"{context}: additional properties {', '.join(extra_keys)}"
-                )
+                raise _fail(f"{context}: additional properties {', '.join(extra_keys)}")
             rule_id = rule["id"]
             if not isinstance(rule_id, str) or not _ID_PATTERNS[group].match(rule_id):
                 raise _fail(f"{context}: invalid rule id {rule_id!r}")
@@ -408,9 +406,7 @@ def _validate_raw_matrix(raw: dict[str, Any]) -> None:
                     raise _fail(f"{context}: trust_state items must be unique")
                 for value in trust_states:
                     if value not in _MEMORY_TRUST_STATES:
-                        raise _fail(
-                            f"{context}: trust_state {value!r} is not defined"
-                        )
+                        raise _fail(f"{context}: trust_state {value!r} is not defined")
                 if rule["taint"] not in _MEMORY_TAINTS:
                     raise _fail(f"{context}: taint {rule['taint']!r} is not defined")
                 strengths = rule["retrieval_strength"]
@@ -419,9 +415,7 @@ def _validate_raw_matrix(raw: dict[str, Any]) -> None:
                         f"{context}: retrieval_strength must be a non-empty array"
                     )
                 if len(set(strengths)) != len(strengths):
-                    raise _fail(
-                        f"{context}: retrieval_strength items must be unique"
-                    )
+                    raise _fail(f"{context}: retrieval_strength items must be unique")
                 for value in strengths:
                     _check_selector_membership(
                         selectors, "flow_strength", value, context
@@ -549,9 +543,7 @@ def load_fusion_matrix(path: str | Path | None = None) -> FusionMatrix:
                 f"{source_name} is not JSON-compatible YAML: {exc}"
             ) from exc
         if not isinstance(raw, dict):
-            raise FusionMatrixError(
-                f"{source_name}: top-level value must be an object"
-            )
+            raise FusionMatrixError(f"{source_name}: top-level value must be an object")
         _validate_raw_matrix(raw)
         try:
             matrix = FusionMatrix.from_raw(raw)
@@ -622,6 +614,15 @@ def _impact_selector_matches(
     selector: tuple[ImpactClass, ...] | Literal["any"], impact: ImpactClass
 ) -> bool:
     return selector == "any" or impact in selector
+
+
+def _behavior_pattern_from_signal(signal: SecuritySignal) -> str | None:
+    """Return B1-B6 for the frozen ``behavior:<pattern>`` category."""
+    prefix = "behavior:"
+    if not signal.category.startswith(prefix):
+        return None
+    pattern = signal.category[len(prefix) :]
+    return pattern if pattern in _BEHAVIOR_PATTERNS else None
 
 
 # ---------------------------------------------------------------------------
@@ -828,8 +829,7 @@ def evaluate_fusion(
     # influence/memory/behavior 规则）
     # ------------------------------------------------------------------
     hostile_evidence = any(
-        signal.category in HOSTILE_INSTRUCTION_CATEGORIES
-        for signal in grouped_signals
+        signal.category in HOSTILE_INSTRUCTION_CATEGORIES for signal in grouped_signals
     )
 
     # 6a. untrusted influence：strength 取自 influenced_by 且携带 untrusted
@@ -896,14 +896,41 @@ def evaluate_fusion(
             )
 
     # 6c. behavior：corroborating flow 以 FlowVerdict 违规态为准（确定性）。
-    corroborating_flow_present = (
-        flow is not None and flow.status == "violation"
-    )
+    corroborating_flow_present = flow is not None and flow.status == "violation"
     for aggregate in behavior_aggregates:
         for rule in matrix.behavior_rules:
             if aggregate.pattern_id not in rule.pattern:
                 continue
             if not _selector_matches(rule.confidence, aggregate.confidence):
+                continue
+            if not _selector_matches(rule.authority, authority_status):
+                continue
+            if not _impact_selector_matches(rule.impact, impact):
+                continue
+            if not _bool_selector_matches(
+                rule.corroborating_flow_required, corroborating_flow_present
+            ):
+                continue
+            add_match(
+                "behavior_and_influence",
+                rule.disposition,
+                f"{REASON_PREFIX}behavior_rule:{rule.id}",
+            )
+
+    # Gate A current-event behavior is emitted as SecuritySignal rather than
+    # persisted BehaviorAggregate. It consumes the exact same frozen matrix;
+    # in particular a medium-confidence B2 matches only the default DEFER rule
+    # and can never become a standalone deny.
+    behavior_signals = [
+        (signal, pattern)
+        for signal in grouped_signals
+        if (pattern := _behavior_pattern_from_signal(signal)) is not None
+    ]
+    for signal, pattern in behavior_signals:
+        for rule in matrix.behavior_rules:
+            if pattern not in rule.pattern:
+                continue
+            if not _selector_matches(rule.confidence, signal.confidence):
                 continue
             if not _selector_matches(rule.authority, authority_status):
                 continue
@@ -944,8 +971,7 @@ def evaluate_fusion(
     # Step 7 — CLEAR_ALLOW Proof：10 条 clear_allow_requires 全成立才放行
     # ------------------------------------------------------------------
     system_invariant_present = any(
-        violation.policy_tier == "system_invariant"
-        for violation in policy_violations
+        violation.policy_tier == "system_invariant" for violation in policy_violations
     )
     hard_policy_present = any(
         violation.policy_tier in ("system_hard_policy", "tenant_hard_policy")
@@ -957,6 +983,9 @@ def evaluate_fusion(
     high_confidence_behavior_chain = any(
         aggregate.confidence == "high" and aggregate.pattern_id != "B6"
         for aggregate in behavior_aggregates
+    ) or any(
+        signal.confidence == "high" and pattern != "B6"
+        for signal, pattern in behavior_signals
     )
 
     condition_holds: dict[str, bool] = {

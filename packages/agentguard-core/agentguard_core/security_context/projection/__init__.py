@@ -86,6 +86,7 @@ from .flow_verdict import (
     DANGEROUS_TAINTS,
     EXTERNAL_DESTINATION_KINDS,
     compute_flow_verdict,
+    compute_flow_verdict_from_state,
 )
 
 __all__ = [
@@ -123,6 +124,7 @@ __all__ = [
     "compile_task_to_grants",
     "compute_authority_verdict",
     "compute_flow_verdict",
+    "compute_flow_verdict_from_state",
     "consumption_intent_digest",
     "derive_grant_id",
     "generate_behavior_signals",
