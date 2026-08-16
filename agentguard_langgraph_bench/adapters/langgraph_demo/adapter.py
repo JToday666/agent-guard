@@ -91,8 +91,20 @@ class _LangGraphRuntimeAdapter:
     def evaluate_model_output(self, **kwargs: Any) -> Any:
         return self.guard_adapter.evaluate_model_output(**kwargs)
 
+    def evaluate_tool_result(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.evaluate_tool_result(**kwargs)
+
+    def evaluate_memory_write(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.evaluate_memory_write(**kwargs)
+
+    def evaluate_message_send(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.evaluate_message_send(**kwargs)
+
     def build_tool_call_event(self, **kwargs: Any) -> Any:
         return self.guard_adapter.build_tool_call_event(**kwargs)
+
+    def build_message_send_event(self, **kwargs: Any) -> Any:
+        return self.guard_adapter.build_message_send_event(**kwargs)
 
     def build_audit_event(self, *args: Any, **kwargs: Any) -> Any:
         return self.guard_adapter.build_audit_event(*args, **kwargs)

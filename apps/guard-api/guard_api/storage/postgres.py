@@ -72,6 +72,7 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    CtProvenanceBatchConflictError,
     EnforcementBindingConflictError,
     EnforcementBindingRecord,
     EvaluationRunConflictError,
@@ -172,6 +173,17 @@ def _lock_provenance_identity(session: Session, kind: str, stable_id: str) -> No
     session.execute(
         text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
     )
+
+
+def _ct_flow_id(edge: ProvenanceEdge) -> str | None:
+    metadata = edge.metadata
+    if (
+        metadata.get("contract") != "ct-provenance/1.0"
+        or metadata.get("kind") != "edge"
+    ):
+        return None
+    flow_id = metadata.get("flow_id")
+    return flow_id if isinstance(flow_id, str) and flow_id else None
 
 
 def _lock_task_identity(session: Session, task_id: str) -> None:
@@ -724,6 +736,62 @@ class PostgresControlPlaneStore:
             )
             session.execute(stmt)
         return merged
+
+    def write_ct_provenance_batch(
+        self,
+        nodes: list[ProvenanceNode],
+        edges: list[ProvenanceEdge],
+    ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
+        """Write a CT subgraph under flow-identity locks and one savepoint."""
+
+        incoming_flows: dict[tuple[str, str], str] = {}
+        for edge in edges:
+            flow_id = _ct_flow_id(edge)
+            if flow_id is None:
+                raise CtProvenanceBatchConflictError(edge.edge_id)
+            identity = (edge.trace_id, flow_id)
+            previous = incoming_flows.get(identity)
+            if previous is not None and previous != edge.edge_id:
+                raise CtProvenanceBatchConflictError(f"{edge.trace_id}:{flow_id}")
+            incoming_flows[identity] = edge.edge_id
+
+        with self._write_session() as session:
+            with session.begin_nested():
+                for trace_id, flow_id in sorted(incoming_flows):
+                    _lock_provenance_identity(
+                        session, "ct-flow", f"{trace_id}:{flow_id}"
+                    )
+                trace_ids = sorted({trace_id for trace_id, _ in incoming_flows})
+                if trace_ids:
+                    rows = session.execute(
+                        select(provenance_edges.c.payload_json).where(
+                            provenance_edges.c.trace_id.in_(trace_ids)
+                        )
+                    ).scalars()
+                    for row in rows:
+                        existing = ProvenanceEdge.model_validate(row)
+                        flow_id = _ct_flow_id(existing)
+                        if flow_id is None:
+                            continue
+                        incoming_edge_id = incoming_flows.get(
+                            (existing.trace_id, flow_id)
+                        )
+                        if (
+                            incoming_edge_id is not None
+                            and incoming_edge_id != existing.edge_id
+                        ):
+                            raise CtProvenanceBatchConflictError(
+                                f"{existing.trace_id}:{flow_id}"
+                            )
+                written_nodes = [
+                    self.add_provenance_node(node)
+                    for node in sorted(nodes, key=lambda item: item.node_id)
+                ]
+                written_edges = [
+                    self.add_provenance_edge(edge)
+                    for edge in sorted(edges, key=lambda item: item.edge_id)
+                ]
+        return written_nodes, written_edges
 
     def list_provenance(
         self,

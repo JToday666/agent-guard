@@ -55,7 +55,7 @@ record type 仍需各自的 typed evidence producer/boundary，未知 extra 不�
 | -------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
 | Approval `evidence/resolution/llm_review` 类型补齐 | 现有 Trace 的 `approvals[]`                                               | FE-RSC-01                                  | 修复 DTO/mapper 丢字段，无后端新接口                                    |
 | official/shadow 显式映射                           | 现有 policy Audit `evidence.decision_v21`                                 | CORE V21-09 已有                           | Inspector 分栏，shadow 不参与官方状态                                   |
-| CT fact/state 引用                                 | CURRENT `evidence.ct_transient_facts` 1.0；S2-L TARGET typed Provenance   | CT-PR-03 + INT-RSC-CT-01 + INT-RSC-CT-PROV | Inspector 摘要；真实 Source/Flow 深链；projection ref 不证明 apply      |
+| CT fact/state 引用                                 | CURRENT `evidence.ct_transient_facts` 1.1/`ct-fact-2`（兼容读 1.0/`ct-fact-1`）；typed Provenance `ct-provenance/1.0` | CT-PR-03 + INT-RSC-CT-01 + INT-RSC-CT-PROV | Inspector 摘要；真实 Source/Flow 深链；projection ref 不证明 apply      |
 | Context Manifest                                   | server-internal strict `ContextManifestAuditRecord` + typed bound channel | CT-PR-04 + CT-PR-04-M/INT                  | 有界、脱敏 chunk/transform；外部 Adapter 不可伪造；不阻塞 V21-11        |
 | RTE display evidence + receipt links               | 待冻结的无敏感 evidence；receipt additive `lease_id/consumption_id`       | CORE V21-10 + RTE-05 schema review         | 展示 gate/binding/consume 状态；不返回 fingerprint/token                |
 | V21 rollout/enable evidence                        | strict rollout audit + internal head CAS + policy `v21_rollout_ref`       | CORE V21-11/12-R + INT-PR-04/03R           | 证明 scope、tightening、enabled path/rule ownership；不返回 flag/secret |
@@ -413,8 +413,9 @@ AGENTGUARD_CT_FACT_PROJECTION_ENABLED=true
 {
   "evidence": {
     "ct_transient_facts": {
-      "schema_version": "1.0",
+      "schema_version": "1.1",
       "payload": {
+        "fact_builder_version": "ct-fact-2",
         "ct_delta_builder_version": "ct-delta-1",
         "commit_id": "ct-commit:evt_01",
         "bundle_digest": "sha256:<bundle>",
@@ -460,7 +461,8 @@ AGENTGUARD_CT_FACT_PROJECTION_ENABLED=true
 ```
 
 消费者必须先判 `FullCommitEnvelope | BudgetDroppedRef`：dropped 只显示
-`partial / committed bundle unavailable`，不得映射空 facts；full 再校验 1.0、payload、外层
+`partial / committed bundle unavailable`，不得映射空 facts；full 再校验当前写入的
+1.1/`ct-fact-2`（并兼容读取历史 1.0/`ct-fact-1`）、payload、外层
 bundle digest 与 `bundle.bundle_digest` 双一致、source identity 和 envelope canonical digest。
 当前状态必须分开表述：
 

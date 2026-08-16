@@ -189,6 +189,14 @@
             <p v-if="provenanceSyncMessage" class="trace-provenance__sync" role="status">
               {{ provenanceSyncMessage }}
             </p>
+            <InlineNotice
+              v-if="runtimeSupervision.provenancePresentation.contractKind !== 'ct-provenance/1.0'"
+              title="内容溯源证据不完整"
+              tone="warning"
+            >
+              当前契约：{{ runtimeSupervision.provenancePresentation.contractKind }}。未知或无效的
+              typed metadata 不会用于信任、污染或确定性展示。
+            </InlineNotice>
             <InlineNotice v-if="provenanceError" title="溯源关系刷新未完成" tone="warning">
               <p>{{ provenanceError }}</p>
               <button class="inline-retry" type="button" @click="handleProvenanceRetry">
@@ -198,14 +206,18 @@
             <div v-if="hasVisitedProvenance && provenance" class="provenance-layout">
               <ProvenanceGraph
                 :key="traceId"
+                :element-source-mode="isMockPreview ? 'mock' : 'live'"
                 :graph="provenance"
+                :presentation="runtimeSupervision.provenancePresentation"
                 :selected-node-id="selectedProvenanceNodeId"
                 @select-node="handleSelectProvenanceNode"
               />
               <ProvenanceInspector
+                :element-source-mode="isMockPreview ? 'mock' : 'live'"
                 :events="evidenceModel.events"
                 :graph="provenance"
                 :node="selectedProvenanceNode"
+                :presentation="runtimeSupervision.provenancePresentation"
                 @select-event="handleTimelineSelectEvent"
               />
             </div>
@@ -429,6 +441,7 @@ const runtimeSupervision = computed(() =>
     dataSource: dashboardDataSourceHandle.descriptor,
     elementSourceMode: isMockPreview ? "mock" : "live",
     events: evidenceModel.value.events,
+    provenance: provenance.value,
     provenanceWindow: provenance.value?.window,
     traceId: traceId.value,
   }),

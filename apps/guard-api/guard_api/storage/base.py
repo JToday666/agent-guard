@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ContextManager, Protocol
@@ -411,6 +412,10 @@ class ProvenanceEndpointMissingError(ProvenanceConflictError):
     """Raised when a provenance edge references a missing or foreign node."""
 
 
+class CtProvenanceBatchConflictError(ProvenanceConflictError):
+    """A CT batch conflicts with an immutable ``(trace_id, flow_id)`` fact."""
+
+
 class PolicyRevisionConflictError(ValueError):
     """Raised when a policy write targets a stale revision."""
 
@@ -568,6 +573,14 @@ def _merge_provenance_mapping(
                 merged[key] = value
             continue
         current = merged[key]
+        if key in {"evidence_refs", "taints"} and isinstance(
+            current, list
+        ) and isinstance(value, list):
+            merged[key] = _merge_provenance_sequence(current, value)
+            continue
+        if key == "coverage" and isinstance(current, str) and isinstance(value, str):
+            merged[key] = _merge_provenance_coverage(current, value)
+            continue
         if isinstance(current, dict) and isinstance(value, dict):
             merged[key] = _merge_provenance_mapping(
                 current,
@@ -584,6 +597,39 @@ def _merge_provenance_mapping(
             mutable=key in mutable_keys,
         )
     return merged
+
+
+def _merge_provenance_sequence(existing: list[Any], incoming: list[Any]) -> list[Any]:
+    """Union bounded provenance annotations without replacing prior evidence."""
+
+    merged: list[Any] = []
+    fingerprints: set[str] = set()
+    for item in [*existing, *incoming]:
+        fingerprint = json.dumps(
+            item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+        )
+        if fingerprint in fingerprints:
+            continue
+        fingerprints.add(fingerprint)
+        merged.append(item)
+    return merged
+
+
+def _merge_provenance_coverage(existing: str, incoming: str) -> str:
+    """Coverage can only stay equal or degrade as more evidence is observed."""
+
+    rank = {
+        "complete": 0,
+        "not_applicable": 0,
+        "partial": 1,
+        "stale": 2,
+        "unknown": 3,
+    }
+    if existing not in rank or incoming not in rank:
+        if existing == incoming:
+            return existing
+        raise ProvenanceConflictError(f"coverage:{existing}:{incoming}")
+    return incoming if rank[incoming] > rank[existing] else existing
 
 
 def _merge_provenance_value(
@@ -661,6 +707,12 @@ class ControlPlaneStore(Protocol):
     def get_provenance_node(self, node_id: str) -> ProvenanceNode | None: ...
 
     def add_provenance_edge(self, edge: ProvenanceEdge) -> ProvenanceEdge: ...
+
+    def write_ct_provenance_batch(
+        self,
+        nodes: list[ProvenanceNode],
+        edges: list[ProvenanceEdge],
+    ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]: ...
 
     def list_provenance(
         self,

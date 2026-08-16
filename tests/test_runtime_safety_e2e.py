@@ -217,12 +217,16 @@ def _assert_common_evidence(result: dict[str, Any]) -> None:
     audit_window = trace["audit_window"]
     assert identifiers["trace_id"] == result["trace_id"]
     assert len(identifiers["calls"]) == len(result["row"]["tool_calls"])
+    audit_by_id = {audit["audit_id"]: audit for audit in trace["audit_events"]}
     for call in identifiers["calls"]:
         assert call["action_id"]
         assert call["event_ids"]
         assert call["decision_ids"]
         assert call["policy_audit_ids"]
         assert call["receipt_audit_ids"]
+        terminal_receipt = audit_by_id[call["receipt_audit_ids"][0]]
+        assert call["policy_audit_ids"][0] == terminal_receipt["links"]["policy_audit_id"]
+        assert call["event_ids"][0] == terminal_receipt["links"]["event_id"]
     assert audit_window["limit"] == 1000
     assert audit_window["returned_count"] == len(trace["audit_events"])
     assert audit_window["has_more"] is False

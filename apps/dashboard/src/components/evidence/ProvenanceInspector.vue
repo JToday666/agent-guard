@@ -47,17 +47,44 @@
           <dt>来源模式</dt>
           <dd>{{ sourceMode === "mock" ? "Mock Preview" : sourceMode }}</dd>
         </div>
-        <div v-if="availability">
+        <div v-if="presentationNode">
           <dt>Availability</dt>
-          <dd>{{ availability }}</dd>
+          <dd>{{ presentationNode.semantics.availability }}</dd>
         </div>
-        <div v-if="certainty">
+        <div v-if="presentationNode">
           <dt>Certainty</dt>
-          <dd>{{ certainty }}</dd>
+          <dd>{{ presentationNode.semantics.certainty }}</dd>
         </div>
-        <div v-if="authority">
+        <div v-if="presentationNode">
           <dt>Authority</dt>
-          <dd>{{ authority }}</dd>
+          <dd>{{ presentationNode.semantics.factAuthority }}</dd>
+        </div>
+        <div v-if="presentationNode?.nodeKind === 'source'">
+          <dt>Source / Trust</dt>
+          <dd>
+            {{ presentationNode.normalizedCtSourceType ?? "unknown" }} /
+            {{ presentationNode.trust }}
+          </dd>
+        </div>
+        <div v-if="presentationNode?.taints.length">
+          <dt>Taints</dt>
+          <dd>{{ presentationNode.taints.join(" · ") }}</dd>
+        </div>
+        <div v-if="adjacentCertainties.length">
+          <dt>关系确定性</dt>
+          <dd>{{ adjacentCertainties.join(" · ") }}</dd>
+        </div>
+        <div v-if="presentationNode?.semantics.sourceRefs.length">
+          <dt>EvidenceRef</dt>
+          <dd>
+            <code>
+              {{
+                presentationNode.semantics.sourceRefs
+                  .map((item) => `${item.kind}:${item.id}`)
+                  .join(" · ")
+              }}
+            </code>
+          </dd>
         </div>
       </dl>
 
@@ -92,6 +119,10 @@ import type {
   ProvenanceGraph,
   ProvenanceNode,
 } from "../../types/dashboard";
+import type {
+  ElementSourceMode,
+  ProvenancePresentationViewModel,
+} from "../../types/runtime-supervision";
 import { redactSensitiveData } from "../../utils/data-redaction";
 import {
   formatDashboardDateTime,
@@ -104,9 +135,11 @@ import StructuredDataView from "../common/StructuredDataView.vue";
 
 defineOptions({ name: "ProvenanceInspector" });
 const props = defineProps<{
+  elementSourceMode: ElementSourceMode;
   events: NormalizedAuditEvidence[];
   graph: ProvenanceGraph;
   node?: ProvenanceNode;
+  presentation: ProvenancePresentationViewModel;
 }>();
 const emit = defineEmits<{ "select-event": [eventId: string] }>();
 
@@ -159,16 +192,20 @@ const status = computed(() => {
   const value = props.node?.metadata.status;
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 });
-function metadataText(key: string): string {
-  const value = props.node?.metadata[key];
-  return typeof value === "string" || typeof value === "number" ? String(value) : "";
-}
-const sourceMode = computed(() => metadataText("source_mode"));
-const availability = computed(() => metadataText("availability"));
-const certainty = computed(() => metadataText("certainty"));
-const authority = computed(
-  () => metadataText("decision_authority") || metadataText("fact_authority"),
+const sourceMode = computed(() => props.elementSourceMode);
+const presentationNode = computed(() =>
+  props.presentation.nodes.find((item) => item.provenanceNodeId === props.node?.nodeId),
 );
+const adjacentCertainties = computed(() => [
+  ...new Set(
+    props.presentation.edges
+      .filter(
+        (edge) =>
+          edge.sourceNodeId === props.node?.nodeId || edge.targetNodeId === props.node?.nodeId,
+      )
+      .map((edge) => edge.certainty),
+  ),
+]);
 const phaseLabel = computed(() => {
   const phase = props.node?.metadata.phase;
   const labels: Record<string, string> = {
@@ -192,6 +229,17 @@ const safeMetadata = computed(() => {
     Object.entries(metadata).filter(
       ([key, value]) =>
         key !== "source" &&
+        ![
+          "availability",
+          "certainty",
+          "decision_authority",
+          "fact_authority",
+          "flow_origin",
+          "flow_strength",
+          "source_mode",
+          "taints",
+          "trust",
+        ].includes(key) &&
         !key.startsWith("_") &&
         value !== undefined &&
         value !== null &&

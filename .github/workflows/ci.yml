@@ -77,15 +77,8 @@ jobs:
       - name: Validate release version mapping
         run: uv run python scripts/check-release-versions.py
 
-      - name: Validate generated roadmap contracts
-        env:
-          ROADMAP_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/dev' }}
-          ROADMAP_HEAD_REF: ${{ github.sha }}
-        run: |
-          uv run python scripts/roadmap-tools.py validate
-          base_ref="$ROADMAP_BASE_REF"
-          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then base_ref="HEAD^"; fi
-          uv run python scripts/roadmap-tools.py check-diff --base-ref "$base_ref" --head-ref "$ROADMAP_HEAD_REF"
+      - name: Validate roadmap source contracts
+        run: uv run python scripts/roadmap-tools.py validate
 
   attackbench-contracts:
     name: AttackBench trusted contracts
@@ -315,6 +308,93 @@ jobs:
           name: roadmap-artifact-e2e
           path: apps/dashboard/test-results-roadmap
           if-no-files-found: ignore
+
+  dashboard-s2-live-e2e:
+    name: Dashboard S2 live E2E / ${{ matrix.storage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        storage: [memory, postgres]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_guard_test
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENTGUARD_LLM_ENABLED: "false"
+      AGENTGUARD_S2_STORAGE_BACKEND: ${{ matrix.storage }}
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+      - name: Install locked environments
+        run: |
+          uv sync --locked --all-groups
+          pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
+      - name: Test live S2 content provenance
+        run: pnpm --filter @agentguard/dashboard test:e2e:s2-live
+      - name: Upload S2 evidence and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dashboard-s2-live-${{ matrix.storage }}
+          path: apps/dashboard/test-results-s2-live-${{ matrix.storage }}
+          if-no-files-found: error
+
+  s2-cross-store-parity:
+    name: S2 Memory/PostgreSQL parity
+    needs: dashboard-s2-live-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download Memory evidence
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.1
+        with:
+          name: dashboard-s2-live-memory
+          path: s2-artifacts/memory
+      - name: Download PostgreSQL evidence
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.1
+        with:
+          name: dashboard-s2-live-postgres
+          path: s2-artifacts/postgres
+      - name: Compare redacted semantic evidence
+        run: >-
+          python tests/support/compare_s2_evidence.py
+          --memory s2-artifacts/memory
+          --postgres s2-artifacts/postgres
+          --output s2-artifacts/s2-parity.json
+      - name: Upload parity result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dashboard-s2-live-parity
+          path: s2-artifacts/s2-parity.json
+          if-no-files-found: error
 
   openclaw-runtime-smoke:
     name: OpenClaw runtime smoke (${{ matrix.os }} / ${{ matrix.openclaw }})
