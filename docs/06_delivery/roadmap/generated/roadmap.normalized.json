@@ -10048,11 +10048,32 @@
       }
     },
     {
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
+      "activation_blockers": [
+        "node:blocked"
+      ],
+      "blocked": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start",
+          "from": null,
+          "id": "node:blocked",
+          "rationale": "blocked"
+        },
+        {
+          "constraint": "activate",
+          "from": null,
+          "id": "node:blocked",
+          "rationale": "blocked"
+        },
+        {
+          "constraint": "exit",
+          "from": null,
+          "id": "node:blocked",
+          "rationale": "blocked"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
       "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation",
@@ -10082,7 +10103,9 @@
         "evidence/R05/EV-R05-WORKTREE.json"
       ],
       "exact_title": "PR-RTE-05 — Strong Approval Binding",
-      "exit_blockers": [],
+      "exit_blockers": [
+        "node:blocked"
+      ],
       "hold": false,
       "id": "R05",
       "incoming_edges": [
@@ -10093,7 +10116,8 @@
       "lifecycle": "in_progress",
       "notes": [
         "Active dirty worktree proves implementation has started, not that RTE-05 Integration or Gate B has passed.",
-        "Its exclusive activation surfaces overlap I01 and require serialized integration."
+        "Its exclusive activation surfaces overlap I01 and require serialized integration.",
+        "BLOCKED: openclaw@2026.7.1-2 lacks atomic replace-and-seal and an authoritative invocation-start hook; CF-13/C3 cannot be verified without an upstream host capability"
       ],
       "optional": false,
       "outgoing_edges": [
@@ -10107,7 +10131,7 @@
         "E-116-R05-S4"
       ],
       "resource_conflicts": [],
-      "revision": 1,
+      "revision": 2,
       "roles": [
         "task"
       ],
@@ -10120,7 +10144,9 @@
         }
       ],
       "topological_rank": 9,
-      "unmet_dependencies": [],
+      "unmet_dependencies": [
+        "node:blocked"
+      ],
       "work": {
         "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
         "branch": "codex/rte-05-integration",
@@ -26763,5 +26789,5 @@
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "1f62292f8b696bff43267b85375c0698e95fed2e3aec526a59197f9db963207d"
+  "source_digest": "e43102fd32b23d5cb94a4c190fb84e0f5f8595abba62b4e35e37a02594bde451"
 }
