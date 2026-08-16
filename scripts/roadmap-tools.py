@@ -461,7 +461,6 @@ class Roadmap:
             node
             for node in self.nodes
             if node.get("lifecycle") == "in_progress"
-            and not node.get("blocked")
             and not node.get("hold")
         ]
         evidence_by_node: dict[str, list[dict[str, Any]]] = defaultdict(list)

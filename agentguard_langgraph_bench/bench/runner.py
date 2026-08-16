@@ -264,6 +264,8 @@ def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
         "prompt_contamination_check": config.prompt_contamination_check,
         "autonomous_planner_recovery_retry": config.autonomous_planner_recovery_retry,
         "autonomous_planner_recovery_max_observations": config.autonomous_planner_recovery_max_observations,
+        "claude_code_retain_artifacts": config.claude_code_retain_artifacts,
+        "claude_code_model": config.claude_code_model,
     }
     data.update(updates)
     return BenchConfig(**data)

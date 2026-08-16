@@ -703,6 +703,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         elementSourceMode:
           dashboardDataSourceHandle.descriptor.dataSourceMode === "live_api" ? "live" : "mock",
         events: evidence.events,
+        provenance,
         provenanceWindow: provenance.window,
         traceId: traceDetail.id,
       });

@@ -83,6 +83,9 @@ class SecurityContext(BaseModel):
     current_step: str = "before_tool"
     model_intent: str | None = None
     context_sources: list[dict[str, Any]] = Field(default_factory=list)
+    visible_source_refs: list[str] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     derived_paths: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

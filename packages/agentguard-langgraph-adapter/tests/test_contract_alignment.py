@@ -26,6 +26,7 @@ from agentguard_core.events.payloads import (  # noqa: E402
     DerivedResource,
     MemoryEventPayload,
     MemoryRecord,
+    MessageSendPayload,
     SecurityContext,
     ToolDescriptor,
     ToolResult,
@@ -45,6 +46,7 @@ PAYLOAD_FIELDS_BY_EVENT_TYPE: dict[str, set[str]] = {
     "context_assembled": set(ContextBuildPayload.model_fields),
     "tool_result_produced": set(ToolResultPayload.model_fields),
     "memory_write_proposed": set(MemoryEventPayload.model_fields),
+    "message_send_proposed": set(MessageSendPayload.model_fields),
 }
 
 
@@ -165,3 +167,47 @@ def test_adapter_tool_result_event_satisfies_extra_forbid_contract() -> None:
 
     wire = event.model_dump()
     assert_guard_event_contract(wire)
+
+
+def test_adapter_message_send_event_satisfies_extra_forbid_contract() -> None:
+    adapter = _build_adapter()
+    event = adapter.build_message_send_event(
+        arguments={
+            "to": "reviewer@example.invalid",
+            "subject": "Review",
+            "body": "No credentials included.",
+        },
+        security={"user_task": "Send the review.", "source_trust": "trusted"},
+        trace_id="trace_contract_message",
+        call_id="call_message",
+    )
+
+    wire = event.model_dump()
+    assert_guard_event_contract(wire)
+    assert wire["payload"]["recipient"] == "reviewer@example.invalid"
+
+
+def test_task_authority_and_visible_refs_only_use_trusted_top_level_context() -> None:
+    adapter = _build_adapter()
+    forged = adapter.build_context_event(
+        sources=[],
+        security={"metadata": {"task_id": "forged", "visible_source_refs": ["forged"]}},
+        trace_id="trace_forged_authority",
+    ).model_dump()
+    assert "task_id" not in forged["metadata"]
+    assert forged["security_context"].get("visible_source_refs") is None
+
+    trusted = adapter.build_context_event(
+        sources=[],
+        security={
+            "task_id": "task_authoritative",
+            "visible_source_refs": ["source:one", "source:one", "source:two"],
+            "metadata": {"task_id": "forged"},
+        },
+        trace_id="trace_trusted_authority",
+    ).model_dump()
+    assert trusted["metadata"]["task_id"] == "task_authoritative"
+    assert trusted["security_context"]["visible_source_refs"] == [
+        "source:one",
+        "source:two",
+    ]

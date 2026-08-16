@@ -83,6 +83,57 @@ def test_adapter_evaluates_context_model_tool_result_and_memory_events() -> None
     )
 
 
+def test_adapter_builds_message_event_and_preserves_only_trusted_task_authority() -> None:
+    client = _SelectiveCoreClient()
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+
+    event, _ = adapter.evaluate_message_send(
+        arguments={
+            "to": "reviewer@example.invalid",
+            "subject": "Review",
+            "body": "summary",
+        },
+        security={
+            "task_id": "task_server_issued",
+            "visible_source_refs": ["source:web:1"],
+            "metadata": {"task_id": "task_forged"},
+        },
+        trace_id="trace_message",
+        call_id="call_message",
+    )
+
+    assert event.event_type == "message_send_proposed"
+    assert event.payload["recipient"] == "reviewer@example.invalid"
+    assert event.metadata["task_id"] == "task_server_issued"
+    assert event.security_context.visible_source_refs == ["source:web:1"]
+
+
+def test_gateway_message_gate_blocks_before_send_email_runtime() -> None:
+    client = _SelectiveCoreClient(deny_event_types={"message_send_proposed"})
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+    runtime = _Runtime({"sent": True})
+    gateway = GuardedToolGateway(adapter, runtime)
+
+    result = gateway.invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "reviewer@example.invalid", "body": "summary"},
+        security={"user_task": "Send the summary."},
+        trace_id="trace_message_gate",
+        call_id="call_message_gate",
+    )
+
+    assert result.blocked is True
+    assert result.executed is False
+    assert result.event["event_type"] == "message_send_proposed"
+    assert runtime.calls == []
+
+
 def test_adapter_marks_unsafe_prompt_injection_actions_as_instruction_like() -> None:
     client = _SelectiveCoreClient()
     adapter = LangGraphAdapter(
@@ -437,6 +488,38 @@ def test_gateway_quarantines_poisoned_tool_result_before_context_admission() -> 
     assert client.audit_events[-1]["links"]["action_id"] == "call_result_gate"
     assert client.audit_events[-1]["evidence"]["execution"]["status"] == "executed"
     assert client.audit_events[-1]["evidence"]["result"]["disposition"] == "quarantined"
+
+
+def test_gateway_allowed_tool_result_keeps_original_tool_call_terminal_receipt() -> None:
+    client = _SelectiveCoreClient()
+    adapter = LangGraphAdapter(
+        config=AgentGuardLangGraphConfig(api_mode="guard-api-v0.3"),
+        core_client=client,
+    )
+    gateway = GuardedToolGateway(
+        guard_adapter=adapter,
+        tool_runtime=_Runtime(result={"content": "safe"}),
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "docs/public.txt"},
+        security={"user_task": "Read the public file.", "source_trust": "trusted"},
+        trace_id="trace_result_allow",
+        call_id="call_result_allow",
+    )
+
+    assert result.executed is True
+    assert [event["event_type"] for event in client.guard_events] == [
+        "tool_result_produced"
+    ]
+    assert [event["record_type"] for event in client.audit_events] == [
+        "runtime_observation",
+        "runtime_outcome",
+    ]
+    outcome = client.audit_events[-1]
+    assert outcome["links"]["event_id"] == client.tool_events[0]["event_id"]
+    assert outcome["links"]["event_id"] != client.guard_events[0]["event_id"]
 
 
 def test_gateway_blocks_unverified_local_rag_answer_review_before_runtime_invoke() -> (

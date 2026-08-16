@@ -27,6 +27,10 @@ def load_agent_adapter(config: Any) -> AgentAdapterProtocol:
         from agentguard_langgraph_bench.adapters.subprocess_agent.adapter import create_adapter
 
         return create_adapter(config)
+    if name == "claude-code":
+        from agentguard_langgraph_bench.adapters.claude_code.adapter import create_adapter
+
+        return create_adapter(config)
     if name == "python":
         return load_python_entrypoint(getattr(config, "adapter_entrypoint", ""), config)
 

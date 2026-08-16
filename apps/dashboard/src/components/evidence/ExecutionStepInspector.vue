@@ -221,6 +221,16 @@
             <dt>信任标签</dt>
             <dd>{{ listOrUnavailable(step.supervision.contentIngressSummary.trustLabels) }}</dd>
           </div>
+          <div>
+            <dt>Taints</dt>
+            <dd>{{ listOrUnavailable(step.supervision.contentIngressSummary.taints) }}</dd>
+          </div>
+          <div>
+            <dt>稳定 SourceRef</dt>
+            <dd>
+              {{ listOrUnavailable(step.supervision.contentIngressSummary.stableSourceRefs) }}
+            </dd>
+          </div>
           <div class="is-wide">
             <dt>CT 归一化</dt>
             <dd>

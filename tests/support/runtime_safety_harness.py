@@ -478,6 +478,16 @@ def evidence_identifiers(row: dict[str, Any], trace: dict[str, Any]) -> dict[str
             for audit in action_audits
             if audit.get("record_type") == "runtime_outcome"
         ]
+        primary_policy_ids = {
+            str(audit.get("links", {}).get("policy_audit_id"))
+            for audit in receipts
+            if audit.get("links", {}).get("policy_audit_id")
+        }
+        primary_event_ids = {
+            str(audit.get("links", {}).get("event_id"))
+            for audit in receipts
+            if audit.get("links", {}).get("event_id")
+        }
         starts = [
             audit
             for audit in action_audits
@@ -496,7 +506,8 @@ def evidence_identifiers(row: dict[str, Any], trace: dict[str, Any]) -> dict[str
                         str(audit.get("links", {}).get("event_id"))
                         for audit in action_audits
                         if audit.get("links", {}).get("event_id")
-                    }
+                    },
+                    key=lambda event_id: (event_id not in primary_event_ids, event_id),
                 ),
                 "decision_ids": sorted(
                     {
@@ -505,7 +516,10 @@ def evidence_identifiers(row: dict[str, Any], trace: dict[str, Any]) -> dict[str
                         if audit.get("links", {}).get("decision_id")
                     }
                 ),
-                "policy_audit_ids": [str(audit["audit_id"]) for audit in policy_audits],
+                "policy_audit_ids": sorted(
+                    {str(audit["audit_id"]) for audit in policy_audits},
+                    key=lambda audit_id: (audit_id not in primary_policy_ids, audit_id),
+                ),
                 "approval_ids": [
                     str(approval["approval_id"]) for approval in linked_approvals
                 ],

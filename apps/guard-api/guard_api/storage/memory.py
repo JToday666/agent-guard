@@ -52,6 +52,7 @@ from guard_api.storage.base import (
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    CtProvenanceBatchConflictError,
     EnforcementBindingConflictError,
     EnforcementBindingRecord,
     EvaluationRunConflictError,
@@ -101,6 +102,17 @@ from guard_api.security_state.lease_service import (
 )
 
 _GRANT_RUNTIME_STATUSES = ("active", "expired", "revoked")
+
+
+def _ct_flow_id(edge: ProvenanceEdge) -> str | None:
+    metadata = edge.metadata
+    if (
+        metadata.get("contract") != "ct-provenance/1.0"
+        or metadata.get("kind") != "edge"
+    ):
+        return None
+    flow_id = metadata.get("flow_id")
+    return flow_id if isinstance(flow_id, str) and flow_id else None
 
 
 def _derive_consumption_id(grant_id: str, action_id: str) -> str:
@@ -386,6 +398,63 @@ class MemoryControlPlaneStore:
             merged = edge if existing is None else merge_provenance_edge(existing, edge)
             self.provenance_edges[edge.edge_id] = merged
             return merged
+
+    def write_ct_provenance_batch(
+        self,
+        nodes: list[ProvenanceNode],
+        edges: list[ProvenanceEdge],
+    ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
+        """Atomically materialize one bounded CT subgraph."""
+
+        with self.provenance_lock:
+            next_nodes = dict(self.provenance_nodes)
+            next_edges = dict(self.provenance_edges)
+            written_nodes: list[ProvenanceNode] = []
+            written_edges: list[ProvenanceEdge] = []
+            for node in sorted(nodes, key=lambda item: item.node_id):
+                existing = next_nodes.get(node.node_id)
+                merged = (
+                    node if existing is None else merge_provenance_node(existing, node)
+                )
+                next_nodes[node.node_id] = merged
+                written_nodes.append(merged)
+
+            known_flows: dict[tuple[str, str], str] = {}
+            for existing in next_edges.values():
+                flow_id = _ct_flow_id(existing)
+                if flow_id is not None:
+                    known_flows[(existing.trace_id, flow_id)] = existing.edge_id
+            for edge in sorted(edges, key=lambda item: item.edge_id):
+                flow_id = _ct_flow_id(edge)
+                if flow_id is None:
+                    raise CtProvenanceBatchConflictError(edge.edge_id)
+                identity = (edge.trace_id, flow_id)
+                existing_flow_edge = known_flows.get(identity)
+                if existing_flow_edge is not None and existing_flow_edge != edge.edge_id:
+                    raise CtProvenanceBatchConflictError(
+                        f"{edge.trace_id}:{flow_id}"
+                    )
+                source = next_nodes.get(edge.source_node_id)
+                target = next_nodes.get(edge.target_node_id)
+                if (
+                    source is None
+                    or target is None
+                    or source.trace_id != edge.trace_id
+                    or target.trace_id != edge.trace_id
+                ):
+                    raise ProvenanceEndpointMissingError(edge.edge_id)
+                existing = next_edges.get(edge.edge_id)
+                merged = (
+                    edge if existing is None else merge_provenance_edge(existing, edge)
+                )
+                next_edges[edge.edge_id] = merged
+                known_flows[identity] = edge.edge_id
+                written_edges.append(merged)
+            self.provenance_nodes.clear()
+            self.provenance_nodes.update(next_nodes)
+            self.provenance_edges.clear()
+            self.provenance_edges.update(next_edges)
+            return written_nodes, written_edges
 
     def list_provenance(
         self,

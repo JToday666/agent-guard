@@ -245,16 +245,18 @@ test("mock provenance shows Web content assembled into context without changing 
     page.locator(".vue-flow__edge-text").filter({ hasText: "汇入上下文" }),
   ).toBeVisible();
 
-  const possibleEdge = page.locator(".prov-edge--certainty-possible");
-  await expect(possibleEdge).toHaveCount(1);
-  const possibleEdgeDash = await possibleEdge
+  const unknownLegacyEdge = page.locator(
+    '.prov-edge--certainty-unknown[data-id="mock_edge_model_input_to_action_001"]',
+  );
+  await expect(unknownLegacyEdge).toHaveCount(1);
+  const unknownEdgeDash = await unknownLegacyEdge
     .locator(".vue-flow__edge-path")
     .evaluate((path) => getComputedStyle(path).strokeDasharray);
-  expect(possibleEdgeDash).not.toBe("none");
+  expect(unknownEdgeDash).not.toBe("none");
   const modelInputNode = mockNodes.filter({ hasText: "模型输入" });
   await modelInputNode.focus();
   await page.keyboard.press("Enter");
-  await expect(page.locator(".vue-flow__edge-text").filter({ hasText: "可能" })).toBeVisible();
+  await expect(page.locator(".prov-edge--certainty-possible")).toHaveCount(0);
 
   await page.getByRole("tab", { name: "执行轨迹" }).click();
   await expect(page.locator('.execution-flow [data-source-mode="mock"]')).toHaveCount(0);

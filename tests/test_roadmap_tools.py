@@ -170,19 +170,20 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
 
     for node_id in ("FE04", "S1", "R05P", "RSC-CT01", "I01", "G-A"):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05", "RM-00"):
+    for node_id in ("R05", "RM-00", "CT05"):
         assert nodes[node_id]["effective_status"] == "in_progress"
-    for node_id in ("RSC-CTPROV", "FE06", "CT05", "CT03R"):
+    for node_id in ("FE06", "CT03R"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
-    assert nodes["C10"]["effective_status"] == "not_ready"
+    for node_id in ("C10", "RSC-CTPROV"):
+        assert nodes[node_id]["effective_status"] == "not_ready"
 
     result = run_tool(roadmap_root, "ready", "--json")
     assert_succeeds(result)
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"RSC-CTPROV", "FE06", "CT05", "CT03R"} <= ready_ids
+    assert {"FE06", "CT03R"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -192,6 +193,8 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "R05P",
         "R05",
         "RM-00",
+        "CT05",
+        "RSC-CTPROV",
         "C10",
     }.isdisjoint(ready_ids)
 
@@ -261,6 +264,25 @@ def test_blocked_node_is_not_ready_even_when_dependencies_are_satisfied(
     assert node["effective_status"] == "not_ready"
     assert node["can_start"] is False
     assert node["activation_blockers"]
+
+
+def test_blocked_active_claim_keeps_exclusive_surface_reserved(
+    roadmap_root: Path,
+) -> None:
+    active = read_json(object_path(roadmap_root, "nodes", "I01"))
+    mutate_object(roadmap_root, "nodes", "I01", blocked=True)
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "CT03R",
+        change_surfaces=list(active["change_surfaces"]),
+    )
+
+    candidate = normalized_nodes(build_normalized(roadmap_root))["CT03R"]
+
+    assert candidate["effective_status"] == "not_ready"
+    assert candidate["can_start"] is False
+    assert candidate["resource_conflicts"]
 
 
 def test_optional_non_blocking_edge_does_not_remove_ready_node(
