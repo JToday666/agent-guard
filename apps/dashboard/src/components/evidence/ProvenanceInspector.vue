@@ -9,6 +9,9 @@
         <span>{{ kindLabel(node.kind) }}</span>
         <strong>{{ nodeDisplayLabel }}</strong>
         <p v-if="summary">{{ summary }}</p>
+        <p v-if="sourceMode === 'mock'" class="provenance-inspector__mock-note">
+          MOCK PREVIEW · 固定合成内容入口，不是真实运行结果
+        </p>
       </div>
 
       <dl>
@@ -39,6 +42,22 @@
         <div>
           <dt>状态</dt>
           <dd>{{ status || "未记录" }}</dd>
+        </div>
+        <div v-if="sourceMode">
+          <dt>来源模式</dt>
+          <dd>{{ sourceMode === "mock" ? "Mock Preview" : sourceMode }}</dd>
+        </div>
+        <div v-if="availability">
+          <dt>Availability</dt>
+          <dd>{{ availability }}</dd>
+        </div>
+        <div v-if="certainty">
+          <dt>Certainty</dt>
+          <dd>{{ certainty }}</dd>
+        </div>
+        <div v-if="authority">
+          <dt>Authority</dt>
+          <dd>{{ authority }}</dd>
         </div>
       </dl>
 
@@ -140,6 +159,16 @@ const status = computed(() => {
   const value = props.node?.metadata.status;
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 });
+function metadataText(key: string): string {
+  const value = props.node?.metadata[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+const sourceMode = computed(() => metadataText("source_mode"));
+const availability = computed(() => metadataText("availability"));
+const certainty = computed(() => metadataText("certainty"));
+const authority = computed(
+  () => metadataText("decision_authority") || metadataText("fact_authority"),
+);
 const phaseLabel = computed(() => {
   const phase = props.node?.metadata.phase;
   const labels: Record<string, string> = {
@@ -216,6 +245,14 @@ const safeMetadata = computed(() => {
   color: var(--color-text-muted);
   font-size: var(--font-size-12);
   margin: 0;
+}
+
+.provenance-inspector__identity .provenance-inspector__mock-note {
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
+  border: 1px dashed var(--color-warning-border);
+  border-radius: var(--radius-1);
+  color: var(--color-warning-strong);
+  padding: var(--space-2);
 }
 
 .provenance-inspector dl {

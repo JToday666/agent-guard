@@ -95,13 +95,14 @@
             :class="[
               `execution-node--${data.step.decision}`,
               {
+                'execution-node--checkpoint': data.step.kind === 'checkpoint',
                 'execution-node--current': data.current,
                 'execution-node--dimmed': !data.matched,
                 'execution-node--selected': data.selected,
                 'execution-node--updated': data.updated,
               },
             ]"
-            :aria-label="`${data.orderLabel}：${data.step.displayName}，${getDecisionLabel(data.step.decision)}，${displayStatus(data.step)}`"
+            :aria-label="supervisionAriaLabel(data.step, data.orderLabel)"
             :aria-pressed="data.selected"
             :data-action-id="data.step.actionId ?? undefined"
             :data-step-id="data.step.stepId"
@@ -132,7 +133,8 @@
             <p :title="data.step.resourceSummary ?? '未记录资源目标'">
               {{ data.step.resourceSummary ?? "未记录资源目标" }}
             </p>
-            <footer>
+            <ExecutionSupervisionCapsules v-if="data.step.kind === 'action'" :step="data.step" />
+            <footer v-else>
               <span :class="`execution-node__decision--${data.step.decision}`">
                 {{ getDecisionLabel(data.step.decision) }}
               </span>
@@ -206,12 +208,14 @@ import {
   EXECUTION_FLOW_NODE_WIDTH,
   type ExecutionFlowOrientation,
 } from "../../data/evidence/execution-flow-layout";
+import { getSupervisionLayerDisplays } from "../../data/evidence/runtime-supervision-display.ts";
 import { getExecutionCategoryLabel } from "../../data/evidence/execution-trace";
 import type {
   ExecutionStepCategory,
   ExecutionStepViewModel,
   TraceLifecycleState,
 } from "../../types/dashboard";
+import ExecutionSupervisionCapsules from "./ExecutionSupervisionCapsules.vue";
 import { getDecisionLabel } from "../../utils/dashboard-formatters";
 
 defineOptions({ name: "ExecutionFlowGraph" });
@@ -426,6 +430,16 @@ function displayStatus(step: ExecutionStepViewModel): string {
   if (step.approval === "pending") return "审批结果未确认";
   if (step.receiptExpectation === "required") return "执行结果未确认";
   return step.statusLabel;
+}
+
+function supervisionAriaLabel(step: ExecutionStepViewModel, orderLabel: string): string {
+  if (step.kind === "checkpoint") {
+    return `${orderLabel}：${step.displayName}，${getDecisionLabel(step.decision)}，${displayStatus(step)}`;
+  }
+  const layers = getSupervisionLayerDisplays(step)
+    .map((layer) => `${layer.label} ${layer.value}`)
+    .join("，");
+  return `${orderLabel}：${step.displayName}，${layers}`;
 }
 
 function runtimeIcon(step: ExecutionStepViewModel): Component {
@@ -699,13 +713,19 @@ defineExpose({ fitCanvas, focusStep });
   color: var(--color-text);
   display: grid;
   gap: var(--space-2);
-  min-height: 8.625rem;
+  box-sizing: border-box;
+  height: 12.875rem;
   padding: var(--space-3);
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast),
     opacity var(--transition-fast);
-  width: 14.75rem;
+  width: 17.25rem;
+}
+
+.execution-node--checkpoint {
+  background: color-mix(in srgb, var(--color-surface-muted) 42%, var(--color-surface));
+  box-shadow: none;
 }
 
 .execution-node--allow {

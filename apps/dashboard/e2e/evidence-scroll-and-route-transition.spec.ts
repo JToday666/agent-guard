@@ -35,6 +35,11 @@ test("embedded execution graph scrolls the page and fullscreen graph owns the wh
   const viewport = graph.locator(".vue-flow__transformationpane");
   await expect(graph).toBeVisible();
   await expect(graph.locator(".execution-node")).toBeVisible();
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
   await page.evaluate(() => {
     const graphElement = document.querySelector<HTMLElement>(".execution-flow");
     const graphTop = graphElement ? graphElement.getBoundingClientRect().top + window.scrollY : 0;
@@ -177,13 +182,16 @@ test("reduced motion removes panel and dialog animations", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
 
-  await page.goto("/approvals");
-  await page.getByRole("button", { name: "仅本次放行" }).click();
-  const dialogSurface = page.locator(".confirm-dialog__surface");
-  await expect(dialogSurface).toBeVisible();
-  await expect(dialogSurface).toHaveCSS("animation-name", "none");
-  await page.keyboard.press("Escape");
-  await expect(dialogSurface).toBeHidden();
+  await page.goto("/evidence/trace_002");
+  const actionNode = page.locator(".execution-node").filter({ hasText: "发送邮件" });
+  await actionNode.focus();
+  await page.keyboard.press("Space");
+  await expect(actionNode).toHaveAttribute("aria-pressed", "true");
+  await expect(actionNode).toHaveCSS("animation-name", "none");
+  const nodeTransitionDuration = await actionNode.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).transitionDuration),
+  );
+  expect(nodeTransitionDuration).toBeLessThanOrEqual(0.00001);
 });
 
 test("provenance graph keeps node text readable without label overlap", async ({ page }) => {

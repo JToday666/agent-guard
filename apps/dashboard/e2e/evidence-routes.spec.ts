@@ -113,14 +113,24 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
   await expect(action).toBeVisible();
   await expect(action).toHaveClass(/execution-node--ask/);
-  await expect(action).toContainText("需审批");
-  await expect(action).toContainText("已执行");
+  await expect(action.locator('[data-supervision-layer="decision"]')).toContainText("需审批");
+  await expect(action.locator('[data-supervision-layer="approval"]')).toContainText("单次放行");
+  await expect(action.locator('[data-supervision-layer="enforcement"]')).toContainText(
+    "证据不可用",
+  );
+  await expect(action.locator('[data-supervision-layer="execution"]')).toContainText("已执行");
   await expect(action).not.toContainText("当前");
 
   await action.click();
   const inspector = page.locator(".execution-inspector");
   await expect(inspector).toContainText("单次放行");
-  await inspector.getByRole("button", { name: "查看安全依据" }).click();
+  await expect(inspector).toContainText("正式决策 / V2 Shadow");
+  await expect(inspector).toContainText("强绑定门控证据尚未随 Trace 返回");
+  await expect(inspector.getByRole("link", { name: "查看审批依据（只读）" })).toHaveAttribute(
+    "href",
+    /readonly=1/,
+  );
+  await inspector.getByRole("button", { name: "查看溯源关系" }).click();
   await expect(page).toHaveURL(/view=provenance/);
   await expect(page).toHaveURL(/action_id=action_trace_002/);
   await expect(page).toHaveURL(/node_id=/);
@@ -140,6 +150,61 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   await expect(page).toHaveURL(/action_id=action_trace_002/);
   await expect(page).toHaveURL(/node_id=/);
   await expect(page.locator(".prov-node--selected")).toContainText("send_email");
+});
+
+test("graph and list reuse the same four-layer supervision presentation", async ({ page }) => {
+  await page.goto("/evidence/trace_002");
+
+  const graphAction = page.locator(".execution-node").filter({ hasText: "发送邮件" });
+  await expect(graphAction).toBeVisible();
+  const graphValues = await graphAction
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  const listAction = page.locator(".execution-list__item").filter({ hasText: "发送邮件" });
+  await expect(listAction).toBeVisible();
+  const listValues = await listAction
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+
+  expect(listValues).toEqual(graphValues);
+  expect(graphValues).toHaveLength(4);
+});
+
+test("mock provenance shows Web content assembled into context without changing execution edges", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_005");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
+
+  const mockNodes = page.locator('.prov-node[data-source-mode="mock"]');
+  await expect(mockNodes).toHaveCount(4);
+  await expect(mockNodes).toContainText([/Web 内容来源/, /上下文拼接/, /模型输入/, /高影响动作/]);
+
+  const sourceNode = mockNodes.filter({ hasText: "Web 内容来源" });
+  await sourceNode.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".provenance-inspector")).toContainText(
+    "MOCK PREVIEW · 固定合成内容入口，不是真实运行结果",
+  );
+  await expect(
+    page.locator(".vue-flow__edge-text").filter({ hasText: "汇入上下文" }),
+  ).toBeVisible();
+
+  const possibleEdge = page.locator(".prov-edge--certainty-possible");
+  await expect(possibleEdge).toHaveCount(1);
+  const possibleEdgeDash = await possibleEdge
+    .locator(".vue-flow__edge-path")
+    .evaluate((path) => getComputedStyle(path).strokeDasharray);
+  expect(possibleEdgeDash).not.toBe("none");
+  const modelInputNode = mockNodes.filter({ hasText: "模型输入" });
+  await modelInputNode.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".vue-flow__edge-text").filter({ hasText: "可能" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "执行轨迹" }).click();
+  await expect(page.locator('.execution-flow [data-source-mode="mock"]')).toHaveCount(0);
 });
 
 test("execution trace defaults to graph and keeps the list layout in the URL", async ({ page }) => {

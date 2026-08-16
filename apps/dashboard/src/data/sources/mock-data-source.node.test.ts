@@ -5,6 +5,7 @@ import {
   OPENCLAW_REQUIRED_HOOK_COUNT,
   OPENCLAW_REQUIRED_HOOKS,
 } from "../../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import type { GuardAuditEventDto } from "../../api/guard-api-types.ts";
 import { MockDashboardDataSource } from "./mock-data-source.ts";
 
 test("mock preview source exposes reads only", () => {
@@ -12,6 +13,24 @@ test("mock preview source exposes reads only", () => {
 
   assert.equal("resolveApproval" in source, false);
   assert.equal(Object.hasOwn(source, "resolveApproval"), false);
+});
+
+test("mock runtime receipts preserve exact policy, event, decision and action links", async () => {
+  const source = new MockDashboardDataSource(0);
+  const response = await source.getTraceDetail("trace_002");
+  assert.equal(response.status, "modified");
+  if (response.status !== "modified") return;
+
+  const policy = response.value.events.find((event) => event.recordType === "policy_evaluation");
+  const outcome = response.value.events.find((event) => event.recordType === "runtime_outcome");
+  assert.ok(policy);
+  assert.ok(outcome);
+  const policyRaw = policy.raw as GuardAuditEventDto;
+  const outcomeRaw = outcome.raw as GuardAuditEventDto;
+  assert.equal(outcomeRaw.links?.policy_audit_id, policyRaw.audit_id);
+  assert.equal(outcomeRaw.links?.event_id, policyRaw.links?.event_id);
+  assert.equal(outcomeRaw.links?.decision_id, policyRaw.links?.decision_id);
+  assert.equal(outcomeRaw.links?.action_id, policyRaw.links?.action_id);
 });
 
 test("mock provenance graph contains evidence nodes and event references", async () => {
@@ -57,6 +76,98 @@ test("mock provenance graph contains evidence nodes and event references", async
   );
   assert.ok(graph.nodes.every((node) => !("eventId" in node.metadata)));
   assert.ok(graph.nodes.every((node) => !("riskScore" in node.metadata)));
+});
+
+test("mock demo provenance adds the validated Web ingress chain without touching execution data", async () => {
+  const source = new MockDashboardDataSource(0);
+  const response = await source.getTraceProvenance("trace_005");
+  assert.equal(response.status, "modified");
+  if (response.status !== "modified") return;
+
+  const previewNodes = response.value.nodes.filter(
+    ({ metadata }) => metadata.fixture_id === "rsc_context_ingress_preview_v01",
+  );
+  const previewEdges = response.value.edges.filter(
+    ({ metadata }) => metadata.fixture_id === "rsc_context_ingress_preview_v01",
+  );
+  assert.equal(previewNodes.length, 4);
+  assert.equal(previewEdges.length, 3);
+  assert.deepEqual(
+    previewNodes.map(({ metadata }) => metadata.presentation_node_kind),
+    ["source", "context", "model_input", "action"],
+  );
+  assert.ok(previewNodes.every(({ traceId }) => traceId === "trace_005"));
+  assert.ok(
+    previewNodes.every(
+      ({ metadata }) =>
+        metadata.source_mode === "mock" &&
+        metadata.element_source_mode === "mock" &&
+        typeof metadata.availability === "string" &&
+        typeof metadata.certainty === "string" &&
+        metadata.status === "MOCK PREVIEW",
+    ),
+  );
+  assert.ok(
+    previewEdges.every(
+      ({ relation, traceId, metadata }) =>
+        traceId === "trace_005" &&
+        relation === "assembled_into" &&
+        metadata.wire_relation === "assembled_into" &&
+        metadata.ct_flow_relation === "assembled_into" &&
+        metadata.source_mode === "mock" &&
+        typeof metadata.availability === "string" &&
+        typeof metadata.certainty === "string",
+    ),
+  );
+
+  const byKind = new Map(
+    previewNodes.map((node) => [String(node.metadata.presentation_node_kind), node]),
+  );
+  const expectedPath = ["source", "context", "model_input", "action"];
+  for (let index = 0; index < expectedPath.length - 1; index += 1) {
+    const sourceNode = byKind.get(expectedPath[index]!);
+    const targetNode = byKind.get(expectedPath[index + 1]!);
+    assert.ok(sourceNode);
+    assert.ok(targetNode);
+    assert.ok(
+      previewEdges.some(
+        (edge) =>
+          edge.sourceNodeId === sourceNode.nodeId && edge.targetNodeId === targetNode.nodeId,
+      ),
+    );
+  }
+
+  const webSource = byKind.get("source");
+  const action = byKind.get("action");
+  assert.ok(webSource);
+  assert.ok(action);
+  assert.equal(webSource.metadata.normalized_ct_source_type, "web");
+  assert.equal(webSource.metadata.trust, "untrusted");
+  assert.match(action.refId, /^mock_action_/);
+
+  const trace = await source.getTraceDetail("trace_005");
+  assert.equal(trace.status, "modified");
+  if (trace.status === "modified") {
+    assert.doesNotMatch(JSON.stringify(trace.value), /mock_prov_|assembled_into/);
+  }
+});
+
+test("mock content ingress fixture is scoped to the fixed demo trace", async () => {
+  const source = new MockDashboardDataSource(0);
+  const response = await source.getTraceProvenance("trace_002");
+  assert.equal(response.status, "modified");
+  if (response.status !== "modified") return;
+
+  assert.ok(
+    response.value.nodes.every(
+      ({ metadata }) => metadata.fixture_id !== "rsc_context_ingress_preview_v01",
+    ),
+  );
+  assert.ok(
+    response.value.edges.every(
+      ({ metadata }) => metadata.fixture_id !== "rsc_context_ingress_preview_v01",
+    ),
+  );
 });
 
 test("mock trace resources honor independent conditional validators", async () => {

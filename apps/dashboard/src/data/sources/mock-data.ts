@@ -739,6 +739,7 @@ function buildRawAudit(
       approval_id: event.approvalId,
       decision_id: `decision_${event.traceId}`,
       event_id: `guard_event_${event.traceId}`,
+      policy_audit_id: isOutcome ? event.id.replace(/_outcome$/, "") : undefined,
     },
     metadata: {
       action_name: event.tool,

@@ -26,6 +26,12 @@ import { mergeApprovalsWithAuditEvidence } from "../approvals/evidence.ts";
 import { createAuditWindow } from "../dashboard/metrics.ts";
 import { buildProvenanceGraphFromEvidence } from "../evidence/provenance-builder.ts";
 import { buildTraceEvidenceViewModel } from "../evidence/trace-evidence.ts";
+import {
+  mergeMockContextIngressProvenance,
+  MOCK_CONTEXT_INGRESS_DEMO_TRACE_ID,
+} from "../runtime-supervision/context-ingress-provenance.ts";
+import type { LoadedContextIngressPreviewFixture } from "../runtime-supervision/context-ingress-provenance.ts";
+import { loadRuntimeSupervisionFixture } from "../runtime-supervision/runtime-supervision-fixture.ts";
 import type { AuditEventRow, ProvenanceGraph } from "../../types/dashboard";
 import {
   OPENCLAW_REQUIRED_HOOK_COUNT,
@@ -39,6 +45,17 @@ import type {
 } from "./dashboard-data-source";
 import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
 import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
+import contextIngressPreviewRaw from "../../../../../tests/fixtures/runtime_supervision/context_ingress_preview_v01.json" with { type: "json" };
+
+function loadContextIngressPreviewFixture(input: unknown): LoadedContextIngressPreviewFixture {
+  const fixture = loadRuntimeSupervisionFixture(input);
+  if (fixture.fixtureKind !== "context_ingress_preview") {
+    throw new Error("Expected the context ingress Preview fixture");
+  }
+  return fixture;
+}
+
+const loadedContextIngressPreview = loadContextIngressPreviewFixture(contextIngressPreviewRaw);
 
 function abortError(signal: AbortSignal): DOMException {
   return signal.reason instanceof DOMException && signal.reason.name === "AbortError"
@@ -493,7 +510,17 @@ export class MockDashboardDataSource implements DashboardReadDataSource {
       approvals,
       mapAuditIntegrity(mockAuditIntegrity),
     );
-    const dto = toProvenanceDto(buildProvenanceGraphFromEvidence(evidence));
+    const evidenceGraph = buildProvenanceGraphFromEvidence(evidence);
+    const previewTimestamp =
+      traceId === MOCK_CONTEXT_INGRESS_DEMO_TRACE_ID
+        ? (events[0]?.occurredAt ?? "2026-06-07T12:08:00+08:00")
+        : "";
+    const graph = mergeMockContextIngressProvenance(
+      evidenceGraph,
+      loadedContextIngressPreview,
+      previewTimestamp,
+    );
+    const dto = toProvenanceDto(graph);
     const etag = mockEtag(dto);
     return etag === options.etag
       ? { status: "not_modified" as const, etag }
