@@ -142,13 +142,13 @@
                 `prov-node--${data.kind}`,
                 `prov-node--phase-${data.phase}`,
                 {
-                  'prov-node--mock': elementSourceMode === 'mock',
+                  'prov-node--mock': nodeElementSourceMode(data) === 'mock',
                   'prov-node--selected': data.nodeId === selectedNodeId,
                 },
               ]"
               :aria-label="`${kindLabel(data.kind)}：${nodeLabel(data.label, data.kind)}`"
               :aria-pressed="data.nodeId === selectedNodeId"
-              :data-source-mode="elementSourceMode"
+              :data-source-mode="nodeElementSourceMode(data)"
               role="button"
               tabindex="0"
               :title="nodeTooltip(data)"
@@ -387,6 +387,13 @@ const kindDefinitions: Record<string, { icon: Component; label: string; miniMapC
 function metadataString(metadata: Record<string, unknown>, key: string): string {
   const value = metadata[key];
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function nodeElementSourceMode(node: ProvenanceNodeData): ElementSourceMode | undefined {
+  if (props.elementSourceMode === "live") return "live";
+  // source_mode controls fixture styling only. Security-sensitive trust,
+  // taint, authority, and certainty continue to come from typed projection.
+  return node.metadata.source_mode === "mock" ? "mock" : undefined;
 }
 
 function metadataBoolean(metadata: Record<string, unknown>, key: string): boolean {

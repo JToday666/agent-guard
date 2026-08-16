@@ -175,7 +175,11 @@ def _materialize(
 ) -> tuple[list[ProvenanceNode], list[ProvenanceEdge]]:
     assert decoded.bundle is not None
     bundle = decoded.bundle
-    envelope = audit.evidence["ct_transient_facts"]
+    if not isinstance(audit.evidence, dict):
+        raise ValueError("full CT envelope requires audit evidence")
+    envelope = audit.evidence.get("ct_transient_facts")
+    if not isinstance(envelope, dict):
+        raise ValueError("full CT envelope is missing from audit evidence")
     evidence_ref = EvidenceRef(
         ref_id=f"ct-envelope:{audit.audit_id}",
         kind="audit_event",

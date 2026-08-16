@@ -458,19 +458,12 @@ def _apply_tool_result_guard(
             payload.counts_as_effective_block = False
             return payload, False
     approval_blocked, approval_resolution = _resolve_approval(guard_adapter, decision)
-    outcome_attempted = _supports_runtime_outcome(guard_adapter, decision)
     if decision.decision != "deny" and not approval_blocked:
-        payload.runtime_receipt_error = _submit_runtime_outcome(
-            guard_adapter,
-            event,
-            decision,
-            execution_status="executed",
-            approval_resolution=approval_resolution,
-            invoked_at=invoked_at,
-            side_effects=side_effects,
-            side_effects_measured=side_effects_measured,
-        )
-        return payload, outcome_attempted
+        # A non-intervening result check is a content checkpoint, not the
+        # terminal action receipt. Let the caller retain the original
+        # tool-call policy identity when it records execution completion.
+        return payload, False
+    outcome_attempted = _supports_runtime_outcome(guard_adapter, decision)
     payload.blocked = True
     payload.decision = decision.decision
     payload.status = "quarantined"

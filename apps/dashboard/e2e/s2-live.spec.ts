@@ -28,8 +28,11 @@ test("real seven-event CT trace is readable in the live Dashboard", async ({ pag
     ],
     { cwd: repoRoot, encoding: "utf8", env: process.env, timeout: 45_000 },
   );
-  const line = run.stdout.split(/\r?\n/).find((item) => item.startsWith(marker));
-  expect(run.status, run.stderr).toBe(0);
+  const stdout = run.stdout ?? "";
+  const stderr = run.stderr ?? run.error?.message ?? "S2 harness did not return stderr";
+  const line = stdout.split(/\r?\n/).find((item) => item.startsWith(marker));
+  expect(run.error, stderr).toBeUndefined();
+  expect(run.status, stderr).toBe(0);
   expect(line).toBeTruthy();
   const evidence = JSON.parse(line!.slice(marker.length)) as {
     trace_id: string;
