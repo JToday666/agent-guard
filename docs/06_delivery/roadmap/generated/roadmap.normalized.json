@@ -7679,7 +7679,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7720,7 +7727,14 @@
       "outgoing_edges": [
         "E-001-C00-C01"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -7740,7 +7754,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7783,7 +7804,14 @@
       "outgoing_edges": [
         "E-002-C01-C02"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -7803,7 +7831,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7846,7 +7881,14 @@
       "outgoing_edges": [
         "E-003-C02-C03"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -7866,7 +7908,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7909,7 +7958,14 @@
       "outgoing_edges": [
         "E-004-C03-C04"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -7929,7 +7985,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7974,7 +8037,14 @@
         "E-006-C04-C06",
         "E-007-C04-C07"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -7994,7 +8064,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8037,7 +8114,14 @@
       "outgoing_edges": [
         "E-008-C05-C08"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8057,7 +8141,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8100,7 +8191,14 @@
       "outgoing_edges": [
         "E-009-C06-C08"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8120,7 +8218,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8163,7 +8268,14 @@
       "outgoing_edges": [
         "E-010-C07-C08"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8183,7 +8295,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8228,7 +8347,14 @@
       "outgoing_edges": [
         "E-011-C08-C09"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8248,7 +8374,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8294,7 +8427,14 @@
         "E-038-C09-G-A",
         "E-047-C09-R05P"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8314,9 +8454,16 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
       "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation"
@@ -8348,7 +8495,14 @@
         "E-059-C10-G-SL",
         "E-115-C10-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task",
@@ -8377,6 +8531,12 @@
           "from": "C10",
           "id": "E-015-C10-C13",
           "rationale": "C13 requires C10."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8406,7 +8566,14 @@
       "outgoing_edges": [
         "E-016-C13-G-SEM"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8436,6 +8603,12 @@
           "from": "G-SEM",
           "id": "E-017-G-SEM-C14",
           "rationale": "Semantic upgrade-only starts only after its admission evidence passes."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8469,7 +8642,14 @@
         "E-142-C14-MASTER-FINAL",
         "E-160-C14-S6"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8513,6 +8693,12 @@
           "from": "G-B",
           "id": "E-062-G-B-C11",
           "rationale": "C11 requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8551,7 +8737,14 @@
         "E-126-C11-FE10B",
         "E-128-C11-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8583,6 +8776,12 @@
           "from": "C11",
           "id": "E-014-C11-C12",
           "rationale": "C12 requires C11."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8616,7 +8815,14 @@
         "E-083-C12-G-ENG",
         "E-141-C12-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8941,7 +9147,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8987,7 +9200,14 @@
         "E-025-CT03B-CT05",
         "E-103-CT03B-FE06"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -9111,14 +9331,21 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
       "change_surfaces": [
         "guard-api-production-wiring"
       ],
-      "effective_status": "ready",
+      "effective_status": "not_ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
@@ -9146,7 +9373,14 @@
         "E-122-CT04-S5C",
         "E-125-CT04-FE10B"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -9237,6 +9471,12 @@
           "from": "CT05",
           "id": "resource:CT05",
           "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -9273,6 +9513,12 @@
           "node_id": "CT05",
           "surfaces": [
             "audit-schema-and-storage"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -9318,6 +9564,12 @@
           "from": "CT05",
           "id": "resource:CT05",
           "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -9358,6 +9610,12 @@
           "node_id": "CT05",
           "surfaces": [
             "audit-schema-and-storage"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -9681,7 +9939,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -9748,7 +10013,16 @@
       "outgoing_edges": [
         "E-048-R05P-R05"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -9796,19 +10070,12 @@
           "from": null,
           "id": "node:blocked",
           "rationale": "blocked"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
         }
       ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
-        "audit-schema-and-storage",
         "core-evaluation-activation",
         "guard-api-production-wiring",
         "runtime-binding-activation"
@@ -9863,14 +10130,7 @@
         "E-113-R05-FE08",
         "E-116-R05-S4"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 2,
       "roles": [
         "task"
@@ -9914,6 +10174,12 @@
           "from": "G-B",
           "id": "E-052-G-B-R06",
           "rationale": "Program scheduling opens RTE-06 after Gate B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -9946,7 +10212,14 @@
         "E-079-R06-G-SR",
         "E-146-R06-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -9984,6 +10257,12 @@
           "from": "G-B",
           "id": "E-053-G-B-R07",
           "rationale": "Program scheduling opens RTE-07 after Gate B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10016,7 +10295,14 @@
         "E-080-R07-G-SR",
         "E-147-R07-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10221,7 +10507,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -10347,7 +10640,15 @@
       "outgoing_edges": [
         "E-036-I01-G-A"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -10390,6 +10691,12 @@
           "from": "R05",
           "id": "E-055-R05-I02A",
           "rationale": "I02A requires R05."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10424,7 +10731,16 @@
         "E-056-I02A-G-B",
         "E-117-I02A-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10475,6 +10791,12 @@
           "from": "CT05",
           "id": "resource:CT05",
           "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -10516,6 +10838,12 @@
           "node_id": "CT05",
           "surfaces": [
             "audit-schema-and-storage"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -10564,6 +10892,12 @@
           "from": "G-B",
           "id": "E-071-G-B-I02B",
           "rationale": "I02B requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10600,7 +10934,16 @@
         "E-073-I02B-ROL1",
         "E-130-I02B-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10646,6 +10989,12 @@
           "from": "G-B",
           "id": "E-068-G-B-I04",
           "rationale": "I04 requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10683,7 +11032,16 @@
         "E-129-I04-S5O",
         "E-145-I04-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10721,6 +11079,12 @@
           "from": "CT05",
           "id": "resource:CT05",
           "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -10757,6 +11121,13 @@
           "node_id": "CT05",
           "surfaces": [
             "audit-schema-and-storage"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -10802,6 +11173,12 @@
           "from": "CT05",
           "id": "resource:CT05",
           "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -10843,6 +11220,13 @@
           "node_id": "CT05",
           "surfaces": [
             "audit-schema-and-storage"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -10889,6 +11273,12 @@
           "from": "CT05",
           "id": "resource:CT05",
           "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -10927,6 +11317,13 @@
           "node_id": "CT05",
           "surfaces": [
             "audit-schema-and-storage"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -26388,10 +26785,9 @@
   ],
   "ready_queue": [
     "CT03R",
-    "FE06",
-    "CT04"
+    "FE06"
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "6f523c4a9aeb6872bd8fd33bcb52fdb7297dfedc1fdcbaaafec0a5b14df6bfe5"
+  "source_digest": "e43102fd32b23d5cb94a4c190fb84e0f5f8595abba62b4e35e37a02594bde451"
 }

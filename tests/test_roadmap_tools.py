@@ -263,6 +263,25 @@ def test_blocked_node_is_not_ready_even_when_dependencies_are_satisfied(
     assert node["activation_blockers"]
 
 
+def test_blocked_active_claim_keeps_exclusive_surface_reserved(
+    roadmap_root: Path,
+) -> None:
+    active = read_json(object_path(roadmap_root, "nodes", "I01"))
+    mutate_object(roadmap_root, "nodes", "I01", blocked=True)
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "CT03R",
+        change_surfaces=list(active["change_surfaces"]),
+    )
+
+    candidate = normalized_nodes(build_normalized(roadmap_root))["CT03R"]
+
+    assert candidate["effective_status"] == "not_ready"
+    assert candidate["can_start"] is False
+    assert candidate["resource_conflicts"]
+
+
 def test_optional_non_blocking_edge_does_not_remove_ready_node(
     roadmap_root: Path,
 ) -> None:

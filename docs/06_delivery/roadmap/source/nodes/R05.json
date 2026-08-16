@@ -1,7 +1,6 @@
 {
   "blocked": true,
   "change_surfaces": [
-    "audit-schema-and-storage",
     "core-evaluation-activation",
     "guard-api-production-wiring",
     "runtime-binding-activation"
