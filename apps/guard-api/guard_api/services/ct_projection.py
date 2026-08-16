@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from agentguard_core import AuditEvent, GuardEvent
 from agentguard_core.actions.builder import build_action_ir
@@ -102,8 +102,10 @@ __all__ = [
     "VISIBLE_REF_MAX_NODES",
     "VISIBLE_REF_MAX_WIDTH",
     "CtCommitPlan",
+    "CtEnvelopeDecodeResult",
     "CtProjectionService",
     "ct_transient_facts_envelope",
+    "decode_ct_transient_facts",
 ]
 
 #: D1 命名空间化投影身份前缀：``source_record_id = "ct-facts:{event_id}"``。
@@ -141,6 +143,22 @@ CT_BASE_REWIND_SKIPS: dict[str, int] = {"count": 0}
 VISIBLE_REF_MAX_DEPTH = 4
 VISIBLE_REF_MAX_WIDTH = 32
 VISIBLE_REF_MAX_NODES = 256
+
+
+@dataclass(frozen=True, slots=True)
+class CtEnvelopeDecodeResult:
+    """Strict, lossless classification of committed CT audit evidence."""
+
+    kind: Literal["absent", "full", "budget_dropped", "unsupported", "invalid"]
+    schema_version: str | None = None
+    fact_builder_version: str | None = None
+    payload: dict[str, Any] | None = None
+    bundle: TransientSecurityFacts | None = None
+    source_record_id: str | None = None
+    source_revision: int = _OBSERVATION_SOURCE_REVISION
+    projection_eligible: bool | None = None
+    envelope_digest: str | None = None
+    issues: tuple[str, ...] = ()
 
 
 def ct_transient_facts_envelope(payload: dict[str, Any]) -> dict[str, Any]:
@@ -204,6 +222,204 @@ def _overlay_digest_matches(
         inner == bundle.overlay_digest
         and bundle.overlay_digest == compute_overlay_digest(bundle)
         and bundle.overlay_digest == outer
+    )
+
+
+def decode_ct_transient_facts(
+    audit_or_envelope: AuditEvent | object,
+) -> CtEnvelopeDecodeResult:
+    """Decode a committed CT envelope without conflating absence and loss.
+
+    The decoder is deliberately independent from runtime feature flags.  It is
+    used by replay/repair consumers, which must interpret the record according
+    to the contract that was committed at the time.
+    """
+
+    audit: AuditEvent | None = (
+        audit_or_envelope if isinstance(audit_or_envelope, AuditEvent) else None
+    )
+    if audit is not None:
+        evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
+        if "ct_transient_facts" not in evidence:
+            return CtEnvelopeDecodeResult(kind="absent")
+        envelope = evidence.get("ct_transient_facts")
+    else:
+        envelope = audit_or_envelope
+    if not isinstance(envelope, dict):
+        return CtEnvelopeDecodeResult(
+            kind="invalid", issues=("ct-envelope:not_object",)
+        )
+
+    # The current budget channel replaces the complete envelope at the root.
+    # Historical tests also exercised a dropped marker in ``payload``; retain
+    # read compatibility without ever treating either form as an empty bundle.
+    if envelope.get("_budget_dropped") is True:
+        digest = envelope.get("_envelope_sha256")
+        if isinstance(digest, str) and digest.startswith("sha256:"):
+            return CtEnvelopeDecodeResult(
+                kind="budget_dropped", envelope_digest=digest
+            )
+        return CtEnvelopeDecodeResult(
+            kind="invalid", issues=("ct-envelope:dropped_digest_invalid",)
+        )
+
+    schema_version = envelope.get("schema_version")
+    if schema_version not in {
+        LEGACY_CT_FACTS_ENVELOPE_VERSION,
+        CT_FACTS_ENVELOPE_VERSION,
+    }:
+        return CtEnvelopeDecodeResult(
+            kind="unsupported",
+            schema_version=(schema_version if isinstance(schema_version, str) else None),
+            issues=("ct-envelope:unsupported_version",),
+        )
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        return CtEnvelopeDecodeResult(
+            kind="invalid",
+            schema_version=schema_version,
+            issues=("ct-envelope:payload_missing",),
+        )
+    if payload.get("_budget_dropped") is True:
+        digest = payload.get("_envelope_sha256")
+        if isinstance(digest, str) and digest.startswith("sha256:"):
+            return CtEnvelopeDecodeResult(
+                kind="budget_dropped",
+                schema_version=schema_version,
+                envelope_digest=digest,
+            )
+        return CtEnvelopeDecodeResult(
+            kind="invalid",
+            schema_version=schema_version,
+            issues=("ct-envelope:dropped_digest_invalid",),
+        )
+
+    fact_builder_version = _fact_builder_version_for_envelope(envelope, payload)
+    if fact_builder_version is None:
+        return CtEnvelopeDecodeResult(
+            kind="unsupported",
+            schema_version=schema_version,
+            payload=payload,
+            issues=("ct-envelope:fact_builder_version_mismatch",),
+        )
+
+    projection_eligible = payload.get("projection_eligible")
+    projection_id = payload.get("projection_id")
+    if schema_version == CT_FACTS_ENVELOPE_VERSION:
+        if not isinstance(projection_eligible, bool):
+            return CtEnvelopeDecodeResult(
+                kind="invalid",
+                schema_version=schema_version,
+                fact_builder_version=fact_builder_version,
+                payload=payload,
+                issues=("ct-envelope:projection_eligibility_invalid",),
+            )
+        if (projection_eligible and not isinstance(projection_id, str)) or (
+            not projection_eligible and projection_id is not None
+        ):
+            return CtEnvelopeDecodeResult(
+                kind="invalid",
+                schema_version=schema_version,
+                fact_builder_version=fact_builder_version,
+                payload=payload,
+                issues=("ct-envelope:projection_identity_invalid",),
+            )
+    elif projection_eligible not in (None, True):
+        return CtEnvelopeDecodeResult(
+            kind="invalid",
+            schema_version=schema_version,
+            fact_builder_version=fact_builder_version,
+            payload=payload,
+            issues=("ct-envelope:legacy_projection_eligibility_invalid",),
+        )
+
+    raw_bundle = payload.get("bundle")
+    expected_digest = payload.get("bundle_digest")
+    source_identity = payload.get("source_identity")
+    if (
+        not isinstance(raw_bundle, dict)
+        or not isinstance(expected_digest, str)
+        or not isinstance(source_identity, dict)
+    ):
+        return CtEnvelopeDecodeResult(
+            kind="invalid",
+            schema_version=schema_version,
+            fact_builder_version=fact_builder_version,
+            payload=payload,
+            projection_eligible=projection_eligible,
+            issues=("ct-envelope:materials_missing",),
+        )
+    try:
+        bundle = TransientSecurityFacts.model_validate(raw_bundle)
+    except Exception:  # noqa: BLE001 - typed failure is a stable classification.
+        return CtEnvelopeDecodeResult(
+            kind="invalid",
+            schema_version=schema_version,
+            fact_builder_version=fact_builder_version,
+            payload=payload,
+            projection_eligible=projection_eligible,
+            issues=("ct-envelope:bundle_invalid",),
+        )
+
+    recomputed_digest = compute_bundle_digest(
+        bundle, fact_builder_version=fact_builder_version
+    )
+    issues: list[str] = []
+    if bundle.bundle_digest != recomputed_digest:
+        issues.append("ct-envelope:embedded_bundle_digest_mismatch")
+    if expected_digest != recomputed_digest:
+        issues.append("ct-envelope:bundle_digest_mismatch")
+    if not _overlay_digest_matches(
+        envelope_schema_version=schema_version,
+        payload=payload,
+        raw_bundle=raw_bundle,
+        bundle=bundle,
+    ):
+        issues.append("ct-envelope:overlay_digest_mismatch")
+
+    source_record_id = source_identity.get("source_record_id")
+    source_revision = source_identity.get("source_revision")
+    if source_identity.get("source_record_type") != "runtime_observation":
+        issues.append("ct-envelope:source_record_type_invalid")
+    if not isinstance(source_record_id, str) or not source_record_id.startswith(
+        CT_FACTS_SOURCE_PREFIX
+    ):
+        issues.append("ct-envelope:source_record_id_invalid")
+    if source_revision != _OBSERVATION_SOURCE_REVISION:
+        issues.append("ct-envelope:source_revision_invalid")
+    if payload.get("commit_id") != f"ct-commit:{bundle.event_id}":
+        issues.append("ct-envelope:commit_id_invalid")
+    if audit is not None:
+        linked_event_id = audit.links.get("event_id")
+        if linked_event_id is not None and linked_event_id != bundle.event_id:
+            issues.append("ct-envelope:audit_event_identity_mismatch")
+        if (
+            linked_event_id is not None
+            and source_record_id != f"{CT_FACTS_SOURCE_PREFIX}{linked_event_id}"
+        ):
+            issues.append("ct-envelope:source_record_id_invalid")
+    if issues:
+        return CtEnvelopeDecodeResult(
+            kind="invalid",
+            schema_version=schema_version,
+            fact_builder_version=fact_builder_version,
+            payload=payload,
+            bundle=bundle,
+            source_record_id=(source_record_id if isinstance(source_record_id, str) else None),
+            projection_eligible=projection_eligible,
+            issues=tuple(issues),
+        )
+    return CtEnvelopeDecodeResult(
+        kind="full",
+        schema_version=schema_version,
+        fact_builder_version=fact_builder_version,
+        payload=payload,
+        bundle=bundle,
+        source_record_id=source_record_id,
+        source_revision=_OBSERVATION_SOURCE_REVISION,
+        projection_eligible=(
+            True if schema_version == LEGACY_CT_FACTS_ENVELOPE_VERSION else projection_eligible
+        ),
     )
 
 
@@ -854,17 +1070,10 @@ class CtProjectionService:
             )
 
     def _backfill(self, audit: AuditEvent) -> None:
-        evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
-        envelope = evidence.get("ct_transient_facts")
-        if not isinstance(envelope, dict):
-            # 无信封：当时未产生 commit 计划（flag off / 材料缺态 /
-            # 降级 bundle），无补投影可做，静默返回。
+        decoded = decode_ct_transient_facts(audit)
+        if decoded.kind == "absent":
             return
-        payload = envelope.get("payload")
-        if not isinstance(payload, dict):
-            return
-        if payload.get("_budget_dropped"):
-            # 预算降级引用：bundle 本体不在场，材料缺失，跳过留痕。
+        if decoded.kind == "budget_dropped":
             logger.info(
                 "ct replay projection backfill skipped for audit %s: "
                 "envelope was budget-degraded to a digest reference "
@@ -872,113 +1081,55 @@ class CtProjectionService:
                 audit.audit_id,
             )
             return
-        envelope_version = envelope.get("schema_version")
-        projection_eligible = payload.get("projection_eligible")
-        if envelope_version == CT_FACTS_ENVELOPE_VERSION:
-            if not isinstance(projection_eligible, bool):
-                logger.warning(
-                    "ct replay projection backfill skipped for audit %s: "
-                    "projection eligibility is missing or malformed "
-                    "(fail-closed)",
-                    audit.audit_id,
-                )
-                return
-            if not projection_eligible:
-                logger.info(
-                    "ct replay projection backfill skipped for audit %s: "
-                    "consumed overlay was committed audit-only",
-                    audit.audit_id,
-                )
-                return
-        elif envelope_version == LEGACY_CT_FACTS_ENVELOPE_VERSION:
-            # Schema 1.0 predates audit-only envelopes; absent means eligible.
-            if projection_eligible not in (None, True):
-                return
-        fact_builder_version = _fact_builder_version_for_envelope(envelope, payload)
-        if fact_builder_version is None:
+        if decoded.kind in {"unsupported", "invalid"}:
+            issue = decoded.issues[0] if decoded.issues else "ct-envelope:invalid"
+            message = {
+                "ct-envelope:bundle_digest_mismatch": (
+                    "rebuilt bundle digest does not match the envelope reference"
+                ),
+                "ct-envelope:embedded_bundle_digest_mismatch": (
+                    "embedded bundle_digest mismatches the recomputed digest"
+                ),
+                "ct-envelope:overlay_digest_mismatch": (
+                    "overlay digest does not match the complete assessment input"
+                ),
+                "ct-envelope:source_record_id_invalid": (
+                    "source_record_id fails the ct-facts: prefix form check"
+                ),
+                "ct-envelope:materials_missing": (
+                    "ct_transient_facts payload malformed (missing materials)"
+                ),
+                "ct-envelope:bundle_invalid": "bundle rebuild failed",
+                "ct-envelope:projection_eligibility_invalid": (
+                    "projection eligibility is missing or malformed"
+                ),
+                "ct-envelope:fact_builder_version_mismatch": (
+                    "unsupported or mismatched envelope/fact-builder version"
+                ),
+                "ct-envelope:unsupported_version": (
+                    "unsupported or mismatched envelope/fact-builder version"
+                ),
+            }.get(issue, issue)
             logger.warning(
                 "ct replay projection backfill skipped for audit %s: "
-                "unsupported or mismatched envelope/fact-builder version "
-                "(fail-closed)",
+                "%s (fail-closed)",
                 audit.audit_id,
+                message,
             )
             return
-        raw_bundle = payload.get("bundle")
-        expected_digest = payload.get("bundle_digest")
-        source_identity = payload.get("source_identity")
-        if (
-            not isinstance(raw_bundle, dict)
-            or not isinstance(expected_digest, str)
-            or not isinstance(source_identity, dict)
-        ):
+        assert decoded.bundle is not None
+        assert decoded.payload is not None
+        assert decoded.source_record_id is not None
+        assert decoded.fact_builder_version is not None
+        bundle = decoded.bundle
+        payload = decoded.payload
+        source_record_id = decoded.source_record_id
+        source_revision = decoded.source_revision
+        fact_builder_version = decoded.fact_builder_version
+        if decoded.projection_eligible is not True:
             logger.info(
                 "ct replay projection backfill skipped for audit %s: "
-                "ct_transient_facts payload malformed (missing materials)",
-                audit.audit_id,
-            )
-            return
-        source_record_id = source_identity.get("source_record_id")
-        raw_revision = source_identity.get("source_revision")
-        source_revision = (
-            raw_revision
-            if isinstance(raw_revision, int) and not isinstance(raw_revision, bool)
-            else _OBSERVATION_SOURCE_REVISION
-        )
-        # 03a 留痕观察项兑现：前缀形态 fail-closed 校验。
-        if not isinstance(source_record_id, str) or not source_record_id.startswith(
-            CT_FACTS_SOURCE_PREFIX
-        ):
-            logger.info(
-                "ct replay projection backfill skipped for audit %s: "
-                "source_record_id fails the ct-facts: prefix form check "
-                "(fail-closed)",
-                audit.audit_id,
-            )
-            return
-        try:
-            bundle = TransientSecurityFacts.model_validate(raw_bundle)
-        except Exception:  # noqa: BLE001 - 重建失败 → 缺材料跳过留痕。
-            logger.warning(
-                "ct replay projection backfill skipped for audit %s: "
-                "bundle rebuild failed (fail-closed)",
-                audit.audit_id,
-                exc_info=True,
-            )
-            return
-        recomputed_bundle_digest = compute_bundle_digest(
-            bundle,
-            fact_builder_version=fact_builder_version,
-        )
-        if bundle.bundle_digest != recomputed_bundle_digest:
-            # 评审 S6 digest 口径统一：_project_ct_facts 的 verify 期望值
-            # 取内嵌字段 bundle.bundle_digest，本处重建后、投影前显式
-            # 断言内嵌字段与重算值一致；不一致即跳过留痕（fail-closed）。
-            logger.warning(
-                "ct replay projection backfill skipped for audit %s: "
-                "embedded bundle_digest mismatches the recomputed digest "
-                "(fail-closed)",
-                audit.audit_id,
-            )
-            return
-        if recomputed_bundle_digest != expected_digest:
-            # 信封引用与重建结果失真：不得静默覆盖，跳过留痕。
-            logger.warning(
-                "ct replay projection backfill skipped for audit %s: "
-                "rebuilt bundle digest does not match the envelope "
-                "reference (fail-closed)",
-                audit.audit_id,
-            )
-            return
-        if not _overlay_digest_matches(
-            envelope_schema_version=envelope.get("schema_version"),
-            payload=payload,
-            raw_bundle=raw_bundle,
-            bundle=bundle,
-        ):
-            logger.warning(
-                "ct replay projection backfill skipped for audit %s: "
-                "overlay digest does not match the complete assessment "
-                "input (fail-closed)",
+                "consumed overlay was committed audit-only",
                 audit.audit_id,
             )
             return

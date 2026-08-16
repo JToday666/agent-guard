@@ -19,6 +19,7 @@ from agentguard_core import (
 from guard_api.models import ApprovalRequest
 from guard_api.storage.base import ControlPlaneStore, ProvenanceConflictError
 
+from .ct_provenance import CtProvenanceWriter
 from .redaction import (
     REDACTED,
     SUMMARY_TEXT_LIMIT,
@@ -37,6 +38,7 @@ class ProvenanceWriter:
 
     def __init__(self, *, store: ControlPlaneStore) -> None:
         self.store = store
+        self.ct_writer = CtProvenanceWriter(store=store)
 
     def record_audit_event(
         self,
@@ -55,6 +57,7 @@ class ProvenanceWriter:
                 approval=approval,
                 critic_review=critic_review,
             )
+            self.ct_writer.record_policy_evaluation(event)
             return
         if event.record_type == "runtime_outcome":
             self._record_runtime_outcome(event, audit_node)
