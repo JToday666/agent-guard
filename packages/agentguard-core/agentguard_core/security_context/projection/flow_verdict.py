@@ -27,17 +27,19 @@ fail-closed 纪律：
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from ...actions.models import ActionIR
 from ...signals.models import CoverageStatus, FlowStrength, FlowVerdict, TaintLabel
 from ..facts import FlowFact, StickyTaintSummary
 from ..snapshot import SecuritySnapshot
+from ..state import OnlineSecurityState
 
 __all__ = [
     "DANGEROUS_TAINTS",
     "EXTERNAL_DESTINATION_KINDS",
     "compute_flow_verdict",
+    "compute_flow_verdict_from_state",
 ]
 
 #: 构成"危险 flow"判定的 taint 集合（03 §7.1 数据外发矩阵覆盖
@@ -79,7 +81,11 @@ def _strongest(strengths: Iterable[FlowStrength]) -> FlowStrength | None:
     return best
 
 
-def _flow_data_truncated(snapshot: SecuritySnapshot) -> bool:
+def _flow_data_truncated(
+    *,
+    dirty_domains: Sequence[str],
+    sticky_taint_summaries: Sequence[StickyTaintSummary],
+) -> bool:
     """flow 数据截断/未决判定（02 §5.1 安全性驱逐与 bounded 状态口径）。
 
     - dataflow 域处于 dirty（投影被安全性驱逐/有界截断后未恢复）；
@@ -88,11 +94,9 @@ def _flow_data_truncated(snapshot: SecuritySnapshot) -> bool:
 
     任一成立即视为截断：``status`` 不得为 ``safe``。
     """
-    if "dataflow" in snapshot.dirty_domains:
+    if "dataflow" in dirty_domains:
         return True
-    return any(
-        summary.unresolved_flow_refs for summary in snapshot.sticky_taint_summaries
-    )
+    return any(summary.unresolved_flow_refs for summary in sticky_taint_summaries)
 
 
 def _dangerous_sticky_taints(
@@ -150,15 +154,57 @@ def compute_flow_verdict(
     ``evidence_refs`` 恒为空列表：生成器不伪造证据引用，由接线阶段按
     审计口径挂载。
     """
+    return _compute_flow_verdict(
+        flows=snapshot.flows,
+        sticky_taint_summaries=snapshot.sticky_taint_summaries,
+        dirty_domains=snapshot.dirty_domains,
+        action_ir=action_ir,
+        dataflow_status=(
+            dataflow_status
+            if dataflow_status is not None
+            else snapshot.coverage.dataflow.status
+        ),
+    )
+
+
+def compute_flow_verdict_from_state(
+    state: OnlineSecurityState,
+    action_ir: ActionIR,
+    *,
+    dataflow_status: CoverageStatus,
+) -> FlowVerdict:
+    """Evaluate the current action against an ephemeral online-state view.
+
+    Gate A uses this entrypoint after composing the historical Snapshot with
+    current transient facts. The caller supplies the coverage status computed
+    from that same state, preventing a forged overlay Snapshot or stale
+    snapshot digest.
+    """
+    return _compute_flow_verdict(
+        flows=state.relevant_flows,
+        sticky_taint_summaries=state.sticky_taint_summaries,
+        dirty_domains=state.dirty_domains,
+        action_ir=action_ir,
+        dataflow_status=dataflow_status,
+    )
+
+
+def _compute_flow_verdict(
+    *,
+    flows: Sequence[FlowFact],
+    sticky_taint_summaries: Sequence[StickyTaintSummary],
+    dirty_domains: Sequence[str],
+    action_ir: ActionIR,
+    dataflow_status: CoverageStatus,
+) -> FlowVerdict:
+    """Shared pure implementation for Snapshot and state-based entrypoints."""
     external_sink = _external_sink(action_ir)
-    dangerous_flows = [flow for flow in snapshot.flows if _is_dangerous(flow)]
+    dangerous_flows = [flow for flow in flows if _is_dangerous(flow)]
 
     if dangerous_flows:
         return FlowVerdict(
             status="violation",
-            strongest_strength=_strongest(
-                flow.strength for flow in dangerous_flows
-            ),
+            strongest_strength=_strongest(flow.strength for flow in dangerous_flows),
             taints=sorted(
                 {
                     taint
@@ -172,12 +218,8 @@ def compute_flow_verdict(
             evidence_refs=[],
         )
 
-    dataflow_status_resolved = (
-        dataflow_status
-        if dataflow_status is not None
-        else snapshot.coverage.dataflow.status
-    )
-    sticky_dangerous = _dangerous_sticky_taints(snapshot.sticky_taint_summaries)
+    dataflow_status_resolved = dataflow_status
+    sticky_dangerous = _dangerous_sticky_taints(sticky_taint_summaries)
 
     if dataflow_status_resolved == "not_applicable" and not sticky_dangerous:
         return FlowVerdict(
@@ -189,12 +231,13 @@ def compute_flow_verdict(
             evidence_refs=[],
         )
 
-    possible_link_present = any(
-        flow.strength == "possible" for flow in snapshot.flows
-    )
+    possible_link_present = any(flow.strength == "possible" for flow in flows)
     safe = (
         dataflow_status_resolved == "complete"
-        and not _flow_data_truncated(snapshot)
+        and not _flow_data_truncated(
+            dirty_domains=dirty_domains,
+            sticky_taint_summaries=sticky_taint_summaries,
+        )
         and not possible_link_present
         and not sticky_dangerous
     )
@@ -212,9 +255,9 @@ def compute_flow_verdict(
     # strongest_strength 仅在确有 flow 证据时透传 producer 值，不推断。
     return FlowVerdict(
         status="uncertain",
-        strongest_strength=_strongest(flow.strength for flow in snapshot.flows),
+        strongest_strength=_strongest(flow.strength for flow in flows),
         taints=sticky_dangerous,
         external_sink=external_sink,
-        path_refs=[flow.flow_id for flow in snapshot.flows],
+        path_refs=[flow.flow_id for flow in flows],
         evidence_refs=[],
     )

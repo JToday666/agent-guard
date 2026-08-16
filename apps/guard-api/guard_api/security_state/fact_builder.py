@@ -1,4 +1,4 @@
-"""CT-PR-02a/02b 事件 → transient 事实映射（ct-fact-1，无接线）。
+"""GuardEvent → transient 事实映射（ct-fact-2）。
 
 冻结出处（docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/）：
 
@@ -34,9 +34,10 @@ ActionIR 缺失仍沿用 ``action_ref_degraded``（§8.4 先例）。
 ``ct-fact:sensitive_outbound_preview``：敏感 content preview 且无稳定
 refs 时的最小 SecuritySignal（02 §8.6，不伪造 exact provenance）。
 
-版本决定（02 §12）：``FACT_BUILDER_VERSION`` 保持 ``ct-fact-1`` 不
-bump——Wave 2 只扩展事件分派与写侧语义字段（memory_facts /
-current_action），既读四事件产物语义与 digest 白名单零变化。
+版本决定（02 §12）：Gate A 将 verified visible refs 接入 model/action
+influence 边、传播服务端 taint，并扩展 current action data refs；
+这些都改变 fact 语义，因此 bump 为 ``ct-fact-2``。由于
+fact→typed delta 容器映射未变，不 bump projector。
 """
 
 from __future__ import annotations
@@ -88,6 +89,7 @@ from .fact_authority import (
 from .transient import (
     TransientSecurityFacts,
     compute_bundle_digest,
+    compute_overlay_digest,
 )
 
 #: 派生事实的统一 producer 标识（02 §10 fact_builder 职责行）。
@@ -189,6 +191,19 @@ def _flow(
         producer=_FACT_PRODUCER,
         evidence_refs=[],
     )
+
+
+def _visible_ref_taints(inputs: FactBuildInputs, ref: str) -> list[str]:
+    """Return server-verified upstream taints in the frozen deterministic order."""
+
+    labels: set[str] = set()
+    descriptor = inputs.upstream_descriptors.get(ref)
+    if descriptor is not None:
+        labels.update(descriptor.initial_taints)
+    memory_fact = inputs.upstream_memory_facts.get(ref)
+    if memory_fact is not None:
+        labels.update(memory_fact.taints)
+    return [label for label in TAINT_ORDER if label in labels]
 
 
 def _source_fact_from_descriptor(
@@ -301,10 +316,14 @@ def _handle_context_assembled(
 def _handle_model_input_prepared(
     event: GuardEvent, inputs: FactBuildInputs
 ) -> _PartialFacts:
-    """02 §8.2：visible set → model_input 装配流；缺失则降级。
+    """Gate A：verified visible set → current model input assembly edges。
 
     Runtime 无法稳定提供 source refs 时不建流、记 degradation；
-    不能从整段 prompt 文本猜“完整 provenance”。
+    不能从整段 prompt 文本猜“完整 provenance”。保留冻结的
+    ``assembled_into/exact/observed`` 装配语义，但 taint 只从
+    服务端已验证的 Snapshot descriptor/memory fact 传播。
+    model output 路径继续以 ``influenced_by/possible`` 表达 LLM
+    不透明变换。
     """
     if inputs.visible_refs is None:
         return _PartialFacts(
@@ -326,7 +345,7 @@ def _handle_model_input_prepared(
             relation="assembled_into",
             strength="exact",
             origin="observed",
-            taints=[],
+            taints=_visible_ref_taints(inputs, ref),
         )
         for index, ref in enumerate(inputs.visible_refs)
     ]
@@ -413,7 +432,7 @@ def _handle_model_output_produced(
                     relation="influenced_by",
                     strength="possible",
                     origin="semantic_inferred",
-                    taints=[],
+                    taints=_visible_ref_taints(inputs, ref),
                 )
             )
             index += 1
@@ -775,11 +794,12 @@ def _handle_message_send_proposed(
 def _handle_tool_call_proposed(
     event: GuardEvent, inputs: FactBuildInputs
 ) -> _PartialFacts:
-    """02 §8.7：data refs 流 + RecentActionFact 候选（无接线）。
+    """Gate A：verified refs → current action influence + action candidate。
 
-    ActionIR 继续由 Core normalizer 拥有；Context Track 只补 data refs
-    流（exact/deterministic）与 current RecentActionFact 候选
-    （Pre-decision，非 final decision）。
+    ActionIR 继续由 Core normalizer 拥有；Context Track 将服务端
+    验证的 visible refs 以 ``influenced_by/possible/
+    semantic_inferred`` 连到 current action，传播 Snapshot fact taint，
+    并写入 ``RecentActionFact.data_refs``。
 
     资源方向约定：CanonicalResource/DerivedResource 无独立方向
     字段，按 ActionIR 字段语义登记——destinations（出站）→
@@ -808,6 +828,34 @@ def _handle_tool_call_proposed(
         )
     flow_facts: list[FlowFact] = []
     index = 0
+    degradations: tuple[EvaluationDegradation, ...] = ()
+    visible_refs = inputs.visible_refs
+    if visible_refs is None:
+        # Missing or rejected visible set: do not emit any provenance edge.
+        # The action itself remains available to conservative assessment.
+        visible_refs = ()
+        degradations = (
+            _degradation(
+                event,
+                reason_code="ct-fact:visible_set_unavailable",
+                failure_kind="unavailable",
+            ),
+        )
+    for ref in visible_refs:
+        flow_facts.append(
+            _flow(
+                event=event,
+                scope_digest=inputs.scope_digest,
+                index=index,
+                source_ref=ref,
+                target_ref=f"action:{action_ir.action_id}",
+                relation="influenced_by",
+                strength="possible",
+                origin="semantic_inferred",
+                taints=_visible_ref_taints(inputs, ref),
+            )
+        )
+        index += 1
     for relation, resources in (
         ("written_to", action_ir.destinations),
         ("read_from", action_ir.resources),
@@ -840,13 +888,17 @@ def _handle_tool_call_proposed(
         effects=action_ir.effects,
         resource_ids=[resource.canonical_id for resource in action_ir.resources],
         destination_ids=[resource.canonical_id for resource in action_ir.destinations],
-        data_refs=list(action_ir.data_refs),
+        data_refs=list(dict.fromkeys((*action_ir.data_refs, *visible_refs))),
         # Pre-decision 候选：authority/decision 由 Core 评估链后置填充。
         authority_status="unknown",
         final_decision=None,
         evidence_refs=[],
     )
-    return _PartialFacts(flow_facts=tuple(flow_facts), current_action=current_action)
+    return _PartialFacts(
+        flow_facts=tuple(flow_facts),
+        current_action=current_action,
+        degradations=degradations,
+    )
 
 
 #: 事件分派表（02 §8.1-8.7）：Wave 1 读路径四事件 + Wave 2 写侧三
@@ -919,4 +971,7 @@ def build_transient_facts(
         degradations=partial.degradations + degradations,
         evidence_refs=(),
     )
-    return bundle.model_copy(update={"bundle_digest": compute_bundle_digest(bundle)})
+    stamped = bundle.model_copy(update={"bundle_digest": compute_bundle_digest(bundle)})
+    return stamped.model_copy(
+        update={"overlay_digest": compute_overlay_digest(stamped)}
+    )

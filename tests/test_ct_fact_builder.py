@@ -1,4 +1,4 @@
-"""CT-PR-02a fact_builder 契约测试（读路径四事件，ct-fact-1，无接线）。
+"""CT fact_builder 读路径与 Gate A provenance 契约测试。
 
 口径依据：
 
@@ -552,7 +552,10 @@ def test_fact_replay_content_perturbation_changes_digest() -> None:
     )
     perturbed = build_transient_facts(
         event=_context_event(
-            [ct_context_source(), ct_context_source(source_id="ctx-2", source_type="rag")]
+            [
+                ct_context_source(),
+                ct_context_source(source_id="ctx-2", source_type="rag"),
+            ]
         ),
         inputs=inputs,
     )

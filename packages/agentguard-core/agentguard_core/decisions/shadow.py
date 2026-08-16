@@ -57,11 +57,31 @@ from ..decisions.evidence import (
 )
 from ..events.contracts import GuardEvent
 from ..policies.models import PolicyBundle
-from ..security_context.coverage import COVERAGE_DOMAINS, compute_coverage
+from ..security_context.assessment_overlay import (
+    ASSESSMENT_OVERLAY_COMPONENT_ID,
+    AssessmentTransientFacts,
+    build_assessment_overlay,
+    compute_overlay_digest,
+)
+from ..security_context.coverage import (
+    COVERAGE_DOMAINS,
+    GapContext,
+    compute_coverage,
+    default_coverage_context,
+)
 from ..security_context.projection.authority_verdict import (
     compute_authority_verdict,
 )
-from ..security_context.projection.flow_verdict import compute_flow_verdict
+from ..security_context.projection.behavior_matchers import (
+    generate_behavior_signals,
+)
+from ..security_context.projection.flow_verdict import (
+    compute_flow_verdict,
+    compute_flow_verdict_from_state,
+)
+from ..security_context.projection.provenance_coverage import (
+    DATAFLOW_PROVIDER_KEY,
+)
 from ..security_context.projector import PROJECTOR_VERSION
 from ..security_context.required_checks import (
     PolicyProfile,
@@ -128,6 +148,10 @@ class ShadowOutcome:
 
     assessment: FastAssessment
     coverage: CoverageMap
+    # Exact digest of the transient overlay that reached every Core component.
+    # ``None`` means no overlay was supplied or assessment degraded before the
+    # overlay was fully consumed; callers must not commit/project that bundle.
+    consumed_overlay_digest: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -282,14 +306,71 @@ def _legacy_signals_and_degradations(
     degradations: list[EvaluationDegradation] = []
     for index, result in enumerate(detection_results):
         signals.append(
-            legacy_detection_to_signal(
-                result, event_id=event_id, result_index=index
-            )
+            legacy_detection_to_signal(result, event_id=event_id, result_index=index)
         )
         degradation = legacy_failure_to_degradation(result, event_id=event_id)
         if degradation is not None:
             degradations.append(degradation)
     return signals, degradations
+
+
+def _overlay_lookup_targets(action_ir: ActionIR) -> tuple[str, ...]:
+    """Deterministic current-action and normalized-sink lookup roots."""
+    refs = {
+        action_ir.action_id,
+        f"action:{action_ir.action_id}",
+        action_ir.event_id,
+        f"event:{action_ir.event_id}",
+        *(resource.canonical_id for resource in action_ir.resources),
+        *(destination.canonical_id for destination in action_ir.destinations),
+    }
+    return tuple(sorted(refs))
+
+
+def _overlay_truncation_degradation(event_id: str) -> EvaluationDegradation:
+    return EvaluationDegradation(
+        degradation_id=f"gate-a:overlay-truncated:{event_id}",
+        component_id=ASSESSMENT_OVERLAY_COMPONENT_ID,
+        domain="dataflow",
+        required_for_action=True,
+        failure_kind="overflow",
+        reason_codes=["v21-05:flow_lookup_truncated"],
+        evidence_refs=[],
+    )
+
+
+def _overlay_incomplete_reasons(
+    transient_facts: AssessmentTransientFacts,
+) -> tuple[str, ...]:
+    """Return every producer-declared gap in the current fact graph.
+
+    ``TransientSecurityFacts`` freezes the rule that any degradation means the
+    graph is incomplete.  Keeping a reason allowlist here would let a newly
+    introduced handler failure silently become eligible for ``CLEAR_ALLOW``.
+    """
+
+    reasons: set[str] = set()
+    for degradation in transient_facts.degradations:
+        if degradation.reason_codes:
+            reasons.update(degradation.reason_codes)
+        else:
+            reasons.add(degradation.degradation_id)
+    return tuple(sorted(reasons))
+
+
+def _overlay_incomplete_degradation(
+    event_id: str, *, reason_codes: Sequence[str]
+) -> EvaluationDegradation:
+    """Promote app-observed lineage gaps into a required Core degradation."""
+    return EvaluationDegradation(
+        degradation_id=f"gate-a:overlay-incomplete:{event_id}",
+        component_id=ASSESSMENT_OVERLAY_COMPONENT_ID,
+        domain="dataflow",
+        required_for_action=True,
+        failure_kind="unavailable",
+        reason_codes=list(reason_codes),
+        evidence_refs=[],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +386,7 @@ def _assess_kernel(
     server_secret: bytes,
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
+    transient_facts: AssessmentTransientFacts | None = None,
 ) -> ShadowOutcome:
     """V21-08 shadow 与 V21-09 正式 assess 的**唯一**编排主体。
 
@@ -321,6 +403,7 @@ def _assess_kernel(
     signals, degradations = _legacy_signals_and_degradations(
         detection_results, event_id=event.event_id
     )
+    consumed_overlay_digest: str | None = None
 
     # 1) ActionIR 构建（失败 → 全降级路径，保守 impact high）。
     action_ir: ActionIR | None = None
@@ -375,6 +458,10 @@ def _assess_kernel(
     else:
         snapshot_digest = snapshot.snapshot_digest
         task_digest = snapshot.task.task_digest if snapshot.task else None
+        memory_facts_for_fusion = snapshot.memory_facts
+        flows_for_fusion = snapshot.flows
+        behavior_aggregates_for_fusion = snapshot.behavior_aggregates
+        overlay_digest_valid = True
         try:
             plan = build_required_check_plan(
                 action_ir,
@@ -383,38 +470,119 @@ def _assess_kernel(
                     policy_digest=snapshot.policy_digest,
                 ),
             )
-            state = _state_from_snapshot(
-                snapshot, revoked_grant_ids=revoked_grant_ids
-            )
-            coverage = compute_coverage(
-                state, plan, projector_version=snapshot.projector_version
-            )
-            authority = compute_authority_verdict(
-                state,
-                action_ir,
-                evaluated_at=snapshot.evaluation_clock.evaluated_at,
-            )
-            flow = compute_flow_verdict(
-                snapshot,
-                action_ir,
-                # flow verdict 的 dataflow 口径用当前动作 plan 派生的
-                # coverage（02 §6.5）：bootstrap snapshot 是全七域视图，
-                # 低影响动作无存储 flow 时 dataflow 报 unknown 会导致
-                # verdict 恒 uncertain；当前 plan 不要求 dataflow 时应为
-                # not_applicable，无危险 flow 即构成安全证据。
-                dataflow_status=coverage.dataflow.status,
-            )
+            state = _state_from_snapshot(snapshot, revoked_grant_ids=revoked_grant_ids)
+            if transient_facts is None:
+                # Compatibility path: keep the exact pre-Gate-A component
+                # inputs and ordering. This is intentionally a separate branch
+                # rather than an empty overlay so assessment parity is strict.
+                coverage = compute_coverage(
+                    state, plan, projector_version=snapshot.projector_version
+                )
+                authority = compute_authority_verdict(
+                    state,
+                    action_ir,
+                    evaluated_at=snapshot.evaluation_clock.evaluated_at,
+                )
+                flow = compute_flow_verdict(
+                    snapshot,
+                    action_ir,
+                    dataflow_status=coverage.dataflow.status,
+                )
+            else:
+                if transient_facts.overlay_digest != compute_overlay_digest(
+                    transient_facts
+                ):
+                    raise ValueError(
+                        "assessment transient overlay_digest changed after validation"
+                    )
+                if transient_facts.event_id != event.event_id:
+                    raise ValueError(
+                        "assessment transient event does not match GuardEvent"
+                    )
+                if transient_facts.scope_digest != snapshot.scope.scope_digest:
+                    raise ValueError(
+                        "assessment transient scope does not match Snapshot"
+                    )
+                if (
+                    transient_facts.current_action is not None
+                    and transient_facts.current_action.action_id != action_ir.action_id
+                ):
+                    raise ValueError(
+                        "assessment transient action does not match ActionIR"
+                    )
+
+                overlay = build_assessment_overlay(
+                    state,
+                    transient_facts,
+                    target_refs=_overlay_lookup_targets(action_ir),
+                )
+                state = overlay.state
+                incomplete_reasons = _overlay_incomplete_reasons(transient_facts)
+                context = default_coverage_context(state, plan).model_copy(
+                    update={
+                        "gap_context": GapContext(
+                            parent_event_ids=frozenset(action_ir.parent_event_ids),
+                            stable_refs=frozenset(overlay.stable_source_refs),
+                        ),
+                        "truncated": (("dataflow",) if overlay.truncated else ()),
+                        "provider_available": (
+                            {DATAFLOW_PROVIDER_KEY: False} if incomplete_reasons else {}
+                        ),
+                    }
+                )
+                coverage = compute_coverage(
+                    state,
+                    plan,
+                    projector_version=snapshot.projector_version,
+                    context=context,
+                )
+                authority = compute_authority_verdict(
+                    state,
+                    action_ir,
+                    evaluated_at=snapshot.evaluation_clock.evaluated_at,
+                )
+                flow = compute_flow_verdict_from_state(
+                    state,
+                    action_ir,
+                    dataflow_status=coverage.dataflow.status,
+                )
+                signals = [
+                    *signals,
+                    *transient_facts.signals,
+                    *generate_behavior_signals(state),
+                ]
+                degradations = [
+                    *degradations,
+                    *transient_facts.degradations,
+                ]
+                if overlay.truncated:
+                    degradations.append(_overlay_truncation_degradation(event.event_id))
+                if incomplete_reasons:
+                    degradations.append(
+                        _overlay_incomplete_degradation(
+                            event.event_id,
+                            reason_codes=incomplete_reasons,
+                        )
+                    )
+                memory_facts_for_fusion = state.memory_index
+                flows_for_fusion = list(overlay.relevant_flows)
+                behavior_aggregates_for_fusion = state.behavior_aggregates
+                overlay_digest_valid = _digest_well_formed(
+                    transient_facts.overlay_digest
+                )
+                consumed_overlay_digest = transient_facts.overlay_digest
         except Exception:  # noqa: BLE001 - 组件异常收敛为 shadow 降级。
             degraded_reason = REASON_COMPONENT_FAILED
             plan = _degraded_plan(impact, REASON_COMPONENT_FAILED)
-            coverage = _unknown_coverage(
-                PROJECTOR_VERSION, REASON_COMPONENT_FAILED
-            )
+            coverage = _unknown_coverage(PROJECTOR_VERSION, REASON_COMPONENT_FAILED)
             authority = _degraded_authority()
             flow = _degraded_flow()
 
     if degraded_reason is not None:
-        degradations = [*degradations, _shadow_degradation(degraded_reason, event_id=event.event_id)]
+        degradations = [
+            *degradations,
+            _shadow_degradation(degraded_reason, event_id=event.event_id),
+        ]
         disposition = "DEFER"
         fusion_reasons = [f"v21-08:shadow_degraded:{degraded_reason}"]
     else:
@@ -429,14 +597,15 @@ def _assess_kernel(
             flow=flow,
             coverage=coverage,
             required_domains=plan.required_domains,
-            memory_facts=snapshot.memory_facts,  # type: ignore[union-attr]
-            flows=snapshot.flows,  # type: ignore[union-attr]
-            behavior_aggregates=snapshot.behavior_aggregates,  # type: ignore[union-attr]
+            memory_facts=memory_facts_for_fusion,
+            flows=flows_for_fusion,
+            behavior_aggregates=behavior_aggregates_for_fusion,
             requires_semantic=False,
             security_digests_valid=(
                 _digest_well_formed(policy_digest)
                 and _digest_well_formed(snapshot_digest)
                 and _digest_well_formed(task_digest)
+                and overlay_digest_valid
             ),
         )
 
@@ -480,7 +649,11 @@ def _assess_kernel(
             "assessment_digest": digest,
         }
     )
-    return ShadowOutcome(assessment=finalized, coverage=coverage)
+    return ShadowOutcome(
+        assessment=finalized,
+        coverage=coverage,
+        consumed_overlay_digest=consumed_overlay_digest,
+    )
 
 
 def assess(
@@ -491,6 +664,7 @@ def assess(
     server_secret: bytes,
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
+    transient_facts: AssessmentTransientFacts | None = None,
 ) -> FastAssessment:
     """V21-09 正式 Core API（完整方案 §15，L3181-3198）。
 
@@ -518,6 +692,7 @@ def assess(
         server_secret=server_secret,
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
+        transient_facts=transient_facts,
     ).assessment
 
 
@@ -529,6 +704,7 @@ def shadow_assess_with_coverage(
     server_secret: bytes,
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
+    transient_facts: AssessmentTransientFacts | None = None,
 ) -> ShadowOutcome:
     """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
 
@@ -542,6 +718,7 @@ def shadow_assess_with_coverage(
         server_secret=server_secret,
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
+        transient_facts=transient_facts,
     )
 
 
@@ -553,6 +730,7 @@ def shadow_assess(
     server_secret: bytes,
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
+    transient_facts: AssessmentTransientFacts | None = None,
 ) -> FastAssessment:
     """V21-08 shadow 快路径评估（纯函数；同输入必同输出）。
 
@@ -583,6 +761,7 @@ def shadow_assess(
         server_secret=server_secret,
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
+        transient_facts=transient_facts,
     ).assessment
 
 

@@ -104,6 +104,7 @@ from .v21_shadow import (
 )
 
 if TYPE_CHECKING:
+    from agentguard_core.security_context import AssessmentTransientFacts
     from agentguard_core.semantic.models import SemanticJudgment
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ __all__ = [
     "PIPELINE_CLOCK_VERSION",
     "V21PhaseBOutcome",
     "V21PhaseCPlan",
+    "V21PhaseAPrepared",
     "V21PipelineMaterials",
     "V21PipelineService",
     "build_evaluation_delta",
@@ -171,6 +173,30 @@ PhaseADegradedKind = Literal["snapshot_absent", "component_failure"]
 
 
 @dataclass(frozen=True)
+class V21PhaseAPrepared:
+    """Phase A 的只读准备材料，尚未执行 V2 shadow assessment。
+
+    Gate A 把事实构建放在历史 Snapshot 读取与 assessment 之间。这个
+    中间形态持有 legacy 单跑结果和同源 Snapshot，允许 CT 构造一次
+    transient bundle 后，再把同一 bundle 作为 pre-commit overlay
+    交给 Core。它不包含可持久化事实，也不改变历史 Snapshot。
+    """
+
+    event_id: str
+    bundle: PolicyBundle
+    policy_revision: str | None
+    decision: GuardDecision
+    detection_results: Sequence[DetectionResult]
+    snapshot: SecuritySnapshot | None
+    state_version: int
+    revoked_grant_ids: list[str]
+    clock: EvaluationClock
+    task_id: str | None
+    scope_digest: str | None
+    degraded_kind: PhaseADegradedKind | None
+
+
+@dataclass(frozen=True)
 class V21PipelineMaterials:
     """Phase A 事务外产出（Phase B 短事务消费材料）。
 
@@ -194,6 +220,9 @@ class V21PipelineMaterials:
     task_id: str | None
     scope_digest: str | None
     degraded_kind: PhaseADegradedKind | None
+    # Exact Core acknowledgement for Gate A. ``None`` forbids committing the
+    # candidate CT bundle even when shadow safely converged to DEFER.
+    consumed_overlay_digest: str | None
 
 
 @dataclass(frozen=True)
@@ -313,8 +342,9 @@ class V21PipelineService:
         store: ControlPlaneStore,
         state_service: SecurityStateService,
         policy_service: PolicyService,
-        semantic_provider: Callable[[GuardEvent, FastAssessment], "SemanticJudgment | None"]
-        | None = None,
+        semantic_provider: (
+            Callable[[GuardEvent, FastAssessment], "SemanticJudgment | None"] | None
+        ) = None,
     ) -> None:
         self._store = store
         self._state_service = state_service
@@ -381,6 +411,56 @@ class V21PipelineService:
             return None
 
     def _run_phase_a(self, event: GuardEvent) -> V21PipelineMaterials | None:
+        prepared = self._prepare_phase_a(event)
+        return self._finish_phase_a(event, prepared, transient_facts=None)
+
+    def prepare_phase_a(self, event: GuardEvent) -> V21PhaseAPrepared | None:
+        """读取 legacy/policy/Snapshot，但暂不执行 shadow assessment。
+
+        Gate A 生产编排使用这个边界在同一历史 Snapshot 上构造当前事件
+        transient facts。异常仍按既有旁路纪律收敛为 ``None``。
+        """
+
+        if not self.enabled:
+            return None
+        try:
+            return self._prepare_phase_a(event)
+        except Exception:  # noqa: BLE001 - shadow 旁路不得影响 legacy。
+            logger.warning(
+                "v21 pipeline phase A preparation failed for event %s; "
+                "falling back to V21-08 shadow path",
+                event.event_id,
+                exc_info=True,
+            )
+            return None
+
+    def finish_phase_a(
+        self,
+        event: GuardEvent,
+        prepared: V21PhaseAPrepared,
+        *,
+        transient_facts: "AssessmentTransientFacts | None" = None,
+    ) -> V21PipelineMaterials | None:
+        """以历史 Snapshot + 当前 transient overlay 完成 shadow assessment。"""
+
+        if not self.enabled:
+            return None
+        try:
+            return self._finish_phase_a(
+                event,
+                prepared,
+                transient_facts=transient_facts,
+            )
+        except Exception:  # noqa: BLE001 - shadow 旁路不得影响 legacy。
+            logger.warning(
+                "v21 pipeline phase A assessment failed for event %s; "
+                "falling back to V21-08 shadow path",
+                event.event_id,
+                exc_info=True,
+            )
+            return None
+
+    def _prepare_phase_a(self, event: GuardEvent) -> V21PhaseAPrepared:
         assert self._server_secret is not None
 
         # 策略解析与 legacy 单跑（detection 不双跑：decision 与
@@ -392,9 +472,7 @@ class V21PipelineService:
         else:
             bundle = self._policy_service.current_snapshot()
             policy_revision = None
-        decision, detection_results = GuardEngine().evaluate_with_results(
-            event, bundle
-        )
+        decision, detection_results = GuardEngine().evaluate_with_results(event, bundle)
 
         clock = EvaluationClock(
             evaluated_at=event.timestamp,
@@ -409,17 +487,7 @@ class V21PipelineService:
                 event.event_id,
                 exc_info=True,
             )
-            outcome = shadow_assess_with_coverage(
-                event,
-                bundle,
-                None,
-                server_secret=self._server_secret,
-                detection_results=detection_results,
-            )
-            assessment = _recategorize_shadow_degradation(
-                outcome.assessment, reason_code=REASON_SNAPSHOT_READ_FAILED
-            )
-            return V21PipelineMaterials(
+            return V21PhaseAPrepared(
                 event_id=event.event_id,
                 bundle=bundle,
                 policy_revision=policy_revision,
@@ -428,8 +496,6 @@ class V21PipelineService:
                 snapshot=None,
                 state_version=0,
                 revoked_grant_ids=[],
-                assessment=assessment,
-                coverage=outcome.coverage,
                 clock=clock,
                 task_id=_task_claim(event),
                 scope_digest=None,
@@ -437,63 +503,75 @@ class V21PipelineService:
             )
 
         snapshot, revoked_grant_ids, task_id, scope_digest = resolved
-        if snapshot is None:
-            # 无 task 引用 / claim 无权威 TaskFact：degraded_no_snapshot
-            # 语义（V21-08 行为保持，禁伪造 Snapshot，01 §25）。
-            outcome = shadow_assess_with_coverage(
-                event,
-                bundle,
-                None,
-                server_secret=self._server_secret,
-                detection_results=detection_results,
-            )
-            return V21PipelineMaterials(
-                event_id=event.event_id,
-                bundle=bundle,
-                policy_revision=policy_revision,
-                decision=decision,
-                detection_results=list(detection_results),
-                snapshot=None,
-                state_version=0,
-                revoked_grant_ids=list(revoked_grant_ids),
-                assessment=outcome.assessment,
-                coverage=outcome.coverage,
-                clock=clock,
-                task_id=task_id,
-                scope_digest=scope_digest,
-                degraded_kind="snapshot_absent",
-            )
-
-        # 正常路径：正式 Core 内核 assess（与 GuardEngine.assess 共享
-        # _assess_kernel，逐字节 parity；with_coverage 形态仅为同源
-        # 透出 coverage）；revoked 注入真实集（D3 同源同锁读取）。
-        outcome = shadow_assess_with_coverage(
-            event,
-            bundle,
-            snapshot,
-            server_secret=self._server_secret,
-            detection_results=detection_results,
-            revoked_grant_ids=revoked_grant_ids,
-        )
-        if self._semantic_provider is not None:
-            # V21-09 恒 None 分支；钩子在 assess 后 revalidate 前，
-            # 天然事务外（03 §12）。产物 V21-09 不消费，仅预留。
-            self._semantic_provider(event, outcome.assessment)
-        return V21PipelineMaterials(
+        return V21PhaseAPrepared(
             event_id=event.event_id,
             bundle=bundle,
             policy_revision=policy_revision,
             decision=decision,
             detection_results=list(detection_results),
             snapshot=snapshot,
-            state_version=snapshot.state_version,
+            state_version=snapshot.state_version if snapshot is not None else 0,
             revoked_grant_ids=list(revoked_grant_ids),
-            assessment=outcome.assessment,
-            coverage=outcome.coverage,
             clock=clock,
             task_id=task_id,
             scope_digest=scope_digest,
-            degraded_kind=None,
+            degraded_kind=(None if snapshot is not None else "snapshot_absent"),
+        )
+
+    def _finish_phase_a(
+        self,
+        event: GuardEvent,
+        prepared: V21PhaseAPrepared,
+        *,
+        transient_facts: "AssessmentTransientFacts | None",
+    ) -> V21PipelineMaterials:
+        assert self._server_secret is not None
+        if prepared.event_id != event.event_id:
+            raise ValueError("phase A prepared materials do not match event_id")
+
+        assess_kwargs: dict[str, Any] = {
+            "server_secret": self._server_secret,
+            "detection_results": prepared.detection_results,
+        }
+        if prepared.snapshot is not None:
+            assess_kwargs["revoked_grant_ids"] = prepared.revoked_grant_ids
+        # Do not pass the new keyword on the compatibility path. Besides keeping
+        # old monkeypatched call sites valid, this guarantees that absence of an
+        # overlay exercises the exact pre-Gate-A Core path.
+        if transient_facts is not None:
+            assess_kwargs["transient_facts"] = transient_facts
+        outcome = shadow_assess_with_coverage(
+            event,
+            prepared.bundle,
+            prepared.snapshot,
+            **assess_kwargs,
+        )
+        assessment = outcome.assessment
+        if prepared.degraded_kind == "component_failure":
+            assessment = _recategorize_shadow_degradation(
+                assessment,
+                reason_code=REASON_SNAPSHOT_READ_FAILED,
+            )
+        if self._semantic_provider is not None and prepared.snapshot is not None:
+            # V21-09 恒 None 分支；钩子在 assess 后 revalidate 前，
+            # 天然事务外（03 §12）。产物 V21-09 不消费，仅预留。
+            self._semantic_provider(event, assessment)
+        return V21PipelineMaterials(
+            event_id=prepared.event_id,
+            bundle=prepared.bundle,
+            policy_revision=prepared.policy_revision,
+            decision=prepared.decision,
+            detection_results=list(prepared.detection_results),
+            snapshot=prepared.snapshot,
+            state_version=prepared.state_version,
+            revoked_grant_ids=list(prepared.revoked_grant_ids),
+            assessment=assessment,
+            coverage=outcome.coverage,
+            clock=prepared.clock,
+            task_id=prepared.task_id,
+            scope_digest=prepared.scope_digest,
+            degraded_kind=prepared.degraded_kind,
+            consumed_overlay_digest=outcome.consumed_overlay_digest,
         )
 
     def _resolve_snapshot_v(
@@ -622,9 +700,7 @@ class V21PipelineService:
             current_snapshot_digest=current_snapshot_digest,
         )
         stale_codes = (
-            list(revalidation.reason_codes)
-            if revalidation.status == "stale"
-            else []
+            list(revalidation.reason_codes) if revalidation.status == "stale" else []
         )
         evidence = build_decision_evidence_v21(
             materials.assessment,
@@ -737,16 +813,12 @@ class V21PipelineService:
         scope_digest = plan.scope_digest
         with self._state_service.store_access.scope_lock(scope_digest):
             self._state_service.ensure_ready(scope_digest)
-            current = self._state_service.store_access.get_security_state(
-                scope_digest
-            )
+            current = self._state_service.store_access.get_security_state(scope_digest)
             # S2 缺态哨兵口径统一（与 Phase B 同为 -1）：ensure_ready
             # 后 current 正常必在场；-1 不与任何真实 state_version
             # （empty_online_state 初始版本为 0）碰撞，缺态时必然
             # 触发 base 漂移跳过分支（fail-closed）而非误投影。
-            base_state_version = (
-                current.state_version if current is not None else -1
-            )
+            base_state_version = current.state_version if current is not None else -1
             if base_state_version != plan.delta.base_state_version:
                 # base 漂移（Phase B→C 窗口内被其他投影推进）：信封
                 # 引用已冻结，不 rebase、不重试、不置脏。S1 结构化
@@ -784,8 +856,7 @@ class V21PipelineService:
                 verify_source_committed=self._verify_evaluation_committed,
             )
         logger.info(
-            "v21-09 evaluation projection %s for audit %s "
-            "(state_version=%s)",
+            "v21-09 evaluation projection %s for audit %s " "(state_version=%s)",
             result.outcome,
             plan.audit_id,
             result.state_version,

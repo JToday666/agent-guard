@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
 from ..ids import new_id
 
@@ -26,9 +32,24 @@ class SecurityContext(BaseModel):
     agent_id: str = "main"
     current_step: str = "before_tool"
     model_intent: str | None = None
+    # Gate A current-event provenance ingress.  ``None`` means the Runtime
+    # cannot prove the visible set, while an explicit empty tuple means it
+    # proved that the set is empty.  The wrap serializer below preserves the
+    # legacy wire shape on every supported Pydantic >=2.9 release; field-level
+    # ``exclude_if`` is newer than the package's declared minimum.
+    visible_source_refs: tuple[str, ...] | None = None
     context_sources: list[dict[str, Any]] = Field(default_factory=list)
     derived_paths: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _serialize_optional_visible_refs(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        serialized = handler(self)
+        if self.visible_source_refs is None:
+            serialized.pop("visible_source_refs", None)
+        return serialized
 
 
 class ToolDescriptor(BaseModel):
