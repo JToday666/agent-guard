@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0.0",
+  "id": "RM-00",
+  "exact_title": "R-0 — 路线图基础与执行控制面",
+  "kind": "task",
+  "roles": ["task"],
+  "lane": "baseline",
+  "lifecycle": "in_progress",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": ["roadmap-catalog-and-generated"],
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/roadmap/README.md",
+      "heading": "## 1. 制品和真值边界",
+      "line_hint": 7
+    }
+  ],
+  "evidence_refs": ["evidence/RM-00/EV-RM-00-WORKTREE.json"],
+  "acceptance_parent": null,
+  "work": {
+    "branch": "codex/roadmap-control",
+    "worktree_slug": "agent-guard-roadmap-control",
+    "owner": "integration-owner",
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "started_at": null,
+    "substate": "active"
+  },
+  "notes": [
+    "Bootstrap allocation: this node records the isolated foundation worktree before the control plane can enforce its own claim protocol.",
+    "The foundation branch was rebased from its original cdf3625 bootstrap base to current origin/dev f435bff before handoff.",
+    "Keep amber until implementation, tests and acceptance are merged into origin/dev; only then close it green."
+  ]
+}

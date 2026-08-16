@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-RM-00-WORKTREE",
+  "node_id": "RM-00",
+  "kind": "worktree",
+  "ref": "codex/roadmap-control",
+  "status": "pending",
+  "summary": "The roadmap control plane is being implemented and verified in its dedicated foundation worktree.",
+  "recorded_at": null,
+  "metadata": {
+    "worktree": "/tmp/agent-guard-roadmap-control",
+    "base_sha": "cdf3625736f9a4e054d022ee0f64592e4405f581",
+    "bootstrap_exception": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-R05-WORKTREE",
+  "node_id": "R05",
+  "kind": "worktree",
+  "ref": "codex/rte-05-integration",
+  "status": "pending",
+  "summary": "A dirty isolated worktree shows formal RTE-05 integration is underway; completion and Gate B evidence are still pending.",
+  "recorded_at": null,
+  "metadata": {
+    "worktree": "/tmp/agent-guard-rte05-integration",
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "shared_surface_conflict_with": "I01"
+  }
+}

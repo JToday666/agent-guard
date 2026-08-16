@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-I01-WORKTREE-F435BFF",
+  "node_id": "I01",
+  "kind": "worktree",
+  "ref": "codex/gate-a-int-pr-01@f435bff",
+  "status": "pending",
+  "summary": "The dirty Gate A integration worktree is based on current origin/dev; implementation and acceptance remain unmerged.",
+  "recorded_at": null,
+  "metadata": {
+    "worktree": "/home/today/dev/agent-guard-gate-a",
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "shared_surface_conflict_with": "R05"
+  }
+}

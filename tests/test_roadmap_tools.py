@@ -140,9 +140,9 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     document = build_normalized(roadmap_root)
     nodes = normalized_nodes(document)
 
-    for node_id in ("FE04", "S1"):
+    for node_id in ("FE04", "S1", "R05P"):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("I01", "R05P"):
+    for node_id in ("I01", "R05", "RM-00"):
         assert nodes[node_id]["effective_status"] == "in_progress"
     for node_id in ("RSC-CT01", "CT05", "CT03R"):
         assert nodes[node_id]["effective_status"] == "ready"
@@ -155,7 +155,7 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
     assert {"RSC-CT01", "CT05", "CT03R"} <= ready_ids
-    assert {"FE04", "S1", "I01", "R05P", "C10"}.isdisjoint(ready_ids)
+    assert {"FE04", "S1", "I01", "R05P", "R05", "RM-00", "C10"}.isdisjoint(ready_ids)
 
 
 def test_ready_is_derived_and_cannot_be_written_into_machine_source(
@@ -287,6 +287,104 @@ def test_completed_lifecycle_requires_verified_completion_evidence(
     result = run_tool(roadmap_root, "validate")
 
     assert_validation_failure(result, "evidence", "verified", "completed")
+
+
+def test_gate_exit_is_blocked_by_each_unfinished_atomic_acceptance(
+    roadmap_root: Path,
+) -> None:
+    gate = normalized_nodes(build_normalized(roadmap_root))["G-A"]
+
+    assert gate["can_exit"] is False
+    acceptance_blockers = {
+        item["from"]
+        for item in gate["blocked_reasons"]
+        if str(item.get("from", "")).startswith("A-GA-")
+    }
+    assert acceptance_blockers == {f"A-GA-{index:02d}" for index in range(1, 9)}
+
+
+def test_append_only_evidence_is_referenced_atomically_when_task_closes(
+    roadmap_root: Path,
+) -> None:
+    before_generated = {
+        name: (generated_dir(roadmap_root) / name).read_bytes()
+        for name in GENERATED_FILENAMES
+    }
+    claim = run_tool(
+        roadmap_root,
+        "claim",
+        "CT03R",
+        "--branch",
+        "codex/ct03r-test",
+        "--owner",
+        "test-owner",
+        "--worktree-slug",
+        "ct03r-test",
+        "--base-sha",
+        "cdf3625",
+        "--expected-revision",
+        "0",
+    )
+    assert_succeeds(claim)
+    after_claim_generated = {
+        name: (generated_dir(roadmap_root) / name).read_bytes()
+        for name in GENERATED_FILENAMES
+    }
+    assert after_claim_generated != before_generated
+
+    evidence = run_tool(
+        roadmap_root,
+        "add-evidence",
+        "CT03R",
+        "--kind",
+        "commit",
+        "--ref",
+        "deadbee",
+        "--summary",
+        "merged test implementation",
+        "--status",
+        "verified",
+    )
+    assert_succeeds(evidence)
+    assert {
+        name: (generated_dir(roadmap_root) / name).read_bytes()
+        for name in GENERATED_FILENAMES
+    } == after_claim_generated
+
+    close = run_tool(
+        roadmap_root,
+        "close",
+        "CT03R",
+        "--commit",
+        "deadbee",
+        "--expected-revision",
+        "1",
+    )
+    assert_succeeds(close)
+    closed = read_json(object_path(roadmap_root, "nodes", "CT03R"))
+    assert closed["lifecycle"] == "completed"
+    assert closed["revision"] == 2
+    assert any("evidence/CT03R/" in ref for ref in closed["evidence_refs"])
+    assert_succeeds(run_tool(roadmap_root, "validate"))
+
+
+def test_close_rejects_unmet_start_exit_and_resource_blockers(
+    roadmap_root: Path,
+) -> None:
+    before = read_json(object_path(roadmap_root, "nodes", "I01"))
+
+    result = run_tool(
+        roadmap_root,
+        "close",
+        "I01",
+        "--commit",
+        "deadbee",
+        "--expected-revision",
+        "1",
+    )
+
+    assert_validation_failure(result, "cannot exit", "rsc-ct01", "resource")
+    assert read_json(object_path(roadmap_root, "nodes", "I01")) == before
 
 
 def test_build_is_deterministic_and_check_detects_stale_artifacts(

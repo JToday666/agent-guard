@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "id": "D-C10-GATE-A",
+  "title": "V21-10 的 CORE 内生依赖与项目级 Gate A 叠加门槛",
+  "status": "accepted",
+  "decision": "C09 remains the CORE-internal predecessor, while Gate A is an additional project-level hard start gate for C10. Contract or test preparation may proceed without claiming C10.",
+  "rationale": "The formal CORE booklet defines C09 to C10, and the current Console program DAG adds Gate A before C10. Both constraints apply at their respective layers.",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## 5. 15 Phase 最终实施 DAG",
+      "line_hint": 136
+    },
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 162
+    }
+  ]
+}

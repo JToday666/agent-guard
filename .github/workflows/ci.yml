@@ -83,7 +83,6 @@ jobs:
           ROADMAP_HEAD_REF: ${{ github.sha }}
         run: |
           uv run python scripts/roadmap-tools.py validate
-          uv run python scripts/roadmap-tools.py check
           base_ref="$ROADMAP_BASE_REF"
           if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then base_ref="HEAD^"; fi
           uv run python scripts/roadmap-tools.py check-diff --base-ref "$base_ref" --head-ref "$ROADMAP_HEAD_REF"

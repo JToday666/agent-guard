@@ -3,12 +3,10 @@
   "id": "R05",
   "exact_title": "PR-RTE-05 — Strong Approval Binding",
   "kind": "task",
-  "roles": [
-    "task"
-  ],
+  "roles": ["task"],
   "lane": "rte",
-  "lifecycle": "not_started",
-  "revision": 0,
+  "lifecycle": "in_progress",
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -24,7 +22,17 @@
       "line_hint": 186
     }
   ],
-  "evidence_refs": [],
-  "work": null,
-  "notes": []
+  "evidence_refs": ["evidence/R05/EV-R05-WORKTREE.json"],
+  "work": {
+    "branch": "codex/rte-05-integration",
+    "worktree_slug": "agent-guard-rte05-integration",
+    "owner": "implementation-owner",
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "started_at": null,
+    "substate": "active"
+  },
+  "notes": [
+    "Active dirty worktree proves implementation has started, not that RTE-05 Integration or Gate B has passed.",
+    "Its exclusive activation surfaces overlap I01 and require serialized integration."
+  ]
 }

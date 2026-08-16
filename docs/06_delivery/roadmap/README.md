@@ -28,12 +28,12 @@ Roadmap candidate、Git 历史。前三者决定合同依赖，Git 只决定实�
 
 ## 2. 状态和可启动性
 
-| 状态 | 颜色 | 含义 |
-| --- | --- | --- |
-| `completed` | 绿色 `#1F9D63` | 完成提交进入 `origin/dev` 且出口证据齐全 |
-| `in_progress` | 琥珀色 `#D99000` | 已 claim，或分支已实现但尚未进入基线 |
-| `ready` | 蓝色 `#2774D8` | 未开始、所有 start 阻断已满足且无共享资源冲突 |
-| `not_ready` | 灰色 `#7B8494` | 未开始但仍有 start 阻断或资源冲突 |
+| 状态          | 颜色             | 含义                                          |
+| ------------- | ---------------- | --------------------------------------------- |
+| `completed`   | 绿色 `#1F9D63`   | 完成提交进入 `origin/dev` 且出口证据齐全      |
+| `in_progress` | 琥珀色 `#D99000` | 已 claim，或分支已实现但尚未进入基线          |
+| `ready`       | 蓝色 `#2774D8`   | 未开始、所有 start 阻断已满足且无共享资源冲突 |
+| `not_ready`   | 灰色 `#7B8494`   | 未开始但仍有 start 阻断或资源冲突             |
 
 `ready` 是生成值，不能写入节点 JSON。正式可 claim 的蓝色节点必须满足：
 
@@ -50,17 +50,20 @@ no active exclusive-surface conflict
 start 条件但仍有 activation/exit 门槛时，蓝色节点带锁徽标；这表示“可以开发”，不表示
 “可以启用或宣称完成”。
 
-当前 `origin/dev@cdf3625` 快照：
+当前 `origin/dev@f435bff` 快照：
 
-- 绿色：B0、CORE C00–C09、CT00/01/02A/02B/03A/03B、RTE01–04、
+- 绿色：B0、CORE C00–C09、CT00/01/02A/02B/03A/03B、RTE01–04、R05P、
   Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1；
-- 琥珀色：`I01`（`codex/gate-a-int-pr-01`）、`R05P`
-  （`codex/rte-05-preparation`）；
+- 琥珀色：`I01`（`codex/gate-a-int-pr-01`）、正式 `R05`
+  （`codex/rte-05-integration`）以及控制面 bootstrap `RM-00`
+  （`codex/roadmap-control`）；
 - 蓝色：`RSC-CT01`、`CT05`、可选 `CT03R`；
-- 灰色：Gate A、RTE05 Integration、CT04、C10、S2 及其后续。
+- 灰色：Gate A、CT04、C10、S2 及其后续。
 
-两个琥珀 worktree 都触及 `evaluation.py`。其独立代码可并行，但共享 production
-wiring 必须由 integration owner 串行收口；Gate A 和 RTE-05 均未因此通过。
+I01 与 R05 的独立代码可并行，但两者声明的 evaluation/production activation 共享表面
+必须由 integration owner 串行收口；Gate A、RTE-05 Integration 和 Gate B 均未因此通过。
+需要关闭其中一个节点时，integration owner 先 `block` 暂停另一个并释放共享表面，完成
+串行合入和 `close` 后再 `resume`；不得绕过资源冲突直接宣称完成。
 
 ## 3. 节点和边契约
 
@@ -70,12 +73,12 @@ wiring 必须由 integration owner 串行收口；Gate A 和 RTE-05 均未因此
 
 边必须声明：
 
-| `constraint` | 视觉 | 语义 |
-| --- | --- | --- |
-| `start` | 粗实线 | 前置不绿则不能 claim 后继任务 |
-| `activate` | 实线加锁 | 可开发，但不能进入 production activation |
-| `exit` | 细实线/汇合 | 可并行开发，但不能通过 Gate/Stage/Final |
-| `none` | 点线或覆盖层 | 不参与阻断计算 |
+| `constraint` | 视觉         | 语义                                     |
+| ------------ | ------------ | ---------------------------------------- |
+| `start`      | 粗实线       | 前置不绿则不能 claim 后继任务            |
+| `activate`   | 实线加锁     | 可开发，但不能进入 production activation |
+| `exit`       | 细实线/汇合  | 可并行开发，但不能通过 Gate/Stage/Final  |
+| `none`       | 点线或覆盖层 | 不参与阻断计算                           |
 
 `hard_dependency`、`required_input` 和 `join` 表示真实依赖；`optional`、`fallback`、
 `non_blocking` 分别使用虚线、点划线、点线。每条边必须有 rationale、provenance 和
@@ -110,16 +113,27 @@ git worktree add ../agent-guard-worktrees/NODE \
 提交全部进入 `origin/dev` 后，立即在新的状态 worktree 执行：
 
 ```bash
-uv run python scripts/roadmap-tools.py add-evidence NODE --kind commit --ref SHA
+uv run python scripts/roadmap-tools.py add-evidence NODE \
+  --kind commit --ref SHA --summary "merged into dev" --status verified
 uv run python scripts/roadmap-tools.py close NODE \
   --commit SHA --expected-revision N
 uv run python scripts/roadmap-tools.py build
 uv run python scripts/roadmap-tools.py check
 ```
 
-阻塞用 `block`，恢复用 `resume`；不删除历史证据。功能 worktree 不得修改其他节点状态，
-不得手改 `generated/`。关闭节点后由生成器重新计算 Ready Queue，下游只能在更新后的蓝色
-状态进入 `dev` 后 claim。
+`add-evidence` 只追加本节点证据，不改节点或 `generated/`；`close` 由 integration owner
+把已核验 commit evidence 引用进节点并原子重建图。阻塞和恢复命令为：
+
+```bash
+uv run python scripts/roadmap-tools.py block NODE \
+  --reason "REASON" --expected-revision N
+uv run python scripts/roadmap-tools.py resume NODE --expected-revision N
+uv run python scripts/roadmap-tools.py check-diff \
+  --base-ref BASE --head-ref HEAD
+```
+
+不删除历史证据。功能 worktree 不得修改其他节点状态，不得手改 `generated/`。关闭节点后
+由生成器重新计算 Ready Queue，下游只能在更新后的蓝色状态进入 `dev` 后 claim。
 
 ## 5. 最快并行路线
 

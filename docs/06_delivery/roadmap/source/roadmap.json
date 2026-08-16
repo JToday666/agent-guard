@@ -12,30 +12,96 @@
     "../generated/index.html"
   ],
   "lanes": [
-    {"id": "baseline", "label": "Baseline", "order": 0},
-    {"id": "core", "label": "CORE V2.1", "order": 10},
-    {"id": "ct", "label": "Context / Taint", "order": 20},
-    {"id": "rte", "label": "Runtime Enforcement", "order": 30},
-    {"id": "integration", "label": "Integration", "order": 40},
-    {"id": "fe", "label": "Console / Frontend", "order": 50},
-    {"id": "stage", "label": "Delivery Stages", "order": 60},
-    {"id": "gate", "label": "Cross-track Gates", "order": 70},
-    {"id": "acceptance", "label": "Acceptance / Evidence", "order": 80},
-    {"id": "final", "label": "Final Acceptance", "order": 90}
+    { "id": "baseline", "label": "Baseline", "order": 0 },
+    { "id": "core", "label": "CORE V2.1", "order": 10 },
+    { "id": "ct", "label": "Context / Taint", "order": 20 },
+    { "id": "rte", "label": "Runtime Enforcement", "order": 30 },
+    { "id": "integration", "label": "Integration", "order": 40 },
+    { "id": "fe", "label": "Console / Frontend", "order": 50 },
+    { "id": "stage", "label": "Delivery Stages", "order": 60 },
+    { "id": "gate", "label": "Cross-track Gates", "order": 70 },
+    { "id": "acceptance", "label": "Acceptance / Evidence", "order": 80 },
+    { "id": "final", "label": "Final Acceptance", "order": 90 }
   ],
   "exclusive_surfaces": [
-    {"id": "core-evaluation-activation", "label": "Core evaluation pipeline and activation"},
-    {"id": "guard-api-production-wiring", "label": "Guard API production evaluation wiring"},
-    {"id": "audit-schema-and-storage", "label": "Audit schema, budget and storage"},
-    {"id": "runtime-binding-activation", "label": "Runtime binding and activation"},
-    {"id": "dashboard-types-mappers-store", "label": "Dashboard types, mappers and stores"},
-    {"id": "roadmap-catalog-and-generated", "label": "Roadmap catalog and generated artifacts"}
+    {
+      "id": "core-evaluation-activation",
+      "label": "Core evaluation pipeline and activation",
+      "path_patterns": [
+        "packages/agentguard-core/**",
+        "apps/guard-api/guard_api/services/evaluation.py",
+        "apps/guard-api/tests/**",
+        "tests/**",
+        "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/**"
+      ]
+    },
+    {
+      "id": "guard-api-production-wiring",
+      "label": "Guard API production evaluation wiring",
+      "path_patterns": [
+        "apps/guard-api/**",
+        "tests/**",
+        "docs/AgentGuard_Runtime_Supervision_Console_Design/**"
+      ]
+    },
+    {
+      "id": "audit-schema-and-storage",
+      "label": "Audit schema, budget and storage",
+      "path_patterns": [
+        "schemas/**",
+        "apps/guard-api/guard_api/migrations/**",
+        "apps/guard-api/guard_api/storage/**",
+        "apps/guard-api/tests/**",
+        "tests/**"
+      ]
+    },
+    {
+      "id": "runtime-binding-activation",
+      "label": "Runtime binding and activation",
+      "path_patterns": [
+        "packages/agentguard-langgraph-adapter/**",
+        "packages/agentguard-openclaw-plugin/**",
+        "packages/agentguard-openclaw-bench-tools/**",
+        "tests/runtime_conformance/**",
+        "apps/guard-api/**",
+        "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/**"
+      ]
+    },
+    {
+      "id": "dashboard-types-mappers-store",
+      "label": "Dashboard types, mappers and stores",
+      "path_patterns": [
+        "apps/dashboard/**",
+        "docs/AgentGuard_Runtime_Supervision_Console_Design/**"
+      ]
+    },
+    {
+      "id": "roadmap-catalog-and-generated",
+      "label": "Roadmap catalog and generated artifacts",
+      "path_patterns": [
+        ".github/workflows/ci.yml",
+        ".gitignore",
+        "AGENTS.md",
+        "apps/dashboard/e2e/roadmap-artifact.spec.ts",
+        "apps/dashboard/package.json",
+        "apps/dashboard/playwright.roadmap.config.ts",
+        "docs/06_delivery/roadmap/**",
+        "docs/README.md",
+        "package.json",
+        "scripts/roadmap-tools.py",
+        "tests/test_roadmap_tools.py"
+      ]
+    }
   ],
   "state_palette": {
-    "completed": {"label": "已完成", "color": "#1F9D63", "icon": "✓"},
-    "in_progress": {"label": "正在实施", "color": "#D99000", "icon": "◐"},
-    "ready": {"label": "可启动", "color": "#2774D8", "icon": "▶"},
-    "not_ready": {"label": "未实施且不可启动", "color": "#7B8494", "icon": "○"}
+    "completed": { "label": "已完成", "color": "#1F9D63", "icon": "✓" },
+    "in_progress": { "label": "正在实施", "color": "#D99000", "icon": "◐" },
+    "ready": { "label": "可启动", "color": "#2774D8", "icon": "▶" },
+    "not_ready": {
+      "label": "未实施且不可启动",
+      "color": "#7B8494",
+      "icon": "○"
+    }
   },
   "authorities": [
     {

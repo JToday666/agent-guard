@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-161-G-A-C10",
+  "from": "G-A",
+  "to": "C10",
+  "relation": "hard_dependency",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "The current program overlay requires Gate A before V21-10 may formally start or land, even though the CORE-internal DAG starts at C09.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 162
+    }
+  ],
+  "decision_id": "D-C10-GATE-A"
+}
