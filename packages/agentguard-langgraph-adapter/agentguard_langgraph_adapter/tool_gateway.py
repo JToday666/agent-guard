@@ -121,9 +121,7 @@ class GuardedToolGateway:
 
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
-        if decision.decision == "ask" and _supports_runtime_outcome(
-            self.guard_adapter, decision
-        ):
+        if _supports_runtime_outcome(self.guard_adapter, decision):
             started = build_tool_started_observation(
                 event,
                 decision,
@@ -141,7 +139,7 @@ class GuardedToolGateway:
                 )
                 result.status = "audit_error"
                 result.safe_message = (
-                    "The approved tool call was not executed because its start "
+                    "The tool call was not executed because its start "
                     "receipt could not be recorded."
                 )
                 result.error = start_error

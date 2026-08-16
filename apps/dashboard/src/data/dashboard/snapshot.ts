@@ -5,6 +5,7 @@ import type {
   EvaluationRun,
   WindowMetrics,
 } from "../../types/dashboard";
+import { hasSameApprovalSnapshot } from "../approvals/approval-snapshot.ts";
 
 function hasSameStringList(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -137,37 +138,13 @@ export function hasSameEvaluationRun(left: EvaluationRun, right: EvaluationRun):
   );
 }
 
-function hasSameApproval(left: ApprovalRequest, right: ApprovalRequest): boolean {
-  return (
-    left.id === right.id &&
-    left.createdAt === right.createdAt &&
-    left.status === right.status &&
-    left.resource === right.resource &&
-    left.riskScore === right.riskScore &&
-    left.severity === right.severity &&
-    left.reason === right.reason &&
-    left.eventId === right.eventId &&
-    left.traceId === right.traceId &&
-    left.subjectId === right.subjectId &&
-    left.subjectType === right.subjectType &&
-    left.actionId === right.actionId &&
-    left.actionName === right.actionName &&
-    left.userTask === right.userTask &&
-    left.agentAction === right.agentAction &&
-    left.consequence === right.consequence &&
-    left.expiresAt === right.expiresAt &&
-    left.resolvedAt === right.resolvedAt &&
-    hasSameStringList(left.ruleHits, right.ruleHits)
-  );
-}
-
 export function reconcileApprovals(
   current: ApprovalRequest[],
   incoming: ApprovalRequest[],
 ): ApprovalRequest[] {
   const hasSameVisibleData =
     current.length === incoming.length &&
-    current.every((approval, index) => hasSameApproval(approval, incoming[index]!));
+    current.every((approval, index) => hasSameApprovalSnapshot(approval, incoming[index]!));
   if (!hasSameVisibleData) return incoming;
   return current;
 }

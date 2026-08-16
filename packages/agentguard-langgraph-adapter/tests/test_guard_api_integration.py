@@ -351,12 +351,14 @@ def test_guard_api_v03_gateway_skips_policy_audit_submission(
     assert result.runtime_receipt_error is None
     # Guard API 模式下策略审计只由 evaluate writer 写入；adapter 仍通过
     # audit/events 回写其权威生产的运行时结果。
-    assert request_paths.count("/v1/audit/events") == 1
+    assert request_paths.count("/v1/audit/events") == 2
     assert result.audit_event is None
     stored = store.list_audit_events()
-    assert len(stored) >= 3
+    assert len(stored) >= 4
     assert {item.record_type for item in stored} == {
         "policy_evaluation",
+        "runtime_observation",
         "runtime_outcome",
     }
+    assert sum(item.event_type == "tool_call_started" for item in stored) == 1
     assert sum(item.record_type == "runtime_outcome" for item in stored) == 1

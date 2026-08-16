@@ -516,11 +516,17 @@ def test_gateway_does_not_submit_policy_audit_in_guard_api_mode() -> None:
     assert allowed.executed is True
     assert denied.blocked is True
     # G-02：Guard API 模式下策略审计由 evaluate writer 唯一写入；gateway
-    # 只提交 Adapter 权威生产的 runtime_outcome。
+    # 只提交 Adapter 权威生产的 runtime start/outcome。
     assert client.audit_events
     assert {event["record_type"] for event in client.audit_events} == {
-        "runtime_outcome"
+        "runtime_observation",
+        "runtime_outcome",
     }
+    assert [
+        event["event_type"]
+        for event in client.audit_events
+        if event["record_type"] == "runtime_observation"
+    ] == ["tool_call_started"]
     assert allowed.audit_event is None
     assert denied.audit_event is None
 

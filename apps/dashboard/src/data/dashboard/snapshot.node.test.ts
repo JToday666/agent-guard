@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ApprovalRequest, AuditEventRow, EvaluationRun } from "../../types/dashboard.ts";
+import { isCompatiblePendingApprovalSnapshot } from "../approvals/approval-snapshot.ts";
 import { createAuditWindow } from "./metrics.ts";
 import {
   hasSameAuditWindow,
@@ -62,9 +63,45 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     subjectType: "tool_call",
     actionId: "call_1",
     actionName: "send_email",
+    agentId: "agent_1",
+    decision: null,
+    decisionId: "decision_1",
+    decisionOptions: ["allow_once", "deny"],
+    evidence: null,
     expiresAt: "2026-06-22T06:45:00Z",
+    policyAuditId: "audit_1",
+    requestingPrincipalId: "principal_1",
+    resolutionReason: null,
+    resolutionSource: null,
     resolvedAt: null,
+    resolvedBy: null,
+    runtime: "langgraph",
     ...overrides,
+  };
+}
+
+function makeApprovalEvidence(): NonNullable<ApprovalRequest["evidence"]> {
+  return {
+    decision: "ask",
+    decisionId: "decision_1",
+    eventId: "audit_1",
+    eventTraceId: "trace_1",
+    eventType: "tool_call_proposed",
+    policy: {
+      bundleId: "policy_default",
+      digest: "sha256:policy",
+      revision: 7,
+      version: "2026.06",
+    },
+    reason: "External send",
+    resourceTargets: ["external@example.com"],
+    runtime: "langgraph",
+    riskScore: 70,
+    ruleHits: ["P005_external_send"],
+    severity: "high",
+    sourceTrust: "untrusted",
+    sourceType: "email",
+    taskPreview: "Send report",
   };
 }
 
@@ -159,4 +196,70 @@ test("replaces approvals when visible data changes", () => {
   const incoming = [makeApproval({ reason: "Updated reason" })];
 
   assert.equal(reconcileApprovals(current, incoming), incoming);
+});
+
+test("replaces approvals when any mutation snapshot authority field changes", () => {
+  const current = [makeApproval({ evidence: makeApprovalEvidence() })];
+  const changedApprovals = [
+    makeApproval({ evidence: makeApprovalEvidence(), policyAuditId: "audit_2" }),
+    makeApproval({ evidence: makeApprovalEvidence(), decisionId: "decision_2" }),
+    makeApproval({ evidence: makeApprovalEvidence(), requestingPrincipalId: "principal_2" }),
+    makeApproval({ evidence: makeApprovalEvidence(), runtime: "openclaw" }),
+    makeApproval({ evidence: makeApprovalEvidence(), agentId: "agent_2" }),
+    makeApproval({ evidence: makeApprovalEvidence(), decisionOptions: ["deny"] }),
+    makeApproval({ evidence: makeApprovalEvidence(), decision: "deny" }),
+    makeApproval({
+      evidence: makeApprovalEvidence(),
+      resolutionSource: "system",
+      resolvedBy: "runtime",
+      resolutionReason: "expired",
+    }),
+    makeApproval({
+      evidence: {
+        ...makeApprovalEvidence(),
+        policy: { ...makeApprovalEvidence().policy, digest: "sha256:changed" },
+      },
+    }),
+    makeApproval({
+      evidence: { ...makeApprovalEvidence(), resourceTargets: ["other@example.com"] },
+    }),
+  ];
+
+  for (const changed of changedApprovals) {
+    const incoming = [changed];
+    assert.equal(reconcileApprovals(current, incoming), incoming);
+  }
+});
+
+test("allows only the trace-scoped read to fill a missing pending policy Audit locator", () => {
+  const traceScoped = makeApproval({ evidence: makeApprovalEvidence() });
+
+  assert.equal(
+    isCompatiblePendingApprovalSnapshot(
+      makeApproval({
+        agentAction: "未提供",
+        consequence: "未提供",
+        evidence: makeApprovalEvidence(),
+        policyAuditId: null,
+        ruleHits: [],
+        userTask: "未提供",
+      }),
+      traceScoped,
+    ),
+    true,
+  );
+  assert.equal(
+    isCompatiblePendingApprovalSnapshot(
+      makeApproval({ evidence: makeApprovalEvidence(), policyAuditId: "audit_other" }),
+      traceScoped,
+    ),
+    false,
+  );
+  assert.equal(
+    isCompatiblePendingApprovalSnapshot(
+      makeApproval({ decisionId: "decision_other", evidence: makeApprovalEvidence() }),
+      traceScoped,
+    ),
+    false,
+  );
 });

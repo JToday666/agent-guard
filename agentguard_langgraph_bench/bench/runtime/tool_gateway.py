@@ -119,6 +119,11 @@ class GuardedToolGateway:
                 runtime_receipt_error=receipt_error,
             )
 
+        approval_id: str | None = None
+        approval_resolution: dict[str, Any] | None = None
+        approval_decision: str | None = None
+        latency_ms: float | None = None
+        approved_arguments_hash: str | None = None
         if decision.decision == "ask":
             approval_id = _approval_id(getattr(decision, "approval", None))
             arguments_hash = _arguments_hash(arguments)
@@ -242,7 +247,7 @@ class GuardedToolGateway:
 
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
-        if decision.decision == "ask" and self._supports_action_receipts(decision):
+        if self._supports_action_receipts(decision):
             started = build_tool_started_observation(
                 event,
                 decision,
@@ -270,7 +275,7 @@ class GuardedToolGateway:
                     counts_as_effective_block=False,
                     runtime_terminal=True,
                     terminal_reason="runtime_receipt_failure",
-                    safe_message="The approved tool call was not executed because its start receipt could not be recorded.",
+                    safe_message="The tool call was not executed because its start receipt could not be recorded.",
                     runtime_receipt_error=start_error,
                 )
             start_audit_id = started.audit_id

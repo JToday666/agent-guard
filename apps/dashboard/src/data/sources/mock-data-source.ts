@@ -370,6 +370,13 @@ function createTraceDetail(traceId: string, approvalDtos: GuardApprovalDto[]): G
       limit: 1000,
       returned_count: events.length,
       has_more: false,
+      next_cursor: null,
+      snapshot_id: `mock-snapshot:${traceId}`,
+    },
+    approval_window: {
+      limit: 1000,
+      returned_count: approvalDtos.filter((approval) => approval.trace_id === traceId).length,
+      has_more: false,
     },
   };
 }
@@ -405,6 +412,19 @@ function toProvenanceDto(graph: ProvenanceGraph): GuardProvenanceDto {
       timestamp: edge.timestamp,
       metadata: edge.metadata,
     })),
+    provenance_window: {
+      node_limit: graph.window.nodeLimit,
+      returned_node_count: graph.window.returnedNodeCount,
+      ...(graph.window.nodesHaveMore === null
+        ? {}
+        : { nodes_have_more: graph.window.nodesHaveMore }),
+      edge_limit: graph.window.edgeLimit,
+      returned_edge_count: graph.window.returnedEdgeCount,
+      ...(graph.window.edgesHaveMore === null
+        ? {}
+        : { edges_have_more: graph.window.edgesHaveMore }),
+      ...(graph.window.hasMore === null ? {} : { has_more: graph.window.hasMore }),
+    },
   };
 }
 
@@ -479,14 +499,10 @@ export class MockDashboardDataSource implements DashboardReadDataSource {
     const dto = createTraceDetail(traceId, this.approvalDtos);
     const etag = mockEtag(dto);
     if (etag === options.etag) return { status: "not_modified" as const, etag };
-    const detail = mapTraceDetail(dto);
     return {
       status: "modified" as const,
       etag,
-      value: {
-        ...detail,
-        approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
-      },
+      value: mapTraceDetail(dto),
     };
   }
 

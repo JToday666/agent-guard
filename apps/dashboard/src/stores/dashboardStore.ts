@@ -3,6 +3,19 @@ import { computed, ref } from "vue";
 
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
+import {
+  createApprovalMutationSelector,
+  type ApprovalMutationContext,
+} from "../data/approvals/approval-mutation-gate";
+import { isCompatiblePendingApprovalSnapshot } from "../data/approvals/approval-snapshot";
+import { buildRuntimeSupervisionViewModel } from "../data/evidence/execution-trace";
+import {
+  getTracePollBackoffMs,
+  isSuccessfulConditionalRead,
+  isTerminalReconciliationComplete,
+  type ConditionalReadResult,
+} from "../data/evidence/trace-reconciliation";
+import { buildTraceEvidenceViewModel } from "../data/evidence/trace-evidence";
 import { dashboardDataSourceHandle } from "../data/sources/index";
 import {
   createAuditWindow,
@@ -22,6 +35,7 @@ import {
 } from "../data/sources/dashboard-data-source";
 import type {
   AdapterStatus,
+  ApprovalDecision,
   ApprovalRequest,
   AuditWindow,
   AuditIntegrity,
@@ -36,12 +50,13 @@ import type {
   TracePollingState,
   TraceSummary,
 } from "../types/dashboard";
+import type { EvidenceLocator } from "../types/runtime-supervision";
 import { getAuthErrorMessage, isSessionAuthError } from "../utils/auth-error-messages";
 import { getApprovalResolutionFailure } from "../utils/approval-resolution";
+import { isApprovalExpired } from "../utils/approval-expiry";
 import {
   getCachedValue,
   getFreshCacheValue,
-  removeCacheValue,
   setBoundedCacheValue,
   type TimedCache,
   unwrapTimedCache,
@@ -89,7 +104,6 @@ const TRACE_CACHE_MAX_ENTRIES = 8;
 const TRACE_DETAIL_TTL_MS = 60_000;
 const TRACE_PROVENANCE_TTL_MS = 120_000;
 const TRACE_POLL_INTERVAL_MS = 2_000;
-const TRACE_POLL_MAX_BACKOFF_MS = 16_000;
 
 interface ScopeRefreshState {
   error: string | null;
@@ -145,6 +159,31 @@ function applyLatestPolicyHistory(
   };
 }
 
+function exactLocatorTraceId(
+  refs: readonly EvidenceLocator[],
+  kind: EvidenceLocator["kind"],
+  id: string | null | undefined,
+): string {
+  if (!id) return "";
+  const traceIds = [
+    ...new Set(
+      refs
+        .filter((ref) => ref.kind === kind && ref.id === id)
+        .map((ref) => ref.traceId)
+        .filter(Boolean),
+    ),
+  ];
+  return traceIds.length === 1 ? traceIds[0]! : "";
+}
+
+function settledApprovalStatus(
+  status: ApprovalRequest["status"],
+): ApprovalMutationContext["approvalStatus"] {
+  if (status === "pending") return "pending";
+  if (status === "allowed" || status === "denied" || status === "expired") return "settled";
+  return "unknown";
+}
+
 export const useDashboardStore = defineStore("dashboard", () => {
   const auditWindow = ref<AuditWindow>(
     createAuditWindow([], {
@@ -170,7 +209,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const provenanceCache = ref<TimedCache<ProvenanceGraph>>({});
   const provenanceErrors = ref<Record<string, string>>({});
   const tracePollingStates = ref<Record<string, TracePollingState>>({});
-  const provenanceLoadingIds = new Set<string>();
+  const traceDetailInFlight = new Map<string, Promise<ConditionalReadResult>>();
+  const provenanceInFlight = new Map<string, Promise<ConditionalReadResult>>();
+  const terminalReconciledTraceIds = new Set<string>();
   const health = ref<HealthStatus>({
     api: "unknown",
     database: "unknown",
@@ -185,6 +226,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const approvalResolutionState = ref<
     "idle" | "submitting" | "succeeded" | "conflict" | "uncertain" | "failed"
   >("idle");
+  const approvalMutationReadOnlyOverride = ref(false);
+  const selectApprovalMutation = createApprovalMutationSelector(
+    dashboardDataSourceHandle.descriptor,
+  );
+  const attemptedApprovalMutations = new Set<string>();
   let pollTimer: number | null = null;
   let activeRefresh: {
     controller: AbortController;
@@ -204,6 +250,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
     traceId: string;
   } | null = null;
   let traceVisibilityHandler: (() => void) | null = null;
+  let activeTerminalReconciliation: {
+    controller: AbortController | null;
+    failureCount: number;
+    timer: number | null;
+    traceId: string;
+  } | null = null;
+  let terminalVisibilityHandler: (() => void) | null = null;
 
   const status = computed(() => scopeStates.value[activeScope.value].status);
   const error = computed(() => scopeStates.value[activeScope.value].error);
@@ -597,96 +650,299 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return promise;
   }
 
-  async function resolveApproval(
-    approval: ApprovalRequest,
-    decision: "allow_once" | "deny",
-    options: { readonly?: boolean } = {},
-  ) {
-    const mutationPermission = selectApprovalMutationWriter(
-      dashboardDataSourceHandle,
-      options.readonly,
-    );
-    if (!mutationPermission.permitted) {
-      const error = new DashboardMutationNotPermittedError();
-      approvalResolutionError.value = error.message;
-      approvalResolutionState.value = "failed";
-      throw error;
+  function setApprovalMutationReadOnlyOverride(value: boolean): void {
+    approvalMutationReadOnlyOverride.value = value;
+  }
+
+  function currentApprovalMutationContext(
+    targetApprovalId: string,
+    requestedDecision: ApprovalDecision,
+  ): ApprovalMutationContext | null {
+    try {
+      if (!targetApprovalId || attemptedApprovalMutations.has(targetApprovalId)) return null;
+      const pendingMatches = approvals.value.filter((approval) => approval.id === targetApprovalId);
+      if (pendingMatches.length !== 1) return null;
+      const pendingApproval = pendingMatches[0]!;
+      const traceDetail = getCachedValue(traceDetailCache.value, pendingApproval.traceId);
+      const provenance = getCachedValue(provenanceCache.value, pendingApproval.traceId);
+      if (
+        !traceDetail ||
+        traceDetail.id !== pendingApproval.traceId ||
+        traceDetail.auditWindow.hasMore !== false ||
+        traceDetail.approvalWindow.hasMore !== false ||
+        !provenance ||
+        provenance.traceId !== traceDetail.id ||
+        provenance.window.hasMore !== false ||
+        provenance.window.nodesHaveMore !== false ||
+        provenance.window.edgesHaveMore !== false
+      ) {
+        return null;
+      }
+
+      const traceApprovalMatches = traceDetail.approvals.filter(
+        (approval) => approval.id === targetApprovalId,
+      );
+      if (traceApprovalMatches.length !== 1) return null;
+      const traceApproval = traceApprovalMatches[0]!;
+      if (!isCompatiblePendingApprovalSnapshot(pendingApproval, traceApproval)) return null;
+
+      const evidence = buildTraceEvidenceViewModel(
+        traceDetail.id,
+        traceDetail.events,
+        traceDetail.approvals,
+        auditIntegrity.value,
+        traceDetail.auditWindow,
+      );
+      const supervision = buildRuntimeSupervisionViewModel({
+        approvalBasisEnabled:
+          dashboardDataSourceHandle.descriptor.capabilities.runtimeSupervisionS1,
+        approvalWindow: traceDetail.approvalWindow,
+        approvals: traceDetail.approvals,
+        auditWindow: traceDetail.auditWindow,
+        dataSource: dashboardDataSourceHandle.descriptor,
+        elementSourceMode:
+          dashboardDataSourceHandle.descriptor.dataSourceMode === "live_api" ? "live" : "mock",
+        events: evidence.events,
+        provenanceWindow: provenance.window,
+        traceId: traceDetail.id,
+      });
+      const stepMatches = supervision.execution.steps.filter(
+        (step) => step.approvalId === targetApprovalId,
+      );
+      if (stepMatches.length !== 1) return null;
+      const step = stepMatches[0]!;
+      const basis = supervision.approvalBasisById[targetApprovalId];
+      if (
+        !basis ||
+        basis.resolution.status !== "pending" ||
+        step.supervision.approval.status !== "pending"
+      ) {
+        return null;
+      }
+
+      const official = step.supervision.officialDecision;
+      const basisOfficial = basis.officialDecision;
+      const approvalTraceId = exactLocatorTraceId(
+        step.supervision.approval.sourceRefs,
+        "approval",
+        traceApproval.id,
+      );
+      const actionTraceId = exactLocatorTraceId(
+        step.supervision.action?.sourceRefs ?? [],
+        "action",
+        step.actionId,
+      );
+      const officialDecisionTraceId = exactLocatorTraceId(
+        official.sourceRefs,
+        "decision",
+        official.decisionId,
+      );
+      const officialPolicyTraceId = exactLocatorTraceId(
+        official.sourceRefs,
+        "audit",
+        official.policyAuditId,
+      );
+      const basisTraceIds = [
+        exactLocatorTraceId(basis.evidenceRefs, "approval", basis.approvalId),
+        exactLocatorTraceId(basis.evidenceRefs, "event", basis.sourceContext.eventId),
+        exactLocatorTraceId(basis.evidenceRefs, "action", basis.actionId),
+        exactLocatorTraceId(basis.evidenceRefs, "decision", basis.officialDecision.decisionId),
+        exactLocatorTraceId(basis.evidenceRefs, "audit", basis.officialDecision.policyAuditId),
+      ];
+      const basisTraceId = basisTraceIds.every((traceId) => traceId === basis.traceId)
+        ? basis.traceId
+        : "";
+      const sourceMode = step.supervision.semantics.elementSourceMode;
+
+      return {
+        targetApprovalId,
+        approvalId: traceApproval.id,
+        basisApprovalId: basis.approvalId,
+        temporalState: supervision.temporalState,
+        readonlyOverride: approvalMutationReadOnlyOverride.value,
+        sessionAuthenticated: useAuthStore().isAuthenticated,
+        csrfReady: useAuthStore().csrfToken.trim().length > 0,
+        approvalStatus: settledApprovalStatus(traceApproval.status),
+        approvalUnexpired: !isApprovalExpired(traceApproval.expiresAt, Date.now()),
+        basisCompleteness: basis.completeness,
+        basisMissingReasons: basis.missingReasons,
+        traceId: traceDetail.id,
+        approvalTraceId,
+        actionTraceId,
+        officialDecisionTraceId:
+          officialDecisionTraceId === officialPolicyTraceId ? officialDecisionTraceId : "",
+        basisTraceId,
+        eventId: traceApproval.eventId ?? "",
+        basisEventId: basis.sourceContext.eventId ?? "",
+        actionId: step.actionId ?? "",
+        basisActionId: basis.actionId,
+        officialDecisionId: official.decisionId ?? "",
+        basisDecisionId: basisOfficial.decisionId ?? "",
+        policyAuditId: official.policyAuditId ?? "",
+        basisPolicyAuditId: basisOfficial.policyAuditId ?? "",
+        officialDecisionValue: official.decision,
+        requestedDecision,
+        decisionOptions: traceApproval.decisionOptions,
+        approvalSource: sourceMode,
+        actionSource: sourceMode,
+        officialDecisionSource: sourceMode,
+        basisSource: sourceMode,
+      };
+    } catch {
+      return null;
     }
-    if (submittingApprovalId.value) return;
-    const auth = useAuthStore();
-    submittingApprovalId.value = approval.id;
+  }
+
+  function canResolveApproval(approvalId: string, decision: ApprovalDecision): boolean {
+    const context = currentApprovalMutationContext(approvalId, decision);
+    return context ? selectApprovalMutation(context) : false;
+  }
+
+  async function prepareApprovalMutation(approvalId: string): Promise<void> {
+    if (
+      !approvalId ||
+      approvalMutationReadOnlyOverride.value ||
+      attemptedApprovalMutations.has(approvalId)
+    ) {
+      return;
+    }
+    const matches = approvals.value.filter((approval) => approval.id === approvalId);
+    if (matches.length !== 1) return;
+    await Promise.all([
+      loadTraceDetail(matches[0]!.traceId, true),
+      loadTraceProvenance(matches[0]!.traceId, true),
+    ]);
+  }
+
+  function rejectApprovalMutation(): never {
+    const error = new DashboardMutationNotPermittedError();
+    approvalResolutionError.value = error.message;
+    approvalResolutionState.value = "failed";
+    throw error;
+  }
+
+  async function readBackApprovalResolution(traceId: string): Promise<void> {
+    const results = await Promise.allSettled([refreshApprovals(), loadTraceDetail(traceId, true)]);
+    for (const result of results) {
+      if (result.status === "rejected") handleSessionError(result.reason);
+    }
+  }
+
+  async function resolveApproval(approvalId: string, decision: ApprovalDecision) {
+    if (
+      submittingApprovalId.value ||
+      attemptedApprovalMutations.has(approvalId) ||
+      !canResolveApproval(approvalId, decision)
+    ) {
+      rejectApprovalMutation();
+    }
+
+    const cachedApproval = approvals.value.find((approval) => approval.id === approvalId)!;
+    const traceId = cachedApproval.traceId;
+    submittingApprovalId.value = approvalId;
     approvalResolutionError.value = null;
     approvalResolutionState.value = "submitting";
     try {
+      try {
+        await refreshApprovals();
+      } catch (reason) {
+        handleSessionError(reason);
+        rejectApprovalMutation();
+      }
+      const refreshedMatches = approvals.value.filter((approval) => approval.id === approvalId);
+      if (refreshedMatches.length !== 1 || refreshedMatches[0]!.traceId !== traceId) {
+        rejectApprovalMutation();
+      }
+      const [traceRead, provenanceRead] = await Promise.all([
+        loadTraceDetail(traceId, true),
+        loadTraceProvenance(traceId, true),
+      ]);
+      if (!isSuccessfulConditionalRead(traceRead) || !isSuccessfulConditionalRead(provenanceRead)) {
+        rejectApprovalMutation();
+      }
+      if (!canResolveApproval(approvalId, decision)) rejectApprovalMutation();
+
+      const mutationPermission = selectApprovalMutationWriter(
+        dashboardDataSourceHandle,
+        approvalMutationReadOnlyOverride.value,
+      );
+      if (!mutationPermission.permitted) rejectApprovalMutation();
+
+      const auth = useAuthStore();
+      attemptedApprovalMutations.add(approvalId);
       const resolution = await mutationPermission.writer.resolveApproval(
-        approval,
+        approvalId,
         decision,
         auth.csrfToken,
       );
       approvalResolutionState.value = "succeeded";
-      approvals.value = approvals.value.filter((item) => item.id !== approval.id);
-      traceDetailCache.value = removeCacheValue(traceDetailCache.value, approval.traceId);
-      provenanceCache.value = removeCacheValue(provenanceCache.value, approval.traceId);
-      traceEtags.delete(approval.traceId);
-      provenanceEtags.delete(approval.traceId);
-      void loadTraceDetail(approval.traceId, true);
-      void refreshApprovals().catch(handleSessionError);
+      await readBackApprovalResolution(traceId);
       return resolution;
     } catch (reason) {
+      if (reason instanceof DashboardMutationNotPermittedError) throw reason;
       handleSessionError(reason);
       const failure = getApprovalResolutionFailure(reason);
       approvalResolutionError.value = failure.message;
       approvalResolutionState.value =
         failure.kind === "conflict" || failure.kind === "uncertain" ? failure.kind : "failed";
       if (failure.shouldRefreshQueue) {
-        await refreshApprovals().catch(handleSessionError);
+        await readBackApprovalResolution(traceId);
       }
+      if (failure.kind !== "conflict") attemptedApprovalMutations.delete(approvalId);
       throw reason;
     } finally {
       submittingApprovalId.value = null;
     }
   }
 
-  async function loadTraceDetail(
+  function loadTraceDetail(
     traceId: string,
     force = false,
     signal?: AbortSignal,
-  ): Promise<"modified" | "not_modified" | "skipped" | "failed" | "aborted"> {
-    if (!traceId || traceDetailLoadingId.value === traceId) return "skipped";
+  ): Promise<ConditionalReadResult> {
+    if (!traceId) return Promise.resolve("skipped");
+    const inFlight = traceDetailInFlight.get(traceId);
+    if (inFlight) return inFlight;
     if (!force && getFreshCacheValue(traceDetailCache.value, traceId, TRACE_DETAIL_TTL_MS)) {
-      return "skipped";
+      return Promise.resolve("skipped");
     }
-    const cachedDetail = getCachedValue(traceDetailCache.value, traceId);
-    traceDetailLoadingId.value = traceId;
-    traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
-    try {
-      const response = await dashboardDataSourceHandle.reader.getTraceDetail(traceId, {
-        etag: cachedDetail ? traceEtags.get(traceId) : undefined,
-        signal,
-      });
-      rememberEtag(traceEtags, traceId, response.etag);
-      if (response.status === "modified") {
-        traceDetailCache.value = setBoundedCacheValue(
-          traceDetailCache.value,
-          traceId,
-          response.value,
-          TRACE_CACHE_MAX_ENTRIES,
-        );
+    const request = Promise.resolve().then(async (): Promise<ConditionalReadResult> => {
+      const cachedDetail = getCachedValue(traceDetailCache.value, traceId);
+      traceDetailLoadingId.value = traceId;
+      traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
+      try {
+        const response = await dashboardDataSourceHandle.reader.getTraceDetail(traceId, {
+          etag: cachedDetail ? traceEtags.get(traceId) : undefined,
+          signal,
+        });
+        rememberEtag(traceEtags, traceId, response.etag);
+        if (response.status === "modified") {
+          terminalReconciledTraceIds.delete(traceId);
+          traceDetailCache.value = setBoundedCacheValue(
+            traceDetailCache.value,
+            traceId,
+            response.value,
+            TRACE_CACHE_MAX_ENTRIES,
+          );
+        }
+        return response.status;
+      } catch (reason) {
+        if (signal?.aborted || isAbortError(reason)) return "aborted";
+        handleSessionError(reason);
+        traceDetailErrors.value = {
+          ...traceDetailErrors.value,
+          [traceId]: cachedDetail
+            ? "证据链刷新失败，当前显示上次成功加载的数据"
+            : errorMessage(reason, "证据链数据加载失败"),
+        };
+        return "failed";
+      } finally {
+        traceDetailInFlight.delete(traceId);
+        if (traceDetailLoadingId.value === traceId) traceDetailLoadingId.value = null;
       }
-      return response.status;
-    } catch (reason) {
-      if (signal?.aborted || isAbortError(reason)) return "aborted";
-      handleSessionError(reason);
-      traceDetailErrors.value = {
-        ...traceDetailErrors.value,
-        [traceId]: cachedDetail
-          ? "证据链刷新失败，当前显示上次成功加载的数据"
-          : errorMessage(reason, "证据链数据加载失败"),
-      };
-      return "failed";
-    } finally {
-      if (traceDetailLoadingId.value === traceId) traceDetailLoadingId.value = null;
-    }
+    });
+    traceDetailInFlight.set(traceId, request);
+    return request;
   }
 
   function clearTracePollTimer(): void {
@@ -718,10 +974,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     record.controller = null;
     if (result === "failed") {
       record.failureCount += 1;
-      const retryInMs = Math.min(
-        TRACE_POLL_INTERVAL_MS * 2 ** record.failureCount,
-        TRACE_POLL_MAX_BACKOFF_MS,
-      );
+      const retryInMs = getTracePollBackoffMs(record.failureCount);
       updateTracePollingState(record.traceId, { retryInMs, status: "backoff" });
       scheduleTracePoll(retryInMs);
       return;
@@ -735,10 +988,123 @@ export const useDashboardStore = defineStore("dashboard", () => {
     scheduleTracePoll(TRACE_POLL_INTERVAL_MS);
   }
 
+  function clearTerminalReconciliationTimer(): void {
+    if (
+      activeTerminalReconciliation?.timer !== null &&
+      activeTerminalReconciliation?.timer !== undefined
+    ) {
+      window.clearTimeout(activeTerminalReconciliation.timer);
+      activeTerminalReconciliation.timer = null;
+    }
+  }
+
+  function stopTerminalReconciliation(status: "paused" | "stopped" = "stopped"): void {
+    if (!activeTerminalReconciliation) return;
+    const traceId = activeTerminalReconciliation.traceId;
+    clearTerminalReconciliationTimer();
+    activeTerminalReconciliation.controller?.abort();
+    activeTerminalReconciliation = null;
+    if (terminalVisibilityHandler) {
+      document.removeEventListener("visibilitychange", terminalVisibilityHandler);
+      terminalVisibilityHandler = null;
+    }
+    updateTracePollingState(traceId, { retryInMs: null, status });
+  }
+
+  function scheduleTerminalReconciliation(delayMs: number): void {
+    if (!activeTerminalReconciliation || document.visibilityState !== "visible") return;
+    clearTerminalReconciliationTimer();
+    const record = activeTerminalReconciliation;
+    record.timer = window.setTimeout(() => {
+      if (activeTerminalReconciliation !== record) return;
+      record.timer = null;
+      void runTerminalReconciliation(record);
+    }, delayMs);
+  }
+
+  function retryTerminalReconciliation(
+    record: NonNullable<typeof activeTerminalReconciliation>,
+  ): void {
+    record.failureCount += 1;
+    const retryInMs = getTracePollBackoffMs(record.failureCount);
+    updateTracePollingState(record.traceId, { retryInMs, status: "backoff" });
+    scheduleTerminalReconciliation(retryInMs);
+  }
+
+  async function runTerminalReconciliation(
+    record: NonNullable<typeof activeTerminalReconciliation>,
+  ): Promise<void> {
+    if (activeTerminalReconciliation !== record || document.visibilityState !== "visible") return;
+    record.controller?.abort();
+    const controller = new AbortController();
+    record.controller = controller;
+    updateTracePollingState(record.traceId, { retryInMs: null, status: "checking" });
+
+    const traceResult = await loadTraceDetail(record.traceId, true, controller.signal);
+    if (activeTerminalReconciliation !== record || controller.signal.aborted) return;
+    if (!isSuccessfulConditionalRead(traceResult)) {
+      record.controller = null;
+      retryTerminalReconciliation(record);
+      return;
+    }
+
+    const provenanceResult = await loadTraceProvenance(record.traceId, true, controller.signal);
+    if (activeTerminalReconciliation !== record || controller.signal.aborted) return;
+    record.controller = null;
+    if (!isTerminalReconciliationComplete(traceResult, provenanceResult)) {
+      retryTerminalReconciliation(record);
+      return;
+    }
+
+    terminalReconciledTraceIds.add(record.traceId);
+    updateTracePollingState(record.traceId, {
+      lastCheckedAt: new Date().toISOString(),
+      retryInMs: null,
+      status: "stopped",
+    });
+    stopTerminalReconciliation("stopped");
+  }
+
+  function reconcileTerminalTrace(traceId: string): void {
+    if (!traceId) return;
+    if (terminalReconciledTraceIds.has(traceId)) {
+      updateTracePollingState(traceId, { retryInMs: null, status: "stopped" });
+      return;
+    }
+    if (activeTerminalReconciliation?.traceId === traceId) return;
+
+    stopTracePolling();
+    activeTerminalReconciliation = {
+      controller: null,
+      failureCount: 0,
+      timer: null,
+      traceId,
+    };
+    terminalVisibilityHandler = () => {
+      if (!activeTerminalReconciliation) return;
+      clearTerminalReconciliationTimer();
+      if (document.visibilityState === "visible") {
+        activeTerminalReconciliation.failureCount = 0;
+        scheduleTerminalReconciliation(0);
+      } else {
+        activeTerminalReconciliation.controller?.abort();
+        activeTerminalReconciliation.controller = null;
+        updateTracePollingState(activeTerminalReconciliation.traceId, {
+          retryInMs: null,
+          status: "paused",
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", terminalVisibilityHandler);
+    if (document.visibilityState === "visible") scheduleTerminalReconciliation(0);
+    else updateTracePollingState(traceId, { retryInMs: null, status: "paused" });
+  }
+
   function startTracePolling(traceId: string): void {
     if (!traceId) return;
     if (activeTracePolling?.traceId === traceId) return;
     stopTracePolling();
+    terminalReconciledTraceIds.delete(traceId);
     activeTracePolling = {
       controller: null,
       failureCount: 0,
@@ -766,16 +1132,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function stopTracePolling(status: "paused" | "stopped" = "stopped"): void {
-    if (!activeTracePolling) return;
-    const traceId = activeTracePolling.traceId;
-    clearTracePollTimer();
-    activeTracePolling.controller?.abort();
-    activeTracePolling = null;
-    if (traceVisibilityHandler) {
-      document.removeEventListener("visibilitychange", traceVisibilityHandler);
-      traceVisibilityHandler = null;
+    if (activeTracePolling) {
+      const traceId = activeTracePolling.traceId;
+      clearTracePollTimer();
+      activeTracePolling.controller?.abort();
+      activeTracePolling = null;
+      if (traceVisibilityHandler) {
+        document.removeEventListener("visibilitychange", traceVisibilityHandler);
+        traceVisibilityHandler = null;
+      }
+      updateTracePollingState(traceId, { retryInMs: null, status });
     }
-    updateTracePollingState(traceId, { retryInMs: null, status });
+    stopTerminalReconciliation(status);
   }
 
   function startPolling(): void {
@@ -798,45 +1166,50 @@ export const useDashboardStore = defineStore("dashboard", () => {
     stopTracePolling();
   }
 
-  async function loadTraceProvenance(
+  function loadTraceProvenance(
     traceId: string,
     force = false,
     signal?: AbortSignal,
-  ): Promise<"modified" | "not_modified" | "skipped" | "failed" | "aborted"> {
-    if (!traceId || provenanceLoadingIds.has(traceId)) return "skipped";
+  ): Promise<ConditionalReadResult> {
+    if (!traceId) return Promise.resolve("skipped");
+    const inFlight = provenanceInFlight.get(traceId);
+    if (inFlight) return inFlight;
     if (!force && getFreshCacheValue(provenanceCache.value, traceId, TRACE_PROVENANCE_TTL_MS))
-      return "skipped";
-    const cachedProvenance = getCachedValue(provenanceCache.value, traceId);
-    provenanceLoadingIds.add(traceId);
-    provenanceErrors.value = { ...provenanceErrors.value, [traceId]: "" };
-    try {
-      const response = await dashboardDataSourceHandle.reader.getTraceProvenance(traceId, {
-        etag: cachedProvenance ? provenanceEtags.get(traceId) : undefined,
-        signal,
-      });
-      rememberEtag(provenanceEtags, traceId, response.etag);
-      if (response.status === "modified") {
-        provenanceCache.value = setBoundedCacheValue(
-          provenanceCache.value,
-          traceId,
-          response.value,
-          TRACE_CACHE_MAX_ENTRIES,
-        );
+      return Promise.resolve("skipped");
+    const request = Promise.resolve().then(async (): Promise<ConditionalReadResult> => {
+      const cachedProvenance = getCachedValue(provenanceCache.value, traceId);
+      provenanceErrors.value = { ...provenanceErrors.value, [traceId]: "" };
+      try {
+        const response = await dashboardDataSourceHandle.reader.getTraceProvenance(traceId, {
+          etag: cachedProvenance ? provenanceEtags.get(traceId) : undefined,
+          signal,
+        });
+        rememberEtag(provenanceEtags, traceId, response.etag);
+        if (response.status === "modified") {
+          provenanceCache.value = setBoundedCacheValue(
+            provenanceCache.value,
+            traceId,
+            response.value,
+            TRACE_CACHE_MAX_ENTRIES,
+          );
+        }
+        return response.status;
+      } catch (reason) {
+        if (signal?.aborted || isAbortError(reason)) return "aborted";
+        handleSessionError(reason);
+        provenanceErrors.value = {
+          ...provenanceErrors.value,
+          [traceId]: cachedProvenance
+            ? "溯源关系刷新失败，当前显示上次成功加载的数据"
+            : errorMessage(reason, "溯源图加载失败"),
+        };
+        return "failed";
+      } finally {
+        provenanceInFlight.delete(traceId);
       }
-      return response.status;
-    } catch (reason) {
-      if (signal?.aborted || isAbortError(reason)) return "aborted";
-      handleSessionError(reason);
-      provenanceErrors.value = {
-        ...provenanceErrors.value,
-        [traceId]: cachedProvenance
-          ? "溯源关系刷新失败，当前显示上次成功加载的数据"
-          : errorMessage(reason, "溯源图加载失败"),
-      };
-      return "failed";
-    } finally {
-      provenanceLoadingIds.delete(traceId);
-    }
+    });
+    provenanceInFlight.set(traceId, request);
+    return request;
   }
 
   return {
@@ -882,7 +1255,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
     loadTraceProvenance,
     startTracePolling,
     stopTracePolling,
+    reconcileTerminalTrace,
+    canResolveApproval,
+    prepareApprovalMutation,
     resolveApproval,
+    setApprovalMutationReadOnlyOverride,
     startPolling,
     stopPolling,
   };

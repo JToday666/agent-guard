@@ -11,8 +11,8 @@ import {
 
 const emptyReader = {} as DashboardReadDataSource;
 const writer: ApprovalMutationDataSource = {
-  async resolveApproval(approval, decision) {
-    return { approvalId: approval.id, decision, status: "resolved" };
+  async resolveApproval(approvalId, decision) {
+    return { approvalId, decision, status: "resolved" };
   },
 };
 
@@ -20,10 +20,15 @@ function createHandle(
   viteMode: string,
   isProduction: boolean,
   approvalWriter: ApprovalMutationDataSource | null,
+  runtimeSupervisionS1Enabled = true,
 ): DashboardDataSourceHandle {
   return {
     approvalWriter,
-    descriptor: createDashboardDataSourceDescriptor({ isProduction, viteMode }),
+    descriptor: createDashboardDataSourceDescriptor({
+      isProduction,
+      runtimeSupervisionS1Enabled,
+      viteMode,
+    }),
     reader: emptyReader,
   };
 }
@@ -37,6 +42,7 @@ test("data source factory deeply freezes source descriptors", () => {
   assert.equal(descriptor.dataSourceMode, "mock_preview");
   assert.equal(descriptor.buildProfile, "development");
   assert.equal(descriptor.capabilities.approvalMutation, false);
+  assert.equal(descriptor.capabilities.runtimeSupervisionS1, false);
   assert.equal(descriptor.capabilities.syntheticFacts, true);
   assert.ok(Object.isFrozen(descriptor));
   assert.ok(Object.isFrozen(descriptor.capabilities));
@@ -57,6 +63,7 @@ test("production always resolves to live API even when the requested Vite mode i
   assert.equal(descriptor.dataSourceMode, "live_api");
   assert.equal(descriptor.buildProfile, "production");
   assert.equal(descriptor.capabilities.approvalMutation, true);
+  assert.equal(descriptor.capabilities.runtimeSupervisionS1, true);
   assert.equal(descriptor.capabilities.syntheticFacts, false);
 });
 
@@ -64,6 +71,14 @@ test("approval writer selection checks mode, capability, writer and read-only ov
   const preview = createHandle("mock", false, null);
   const live = createHandle("development", false, writer);
   const liveWithoutWriter = createHandle("development", false, null);
+  const liveWithS1Disabled = createHandle("development", false, writer, false);
+  const forgedLiveHandle = {
+    ...live,
+    descriptor: Object.freeze({
+      ...live.descriptor,
+      capabilities: Object.freeze({ ...live.descriptor.capabilities }),
+    }),
+  };
 
   assert.deepEqual(selectApprovalMutationWriter(preview), {
     code: "mutation_not_permitted",
@@ -77,5 +92,15 @@ test("approval writer selection checks mode, capability, writer and read-only ov
     code: "mutation_not_permitted",
     permitted: false,
   });
+  assert.deepEqual(selectApprovalMutationWriter(liveWithS1Disabled), {
+    code: "mutation_not_permitted",
+    permitted: false,
+  });
+  assert.deepEqual(selectApprovalMutationWriter(forgedLiveHandle), {
+    code: "mutation_not_permitted",
+    permitted: false,
+  });
+  assert.equal(liveWithS1Disabled.descriptor.capabilities.approvalMutation, false);
+  assert.equal(liveWithS1Disabled.descriptor.capabilities.runtimeSupervisionS1, false);
   assert.equal(selectApprovalMutationWriter(live).permitted, true);
 });

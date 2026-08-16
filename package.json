@@ -22,6 +22,7 @@
     "dashboard:check": "pnpm --filter @agentguard/dashboard check",
     "dashboard:test:e2e": "pnpm --filter @agentguard/dashboard test:e2e",
     "dashboard:test:e2e:api": "pnpm --filter @agentguard/dashboard test:e2e:api",
+    "dashboard:test:e2e:s1-live": "pnpm --filter @agentguard/dashboard test:e2e:s1-live",
     "dashboard:typecheck": "pnpm --filter @agentguard/dashboard typecheck",
     "dashboard:build": "pnpm --filter @agentguard/dashboard build",
     "openclaw:plugin:install": "node scripts/openclaw-plugin-dev.mjs install",

@@ -53,6 +53,9 @@ function currentApproval(snapshot?: FixtureSnapshot): ApprovalRequest[] {
       status: snapshot.approval.status,
       decision: snapshot.approval.decision,
       resolved_at: snapshot.approval.status === "resolved" ? source.resolved_at : null,
+      resolution_source: snapshot.approval.status === "resolved" ? source.resolution_source : null,
+      resolved_by: snapshot.approval.status === "resolved" ? source.resolved_by : null,
+      resolution_reason: snapshot.approval.status === "resolved" ? source.resolution_reason : null,
     }),
   ];
 }

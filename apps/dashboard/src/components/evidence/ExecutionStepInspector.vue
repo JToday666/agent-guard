@@ -66,7 +66,7 @@
       </section>
 
       <section class="execution-inspector__section">
-        <h5>审批与依据</h5>
+        <h5>Approval Basis</h5>
         <dl class="execution-inspector__detail-grid">
           <div>
             <dt>审批状态</dt>
@@ -76,15 +76,64 @@
             <dt>审批 ID</dt>
             <dd>{{ step.supervision.approval.approvalId ?? "未记录" }}</dd>
           </div>
+          <div>
+            <dt>依据完整性</dt>
+            <dd>
+              {{ approvalBasis ? getAvailabilityLabel(approvalBasis.completeness) : "不可用" }}
+            </dd>
+          </div>
+          <div>
+            <dt>正式审计 / GuardEvent</dt>
+            <dd>
+              {{ approvalBasis?.officialDecision.policyAuditId ?? "未记录" }} /
+              {{ approvalBasis?.sourceContext.eventId ?? "未记录" }}
+            </dd>
+          </div>
           <div class="is-wide">
             <dt>结构化依据</dt>
-            <dd>
-              {{
-                step.supervision.approval.availability === "recorded"
-                  ? "当前 Trace 仅返回审批状态，尚未返回结构化 Approval Basis。"
-                  : "审批依据不可用，不从判定原因或关键词推导。"
-              }}
-            </dd>
+            <dd>{{ approvalBasisSummary(approvalBasis) }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>请求上下文</dt>
+            <dd>{{ approvalBasis?.sourceContext.taskPreview ?? "不可用" }}</dd>
+          </div>
+          <div>
+            <dt>来源类型</dt>
+            <dd>{{ listOrUnavailable(approvalBasis?.sourceContext.rawSourceTypes ?? []) }}</dd>
+          </div>
+          <div>
+            <dt>来源信任</dt>
+            <dd>{{ listOrUnavailable(approvalBasis?.sourceContext.sourceTrust ?? []) }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>缺失原因</dt>
+            <dd>{{ approvalMissingReasons(approvalBasis) }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="execution-inspector__section">
+        <h5>Approval Resolution</h5>
+        <dl class="execution-inspector__detail-grid">
+          <div>
+            <dt>终态</dt>
+            <dd>{{ approvalBasis?.resolution.status ?? "不可用" }}</dd>
+          </div>
+          <div>
+            <dt>决议</dt>
+            <dd>{{ approvalResolutionDecision(approvalBasis) }}</dd>
+          </div>
+          <div>
+            <dt>来源 / 操作者</dt>
+            <dd>{{ approvalResolutionActor(approvalBasis) }}</dd>
+          </div>
+          <div>
+            <dt>决议时间</dt>
+            <dd>{{ formatOptionalTime(approvalBasis?.resolution.resolvedAt ?? null) }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>决议原因</dt>
+            <dd>{{ approvalBasis?.resolution.resolutionReason ?? "未记录" }}</dd>
           </div>
         </dl>
       </section>
@@ -260,6 +309,7 @@ import type {
   ExecutionStepViewModel,
   TraceLifecycleState,
 } from "../../types/dashboard";
+import type { ApprovalBasisViewModel } from "../../types/runtime-supervision";
 import {
   formatDashboardDateTime,
   getDecisionLabel,
@@ -272,6 +322,7 @@ import ExecutionSupervisionCapsules from "./ExecutionSupervisionCapsules.vue";
 defineOptions({ name: "ExecutionStepInspector" });
 
 const props = defineProps<{
+  approvalBasis?: ApprovalBasisViewModel;
   lifecycleState: TraceLifecycleState;
   step?: ExecutionStepViewModel;
   stepNumber?: number;
@@ -311,6 +362,36 @@ function formatOptionalTime(value: string | null): string {
 
 function listOrUnavailable(values: readonly string[]): string {
   return values.length ? values.join(" · ") : "不可用";
+}
+
+function approvalBasisSummary(basis: ApprovalBasisViewModel | undefined): string {
+  if (!basis) return "结构化审批依据不可用，不从判定原因、关键词或 Shadow 结果推导。";
+  if (basis.completeness === "recorded") {
+    return "已从当前执行步骤唯一选定的正式 ASK 与审批证据生成。";
+  }
+  if (basis.completeness === "unavailable") {
+    return "关键身份或原始审批证据不可用；该依据仅供只读调查。";
+  }
+  return "当前证据窗口或请求事实不完整；该依据仅供只读调查。";
+}
+
+function approvalMissingReasons(basis: ApprovalBasisViewModel | undefined): string {
+  if (!basis) return "APPROVAL_BASIS_UNAVAILABLE";
+  return basis.missingReasons.length ? basis.missingReasons.join(" · ") : "无";
+}
+
+function approvalResolutionDecision(basis: ApprovalBasisViewModel | undefined): string {
+  if (!basis) return "不可用";
+  if (basis.resolution.decision === "allow_once") return "单次放行";
+  if (basis.resolution.decision === "deny") return "拒绝";
+  return "尚未决议";
+}
+
+function approvalResolutionActor(basis: ApprovalBasisViewModel | undefined): string {
+  if (!basis) return "不可用";
+  const source = basis.resolution.resolutionSource ?? "未记录来源";
+  const actor = basis.resolution.resolvedBy ?? "未记录操作者";
+  return `${source} / ${actor}`;
 }
 
 function layerValue(step: ExecutionStepViewModel, key: SupervisionLayerKey): string {

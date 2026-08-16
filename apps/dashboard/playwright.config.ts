@@ -9,7 +9,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-functional",
-      testIgnore: /(api-mode|desktop-matrix|tablet-matrix)\.spec\.ts/,
+      testIgnore: /(api-mode|desktop-matrix|s1-live|tablet-matrix)\.spec\.ts/,
       use: { viewport: { height: 768, width: 1366 } },
     },
     {
@@ -60,7 +60,7 @@ export default defineConfig({
   ],
   reporter: "list",
   testDir: "e2e",
-  testIgnore: /api-mode\.spec\.ts/,
+  testIgnore: /(api-mode|s1-live)\.spec\.ts/,
   use: {
     baseURL,
     screenshot: "only-on-failure",

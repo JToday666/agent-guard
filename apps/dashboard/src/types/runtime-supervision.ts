@@ -376,6 +376,57 @@ export interface TraceLifecycleSupervisionDetails {
   completionReason: string | null;
 }
 
+export interface ApprovalRequestFacts {
+  subjectId: string;
+  subjectType: string;
+  actionName: string;
+  resourceSummary: string;
+  runtime: string;
+  agentId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ApprovalContextBasis {
+  eventId: string | null;
+  eventType: string | null;
+  taskPreview: string | null;
+  semanticJudgmentAvailability: Availability;
+  semanticJudgment: "aligned" | "misaligned" | "uncertain" | null;
+  semanticJudgmentProducer: string | null;
+  rawSourceTypes: string[];
+  normalizedCtSourceTypes: string[];
+  sourceTrust: Array<"trusted" | "untrusted" | "unknown">;
+  taints: string[];
+  resourceTargets: string[];
+  factRefs: EvidenceLocator[];
+}
+
+export interface ApprovalResolutionBasis {
+  status: "pending" | "allowed" | "denied" | "expired" | "unknown";
+  decision: "allow_once" | "deny" | null;
+  resolutionSource: "human" | "llm" | "system" | null;
+  resolvedBy: string | null;
+  resolutionReason: string | null;
+  resolvedAt: string | null;
+}
+
+export interface ApprovalBasisViewModel {
+  schemaVersion: "approval-basis/0.1";
+  approvalId: string;
+  traceId: string;
+  actionId: string;
+  request: ApprovalRequestFacts;
+  officialDecision: OfficialDecisionPresentation;
+  v21Assessment: V21AssessmentPresentation;
+  sourceContext: ApprovalContextBasis;
+  resolution: ApprovalResolutionBasis;
+  enforcement: EnforcementPresentation;
+  evidenceRefs: EvidenceLocator[];
+  completeness: Availability;
+  missingReasons: string[];
+}
+
 export interface SupervisionCompleteness {
   auditEvents: Availability;
   approvals: Availability;
@@ -406,7 +457,7 @@ export interface RuntimeSupervisionViewModel {
   runtime: string | null;
   agentId: string | null;
   execution: ExecutionTraceViewModel;
-  approvalBasisById: Record<string, never>;
+  approvalBasisById: Record<string, ApprovalBasisViewModel>;
   contextManifestByEventId: Record<string, never>;
   provenancePresentation: ProvenancePresentationViewModel;
   completeness: SupervisionCompleteness;

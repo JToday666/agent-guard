@@ -188,5 +188,12 @@ export function mergeMockContextIngressProvenance(
     edges: [...baseGraph.edges, ...edges],
     nodes: [...baseGraph.nodes, ...nodes],
     traceId: baseGraph.traceId,
+    window: {
+      ...baseGraph.window,
+      edgeLimit: Math.max(baseGraph.window.edgeLimit, baseGraph.edges.length + edges.length),
+      nodeLimit: Math.max(baseGraph.window.nodeLimit, baseGraph.nodes.length + nodes.length),
+      returnedEdgeCount: baseGraph.edges.length + edges.length,
+      returnedNodeCount: baseGraph.nodes.length + nodes.length,
+    },
   };
 }

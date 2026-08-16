@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_BACKEND_TARGET?: string;
   readonly VITE_API_MOCK_DELAY?: string;
   readonly VITE_API_REQUEST_TIMEOUT_MS?: string;
+  readonly VITE_RUNTIME_SUPERVISION_S1_ENABLED?: string;
 }
 
 interface ImportMeta {

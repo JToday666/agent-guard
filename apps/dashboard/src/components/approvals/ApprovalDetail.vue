@@ -80,6 +80,10 @@
       <section class="impact-callout">
         <strong>放行影响</strong>
         <p>{{ approval.consequence }}</p>
+        <p>
+          “仅本次放行”只授权当前审批精确关联的动作与资源；原始 official ASK
+          不会被改写，且不代表动作已经开始或执行成功。
+        </p>
       </section>
 
       <nav class="evidence-links" aria-label="关联证据">
@@ -101,18 +105,20 @@
         resolutionDisabledReason
       }}</span>
       <button
+        v-if="supportsDecision('allow_once')"
         type="button"
         class="button-warning"
-        :disabled="!canResolve"
+        :disabled="!canResolveDecision('allow_once')"
         :title="resolutionDisabledReason"
         @click="confirmationDecision = 'allow_once'"
       >
         {{ submittingDecision === "allow_once" ? "提交中…" : "仅本次放行" }}
       </button>
       <button
+        v-if="supportsDecision('deny')"
         type="button"
         class="button-danger"
-        :disabled="!canResolve"
+        :disabled="!canResolveDecision('deny')"
         :title="resolutionDisabledReason"
         @click="confirmationDecision = 'deny'"
       >
@@ -124,7 +130,7 @@
       v-if="confirmationDecision && confirmationContent"
       :busy-label="confirmationContent.busyLabel"
       :confirm-label="confirmationContent.confirmLabel"
-      :confirm-disabled="!canResolve"
+      :confirm-disabled="!canResolveDecision(confirmationDecision)"
       :error-message="actionMessage"
       :eyebrow="confirmationContent.eyebrow"
       :is-submitting="submittingDecision === confirmationDecision"
@@ -168,7 +174,7 @@ import ConfirmDialog from "../common/ConfirmDialog.vue";
 const props = defineProps<{
   approval: ApprovalRequest;
   approvalRoutes: { trace: RouteLocationRaw; event?: RouteLocationRaw | null } | null;
-  canResolve: boolean;
+  canResolveDecision: (decision: ConfirmationDecision) => boolean;
   submittingDecision: "allow_once" | "deny" | null;
   actionMessage: string;
   resolutionDisabledReason: string;
@@ -184,7 +190,8 @@ const confirmationContent = computed(() => {
     return {
       busyLabel: "正在放行…",
       confirmLabel: "确认仅本次放行",
-      description: "该动作将绕过当前安全判断并继续执行一次。",
+      description:
+        "这只会授权当前审批精确关联的动作与资源；原始 official ASK 保持不变，是否开始或成功仍以运行时门禁与回执为准。",
       eyebrow: "高影响操作",
       impactLabel: "放行影响",
       title: "确认仅本次放行？",
@@ -207,8 +214,12 @@ const confirmationContent = computed(() => {
 const confirmationImpact = computed(() =>
   confirmationDecision.value === "deny"
     ? "拒绝本次授权；运行时是否产生其他结果，以后续审计记录为准。"
-    : props.approval.consequence,
+    : "仅授权当前审批精确关联的动作与资源一次；不表示动作已开始或执行成功。",
 );
+
+function supportsDecision(decision: ConfirmationDecision): boolean {
+  return props.approval.decisionOptions.includes(decision);
+}
 
 watch(
   () => props.approval.id,
@@ -217,10 +228,25 @@ watch(
   },
 );
 
+watch(
+  () => props.approval.decisionOptions,
+  () => {
+    if (confirmationDecision.value && !supportsDecision(confirmationDecision.value)) {
+      confirmationDecision.value = null;
+    }
+  },
+);
+
 const evidenceFields = computed(() => formatApprovalEvidenceFields(props.approval));
 
 function handleConfirm(): void {
-  if (confirmationDecision.value) emit("resolve", confirmationDecision.value);
+  if (
+    confirmationDecision.value &&
+    supportsDecision(confirmationDecision.value) &&
+    props.canResolveDecision(confirmationDecision.value)
+  ) {
+    emit("resolve", confirmationDecision.value);
+  }
 }
 </script>
 

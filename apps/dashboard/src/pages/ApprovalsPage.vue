@@ -79,15 +79,31 @@
             <ApprovalDetail
               :approval="selectedApproval"
               :approval-routes="selectedApprovalRoutes"
-              :can-resolve="canResolveApproval"
+              :can-resolve-decision="canResolveDecision"
               :submitting-decision="isSubmitting ? pendingDecision : null"
               :action-message="actionMessage"
               :resolution-disabled-reason="resolutionDisabledReason"
               @resolve="handleResolveApproval"
             />
           </div>
+          <div v-else class="approval-detail-pane">
+            <EmptyState
+              title="该审批不可用"
+              message="该审批不在当前待处理快照中，可能已处理、过期或链接无效。系统不会自动改选其他请求。"
+            >
+              <RouterLink :to="approvalQueueRoute">返回审批队列</RouterLink>
+            </EmptyState>
+          </div>
         </div>
-        <EmptyState v-else title="审批队列已清空" message="当前没有等待人工处理的动作。">
+        <EmptyState
+          v-else
+          :title="requestedId ? '该审批不可用' : '审批队列已清空'"
+          :message="
+            requestedId
+              ? '该审批不在当前待处理快照中，可能已处理、过期或链接无效。'
+              : '当前没有等待人工处理的动作。'
+          "
+        >
           <RouterLink to="/investigations">查看调查事件</RouterLink>
         </EmptyState>
       </div>
@@ -126,12 +142,21 @@ const approvalQueueRef = ref<HTMLElement | null>(null);
 const nowMs = ref(Date.now());
 let expiryClock: number | undefined;
 const isReadonlyRoute = computed(() => route.query.readonly === "1");
-const isReadOnly = computed(() => isMockPreview || isReadonlyRoute.value);
-const readonlyReason = computed(() =>
-  isMockPreview
-    ? "Mock Preview 使用固定合成样例，数据源不具备审批写入能力。移除 URL 参数也不会开放处理权限。"
-    : "当前链接以只读方式打开，仅可查看审批依据，不能提交处理结果。",
+const hasApprovalMutationCapability =
+  dashboardDataSourceHandle.descriptor.capabilities.approvalMutation &&
+  dashboardDataSourceHandle.descriptor.capabilities.runtimeSupervisionS1;
+const isReadOnly = computed(
+  () => isMockPreview || !hasApprovalMutationCapability || isReadonlyRoute.value,
 );
+const readonlyReason = computed(() => {
+  if (isMockPreview) {
+    return "Mock Preview 使用固定合成样例，数据源不具备审批写入能力。移除 URL 参数也不会开放处理权限。";
+  }
+  if (!hasApprovalMutationCapability) {
+    return "Runtime Supervision S1 尚未启用，审批依据仅供查看，不能提交处理结果。";
+  }
+  return "当前链接以只读方式打开，仅可查看审批依据，不能提交处理结果。";
+});
 const approvalQueueRoute = computed(() => ({
   path: "/approvals",
   query: isReadOnly.value ? { readonly: "1" } : {},
@@ -157,8 +182,7 @@ const requestedId = computed(() =>
 );
 const selectedApproval = computed(() =>
   requestedId.value
-    ? (sortedApprovals.value.find((approval) => approval.id === requestedId.value) ??
-      sortedApprovals.value[0])
+    ? sortedApprovals.value.find((approval) => approval.id === requestedId.value)
     : sortedApprovals.value[0],
 );
 const selectedApprovalRoutes = computed(() =>
@@ -173,11 +197,24 @@ const resolutionDisabledReason = computed(() => {
   if (isSubmitting.value) return "审批正在提交";
   if (!authStore.csrfToken) return "浏览器会话尚未就绪，请刷新页面后重试";
   if (isExpired.value) return "审批已过期，不能继续处理";
+  if (!selectedApproval.value?.decisionOptions.length) return "服务端未提供可用的审批处理选项";
+  if (
+    !selectedApproval.value.decisionOptions.some((decision) =>
+      store.canResolveApproval(selectedApproval.value!.id, decision),
+    )
+  ) {
+    return "审批依据尚未完成 Live 精确关联，当前只能查看";
+  }
   return "";
 });
-const canResolveApproval = computed(
-  () => Boolean(selectedApproval.value) && !resolutionDisabledReason.value,
-);
+
+function canResolveDecision(decision: "allow_once" | "deny"): boolean {
+  return Boolean(
+    selectedApproval.value &&
+    !resolutionDisabledReason.value &&
+    store.canResolveApproval(selectedApproval.value.id, decision),
+  );
+}
 const approvalIds = computed(() =>
   sortedApprovals.value.map((approval) => approval.id).join("\u0000"),
 );
@@ -186,16 +223,12 @@ watch(
   () => {
     if (route.name !== "approvals") return;
     if (store.status === "idle" || store.status === "loading") return;
-    const firstApprovalId = sortedApprovals.value[0]?.id;
-    if (!firstApprovalId) {
-      if (requestedId.value) void router.replace(approvalQueueRoute.value);
-      return;
-    }
+    if (!sortedApprovals.value.length) return;
     if (
       requestedId.value &&
       !store.approvals.some((approval) => approval.id === requestedId.value)
     ) {
-      void router.replace(approvalDetailRoute(firstApprovalId));
+      pageMessage.value = "该审批已不在待处理队列中；为避免误操作，未自动选择其他请求。";
     }
   },
   { immediate: true },
@@ -212,13 +245,32 @@ function stopExpiryClock() {
   window.clearInterval(expiryClock);
 }
 onActivated(startExpiryClock);
-onDeactivated(stopExpiryClock);
-onUnmounted(stopExpiryClock);
+onActivated(() => store.setApprovalMutationReadOnlyOverride(isReadOnly.value));
+onDeactivated(() => {
+  stopExpiryClock();
+  store.setApprovalMutationReadOnlyOverride(true);
+});
+onUnmounted(() => {
+  stopExpiryClock();
+  store.setApprovalMutationReadOnlyOverride(true);
+});
+watch(
+  isReadOnly,
+  (value) => {
+    store.setApprovalMutationReadOnlyOverride(value);
+    if (!value && selectedApproval.value) {
+      void store.prepareApprovalMutation(selectedApproval.value.id);
+    }
+  },
+  { immediate: true },
+);
 watch(
   () => selectedApproval.value?.id,
-  () => {
+  (approvalId) => {
     if (!isSubmitting.value) actionMessage.value = "";
+    if (approvalId) void store.prepareApprovalMutation(approvalId);
   },
+  { immediate: true },
 );
 watch(requestedId, async (approvalId, previousApprovalId) => {
   if (approvalId === previousApprovalId || !window.matchMedia("(max-width: 56.25rem)").matches) {
@@ -240,23 +292,21 @@ function handleSelectApproval(approval: ApprovalRequest) {
   void router.push(approvalDetailRoute(approval.id));
 }
 async function handleResolveApproval(decision: "allow_once" | "deny") {
-  if (!selectedApproval.value || !canResolveApproval.value) return;
+  if (!selectedApproval.value || !canResolveDecision(decision)) return;
   const id = selectedApproval.value.id;
   const traceRoute = selectedApprovalRoutes.value?.trace;
   actionMessage.value = "";
   pageMessage.value = "";
   pendingDecision.value = decision;
   try {
-    await store.resolveApproval(selectedApproval.value, decision, {
-      readonly: isReadOnly.value,
-    });
-    actionMessage.value = decision === "deny" ? "已拒绝该动作的本次授权" : "已允许该动作执行一次";
+    await store.resolveApproval(id, decision);
+    actionMessage.value =
+      decision === "deny"
+        ? "已记录拒绝授权；实际状态以运行时回执为准"
+        : "已记录仅本次放行；是否执行以运行时回执为准";
     if (traceRoute) {
       void router.push(traceRoute);
       return;
-    }
-    if (!store.approvals.some((approval) => approval.id === id)) {
-      void router.replace(approvalQueueRoute.value);
     }
   } catch {
     const message = store.approvalResolutionError ?? "审批提交失败";
@@ -265,9 +315,6 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
       store.approvalResolutionState === "uncertain"
     ) {
       pageMessage.value = message;
-      if (!store.approvals.some((approval) => approval.id === id)) {
-        await router.replace(approvalQueueRoute.value);
-      }
     } else {
       actionMessage.value = message;
     }

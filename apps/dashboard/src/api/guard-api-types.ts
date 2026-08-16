@@ -40,6 +40,68 @@ export interface GuardAuditIntegrityMetadataDto {
   canonicalization: string;
 }
 
+export interface GuardApprovalEvidenceEventDto {
+  event_id?: string;
+  event_type?: string;
+  trace_id?: string;
+  case_id?: string | null;
+  runtime?: string;
+  current_step?: string | null;
+  source_type?: string | null;
+  source_trust?: string | null;
+  resource_targets?: string[];
+  user_task?: string | null;
+}
+
+export interface GuardApprovalRuleHitDto {
+  rule_id?: string;
+}
+
+export interface GuardApprovalEvidenceDecisionDto {
+  decision_id?: string;
+  decision?: PolicyDecision;
+  risk_score?: number;
+  severity?: Exclude<RiskSeverity, "unknown">;
+  reason?: string;
+  rule_hits?: Array<string | GuardApprovalRuleHitDto>;
+}
+
+export interface GuardApprovalPolicyEvidenceDto {
+  bundle_id?: string;
+  version?: string;
+  revision?: number | null;
+  canonical_digest?: string;
+  digest?: string;
+}
+
+/**
+ * Bounded, display-safe approval evidence. `payload` and unknown producer
+ * extensions are deliberately absent so the dashboard cannot project them.
+ * The flat fields preserve read-only compatibility with pre-S1 fixtures.
+ */
+export interface GuardApprovalEvidenceDto {
+  event?: GuardApprovalEvidenceEventDto;
+  decision?: GuardApprovalEvidenceDecisionDto;
+  policy?: GuardApprovalPolicyEvidenceDto;
+  event_id?: string;
+  decision_id?: string;
+  rule_hits?: Array<string | GuardApprovalRuleHitDto>;
+}
+
+export interface GuardLlmApprovalReviewDto {
+  review_id?: string;
+  reviewer?: string;
+  status?: "reviewed" | "resolved" | "kept_pending" | "error";
+  decision?: "allow_once" | "deny" | null;
+  confidence?: number | null;
+  reason?: string | null;
+  evidence_refs?: string[];
+  error?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  reviewed_at?: string;
+}
+
 export interface GuardApprovalDto {
   approval_id: string;
   trace_id: string;
@@ -60,6 +122,11 @@ export interface GuardApprovalDto {
   created_at: string;
   expires_at: string;
   resolved_at: string | null;
+  evidence?: GuardApprovalEvidenceDto;
+  llm_review?: GuardLlmApprovalReviewDto | null;
+  resolution_source?: "human" | "llm" | "system" | null;
+  resolved_by?: string | null;
+  resolution_reason?: string | null;
 }
 
 export interface GuardAuditWindowScopeDto {
@@ -159,6 +226,13 @@ export interface GuardTraceDetailDto {
   audit_events: GuardAuditEventDto[];
   approvals: GuardApprovalDto[];
   audit_window?: {
+    limit?: number;
+    returned_count?: number;
+    has_more?: boolean;
+    next_cursor?: string | null;
+    snapshot_id?: string | null;
+  };
+  approval_window?: {
     limit?: number;
     returned_count?: number;
     has_more?: boolean;
@@ -267,6 +341,15 @@ export interface GuardProvenanceDto {
   trace_id: string;
   nodes: GuardProvenanceNodeDto[];
   edges: GuardProvenanceEdgeDto[];
+  provenance_window?: {
+    node_limit?: number;
+    returned_node_count?: number;
+    nodes_have_more?: boolean;
+    edge_limit?: number;
+    returned_edge_count?: number;
+    edges_have_more?: boolean;
+    has_more?: boolean;
+  };
 }
 
 export interface GuardHealthDto {

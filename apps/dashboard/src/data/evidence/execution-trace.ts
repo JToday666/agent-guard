@@ -9,14 +9,21 @@ import type {
   ExecutionStepViewModel,
   ExecutionTraceViewModel,
   NormalizedAuditEvidence,
+  ProvenanceWindow,
+  TraceApprovalWindow,
+  TraceAuditWindow,
   TraceLifecycleState,
 } from "../../types/dashboard";
 import type {
+  ApprovalBasisViewModel,
+  Availability,
   DashboardDataSourceDescriptor,
   ElementSourceMode,
   RuntimeSupervisionViewModel,
+  SupervisionWarning,
 } from "../../types/runtime-supervision.ts";
 import { getEventTypeLabel } from "../../utils/dashboard-formatters.ts";
+import { projectApprovalBasis } from "./approval-basis-projector.ts";
 import {
   projectExecutionStepSupervision,
   type SelectedApprovalEvidence,
@@ -664,6 +671,141 @@ export interface RuntimeSupervisionProjectionInput extends ExecutionProjectionCo
   dataSource: DashboardDataSourceDescriptor;
   runtime?: string | null;
   agentId?: string | null;
+  approvalBasisEnabled?: boolean;
+  auditWindow?: TraceAuditWindow | null;
+  approvalWindow?: TraceApprovalWindow | null;
+  provenanceWindow?: ProvenanceWindow | null;
+}
+
+interface ApprovalBasisProjectionResult {
+  approvalBasisById: Record<string, ApprovalBasisViewModel>;
+  availability: Availability;
+  warnings: SupervisionWarning[];
+}
+
+function windowTruncationReasons(input: RuntimeSupervisionProjectionInput): string[] {
+  const reasons: string[] = [];
+  if (input.auditWindow?.hasMore === true) reasons.push("TRACE_AUDIT_WINDOW_TRUNCATED");
+  if (input.approvalWindow?.hasMore === true) {
+    reasons.push("TRACE_APPROVAL_WINDOW_TRUNCATED");
+  }
+  if (
+    input.provenanceWindow?.hasMore === true ||
+    input.provenanceWindow?.nodesHaveMore === true ||
+    input.provenanceWindow?.edgesHaveMore === true
+  ) {
+    reasons.push("PROVENANCE_WINDOW_TRUNCATED");
+  }
+  return reasons;
+}
+
+function approvalBasisAvailability(
+  values: readonly ApprovalBasisViewModel[],
+  expectedCount: number,
+): Availability {
+  if (expectedCount === 0) return "not_applicable";
+  if (values.length === 0) return "unavailable";
+  if (values.length !== expectedCount) return "partial";
+  const recorded = values.filter((basis) => basis.completeness === "recorded").length;
+  const unavailable = values.filter((basis) => basis.completeness === "unavailable").length;
+  if (recorded === values.length) return "recorded";
+  if (unavailable === values.length) return "unavailable";
+  return "partial";
+}
+
+function buildApprovalBasisById(
+  input: RuntimeSupervisionProjectionInput,
+  execution: ExecutionTraceViewModel,
+  truncationReasons: readonly string[],
+): ApprovalBasisProjectionResult {
+  if (input.approvalBasisEnabled === false) {
+    return { approvalBasisById: {}, availability: "unavailable", warnings: [] };
+  }
+
+  const approvalsById = new Map<string, ApprovalRequest[]>();
+  for (const approval of input.approvals) {
+    if (!approval.id) continue;
+    const matches = approvalsById.get(approval.id) ?? [];
+    matches.push(approval);
+    approvalsById.set(approval.id, matches);
+  }
+  const stepsByApprovalId = new Map<string, ExecutionStepViewModel[]>();
+  for (const step of execution.steps) {
+    if (!step.approvalId) continue;
+    const matches = stepsByApprovalId.get(step.approvalId) ?? [];
+    matches.push(step);
+    stepsByApprovalId.set(step.approvalId, matches);
+  }
+
+  const expectedIds = new Set([...approvalsById.keys(), ...stepsByApprovalId.keys()]);
+  const entries: Array<[string, ApprovalBasisViewModel]> = [];
+  const warnings: SupervisionWarning[] = [];
+  const invalidApprovalCount = input.approvals.filter((approval) => !approval.id).length;
+  if (invalidApprovalCount) {
+    warnings.push({
+      code: "identity_conflict",
+      severity: "warning",
+      message: `${invalidApprovalCount} 条审批请求缺少稳定审批 ID，无法生成结构化依据。`,
+      sourceRefs: [],
+    });
+  }
+  for (const approvalId of [...expectedIds].sort()) {
+    const approvals = approvalsById.get(approvalId) ?? [];
+    const steps = stepsByApprovalId.get(approvalId) ?? [];
+    if (approvals.length !== 1 || steps.length !== 1) {
+      warnings.push({
+        code: "identity_conflict",
+        severity: "warning",
+        message: `审批 ${approvalId} 无法唯一关联一个请求与一个执行步骤。`,
+        sourceRefs: [{ kind: "approval", id: approvalId, traceId: input.traceId }],
+      });
+      continue;
+    }
+    try {
+      entries.push([
+        approvalId,
+        projectApprovalBasis({
+          approval: approvals[0]!,
+          step: steps[0]!,
+          traceId: input.traceId,
+          windowTruncationReasons: truncationReasons,
+        }),
+      ]);
+    } catch {
+      warnings.push({
+        code: "projection_failed",
+        severity: "error",
+        message: `审批 ${approvalId} 的结构化依据投影失败；原始审计记录仍可查看。`,
+        sourceRefs: [{ kind: "approval", id: approvalId, traceId: input.traceId }],
+      });
+    }
+  }
+  const approvalBasisById = Object.fromEntries(entries);
+  const projectedAvailability = approvalBasisAvailability(
+    Object.values(approvalBasisById),
+    expectedIds.size + invalidApprovalCount,
+  );
+  return {
+    approvalBasisById,
+    availability:
+      projectedAvailability === "not_applicable" && truncationReasons.length
+        ? "partial"
+        : projectedAvailability,
+    warnings,
+  };
+}
+
+function uniqueApprovalValue(
+  approvals: readonly ApprovalRequest[],
+  read: (approval: ApprovalRequest) => string | null,
+): string | null {
+  const values = new Set(
+    approvals.flatMap((approval) => {
+      const value = read(approval);
+      return value ? [value] : [];
+    }),
+  );
+  return values.size === 1 ? [...values][0]! : null;
 }
 
 export function buildRuntimeSupervisionViewModel(
@@ -673,6 +815,8 @@ export function buildRuntimeSupervisionViewModel(
     elementSourceMode: input.elementSourceMode,
     traceId: input.traceId,
   });
+  const truncationReasons = windowTruncationReasons(input);
+  const approvalBasis = buildApprovalBasisById(input, execution, truncationReasons);
   const receiptRequiredSteps = execution.steps.filter(
     (step) => step.receiptExpectation === "required",
   );
@@ -710,36 +854,119 @@ export function buildRuntimeSupervisionViewModel(
       message: `步骤 ${step.stepId} 的 V2.1 影子证据不完整或与正式判定冲突。`,
       sourceRefs: step.supervision.v21Assessment.sourceRefs,
     }));
-  const warnings = [...correlationWarnings, ...unsupportedV21Warnings];
+  const windowWarnings: SupervisionWarning[] = truncationReasons.length
+    ? [
+        {
+          code: "window_truncated",
+          severity: "warning",
+          message: "Trace、Approval 或 Provenance 窗口已截断；当前投影不代表完整证据链。",
+          sourceRefs: [],
+        },
+      ]
+    : [];
+  const warnings = [
+    ...correlationWarnings,
+    ...unsupportedV21Warnings,
+    ...approvalBasis.warnings,
+    ...windowWarnings,
+  ];
+  const auditAvailability: Availability =
+    input.auditWindow?.hasMore === true
+      ? "partial"
+      : input.events.length
+        ? "recorded"
+        : "unavailable";
+  const approvalsAvailability: Availability =
+    input.approvalWindow?.hasMore === true
+      ? "partial"
+      : input.approvals.length
+        ? "recorded"
+        : "unavailable";
+  const provenanceTruncated = truncationReasons.includes("PROVENANCE_WINDOW_TRUNCATED");
   return {
     schemaVersion: "runtime-supervision/0.1",
     traceId: input.traceId,
     dataSource: input.dataSource,
     temporalState: execution.lifecycleSupervision.confirmedTerminal ? "historical" : "following",
-    runtime: input.runtime ?? null,
-    agentId: input.agentId ?? null,
+    runtime: input.runtime ?? uniqueApprovalValue(input.approvals, (approval) => approval.runtime),
+    agentId: input.agentId ?? uniqueApprovalValue(input.approvals, (approval) => approval.agentId),
     execution,
-    approvalBasisById: {},
+    approvalBasisById: approvalBasis.approvalBasisById,
     contextManifestByEventId: {},
     provenancePresentation: { contractKind: "legacy", edges: [], nodes: [], warnings: [] },
     completeness: {
-      auditEvents: input.events.length ? "recorded" : "unavailable",
-      approvals: input.approvals.length ? "recorded" : "unavailable",
-      provenance: "unavailable",
+      auditEvents: auditAvailability,
+      approvals: approvalsAvailability,
+      provenance: provenanceTruncated ? "partial" : "unavailable",
       contextManifest: "unavailable",
       runtimeReceipts: receiptAvailability,
-      truncatedReasons: [],
+      truncatedReasons: truncationReasons,
     },
     capabilities: {
       facts: "unavailable",
       contextManifest: "unavailable",
-      approvalBasis: "unavailable",
+      approvalBasis: approvalBasis.availability,
       enforcementEvidence: "unavailable",
       runtimeReceipts: receiptAvailability,
       traceCompare: "unavailable",
     },
     warnings,
   };
+}
+
+/**
+ * UI boundary for the derived execution graph. A malformed projection must not
+ * prevent EvidenceDetailPage from rendering its independent raw Audit model.
+ */
+export function buildRuntimeSupervisionViewModelSafely(
+  input: RuntimeSupervisionProjectionInput,
+): RuntimeSupervisionViewModel {
+  try {
+    return buildRuntimeSupervisionViewModel(input);
+  } catch {
+    return {
+      schemaVersion: "runtime-supervision/0.1",
+      traceId: input.traceId,
+      dataSource: input.dataSource,
+      temporalState: "following",
+      runtime: input.runtime ?? null,
+      agentId: input.agentId ?? null,
+      execution: {
+        steps: [],
+        lifecycleState: "observing",
+        lifecycleLabel: "实时观察中",
+        lifecycleAuditId: null,
+        lifecycleSupervision: { confirmedTerminal: false, completionReason: null },
+      },
+      approvalBasisById: {},
+      contextManifestByEventId: {},
+      provenancePresentation: { contractKind: "legacy", edges: [], nodes: [], warnings: [] },
+      completeness: {
+        auditEvents: "unavailable",
+        approvals: "unavailable",
+        provenance: "unavailable",
+        contextManifest: "unavailable",
+        runtimeReceipts: "unavailable",
+        truncatedReasons: [],
+      },
+      capabilities: {
+        facts: "unavailable",
+        contextManifest: "unavailable",
+        approvalBasis: "unavailable",
+        enforcementEvidence: "unavailable",
+        runtimeReceipts: "unavailable",
+        traceCompare: "unavailable",
+      },
+      warnings: [
+        {
+          code: "projection_failed",
+          severity: "error",
+          message: "运行监督投影失败；原始审计记录仍可查看。",
+          sourceRefs: [],
+        },
+      ],
+    };
+  }
 }
 
 export function shouldContinueTracePolling(trace: ExecutionTraceViewModel): boolean {

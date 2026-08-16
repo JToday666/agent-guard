@@ -144,7 +144,15 @@
             role="tabpanel"
             aria-labelledby="trace-view-tab-execution"
           >
+            <InlineNotice
+              v-if="runtimeProjectionFailed"
+              title="部分运行监督投影暂不可用"
+              tone="warning"
+            >
+              原始审计记录未受影响，可切换到“审计记录”继续调查。
+            </InlineNotice>
             <ExecutionTrace
+              :approval-basis-by-id="runtimeSupervision.approvalBasisById"
               :is-window-partial="isExecutionWindowPartial"
               :layout="executionLayout"
               :polling-state="tracePollingState"
@@ -336,8 +344,9 @@ import ExecutionTrace from "../components/evidence/ExecutionTrace.vue";
 import ProvenanceInspector from "../components/evidence/ProvenanceInspector.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
+import { dashboardEnv } from "../config/dashboard-env";
 import {
-  buildRuntimeSupervisionViewModel,
+  buildRuntimeSupervisionViewModelSafely,
   shouldContinueTracePolling,
 } from "../data/evidence/execution-trace";
 import type { ExecutionTraceLayout } from "../data/evidence/execution-flow-layout";
@@ -372,8 +381,6 @@ const store = useDashboardStore();
 const isMockPreview = dashboardDataSourceHandle.descriptor.dataSourceMode === "mock_preview";
 const isPageActive = ref(false);
 const provenanceSyncMessage = ref("");
-const finalTraceReconciledId = ref("");
-const terminalSyncTraceId = ref("");
 // This page is kept alive. During navigation Vue updates the shared route before
 // deactivating the cached page, so reading route.params directly would briefly
 // erase the trace id and invalidate the execution projection.
@@ -403,6 +410,7 @@ const traceApprovals = computed(() =>
     ? traceDetail.value.approvals
     : store.approvals.filter((approval) => approval.traceId === traceId.value),
 );
+const provenance = computed(() => store.provenanceByTrace[traceId.value]);
 const evidenceModel = computed(() =>
   buildTraceEvidenceViewModel(
     traceId.value,
@@ -413,19 +421,27 @@ const evidenceModel = computed(() =>
   ),
 );
 const runtimeSupervision = computed(() =>
-  buildRuntimeSupervisionViewModel({
+  buildRuntimeSupervisionViewModelSafely({
+    approvalBasisEnabled: dashboardEnv.runtimeSupervisionS1Enabled,
+    approvalWindow: traceDetail.value?.approvalWindow,
     approvals: traceApprovals.value,
+    auditWindow: traceDetail.value?.auditWindow,
     dataSource: dashboardDataSourceHandle.descriptor,
     elementSourceMode: isMockPreview ? "mock" : "live",
     events: evidenceModel.value.events,
+    provenanceWindow: provenance.value?.window,
     traceId: traceId.value,
   }),
 );
 const executionTrace = computed(() => runtimeSupervision.value.execution);
+const runtimeProjectionFailed = computed(() =>
+  runtimeSupervision.value.warnings.some((warning) => warning.code === "projection_failed"),
+);
 const isExecutionWindowPartial = computed(
   () =>
     evidenceModel.value.integrity.mayBeTruncated ||
-    evidenceModel.value.integrity.traceMetadataStatus === "partial",
+    evidenceModel.value.integrity.traceMetadataStatus === "partial" ||
+    runtimeSupervision.value.completeness.truncatedReasons.length > 0,
 );
 const tracePollingState = computed(
   () => store.tracePollingStates[traceId.value] ?? idlePollingState,
@@ -477,7 +493,6 @@ const selectedExecutionStep = computed(() =>
       (selectedEventId.value && step.auditIds.includes(selectedEventId.value)),
   ),
 );
-const provenance = computed(() => store.provenanceByTrace[traceId.value]);
 const provenanceError = computed(() => store.provenanceErrors[traceId.value] ?? "");
 const selectedProvenanceNodeId = computed<string | undefined>(() =>
   typeof route.query.node_id === "string" ? route.query.node_id : undefined,
@@ -693,8 +708,6 @@ watch(
 
 watch(traceId, (value, previous) => {
   provenanceSyncMessage.value = "";
-  finalTraceReconciledId.value = "";
-  terminalSyncTraceId.value = "";
   hasVisitedProvenance.value = activeView.value === "provenance";
   if (!isPageActive.value || !value) return;
   if (previous && previous !== value) store.stopTracePolling();
@@ -709,7 +722,7 @@ watch(
       store.startTracePolling(traceId.value);
       return;
     }
-    void reconcileTerminalTrace(traceId.value);
+    store.reconcileTerminalTrace(traceId.value);
   },
   { immediate: true },
 );
@@ -719,7 +732,7 @@ onActivated(() => {
   if (traceId.value && shouldContinueTracePolling(executionTrace.value)) {
     store.startTracePolling(traceId.value);
   } else if (traceId.value) {
-    void reconcileTerminalTrace(traceId.value);
+    store.reconcileTerminalTrace(traceId.value);
   }
   if (activeView.value === "provenance") void handleProvenanceRetry();
 });
@@ -732,26 +745,6 @@ onDeactivated(() => {
 onUnmounted(() => {
   store.stopTracePolling();
 });
-
-async function reconcileTerminalTrace(value: string): Promise<void> {
-  if (!value || terminalSyncTraceId.value === value || finalTraceReconciledId.value === value) {
-    return;
-  }
-  terminalSyncTraceId.value = value;
-  store.stopTracePolling();
-  try {
-    const traceResult = await store.loadTraceDetail(value, true);
-    if (traceResult === "skipped") {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-      await store.loadTraceDetail(value, true);
-    }
-    if (traceId.value !== value) return;
-    finalTraceReconciledId.value = value;
-    await store.loadTraceProvenance(value, true);
-  } finally {
-    if (terminalSyncTraceId.value === value) terminalSyncTraceId.value = "";
-  }
-}
 </script>
 
 <style scoped lang="scss">

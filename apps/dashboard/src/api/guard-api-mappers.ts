@@ -13,9 +13,12 @@ import type {
   GuardTraceDetailDto,
 } from "./guard-api-types";
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence.ts";
 import type {
   AdapterStatus,
+  ApprovalDecision,
   ApprovalRequest,
+  ApprovalRequestEvidence,
   AuditEventRow,
   AuditIntegrity,
   AuditRecordType,
@@ -104,6 +107,101 @@ function readSeverity(value: unknown): AuditEventRow["severity"] {
 
 function readRuntime(value: unknown): AuditEventRow["runtime"] {
   return value === "langgraph" || value === "openclaw" ? value : "unknown";
+}
+
+function readApprovalDecision(value: unknown): ApprovalDecision | null {
+  return value === "allow_once" || value === "deny" ? value : null;
+}
+
+function readApprovalDecisionOptions(value: unknown): ApprovalDecision[] {
+  return [
+    ...new Set(
+      readArray(value).flatMap((item) => {
+        const decision = readApprovalDecision(item);
+        return decision ? [decision] : [];
+      }),
+    ),
+  ];
+}
+
+function readApprovalRuleIds(value: unknown): string[] {
+  return [
+    ...new Set(
+      readArray(value).flatMap((item) => {
+        if (typeof item === "string" && item) return [item];
+        const ruleId = readString(readRecord(item).rule_id);
+        return ruleId ? [ruleId] : [];
+      }),
+    ),
+  ];
+}
+
+function mapApprovalEvidence(value: unknown): ApprovalRequestEvidence | null {
+  const evidence = readRecord(value);
+  const event = readRecord(evidence.event);
+  const decision = readRecord(evidence.decision);
+  const policy = readRecord(evidence.policy);
+  const eventId = readString(event.event_id) ?? readString(evidence.event_id);
+  const decisionId = readString(decision.decision_id) ?? readString(evidence.decision_id);
+  const ruleHits = readApprovalRuleIds(decision.rule_hits ?? evidence.rule_hits);
+  const eventType = readString(event.event_type);
+  const taskPreview = readString(event.user_task);
+  const sourceType = readString(event.source_type);
+  const sourceTrust = readString(event.source_trust);
+  const resourceTargets = readStringArray(event.resource_targets).map((target) =>
+    maskSensitiveText(target),
+  );
+  const officialDecision = readDecision(decision.decision);
+  const riskScore = readNullableNumber(decision.risk_score);
+  const severity = readSeverity(decision.severity);
+  const reason = readString(decision.reason);
+  const bundleId = readString(policy.bundle_id);
+  const version = readString(policy.version);
+  const revision =
+    typeof policy.revision === "number" && Number.isInteger(policy.revision)
+      ? policy.revision
+      : null;
+  const digest = readString(policy.canonical_digest) ?? readString(policy.digest);
+  const hasRecognizedEvidence =
+    eventId !== null ||
+    decisionId !== null ||
+    eventType !== null ||
+    taskPreview !== null ||
+    sourceType !== null ||
+    sourceTrust !== null ||
+    resourceTargets.length > 0 ||
+    officialDecision !== "unknown" ||
+    riskScore !== null ||
+    severity !== "unknown" ||
+    reason !== null ||
+    ruleHits.length > 0 ||
+    bundleId !== null ||
+    version !== null ||
+    revision !== null ||
+    digest !== null;
+  if (!hasRecognizedEvidence) return null;
+  return {
+    eventId,
+    eventTraceId: readString(event.trace_id),
+    eventType,
+    runtime: readRuntime(event.runtime),
+    taskPreview: taskPreview ? maskSensitiveText(taskPreview) : null,
+    sourceType,
+    sourceTrust,
+    resourceTargets,
+    decisionId,
+    decision: officialDecision,
+    riskScore,
+    severity,
+    reason: reason ? maskSensitiveText(reason) : null,
+    ruleHits,
+    policy: {
+      bundleId,
+      version,
+      revision,
+      digest,
+    },
+  };
 }
 
 function readRecordType(
@@ -275,43 +373,93 @@ export function mapAuditWindow(dto: GuardAuditWindowDto): AuditWindow {
 export function mapApproval(dto: GuardApprovalDto): ApprovalRequest {
   const actionName = readString(dto.action_name) ?? "未提供";
   const resource = readString(dto.resource) ?? "未提供";
+  const evidenceRecord = readRecord(dto.evidence);
+  const eventEvidence = readRecord(evidenceRecord.event);
+  const decisionEvidence = readRecord(evidenceRecord.decision);
+  const evidence = mapApprovalEvidence(dto.evidence);
+  const resolutionDecision = readApprovalDecision(dto.decision);
+  const resolvedAt = readString(dto.resolved_at);
+  const resolutionSource =
+    dto.resolution_source === "human" ||
+    dto.resolution_source === "llm" ||
+    dto.resolution_source === "system"
+      ? dto.resolution_source
+      : null;
+  const resolvedBy = readString(dto.resolved_by);
+  const resolutionReasonValue = readString(dto.resolution_reason);
   const status: ApprovalRequest["status"] =
     dto.status === "expired"
-      ? "expired"
+      ? (dto.decision === null || resolutionDecision === "deny") &&
+        dto.resolved_at === null &&
+        resolutionSource === null &&
+        resolvedBy === null &&
+        resolutionReasonValue === null
+        ? "expired"
+        : "unknown"
       : dto.status === "pending"
-        ? "pending"
-        : dto.decision === "allow_once"
-          ? "allowed"
-          : "denied";
+        ? dto.decision === null &&
+          dto.resolved_at === null &&
+          resolutionSource === null &&
+          resolvedBy === null &&
+          resolutionReasonValue === null
+          ? "pending"
+          : "unknown"
+        : dto.status !== "resolved"
+          ? "unknown"
+          : resolvedAt === null
+            ? "unknown"
+            : resolutionDecision === "allow_once"
+              ? "allowed"
+              : resolutionDecision === "deny"
+                ? "denied"
+                : "unknown";
+  const eventId = readString(eventEvidence.event_id) ?? readString(evidenceRecord.event_id);
+  const decisionId =
+    readString(decisionEvidence.decision_id) ?? readString(evidenceRecord.decision_id);
+  const userTask = evidence?.taskPreview ?? "未提供";
+  const ruleHits = evidence?.ruleHits ?? [];
 
   return {
-    id: readString(dto.approval_id) ?? "未提供",
+    id: readString(dto.approval_id) ?? "",
     createdAt: readString(dto.created_at) ?? "",
     status,
     resource: maskSensitiveText(resource),
     riskScore: readNumber(dto.risk_score),
     severity: readSeverity(dto.severity),
     reason: readString(dto.reason) ?? "未提供",
-    eventId: "",
+    eventId,
+    policyAuditId: null,
+    decisionId,
     traceId: readString(dto.trace_id) ?? "",
     subjectId: readString(dto.subject_id) ?? "未提供",
     subjectType: readString(dto.subject_type) ?? "未提供",
-    actionId: readString(dto.action_id) ?? "未提供",
+    actionId: readString(dto.action_id) ?? "",
     actionName,
-    userTask: "未提供",
+    requestingPrincipalId: readString(dto.requesting_principal_id),
+    runtime: readRuntime(dto.runtime),
+    agentId: readString(dto.agent_id),
+    decisionOptions: readApprovalDecisionOptions(dto.decision_options),
+    decision: resolutionDecision,
+    userTask,
     agentAction: `${actionName}(${maskSensitiveText(resource)})`,
     consequence: approvalConsequence(status),
-    ruleHits: [],
+    ruleHits,
+    evidence,
     expiresAt: readString(dto.expires_at),
-    resolvedAt: readString(dto.resolved_at),
+    resolvedAt,
+    resolutionSource,
+    resolvedBy,
+    resolutionReason: resolutionReasonValue ? maskSensitiveText(resolutionReasonValue) : null,
   };
 }
 
 function approvalConsequence(status: ApprovalRequest["status"]): string {
   if (status === "allowed") return "该动作已获得一次性放行。";
   if (status === "denied") return "该动作的本次授权已被拒绝；实际执行结果以运行时回执为准。";
-  if (status === "expired") return "该审批已过期，当前动作不会继续执行。";
-  return "允许一次后，当前暂停的工具动作将继续执行。";
+  if (status === "expired")
+    return "该审批已过期，不能再通过本审批释放；实际执行结果以运行时回执为准。";
+  if (status === "pending") return "允许一次只释放本次授权；动作是否执行及其结果以运行时回执为准。";
+  return "审批状态证据不完整，当前不能据此确认授权或执行结果。";
 }
 
 function evaluationDatasetLabel(datasetId: string | null, datasetVersion: string | null): string {
@@ -380,7 +528,9 @@ export function mapEvaluationRun(dto: GuardEvaluationRunDto): EvaluationRun {
 
 export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
   const auditWindow = readRecord(dto.audit_window);
+  const approvalWindow = readRecord(dto.approval_window);
   const events = readArray(dto.audit_events).map((row) => mapAuditEvent(row as GuardAuditEventDto));
+  const approvals = readArray(dto.approvals).map((row) => mapApproval(row as GuardApprovalDto));
   const useAuditSequence = events.every((event) => event.auditSequence !== null);
   events.sort((left, right) => {
     const primaryOrder = useAuditSequence
@@ -391,11 +541,18 @@ export function mapTraceDetail(dto: GuardTraceDetailDto): TraceDetail {
   return {
     id: readString(dto.trace_id) ?? "",
     events,
-    approvals: readArray(dto.approvals).map((row) => mapApproval(row as GuardApprovalDto)),
+    approvals: mergeApprovalsWithAuditEvidence(approvals, events),
     auditWindow: {
       hasMore: readNullableBoolean(auditWindow.has_more),
       limit: readNumber(auditWindow.limit, events.length),
       returnedCount: readNumber(auditWindow.returned_count, events.length),
+      nextCursor: readString(auditWindow.next_cursor),
+      snapshotId: readString(auditWindow.snapshot_id),
+    },
+    approvalWindow: {
+      hasMore: readNullableBoolean(approvalWindow.has_more),
+      limit: readNumber(approvalWindow.limit, readArray(dto.approvals).length),
+      returnedCount: readNumber(approvalWindow.returned_count, readArray(dto.approvals).length),
     },
     loadedAt: new Date().toISOString(),
   };
@@ -529,32 +686,44 @@ export function mapAdapterStatus(dto: GuardAdapterStatusDto): AdapterStatus {
 }
 
 export function mapProvenance(dto: GuardProvenanceDto): ProvenanceGraph {
+  const window = readRecord(dto.provenance_window);
+  const nodes = readArray(dto.nodes).map((item): ProvenanceNode => {
+    const n = readRecord(item);
+    return {
+      nodeId: readString(n.node_id) ?? "node",
+      traceId: readString(n.trace_id) ?? readString(dto.trace_id) ?? "",
+      kind: readString(n.kind) ?? "event",
+      refId: readString(n.ref_id) ?? "",
+      label: readString(n.label) ?? "未提供",
+      timestamp: readString(n.timestamp) ?? "",
+      metadata: readRecord(n.metadata),
+    };
+  });
+  const edges = readArray(dto.edges).map((item): ProvenanceEdge => {
+    const e = readRecord(item);
+    return {
+      edgeId: readString(e.edge_id) ?? "edge",
+      traceId: readString(e.trace_id) ?? readString(dto.trace_id) ?? "",
+      sourceNodeId: readString(e.source_node_id) ?? "",
+      targetNodeId: readString(e.target_node_id) ?? "",
+      relation: readString(e.relation) ?? "",
+      timestamp: readString(e.timestamp) ?? "",
+      metadata: readRecord(e.metadata),
+    };
+  });
   return {
     traceId: readString(dto.trace_id) ?? "",
-    nodes: readArray(dto.nodes).map((item): ProvenanceNode => {
-      const n = readRecord(item);
-      return {
-        nodeId: readString(n.node_id) ?? "node",
-        traceId: readString(n.trace_id) ?? readString(dto.trace_id) ?? "",
-        kind: readString(n.kind) ?? "event",
-        refId: readString(n.ref_id) ?? "",
-        label: readString(n.label) ?? "未提供",
-        timestamp: readString(n.timestamp) ?? "",
-        metadata: readRecord(n.metadata),
-      };
-    }),
-    edges: readArray(dto.edges).map((item): ProvenanceEdge => {
-      const e = readRecord(item);
-      return {
-        edgeId: readString(e.edge_id) ?? "edge",
-        traceId: readString(e.trace_id) ?? readString(dto.trace_id) ?? "",
-        sourceNodeId: readString(e.source_node_id) ?? "",
-        targetNodeId: readString(e.target_node_id) ?? "",
-        relation: readString(e.relation) ?? "",
-        timestamp: readString(e.timestamp) ?? "",
-        metadata: readRecord(e.metadata),
-      };
-    }),
+    nodes,
+    edges,
+    window: {
+      nodeLimit: readNumber(window.node_limit, nodes.length),
+      returnedNodeCount: readNumber(window.returned_node_count, nodes.length),
+      nodesHaveMore: readNullableBoolean(window.nodes_have_more),
+      edgeLimit: readNumber(window.edge_limit, edges.length),
+      returnedEdgeCount: readNumber(window.returned_edge_count, edges.length),
+      edgesHaveMore: readNullableBoolean(window.edges_have_more),
+      hasMore: readNullableBoolean(window.has_more),
+    },
   };
 }
 
