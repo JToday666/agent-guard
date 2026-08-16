@@ -26,6 +26,7 @@ import base64
 import copy
 import json
 import logging
+from types import SimpleNamespace
 
 from agentguard_core import AuditEvent, GuardEvent, utc_now_iso
 from agentguard_core.actions.canonical_json import canonical_sha256
@@ -49,12 +50,15 @@ from agentguard_core.security_context import (
     OnlineSecurityState,
     projection_identity_key,
 )
+from agentguard_core.security_context.facts import FlowFact, SourceFact
 from guard_api.auth import AuthContext
 from guard_api.models import TaskCreateRequest
 from guard_api.security_state import SecurityStateService
 from guard_api.security_state.transient import (
+    LEGACY_FACT_BUILDER_VERSION,
     TransientSecurityFacts,
     compute_bundle_digest,
+    compute_overlay_digest,
 )
 from guard_api.services import (
     ApprovalService,
@@ -190,19 +194,166 @@ def _ct_event(
         trace_id=_TRACE_ID,
         timestamp="2026-08-16T00:00:00+00:00",
         security_context=SecurityContext(
-            agent_id="main", user_task="ct wiring fixture"
+            agent_id="main",
+            user_task="ct wiring fixture",
+            # Existing CT projection fixtures prove an explicitly empty
+            # visible set.  Gate A distinguishes this from an omitted set.
+            visible_source_refs=(),
         ),
         payload=payload,
         metadata=metadata,
     )
 
 
-def _online_state(
-    store: MemoryControlPlaneStore, scope_digest: str
-):
+def _online_state(store: MemoryControlPlaneStore, scope_digest: str):
     record = store.get_security_state(scope_digest)
     assert record is not None
     return record, OnlineSecurityState.model_validate(record.canonical_payload)
+
+
+def test_visible_action_alias_requires_one_returned_by_edge_not_one_target() -> None:
+    """Duplicate evidence edges to the same target remain ambiguous."""
+
+    scope_digest = "sha256:" + "9" * 64
+    source_ref = "tool_result:binding:test:call_prior"
+    source = SourceFact(
+        source_id=source_ref,
+        scope_digest=scope_digest,
+        source_type="tool_result",
+        trust="untrusted",
+        verification_state="unverified",
+        origin="observed",
+        authority="untrusted_claim",
+        producer="ct-fact-builder",
+        taints=["UNTRUSTED"],
+        first_sequence=None,
+        last_sequence=None,
+        evidence_refs=[],
+    )
+
+    def returned_by(flow_id: str) -> FlowFact:
+        return FlowFact(
+            flow_id=flow_id,
+            scope_digest=scope_digest,
+            source_ref="action:call_prior",
+            target_ref=source_ref,
+            relation="returned_by",
+            taints=[],
+            strength="exact",
+            origin="deterministic",
+            sequence=None,
+            producer="ct-fact-builder",
+            evidence_refs=[],
+        )
+
+    event = _ct_event(
+        event_id="evt_visible_alias_ambiguous",
+        event_type="tool_call_proposed",
+    )
+    event = event.model_copy(
+        update={
+            "security_context": event.security_context.model_copy(
+                update={"visible_source_refs": ("action:call_prior",)}
+            )
+        }
+    )
+    materials = SimpleNamespace(
+        snapshot=SimpleNamespace(
+            sources=[source],
+            flows=[returned_by("flow:one"), returned_by("flow:two")],
+        )
+    )
+    service = object.__new__(CtProjectionService)
+    assert service._resolve_visible_refs(event, materials, scope_digest) is None
+
+
+def test_visible_refs_reject_mixed_cross_scope_set_without_partial_acceptance() -> None:
+    scope_digest = "sha256:" + "8" * 64
+    other_scope = "sha256:" + "7" * 64
+
+    def source(source_id: str, scope: str) -> SourceFact:
+        return SourceFact(
+            source_id=source_id,
+            scope_digest=scope,
+            source_type="tool_result",
+            trust="untrusted",
+            verification_state="verified",
+            origin="observed",
+            authority="authoritative",
+            producer="ct-fact-builder",
+            taints=["UNTRUSTED"],
+            first_sequence=None,
+            last_sequence=None,
+            evidence_refs=[],
+        )
+
+    same_scope_ref = "tool_result:binding:test:call_same_scope"
+    cross_scope_ref = "tool_result:binding:test:call_cross_scope"
+    event = _ct_event(
+        event_id="evt_visible_cross_scope",
+        event_type="tool_call_proposed",
+    ).model_copy(
+        update={
+            "security_context": SecurityContext(
+                agent_id="main",
+                user_task="ct wiring fixture",
+                visible_source_refs=(same_scope_ref, cross_scope_ref),
+            )
+        }
+    )
+    materials = SimpleNamespace(
+        snapshot=SimpleNamespace(
+            sources=[
+                source(same_scope_ref, scope_digest),
+                source(cross_scope_ref, other_scope),
+            ],
+            flows=[],
+        )
+    )
+
+    service = object.__new__(CtProjectionService)
+    assert service._resolve_visible_refs(event, materials, scope_digest) is None
+
+
+def test_visible_refs_apply_width_budget_before_deduplication() -> None:
+    scope_digest = "sha256:" + "6" * 64
+    source_ref = "tool_result:binding:test:call_repeated"
+    event = _ct_event(
+        event_id="evt_visible_over_width",
+        event_type="tool_call_proposed",
+    ).model_copy(
+        update={
+            "security_context": SecurityContext(
+                agent_id="main",
+                user_task="ct wiring fixture",
+                visible_source_refs=tuple(source_ref for _ in range(33)),
+            )
+        }
+    )
+    materials = SimpleNamespace(
+        snapshot=SimpleNamespace(
+            sources=[
+                SourceFact(
+                    source_id=source_ref,
+                    scope_digest=scope_digest,
+                    source_type="tool_result",
+                    trust="untrusted",
+                    verification_state="verified",
+                    origin="observed",
+                    authority="authoritative",
+                    producer="ct-fact-builder",
+                    taints=["UNTRUSTED"],
+                    first_sequence=None,
+                    last_sequence=None,
+                    evidence_refs=[],
+                )
+            ],
+            flows=[],
+        )
+    )
+
+    service = object.__new__(CtProjectionService)
+    assert service._resolve_visible_refs(event, materials, scope_digest) is None
 
 
 def _snapshot_kwargs(scope_digest: str, task_fact: TaskFact) -> dict:
@@ -285,9 +436,7 @@ def test_dod_real_shapes_populate_state_indices() -> None:
         event_type="memory_write_proposed",
         task_id=task_id,
     )
-    evaluation.evaluate(
-        memory_event, requesting_principal_id="cred_adapter_main"
-    )
+    evaluation.evaluate(memory_event, requesting_principal_id="cred_adapter_main")
 
     # D4 commit 信封：随同一条 policy_evaluation 审计记录落盘；
     # D1 独立投影身份（runtime_observation + ct-facts:{event_id}）。
@@ -295,9 +444,11 @@ def test_dod_real_shapes_populate_state_indices() -> None:
         audit = store.get_policy_evaluation_by_event_id(event_id)
         assert audit is not None
         envelope = audit.evidence["ct_transient_facts"]
-        assert envelope["schema_version"] == "1.0"
+        assert envelope["schema_version"] == "1.1"
         payload = envelope["payload"]
+        assert payload["fact_builder_version"] == "ct-fact-2"
         assert payload["bundle_digest"].startswith("sha256:")
+        assert payload["overlay_digest"].startswith("sha256:")
         assert payload["source_identity"] == {
             "source_record_type": "runtime_observation",
             "source_record_id": f"ct-facts:{event_id}",
@@ -337,9 +488,7 @@ def test_ct_flag_off_byte_identical() -> None:
         store = MemoryControlPlaneStore()
         settings = _settings(ct_enabled=ct_enabled)
         task_id, scope_digest = _ingress_task(store, settings=settings)
-        evaluation, state_service, ct_service = _stack(
-            store, settings=settings
-        )
+        evaluation, state_service, ct_service = _stack(store, settings=settings)
         assert ct_service.enabled is ct_enabled
         event = _ct_event(
             event_id="evt_ct_off_1",
@@ -400,31 +549,20 @@ def test_replay_idempotent_short_circuit(monkeypatch, caplog) -> None:
         calls["count"] += 1
         return original_project(self, committed_record, **kwargs)
 
-    monkeypatch.setattr(
-        SecurityStateService, "project_committed", _counting
-    )
+    monkeypatch.setattr(SecurityStateService, "project_committed", _counting)
 
-    first = evaluation.evaluate(
-        event, requesting_principal_id="cred_adapter_main"
-    )
+    first = evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
     count_after_first = calls["count"]
     assert count_after_first >= 1
     version_after_first = store.get_security_state(scope_digest).state_version
 
-    replay = evaluation.evaluate(
-        event, requesting_principal_id="cred_adapter_main"
-    )
+    replay = evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
     # 响应不变（同幂等结果）。
     assert replay.policy_audit_id == first.policy_audit_id
-    assert _normalized_response_dump(replay) == _normalized_response_dump(
-        first
-    )
+    assert _normalized_response_dump(replay) == _normalized_response_dump(first)
     # 五元组幂等键短路：evaluation 与 CT 补投影均不重复进入 projector。
     assert calls["count"] == count_after_first
-    assert (
-        store.get_security_state(scope_digest).state_version
-        == version_after_first
-    )
+    assert store.get_security_state(scope_digest).state_version == version_after_first
     # 评审强化：短路断言必须与「backfill 重建失败」可区分——登记在场
     # （短路前置条件成立），且 replay 全程无任何 backfill 跳过/失败留痕。
     assert (
@@ -536,9 +674,7 @@ def test_dirty_rebuild_state_digest_equivalence() -> None:
 
     # 置脏后 bounded rebuild 必须逐位等价：同投影登记 + 同
     # projector_version → 同事实容器（05 §12 T-Replay）。
-    state_service.store_access.mark_security_state_dirty(
-        scope_digest, ["source"]
-    )
+    state_service.store_access.mark_security_state_dirty(scope_digest, ["source"])
     task_record = store.get_task_fact(task_id)
     assert task_record is not None
     state_service.read_snapshot_with_revoked(
@@ -568,9 +704,7 @@ def test_no_task_reference_skip_no_fabrication() -> None:
         event_type="tool_result_produced",
         call_id="call_notask_1",
     )
-    response = evaluation.evaluate(
-        event, requesting_principal_id="cred_adapter_main"
-    )
+    response = evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
     assert response.decision.decision in ("allow", "ask", "deny")
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
     assert audit is not None
@@ -596,9 +730,7 @@ def test_dual_projection_coexistence_forward_drift_rebase() -> None:
         task_id=task_id,
         call_id="call_dual_1",
     )
-    response = evaluation.evaluate(
-        event, requesting_principal_id="cred_adapter_main"
-    )
+    response = evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
     assert response.decision.decision in ("allow", "ask", "deny")
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
     assert audit is not None
@@ -668,32 +800,25 @@ def test_ct_envelope_round_trip_persistence_fidelity() -> None:
     assert compute_bundle_digest(rebuilt) == payload["bundle_digest"]
     assert rebuilt.bundle_digest == payload["bundle_digest"]
     assert payload["bundle_digest"].startswith("sha256:")
+    assert compute_overlay_digest(rebuilt) == payload["overlay_digest"]
+    assert rebuilt.overlay_digest == payload["overlay_digest"]
+    assert payload["overlay_digest"].startswith("sha256:")
 
     # 三类 facts 逐条字段等价：重建 bundle 的事实集与在线状态容器
     # （由同一 bundle 投影，delta_builder 排序去重口径）逐条 digest 相等。
     def _fact_digests(facts) -> set[str]:
-        return {
-            canonical_sha256(fact.model_dump(mode="json")) for fact in facts
-        }
+        return {canonical_sha256(fact.model_dump(mode="json")) for fact in facts}
 
     _, state = _online_state(store, scope_digest)
     assert rebuilt.source_facts
     assert rebuilt.flow_facts
-    assert _fact_digests(rebuilt.source_facts) == _fact_digests(
-        state.source_index
-    )
-    assert _fact_digests(rebuilt.flow_facts) == _fact_digests(
-        state.relevant_flows
-    )
-    assert _fact_digests(rebuilt.memory_facts) == _fact_digests(
-        state.memory_index
-    )
+    assert _fact_digests(rebuilt.source_facts) == _fact_digests(state.source_index)
+    assert _fact_digests(rebuilt.flow_facts) == _fact_digests(state.relevant_flows)
+    assert _fact_digests(rebuilt.memory_facts) == _fact_digests(state.memory_index)
     # 身份字段等价。
     assert rebuilt.event_id == event.event_id
     assert rebuilt.scope_digest == scope_digest
-    assert all(
-        fact.scope_digest == scope_digest for fact in rebuilt.source_facts
-    )
+    assert all(fact.scope_digest == scope_digest for fact in rebuilt.source_facts)
 
 
 # ---------------------------------------------------------------------------
@@ -712,9 +837,7 @@ def test_backfill_positive_rebuild_restores_registration() -> None:
         task_id=task_id,
         call_id="call_backfill_1",
     )
-    first = evaluation.evaluate(
-        event, requesting_principal_id="cred_adapter_main"
-    )
+    first = evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
     access = state_service.store_access
     registration = access.get_projection(
         scope_digest,
@@ -770,9 +893,7 @@ def test_backfill_positive_rebuild_restores_registration() -> None:
             ]
         }
     )
-    assert len(stripped.applied_projections) == len(
-        state_now.applied_projections
-    ) - 1
+    assert len(stripped.applied_projections) == len(state_now.applied_projections) - 1
     assert store.cas_security_state(
         scope_digest,
         record_now.state_version,
@@ -787,9 +908,7 @@ def test_backfill_positive_rebuild_restores_registration() -> None:
         ),
     )
 
-    replay = evaluation.evaluate(
-        event, requesting_principal_id="cred_adapter_main"
-    )
+    replay = evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
     assert replay.policy_audit_id == first.policy_audit_id
 
     # 登记恢复且容器 digest 与原投影等价；身份派生的 projection_id
@@ -818,6 +937,8 @@ def _ct_backfill_audit(
     *,
     payload: dict,
     task_id: str | None,
+    envelope_schema_version: str = "1.1",
+    event_id: str | None = None,
 ) -> AuditEvent:
     metadata: dict[str, object] = {}
     if task_id is not None:
@@ -833,14 +954,92 @@ def _ct_backfill_audit(
         severity="low",
         blocked=False,
         reason="fixture",
+        links=(
+            {"event_id": event_id, "decision_id": f"decision:{event_id}"}
+            if event_id is not None
+            else {}
+        ),
         metadata=metadata,
         evidence={
             "ct_transient_facts": {
-                "schema_version": "1.0",
+                "schema_version": envelope_schema_version,
                 "payload": payload,
             }
         },
     )
+
+
+def test_backfill_accepts_legacy_1_0_ct_fact_1_without_overlay_digest() -> None:
+    """A pre-Gate audit remains replayable after the fact-builder bump."""
+
+    store = MemoryControlPlaneStore()
+    settings = _settings()
+    task_id, scope_digest = _ingress_task(store, settings=settings)
+    _, state_service, ct_service = _stack(store, settings=settings)
+
+    event_id = "evt_ct_legacy_backfill"
+    source_record_id = f"ct-facts:{event_id}"
+    source = SourceFact(
+        source_id="tool_result:binding:legacy:call-legacy",
+        scope_digest=scope_digest,
+        source_type="tool_result",
+        trust="untrusted",
+        verification_state="unverified",
+        origin="observed",
+        authority="untrusted_claim",
+        producer="ct-fact-builder",
+        taints=["UNTRUSTED"],
+        first_sequence=None,
+        last_sequence=None,
+        evidence_refs=[],
+    )
+    bare_bundle = TransientSecurityFacts(
+        event_id=event_id,
+        scope_digest=scope_digest,
+        source_facts=(source,),
+    )
+    legacy_digest = compute_bundle_digest(
+        bare_bundle,
+        fact_builder_version=LEGACY_FACT_BUILDER_VERSION,
+    )
+    legacy_bundle = bare_bundle.model_copy(update={"bundle_digest": legacy_digest})
+    raw_bundle = legacy_bundle.model_dump(mode="json")
+    raw_bundle.pop("overlay_digest")
+    legacy_payload = {
+        "ct_delta_builder_version": "ct-delta-1",
+        "commit_id": f"ct-commit:{event_id}",
+        "bundle_digest": legacy_digest,
+        "bundle": raw_bundle,
+        "projection_id": "projection:legacy-fixture",
+        "base_state_version_at_commit": 0,
+        "source_identity": {
+            "source_record_type": "runtime_observation",
+            "source_record_id": source_record_id,
+            "source_revision": 1,
+        },
+    }
+    audit = _ct_backfill_audit(
+        payload=legacy_payload,
+        task_id=task_id,
+        envelope_schema_version="1.0",
+        event_id=event_id,
+    )
+    assert store.add_audit_event(audit) is True
+    persisted = store.get_audit_event(audit.audit_id)
+    assert persisted is not None
+
+    ct_service.backfill(persisted)
+
+    registration = state_service.store_access.get_projection(
+        scope_digest,
+        "runtime_observation",
+        source_record_id,
+        1,
+        PROJECTOR_VERSION,
+    )
+    assert registration is not None
+    _, state = _online_state(store, scope_digest)
+    assert any(fact.source_id == source.source_id for fact in state.source_index)
 
 
 def test_backfill_negative_branches_direct_drive(caplog) -> None:
@@ -860,9 +1059,7 @@ def test_backfill_negative_branches_direct_drive(caplog) -> None:
     )
     base_audit = store.get_policy_evaluation_by_event_id("evt_ct_s4_base")
     assert base_audit is not None
-    base_payload = copy.deepcopy(
-        base_audit.evidence["ct_transient_facts"]["payload"]
-    )
+    base_payload = copy.deepcopy(base_audit.evidence["ct_transient_facts"]["payload"])
 
     def _payload_with_source(source_record_id: str) -> dict:
         payload = copy.deepcopy(base_payload)
@@ -927,6 +1124,31 @@ def test_backfill_negative_branches_direct_drive(caplog) -> None:
     _assert_skip("embedded bundle_digest mismatches")
     _assert_not_registered("ct-facts:evt_ct_s4_embedded")
 
+    # 用例 2c：1.1 信封不得宣称旧 fact-builder 版本。
+    caplog.clear()
+    version_payload = _payload_with_source("ct-facts:evt_ct_s4_version")
+    version_payload["fact_builder_version"] = LEGACY_FACT_BUILDER_VERSION
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(payload=version_payload, task_id=task_id)
+        )
+    _assert_skip("unsupported or mismatched envelope/fact-builder version")
+    _assert_not_registered("ct-facts:evt_ct_s4_version")
+
+    # 用例 2d：source_id 不进历史 bundle digest，但进入 Gate A overlay
+    # digest；只篡改注册身份也必须在 backfill 时被拒绝。
+    caplog.clear()
+    overlay_payload = _payload_with_source("ct-facts:evt_ct_s4_overlay")
+    overlay_payload["bundle"]["source_facts"][0]["source_id"] += ":tampered"
+    tampered_bundle = TransientSecurityFacts.model_validate(overlay_payload["bundle"])
+    assert compute_bundle_digest(tampered_bundle) == overlay_payload["bundle_digest"]
+    with caplog.at_level(logging.INFO):
+        ct_service.backfill(
+            _ct_backfill_audit(payload=overlay_payload, task_id=task_id)
+        )
+    _assert_skip("overlay digest does not match")
+    _assert_not_registered("ct-facts:evt_ct_s4_overlay")
+
     # 用例 3：audit metadata 缺 task_id 跳过。
     caplog.clear()
     with caplog.at_level(logging.INFO):
@@ -943,9 +1165,7 @@ def test_backfill_negative_branches_direct_drive(caplog) -> None:
     caplog.clear()
     with caplog.at_level(logging.INFO):
         ct_service.backfill(
-            _ct_backfill_audit(
-                payload=_payload_with_source("evt-x"), task_id=task_id
-            )
+            _ct_backfill_audit(payload=_payload_with_source("evt-x"), task_id=task_id)
         )
     _assert_skip("ct-facts: prefix form check")
     _assert_not_registered("evt-x")
