@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "id": "I01",
+  "exact_title": "INT-PR-01 — Fact → Snapshot → Shadow Fusion",
+  "kind": "task",
+  "roles": ["task"],
+  "lane": "integration",
+  "lifecycle": "completed",
+  "revision": 3,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring",
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "# 11. INT-PR-01 — Fact → Snapshot → Shadow Fusion",
+      "line_hint": 339
+    }
+  ],
+  "evidence_refs": [
+    "evidence/I01/EV-I01-40C28139410C.json",
+    "evidence/I01/EV-I01-4CAE97DF476F.json",
+    "evidence/I01/EV-I01-6E28F9EE76C3.json",
+    "evidence/I01/EV-I01-D45104021BBA.json",
+    "evidence/I01/EV-I01-D5E86EBAA6BB.json",
+    "evidence/I01/EV-I01-WORKTREE-F435BFF.json",
+    "evidence/I01/EV-I01-WORKTREE.json"
+  ],
+  "work": {
+    "branch": "codex/gate-a-int-pr-01",
+    "worktree_slug": "agent-guard-gate-a",
+    "owner": "implementation-owner",
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "started_at": null,
+    "substate": "closed",
+    "completed_commit": "0f3652e73ade43b621f7bcc414b36ca697da6d7c"
+  },
+  "notes": [
+    "INT-PR-01 and its production Snapshot-to-shadow evidence landed on origin/dev in PR #156."
+  ]
+}

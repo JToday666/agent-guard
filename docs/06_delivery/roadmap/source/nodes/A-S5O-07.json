@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-S5O-07",
+  "exact_title": "official route 对 case/runtime/profile/policy 唯一；overlap 在 mutation 拒绝",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 11.3 S5-O 退出条件和口径",
+      "line_hint": 537
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "S5O",
+  "work": null,
+  "notes": []
+}

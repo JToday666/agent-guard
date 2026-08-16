@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "FE02",
+  "exact_title": "FE-RSC-02 — Unique execution projector and required supervision ViewModel",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "fe",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "dashboard-types-mappers-store"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 13. 前端 PR 拆分",
+      "line_hint": 658
+    }
+  ],
+  "evidence_refs": [
+    "evidence/FE02/EV-FE02-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

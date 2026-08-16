@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GC2-02",
+  "exact_title": "pre hook completes before invocation = yes",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/03_OpenClaw实施方案.md",
+      "heading": "### 2.2 C2 Gate 判据",
+      "line_hint": 60
+    }
+  ],
+  "evidence_refs": [
+    "evidence/A-GC2-02/EV-A-GC2-02-COMMIT.json"
+  ],
+  "acceptance_parent": "G-C2",
+  "work": null,
+  "notes": []
+}

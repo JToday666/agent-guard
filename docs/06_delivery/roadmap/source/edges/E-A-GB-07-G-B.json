@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GB-07-G-B",
+  "from": "A-GB-07",
+  "to": "G-B",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-B cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 5.2 Gate B：当前 Official Decision → RTE",
+      "line_hint": 265
+    }
+  ],
+  "decision_id": null
+}

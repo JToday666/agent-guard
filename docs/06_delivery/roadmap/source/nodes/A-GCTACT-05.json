@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GCTACT-05",
+  "exact_title": "full ct_transient_facts Trace readback and rollback evidence exist",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 96
+    }
+  ],
+  "evidence_refs": ["evidence/A-GCTACT-05/EV-A-GCTACT-05-070081893EC4.json"],
+  "acceptance_parent": "G-CTACT",
+  "work": null,
+  "notes": []
+}

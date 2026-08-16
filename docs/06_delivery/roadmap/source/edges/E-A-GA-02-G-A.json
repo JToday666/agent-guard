@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GA-02-G-A",
+  "from": "A-GA-02",
+  "to": "G-A",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-A cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 5.1 Gate A：CT → CORE Shadow",
+      "line_hint": 219
+    }
+  ],
+  "decision_id": null
+}

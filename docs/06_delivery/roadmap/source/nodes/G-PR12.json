@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-PR12",
+  "exact_title": "每个判定类 PR 的最小门禁",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## 21. 每个判定类 PR 的最小门禁",
+      "line_hint": 524
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

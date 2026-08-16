@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-042-G-C2-R03",
+  "from": "G-C2",
+  "to": "R03",
+  "relation": "hard_dependency",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "R03 requires G-C2.",
+  "provenance": "documented_git_confirmed",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 11. 并行开发关系",
+      "line_hint": 251
+    }
+  ],
+  "decision_id": null
+}

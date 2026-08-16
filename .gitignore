@@ -25,8 +25,9 @@ release-dist/
 !**/.env.example
 !**/.env.*.example
 
-# Project agent instructions
-AGENTS.md
+# Project agent instructions. Keep only the repository-root memory tracked.
+**/AGENTS.md
+!/AGENTS.md
 .agents/skills/frontend-design/
 question-record/
 

@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S5C",
+  "exact_title": "S5-C Context Isolation View",
+  "kind": "stage",
+  "roles": [
+    "stage",
+    "gate"
+  ],
+  "lane": "stage",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "dashboard-types-mappers-store"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 11.2 S5-C 退出条件和口径",
+      "line_hint": 510
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

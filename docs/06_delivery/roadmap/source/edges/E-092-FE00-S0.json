@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-092-FE00-S0",
+  "from": "FE00",
+  "to": "S0",
+  "relation": "join",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "S0 requires FE00.",
+  "provenance": "documented_git_confirmed",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

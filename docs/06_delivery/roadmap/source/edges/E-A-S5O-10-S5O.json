@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-S5O-10-S5O",
+  "from": "A-S5O-10",
+  "to": "S5O",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "S5O cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 11.3 S5-O 退出条件和口径",
+      "line_hint": 544
+    }
+  ],
+  "decision_id": null
+}

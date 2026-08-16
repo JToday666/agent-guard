@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-CTFINAL-08",
+  "exact_title": "Receipt closure",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "# 22. Final Implementation DoD",
+      "line_hint": 594
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "CT-FINAL-DOD",
+  "work": null,
+  "notes": []
+}

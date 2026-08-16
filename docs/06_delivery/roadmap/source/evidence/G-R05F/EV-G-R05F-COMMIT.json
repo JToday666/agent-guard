@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-G-R05F-COMMIT",
+  "node_id": "G-R05F",
+  "kind": "commit",
+  "ref": "35e4fb2",
+  "status": "verified",
+  "summary": "Reviewed Git evidence for G-R05F; 35e4fb2 is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

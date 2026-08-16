@@ -1,0 +1,11 @@
+{
+  "id": "EV-G-CTACT-8B05E9B511D8",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "G-CTACT",
+  "recorded_at": "2026-08-16T13:55:15Z",
+  "ref": "tests/test_gate_a_int_pr_01.py::test_flag_rollback_stops_new_overlay_and_preserves_committed_history",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Flag rollback preserves committed history and disables new overlay"
+}

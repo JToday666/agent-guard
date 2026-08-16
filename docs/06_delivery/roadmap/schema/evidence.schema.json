@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.dev/schemas/roadmap/evidence.schema.json",
+  "title": "AgentGuard roadmap evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "node_id", "kind", "ref", "status", "summary", "recorded_at", "metadata"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "id": {"type": "string", "pattern": "^EV-[A-Z0-9._-]+$"},
+    "node_id": {"type": "string", "minLength": 1},
+    "kind": {"enum": ["commit", "test", "ci", "review", "rollback", "e2e", "doc", "worktree"]},
+    "ref": {"type": "string", "minLength": 1},
+    "status": {"enum": ["verified", "pending"]},
+    "summary": {"type": "string", "minLength": 1},
+    "recorded_at": {"type": ["string", "null"], "format": "date-time"},
+    "metadata": {"type": "object"}
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "R06",
+  "exact_title": "PR-RTE-06 — Result Evidence Hardening",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "rte",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "runtime-binding-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 9. PR-RTE-06 — Result Evidence Hardening",
+      "line_hint": 224
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

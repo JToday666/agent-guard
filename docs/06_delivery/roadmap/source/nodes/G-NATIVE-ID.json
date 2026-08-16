@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-NATIVE-ID",
+  "exact_title": "OpenClaw native ID Gate",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/02_字段与Schema契约冻结.md",
+      "heading": "### 2.2 OpenClaw native ID Gate",
+      "line_hint": 72
+    }
+  ],
+  "evidence_refs": [
+    "evidence/G-NATIVE-ID/EV-G-NATIVE-ID-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

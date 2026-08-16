@@ -32,6 +32,7 @@ docs/
 6. [AttackBench 攻击样本与评测](05_redteam/attackbench.md)
 7. [Dashboard 与审批流](04_apps/dashboard_design.md)
 8. [实施路线与验收标准](06_delivery/implementation_plan.md)
+9. [全轨实施路线图与执行控制面](06_delivery/roadmap/README.md)
 
 ### Core 开发
 
@@ -108,6 +109,7 @@ docs/
 | [openclaw_attackbench.md](05_redteam/openclaw_attackbench.md)                            | OpenClaw 自动轮转 AttackBench、bench shim、bench tools、检测启用和验证流程     |
 | [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                   | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |
 | [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准                                          |
+| [roadmap/](06_delivery/roadmap/README.md)                                                 | CORE/CT/RTE/Console 全轨任务、Gate、Stage、证据状态和并行 worktree 控制面        |
 | [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                                                     |
 | [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                               | Capability Auth、control token、adapter token、browser session 与接口鉴权      |
 | [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                           | Adapter / Plugin token 使用边界和 scope                                        |

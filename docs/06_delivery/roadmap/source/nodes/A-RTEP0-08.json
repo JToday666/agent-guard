@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-RTEP0-08",
+  "exact_title": "Spike 有确定结论",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 13. P0 完成定义",
+      "line_hint": 316
+    }
+  ],
+  "evidence_refs": [
+    "evidence/A-RTEP0-08/EV-A-RTEP0-08-COMMIT.json"
+  ],
+  "acceptance_parent": "RTE-P0-DOD",
+  "work": null,
+  "notes": []
+}

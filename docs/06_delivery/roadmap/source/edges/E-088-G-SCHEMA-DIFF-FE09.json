@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-088-G-SCHEMA-DIFF-FE09",
+  "from": "G-SCHEMA-DIFF",
+  "to": "FE09",
+  "relation": "optional",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "FE09 requires G-SCHEMA-DIFF.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

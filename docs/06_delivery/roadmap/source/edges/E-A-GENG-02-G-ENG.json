@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GENG-02-G-ENG",
+  "from": "A-GENG-02",
+  "to": "G-ENG",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-ENG cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/05_评测_性能_可信验收.md",
+      "heading": "#### Engineering Gate",
+      "line_hint": 264
+    }
+  ],
+  "decision_id": null
+}

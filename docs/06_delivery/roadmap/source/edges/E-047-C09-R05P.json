@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-047-C09-R05P",
+  "from": "C09",
+  "to": "R05P",
+  "relation": "required_input",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "Production assessment contract is required for RTE-05 preparation.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

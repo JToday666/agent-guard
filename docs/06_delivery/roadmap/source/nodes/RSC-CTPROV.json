@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "RSC-CTPROV",
+  "exact_title": "INT-RSC-CT-PROV — Typed Provenance writer",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "integration",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "audit-schema-and-storage"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 14. 后端/集成 PR 建议",
+      "line_hint": 707
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

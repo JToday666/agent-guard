@@ -38,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -74,6 +76,16 @@ jobs:
 
       - name: Validate release version mapping
         run: uv run python scripts/check-release-versions.py
+
+      - name: Validate generated roadmap contracts
+        env:
+          ROADMAP_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/dev' }}
+          ROADMAP_HEAD_REF: ${{ github.sha }}
+        run: |
+          uv run python scripts/roadmap-tools.py validate
+          base_ref="$ROADMAP_BASE_REF"
+          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then base_ref="HEAD^"; fi
+          uv run python scripts/roadmap-tools.py check-diff --base-ref "$base_ref" --head-ref "$ROADMAP_HEAD_REF"
 
   attackbench-contracts:
     name: AttackBench trusted contracts
@@ -254,6 +266,54 @@ jobs:
         with:
           name: dashboard-s1-live-${{ matrix.storage }}
           path: apps/dashboard/test-results-s1-live-${{ matrix.storage }}
+          if-no-files-found: ignore
+
+  roadmap-dashboard-e2e:
+    name: Roadmap artifact E2E / Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Build roadmap artifact
+        run: pnpm roadmap:build
+
+      - name: Install Chromium
+        run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
+
+      - name: Test self-contained roadmap artifact
+        run: pnpm dashboard:test:e2e:roadmap
+
+      - name: Upload roadmap failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: roadmap-artifact-e2e
+          path: apps/dashboard/test-results-roadmap
           if-no-files-found: ignore
 
   openclaw-runtime-smoke:

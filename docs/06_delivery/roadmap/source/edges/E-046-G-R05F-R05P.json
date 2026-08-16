@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-046-G-R05F-R05P",
+  "from": "G-R05F",
+  "to": "R05P",
+  "relation": "qualifies",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "The Core V2.1 freeze gate is a prerequisite for RTE-05 preparation.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 11. 并行开发关系",
+      "line_hint": 251
+    }
+  ],
+  "decision_id": null
+}

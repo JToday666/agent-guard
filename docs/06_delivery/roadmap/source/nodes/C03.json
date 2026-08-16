@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "C03",
+  "exact_title": "V21-03 — Authenticated Task Ingress + SecurityStateScope",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "core",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## V21-03 — Authenticated Task Ingress + SecurityStateScope",
+      "line_hint": 249
+    }
+  ],
+  "evidence_refs": [
+    "evidence/C03/EV-C03-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

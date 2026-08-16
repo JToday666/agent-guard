@@ -1,0 +1,11 @@
+{
+  "id": "EV-G-CTACT-757CF72533EB",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "G-CTACT",
+  "recorded_at": "2026-08-16T13:54:57Z",
+  "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Gate A, CT, V21 and storage parity suites passed"
+}

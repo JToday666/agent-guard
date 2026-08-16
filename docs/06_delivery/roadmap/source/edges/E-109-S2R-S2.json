@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-109-S2R-S2",
+  "from": "S2R",
+  "to": "S2",
+  "relation": "optional",
+  "constraint": "none",
+  "blocking": "none",
+  "rationale": "Replay preview is optional and does not qualify formal S2 completion.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

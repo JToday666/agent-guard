@@ -1,0 +1,11 @@
+{
+  "id": "EV-RSC-CT01-5DC863BA6BF4",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "RSC-CT01",
+  "recorded_at": "2026-08-16T13:54:06Z",
+  "ref": "docs/06_delivery/gate_a_int_pr_01_acceptance.md",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Gate A, CT, V21 and storage parity suites passed"
+}

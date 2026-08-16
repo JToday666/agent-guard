@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "C14",
+  "exact_title": "V21-14 — Optional Semantic Upgrade-only",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "core",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": true,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## V21-14 — Optional Semantic Upgrade-only",
+      "line_hint": 505
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": [
+    "Optional upgrade-only branch; does not block Competition Final."
+  ]
+}

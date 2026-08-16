@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-CT00-COMMIT",
+  "node_id": "CT00",
+  "kind": "commit",
+  "ref": "c70cb77",
+  "status": "verified",
+  "summary": "Reviewed Git mapping for CT00; c70cb77 is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

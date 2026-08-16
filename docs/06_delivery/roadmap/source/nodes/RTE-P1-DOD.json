@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "id": "RTE-P1-DOD",
+  "exact_title": "P1 完成定义",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 14. P1 完成定义",
+      "line_hint": 330
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

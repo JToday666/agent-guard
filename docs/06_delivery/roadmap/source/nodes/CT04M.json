@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "id": "CT04M",
+  "exact_title": "CT-PR-04-M/INT — Bounded Manifest Producer",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "ct",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring",
+    "audit-schema-and-storage"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 14. 后端/集成 PR 建议",
+      "line_hint": 713
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

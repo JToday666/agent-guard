@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.dev/schemas/roadmap/edge.schema.json",
+  "title": "AgentGuard roadmap edge",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "id", "from", "to", "relation", "constraint",
+    "blocking", "rationale", "provenance", "source_refs", "decision_id"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "id": {"type": "string", "pattern": "^E-[A-Z0-9._-]+$"},
+    "from": {"type": "string", "minLength": 1},
+    "to": {"type": "string", "minLength": 1},
+    "relation": {
+      "enum": ["hard_dependency", "required_input", "join", "optional", "fallback", "non_blocking", "qualifies", "observed_sequence"]
+    },
+    "constraint": {"enum": ["start", "activate", "exit", "none"]},
+    "blocking": {"enum": ["hard", "soft", "none"]},
+    "rationale": {"type": "string", "minLength": 1},
+    "provenance": {
+      "enum": ["documented_git_confirmed", "documented_planned", "program_decision", "git_observed"]
+    },
+    "source_refs": {
+      "type": "array", "minItems": 1,
+      "items": {"$ref": "#/$defs/source_ref"}
+    },
+    "decision_id": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "source_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "heading", "line_hint"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "heading": {"type": "string", "minLength": 1},
+        "line_hint": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "string", "minLength": 1}]}
+      }
+    }
+  }
+}

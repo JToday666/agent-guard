@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-083-C12-G-ENG",
+  "from": "C12",
+  "to": "G-ENG",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-ENG requires C12.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "# 3. 全局实施 DAG",
+      "line_hint": 79
+    }
+  ],
+  "decision_id": null
+}

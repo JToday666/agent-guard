@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-C08-COMMIT",
+  "node_id": "C08",
+  "kind": "commit",
+  "ref": "8ddc634",
+  "status": "verified",
+  "summary": "Git history maps C08 implementation to 8ddc634; commit is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

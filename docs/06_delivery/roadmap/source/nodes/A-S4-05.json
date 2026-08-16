@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-S4-05",
+  "exact_title": "deny invocation count 为 0 且 receipt not_invoked",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 10.3 退出条件",
+      "line_hint": 482
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "S4",
+  "work": null,
+  "notes": []
+}

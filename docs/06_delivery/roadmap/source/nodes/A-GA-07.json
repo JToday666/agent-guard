@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GA-07",
+  "exact_title": "DecisionEvidenceV21.mode=shadow 可查询",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 5.1 Gate A：CT → CORE Shadow",
+      "line_hint": 224
+    }
+  ],
+  "evidence_refs": ["evidence/A-GA-07/EV-A-GA-07-DE6AFE0EDC0A.json"],
+  "acceptance_parent": "G-A",
+  "work": null,
+  "notes": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "EV-A-GA-05-5D4B76885065",
+  "kind": "commit",
+  "metadata": {},
+  "node_id": "A-GA-05",
+  "recorded_at": "2026-08-16T13:56:43Z",
+  "ref": "0f3652e73ade43b621f7bcc414b36ca697da6d7c",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Atomic Gate A acceptance item verified by PR #156"
+}

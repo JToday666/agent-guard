@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S0",
+  "exact_title": "S0 — High-Fidelity UI Preview",
+  "kind": "stage",
+  "roles": [
+    "stage"
+  ],
+  "lane": "stage",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "dashboard-types-mappers-store"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 6. S0 — High-Fidelity UI Preview",
+      "line_hint": 270
+    }
+  ],
+  "evidence_refs": [
+    "evidence/S0/EV-S0-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

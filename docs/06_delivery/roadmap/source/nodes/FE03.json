@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "FE03",
+  "exact_title": "FE-RSC-03 — Three-lane action capsule and detail skeleton",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "fe",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "dashboard-types-mappers-store"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 13. 前端 PR 拆分",
+      "line_hint": 659
+    }
+  ],
+  "evidence_refs": [
+    "evidence/FE03/EV-FE03-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

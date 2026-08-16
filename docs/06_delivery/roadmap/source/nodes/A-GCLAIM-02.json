@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GCLAIM-02",
+  "exact_title": "FPR/Benign Deny 95% CI upper bound",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/05_评测_性能_可信验收.md",
+      "heading": "#### Evidence / Claim Gate",
+      "line_hint": 279
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "G-CLAIM",
+  "work": null,
+  "notes": []
+}

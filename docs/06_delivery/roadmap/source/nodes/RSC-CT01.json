@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "id": "RSC-CT01",
+  "exact_title": "INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "integration",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 93
+    }
+  ],
+  "evidence_refs": [
+    "evidence/RSC-CT01/EV-RSC-CT01-5DC863BA6BF4.json",
+    "evidence/RSC-CT01/EV-RSC-CT01-70D4DC0F3B56.json",
+    "evidence/RSC-CT01/EV-RSC-CT01-710B472209CA.json",
+    "evidence/RSC-CT01/EV-RSC-CT01-78830BD125FD.json",
+    "evidence/RSC-CT01/EV-RSC-CT01-C2511C2C3FA2.json"
+  ],
+  "work": {
+    "branch": "codex/gate-a-int-pr-01",
+    "worktree_slug": "agent-guard-gate-a",
+    "owner": "implementation-owner",
+    "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+    "started_at": null,
+    "substate": "closed",
+    "completed_commit": "0f3652e73ade43b621f7bcc414b36ca697da6d7c"
+  },
+  "notes": [
+    "PR #156 verified scoped three-gate activation, secret-safe readiness, live Trace readback and flag rollback."
+  ]
+}

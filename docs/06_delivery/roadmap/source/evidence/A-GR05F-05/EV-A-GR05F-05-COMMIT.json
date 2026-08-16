@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-A-GR05F-05-COMMIT",
+  "node_id": "A-GR05F-05",
+  "kind": "commit",
+  "ref": "35e4fb2",
+  "status": "verified",
+  "summary": "G-R05F acceptance evidence is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "parent": "G-R05F"
+  }
+}

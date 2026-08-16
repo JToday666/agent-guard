@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-A-RTEP0-03-COMMIT",
+  "node_id": "A-RTEP0-03",
+  "kind": "commit",
+  "ref": "b54b062",
+  "status": "verified",
+  "summary": "RTE P0 completion evidence b54b062 is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "parent": "RTE-P0-DOD"
+  }
+}

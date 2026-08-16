@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-CTFINAL-05-CT-FINAL-DOD",
+  "from": "A-CTFINAL-05",
+  "to": "CT-FINAL-DOD",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "CT-FINAL-DOD cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "# 22. Final Implementation DoD",
+      "line_hint": 591
+    }
+  ],
+  "decision_id": null
+}

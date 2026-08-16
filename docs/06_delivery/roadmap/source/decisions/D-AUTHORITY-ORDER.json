@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "id": "D-AUTHORITY-ORDER",
+  "title": "路线图文档效力顺序",
+  "status": "accepted",
+  "decision": "Formal CORE/CT/RTE freeze booklets define track-local tasks and DoD; the Console plan defines S0-S6 scheduling; Master candidate only supplies non-conflicting cross-track joins; Git supplies state and observed order.",
+  "rationale": "The docs map explicitly marks Master Roadmap as lower-authority Implementation Freeze Candidate.",
+  "source_refs": [
+    {
+      "path": "docs/README.md",
+      "heading": "## 3. 文档职责",
+      "line_hint": 145
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GSTAGE-06-G-STAGE",
+  "from": "A-GSTAGE-06",
+  "to": "G-STAGE",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-STAGE cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 16. Stage 晋级判定",
+      "line_hint": 764
+    }
+  ],
+  "decision_id": null
+}

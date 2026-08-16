@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-RTEP1-06",
+  "exact_title": "result evidence 与 Context/Memory interface 不冲突",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 14. P1 完成定义",
+      "line_hint": 337
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "RTE-P1-DOD",
+  "work": null,
+  "notes": []
+}
