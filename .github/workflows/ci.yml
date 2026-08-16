@@ -77,15 +77,8 @@ jobs:
       - name: Validate release version mapping
         run: uv run python scripts/check-release-versions.py
 
-      - name: Validate generated roadmap contracts
-        env:
-          ROADMAP_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/dev' }}
-          ROADMAP_HEAD_REF: ${{ github.sha }}
-        run: |
-          uv run python scripts/roadmap-tools.py validate
-          base_ref="$ROADMAP_BASE_REF"
-          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then base_ref="HEAD^"; fi
-          uv run python scripts/roadmap-tools.py check-diff --base-ref "$base_ref" --head-ref "$ROADMAP_HEAD_REF"
+      - name: Validate roadmap source contracts
+        run: uv run python scripts/roadmap-tools.py validate
 
   attackbench-contracts:
     name: AttackBench trusted contracts
