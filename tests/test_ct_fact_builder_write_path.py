@@ -1,4 +1,4 @@
-"""CT-PR-02b 写侧事件契约测试（ct-fact-1，无接线）。
+"""CT fact_builder 写侧与 Gate A current-action 契约测试。
 
 口径：02 §8.5-8.7/§11/§13、04 §2/§3/§4/§12/§15 与冻结 YAML parity。
 """
@@ -334,7 +334,10 @@ def test_message_send_stable_refs_build_exact_sent_to(
     [
         pytest.param(_send_event(), ct_inputs(), True, id="no-action-ir"),
         pytest.param(
-            _send_event(), ct_inputs(action_ir=ct_action_ir()), True, id="empty-data-refs"
+            _send_event(),
+            ct_inputs(action_ir=ct_action_ir()),
+            True,
+            id="empty-data-refs",
         ),
         pytest.param(
             # email 归一失败（无 @）→ unresolved → 不建流。
@@ -369,7 +372,9 @@ def test_write_side_without_stable_flow_builds_no_flow(event, inputs, degraded) 
 
 def test_message_send_sensitive_preview_signal_without_exact_flow() -> None:
     # 02 §8.6：只有敏感证据 → Signal + 零 exact 流，绝不伪造 provenance。
-    bundle = build_transient_facts(event=_send_event(sensitive=True), inputs=ct_inputs())
+    bundle = build_transient_facts(
+        event=_send_event(sensitive=True), inputs=ct_inputs()
+    )
     assert bundle.flow_facts == ()
     (signal,) = bundle.signals
     assert signal.signal_id == "signal:evt-1:sensitive_send"
@@ -420,7 +425,8 @@ def _tool_call_action_ir():
 
 def test_tool_call_with_action_ir_builds_data_ref_flows_and_candidate() -> None:
     bundle = build_transient_facts(
-        event=_tool_call_event(), inputs=ct_inputs(action_ir=_tool_call_action_ir())
+        event=_tool_call_event(),
+        inputs=ct_inputs(action_ir=_tool_call_action_ir(), visible_refs=()),
     )
     # 方向约定：destinations → written_to；resources → read_from。
     assert [flow.relation for flow in bundle.flow_facts] == ["written_to", "read_from"]
@@ -438,6 +444,42 @@ def test_tool_call_with_action_ir_builds_data_ref_flows_and_candidate() -> None:
     assert candidate.data_refs == ["data:artifact-1"]
     assert candidate.runtime_sequence is None
     assert bundle.degradations == ()
+
+
+def test_tool_call_verified_ref_builds_tainted_current_action_influence() -> None:
+    inputs = ct_inputs(
+        action_ir=_tool_call_action_ir(),
+        visible_refs=(REF,),
+        upstream_descriptors={
+            REF: _descriptor(trust="untrusted", taints=("UNTRUSTED", "SENSITIVE"))
+        },
+    )
+    bundle = build_transient_facts(event=_tool_call_event(), inputs=inputs)
+
+    influence = bundle.flow_facts[0]
+    assert (influence.source_ref, influence.target_ref) == (
+        REF,
+        "action:action-1",
+    )
+    assert (influence.relation, influence.strength, influence.origin) == (
+        "influenced_by",
+        "possible",
+        "semantic_inferred",
+    )
+    assert influence.taints == ["UNTRUSTED", "SENSITIVE"]
+    assert bundle.current_action is not None
+    assert bundle.current_action.data_refs == ["data:artifact-1", REF]
+    assert bundle.degradations == ()
+
+
+def test_tool_call_missing_visible_set_keeps_action_but_degrades_provenance() -> None:
+    bundle = build_transient_facts(
+        event=_tool_call_event(),
+        inputs=ct_inputs(action_ir=_tool_call_action_ir(), visible_refs=None),
+    )
+    assert bundle.current_action is not None
+    assert all(flow.relation != "influenced_by" for flow in bundle.flow_facts)
+    assert bundle.degradations[0].reason_codes == ["ct-fact:visible_set_unavailable"]
 
 
 def test_tool_call_without_action_ir_degrades() -> None:
@@ -460,7 +502,11 @@ def test_tool_call_without_action_ir_degrades() -> None:
             ct_inputs(upstream_descriptors={REF: _descriptor(taints=("UNTRUSTED",))}),
         ),
         ("message", _send_event(sensitive=True), ct_inputs()),
-        ("tool_call", _tool_call_event(), ct_inputs(action_ir=_tool_call_action_ir())),
+        (
+            "tool_call",
+            _tool_call_event(),
+            ct_inputs(action_ir=_tool_call_action_ir(), visible_refs=()),
+        ),
     ],
 )
 def test_write_side_fact_replay_deterministic(case: str, event, inputs) -> None:
@@ -479,7 +525,10 @@ def test_write_side_flows_match_frozen_yaml(freeze_yaml) -> None:
     cases = (
         (_memory_event(), ct_inputs(upstream_descriptors={REF: _descriptor()})),
         (_send_event(), ct_inputs(action_ir=_action_with_data_refs("data:artifact-1"))),
-        (_tool_call_event(), ct_inputs(action_ir=_tool_call_action_ir())),
+        (
+            _tool_call_event(),
+            ct_inputs(action_ir=_tool_call_action_ir(), visible_refs=()),
+        ),
     )
     flows = [
         flow

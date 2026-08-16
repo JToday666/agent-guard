@@ -27,6 +27,7 @@ from agentguard_core.security_context.facts import (
     MemoryFact,
     StickyTaintSummary,
 )
+from agentguard_core.security_context.projection import provenance_lookup
 from agentguard_core.security_context.projection.provenance import (
     MAX_STICKY_TAINT_SUMMARIES,
     PROVENANCE_TYPED_UPSERT_HANDLERS,
@@ -60,7 +61,9 @@ SCOPE = "hmac-sha256:scope_fixture"
 # ---------------------------------------------------------------------------
 
 
-def seq(value: int, *, domain: str = "audit", producer: str = "binding_a") -> SequenceRef:
+def seq(
+    value: int, *, domain: str = "audit", producer: str = "binding_a"
+) -> SequenceRef:
     return SequenceRef(domain=domain, producer_binding_id=producer, value=value)  # type: ignore[arg-type]
 
 
@@ -279,9 +282,7 @@ def test_sticky_merge_same_id_union_taints_min_first_max_last() -> None:
     state = empty_state().model_copy(
         update={
             "sticky_taint_summaries": [
-                make_summary(
-                    "s1", ["CREDENTIAL"], first=5, last=9, flow_refs=["f1"]
-                )
+                make_summary("s1", ["CREDENTIAL"], first=5, last=9, flow_refs=["f1"])
             ]
         }
     )
@@ -355,9 +356,7 @@ def test_sticky_overflow_after_safe_merge_fail_closed() -> None:
     assert len(distinct_sets) >= MAX_STICKY_TAINT_SUMMARIES + 1
     summaries = [
         make_summary(f"s{i}", taints)
-        for i, taints in enumerate(
-            distinct_sets[: MAX_STICKY_TAINT_SUMMARIES + 1]
-        )
+        for i, taints in enumerate(distinct_sets[: MAX_STICKY_TAINT_SUMMARIES + 1])
     ]
     with pytest.raises(ProvenanceProjectionError) as excinfo:
         apply_sticky_taint_upserts(empty_state(), summaries)
@@ -380,11 +379,7 @@ def test_sticky_protected_summary_never_evicted() -> None:
         assert "protected" in ids or any(
             "protected" in s.summary_id for s in result.sticky_taint_summaries
         )
-        kept = [
-            s
-            for s in result.sticky_taint_summaries
-            if "protected" in s.summary_id
-        ]
+        kept = [s for s in result.sticky_taint_summaries if "protected" in s.summary_id]
         assert kept and "CREDENTIAL" in kept[0].taints
     except ProvenanceProjectionError as error:
         # fail-closed 路径同样合法：绝不静默淘汰 protected 摘要
@@ -435,9 +430,7 @@ def test_declassification_matched_via_memory_refs() -> None:
             ]
         }
     )
-    declass = make_declass(
-        "d1", "mem_1", "mem_2", removed=["SENSITIVE"]
-    )
+    declass = make_declass("d1", "mem_1", "mem_2", removed=["SENSITIVE"])
     result = apply_declassification_upserts(state, [declass])
     assert result.sticky_taint_summaries[0].taints == []
 
@@ -471,9 +464,9 @@ def test_declassification_conflict_fail_closed() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _declass_and_sticky_items() -> tuple[
-    list[DeclassificationFact], list[StickyTaintSummary]
-]:
+def _declass_and_sticky_items() -> (
+    tuple[list[DeclassificationFact], list[StickyTaintSummary]]
+):
     declass = make_declass(
         "d1",
         "artifact:x",
@@ -501,9 +494,7 @@ def test_same_delta_declass_and_sticky_new_summary_is_cleaned() -> None:
         }
     )
     result = handlers.apply_typed_updates(empty_state(), delta)
-    summary = next(
-        s for s in result.sticky_taint_summaries if s.summary_id == "s_new"
-    )
+    summary = next(s for s in result.sticky_taint_summaries if s.summary_id == "s_new")
     assert summary.taints == ["SENSITIVE"]  # CREDENTIAL 已被净化
 
 
@@ -548,17 +539,14 @@ def test_replay_declassification_effects_idempotent_and_empty_noop() -> None:
 def chain_state(length: int) -> OnlineSecurityState:
     """a0 → a1 → ... → a_length 的线性 flow 链。"""
     flows = [
-        make_flow(f"flow_{i:02d}", f"node_{i}", f"node_{i + 1}")
-        for i in range(length)
+        make_flow(f"flow_{i:02d}", f"node_{i}", f"node_{i + 1}") for i in range(length)
     ]
     return empty_state().model_copy(update={"relevant_flows": flows})
 
 
 def test_lookup_traverses_full_chain_within_budget() -> None:
     state = chain_state(3)
-    flows, truncated = bounded_relevant_flow_lookup(
-        state, target_ref="node_0"
-    )
+    flows, truncated = bounded_relevant_flow_lookup(state, target_ref="node_0")
     assert [f.flow_id for f in flows] == ["flow_00", "flow_01", "flow_02"]
     assert truncated is False
 
@@ -569,17 +557,14 @@ def test_lookup_depth_budget_truncates() -> None:
         state, target_ref="node_0", max_depth=2
     )
     assert truncated is True
-    reachable = {f.flow_id for f in flows}
-    # 深度预算外的远端 flow 不得被静默纳入完整子图
-    assert "flow_04" not in reachable
-    assert "flow_05" not in reachable
+    # node_0 is depth 0, so max_depth=2 admits only edges whose peer ends at
+    # node_1/node_2. The boundary edge to node_3 must not leak into the result.
+    assert [flow.flow_id for flow in flows] == ["flow_00", "flow_01"]
 
 
 def test_lookup_breadth_budget_truncates() -> None:
     # 单节点 3 条邻接 flow，breadth=2 → 截断
-    flows = [
-        make_flow(f"edge_{i}", "hub", f"leaf_{i}") for i in range(3)
-    ]
+    flows = [make_flow(f"edge_{i}", "hub", f"leaf_{i}") for i in range(3)]
     state = empty_state().model_copy(update={"relevant_flows": flows})
     found, truncated = bounded_relevant_flow_lookup(
         state, target_ref="hub", max_breadth=2
@@ -594,13 +579,32 @@ def test_lookup_node_budget_truncates() -> None:
         state, target_ref="node_0", node_budget=2
     )
     assert truncated is True
+    # The root consumes one node and flow_00 admits the second. flow_01 cannot
+    # be returned because doing so would expose a third endpoint.
+    assert [flow.flow_id for flow in flows] == ["flow_00"]
+
+
+def test_lookup_input_flow_overflow_rejects_before_indexing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = chain_state(3)
+    monkeypatch.setattr(provenance_lookup, "MAX_LOOKUP_INPUT_FLOWS", 2)
+
+    def unexpected_index(_flows: list[FlowFact]):
+        pytest.fail("oversized input must be rejected before adjacency allocation")
+
+    monkeypatch.setattr(provenance_lookup, "_build_adjacency", unexpected_index)
+    flows, truncated = provenance_lookup.bounded_relevant_flow_lookup(
+        state, target_ref="node_0"
+    )
+
+    assert flows == []
+    assert truncated is True
 
 
 def test_lookup_disconnected_target_returns_empty_not_truncated() -> None:
     state = chain_state(3)
-    flows, truncated = bounded_relevant_flow_lookup(
-        state, target_ref="unknown_node"
-    )
+    flows, truncated = bounded_relevant_flow_lookup(state, target_ref="unknown_node")
     assert flows == []
     assert truncated is False
 
@@ -651,9 +655,7 @@ def test_local_handler_tuple_integration_semantics() -> None:
         "flow_upserts": [make_flow("f1", "src_1", "sink_1")],
         "declassification_upserts": [],
         "memory_upserts": [make_memory("mem_1")],
-        "sticky_taint_upserts": [
-            make_summary("s1", ["CREDENTIAL"], flow_refs=["f1"])
-        ],
+        "sticky_taint_upserts": [make_summary("s1", ["CREDENTIAL"], flow_refs=["f1"])],
     }
     state = empty_state()
     for name, handler_fn in PROVENANCE_TYPED_UPSERT_HANDLERS:
@@ -665,8 +667,6 @@ def test_local_handler_tuple_integration_semantics() -> None:
     assert [m.memory_id for m in state.memory_index] == ["mem_1"]
     assert [s.summary_id for s in state.sticky_taint_summaries] == ["s1"]
     # lookup 与 handler 结果联动：bounded subgraph 可达
-    flows, truncated = bounded_relevant_flow_lookup(
-        state, target_ref="sink_1"
-    )
+    flows, truncated = bounded_relevant_flow_lookup(state, target_ref="sink_1")
     assert [f.flow_id for f in flows] == ["f1"]
     assert truncated is False

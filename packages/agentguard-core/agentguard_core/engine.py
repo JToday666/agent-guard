@@ -33,6 +33,7 @@ if TYPE_CHECKING:  # 仅类型标注：不在运行时污染 legacy 导入隔离
     # ``FastAssessment`` 经 ``decisions`` 包导出层引入（引用名不含
     # 禁词），不在本文件直接引用 ``decisions.evidence``。
     from .decisions import FastAssessment
+    from .security_context.assessment_overlay import AssessmentTransientFacts
     from .security_context.snapshot import SecuritySnapshot
     from .semantic.models import SemanticJudgment
 
@@ -139,6 +140,7 @@ class GuardEngine:
         server_secret: bytes,
         detection_results: Sequence[DetectionResult] = (),
         revoked_grant_ids: Sequence[str] = (),
+        transient_facts: "AssessmentTransientFacts | None" = None,
     ) -> "FastAssessment":
         """V21-09 正式 ``assess(event, policies, snapshot) -> FastAssessment``。
 
@@ -157,6 +159,7 @@ class GuardEngine:
             server_secret=server_secret,
             detection_results=detection_results,
             revoked_grant_ids=revoked_grant_ids,
+            transient_facts=transient_facts,
         )
 
     def finalize(
@@ -177,9 +180,7 @@ class GuardEngine:
             finalize_v21,
         )
 
-        semantic_digest = (
-            semantic.semantic_digest if semantic is not None else None
-        )
+        semantic_digest = semantic.semantic_digest if semantic is not None else None
         return finalize_v21(
             assessment,
             semantic,

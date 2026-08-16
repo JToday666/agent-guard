@@ -1,4 +1,4 @@
-"""CT-PR-02a TransientSecurityFacts 契约测试（ct-fact-1，无接线）。
+"""TransientSecurityFacts 与 Gate A overlay digest 契约测试。
 
 口径依据：
 
@@ -21,9 +21,12 @@ from pydantic import ValidationError
 from agentguard_core.security_context.facts import FlowFact, SourceFact
 from guard_api.security_state.transient import (
     FACT_BUILDER_VERSION,
+    LEGACY_FACT_BUILDER_VERSION,
     TransientSecurityFacts,
     bundle_digest_projection,
     compute_bundle_digest,
+    compute_overlay_digest,
+    overlay_digest_projection,
 )
 
 SCOPE = "sha256:" + "0" * 64
@@ -82,8 +85,8 @@ def _bundle(**overrides) -> TransientSecurityFacts:
     return TransientSecurityFacts(**base)
 
 
-def test_fact_builder_version_is_ct_fact_1() -> None:
-    assert FACT_BUILDER_VERSION == "ct-fact-1"
+def test_fact_builder_version_is_ct_fact_2() -> None:
+    assert FACT_BUILDER_VERSION == "ct-fact-2"
 
 
 def test_schema_defaults_and_frozen_fields() -> None:
@@ -96,6 +99,7 @@ def test_schema_defaults_and_frozen_fields() -> None:
     assert bundle.degradations == ()
     assert bundle.evidence_refs == ()
     assert bundle.bundle_digest == ""
+    assert bundle.overlay_digest == ""
 
 
 def test_extra_fields_forbidden() -> None:
@@ -115,13 +119,31 @@ def test_projection_whitelist_keys() -> None:
         "flow_facts",
         "memory_facts",
     }
-    assert projection["fact_builder_version"] == "ct-fact-1"
+    assert projection["fact_builder_version"] == "ct-fact-2"
 
 
 def test_digest_deterministic_same_content() -> None:
     # T-FactReplay：同内容两次独立构造 → 同 digest。
     assert compute_bundle_digest(_bundle()) == compute_bundle_digest(_bundle())
     assert compute_bundle_digest(_bundle()).startswith("sha256:")
+
+
+def test_legacy_fact_builder_digest_remains_explicitly_recomputable() -> None:
+    bundle = _bundle()
+    current = compute_bundle_digest(bundle)
+    legacy = compute_bundle_digest(
+        bundle,
+        fact_builder_version=LEGACY_FACT_BUILDER_VERSION,
+    )
+
+    assert legacy != current
+    assert (
+        bundle_digest_projection(
+            bundle,
+            fact_builder_version=LEGACY_FACT_BUILDER_VERSION,
+        )["fact_builder_version"]
+        == "ct-fact-1"
+    )
 
 
 def test_registration_ids_excluded_from_digest() -> None:
@@ -163,6 +185,24 @@ def test_bundle_digest_itself_excluded() -> None:
     bare = _bundle()
     stamped = bare.model_copy(update={"bundle_digest": "sha256:" + "f" * 64})
     assert compute_bundle_digest(stamped) == compute_bundle_digest(bare)
+
+
+def test_overlay_digest_covers_registration_ids_and_excludes_derived_digests() -> None:
+    bare = _bundle()
+    renamed = _bundle(
+        source_facts=(_source_fact(source_id="source:web:evt-1:renamed"),),
+        flow_facts=(_flow_fact(flow_id="flow:evt-1:renamed"),),
+    )
+    assert compute_overlay_digest(renamed) != compute_overlay_digest(bare)
+    stamped = bare.model_copy(
+        update={
+            "bundle_digest": "sha256:" + "a" * 64,
+            "overlay_digest": "sha256:" + "b" * 64,
+        }
+    )
+    assert compute_overlay_digest(stamped) == compute_overlay_digest(bare)
+    assert "bundle_digest" not in overlay_digest_projection(bare)
+    assert "overlay_digest" not in overlay_digest_projection(bare)
 
 
 def test_json_serializable() -> None:

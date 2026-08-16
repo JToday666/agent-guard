@@ -81,6 +81,9 @@ from .state import (
 )
 
 __all__ = [
+    "ASSESSMENT_OVERLAY_COMPONENT_ID",
+    "ASSESSMENT_OVERLAY_MAX_CONTAINER_ITEMS",
+    "ASSESSMENT_OVERLAY_VERSION",
     "CONTAINER_EVICTION_CLASS",
     "COVERAGE_DOMAINS",
     "PROJECTOR_VERSION",
@@ -89,6 +92,9 @@ __all__ = [
     "AppliedProjection",
     "ApplyOutcome",
     "ApplyResult",
+    "AssessmentOverlay",
+    "AssessmentOverlayError",
+    "AssessmentTransientFacts",
     "BehaviorAggregate",
     "CapabilityGrant",
     "CommittedRecord",
@@ -119,9 +125,11 @@ __all__ = [
     "apply_delta",
     "apply_safe_eviction",
     "build_required_check_plan",
+    "build_assessment_overlay",
     "build_snapshot",
     "compare_sequence_refs",
     "compute_coverage",
+    "compute_overlay_digest",
     "default_coverage_context",
     "delta_digest_projection",
     "fact_digest",
@@ -130,6 +138,7 @@ __all__ = [
     "is_sticky_taint_summary",
     "localize_gaps",
     "mark_state_dirty",
+    "overlay_digest_projection",
     "project_committed_record",
     "projection_identity_key",
     "rebuild_state",
@@ -137,3 +146,19 @@ __all__ = [
     "state_digest",
     "state_digest_projection",
 ]
+
+# Gate A assessment overlay depends on a projection lookup module. Import it
+# only after the base security-context package has finished initialization to
+# avoid entering the handlers/projection cycle from a partially initialized
+# package.
+from .assessment_overlay import (  # noqa: E402
+    ASSESSMENT_OVERLAY_COMPONENT_ID,
+    ASSESSMENT_OVERLAY_MAX_CONTAINER_ITEMS,
+    ASSESSMENT_OVERLAY_VERSION,
+    AssessmentOverlay,
+    AssessmentOverlayError,
+    AssessmentTransientFacts,
+    build_assessment_overlay,
+    compute_overlay_digest,
+    overlay_digest_projection,
+)

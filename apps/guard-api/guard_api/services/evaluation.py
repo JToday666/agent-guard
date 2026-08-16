@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from agentguard_core import (
@@ -13,6 +14,11 @@ from agentguard_core import (
     MemoryEventPayload,
     MemoryGuardChange,
 )
+from agentguard_core.security_context import (
+    ASSESSMENT_OVERLAY_COMPONENT_ID,
+    AssessmentTransientFacts,
+)
+from agentguard_core.signals.models import EvaluationDegradation
 from guard_api.models import (
     ApprovalRequest,
     EnforcementBinding,
@@ -33,13 +39,48 @@ from .policy import PolicyService
 
 if TYPE_CHECKING:
     from .ct_projection import CtCommitPlan, CtProjectionService
+    from guard_api.security_state.transient import TransientSecurityFacts
+
     from .v21_pipeline import (
+        V21PhaseAPrepared,
         V21PhaseBOutcome,
         V21PhaseCPlan,
         V21PipelineMaterials,
         V21PipelineService,
     )
     from .v21_shadow import V21ShadowService
+
+
+logger = logging.getLogger(__name__)
+
+_CT_OVERLAY_UNAVAILABLE_REASON = "ct-fact:overlay_unavailable"
+
+
+def _ct_overlay_unavailable(
+    *, event_id: str, scope_digest: str
+) -> AssessmentTransientFacts:
+    """Build a deterministic required degradation when CT cannot reach Core.
+
+    This DTO contains no asserted facts.  It only marks the dataflow provider
+    unavailable so an enabled-but-failed Gate A path cannot silently fall back
+    to the pre-overlay assessment and produce ``CLEAR_ALLOW``.
+    """
+
+    return AssessmentTransientFacts.from_primitives(
+        event_id=event_id,
+        scope_digest=scope_digest,
+        degradations=(
+            EvaluationDegradation(
+                degradation_id=f"gate-a:ct-overlay-unavailable:{event_id}",
+                component_id=ASSESSMENT_OVERLAY_COMPONENT_ID,
+                domain="dataflow",
+                required_for_action=True,
+                failure_kind="unavailable",
+                reason_codes=[_CT_OVERLAY_UNAVAILABLE_REASON],
+                evidence_refs=[],
+            ),
+        ),
+    )
 
 
 class EvaluationConflictError(ValueError):
@@ -51,6 +92,7 @@ _SESSION_IDENTITY_FIELDS: tuple[str, ...] = (
     "conversation_id",
     "session_key",
     "session_id",
+    "visible_source_refs",
 )
 # payload 契约扩展时增补的可选字段（见 MemoryEventPayload.action_id）。
 _PAYLOAD_EXTENSION_FIELDS: tuple[str, ...] = ("action_id",)
@@ -150,7 +192,8 @@ class EvaluationService:
         # V21-09 D4/D9：pipeline Phase A 在 evaluation_transaction 之前
         # 执行（事务外只读）；replay 不重算 assess——已存在幂等评估
         # 时直接走事务内 replay 检查，不跑 Phase A。
-        materials = None
+        materials: "V21PipelineMaterials | None" = None
+        ct_bundle: "TransientSecurityFacts | None" = None
         if self.v21_pipeline is not None and self.v21_pipeline.enabled:
             existing = self.audit_service.store.get_policy_evaluation_by_event_id(
                 event.event_id
@@ -167,11 +210,87 @@ class EvaluationService:
                         self.ct_projection_service.backfill(existing)
                     return replayed
             else:
-                materials = self.v21_pipeline.run_phase_a(event)
-        # CT-PR-03b：事务外构建 bundle 与 commit 计划（纯 CPU）。
+                # Gate A: CT 开启时将 Phase A 拆成 prepare/finish。事实只
+                # 构造一次，并在权威 commit 前作为 ephemeral overlay
+                # 参与当前 V2 shadow assessment；历史 Snapshot 不变。
+                if (
+                    self.ct_projection_service is not None
+                    and self.ct_projection_service.enabled
+                ):
+                    prepared: "V21PhaseAPrepared | None" = (
+                        self.v21_pipeline.prepare_phase_a(event)
+                    )
+                    if prepared is not None:
+                        ct_bundle = self.ct_projection_service.build_transient_bundle(
+                            event,
+                            prepared,
+                        )
+                        transient_facts = None
+                        overlay_scope = (
+                            prepared.scope_digest
+                            if prepared.snapshot is not None
+                            and prepared.task_id is not None
+                            else None
+                        )
+                        if ct_bundle is None and overlay_scope is not None:
+                            transient_facts = _ct_overlay_unavailable(
+                                event_id=event.event_id,
+                                scope_digest=overlay_scope,
+                            )
+                        elif ct_bundle is not None:
+                            try:
+                                transient_facts = (
+                                    AssessmentTransientFacts.model_validate(
+                                        ct_bundle.model_dump(mode="json")
+                                    )
+                                )
+                            except Exception:  # noqa: BLE001 - shadow fail-closed。
+                                # A bundle that Core did not consume must never
+                                # be committed/projected as if it influenced the
+                                # assessment.  Replace it with a degradation-only
+                                # overlay and clear the commit candidate.
+                                ct_bundle = None
+                                if overlay_scope is not None:
+                                    transient_facts = _ct_overlay_unavailable(
+                                        event_id=event.event_id,
+                                        scope_digest=overlay_scope,
+                                    )
+                                logger.warning(
+                                    "ct transient facts could not be mapped to "
+                                    "the Core overlay for event %s; using a "
+                                    "required dataflow degradation",
+                                    event.event_id,
+                                    exc_info=True,
+                                )
+                        materials = self.v21_pipeline.finish_phase_a(
+                            event,
+                            prepared,
+                            transient_facts=transient_facts,
+                        )
+                else:
+                    # Compatibility path: no new keyword/call boundary when CT
+                    # is disabled, preserving V21-09 byte-for-byte behavior.
+                    materials = self.v21_pipeline.run_phase_a(event)
+        # CT Gate A：从 assessment 使用过的同一 bundle 准备 commit 计划，
+        # 禁止为了投影再次运行 fact builder。
         ct_plan: "CtCommitPlan | None" = None
-        if self.ct_projection_service is not None and materials is not None:
-            ct_plan = self.ct_projection_service.build_commit_bundle(event, materials)
+        if (
+            self.ct_projection_service is not None
+            and materials is not None
+            and ct_bundle is not None
+            and materials.consumed_overlay_digest == ct_bundle.overlay_digest
+        ):
+            ct_plan = self.ct_projection_service.build_commit_plan(
+                event,
+                materials,
+                ct_bundle,
+            )
+        elif ct_bundle is not None and materials is not None:
+            logger.warning(
+                "ct bundle for event %s was not acknowledged by Core; "
+                "skipping its audit commit and projection",
+                event.event_id,
+            )
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         backfill_audit: AuditEvent | None = None
