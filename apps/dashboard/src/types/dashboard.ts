@@ -9,7 +9,11 @@ export type DecisionStatus = PolicyDecision | "unknown";
 
 export type RiskSeverity = "critical" | "high" | "medium" | "low" | "unknown";
 
-export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired";
+export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired" | "unknown";
+
+export type ApprovalDecision = "allow_once" | "deny";
+
+export type ApprovalResolutionSource = "human" | "llm" | "system";
 
 export type RuntimeName = "langgraph" | "openclaw" | "unknown";
 
@@ -47,6 +51,24 @@ export interface AuditEventRow {
   raw?: unknown;
 }
 
+export interface ApprovalRequestEvidence {
+  eventId: string | null;
+  eventTraceId: string | null;
+  eventType: string | null;
+  runtime: RuntimeName;
+  taskPreview: string | null;
+  sourceType: string | null;
+  sourceTrust: string | null;
+  resourceTargets: string[];
+  decisionId: string | null;
+  decision: DecisionStatus;
+  riskScore: number | null;
+  severity: RiskSeverity;
+  reason: string | null;
+  ruleHits: string[];
+  policy: PolicyReferenceEvidence;
+}
+
 export interface ApprovalRequest {
   id: string;
   createdAt: string;
@@ -55,18 +77,31 @@ export interface ApprovalRequest {
   riskScore: number;
   severity: RiskSeverity;
   reason: string;
-  eventId: string;
+  /** Stable GuardEvent identity from Approval evidence. */
+  eventId: string | null;
+  /** AuditEvent identity used for the evidence deep link. */
+  policyAuditId: string | null;
+  decisionId: string | null;
   traceId: string;
   subjectId: string;
   subjectType: string;
   actionId: string;
   actionName: string;
+  requestingPrincipalId: string | null;
+  runtime: RuntimeName;
+  agentId: string | null;
+  decisionOptions: ApprovalDecision[];
+  decision: ApprovalDecision | null;
   userTask: string;
   agentAction: string;
   consequence: string;
   ruleHits: string[];
+  evidence: ApprovalRequestEvidence | null;
   expiresAt?: string | null;
   resolvedAt?: string | null;
+  resolutionSource: ApprovalResolutionSource | null;
+  resolvedBy: string | null;
+  resolutionReason: string | null;
 }
 
 export interface TraceSummary {
@@ -470,10 +505,19 @@ export interface TraceDetail {
   events: AuditEventRow[];
   approvals: ApprovalRequest[];
   auditWindow: TraceAuditWindow;
+  approvalWindow: TraceApprovalWindow;
   loadedAt: string;
 }
 
 export interface TraceAuditWindow {
+  limit: number;
+  returnedCount: number;
+  hasMore: boolean | null;
+  nextCursor: string | null;
+  snapshotId: string | null;
+}
+
+export interface TraceApprovalWindow {
   limit: number;
   returnedCount: number;
   hasMore: boolean | null;
@@ -589,4 +633,15 @@ export interface ProvenanceGraph {
   traceId: string;
   nodes: ProvenanceNode[];
   edges: ProvenanceEdge[];
+  window: ProvenanceWindow;
+}
+
+export interface ProvenanceWindow {
+  nodeLimit: number;
+  returnedNodeCount: number;
+  nodesHaveMore: boolean | null;
+  edgeLimit: number;
+  returnedEdgeCount: number;
+  edgesHaveMore: boolean | null;
+  hasMore: boolean | null;
 }

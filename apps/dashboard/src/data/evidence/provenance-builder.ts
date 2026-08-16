@@ -348,7 +348,22 @@ export function buildProvenanceGraphFromEvidence(
   evidence: TraceEvidenceViewModel,
 ): ProvenanceGraph {
   const primary = evidence.primary;
-  if (!primary) return { edges: [], nodes: [], traceId: evidence.traceId };
+  if (!primary) {
+    return {
+      edges: [],
+      nodes: [],
+      traceId: evidence.traceId,
+      window: {
+        edgeLimit: 0,
+        edgesHaveMore: null,
+        hasMore: null,
+        nodeLimit: 0,
+        nodesHaveMore: null,
+        returnedEdgeCount: 0,
+        returnedNodeCount: 0,
+      },
+    };
+  }
   const input = buildInputs(primary);
   const timestamp = primary.occurredAt;
   const nodeId = (refId: string) => `${evidence.traceId}:${refId}`;
@@ -424,5 +439,18 @@ export function buildProvenanceGraphFromEvidence(
         traceId: evidence.traceId,
       });
     });
-  return { edges, nodes, traceId: evidence.traceId };
+  return {
+    edges,
+    nodes,
+    traceId: evidence.traceId,
+    window: {
+      edgeLimit: edges.length,
+      edgesHaveMore: null,
+      hasMore: null,
+      nodeLimit: nodes.length,
+      nodesHaveMore: null,
+      returnedEdgeCount: edges.length,
+      returnedNodeCount: nodes.length,
+    },
+  };
 }

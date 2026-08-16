@@ -31,9 +31,7 @@ import {
   mapProvenance,
   mapTraceDetail,
 } from "../../api/guard-api-mappers";
-import { mergeApprovalsWithAuditEvidence } from "../approvals/evidence";
 import type {
-  ApprovalRequest,
   ApprovalResolution,
   AuditIntegrity,
   ConfigAuditFindingRecord,
@@ -84,12 +82,12 @@ export class ApiDashboardDataSource implements DashboardReadDataSource, Approval
   }
 
   async resolveApproval(
-    approval: ApprovalRequest,
+    approvalId: string,
     decision: "allow_once" | "deny",
     csrfToken: string,
   ): Promise<ApprovalResolution> {
     const result = await requestJson<GuardApprovalResolutionDto>(
-      `/approvals/${approval.id}/resolve`,
+      `/approvals/${encodeURIComponent(approvalId)}/resolve`,
       {
         method: "POST",
         headers: { "X-AgentGuard-CSRF": csrfToken },
@@ -150,14 +148,10 @@ export class ApiDashboardDataSource implements DashboardReadDataSource, Approval
       options.signal,
     );
     if (response.status === "not_modified") return response;
-    const detail = mapTraceDetail(response.value);
     return {
       status: "modified" as const,
       etag: response.etag,
-      value: {
-        ...detail,
-        approvals: mergeApprovalsWithAuditEvidence(detail.approvals, detail.events),
-      },
+      value: mapTraceDetail(response.value),
     };
   }
 

@@ -273,6 +273,110 @@ test("maps a resolved allow_once approval to an allowed view state", () => {
   assert.equal(approval.status, "allowed");
 });
 
+test("maps only allowlisted approval evidence and keeps wire identities distinct", () => {
+  const approval = mapApproval({
+    approval_id: "app_evidence",
+    trace_id: "trace_evidence",
+    subject_id: "call_evidence",
+    subject_type: "tool_call",
+    action_id: "call_evidence",
+    action_name: "send_email",
+    requesting_principal_id: "principal_evidence",
+    runtime: "langgraph",
+    agent_id: "agent_evidence",
+    status: "resolved",
+    decision_options: ["allow_once", "deny"],
+    decision: "allow_once",
+    resource: "person@example.invalid",
+    reason: "External send",
+    risk_score: 62,
+    severity: "medium",
+    created_at: "2026-06-22T06:30:00Z",
+    expires_at: "2026-06-22T06:45:00Z",
+    resolved_at: "2026-06-22T06:31:00Z",
+    resolution_source: "human",
+    resolved_by: "principal_evidence",
+    resolution_reason: "Only send to person@example.invalid",
+    evidence: {
+      event: {
+        event_id: "event_evidence",
+        event_type: "tool_call_proposed",
+        trace_id: "trace_evidence",
+        runtime: "langgraph",
+        source_type: "email",
+        source_trust: "untrusted",
+        resource_targets: ["person@example.invalid"],
+        user_task: "Send to person@example.invalid",
+      },
+      decision: {
+        decision_id: "decision_evidence",
+        decision: "ask",
+        risk_score: 62,
+        severity: "medium",
+        reason: "Review person@example.invalid",
+        rule_hits: [{ rule_id: "P005_external_send" }, "P004_task_mismatch"],
+      },
+      policy: {
+        bundle_id: "default",
+        version: "p1",
+        revision: 2,
+        canonical_digest: "sha256:abc",
+      },
+      payload: { authorization: "Bearer should-never-reach-the-view-model" },
+      unknown_secret: "should-never-reach-the-view-model",
+    } as unknown as NonNullable<Parameters<typeof mapApproval>[0]["evidence"]>,
+    llm_review: {
+      reviewer: "llm-approval",
+      status: "resolved",
+      decision: "allow_once",
+      reason: "should-not-become-official-basis",
+    },
+  });
+
+  assert.equal(approval.eventId, "event_evidence");
+  assert.equal(approval.policyAuditId, null);
+  assert.equal(approval.decisionId, "decision_evidence");
+  assert.equal(approval.evidence?.eventTraceId, "trace_evidence");
+  assert.equal(approval.evidence?.runtime, "langgraph");
+  assert.deepEqual(approval.evidence?.ruleHits, ["P005_external_send", "P004_task_mismatch"]);
+  assert.equal(approval.resolutionSource, "human");
+  const serialized = JSON.stringify(approval);
+  assert.equal(serialized.includes("should-never-reach-the-view-model"), false);
+  assert.equal(serialized.includes("should-not-become-official-basis"), false);
+  assert.equal(serialized.includes("person@example.invalid"), false);
+});
+
+test("keeps malformed stable approval identities empty instead of display placeholders", () => {
+  const approval = mapApproval({
+    approval_id: null,
+    trace_id: null,
+    subject_id: "subject",
+    subject_type: "tool_call",
+    action_id: null,
+    action_name: "send_email",
+    requesting_principal_id: "principal",
+    runtime: "langgraph",
+    agent_id: "agent",
+    status: "pending",
+    decision_options: [],
+    decision: null,
+    resource: "resource",
+    reason: "reason",
+    risk_score: 0,
+    severity: "low",
+    created_at: "2026-06-22T06:30:00Z",
+    expires_at: "2026-06-22T06:45:00Z",
+    resolved_at: null,
+  } as unknown as Parameters<typeof mapApproval>[0]);
+
+  assert.equal(approval.id, "");
+  assert.equal(approval.traceId, "");
+  assert.equal(approval.actionId, "");
+  assert.equal(approval.eventId, null);
+  assert.equal(approval.policyAuditId, null);
+  assert.equal(approval.decisionId, null);
+});
+
 test("maps canonical approval subject and action fields", () => {
   const approval = mapApproval({
     approval_id: "app_2",
@@ -354,11 +458,29 @@ test("maps trace detail response through existing event and approval mappers", (
       },
     ],
     approvals: [],
-    audit_window: { limit: 1000, returned_count: 2, has_more: true },
+    audit_window: {
+      limit: 1000,
+      returned_count: 2,
+      has_more: true,
+      next_cursor: "cursor-trace-1",
+      snapshot_id: "snapshot-trace-1",
+    },
+    approval_window: { limit: 100, returned_count: 0, has_more: false },
   });
 
   assert.equal(detail.id, "trace_1");
-  assert.deepEqual(detail.auditWindow, { limit: 1000, returnedCount: 2, hasMore: true });
+  assert.deepEqual(detail.auditWindow, {
+    limit: 1000,
+    returnedCount: 2,
+    hasMore: true,
+    nextCursor: "cursor-trace-1",
+    snapshotId: "snapshot-trace-1",
+  });
+  assert.deepEqual(detail.approvalWindow, {
+    limit: 100,
+    returnedCount: 0,
+    hasMore: false,
+  });
   assert.deepEqual(
     detail.events.map((event) => event.id),
     ["audit_1", "audit_2"],
@@ -431,7 +553,18 @@ test("maps sparse trace detail responses without creating an unused metrics mode
   assert.equal(detail.id, "trace_sparse");
   assert.deepEqual(detail.events, []);
   assert.deepEqual(detail.approvals, []);
-  assert.deepEqual(detail.auditWindow, { limit: 0, returnedCount: 0, hasMore: null });
+  assert.deepEqual(detail.auditWindow, {
+    limit: 0,
+    returnedCount: 0,
+    hasMore: null,
+    nextCursor: null,
+    snapshotId: null,
+  });
+  assert.deepEqual(detail.approvalWindow, {
+    limit: 0,
+    returnedCount: 0,
+    hasMore: null,
+  });
   assert.equal("aggregateMetrics" in detail, false);
 });
 
@@ -643,4 +776,40 @@ test("maps sparse adapter and provenance responses with safe defaults", () => {
   assert.equal(provenance.traceId, "trace_sparse");
   assert.deepEqual(provenance.nodes, []);
   assert.deepEqual(provenance.edges, []);
+  assert.deepEqual(provenance.window, {
+    edgeLimit: 0,
+    edgesHaveMore: null,
+    hasMore: null,
+    nodeLimit: 0,
+    nodesHaveMore: null,
+    returnedEdgeCount: 0,
+    returnedNodeCount: 0,
+  });
+});
+
+test("maps explicit Provenance truncation without inventing a continuation cursor", () => {
+  const provenance = mapProvenance({
+    trace_id: "trace_windowed",
+    nodes: [],
+    edges: [],
+    provenance_window: {
+      node_limit: 1000,
+      returned_node_count: 0,
+      nodes_have_more: true,
+      edge_limit: 2000,
+      returned_edge_count: 0,
+      edges_have_more: false,
+      has_more: true,
+    },
+  });
+
+  assert.deepEqual(provenance.window, {
+    edgeLimit: 2000,
+    edgesHaveMore: false,
+    hasMore: true,
+    nodeLimit: 1000,
+    nodesHaveMore: true,
+    returnedEdgeCount: 0,
+    returnedNodeCount: 0,
+  });
 });
