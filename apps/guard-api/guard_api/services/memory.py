@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from agentguard_core import AuditEvent, MemoryGuardChange, utc_now_iso
 
 from guard_api.storage.base import ControlPlaneStore
 
 from .audit import AuditService
 from .evidence import _should_quarantine_memory_change
+
+if TYPE_CHECKING:
+    from .ct_projection import CtProjectionService
 
 
 class MemoryGuardService:
@@ -16,9 +21,11 @@ class MemoryGuardService:
         *,
         store: ControlPlaneStore,
         audit_service: AuditService | None = None,
+        projection_service: CtProjectionService | None = None,
     ) -> None:
         self.store = store
         self.audit_service = audit_service
+        self.projection_service = projection_service
 
     def propose(
         self,
@@ -49,6 +56,9 @@ class MemoryGuardService:
     def commit(self, change_id: str, *, operator_id: str) -> MemoryGuardChange:
         return self._transition(change_id, "committed", operator_id=operator_id)
 
+    def reject(self, change_id: str, *, operator_id: str) -> MemoryGuardChange:
+        return self._transition(change_id, "rejected", operator_id=operator_id)
+
     def rollback(self, change_id: str, *, operator_id: str) -> MemoryGuardChange:
         return self._transition(change_id, "rolled_back", operator_id=operator_id)
 
@@ -66,7 +76,11 @@ class MemoryGuardService:
                 self._record_transition_audit(
                     result.previous_status, result.change, operator_id=operator_id
                 )
-            return result.change
+        # commit-after-project：事务成功退出后才运行派生投影。幂等重放与
+        # 并发落败方仍调用同一入口，用 projection identity 补 crash 窗口。
+        if self.projection_service is not None:
+            self.projection_service.project_memory_transition(result.change)
+        return result.change
 
     def _record_transition_audit(
         self,

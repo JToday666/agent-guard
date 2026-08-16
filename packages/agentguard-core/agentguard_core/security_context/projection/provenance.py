@@ -318,22 +318,143 @@ def apply_declassification_upserts(
 def apply_memory_upserts(
     state: OnlineSecurityState, items: list[MemoryFact]
 ) -> OnlineSecurityState:
-    """按 ``memory_id`` 去重合并入 ``memory_index``（确定性排序）。
+    """按权威 memory sequence 合并 lifecycle，安全属性只增不减。
 
-    同 id 同内容幂等 no-op；同 id 异内容 fail-closed 抛
-    ``v21-05:memory_identity_conflict``（T-Replay 确定性）。
-
-    Memory lifecycle status 与 trust/taint 分开保存（02 §13 P3），
-    handler 不混用两者。
+    CT05 lifecycle fact 以 ``last_write_sequence=(memory, change_id,
+    revision)`` 提供可比较权威序列。相同 change 的合法前进按状态机
+    接受；同序异内容、跨 change 覆盖、不可比较序列与非法转换均
+    fail-closed。CT03 已存在的未绑定 observation fact 可与首条绑定
+    lifecycle fact 安全桥接，且只做 taint/source/evidence 并集。
     """
-    merged = _dedupe_by_key(
-        state.memory_index,
-        items,
-        "memory_id",
-        conflict_reason="v21-05:memory_identity_conflict",
-        dirty_domain="memory",
+
+    merged: dict[str, MemoryFact] = {
+        fact.memory_id: fact for fact in state.memory_index
+    }
+    for incoming in sorted(items, key=lambda fact: fact.memory_id):
+        existing = merged.get(incoming.memory_id)
+        merged[incoming.memory_id] = (
+            incoming
+            if existing is None
+            else _merge_memory_fact(existing, incoming)
+        )
+    return state.model_copy(
+        update={"memory_index": [merged[key] for key in sorted(merged)]}
     )
-    return state.model_copy(update={"memory_index": merged})
+
+
+_MEMORY_REVISION_BY_STATUS: dict[str, int] = {
+    "proposed": 1,
+    "quarantined": 1,
+    "committed": 2,
+    "rejected": 2,
+    "rolled_back": 3,
+}
+_MEMORY_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "proposed": frozenset({"committed", "rejected"}),
+    "quarantined": frozenset({"committed", "rejected"}),
+    "committed": frozenset({"rolled_back"}),
+    "rejected": frozenset(),
+    "rolled_back": frozenset(),
+}
+_MEMORY_TRUST_RISK = {"clean": 0, "unknown": 1, "tainted": 2, "quarantined": 3}
+
+
+def _memory_projection_error(reason: str, message: str) -> ProvenanceProjectionError:
+    return ProvenanceProjectionError(
+        f"v21-05:{reason}", message, dirty_domains=("memory",)
+    )
+
+
+def _validate_memory_sequence(fact: MemoryFact) -> int | None:
+    sequence = fact.last_write_sequence
+    if fact.change_id is None:
+        if sequence is not None:
+            raise _memory_projection_error(
+                "memory_sequence_unbound",
+                "unbound memory observation cannot carry a lifecycle sequence",
+            )
+        return None
+    expected = _MEMORY_REVISION_BY_STATUS.get(fact.change_status or "")
+    if (
+        expected is None
+        or sequence is None
+        or sequence.domain != "memory"
+        or sequence.producer_binding_id != fact.change_id
+        or sequence.value != expected
+    ):
+        raise _memory_projection_error(
+            "memory_sequence_invalid",
+            "memory lifecycle fact lacks the comparable authoritative sequence",
+        )
+    return expected
+
+
+def _merge_memory_evidence(
+    left: list[EvidenceRef], right: list[EvidenceRef]
+) -> list[EvidenceRef]:
+    by_json = {ref.model_dump_json(): ref for ref in [*left, *right]}
+    return [by_json[key] for key in sorted(by_json)]
+
+
+def _merge_memory_fact(left: MemoryFact, right: MemoryFact) -> MemoryFact:
+    left_revision = _validate_memory_sequence(left)
+    right_revision = _validate_memory_sequence(right)
+    if left.change_id is None and right.change_id is None:
+        if left == right:
+            return left
+        raise _memory_projection_error(
+            "memory_identity_conflict",
+            "same unbound memory identity carries different content",
+        )
+    if left.change_id is not None and right.change_id is not None:
+        if left.change_id != right.change_id:
+            raise _memory_projection_error(
+                "memory_identity_conflict",
+                "same memory identity is bound to different lifecycle changes",
+            )
+        assert left_revision is not None and right_revision is not None
+        if right_revision == left_revision:
+            if right == left:
+                return left
+            raise _memory_projection_error(
+                "memory_same_sequence_conflict",
+                "same memory lifecycle sequence carries different content",
+            )
+        if right_revision < left_revision:
+            # A late older projection is a stale replay. It may be registered,
+            # but must not roll back the authoritative lifecycle head.
+            return left
+        if right.change_status not in _MEMORY_ALLOWED_TRANSITIONS.get(
+            left.change_status or "", frozenset()
+        ):
+            raise _memory_projection_error(
+                "memory_lifecycle_invalid",
+                "memory lifecycle transition violates the authoritative state machine",
+            )
+
+    # Bound lifecycle wins over the CT03 unbound observation identity. This is
+    # the only permitted identity enrichment; two bound change ids conflict.
+    bound = right if right.change_id is not None else left
+    trust_state = max(
+        (left.trust_state, right.trust_state),
+        key=lambda value: _MEMORY_TRUST_RISK[value],
+    )
+    last_write = bound.last_write_sequence
+    last_read = right.last_read_sequence or left.last_read_sequence
+    if left.last_read_sequence is not None and right.last_read_sequence is not None:
+        last_read = _max_sequence(left.last_read_sequence, right.last_read_sequence)
+    return bound.model_copy(
+        update={
+            "trust_state": trust_state,
+            "taints": propagate_taints(left.taints, right.taints),
+            "source_refs": sorted(set(left.source_refs) | set(right.source_refs)),
+            "last_write_sequence": last_write,
+            "last_read_sequence": last_read,
+            "evidence_refs": _merge_memory_evidence(
+                left.evidence_refs, right.evidence_refs
+            ),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1404,6 +1404,135 @@ def test_store_concurrent_commit_writes_single_transition_audit(store) -> None:
     assert store.verify_audit_integrity().valid
 
 
+def test_ct05_memory_projection_restart_contract_across_stores(store) -> None:
+    """Memory/PostgreSQL 均从 committed rows 恢复 rollback 后的污染。"""
+
+    import base64
+
+    from agentguard_core.security_context import PROJECTOR_VERSION, MemoryFact
+    from guard_api.security_state import SecurityStateService
+    from guard_api.security_state.transient import (
+        TransientSecurityFacts,
+        compute_bundle_digest,
+        compute_overlay_digest,
+    )
+    from guard_api.services.ct_projection import (
+        CtProjectionService,
+        ct_transient_facts_envelope,
+        decode_ct_transient_facts,
+    )
+
+    settings = GuardApiSettings(
+        v21_shadow_server_secret=base64.urlsafe_b64encode(
+            b"ct05-cross-store-secret-material"
+        ).decode("ascii"),
+        ct_fact_projection_enabled=True,
+    )
+    state_service = SecurityStateService(store)
+    ct_service = CtProjectionService(
+        settings=settings, store=store, state_service=state_service
+    )
+    assert ct_service.enabled
+    memory_service = MemoryGuardService(
+        store=store,
+        audit_service=AuditService(store=store),
+        projection_service=ct_service,
+    )
+    change = memory_service.propose(
+        MemoryGuardChange(
+            change_id="memchg_ct05_cross_store",
+            trace_id="trace_ct05_cross_store",
+            namespace="notes",
+            key="summary",
+            source_trust="untrusted",
+            metadata={"event_id": "evt_ct05_cross_store"},
+        ),
+        runtime="langgraph",
+        agent_id="main",
+        principal_id="operator-1",
+    )
+    assert change.status == "quarantined"
+    scope_digest = "sha256:" + "5" * 64
+    fact = MemoryFact(
+        memory_id="memory://notes/summary",
+        change_id=None,
+        change_status="proposed",
+        trust_state="tainted",
+        taints=["UNTRUSTED", "PERSISTENT_UNTRUSTED"],
+        source_refs=["source:web:1"],
+        last_write_sequence=None,
+        last_read_sequence=None,
+        evidence_refs=[],
+    )
+    bundle = TransientSecurityFacts(
+        event_id="evt_ct05_cross_store",
+        scope_digest=scope_digest,
+        memory_facts=(fact,),
+    )
+    bundle = bundle.model_copy(
+        update={"bundle_digest": compute_bundle_digest(bundle)}
+    )
+    bundle = bundle.model_copy(
+        update={"overlay_digest": compute_overlay_digest(bundle)}
+    )
+    payload = ct_service.commit_envelope(
+        bundle,
+        source_record_id="ct-facts:evt_ct05_cross_store",
+        projection_id=None,
+        base_state_version=0,
+        projection_eligible=False,
+    )
+    audit = AuditEvent(
+        schema_version="0.4",
+        record_type="policy_evaluation",
+        trace_id=change.trace_id,
+        runtime="langgraph",
+        summary="ct05 cross-store authority",
+        decision="allow",
+        risk_score=0,
+        severity="low",
+        blocked=False,
+        reason="ct05:test",
+        links={
+            "event_id": "evt_ct05_cross_store",
+            "decision_id": "decision_ct05_cross_store",
+            "memory_change_id": change.change_id,
+        },
+        evidence=ct_transient_facts_envelope(payload),
+    )
+    assert store.add_audit_event(audit) is True
+    persisted_audit = store.get_policy_evaluation_by_event_id(
+        "evt_ct05_cross_store"
+    )
+    assert persisted_audit is not None
+    decoded = decode_ct_transient_facts(persisted_audit)
+    assert decoded.kind == "full", decoded
+    assert ct_service._memory_binding_from_audit(persisted_audit, change) is not None
+    ct_service.project_memory_from_audit(persisted_audit)
+    memory_service.commit(change.change_id, operator_id="operator-1")
+    memory_service.rollback(change.change_id, operator_id="operator-1")
+
+    for revision in (1, 2, 3):
+        assert (
+            store.get_projection(
+                scope_digest,
+                "memory_transition",
+                change.change_id,
+                revision,
+                PROJECTOR_VERSION,
+            )
+            is not None
+        )
+    store.mark_security_state_dirty(scope_digest, ["memory"])
+    rebuilt = SecurityStateService(store).ensure_ready(scope_digest)
+    restored = next(
+        item for item in rebuilt.memory_index if item.change_id == change.change_id
+    )
+    assert restored.change_status == "rolled_back"
+    assert restored.trust_state == "quarantined"
+    assert "PERSISTENT_UNTRUSTED" in restored.taints
+
+
 # ---------------------------------------------------------------------------
 # V21-03 TaskFact 存储契约（create/get/list 双实现一致性）
 # ---------------------------------------------------------------------------

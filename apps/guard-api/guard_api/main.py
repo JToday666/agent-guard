@@ -98,7 +98,6 @@ def create_app(
         cursor_signing_key=settings.audit_cursor_signing_key(),
     )
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
-    memory_guard_service = MemoryGuardService(store=store, audit_service=audit_service)
     # V21-08：安全状态门面（构造无 I/O；flag off 时不产生任何 I/O）。
     # 提前创建以便 ApprovalService 承接 human allow_once → grant 投影（T6），
     # 且与 V21ShadowService 共用同一实例，不重复注册。
@@ -150,6 +149,11 @@ def create_app(
         settings=settings,
         store=store,
         state_service=security_state_service,
+    )
+    memory_guard_service = MemoryGuardService(
+        store=store,
+        audit_service=audit_service,
+        projection_service=ct_projection_service,
     )
     evaluation_service = EvaluationService(
         policy_service=policy_service,

@@ -111,6 +111,28 @@ def make_memory(memory_id: str, **overrides: object) -> MemoryFact:
     return MemoryFact(**payload)  # type: ignore[arg-type]
 
 
+def lifecycle_memory(
+    status: str,
+    revision: int,
+    *,
+    taints: list[str] | None = None,
+    source_refs: list[str] | None = None,
+) -> MemoryFact:
+    return make_memory(
+        "memory:notes:summary",
+        change_id="memchg_ct05",
+        change_status=status,
+        trust_state="tainted",
+        taints=(taints if taints is not None else ["PERSISTENT_UNTRUSTED"]),
+        source_refs=(
+            source_refs if source_refs is not None else ["source:web:1"]
+        ),
+        last_write_sequence=seq(
+            revision, domain="memory", producer="memchg_ct05"
+        ),
+    )
+
+
 def make_summary(
     summary_id: str,
     taints: list[str],
@@ -233,6 +255,44 @@ def test_memory_upserts_same_key_different_content_fail_closed() -> None:
         )
     assert excinfo.value.reason_code == "v21-05:memory_identity_conflict"
     assert excinfo.value.dirty_domains == ("memory",)
+
+
+def test_memory_lifecycle_advances_and_never_removes_persistent_taint() -> None:
+    state = apply_memory_upserts(
+        empty_state(), [lifecycle_memory("proposed", 1)]
+    )
+    state = apply_memory_upserts(
+        state,
+        [
+            lifecycle_memory(
+                "committed", 2, taints=[], source_refs=["action:write"]
+            )
+        ],
+    )
+    state = apply_memory_upserts(
+        state, [lifecycle_memory("rolled_back", 3, taints=[])]
+    )
+    fact = state.memory_index[0]
+    assert fact.change_status == "rolled_back"
+    assert fact.trust_state == "tainted"
+    assert "PERSISTENT_UNTRUSTED" in fact.taints
+    assert fact.source_refs == ["action:write", "source:web:1"]
+
+
+def test_memory_lifecycle_rejects_illegal_or_same_sequence_conflicts() -> None:
+    committed = apply_memory_upserts(
+        empty_state(), [lifecycle_memory("committed", 2)]
+    )
+    with pytest.raises(ProvenanceProjectionError) as illegal:
+        apply_memory_upserts(committed, [lifecycle_memory("rejected", 2)])
+    assert illegal.value.reason_code == "v21-05:memory_same_sequence_conflict"
+
+    proposed = apply_memory_upserts(
+        empty_state(), [lifecycle_memory("proposed", 1)]
+    )
+    with pytest.raises(ProvenanceProjectionError) as skipped:
+        apply_memory_upserts(proposed, [lifecycle_memory("rolled_back", 3)])
+    assert skipped.value.reason_code == "v21-05:memory_lifecycle_invalid"
 
 
 # ---------------------------------------------------------------------------

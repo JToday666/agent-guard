@@ -49,10 +49,10 @@ __all__ = [
 
 #: Projector 版本（02 §4.2）：resource normalization / taint propagation /
 #: flow construction / behavior aggregation / capability projection /
-#: coverage computation 任一逻辑变化必须提升版本。V21-05/06/07 集成
-#: PR 唯一一次 bump（D2/C7）：typed upsert 全部接线，旧版本
-#: ``v21-04.projector.1`` envelope 由 guard-api 懒 legacy decoder 重投影。
-PROJECTOR_VERSION = "v21-07.projector.2"
+#: coverage computation 任一逻辑变化必须提升版本。CT05 增加可比较的
+#: Memory lifecycle merge 后提升至 projector.3；guard-api 对
+#: ``v21-07.projector.2`` 与 ``v21-04.projector.1`` 提供懒 decoder。
+PROJECTOR_VERSION = "ct-05.projector.3"
 
 ApplyOutcome = Literal["applied", "noop", "conflict", "needs_rebuild"]
 
@@ -484,8 +484,12 @@ def rebuild_state(
             f"got {projector_version!r}",
         )
 
-    def identity_sort_key(record: CommittedRecord) -> str:
-        return canonical_sha256(
+    def identity_sort_key(record: CommittedRecord) -> tuple[str, str, int, str]:
+        # CT05 makes source_revision an authoritative lifecycle sequence for
+        # memory_transition. Sorting the explicit identity fields (rather than
+        # their hash) guarantees revision 1 → 2 → 3 regardless of input order.
+        # The final digest remains a deterministic tie-breaker for all records.
+        digest = canonical_sha256(
             {
                 "scope_digest": record.scope_digest,
                 "source_record_type": record.source_record_type,
@@ -493,6 +497,12 @@ def rebuild_state(
                 "source_revision": record.source_revision,
                 "projector_version": record.projector_version,
             }
+        )
+        return (
+            record.source_record_type,
+            record.source_record_id,
+            record.source_revision,
+            digest,
         )
 
     ordered = sorted(committed_records, key=identity_sort_key)
