@@ -396,6 +396,92 @@ jobs:
           path: s2-artifacts/s2-parity.json
           if-no-files-found: error
 
+  rte05-strong-binding:
+    name: RTE-05 strong binding / ${{ matrix.storage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - storage: memory
+            database_url: ""
+            guard_filter: "not postgres"
+          - storage: postgres
+            database_url: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+            guard_filter: "postgres"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_guard_test
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENTGUARD_RTE05_STRONG_BINDING_ENABLED: "true"
+      AGENTGUARD_RTE05_STORAGE_BACKEND: ${{ matrix.storage }}
+      AGENTGUARD_TEST_DATABASE_URL: ${{ matrix.database_url }}
+      AGENTGUARD_OPENCLAW_EXPECT_VERSION: "2026.7.1-2"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install OpenClaw contract dependencies
+        run: pnpm --filter @agentguard-ai/openclaw-plugin install --frozen-lockfile
+
+      - name: Test RTE-05 Guard API and execution leases
+        run: >-
+          uv run pytest -q tests/test_rte05_execution_lease_api.py
+          -k "${{ matrix.guard_filter }}"
+
+      - name: Test RTE-05 LangGraph conformance and real chain
+        run: >-
+          uv run --group bench pytest -q
+          tests/test_rte05_runtime_conformance_langgraph.py
+
+      - name: Test RTE-05 receipt and capability contracts
+        run: >-
+          uv run pytest -q
+          tests/test_runtime_enforcement_contract.py
+          tests/test_runtime_conformance_registry.py
+
+      - name: Build OpenClaw plugin
+        run: pnpm --filter @agentguard-ai/openclaw-plugin build
+
+      - name: Test RTE-05 through pinned OpenClaw host SDK and live Guard API
+        env:
+          AGENTGUARD_RTE05_LIVE_GATE: "1"
+        run: uv run pytest -q tests/test_rte05_openclaw_live.py
+
+      - name: Test OpenClaw RTE-05 strong binding
+        working-directory: packages/agentguard-openclaw-plugin
+        run: node --test test/rte05-strong-binding.test.mjs
+
   openclaw-runtime-smoke:
     name: OpenClaw runtime smoke (${{ matrix.os }} / ${{ matrix.openclaw }})
     runs-on: ${{ matrix.os }}
