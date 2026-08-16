@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "id": "D-R05-BEFORE-GATE-B",
+  "title": "RTE-05 precedes Gate B",
+  "status": "accepted",
+  "decision": "Use R05 → I02A → Gate B. RTE-05 does not wait for Gate B.",
+  "rationale": "The Master roadmap explicitly adjudicates the rough-diagram conflict in favor of the formal CT/RTE text.",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "## Gate B 顺序裁决说明",
+      "line_hint": 333
+    },
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 164
+    }
+  ]
+}

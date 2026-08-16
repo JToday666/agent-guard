@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GCF-05",
+  "exact_title": "Decision/Approval/Enforcement/Execution 四层语义正确",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/06_测试矩阵_风险与决策记录.md",
+      "heading": "## 12. 最终质量 Gate",
+      "line_hint": 619
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "G-CONSOLE-FINAL",
+  "work": null,
+  "notes": []
+}

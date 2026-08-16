@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GA-01",
+  "exact_title": "SourceFact/FlowFact 真实生成",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 5.1 Gate A：CT → CORE Shadow",
+      "line_hint": 218
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "G-A",
+  "work": null,
+  "notes": []
+}

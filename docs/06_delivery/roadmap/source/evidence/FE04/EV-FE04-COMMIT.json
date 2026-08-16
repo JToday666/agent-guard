@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-FE04-COMMIT",
+  "node_id": "FE04",
+  "kind": "commit",
+  "ref": "cdf3625",
+  "status": "verified",
+  "summary": "Reviewed Git mapping for FE04; cdf3625 is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

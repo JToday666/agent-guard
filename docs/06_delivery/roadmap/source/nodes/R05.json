@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "R05",
+  "exact_title": "PR-RTE-05 — Strong Approval Binding",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "rte",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation",
+    "guard-api-production-wiring",
+    "runtime-binding-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 8. PR-RTE-05 — Strong Approval Binding",
+      "line_hint": 186
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

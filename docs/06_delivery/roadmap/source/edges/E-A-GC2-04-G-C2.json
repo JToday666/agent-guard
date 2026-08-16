@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GC2-04-G-C2",
+  "from": "A-GC2-04",
+  "to": "G-C2",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-C2 cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_git_confirmed",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/03_OpenClaw实施方案.md",
+      "heading": "### 2.2 C2 Gate 判据",
+      "line_hint": 62
+    }
+  ],
+  "decision_id": null
+}

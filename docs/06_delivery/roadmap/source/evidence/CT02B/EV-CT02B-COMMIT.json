@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-CT02B-COMMIT",
+  "node_id": "CT02B",
+  "kind": "commit",
+  "ref": "d06f3dd",
+  "status": "verified",
+  "summary": "Reviewed Git mapping for CT02B; d06f3dd is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "id": "I01",
+  "exact_title": "INT-PR-01 — Fact → Snapshot → Shadow Fusion",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "integration",
+  "lifecycle": "in_progress",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring",
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "# 11. INT-PR-01 — Fact → Snapshot → Shadow Fusion",
+      "line_hint": 339
+    }
+  ],
+  "evidence_refs": [
+    "evidence/I01/EV-I01-WORKTREE.json"
+  ],
+  "work": {
+    "branch": "codex/gate-a-int-pr-01",
+    "worktree_slug": "agent-guard-gate-a",
+    "owner": "implementation-owner",
+    "base_sha": "f6c8caa",
+    "started_at": null,
+    "substate": "active"
+  },
+  "notes": [
+    "Active worktree overlaps evaluation.py with R05P; integration owner must serialize the shared surface.",
+    "Gate A remains unpassed until I01 acceptance is closed on origin/dev."
+  ]
+}

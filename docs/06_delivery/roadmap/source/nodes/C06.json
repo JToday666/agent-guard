@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "C06",
+  "exact_title": "V21-06 — Authority / Capability",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "core",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## V21-06 — Authority / Capability",
+      "line_hint": 320
+    }
+  ],
+  "evidence_refs": [
+    "evidence/C06/EV-C06-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

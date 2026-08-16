@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-RTEP1-05-RTE-P1-DOD",
+  "from": "A-RTEP1-05",
+  "to": "RTE-P1-DOD",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "RTE-P1-DOD cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 14. P1 完成定义",
+      "line_hint": 336
+    }
+  ],
+  "decision_id": null
+}

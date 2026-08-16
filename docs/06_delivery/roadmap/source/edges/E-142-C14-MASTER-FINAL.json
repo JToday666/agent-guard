@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-142-C14-MASTER-FINAL",
+  "from": "C14",
+  "to": "MASTER-FINAL",
+  "relation": "join",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "MASTER-FINAL requires C14.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "# 3. 全局实施 DAG",
+      "line_hint": 79
+    }
+  ],
+  "decision_id": null
+}

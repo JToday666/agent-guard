@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-R05F",
+  "exact_title": "Core V2.1 Freeze Gate",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 7. Core V2.1 Freeze Gate",
+      "line_hint": 169
+    }
+  ],
+  "evidence_refs": [
+    "evidence/G-R05F/EV-G-R05F-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

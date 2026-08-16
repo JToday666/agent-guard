@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-151-S1-RSC-CT01",
+  "from": "S1",
+  "to": "RSC-CT01",
+  "relation": "non_blocking",
+  "constraint": "none",
+  "blocking": "none",
+  "rationale": "S1 does not block scoped CT activation work.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-098-CT03R-FE05",
+  "from": "CT03R",
+  "to": "FE05",
+  "relation": "join",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "FE05 requires CT03R.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

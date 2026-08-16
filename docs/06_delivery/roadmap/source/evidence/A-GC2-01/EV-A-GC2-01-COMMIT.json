@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-A-GC2-01-COMMIT",
+  "node_id": "A-GC2-01",
+  "kind": "commit",
+  "ref": "d1baf99",
+  "status": "verified",
+  "summary": "G-C2 acceptance evidence is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "parent": "G-C2"
+  }
+}

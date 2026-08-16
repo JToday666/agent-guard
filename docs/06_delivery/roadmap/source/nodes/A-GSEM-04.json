@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-GSEM-04",
+  "exact_title": "rollback/circuit breaker 完成",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": true,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## 20. V21-14 — Optional Semantic Upgrade-only",
+      "line_hint": 512
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "G-SEM",
+  "work": null,
+  "notes": []
+}

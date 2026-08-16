@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-CTACT",
+  "exact_title": "CT scoped activation readiness and commit readback",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 93
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

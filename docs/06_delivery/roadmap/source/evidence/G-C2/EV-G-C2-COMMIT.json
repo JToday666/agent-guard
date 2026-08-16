@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-G-C2-COMMIT",
+  "node_id": "G-C2",
+  "kind": "commit",
+  "ref": "d1baf99",
+  "status": "verified",
+  "summary": "Reviewed Git evidence for G-C2; d1baf99 is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

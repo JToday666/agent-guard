@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "id": "CT06",
+  "exact_title": "CT-PR-06 — Declassification Evidence",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "ct",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring",
+    "audit-schema-and-storage"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "# 9. CT-PR-06 — Declassification Evidence",
+      "line_hint": 295
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

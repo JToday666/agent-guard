@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-C00-COMMIT",
+  "node_id": "C00",
+  "kind": "commit",
+  "ref": "50a9974",
+  "status": "verified",
+  "summary": "Git history maps C00 implementation to 50a9974; commit is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

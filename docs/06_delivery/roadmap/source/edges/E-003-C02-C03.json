@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-003-C02-C03",
+  "from": "C02",
+  "to": "C03",
+  "relation": "hard_dependency",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "C03 requires C02.",
+  "provenance": "documented_git_confirmed",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## 5. 15 Phase 最终实施 DAG",
+      "line_hint": 136
+    }
+  ],
+  "decision_id": null
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-146-R06-MASTER-FINAL",
+  "from": "R06",
+  "to": "MASTER-FINAL",
+  "relation": "join",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "MASTER-FINAL requires R06.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "# 3. 全局实施 DAG",
+      "line_hint": 79
+    }
+  ],
+  "decision_id": null
+}

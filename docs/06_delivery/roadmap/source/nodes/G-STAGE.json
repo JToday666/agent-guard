@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-STAGE",
+  "exact_title": "Stage Exit Evidence",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/06_测试矩阵_风险与决策记录.md",
+      "heading": "## 1. 验证策略",
+      "line_hint": 15
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

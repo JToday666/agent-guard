@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-CT03A-COMMIT",
+  "node_id": "CT03A",
+  "kind": "commit",
+  "ref": "825de08",
+  "status": "verified",
+  "summary": "Reviewed Git mapping for CT03A; 825de08 is reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

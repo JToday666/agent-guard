@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-G-HOOK-CAP-COMMIT",
+  "node_id": "G-HOOK-CAP",
+  "kind": "commit",
+  "ref": "b54b062",
+  "status": "verified",
+  "summary": "Cross-runtime real runtime capability evidence is present on origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "mapping": "reviewed"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "A-MASTER-10",
+  "exact_title": "Runtime Receipt",
+  "kind": "acceptance",
+  "roles": [
+    "acceptance"
+  ],
+  "lane": "acceptance",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "# 10. 最终验收",
+      "line_hint": 700
+    }
+  ],
+  "evidence_refs": [],
+  "acceptance_parent": "MASTER-FINAL",
+  "work": null,
+  "notes": []
+}

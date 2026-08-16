@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-A-S1-02-COMMIT",
+  "node_id": "A-S1-02",
+  "kind": "commit",
+  "ref": "cdf3625",
+  "status": "verified",
+  "summary": "The S1 acceptance record is included in cdf3625, reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "parent": "S1"
+  }
+}

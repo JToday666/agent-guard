@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0.0",
+  "project": "AgentGuard full-track implementation roadmap",
+  "baseline_ref": "origin/dev",
+  "nodes_dir": "nodes",
+  "edges_dir": "edges",
+  "evidence_dir": "evidence",
+  "decisions_dir": "decisions",
+  "generated_files": [
+    "../generated/roadmap.normalized.json",
+    "../generated/roadmap.md",
+    "../generated/index.html"
+  ],
+  "lanes": [
+    {"id": "baseline", "label": "Baseline", "order": 0},
+    {"id": "core", "label": "CORE V2.1", "order": 10},
+    {"id": "ct", "label": "Context / Taint", "order": 20},
+    {"id": "rte", "label": "Runtime Enforcement", "order": 30},
+    {"id": "integration", "label": "Integration", "order": 40},
+    {"id": "fe", "label": "Console / Frontend", "order": 50},
+    {"id": "stage", "label": "Delivery Stages", "order": 60},
+    {"id": "gate", "label": "Cross-track Gates", "order": 70},
+    {"id": "acceptance", "label": "Acceptance / Evidence", "order": 80},
+    {"id": "final", "label": "Final Acceptance", "order": 90}
+  ],
+  "exclusive_surfaces": [
+    {"id": "core-evaluation-activation", "label": "Core evaluation pipeline and activation"},
+    {"id": "guard-api-production-wiring", "label": "Guard API production evaluation wiring"},
+    {"id": "audit-schema-and-storage", "label": "Audit schema, budget and storage"},
+    {"id": "runtime-binding-activation", "label": "Runtime binding and activation"},
+    {"id": "dashboard-types-mappers-store", "label": "Dashboard types, mappers and stores"},
+    {"id": "roadmap-catalog-and-generated", "label": "Roadmap catalog and generated artifacts"}
+  ],
+  "state_palette": {
+    "completed": {"label": "已完成", "color": "#1F9D63", "icon": "✓"},
+    "in_progress": {"label": "正在实施", "color": "#D99000", "icon": "◐"},
+    "ready": {"label": "可启动", "color": "#2774D8", "icon": "▶"},
+    "not_ready": {"label": "未实施且不可启动", "color": "#7B8494", "icon": "○"}
+  },
+  "authorities": [
+    {
+      "rank": 1,
+      "name": "Formal track freeze booklets",
+      "paths": [
+        "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/",
+        "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/",
+        "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/"
+      ],
+      "rule": "Defines track-local task boundaries, contracts and DoD."
+    },
+    {
+      "rank": 2,
+      "name": "Runtime Supervision Console plan",
+      "paths": ["docs/AgentGuard_Runtime_Supervision_Console_Design/"],
+      "rule": "Defines S0-S6 scheduling, presentation tasks and cross-track joins."
+    },
+    {
+      "rank": 3,
+      "name": "Master Roadmap candidate",
+      "paths": ["docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md"],
+      "rule": "Supplies cross-track relationships only; never overrides a formal freeze booklet."
+    },
+    {
+      "rank": 4,
+      "name": "Git history",
+      "paths": [".git"],
+      "rule": "Determines implementation state and observed order; chronology alone is not a dependency."
+    }
+  ]
+}

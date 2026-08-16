@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "R04",
+  "exact_title": "PR-RTE-04 — Cross-Runtime Conformance Suite",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "rte",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 6. PR-RTE-04 — Cross-Runtime Conformance Suite",
+      "line_hint": 140
+    }
+  ],
+  "evidence_refs": [
+    "evidence/R04/EV-R04-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

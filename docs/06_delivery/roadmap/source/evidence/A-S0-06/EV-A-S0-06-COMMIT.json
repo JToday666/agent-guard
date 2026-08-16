@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "id": "EV-A-S0-06-COMMIT",
+  "node_id": "A-S0-06",
+  "kind": "commit",
+  "ref": "e16b854",
+  "status": "verified",
+  "summary": "The S0 acceptance record is included in e16b854, reachable from origin/dev.",
+  "recorded_at": null,
+  "metadata": {
+    "baseline_ref": "origin/dev",
+    "parent": "S0"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "id": "R05P",
+  "exact_title": "RTE-05 Preparation",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "rte",
+  "lifecycle": "in_progress",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation",
+    "guard-api-production-wiring",
+    "runtime-binding-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "## Gate A 前",
+      "line_hint": 615
+    }
+  ],
+  "evidence_refs": [
+    "evidence/R05P/EV-R05P-WORKTREE.json"
+  ],
+  "work": {
+    "branch": "codex/rte-05-preparation",
+    "worktree_slug": "agent-guard-rte05-preparation",
+    "owner": "implementation-owner",
+    "base_sha": "f6c8caa",
+    "started_at": null,
+    "substate": "active"
+  },
+  "notes": [
+    "Active worktree overlaps evaluation.py with I01; integration owner must serialize the shared surface."
+  ]
+}

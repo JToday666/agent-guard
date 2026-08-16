@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "CT03R",
+  "exact_title": "CT-PR-03R — Offline Replay Artifact Exporter",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "ct",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": true,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 97
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": [
+    "Optional replay path; does not constitute the formal S2 exit."
+  ]
+}

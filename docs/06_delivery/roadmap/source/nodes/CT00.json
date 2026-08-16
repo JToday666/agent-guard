@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "CT00",
+  "exact_title": "CT-PR-00 — Contract Freeze",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "ct",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "# 3. CT-PR-00 — Contract Freeze",
+      "line_hint": 95
+    }
+  ],
+  "evidence_refs": [
+    "evidence/CT00/EV-CT00-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

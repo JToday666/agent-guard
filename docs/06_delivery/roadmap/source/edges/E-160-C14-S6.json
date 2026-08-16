@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-160-C14-S6",
+  "from": "C14",
+  "to": "S6",
+  "relation": "non_blocking",
+  "constraint": "none",
+  "blocking": "none",
+  "rationale": "Semantic upgrade-only does not block Competition Final.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

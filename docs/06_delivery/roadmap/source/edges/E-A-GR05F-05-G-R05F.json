@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GR05F-05-G-R05F",
+  "from": "A-GR05F-05",
+  "to": "G-R05F",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-R05F cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_git_confirmed",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/06_迁移_PR与实施计划.md",
+      "heading": "## 7. Core V2.1 Freeze Gate",
+      "line_hint": 179
+    }
+  ],
+  "decision_id": null
+}

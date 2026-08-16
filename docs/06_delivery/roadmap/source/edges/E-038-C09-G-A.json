@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-038-C09-G-A",
+  "from": "C09",
+  "to": "G-A",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "Gate A consumes the real Snapshot in the V21 shadow assessment.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 5. Gate A / Gate B 边界",
+      "line_hint": 203
+    }
+  ],
+  "decision_id": null
+}

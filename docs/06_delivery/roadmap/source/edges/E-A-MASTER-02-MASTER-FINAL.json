@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-MASTER-02-MASTER-FINAL",
+  "from": "A-MASTER-02",
+  "to": "MASTER-FINAL",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "MASTER-FINAL cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md",
+      "heading": "# 10. 最终验收",
+      "line_hint": 686
+    }
+  ],
+  "decision_id": null
+}

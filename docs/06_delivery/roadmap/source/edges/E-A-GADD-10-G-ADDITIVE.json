@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-A-GADD-10-G-ADDITIVE",
+  "from": "A-GADD-10",
+  "to": "G-ADDITIVE",
+  "relation": "qualifies",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "G-ADDITIVE cannot exit until this documented acceptance item is verified.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/03_API_事件_刷新与安全边界冻结.md",
+      "heading": "## 13. Additive 字段准入 Gate",
+      "line_hint": 1170
+    }
+  ],
+  "decision_id": null
+}

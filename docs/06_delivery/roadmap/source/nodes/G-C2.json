@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-C2",
+  "exact_title": "C2 Gate 判据",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/03_OpenClaw实施方案.md",
+      "heading": "### 2.2 C2 Gate 判据",
+      "line_hint": 54
+    }
+  ],
+  "evidence_refs": [
+    "evidence/G-C2/EV-G-C2-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

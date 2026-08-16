@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "id": "CT-O2",
+  "exact_title": "actual context rewrite",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "ct",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": true,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
+      "heading": "### Stage",
+      "line_hint": 253
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

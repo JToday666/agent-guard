@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-050-R05-R06",
+  "from": "R05",
+  "to": "R06",
+  "relation": "hard_dependency",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "Result hardening starts after strong binding is integrated.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": "D-RTE67-PARALLEL"
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S2R",
+  "exact_title": "S2-R Committed Fact/Delta Replay",
+  "kind": "stage",
+  "roles": [
+    "stage"
+  ],
+  "lane": "stage",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": true,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "dashboard-types-mappers-store"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 8.1 两个里程碑",
+      "line_hint": 360
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

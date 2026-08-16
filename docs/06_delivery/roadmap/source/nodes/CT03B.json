@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "CT03B",
+  "exact_title": "CT-PR-03b — Committed Delta Builder production wiring",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "ct",
+  "lifecycle": "completed",
+  "revision": 1,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 3.2 Context/Taint",
+      "line_hint": 71
+    }
+  ],
+  "evidence_refs": [
+    "evidence/CT03B/EV-CT03B-COMMIT.json"
+  ],
+  "work": null,
+  "notes": []
+}

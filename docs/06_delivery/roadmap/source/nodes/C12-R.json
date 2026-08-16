@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "C12-R",
+  "exact_title": "V21-12-R — Stateful case/cohort rollout extension",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "integration",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring",
+    "core-evaluation-activation",
+    "audit-schema-and-storage"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 14. 后端/集成 PR 建议",
+      "line_hint": 721
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}

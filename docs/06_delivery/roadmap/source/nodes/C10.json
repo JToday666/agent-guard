@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "id": "C10",
+  "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
+  "kind": "gate",
+  "roles": [
+    "task",
+    "gate"
+  ],
+  "lane": "core",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
+      "heading": "## V21-10 — Receipt / Evaluation Pre-enable Gate",
+      "line_hint": 420
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": [
+    "Program-level Gate A also blocks formal start."
+  ]
+}

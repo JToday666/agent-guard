@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-107-RSC-CTPROV-S2",
+  "from": "RSC-CTPROV",
+  "to": "S2",
+  "relation": "join",
+  "constraint": "exit",
+  "blocking": "hard",
+  "rationale": "S2 requires RSC-CTPROV.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

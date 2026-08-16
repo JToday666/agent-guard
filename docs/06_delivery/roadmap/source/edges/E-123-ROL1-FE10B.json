@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-123-ROL1-FE10B",
+  "from": "ROL1",
+  "to": "FE10B",
+  "relation": "join",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "FE10B requires ROL1.",
+  "provenance": "documented_planned",
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 117
+    }
+  ],
+  "decision_id": null
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "id": "G-B",
+  "exact_title": "Gate B：当前 Official Decision → RTE",
+  "kind": "gate",
+  "roles": [
+    "gate"
+  ],
+  "lane": "gate",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [],
+  "source_refs": [
+    {
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
+      "heading": "### 5.2 Gate B：当前 Official Decision → RTE",
+      "line_hint": 229
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": []
+}
