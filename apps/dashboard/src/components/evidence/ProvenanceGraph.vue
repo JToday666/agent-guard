@@ -142,13 +142,13 @@
                 `prov-node--${data.kind}`,
                 `prov-node--phase-${data.phase}`,
                 {
-                  'prov-node--mock': data.metadata.source_mode === 'mock',
+                  'prov-node--mock': elementSourceMode === 'mock',
                   'prov-node--selected': data.nodeId === selectedNodeId,
                 },
               ]"
               :aria-label="`${kindLabel(data.kind)}：${nodeLabel(data.label, data.kind)}`"
               :aria-pressed="data.nodeId === selectedNodeId"
-              :data-source-mode="data.metadata.source_mode || undefined"
+              :data-source-mode="elementSourceMode"
               role="button"
               tabindex="0"
               :title="nodeTooltip(data)"
@@ -255,7 +255,11 @@ import type {
   ProvenanceGraph,
   ProvenanceNode,
 } from "../../types/dashboard";
-import type { EvidenceCertainty } from "../../types/runtime-supervision";
+import type {
+  ElementSourceMode,
+  EvidenceCertainty,
+  ProvenancePresentationViewModel,
+} from "../../types/runtime-supervision";
 import { getDecisionLabel, getEventTypeLabel } from "../../utils/dashboard-formatters";
 import { getProvenanceRelationLabel, getProvenanceRiskScore } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
@@ -263,7 +267,9 @@ import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 defineOptions({ name: "ProvenanceGraph" });
 
 const props = defineProps<{
+  elementSourceMode: ElementSourceMode;
   graph: ProvenanceGraph;
+  presentation: ProvenancePresentationViewModel;
   selectedNodeId?: string;
 }>();
 
@@ -816,24 +822,16 @@ async function runLayout(): Promise<void> {
   isLayouting.value = false;
 }
 
+const presentedEdgeById = computed(
+  () => new Map(props.presentation.edges.map((edge) => [edge.edgeId, edge] as const)),
+);
+
 function relationType(edge: ProvenanceEdge): string {
-  return metadataString(edge.metadata, "relation_type") || "unknown";
+  return presentedEdgeById.value.get(edge.edgeId)?.legacyRelationType ?? "unknown";
 }
 
 function edgeCertainty(edge: ProvenanceEdge): EvidenceCertainty {
-  const declared = metadataString(edge.metadata, "certainty");
-  const origin = metadataString(edge.metadata, "flow_origin");
-  const strength = metadataString(edge.metadata, "flow_strength");
-  if (origin === "semantic_inferred" || strength === "possible") return "possible";
-  if (
-    declared === "confirmed" ||
-    declared === "supported" ||
-    declared === "possible" ||
-    declared === "unknown"
-  ) {
-    return declared;
-  }
-  return "unknown";
+  return presentedEdgeById.value.get(edge.edgeId)?.certainty ?? "unknown";
 }
 
 function edgeStroke(type: string): string {
@@ -879,7 +877,9 @@ const flowEdges = computed<Edge[]>(() =>
       const stroke = edgeStroke(type);
       const sourceNode = nodeById.value.get(edge.sourceNodeId);
       const targetNode = nodeById.value.get(edge.targetNodeId);
-      const relationLabel = getProvenanceRelationLabel(edge.relation) || edge.relation;
+      const presentation = presentedEdgeById.value.get(edge.edgeId);
+      const relation = presentation?.ctFlowRelation ?? presentation?.wireRelation ?? "unknown";
+      const relationLabel = getProvenanceRelationLabel(relation) || relation;
       const presentedRelationLabel =
         certainty === "possible" ? `${relationLabel}（可能）` : relationLabel;
       return {

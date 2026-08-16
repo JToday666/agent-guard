@@ -9,6 +9,7 @@ import type {
   ExecutionStepViewModel,
   ExecutionTraceViewModel,
   NormalizedAuditEvidence,
+  ProvenanceGraph,
   ProvenanceWindow,
   TraceApprovalWindow,
   TraceAuditWindow,
@@ -24,6 +25,7 @@ import type {
 } from "../../types/runtime-supervision.ts";
 import { getEventTypeLabel } from "../../utils/dashboard-formatters.ts";
 import { projectApprovalBasis } from "./approval-basis-projector.ts";
+import { applyCtContentToSteps, projectCtPresentation } from "./provenance-presentation.ts";
 import {
   projectExecutionStepSupervision,
   type SelectedApprovalEvidence,
@@ -674,6 +676,7 @@ export interface RuntimeSupervisionProjectionInput extends ExecutionProjectionCo
   approvalBasisEnabled?: boolean;
   auditWindow?: TraceAuditWindow | null;
   approvalWindow?: TraceApprovalWindow | null;
+  provenance?: ProvenanceGraph | null;
   provenanceWindow?: ProvenanceWindow | null;
 }
 
@@ -811,10 +814,20 @@ function uniqueApprovalValue(
 export function buildRuntimeSupervisionViewModel(
   input: RuntimeSupervisionProjectionInput,
 ): RuntimeSupervisionViewModel {
-  const execution = buildExecutionTrace(input.events, input.approvals, {
+  const baseExecution = buildExecutionTrace(input.events, input.approvals, {
     elementSourceMode: input.elementSourceMode,
     traceId: input.traceId,
   });
+  const ctProjection = projectCtPresentation({
+    traceId: input.traceId,
+    elementSourceMode: input.elementSourceMode,
+    events: input.events,
+    provenance: input.provenance,
+  });
+  const execution = {
+    ...baseExecution,
+    steps: applyCtContentToSteps(baseExecution.steps, ctProjection.contentByEventId),
+  };
   const truncationReasons = windowTruncationReasons(input);
   const approvalBasis = buildApprovalBasisById(input, execution, truncationReasons);
   const receiptRequiredSteps = execution.steps.filter(
@@ -868,6 +881,7 @@ export function buildRuntimeSupervisionViewModel(
     ...correlationWarnings,
     ...unsupportedV21Warnings,
     ...approvalBasis.warnings,
+    ...ctProjection.presentation.warnings,
     ...windowWarnings,
   ];
   const auditAvailability: Availability =
@@ -893,17 +907,17 @@ export function buildRuntimeSupervisionViewModel(
     execution,
     approvalBasisById: approvalBasis.approvalBasisById,
     contextManifestByEventId: {},
-    provenancePresentation: { contractKind: "legacy", edges: [], nodes: [], warnings: [] },
+    provenancePresentation: ctProjection.presentation,
     completeness: {
       auditEvents: auditAvailability,
       approvals: approvalsAvailability,
-      provenance: provenanceTruncated ? "partial" : "unavailable",
+      provenance: provenanceTruncated ? "partial" : ctProjection.provenanceAvailability,
       contextManifest: "unavailable",
       runtimeReceipts: receiptAvailability,
       truncatedReasons: truncationReasons,
     },
     capabilities: {
-      facts: "unavailable",
+      facts: ctProjection.factAvailability,
       contextManifest: "unavailable",
       approvalBasis: approvalBasis.availability,
       enforcementEvidence: "unavailable",
