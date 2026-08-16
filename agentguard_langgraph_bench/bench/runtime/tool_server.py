@@ -24,6 +24,7 @@ class BenchmarkToolServer:
         self.host = host
         self.port = port
         self._events: list[dict[str, Any]] = []
+        self._bridge_events: list[dict[str, Any]] = []
         self._lock = Lock()
         self._server: HTTPServer | None = None
         self._thread: Thread | None = None
@@ -73,6 +74,12 @@ class BenchmarkToolServer:
                 path = urlparse(self.path).path
                 if path == "/reset-case":
                     outer.reset_case(clear_context=True)
+                    self._send_json({"ok": True})
+                    return
+                if path == "/bridge-events":
+                    payload = self._read_json()
+                    if payload.get("case_id") == outer.case_context().get("case_id"):
+                        outer.record_bridge_event(payload)
                     self._send_json({"ok": True})
                     return
                 if path.startswith("/tools/"):
@@ -242,6 +249,7 @@ class BenchmarkToolServer:
     def reset_case(self, *, clear_context: bool = True) -> None:
         with self._lock:
             self._events.clear()
+            self._bridge_events.clear()
             self._terminal_by_case.clear()
         if clear_context:
             self.clear_case_context()
@@ -249,6 +257,14 @@ class BenchmarkToolServer:
     def events(self) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._events)
+
+    def record_bridge_event(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            self._bridge_events.append(dict(event))
+
+    def bridge_events(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return list(self._bridge_events)
 
     def _record_server_event(self, event: dict[str, Any]) -> None:
         with self._lock:

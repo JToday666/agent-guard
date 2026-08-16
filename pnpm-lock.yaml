@@ -87,6 +87,19 @@ importers:
         specifier: 3.3.5
         version: 3.3.5(typescript@6.0.3)
 
+  benchmarks/claude-code-mcp-bridge:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
+    devDependencies:
+      '@types/node':
+        specifier: 25.9.1
+        version: 25.9.1
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   benchmarks/openclaw-bench-tools:
     dependencies:
       openclaw:

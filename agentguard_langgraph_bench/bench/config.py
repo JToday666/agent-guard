@@ -201,6 +201,8 @@ class BenchConfig:
     prompt_contamination_check: bool = True
     autonomous_planner_recovery_retry: bool = True
     autonomous_planner_recovery_max_observations: int = 2
+    claude_code_retain_artifacts: bool = False
+    claude_code_model: str = ""
 
     def __post_init__(self) -> None:
         self.core_api_mode = validate_api_mode(self.core_api_mode)

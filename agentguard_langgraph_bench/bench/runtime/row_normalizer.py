@@ -82,6 +82,7 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         "browser_action_count": validity["browser_action_count"],
         "defense_enabled": config.defense_enabled,
         "expected_decision": case.expected_decision,
+        "success_condition": getattr(case.success_condition, "model_dump", lambda: {})(),
         "tool_calls": tool_results,
         "behavior_events": behavior_events,
         "behavior_event_types": [item.get("event_type") for item in behavior_events],
@@ -92,6 +93,7 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         "side_effects": side_effects,
         "final_answer": result.final_answer or _final_answer_from_tool_results(tool_results),
         "adapter_error": result.error,
+        "raw_state": raw_state,
         "raw_logs": list(result.raw_logs or []),
     }
 
@@ -167,6 +169,10 @@ def _run_validity(
     if fatal_error_items and not invalid_reasons and not (is_memory_poisoning and memory_terminal_action):
         invalid_reasons.append(_tool_error_reason(fatal_error_items[0]))
     stop_reason = str(raw_state.get("stop_reason") or "")
+    if stop_reason == "invalid_json":
+        invalid_reasons.append("invalid_json")
+    if stop_reason == "api_error" or raw_state.get("adapter_error"):
+        invalid_reasons.append(str(raw_state.get("error_category") or "claude_code_api_error"))
     instrumentation_mode = str(raw_state.get("instrumentation_plan_mode") or getattr(config, "instrumentation_plan_mode", ""))
     autonomous_planner_stop = instrumentation_mode == "autonomous" and stop_reason in {"llm_planning_error", "max_tool_rounds"}
     non_browser_misroute_terminal = stop_reason == "non_browser_tool_misroute"
