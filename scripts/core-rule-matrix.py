@@ -154,11 +154,7 @@ def _event_with_defaults(
     event.setdefault("attack_type", "rule_matrix")
     event.setdefault("is_malicious", is_malicious)
     event.setdefault("timestamp", "2026-06-27T00:00:00+00:00")
-    event.setdefault(
-        "pre_execution",
-        event["event_type"]
-        not in {"model_output_produced", "tool_result_produced"},
-    )
+    event.setdefault("pre_execution", True)
     event.setdefault(
         "security_context",
         {
