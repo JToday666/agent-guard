@@ -28,6 +28,7 @@ test("evidence detail uses document scrolling and the dossier does not trap the 
 test("embedded execution graph scrolls the page and fullscreen graph owns the wheel", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/evidence/trace_002");
 
   const graph = page.locator(".execution-flow");
@@ -46,8 +47,8 @@ test("embedded execution graph scrolls the page and fullscreen graph owns the wh
     window.scrollTo(0, Math.max(0, graphTop - 180));
   });
   const embeddedScrollY = await page.evaluate(() => window.scrollY);
-  const embeddedTransform = await viewport.getAttribute("style");
   await canvas.hover();
+  const embeddedTransform = await viewport.getAttribute("style");
   await page.mouse.wheel(0, 320);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(embeddedScrollY);
   await expect(viewport).toHaveAttribute("style", embeddedTransform ?? "");
@@ -58,10 +59,9 @@ test("embedded execution graph scrolls the page and fullscreen graph owns the wh
 
   await graph.getByRole("button", { name: "全屏" }).click();
   await expect(graph).toHaveClass(/execution-flow--fullscreen/);
-  await page.waitForTimeout(250);
+  await canvas.hover();
   const fullscreenScrollY = await page.evaluate(() => window.scrollY);
   const fullscreenTransform = await viewport.getAttribute("style");
-  await canvas.hover();
   await page.mouse.wheel(0, -260);
   await expect.poll(() => viewport.getAttribute("style")).not.toBe(fullscreenTransform);
   expect(await page.evaluate(() => window.scrollY)).toBe(fullscreenScrollY);
