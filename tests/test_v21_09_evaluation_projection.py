@@ -19,6 +19,8 @@ from __future__ import annotations
 import threading
 from contextlib import contextmanager
 
+import pytest
+
 from agentguard_core import GuardEngine, PolicyBundle, utc_now_iso
 from agentguard_core.decisions.evidence import state_delta_v21_envelope
 from agentguard_core.decisions.finalize import derive_final_audit_id
@@ -716,9 +718,8 @@ def test_d9_backfill_skips_records_without_envelope(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.postgres
 def test_projection_postgres_backend() -> None:
-    import pytest
-
     from tests.test_v21_09_pipeline import _postgres_store
 
     try:

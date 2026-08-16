@@ -44,6 +44,9 @@ from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.auth import add_adapter_credential, memory_store_with_adapter
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 
+
+pytestmark = pytest.mark.e2e
+
 _ADAPTER_HEADERS = {"Authorization": "Bearer adapter-secret"}
 _CONTROL_HEADERS = {"Authorization": "Bearer control-secret"}
 _TRACE_ID = "trace_gate_a_int_pr_01"
@@ -741,6 +744,7 @@ def test_http_forged_visible_ref_emits_no_edge_or_b2() -> None:
     assert registration is None
 
 
+@pytest.mark.postgres
 def test_postgres_verified_chain_survives_store_reopen() -> None:
     """The Gate A chain has storage parity and restart-safe readback."""
 

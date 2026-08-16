@@ -24,6 +24,9 @@ from tests.support.runtime_safety_harness import (
 )
 
 
+pytestmark = pytest.mark.e2e
+
+
 @pytest.fixture(scope="module")
 def memory_runtime_suite(
     tmp_path_factory: pytest.TempPathFactory,
@@ -72,12 +75,14 @@ def test_runtime_safety_memory_closes_allow_ask_deny_chain(
     _assert_acceptance_contract(memory_runtime_suite)
 
 
+@pytest.mark.postgres
 def test_runtime_safety_postgres_closes_allow_ask_deny_chain(
     postgres_runtime_suite: dict[str, dict[str, Any]],
 ) -> None:
     _assert_acceptance_contract(postgres_runtime_suite)
 
 
+@pytest.mark.postgres
 def test_runtime_safety_memory_postgres_have_identical_semantics(
     memory_runtime_suite: dict[str, dict[str, Any]],
     postgres_runtime_suite: dict[str, dict[str, Any]],

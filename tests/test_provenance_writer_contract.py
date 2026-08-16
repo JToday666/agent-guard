@@ -38,7 +38,9 @@ def _fixture() -> dict[str, Any]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
-@pytest.fixture(params=("memory", "postgres"))
+@pytest.fixture(
+    params=("memory", pytest.param("postgres", marks=pytest.mark.postgres))
+)
 def provenance_store(request: pytest.FixtureRequest) -> ControlPlaneStore:
     if request.param == "memory":
         return MemoryControlPlaneStore()

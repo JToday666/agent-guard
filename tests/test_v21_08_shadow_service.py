@@ -570,6 +570,7 @@ def _postgres_store():
     return store
 
 
+@pytest.mark.postgres
 def test_shadow_service_postgres_backend() -> None:
     store = _postgres_store()
     state_service = SecurityStateService(store)

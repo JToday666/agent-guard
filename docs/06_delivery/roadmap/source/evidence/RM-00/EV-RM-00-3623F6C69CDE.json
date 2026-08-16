@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-3623F6C69CDE",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-16T17:43:34Z",
+  "ref": "local:python-fast-2026-08-17",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Python fast gate: 1918 passed, 16 skipped, 146 deselected in 218.95s; ruff and pyright passed"
+}

@@ -1,0 +1,502 @@
+name: Extended CI
+
+on:
+  schedule:
+    # 03:00 Asia/Shanghai (UTC+8).
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 3.12 / PostgreSQL 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_guard_test
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install OpenClaw contract dependencies
+        run: pnpm --filter @agentguard-ai/openclaw-plugin install --frozen-lockfile
+
+      - name: Lint
+        run: uv run ruff check apps packages scripts tests
+
+      - name: Type check
+        run: uv run pyright
+
+      - name: Test Python contracts and migrations
+        run: |
+          shopt -s nullglob
+          test_paths=(tests apps/*/tests packages/*/tests)
+          uv run pytest -q "${test_paths[@]}"
+
+      - name: Validate release version mapping
+        run: uv run python scripts/check-release-versions.py
+
+      - name: Validate roadmap source contracts
+        run: uv run python scripts/roadmap-tools.py validate
+
+  attackbench-contracts:
+    name: AttackBench trusted contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Test frozen dataset and trustworthy metrics
+        run: >-
+          uv run --group bench pytest -q
+          agentguard_langgraph_bench/bench/tests/test_dataset_contract.py
+          agentguard_langgraph_bench/bench/tests/test_trustworthy_metrics.py
+          agentguard_langgraph_bench/bench/tests/test_attackcase_schema.py
+          agentguard_langgraph_bench/bench/tests/test_core_client.py
+          agentguard_langgraph_bench/bench/tests/test_paired_runner.py
+          agentguard_langgraph_bench/bench/tests/test_policy_decision.py
+          agentguard_langgraph_bench/bench/tests/test_tool_gateway_approval_continuation.py
+
+  windows-security:
+    name: Windows security and release contracts
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Test Windows blocking fixes
+        run: >-
+          uv run pytest -q
+          tests/test_audit_checkpoint.py
+          tests/test_guard_api_endpoint_policy.py
+          tests/test_check_release_artifacts.py
+          tests/test_release_artifact_manifest.py
+
+  node:
+    name: Node 24 / pnpm 11
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Dashboard
+        run: pnpm --filter @agentguard/dashboard check
+
+      - name: Test OpenClaw runtime plugin
+        run: pnpm --filter @agentguard-ai/openclaw-plugin test
+
+      - name: Test OpenClaw bench tools
+        run: pnpm --filter @agentguard/openclaw-bench-tools test
+
+      - name: Test OpenClaw local shims
+        run: pnpm openclaw:bench-shim:test
+
+  dashboard-e2e:
+    name: Dashboard E2E / Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
+
+      - name: Test Dashboard mock mode
+        run: pnpm --filter @agentguard/dashboard test:e2e
+
+      - name: Test Dashboard real API mode
+        run: pnpm --filter @agentguard/dashboard test:e2e:api
+
+  dashboard-s1-live-e2e:
+    name: Dashboard S1 live E2E / ${{ matrix.storage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        storage: [memory, postgres]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_guard_test
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENTGUARD_CT_FACT_PROJECTION_ENABLED: "false"
+      AGENTGUARD_LLM_ENABLED: "false"
+      AGENTGUARD_S1_STORAGE_BACKEND: ${{ matrix.storage }}
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+      AGENTGUARD_V21_SHADOW_ENABLED: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
+
+      - name: Test live S1 runtime supervision
+        run: pnpm --filter @agentguard/dashboard test:e2e:s1-live
+
+      - name: Upload live S1 failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dashboard-s1-live-${{ matrix.storage }}
+          path: apps/dashboard/test-results-s1-live-${{ matrix.storage }}
+          if-no-files-found: ignore
+
+  roadmap-dashboard-e2e:
+    name: Roadmap artifact E2E / Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Build roadmap artifact
+        run: pnpm roadmap:build
+
+      - name: Install Chromium
+        run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
+
+      - name: Test self-contained roadmap artifact
+        run: pnpm dashboard:test:e2e:roadmap
+
+      - name: Upload roadmap failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: roadmap-artifact-e2e
+          path: apps/dashboard/test-results-roadmap
+          if-no-files-found: ignore
+
+  dashboard-s2-live-e2e:
+    name: Dashboard S2 live E2E / ${{ matrix.storage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        storage: [memory, postgres]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_guard_test
+          POSTGRES_PASSWORD: "123456"
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_guard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENTGUARD_LLM_ENABLED: "false"
+      AGENTGUARD_S2_STORAGE_BACKEND: ${{ matrix.storage }}
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+      - name: Install locked environments
+        run: |
+          uv sync --locked --all-groups
+          pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
+      - name: Test live S2 content provenance
+        run: pnpm --filter @agentguard/dashboard test:e2e:s2-live
+      - name: Upload S2 evidence and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dashboard-s2-live-${{ matrix.storage }}
+          path: apps/dashboard/test-results-s2-live-${{ matrix.storage }}
+          if-no-files-found: error
+
+  s2-cross-store-parity:
+    name: S2 Memory/PostgreSQL parity
+    needs: dashboard-s2-live-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download Memory evidence
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.1
+        with:
+          name: dashboard-s2-live-memory
+          path: s2-artifacts/memory
+      - name: Download PostgreSQL evidence
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.1
+        with:
+          name: dashboard-s2-live-postgres
+          path: s2-artifacts/postgres
+      - name: Compare redacted semantic evidence
+        run: >-
+          python tests/support/compare_s2_evidence.py
+          --memory s2-artifacts/memory
+          --postgres s2-artifacts/postgres
+          --output s2-artifacts/s2-parity.json
+      - name: Upload parity result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dashboard-s2-live-parity
+          path: s2-artifacts/s2-parity.json
+          if-no-files-found: error
+
+  openclaw-runtime-smoke:
+    name: OpenClaw runtime smoke (${{ matrix.os }} / ${{ matrix.openclaw }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        openclaw: ["2026.6.6", "2026.7.1-2"]
+    env:
+      AGENTGUARD_OPENCLAW_EXPECT_VERSION: ${{ matrix.openclaw }}
+      AGENTGUARD_TEST_DATABASE_URL: postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard_test
+      AGENTGUARD_CONTROL_TOKEN: ci-smoke-control-token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set OpenClaw install root
+        shell: bash
+        run: echo "AGENTGUARD_OPENCLAW_ROOT=${RUNNER_TEMP}/openclaw-${{ matrix.openclaw }}" >> "$GITHUB_ENV"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: pnpm
+
+      - name: Cache npm (openclaw install)
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/.npm
+          key: npm-openclaw-${{ matrix.os }}-${{ matrix.openclaw }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            npm-openclaw-${{ matrix.os }}-${{ matrix.openclaw }}-
+
+      - name: Install OpenClaw outside workspace
+        shell: bash
+        run: npm install --prefix "$AGENTGUARD_OPENCLAW_ROOT" "openclaw@${{ matrix.openclaw }}" --ignore-scripts --no-audit --no-fund
+
+      - name: Start preinstalled PostgreSQL (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '123456';"
+          sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'" | grep -q 1 || sudo -u postgres createdb agent_guard_test
+
+      - name: Start preinstalled PostgreSQL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $service = Get-Service -Name "postgresql-*" | Select-Object -First 1
+          if (-not $service) { throw "未找到预装的 PostgreSQL 服务（postgresql-*）" }
+          if ($service.Status -ne 'Running') {
+            # 新版 runner 镜像上服务可能被禁用，先改启动类型再启动
+            Set-Service -Name $service.Name -StartupType Manual
+            Start-Service -Name $service.Name
+          }
+          # 定位 psql.exe（可能不在 PATH 上）
+          $pgbin = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).Directory.FullName
+          if (-not $pgbin) { $pgbin = (Get-Item (Get-Command psql.exe).Source).Directory.FullName }
+          # 从服务注册表定位 data 目录，临时改为 trust 认证以设置密码
+          $imgPath = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$($service.Name)").ImagePath
+          $dataDir = if ($imgPath -match '-D\s+"?([^"]+)"?') { $matches[1] } else { (Get-ChildItem "C:\Program Files\PostgreSQL\*\data" -Directory | Select-Object -First 1).FullName }
+          $hbaPath = Join-Path $dataDir "pg_hba.conf"
+          $hbaBackup = Get-Content $hbaPath -Raw
+          $hbaTrust = $hbaBackup -replace '(host\s+all\s+all\s+\S+\s+)\S+', '${1}trust'
+          Set-Content $hbaPath -Value $hbaTrust -NoNewline
+          Restart-Service -Name $service.Name
+          & "$pgbin\psql.exe" -U postgres -d postgres -c "ALTER USER postgres WITH PASSWORD '123456';"
+          $exists = & "$pgbin\psql.exe" -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'agent_guard_test'"
+          if ($exists -ne "1") { & "$pgbin\psql.exe" -U postgres -d postgres -c "CREATE DATABASE agent_guard_test;" }
+          # 恢复原始认证并重启
+          Set-Content $hbaPath -Value $hbaBackup -NoNewline
+          Restart-Service -Name $service.Name
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked Python environment
+        run: uv sync --locked --all-groups
+
+      - name: Install locked Node environment
+        run: pnpm install --frozen-lockfile
+
+      - name: Build OpenClaw plugin
+        run: pnpm --filter @agentguard-ai/openclaw-plugin build
+
+      - name: Run OpenClaw runtime smoke gate
+        run: node scripts/openclaw-runtime-smoke.mjs --provision-env
+
+      - name: Upload smoke report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openclaw-runtime-smoke-${{ matrix.os }}-${{ matrix.openclaw }}
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/agentguard-openclaw-runtime-smoke-report.json
+            ${{ runner.temp }}/agentguard-openclaw-smoke-gateway.log

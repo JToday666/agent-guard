@@ -32,7 +32,9 @@ OTHER_SCOPE = "hmac-sha256:state_contract_other"
 PROJECTOR_VERSION = "v21-07.projector.2"
 
 
-@pytest.fixture(params=["memory", "postgres"])
+@pytest.fixture(
+    params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)]
+)
 def store(request):
     if request.param == "memory":
         return MemoryControlPlaneStore()
