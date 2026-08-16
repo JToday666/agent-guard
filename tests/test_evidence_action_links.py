@@ -134,7 +134,7 @@ def test_approval_gated_guard_hook_retains_a_stable_action_link() -> None:
 
     audit = _audit(event, decision=_decision("ask"), approval_id="app_model_input")
 
-    assert audit.links["action_id"] == event.event_id
+    assert audit.links["action_id"] == f"act_{event.event_id}"
     assert audit.links["approval_id"] == "app_model_input"
 
 
@@ -219,7 +219,7 @@ def test_tool_call_uses_the_original_tool_action_id() -> None:
         ),
     ],
 )
-def test_intrinsic_agent_actions_use_the_guard_event_id(
+def test_intrinsic_agent_actions_use_the_canonical_guard_event_action_id(
     event_type: str,
     payload: dict[str, object],
 ) -> None:
@@ -227,8 +227,8 @@ def test_intrinsic_agent_actions_use_the_guard_event_id(
 
     audit = _audit(event)
 
-    assert audit.links["action_id"] == event.event_id
-    assert audit.metadata["action_id"] == event.event_id
+    assert audit.links["action_id"] == f"act_{event.event_id}"
+    assert audit.metadata["action_id"] == f"act_{event.event_id}"
 
 
 def test_explicit_source_action_id_is_preserved_for_memory_write() -> None:

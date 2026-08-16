@@ -37,6 +37,14 @@ _MODEL_EVENT_PHASE_CONTRACT: dict[GuardEventType, Literal["input", "output"]] = 
     "model_output_produced": "output",
 }
 
+# These callbacks describe observations after the represented execution/model
+# boundary. Runtime producers may omit ``pre_execution`` for compatibility, in
+# which case the server-owned event contract supplies False. An explicit True
+# is contradictory and must be rejected before policy or approval side effects.
+_POST_EXECUTION_EVENT_TYPES: frozenset[GuardEventType] = frozenset(
+    {"model_output_produced", "tool_result_produced"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class RawPayloadContract:
@@ -195,6 +203,13 @@ class GuardEvent(BaseModel):
         if not isinstance(data, dict):
             return data
         event_type = data.get("event_type", "tool_call_proposed")
+        if event_type in _POST_EXECUTION_EVENT_TYPES:
+            if data.get("pre_execution") is True:
+                raise ValueError(
+                    f"event_type={event_type} cannot be marked pre_execution"
+                )
+            if "pre_execution" not in data:
+                data = {**data, "pre_execution": False}
         payload = data.get("payload")
         if not isinstance(payload, dict):
             return data
@@ -212,6 +227,10 @@ class GuardEvent(BaseModel):
 
     @model_validator(mode="after")
     def validate_event_payload_contract(self) -> GuardEvent:
+        if self.event_type in _POST_EXECUTION_EVENT_TYPES and self.pre_execution:
+            raise ValueError(
+                f"event_type={self.event_type} cannot be marked pre_execution"
+            )
         expected_payload = _EVENT_PAYLOAD_CONTRACT[self.event_type]
         if not isinstance(self.payload, expected_payload):
             raise ValueError(

@@ -7,6 +7,9 @@ export type AgentGuardPluginConfig = {
   requestTimeoutMs: number;
   approvalPollIntervalMs: number;
   approvalTimeoutMs: number;
+  strongApprovalBindingEnabled: boolean;
+  /** Trusted local provisioning value; never learned from Guard API output. */
+  runtimeBindingId: string;
   diagnosticLogging: boolean;
   agentId: string;
 };
@@ -20,6 +23,8 @@ export type OpenClawPluginConfigInput =
       requestTimeoutMs?: number;
       approvalPollIntervalMs?: number;
       approvalTimeoutMs?: number;
+      strongApprovalBindingEnabled?: boolean;
+      runtimeBindingId?: string;
       diagnosticLogging?: boolean;
       agentId?: string;
     }
@@ -166,6 +171,82 @@ export type GuardEvaluationResponse = {
   decision: GuardDecision;
   approval: EvaluationApproval | null;
   policy_audit_id?: string | null;
+  enforcement_binding?: EnforcementBinding | InvalidEnforcementBinding;
+};
+
+/** Local fail-closed sentinel; never serialized or persisted. */
+export type InvalidEnforcementBinding = { invalid: true };
+
+/** Server-authored ActionIR binding. The fingerprint is transport-only. */
+export type EnforcementBinding = {
+  schema_version: "2.1";
+  action_id: string;
+  authorization_fingerprint: string;
+  runtime_binding_id: string;
+  requires_execution_lease: true;
+};
+
+/** Non-secret lease linkage returned to hooks after the token is discarded. */
+export type ExecutionLeaseLinks = {
+  leaseId: string;
+  consumptionId: string;
+};
+
+export type ExecutionLeaseReference = ExecutionLeaseLinks & {
+  expiresAt: string;
+};
+
+export type EnforcementGateState =
+  | "evaluating"
+  | "allowed"
+  | "approval_pending"
+  | "approval_released"
+  | "blocked"
+  | "timed_out"
+  | "binding_failed";
+
+export type BindingCheckStatus =
+  | "not_applicable"
+  | "not_performed"
+  | "passed"
+  | "failed"
+  | "unknown";
+
+export type LeaseConsumeOutcome =
+  | "not_applicable"
+  | "not_attempted"
+  | "consumed"
+  | "expired"
+  | "revoked"
+  | "rejected"
+  | "unknown";
+
+export type Rte05ReasonCode =
+  | "rte-05:binding_exact"
+  | "rte-05:binding_invalid"
+  | "rte-05:binding_mismatch"
+  | "rte-05:approval_not_human"
+  | "rte-05:approval_not_consumable"
+  | "rte-05:approval_not_found"
+  | "rte-05:identity_denied"
+  | "rte-05:approval_expired"
+  | "rte-05:approval_timed_out"
+  | "rte-05:lease_consumed"
+  | "rte-05:consumption_conflict"
+  | "rte-05:lease_rejected"
+  | "rte-05:lease_expired"
+  | "rte-05:lease_revoked"
+  | "rte-05:lease_unavailable"
+  | "rte-05:lease_response_invalid"
+  | "rte-05:lease_consume_timed_out"
+  | "rte-05:multiple_binding_conflict"
+  | "rte-05:correlation_capacity_exhausted";
+
+export type RuntimeEnforcementEvidence = {
+  gate_state: EnforcementGateState;
+  binding_check_status: BindingCheckStatus;
+  lease_consume_outcome: LeaseConsumeOutcome;
+  reason_codes: Rte05ReasonCode[];
 };
 
 export type GuardDecision = {
@@ -195,6 +276,7 @@ export type EvaluationApproval = {
 export type ApprovalWaitResponse = {
   status: string;
   decision: "allow_once" | "deny" | null;
+  resolution_source?: "human" | "llm" | "system" | null;
 };
 
 export type ConfigAuditFinding = {
@@ -292,6 +374,8 @@ export type RuntimeOutcomeReceipt = Omit<
     action_id?: string;
     approval_id?: string;
     parent_audit_id?: string;
+    lease_id?: string;
+    consumption_id?: string;
   };
   latency_ms: null;
   metadata: {
@@ -304,10 +388,12 @@ export type RuntimeOutcomeReceipt = Omit<
     side_effects: JsonObject;
     result: JsonObject;
     approval: JsonObject;
+    enforcement?: RuntimeEnforcementEvidence;
   };
 };
 
 export type ToolHookResult = {
+  params?: JsonObject;
   block?: boolean;
   blockReason?: string;
 };

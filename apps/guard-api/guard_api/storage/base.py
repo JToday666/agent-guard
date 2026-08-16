@@ -700,6 +700,17 @@ class ControlPlaneStore(Protocol):
         """
         ...
 
+    def runtime_outcome_transaction(
+        self, approval_id: str | None
+    ) -> ContextManager[None]:
+        """Serialize receipt first-write checks with lease consumption.
+
+        The audit identity check, private authority reads, and audit insertion
+        must share one atomic window.  For a bound approval, execution-lease
+        consumption must occur wholly before or wholly after this context.
+        """
+        ...
+
     def verify_audit_integrity(self) -> AuditIntegrityStatus: ...
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode: ...
@@ -940,6 +951,16 @@ class ControlPlaneStore(Protocol):
         self, approval_id: str
     ) -> EnforcementBindingRecord | None:
         """Read a private binding by approval ID; never expose it publicly."""
+        ...
+
+    def approval_execution_was_consumed(self, approval_id: str) -> bool:
+        """Return whether the approval's exact private authority was consumed.
+
+        Implementations must treat either an exhausted bound grant or its exact
+        consumption/lease pair as consumed.  The boolean-only result keeps
+        private grant, fingerprint, consumption, and lease identifiers out of
+        receipt-validation errors and public service payloads.
+        """
         ...
 
     def register_approval_grant(

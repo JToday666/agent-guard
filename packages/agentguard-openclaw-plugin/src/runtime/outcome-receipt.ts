@@ -7,8 +7,10 @@ import {
 } from "../mapping/audit-outcomes.js";
 import type {
   AgentGuardPluginConfig,
+  ExecutionLeaseLinks,
   GuardEvaluationResponse,
   GuardEvent,
+  RuntimeEnforcementEvidence,
 } from "../types.js";
 import type { RuntimeOutcomeDelivery } from "./outcome-delivery.js";
 
@@ -30,6 +32,8 @@ export type FireRuntimeOutcomeParams = {
   error?: string | null;
   /** 显式顶层时间戳；terminal 回执须与 completedAt 同源（Core 一致性校验）。 */
   timestamp?: string;
+  lease?: ExecutionLeaseLinks;
+  enforcement?: RuntimeEnforcementEvidence;
 };
 
 /**
@@ -57,6 +61,8 @@ export function fireRuntimeOutcomeReceipt(
     completedAt,
     error,
     timestamp,
+    lease,
+    enforcement,
   } = params;
   if (!evaluation.policy_audit_id) {
     logDiagnostic(
@@ -80,6 +86,8 @@ export function fireRuntimeOutcomeReceipt(
         completedAt,
         error,
         timestamp,
+        lease,
+        enforcement,
       },
     );
     delivery.submit(receipt, client, logLabel);

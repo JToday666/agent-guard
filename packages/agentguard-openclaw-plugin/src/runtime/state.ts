@@ -4,7 +4,13 @@ import type {
   GuardEvaluationResponse,
   GuardEvent,
   JsonObject,
+  RuntimeEnforcementEvidence,
 } from "../types.js";
+
+export type ReceiptEvaluation = Omit<
+  GuardEvaluationResponse,
+  "enforcement_binding"
+>;
 
 export type SessionState = {
   userTask?: string;
@@ -14,6 +20,8 @@ export type SessionState = {
   model?: string;
   runId?: string;
   sessionId?: string;
+  /** Trusted host/session task locator; never sourced from tool arguments. */
+  taskId?: string;
   toolRuntimePolicies?: Record<string, JsonObject>;
 };
 
@@ -60,6 +68,9 @@ export type ToolCallState = {
   gateState: EnforcementGateState;
   approvalId?: string | null;
   approvalStatus?: "pending" | "allowed" | "denied" | "expired" | "unknown";
+  leaseId?: string;
+  consumptionId?: string;
+  enforcement?: RuntimeEnforcementEvidence;
   terminalStatus?: "executed" | "failed";
   terminalObservedAt?: string;
   resultPersistObserved?: boolean;
@@ -69,7 +80,9 @@ export type ToolCallState = {
   updatedAtMs: number;
   /** terminal 回执构造所需的完整关联，避免 after hook 重查（§5.1）。 */
   guardEvent?: GuardEvent;
-  evaluation?: GuardEvaluationResponse;
+  evaluation?: ReceiptEvaluation;
+  /** A native ID collision makes all later terminal observations ambiguous. */
+  correlationCompromised?: boolean;
 };
 
 /** RTE-03 §8：active correlation state 硬容量；耗尽时不淘汰受保护状态。 */
@@ -82,7 +95,9 @@ export type EvidenceDegradationReason =
   | "after_tool_call_correlation_missing"
   | "after_tool_call_policy_linkage_missing"
   | "after_tool_call_local_fallback_correlation"
-  | "tool_call_state_capacity_exhausted";
+  | "tool_call_state_capacity_exhausted"
+  | "tool_call_state_duplicate_active_id"
+  | "strong_binding_operational_degradation";
 
 const DEGRADATION_COUNT_CAP = 10_000;
 
@@ -217,6 +232,9 @@ export function rememberSessionState(
       stringMaybe(eventRecord.sessionId) ??
       stringMaybe(contextRecord.sessionId) ??
       existing.sessionId,
+    taskId:
+      stringMaybe(contextRecord.taskId ?? contextRecord.task_id) ??
+      existing.taskId,
     toolRuntimePolicies:
       Object.keys(toolRuntimePolicies).length > 0
         ? toolRuntimePolicies
@@ -425,19 +443,22 @@ export type RememberToolCallStateOptions = {
   tracker?: EvidenceDegradationTracker;
   nowMs?: number;
   limit?: number;
+  onRejected?: (
+    reason: "capacity_exhausted" | "duplicate_active_id",
+  ) => void;
 };
 
 export function rememberToolCallState(
   cache: Map<string, ToolCallState>,
   event: GuardEvent,
   options: RememberToolCallStateOptions = {},
-): void {
+): ToolCallState | undefined {
   if (
     event.event_type !== "tool_call_proposed" ||
     !("tool" in event.payload) ||
     !("arguments" in event.payload)
   ) {
-    return;
+    return undefined;
   }
   const payload = event.payload;
   const callId = payload.tool.call_id;
@@ -452,6 +473,19 @@ export function rememberToolCallState(
       : "local_fallback";
   const nowMs = options.nowMs ?? Date.now();
   const limit = options.limit ?? TOOL_CALL_STATE_ACTIVE_LIMIT;
+  const existing = cache.get(callId);
+  if (existing) {
+    if (!canEvictToolCallState(existing, nowMs)) {
+      // Preserve the original attempt and its approved parameters. Once a
+      // native identity collides, later after-hook events cannot be assigned
+      // safely to either attempt, so terminal derivation must stay disabled.
+      existing.correlationCompromised = true;
+      options.tracker?.record("tool_call_state_duplicate_active_id");
+      options.onRejected?.("duplicate_active_id");
+      return undefined;
+    }
+    cache.delete(callId);
+  }
   if (!cache.has(callId) && cache.size >= limit) {
     // §8.4/§8.5：容量耗尽时先回收可驱逐状态；回收失败则不静默淘汰
     // 受保护状态——本次调用放弃 C2 correlation，C1 enforcement 照常继续。
@@ -465,10 +499,11 @@ export function rememberToolCallState(
     }
     if (!reclaimed) {
       options.tracker?.record("tool_call_state_capacity_exhausted");
-      return;
+      options.onRejected?.("capacity_exhausted");
+      return undefined;
     }
   }
-  cache.set(callId, {
+  const state: ToolCallState = {
     userTask: event.security_context.user_task,
     sourceTrust: event.security_context.source_trust,
     sourceType: event.security_context.source_type,
@@ -486,7 +521,20 @@ export function rememberToolCallState(
     gateState: "evaluating",
     createdAtMs: nowMs,
     updatedAtMs: nowMs,
-  });
+  };
+  cache.set(callId, state);
+  return state;
+}
+
+/** Strip transport-only strong binding data before correlation state storage. */
+export function receiptEvaluation(
+  evaluation: GuardEvaluationResponse,
+): ReceiptEvaluation {
+  return {
+    decision: evaluation.decision,
+    approval: evaluation.approval,
+    policy_audit_id: evaluation.policy_audit_id,
+  };
 }
 
 export function mergeRuntimeFields(
@@ -501,6 +549,7 @@ export function mergeRuntimeFields(
   record.model = stringMaybe(record.model) ?? state.model;
   record.runId = stringMaybe(record.runId) ?? state.runId;
   record.sessionId = stringMaybe(record.sessionId) ?? state.sessionId;
+  record.taskId = stringMaybe(record.taskId ?? record.task_id) ?? state.taskId;
   const toolName = stringMaybe(record.toolName);
   const runtimePolicy = toolName
     ? state.toolRuntimePolicies?.[toolName]

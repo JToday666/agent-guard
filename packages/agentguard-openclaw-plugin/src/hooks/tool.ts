@@ -14,12 +14,24 @@ import {
 import {
   asRecord,
   patchToolCallState,
+  receiptEvaluation,
   rememberSessionState,
   rememberToolCallState,
   stringMaybe,
   withCachedRuntimeFields,
   withCachedToolContext,
 } from "../runtime/state.js";
+import {
+  capacityFailureEvidence,
+  correlationFailureEvidence,
+  consumeStrongApproval,
+  isStrongBindingDegraded,
+  snapshotGuardEvent,
+  snapshotToolParams,
+  strongHostInputSnapshot,
+  validateStrongBinding,
+} from "../runtime/strong-binding.js";
+import { FINAL_ENFORCEMENT_HOOK_PRIORITY } from "../runtime/host-capabilities.js";
 import { fireRuntimeOutcomeReceipt } from "../runtime/outcome-receipt.js";
 import {
   blockingApprovalHookTimeoutMs,
@@ -57,26 +69,165 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
         return undefined;
       }
       const client = makeClient();
+      let strongBindingDeclared = false;
       try {
         rememberSessionState(sessionState, event, context);
         const cached = withCachedRuntimeFields(sessionState, event, context);
-        const guardEvent = buildToolCallGuardEvent(
-          cached.event,
-          cached.context,
+        const guardEvent = snapshotGuardEvent(
+          buildToolCallGuardEvent(cached.event, cached.context),
         );
+        const actionSnapshot = strongHostInputSnapshot(
+          event,
+          context,
+          guardEvent,
+        );
+        const approvedParams = snapshotToolParams(event);
         const callId = (guardEvent.payload as ToolCallPayload).tool.call_id;
         const nativeToolCallId =
           stringMaybe(asRecord(event).toolCallId) ??
           stringMaybe(asRecord(context).toolCallId) ??
           null;
-        rememberToolCallState(toolCallState, guardEvent, {
+        let stateRejection:
+          | "capacity_exhausted"
+          | "duplicate_active_id"
+          | undefined;
+        const remembered = rememberToolCallState(toolCallState, guardEvent, {
           nativeToolCallId,
           tracker: degradations,
+          onRejected: (reason) => {
+            stateRejection = reason;
+          },
         });
+        if (stateRejection === "duplicate_active_id") {
+          logDiagnostic(
+            config,
+            "before_tool_call blocked duplicate active native action id",
+          );
+          return failClosedToolResult();
+        }
         const decision = await client.evaluate(guardEvent);
+        strongBindingDeclared = decision.enforcement_binding !== undefined;
         // §4 冻结不变量：policy linkage 必须在 handler 返回前同步写入
         // correlation state，禁止 fire-and-forget。
         linkToolCallDecision(toolCallState, callId, guardEvent, decision);
+        if (strongBindingDeclared) {
+          patchToolCallState(toolCallState, callId, {
+            gateState: "approval_pending",
+            approvalId: decision.approval?.approval_id ?? null,
+            approvalStatus: "pending",
+          });
+          const validation = validateStrongBinding(
+            decision,
+            guardEvent,
+            config.runtimeBindingId,
+          );
+          if (
+            remembered &&
+            remembered.correlationSource !== "native_tool_call_id"
+          ) {
+            degradations.record("after_tool_call_local_fallback_correlation");
+          }
+          const strongResult =
+            !remembered
+              ? {
+                  outcome: "blocked" as const,
+                  approval: null,
+                  enforcement: capacityFailureEvidence(),
+                }
+              : remembered.correlationSource !== "native_tool_call_id"
+                ? {
+                    outcome: "blocked" as const,
+                    approval: null,
+                    enforcement: correlationFailureEvidence(),
+                  }
+              : validation.ok
+                ? await consumeStrongApproval(
+                    client,
+                    decision,
+                    validation.binding,
+                    client.approvalDeadlineMs(),
+                    () => {
+                      const latest = withCachedRuntimeFields(
+                        sessionState,
+                        event,
+                        context,
+                      );
+                      const latestGuardEvent = snapshotGuardEvent(
+                        buildToolCallGuardEvent(
+                          latest.event,
+                          latest.context,
+                        ),
+                      );
+                      return (
+                        strongHostInputSnapshot(
+                          event,
+                          context,
+                          latestGuardEvent,
+                        ) === actionSnapshot
+                      );
+                    },
+                  )
+                : {
+                    outcome: "blocked" as const,
+                    approval: null,
+                    enforcement: validation.enforcement,
+                  };
+
+          if (strongResult.outcome === "released") {
+            patchToolCallState(toolCallState, callId, {
+              gateState: "approval_released",
+              approvalId: strongResult.approval.approvalId,
+              approvalStatus: "allowed",
+              leaseId: strongResult.lease.leaseId,
+              consumptionId: strongResult.lease.consumptionId,
+              enforcement: strongResult.enforcement,
+            });
+            fireRuntimeOutcomeReceipt({
+              client,
+              config,
+              guardEvent,
+              evaluation: decision,
+              kind: "approval_release",
+              approval: strongResult.approval,
+              lease: strongResult.lease,
+              enforcement: strongResult.enforcement,
+              stage: "before_tool_call",
+              logLabel: "before_tool_call",
+              delivery: outcomeDelivery,
+            });
+            patchToolCallState(toolCallState, callId, { receiptQueued: true });
+            return { params: approvedParams };
+          }
+
+          if (isStrongBindingDegraded(strongResult.enforcement)) {
+            degradations.record("strong_binding_operational_degradation");
+          }
+
+          patchToolCallState(toolCallState, callId, {
+            gateState: strongResult.enforcement.gate_state,
+            approvalId:
+              strongResult.approval?.approvalId ??
+              decision.approval?.approval_id ??
+              null,
+            approvalStatus: strongResult.approval?.status ?? "unknown",
+            enforcement: strongResult.enforcement,
+          });
+          fireRuntimeOutcomeReceipt({
+            client,
+            config,
+            guardEvent,
+            evaluation: decision,
+            kind: "pre_execution_deny",
+            approval: strongResult.approval,
+            lease: strongResult.lease,
+            enforcement: strongResult.enforcement,
+            stage: "before_tool_call",
+            logLabel: "before_tool_call",
+            delivery: outcomeDelivery,
+          });
+          patchToolCallState(toolCallState, callId, { receiptQueued: true });
+          return failClosedToolResult();
+        }
         if (isObserve(config)) {
           patchToolCallState(toolCallState, callId, { gateState: "allowed" });
           return undefined;
@@ -137,14 +288,22 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
         logDiagnostic(config, "before_tool_call failed closed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        if (!isObserve(config)) {
-          markFailedClosedGate(toolCallState, event, context);
+        if (strongBindingDeclared || !isObserve(config)) {
+          markFailedClosedGate(
+            toolCallState,
+            event,
+            context,
+            strongBindingDeclared ? "binding_failed" : "blocked",
+          );
           return failClosedToolResult();
         }
         return undefined;
       }
     },
-    { priority: 100, timeoutMs: blockingApprovalHookTimeoutMs(config) },
+    {
+      priority: FINAL_ENFORCEMENT_HOOK_PRIORITY,
+      timeoutMs: blockingApprovalHookTimeoutMs(config),
+    },
   );
 }
 
@@ -160,7 +319,7 @@ export function linkToolCallDecision(
     decisionId: evaluation.decision.decision_id,
     decision: evaluation.decision.decision,
     guardEvent,
-    evaluation,
+    evaluation: receiptEvaluation(evaluation),
   });
 }
 
@@ -169,6 +328,7 @@ function markFailedClosedGate(
   toolCallState: Map<string, ToolCallState>,
   event: unknown,
   context: unknown,
+  gateState: EnforcementGateState = "blocked",
 ): void {
   const callId =
     stringMaybe(asRecord(event).toolCallId) ??
@@ -177,7 +337,7 @@ function markFailedClosedGate(
     return;
   }
   patchToolCallState(toolCallState, callId, {
-    gateState: "blocked",
+    gateState,
     receiptQueued: true,
   });
 }
@@ -264,6 +424,14 @@ export function registerAfterToolCall(hookContext: HookContext): void {
           degradations.record("after_tool_call_correlation_missing");
           return;
         }
+        if (state.correlationCompromised) {
+          logDiagnostic(
+            config,
+            "after_tool_call skipped: native action identity was duplicated",
+            { toolCallId: callId },
+          );
+          return;
+        }
         if (state.correlationSource !== "native_tool_call_id") {
           // C2 要求稳定原生身份；local fallback 不伪造 terminal fact。
           degradations.record("after_tool_call_local_fallback_correlation");
@@ -302,6 +470,13 @@ export function registerAfterToolCall(hookContext: HookContext): void {
                 resolvedAt: null,
               }
             : undefined;
+        const lease =
+          state.leaseId && state.consumptionId
+            ? {
+                leaseId: state.leaseId,
+                consumptionId: state.consumptionId,
+              }
+            : undefined;
         fireRuntimeOutcomeReceipt({
           client,
           config,
@@ -309,6 +484,8 @@ export function registerAfterToolCall(hookContext: HookContext): void {
           evaluation: state.evaluation,
           kind: terminal === "failed" ? "execution_failed" : "execution_completed",
           approval,
+          lease,
+          enforcement: state.enforcement,
           interventionType: intervention,
           invokedAt: null,
           // Core 要求 execution.completed_at 与回执顶层 timestamp 完全一致，

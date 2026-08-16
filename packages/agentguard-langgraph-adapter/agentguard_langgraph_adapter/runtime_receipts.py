@@ -7,10 +7,12 @@ from typing import Any, Literal
 from .event_models import (
     AuditEvent,
     PolicyDecision,
+    RuntimeEnforcementEvidence,
     RuntimeOutcomeKind,
     RuntimeOutcomeReceipt,
     utc_now_iso,
 )
+from .strong_binding import normalize_approval_resolution
 
 ExecutionStatus = Literal["not_invoked", "executed", "failed", "unknown"]
 ResultDisposition = Literal[
@@ -69,14 +71,48 @@ def build_tool_started_observation(
     *,
     approval_resolution: dict[str, Any] | None = None,
     timestamp: str | None = None,
+    enforcement: RuntimeEnforcementEvidence | dict[str, Any] | Any | None = None,
+    lease_id: str | None = None,
+    consumption_id: str | None = None,
 ) -> AuditEvent:
     event_data = _event_dump(event)
     occurred_at = timestamp or utc_now_iso()
-    links = _policy_links(event_data, decision, approval_resolution)
+    links = _policy_links(
+        event_data,
+        decision,
+        approval_resolution,
+        lease_id=lease_id,
+        consumption_id=consumption_id,
+    )
     links["parent_audit_id"] = str(decision.policy_audit_id)
     approval = _approval_evidence(decision, approval_resolution)
     action_name = _action_name(event_data)
     event_id = _event_id(event_data)
+    evidence: dict[str, Any] = {
+        "intervention": _intervention(decision, approval),
+        "execution": {
+            "status": "unknown",
+            "receipt_recorded": False,
+            "invoked_at": occurred_at,
+            "completed_at": None,
+            "error": None,
+            "tool_result_entered_context": None,
+            "persisted": None,
+        },
+        "side_effects": {
+            "measurement_status": "not_measured",
+            "count": None,
+            "summary": "Execution started; final side effects are not yet known.",
+        },
+        "result": {
+            "disposition": "unknown",
+            "summary": "Execution has not produced a terminal result.",
+            "sanitized": False,
+        },
+        "approval": approval,
+    }
+    if enforcement is not None:
+        evidence["enforcement"] = _enforcement_dump(enforcement)
     return AuditEvent(
         audit_id=f"audit_observation_started_{event_id}",
         schema_version="0.4",
@@ -100,29 +136,7 @@ def build_tool_started_observation(
         links=links,
         latency_ms=None,
         metadata={"action_name": action_name, "observation_state": "started"},
-        evidence={
-            "intervention": _intervention(decision, approval),
-            "execution": {
-                "status": "unknown",
-                "receipt_recorded": False,
-                "invoked_at": occurred_at,
-                "completed_at": None,
-                "error": None,
-                "tool_result_entered_context": None,
-                "persisted": None,
-            },
-            "side_effects": {
-                "measurement_status": "not_measured",
-                "count": None,
-                "summary": "Execution started; final side effects are not yet known.",
-            },
-            "result": {
-                "disposition": "unknown",
-                "summary": "Execution has not produced a terminal result.",
-                "sanitized": False,
-            },
-            "approval": approval,
-        },
+        evidence=evidence,
     )
 
 
@@ -143,11 +157,20 @@ def build_runtime_outcome(
     parent_audit_id: str | None = None,
     intervention_type: str | None = None,
     intervention_reason: str | None = None,
+    enforcement: RuntimeEnforcementEvidence | dict[str, Any] | Any | None = None,
+    lease_id: str | None = None,
+    consumption_id: str | None = None,
 ) -> AuditEvent:
     event_data = _event_dump(event)
     event_id = _event_id(event_data)
     completed = completed_at or utc_now_iso()
-    links = _policy_links(event_data, decision, approval_resolution)
+    links = _policy_links(
+        event_data,
+        decision,
+        approval_resolution,
+        lease_id=lease_id,
+        consumption_id=consumption_id,
+    )
     if parent_audit_id:
         links["parent_audit_id"] = parent_audit_id
     approval = _approval_evidence(decision, approval_resolution)
@@ -155,6 +178,45 @@ def build_runtime_outcome(
     disposition = result_disposition or _default_disposition(execution_status)
     action_name = _action_name(event_data)
     outcome_kind = _outcome_kind(execution_status, disposition, approval)
+    evidence: dict[str, Any] = {
+        "intervention": (
+            {
+                "type": intervention_type,
+                "reason": intervention_reason
+                or "The adapter recorded the runtime outcome.",
+            }
+            if intervention_type
+            else _intervention(decision, approval)
+        ),
+        "execution": {
+            "status": execution_status,
+            "receipt_recorded": True,
+            "invoked_at": invoked_at,
+            "completed_at": completed,
+            "error": bounded_terminal_error(error),
+            "tool_result_entered_context": (
+                True
+                if execution_status == "executed" and disposition != "quarantined"
+                else (
+                    False if execution_status in {"not_invoked", "executed"} else None
+                )
+            ),
+            "persisted": False if execution_status == "not_invoked" else None,
+        },
+        "side_effects": _side_effect_evidence(
+            execution_status,
+            measured_effects,
+            measured=side_effects_measured,
+        ),
+        "result": {
+            "disposition": disposition,
+            "summary": result_summary,
+            "sanitized": result_sanitized,
+        },
+        "approval": approval,
+    }
+    if enforcement is not None:
+        evidence["enforcement"] = _enforcement_dump(enforcement)
     return RuntimeOutcomeReceipt(
         audit_id=f"audit_outcome_{event_id}_{outcome_kind}",
         schema_version="0.4",
@@ -181,45 +243,7 @@ def build_runtime_outcome(
             "agent_id": _agent_id(event_data),
             "outcome_kind": outcome_kind,
         },
-        evidence={  # pyright: ignore[reportArgumentType]
-            "intervention": (
-                {
-                    "type": intervention_type,
-                    "reason": intervention_reason
-                    or "The adapter recorded the runtime outcome.",
-                }
-                if intervention_type
-                else _intervention(decision, approval)
-            ),
-            "execution": {
-                "status": execution_status,
-                "receipt_recorded": True,
-                "invoked_at": invoked_at,
-                "completed_at": completed,
-                "error": bounded_terminal_error(error),
-                "tool_result_entered_context": (
-                    True
-                    if execution_status == "executed" and disposition != "quarantined"
-                    else (
-                        False
-                        if execution_status in {"not_invoked", "executed"}
-                        else None
-                    )
-                ),
-                "persisted": False if execution_status == "not_invoked" else None,
-            },
-            "side_effects": _side_effect_evidence(
-                execution_status,
-                measured_effects,
-                measured=side_effects_measured,
-            ),
-            "result": {
-                "disposition": disposition,
-                "summary": result_summary,
-                "sanitized": result_sanitized,
-            },
-            "approval": approval,
-        },
+        evidence=evidence,  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -327,6 +351,9 @@ def _policy_links(
     event: dict[str, Any],
     decision: PolicyDecision,
     approval_resolution: dict[str, Any] | None,
+    *,
+    lease_id: str | None = None,
+    consumption_id: str | None = None,
 ) -> dict[str, str]:
     if not decision.policy_audit_id:
         raise ValueError("runtime receipt requires policy_audit_id")
@@ -339,7 +366,33 @@ def _policy_links(
         links["action_id"] = action_id
     if approval_id := _approval_id(decision, approval_resolution):
         links["approval_id"] = approval_id
+    if (lease_id is None) != (consumption_id is None):
+        raise ValueError("lease_id and consumption_id must be present together")
+    if lease_id is not None and consumption_id is not None:
+        if not lease_id or not consumption_id:
+            raise ValueError("execution lease IDs must be non-empty")
+        links["lease_id"] = lease_id
+        links["consumption_id"] = consumption_id
     return links
+
+
+def _enforcement_dump(
+    evidence: RuntimeEnforcementEvidence | dict[str, Any] | Any,
+) -> dict[str, Any]:
+    if isinstance(evidence, RuntimeEnforcementEvidence):
+        model = evidence
+    elif isinstance(evidence, dict):
+        model = RuntimeEnforcementEvidence.model_validate(evidence)
+    else:
+        as_dict = getattr(evidence, "as_dict", None)
+        model_dump = getattr(evidence, "model_dump", None)
+        if callable(as_dict):
+            model = RuntimeEnforcementEvidence.model_validate(as_dict())
+        elif callable(model_dump):
+            model = RuntimeEnforcementEvidence.model_validate(model_dump())
+        else:
+            model = RuntimeEnforcementEvidence.model_validate(evidence)
+    return model.model_dump(mode="json")
 
 
 def _action_id(event: dict[str, Any]) -> str | None:
@@ -411,6 +464,8 @@ def _approval_id(
 def _approval_evidence(
     decision: PolicyDecision, resolution: dict[str, Any] | None
 ) -> dict[str, object]:
+    if resolution is not None:
+        resolution = normalize_approval_resolution(resolution)
     approval_id = _approval_id(decision, resolution)
     if decision.decision != "ask":
         return {

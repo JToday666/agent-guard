@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import time
@@ -22,7 +23,17 @@ from agentguard_langgraph_adapter.tool_gateway import (
     _compatibility_from_event,
     _evaluate_memory_write_gate,
     _evaluate_message_send_gate,
+    _multiple_binding_failure,
     adapter_submits_policy_audit,
+)
+from agentguard_langgraph_adapter.strong_binding import (
+    ApprovalResolutionValidationError,
+    StrongBindingFailure,
+    StrongBindingRelease,
+    authorize_strong_approval,
+    normalize_approval_resolution,
+    raw_enforcement_binding,
+    validate_strong_release_for_invocation,
 )
 from agentguard_langgraph_bench.adapter.event_models import (
     ToolExecutionResult,
@@ -42,7 +53,9 @@ class GuardedToolGateway:
     tool_runtime: Any
     approval_mode: str = "fail-closed"
     approval_timeout: float = 60.0
-    _last_receipt_by_trace: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _last_receipt_by_trace: dict[str, str] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.approval_mode = str(self.approval_mode or "fail-closed").strip().lower()
@@ -64,6 +77,11 @@ class GuardedToolGateway:
         case_context: dict[str, Any] | None = None,
     ) -> ToolExecutionResult:
         call_id = call_id or new_id("call")
+        arguments = deepcopy(arguments)
+        raw_arguments = deepcopy(raw_arguments)
+        compatibility = deepcopy(compatibility)
+        security = deepcopy(security)
+        case_context = deepcopy(case_context)
         arguments = self._enrich_arguments(
             tool_name,
             arguments,
@@ -71,7 +89,7 @@ class GuardedToolGateway:
             case_context=case_context,
             call_id=call_id,
         )
-        security_for_event = dict(security)
+        security_for_event = deepcopy(security)
         if raw_arguments is not None or compatibility is not None:
             metadata = dict(security_for_event.get("metadata") or {})
             metadata["compatibility"] = {
@@ -130,10 +148,46 @@ class GuardedToolGateway:
         approval_decision: str | None = None
         latency_ms: float | None = None
         approved_arguments_hash: str | None = None
+        strong_release: StrongBindingRelease | None = None
+        if raw_enforcement_binding(decision) is not None and not (
+            decision.decision == "ask" and self.approval_mode == "fail-closed"
+        ):
+            approval_id = _approval_id(getattr(decision, "approval", None))
+            try:
+                strong_release = authorize_strong_approval(
+                    self.guard_adapter,
+                    decision,
+                    expected_action_id=_event_action_id(event) or call_id,
+                    expected_runtime_binding_id=_expected_runtime_binding_id(
+                        self.guard_adapter
+                    ),
+                    approval_id=approval_id,
+                    timeout_seconds=self.approval_timeout,
+                    poll_interval_seconds=min(0.25, self.approval_timeout),
+                )
+            except StrongBindingFailure as failure:
+                return self._strong_binding_failure(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    event=event,
+                    decision=decision,
+                    audit_event=audit_event,
+                    failure=failure,
+                )
+            assert strong_release is not None
+            approval_resolution = strong_release.approval_resolution
+            approval_decision = _approval_decision(approval_resolution)
+            latency_ms = strong_release.approval_wait_latency_ms
+            approved_arguments_hash = _arguments_hash(arguments)
         if decision.decision == "ask":
             approval_id = _approval_id(getattr(decision, "approval", None))
             arguments_hash = _arguments_hash(arguments)
-            if self.approval_mode == "fail-closed" or not approval_id:
+            if strong_release is not None:
+                approval_resolution = strong_release.approval_resolution
+                approval_decision = "allow_once"
+                latency_ms = strong_release.approval_wait_latency_ms
+                approved_arguments_hash = arguments_hash
+            elif self.approval_mode == "fail-closed" or not approval_id:
                 approval_resolution = {
                     "status": "not_waited",
                     "decision": "deny",
@@ -166,15 +220,22 @@ class GuardedToolGateway:
                     runtime_receipt_error=receipt_error,
                 )
 
-            approval_resolution, latency_ms = _wait_for_approval(
-                self.guard_adapter,
-                approval_id=approval_id,
-                timeout_seconds=self.approval_timeout,
+            if strong_release is None:
+                assert approval_id is not None
+                approval_resolution, latency_ms = _wait_for_approval(
+                    self.guard_adapter,
+                    approval_id=approval_id,
+                    timeout_seconds=self.approval_timeout,
+                )
+                approval_decision = _approval_decision(approval_resolution)
+            assert approval_resolution is not None
+            approval_status = (
+                str(approval_resolution.get("status") or "").strip().lower()
             )
-            approval_decision = _approval_decision(approval_resolution)
-            approval_status = str(approval_resolution.get("status") or "").strip().lower()
             approval_consumed = approval_status == "resolved"
-            approved_arguments_hash = _approval_hash(approval_resolution) or arguments_hash
+            approved_arguments_hash = (
+                _approval_hash(approval_resolution) or arguments_hash
+            )
             approval_metadata = {
                 "approval_mode": self.approval_mode,
                 "approval_id": approval_id,
@@ -185,7 +246,9 @@ class GuardedToolGateway:
                 "approval_resolution": approval_resolution,
                 "tool_executed_after_approval": False,
             }
-            if approval_decision in {"allow", "allow_once", "allow_session"}:
+            if strong_release is not None:
+                pass
+            elif approval_decision in {"allow", "allow_once", "allow_session"}:
                 mismatch_reason = _approval_binding_mismatch(
                     approval_resolution,
                     tool_call_id=call_id,
@@ -200,7 +263,9 @@ class GuardedToolGateway:
                         execution_status="not_invoked",
                         approval_resolution=approval_resolution,
                         intervention_type="approval_binding_mismatch",
-                        intervention_reason=("The approval did not match the reviewed tool call, so the runtime was not invoked."),
+                        intervention_reason=(
+                            "The approval did not match the reviewed tool call, so the runtime was not invoked."
+                        ),
                     )
                     return _annotate_result(
                         blocked_result(
@@ -252,17 +317,8 @@ class GuardedToolGateway:
                 )
 
         compatibility_payload = compatibility or _compatibility_from_event(event)
-        secondary_gate = _evaluate_memory_write_gate(
-            self.guard_adapter,
-            tool_name=tool_name,
-            arguments=arguments,
-            security=security_for_event,
-            trace_id=trace_id,
-            call_id=call_id,
-            compatibility=compatibility_payload,
-        )
-        if secondary_gate is None:
-            secondary_gate = _evaluate_message_send_gate(
+        memory_gate, memory_release, memory_receipt_context = (
+            _evaluate_memory_write_gate(
                 self.guard_adapter,
                 tool_name=tool_name,
                 arguments=arguments,
@@ -270,26 +326,124 @@ class GuardedToolGateway:
                 trace_id=trace_id,
                 call_id=call_id,
                 compatibility=compatibility_payload,
+                approval_timeout=self.approval_timeout,
+                approval_poll_interval=min(0.25, self.approval_timeout),
             )
-        if secondary_gate is not None:
+        )
+        if memory_gate is not None:
             return _annotate_result(
-                secondary_gate,
+                memory_gate,
                 approval_mode=self.approval_mode,
                 runtime_terminal=True,
-                terminal_reason=secondary_gate.block_semantics or "secondary_gate",
+                terminal_reason=memory_gate.block_semantics or "secondary_gate",
             )
+        if memory_release is not None:
+            if strong_release is not None:
+                failure = _multiple_binding_failure(memory_release)
+                assert memory_receipt_context is not None
+                return self._strong_binding_failure(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    event=event,
+                    decision=decision,
+                    audit_event=audit_event,
+                    failure=failure,
+                    receipt_event=memory_receipt_context[0],
+                    receipt_decision=memory_receipt_context[1],
+                )
+            strong_release = memory_release
+            approval_resolution = memory_release.approval_resolution
 
+        receipt_event, receipt_decision = (
+            memory_receipt_context
+            if memory_release is not None and memory_receipt_context is not None
+            else (event, decision)
+        )
+
+        message_gate, message_release, message_receipt_context = _evaluate_message_send_gate(
+            self.guard_adapter,
+            tool_name=tool_name,
+            arguments=arguments,
+            security=security_for_event,
+            trace_id=trace_id,
+            call_id=call_id,
+            compatibility=compatibility_payload,
+            approval_timeout=self.approval_timeout,
+            approval_poll_interval=min(0.25, self.approval_timeout),
+        )
+        if message_gate is not None:
+            return _annotate_result(
+                message_gate,
+                approval_mode=self.approval_mode,
+                runtime_terminal=True,
+                terminal_reason=message_gate.block_semantics or "secondary_gate",
+            )
+        if message_release is not None:
+            if strong_release is not None:
+                failure = _multiple_binding_failure(message_release)
+                assert message_receipt_context is not None
+                return self._strong_binding_failure(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    event=event,
+                    decision=decision,
+                    audit_event=audit_event,
+                    failure=failure,
+                    receipt_event=message_receipt_context[0],
+                    receipt_decision=message_receipt_context[1],
+                )
+            strong_release = message_release
+            approval_resolution = message_release.approval_resolution
+            approval_decision = "allow_once"
+            latency_ms = message_release.approval_wait_latency_ms
+            assert message_receipt_context is not None
+            receipt_event, receipt_decision = message_receipt_context
+
+        lease_id = strong_release.lease.lease_id if strong_release is not None else None
+        consumption_id = (
+            strong_release.lease.consumption_id if strong_release is not None else None
+        )
+        enforcement = strong_release.enforcement if strong_release is not None else None
+        before = self.tool_runtime.snapshot()
+        if strong_release is not None:
+            try:
+                validate_strong_release_for_invocation(strong_release)
+            except StrongBindingFailure as failure:
+                return self._strong_binding_failure(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    event=event,
+                    decision=decision,
+                    audit_event=audit_event,
+                    failure=failure,
+                    receipt_event=receipt_event,
+                    receipt_decision=receipt_decision,
+                )
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
-        if self._supports_action_receipts(decision):
+        if self._supports_action_receipts(receipt_decision):
             started = build_tool_started_observation(
-                event,
-                decision,
+                receipt_event,
+                receipt_decision,
                 approval_resolution=approval_resolution,
                 timestamp=invoked_at,
+                enforcement=enforcement,
+                lease_id=lease_id,
+                consumption_id=consumption_id,
             )
             start_error = self._record_receipt(started)
             if start_error is not None:
+                terminal_error = self._record_outcome(
+                    receipt_event,
+                    receipt_decision,
+                    execution_status="not_invoked",
+                    approval_resolution=approval_resolution,
+                    intervention_type="runtime_receipt_failure",
+                    intervention_reason="The start receipt failed before runtime invocation.",
+                    enforcement=enforcement,
+                    lease_id=lease_id,
+                    consumption_id=consumption_id,
+                )
                 return _annotate_result(
                     blocked_result(
                         tool_name=tool_name,
@@ -310,11 +464,13 @@ class GuardedToolGateway:
                     runtime_terminal=True,
                     terminal_reason="runtime_receipt_failure",
                     safe_message="The tool call was not executed because its start receipt could not be recorded.",
-                    runtime_receipt_error=start_error,
+                    runtime_receipt_error=terminal_error or start_error,
+                    lease_id=lease_id,
+                    consumption_id=consumption_id,
                 )
             start_audit_id = started.audit_id
-
-        before = self.tool_runtime.snapshot()
+            # The live lease authorized the action when this receipt persisted.
+            # Do not turn later clock movement into a false start + not_invoked.
         try:
             result = self.tool_runtime.invoke(tool_name, arguments)
             side_effects = self.tool_runtime.diff(before)
@@ -330,22 +486,40 @@ class GuardedToolGateway:
                 side_effects=side_effects,
                 event=event.model_dump(),
                 audit_event=_dump_audit_event(audit_event),
-                approval_mode=self.approval_mode if decision.decision == "ask" else None,
+                approval_mode=self.approval_mode
+                if decision.decision == "ask"
+                else None,
                 approval_id=approval_id if decision.decision == "ask" else None,
                 approval_consumed=True if decision.decision == "ask" else False,
-                approval_decision=approval_decision if decision.decision == "ask" else None,
-                approval_wait_latency_ms=latency_ms if decision.decision == "ask" else None,
-                approved_arguments_hash=approved_arguments_hash if decision.decision == "ask" else None,
-                approval_resolution=approval_resolution if decision.decision == "ask" else None,
-                tool_executed_after_approval=True if decision.decision == "ask" else False,
-                block_semantics="approval_allow_continue" if decision.decision == "ask" else None,
+                approval_decision=approval_decision
+                if decision.decision == "ask"
+                else None,
+                approval_wait_latency_ms=latency_ms
+                if decision.decision == "ask"
+                else None,
+                approved_arguments_hash=approved_arguments_hash
+                if decision.decision == "ask"
+                else None,
+                approval_resolution=approval_resolution
+                if decision.decision == "ask"
+                else None,
+                tool_executed_after_approval=True
+                if decision.decision == "ask"
+                else False,
+                block_semantics="approval_allow_continue"
+                if decision.decision == "ask"
+                else None,
                 counts_as_effective_block=False,
                 runtime_terminal=False,
                 terminal_reason=None,
-                rag_answer_provenance=result.get("rag_answer_provenance") if tool_name == "rag_answer" and isinstance(result, dict) else None,
+                rag_answer_provenance=result.get("rag_answer_provenance")
+                if tool_name == "rag_answer" and isinstance(result, dict)
+                else None,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
                 runtime_receipt_error=None,
+                lease_id=lease_id,
+                consumption_id=consumption_id,
             )
             payload, result_outcome_attempted = _apply_tool_result_guard(
                 self.guard_adapter,
@@ -359,11 +533,17 @@ class GuardedToolGateway:
                 call_id=call_id,
                 invoked_at=invoked_at,
                 side_effects_measured=True,
+                receipt_event=receipt_event,
+                receipt_decision=receipt_decision,
+                approval_resolution=approval_resolution,
+                enforcement=enforcement,
+                lease_id=lease_id,
+                consumption_id=consumption_id,
             )
             if not result_outcome_attempted:
                 payload.runtime_receipt_error = self._record_outcome(
-                    event,
-                    decision,
+                    receipt_event,
+                    receipt_decision,
                     execution_status="executed",
                     approval_resolution=(
                         approval_resolution if decision.decision == "ask" else None
@@ -372,20 +552,28 @@ class GuardedToolGateway:
                     side_effects=side_effects,
                     side_effects_measured=True,
                     parent_audit_id=start_audit_id,
+                    enforcement=enforcement,
+                    lease_id=lease_id,
+                    consumption_id=consumption_id,
                 )
             return payload
         except Exception as exc:
             side_effects = self.tool_runtime.diff(before)
             receipt_error = self._record_outcome(
-                event,
-                decision,
+                receipt_event,
+                receipt_decision,
                 execution_status="failed",
-                approval_resolution=(approval_resolution if decision.decision == "ask" else None),
+                approval_resolution=(
+                    approval_resolution if decision.decision == "ask" else None
+                ),
                 invoked_at=invoked_at,
                 error=str(exc),
                 side_effects=side_effects,
                 side_effects_measured=True,
                 parent_audit_id=start_audit_id,
+                enforcement=enforcement,
+                lease_id=lease_id,
+                consumption_id=consumption_id,
             )
             return ToolExecutionResult(
                 tool_name=tool_name,
@@ -400,20 +588,107 @@ class GuardedToolGateway:
                 event=event.model_dump(),
                 audit_event=_dump_audit_event(audit_event),
                 error=str(exc),
-                approval_mode=self.approval_mode if decision.decision == "ask" else None,
+                approval_mode=self.approval_mode
+                if decision.decision == "ask"
+                else None,
                 approval_id=approval_id if decision.decision == "ask" else None,
                 approval_consumed=True if decision.decision == "ask" else False,
-                approval_decision=approval_decision if decision.decision == "ask" else None,
-                approval_wait_latency_ms=latency_ms if decision.decision == "ask" else None,
-                approved_arguments_hash=approved_arguments_hash if decision.decision == "ask" else None,
-                approval_resolution=approval_resolution if decision.decision == "ask" else None,
-                tool_executed_after_approval=True if decision.decision == "ask" else False,
-                block_semantics="approval_allow_continue" if decision.decision == "ask" else None,
+                approval_decision=approval_decision
+                if decision.decision == "ask"
+                else None,
+                approval_wait_latency_ms=latency_ms
+                if decision.decision == "ask"
+                else None,
+                approved_arguments_hash=approved_arguments_hash
+                if decision.decision == "ask"
+                else None,
+                approval_resolution=approval_resolution
+                if decision.decision == "ask"
+                else None,
+                tool_executed_after_approval=True
+                if decision.decision == "ask"
+                else False,
+                block_semantics="approval_allow_continue"
+                if decision.decision == "ask"
+                else None,
                 counts_as_effective_block=False,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
                 runtime_receipt_error=receipt_error,
+                lease_id=lease_id,
+                consumption_id=consumption_id,
             )
+
+    def _strong_binding_failure(
+        self,
+        *,
+        tool_name: str,
+        call_id: str,
+        event: Any,
+        decision: Any,
+        audit_event: Any | None,
+        failure: StrongBindingFailure,
+        parent_audit_id: str | None = None,
+        receipt_event: Any | None = None,
+        receipt_decision: Any | None = None,
+    ) -> ToolExecutionResult:
+        binding_event = receipt_event if receipt_event is not None else event
+        binding_decision = receipt_decision if receipt_decision is not None else decision
+        timed_out = failure.evidence.gate_state == "timed_out"
+        lease_id = (
+            failure.correlation.lease_id
+            if failure.correlation is not None
+            else None
+        )
+        consumption_id = (
+            failure.correlation.consumption_id
+            if failure.correlation is not None
+            else None
+        )
+        receipt_error = self._record_outcome(
+            binding_event,
+            binding_decision,
+            execution_status="not_invoked",
+            approval_resolution=failure.approval_resolution,
+            intervention_type="approval_not_obtained",
+            intervention_reason="Strong approval binding was not valid at the invocation boundary.",
+            parent_audit_id=parent_audit_id,
+            enforcement=failure.evidence,
+            lease_id=lease_id,
+            consumption_id=consumption_id,
+        )
+        resolution = failure.approval_resolution or {}
+        return _annotate_result(
+            blocked_result(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                decision=decision,
+                audit_event=audit_event,
+            ),
+            approval_mode=self.approval_mode,
+            approval_id=_approval_id(getattr(binding_decision, "approval", None)),
+            approval_consumed=resolution.get("status") == "resolved",
+            approval_decision=str(resolution.get("decision") or "") or None,
+            approval_wait_latency_ms=failure.approval_wait_latency_ms,
+            approval_resolution=failure.approval_resolution,
+            block_semantics=(
+                "strong_binding_timeout" if timed_out else "strong_binding_failure"
+            ),
+            counts_as_effective_block=False,
+            runtime_terminal=True,
+            terminal_reason=(
+                "strong_binding_timeout" if timed_out else "strong_binding_failure"
+            ),
+            safe_message=(
+                "The tool call timed out before the strong-approved action reached invocation."
+                if timed_out
+                else "The tool call was blocked because its strong approval binding could not be verified."
+            ),
+            runtime_receipt_error=receipt_error,
+            lease_id=lease_id,
+            consumption_id=consumption_id,
+        )
 
     def record_trace_lifecycle(
         self,
@@ -439,7 +714,10 @@ class GuardedToolGateway:
         return self._record_receipt(receipt)
 
     def _supports_action_receipts(self, decision: Any) -> bool:
-        return bool(runtime_receipts_enabled(self.guard_adapter) and getattr(decision, "policy_audit_id", None))
+        return bool(
+            runtime_receipts_enabled(self.guard_adapter)
+            and getattr(decision, "policy_audit_id", None)
+        )
 
     def _record_outcome(
         self,
@@ -455,6 +733,9 @@ class GuardedToolGateway:
         parent_audit_id: str | None = None,
         intervention_type: str | None = None,
         intervention_reason: str | None = None,
+        enforcement: Any | None = None,
+        lease_id: str | None = None,
+        consumption_id: str | None = None,
     ) -> str | None:
         if not self._supports_action_receipts(decision):
             return None
@@ -470,6 +751,9 @@ class GuardedToolGateway:
             parent_audit_id=parent_audit_id,
             intervention_type=intervention_type,
             intervention_reason=intervention_reason,
+            enforcement=enforcement,
+            lease_id=lease_id,
+            consumption_id=consumption_id,
         )
         return self._record_receipt(receipt)
 
@@ -496,8 +780,12 @@ class GuardedToolGateway:
             "rag_retrieve",
         }:
             payload = dict(arguments)
-            metadata = dict((case_context or {}).get("metadata") or security.get("metadata") or {})
-            payload["_case_id"] = security.get("case_id") or (case_context or {}).get("case_id")
+            metadata = dict(
+                (case_context or {}).get("metadata") or security.get("metadata") or {}
+            )
+            payload["_case_id"] = security.get("case_id") or (case_context or {}).get(
+                "case_id"
+            )
             payload["_scenario_id"] = metadata.get("scenario_id")
             payload["_phase"] = metadata.get("phase")
             payload["_source_tool_call_id"] = call_id
@@ -520,8 +808,13 @@ class GuardedToolGateway:
         clean_catalog = _catalog_from_context(context, "clean_tool_catalog")
         poisoned_catalog = _catalog_from_context(context, "poisoned_tool_catalog")
         descriptor = _select_descriptor(selected_catalog, payload, context, metadata)
-        clean_descriptor = _select_descriptor(clean_catalog, payload, context, metadata) or descriptor
-        poisoned_descriptor = _select_descriptor(poisoned_catalog, payload, context, metadata) or descriptor
+        clean_descriptor = (
+            _select_descriptor(clean_catalog, payload, context, metadata) or descriptor
+        )
+        poisoned_descriptor = (
+            _select_descriptor(poisoned_catalog, payload, context, metadata)
+            or descriptor
+        )
         descriptor_diff = list(context.get("descriptor_diff") or [])
         if not descriptor_diff and clean_catalog and poisoned_catalog:
             descriptor_diff = build_descriptor_diff(clean_catalog, poisoned_catalog)
@@ -529,7 +822,9 @@ class GuardedToolGateway:
             payload.setdefault("descriptor", descriptor)
             payload.setdefault(
                 "catalog_view",
-                payload.get("catalog_view") or context.get("catalog_view") or "poisoned",
+                payload.get("catalog_view")
+                or context.get("catalog_view")
+                or "poisoned",
             )
         if clean_descriptor:
             payload.setdefault("clean_descriptor", clean_descriptor)
@@ -572,10 +867,16 @@ def _catalog_from_context(context: dict[str, Any], key: str) -> list[dict[str, A
     return []
 
 
-def _catalog_for_view(context: dict[str, Any], catalog_view: str) -> list[dict[str, Any]]:
+def _catalog_for_view(
+    context: dict[str, Any], catalog_view: str
+) -> list[dict[str, Any]]:
     if catalog_view == "clean":
-        return _catalog_from_context(context, "clean_tool_catalog") or _catalog_from_context(context, "poisoned_tool_catalog")
-    return _catalog_from_context(context, "poisoned_tool_catalog") or _catalog_from_context(context, "clean_tool_catalog")
+        return _catalog_from_context(
+            context, "clean_tool_catalog"
+        ) or _catalog_from_context(context, "poisoned_tool_catalog")
+    return _catalog_from_context(
+        context, "poisoned_tool_catalog"
+    ) or _catalog_from_context(context, "clean_tool_catalog")
 
 
 def _select_descriptor(
@@ -589,23 +890,48 @@ def _select_descriptor(
     server = str(payload.get("server") or "")
     tool = str(payload.get("tool") or "")
     for item in catalog:
-        if server and str(item.get("server") or item.get("server_name") or "") != server:
+        if (
+            server
+            and str(item.get("server") or item.get("server_name") or "") != server
+        ):
             continue
-        if tool and str(item.get("tool") or item.get("tool_name") or item.get("name") or "") != tool:
+        if (
+            tool
+            and str(item.get("tool") or item.get("tool_name") or item.get("name") or "")
+            != tool
+        ):
             continue
         return dict(item)
-    target_server = str((context.get("hijacking") or metadata.get("hijacking") or {}).get("target_server") or "")
-    target_tool = str((context.get("hijacking") or metadata.get("hijacking") or {}).get("target_tool") or "")
+    target_server = str(
+        (context.get("hijacking") or metadata.get("hijacking") or {}).get(
+            "target_server"
+        )
+        or ""
+    )
+    target_tool = str(
+        (context.get("hijacking") or metadata.get("hijacking") or {}).get("target_tool")
+        or ""
+    )
     for item in catalog:
-        if target_server and str(item.get("server") or item.get("server_name") or "") != target_server:
+        if (
+            target_server
+            and str(item.get("server") or item.get("server_name") or "")
+            != target_server
+        ):
             continue
-        if target_tool and str(item.get("tool") or item.get("tool_name") or item.get("name") or "") != target_tool:
+        if (
+            target_tool
+            and str(item.get("tool") or item.get("tool_name") or item.get("name") or "")
+            != target_tool
+        ):
             continue
         return dict(item)
     return dict(catalog[0]) if catalog else None
 
 
-def _annotate_result(result: ToolExecutionResult, **updates: Any) -> ToolExecutionResult:
+def _annotate_result(
+    result: ToolExecutionResult, **updates: Any
+) -> ToolExecutionResult:
     clean_updates = {key: value for key, value in updates.items() if value is not None}
     return result.model_copy(update=clean_updates)
 
@@ -613,8 +939,38 @@ def _annotate_result(result: ToolExecutionResult, **updates: Any) -> ToolExecuti
 def _dump_audit_event(audit_event: Any | None) -> dict[str, Any] | None:
     if audit_event is None:
         return None
-    dumped = audit_event.model_dump() if hasattr(audit_event, "model_dump") else audit_event
+    dumped = (
+        audit_event.model_dump() if hasattr(audit_event, "model_dump") else audit_event
+    )
     return dumped if isinstance(dumped, dict) else None
+
+
+def _event_action_id(event: Any) -> str | None:
+    dumped = event.model_dump() if hasattr(event, "model_dump") else event
+    if not isinstance(dumped, dict):
+        return None
+    direct = dumped.get("action_id")
+    if isinstance(direct, str) and direct:
+        return direct
+    payload = dumped.get("payload")
+    if isinstance(payload, dict):
+        action_id = payload.get("action_id")
+        if isinstance(action_id, str) and action_id:
+            return action_id
+        tool = payload.get("tool")
+    else:
+        tool = dumped.get("tool")
+    if isinstance(tool, dict):
+        call_id = tool.get("call_id") or tool.get("tool_call_id")
+        if isinstance(call_id, str) and call_id:
+            return call_id
+    return None
+
+
+def _expected_runtime_binding_id(guard_adapter: Any) -> str | None:
+    config = getattr(guard_adapter, "config", None)
+    value = getattr(config, "runtime_binding_id", None)
+    return value if isinstance(value, str) and value else None
 
 
 def _approval_id(approval: Any) -> str | None:
@@ -636,7 +992,9 @@ def _arguments_hash(arguments: dict[str, Any]) -> str:
 
 
 def _approval_hash(resolution: dict[str, Any]) -> str | None:
-    value = resolution.get("approved_arguments_hash") or resolution.get("arguments_hash")
+    value = resolution.get("approved_arguments_hash") or resolution.get(
+        "arguments_hash"
+    )
     return str(value) if value else None
 
 
@@ -648,7 +1006,9 @@ def _approval_decision(resolution: dict[str, Any]) -> str:
     return decision or status or "unknown"
 
 
-def _wait_for_approval(guard_adapter: Any, *, approval_id: str, timeout_seconds: float) -> tuple[dict[str, Any], int]:
+def _wait_for_approval(
+    guard_adapter: Any, *, approval_id: str, timeout_seconds: float
+) -> tuple[dict[str, Any], int]:
     started = time.monotonic()
     deadline = started + timeout_seconds
     last_resolution: dict[str, Any] = {"status": "pending", "decision": None}
@@ -674,7 +1034,9 @@ def _wait_for_approval(guard_adapter: Any, *, approval_id: str, timeout_seconds:
         time.sleep(min(0.25, max(deadline - time.monotonic(), 0.0)))
 
 
-def _call_wait_for_approval(guard_adapter: Any, approval_id: str, timeout_seconds: float) -> dict[str, Any]:
+def _call_wait_for_approval(
+    guard_adapter: Any, approval_id: str, timeout_seconds: float
+) -> dict[str, Any]:
     wait = getattr(guard_adapter, "wait_for_approval", None)
     if not callable(wait):
         return {
@@ -687,7 +1049,14 @@ def _call_wait_for_approval(guard_adapter: Any, approval_id: str, timeout_second
     except TypeError:
         resolution = wait(approval_id)
     if isinstance(resolution, dict):
-        return dict(resolution)
+        try:
+            return normalize_approval_resolution(resolution)
+        except ApprovalResolutionValidationError:
+            return {
+                "status": "error",
+                "decision": "deny",
+                "reason": "approval_resolution_invalid",
+            }
     return {
         "status": "error",
         "decision": "deny",

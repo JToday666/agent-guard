@@ -74,14 +74,24 @@
         "properties": { "event_type": { "const": "model_output_produced" } },
         "required": ["event_type"]
       },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/modelOutputPayload" } } }
+      "then": {
+        "properties": {
+          "pre_execution": { "const": false },
+          "payload": { "$ref": "#/$defs/modelOutputPayload" }
+        }
+      }
     },
     {
       "if": {
         "properties": { "event_type": { "const": "tool_result_produced" } },
         "required": ["event_type"]
       },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/toolResultPayload" } } }
+      "then": {
+        "properties": {
+          "pre_execution": { "const": false },
+          "payload": { "$ref": "#/$defs/toolResultPayload" }
+        }
+      }
     },
     {
       "if": {

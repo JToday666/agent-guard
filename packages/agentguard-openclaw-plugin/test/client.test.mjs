@@ -97,6 +97,8 @@ test("buildPluginConfig uses safe defaults with a resolved SecretRef token", () 
   assert.equal(config.requestTimeoutMs, 5000);
   assert.equal(config.approvalPollIntervalMs, 1000);
   assert.equal(config.approvalTimeoutMs, 25000);
+  assert.equal(config.strongApprovalBindingEnabled, false);
+  assert.equal(config.runtimeBindingId, "");
   assert.equal(config.diagnosticLogging, false);
   assert.equal(config.agentId, "main");
 });
@@ -105,15 +107,30 @@ test("buildPluginConfig accepts the canonical public options", () => {
   const config = buildPluginConfig({
     adapterToken: "resolved-token",
     approvalTimeoutMs: 2500,
+    strongApprovalBindingEnabled: true,
+    runtimeBindingId: "binding:openclaw:main",
     diagnosticLogging: true,
     agentId: "openclaw-main",
     enforcementMode: "observe",
   });
 
   assert.equal(config.approvalTimeoutMs, 2500);
+  assert.equal(config.strongApprovalBindingEnabled, true);
+  assert.equal(config.runtimeBindingId, "binding:openclaw:main");
   assert.equal(config.diagnosticLogging, true);
   assert.equal(config.agentId, "openclaw-main");
   assert.equal(config.enforcementMode, "observe");
+});
+
+test("buildPluginConfig rejects an untrusted runtime binding identifier", () => {
+  assert.throws(
+    () =>
+      buildPluginConfig({
+        adapterToken: "resolved-token",
+        runtimeBindingId: "binding id with spaces",
+      }),
+    /runtimeBindingId must be a 1-256 character trusted runtime identifier/,
+  );
 });
 
 test("buildPluginConfig rejects a missing resolved SecretRef", () => {
@@ -206,7 +223,6 @@ test("GuardApiClient sends adapter heartbeat with capabilities and runtime ident
   );
   assert.deepEqual(requests[0].body.fail_closed_stages, [
     "before_tool_call",
-    "message_sending",
     "before_install",
     "before_agent_run",
     "before_agent_finalize",
@@ -339,6 +355,106 @@ test("GuardApiClient caps approval polling by the single approval timeout", asyn
   assert.equal(waitCalls, 1);
 });
 
+test("GuardApiClient total deadline covers a stalled successful response body", async () => {
+  const encoder = new TextEncoder();
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "https://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 20,
+      approvalPollIntervalMs: 1,
+      approvalTimeoutMs: 20,
+      diagnosticLogging: false,
+    },
+    fetchImpl: async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('{"decision":'));
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+  });
+
+  const outcome = await Promise.race([
+    client.evaluate({ event_id: "evt_stalled_body" }).then(
+      () => ({ kind: "resolved" }),
+      (error) => ({ kind: "rejected", error }),
+    ),
+    new Promise((resolve) =>
+      setTimeout(() => resolve({ kind: "hung" }), 200),
+    ),
+  ]);
+
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.error.name, "GuardApiResponseError");
+  assert.equal(outcome.error.failure, "timed_out");
+});
+
+test("GuardApiClient total deadline also covers stalled response headers", async () => {
+  const client = new GuardApiClient({
+    config: {
+      guardApiBaseUrl: "https://guard.test",
+      adapterToken: "secret-token",
+      requestTimeoutMs: 20,
+      approvalPollIntervalMs: 1,
+      approvalTimeoutMs: 20,
+      diagnosticLogging: false,
+    },
+    fetchImpl: async () => new Promise(() => undefined),
+  });
+
+  const outcome = await Promise.race([
+    client.evaluate({ event_id: "evt_stalled_headers" }).then(
+      () => ({ kind: "resolved" }),
+      (error) => ({ kind: "rejected", error }),
+    ),
+    new Promise((resolve) =>
+      setTimeout(() => resolve({ kind: "hung" }), 200),
+    ),
+  ]);
+
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.error.name, "GuardApiResponseError");
+  assert.equal(outcome.error.failure, "timed_out");
+});
+
+test("GuardApiClient rejects oversized and malformed JSON bodies with bounded classifications", async () => {
+  const cases = [
+    {
+      body: JSON.stringify({ ...allowDecision, padding: "x".repeat(2_000_000) }),
+      failure: "too_large",
+    },
+    { body: '{"decision":', failure: "malformed" },
+  ];
+
+  for (const item of cases) {
+    const client = new GuardApiClient({
+      config: {
+        guardApiBaseUrl: "https://guard.test",
+        adapterToken: "secret-token",
+        requestTimeoutMs: 1000,
+        approvalPollIntervalMs: 1,
+        approvalTimeoutMs: 20,
+        diagnosticLogging: false,
+      },
+      fetchImpl: async () =>
+        new Response(item.body, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+
+    await assert.rejects(
+      client.evaluate({ event_id: `evt_${item.failure}` }),
+      (error) =>
+        error.name === "GuardApiResponseError" &&
+        error.failure === item.failure,
+    );
+  }
+});
+
 test("GuardApiClient diagnostic logging redacts adapter token", async () => {
   const warnings = [];
   const originalWarn = console.warn;
@@ -365,7 +481,7 @@ test("GuardApiClient diagnostic logging redacts adapter token", async () => {
 
   assert.equal(warnings.length > 0, true);
   assert.equal(warnings.join("\n").includes("secret-token"), false);
-  assert.equal(warnings.join("\n").includes("[redacted]"), true);
+  assert.equal(warnings.join("\n").includes('"error_type":"error"'), true);
 });
 
 test("submitRuntimeOutcome posts to /v1/audit/events and surfaces created flags", async () => {

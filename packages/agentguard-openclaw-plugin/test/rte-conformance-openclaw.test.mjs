@@ -222,12 +222,20 @@ test("CF-01 allow executes once per accepted call and closes a terminal fact", a
   assert.equal(harness.toolCallState.get("call-cf01").gateState, "allowed");
   assert.equal(harness.toolCallState.get("call-cf01").terminalStatus, "executed");
 
-  // 重放语义归属（registry note）：同 callId 再次通过 host 链属新 attempt，
-  // 插件不做客户端重放抑制；同事件幂等去重由 evaluate 层承担（CF-10）。
-  await runHostToolCall(harness, { toolCallId: "call-cf01" });
-  assert.equal(harness.invocations.length, 2);
-  assert.equal(harness.submitted.length, 2);
-  assert.equal(harness.submitted[1].links.action_id, "call-cf01");
+  // Native call IDs are unique host identities. Reuse during the terminal
+  // grace window is ambiguous with an active/replayed invocation and must
+  // fail closed without overwriting the first attempt's correlation state.
+  const duplicate = await runHostToolCall(harness, {
+    toolCallId: "call-cf01",
+  });
+  assert.equal(duplicate.blocked, true);
+  assert.equal(harness.invocations.length, 1);
+  assert.equal(harness.submitted.length, 1);
+  assert.equal(
+    harness.degradations.snapshot().byReason
+      .tool_call_state_duplicate_active_id,
+    1,
+  );
 });
 
 test("CF-02 deny returns block:true, never invokes, and blocked after-arrival derives nothing", async () => {

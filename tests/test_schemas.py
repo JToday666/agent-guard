@@ -712,6 +712,57 @@ def test_guard_event_model_rejects_payload_contract_mismatches() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            "model_output_produced",
+            {
+                "phase": "output",
+                "content_preview": "visible answer",
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": False,
+                "sanitized": True,
+            },
+        ),
+        (
+            "tool_result_produced",
+            {
+                "tool": {"name": "read_file", "call_id": "call_post_phase"},
+                "result": {
+                    "content_preview": "ok",
+                    "content_type": "text/plain",
+                    "size_bytes": 2,
+                },
+                "will_enter_context": True,
+                "will_persist": False,
+                "sanitized": False,
+                "contains_sensitive_data": False,
+                "contains_instruction_like_text": False,
+            },
+        ),
+    ],
+)
+def test_guard_event_derives_post_execution_phase_and_rejects_contradictions(
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
+    base = {
+        "event_id": f"evt_{event_type}",
+        "event_type": event_type,
+        "runtime": "openclaw",
+        "trace_id": "trace_post_execution_phase",
+        "payload": payload,
+    }
+
+    derived = GuardEvent.model_validate(base)
+
+    assert derived.pre_execution is False
+    for contradictory_value in (True, 1, "true"):
+        with pytest.raises(PydanticValidationError, match="cannot be marked"):
+            GuardEvent.model_validate({**base, "pre_execution": contradictory_value})
+
+
 def test_guard_event_schema_rejects_payload_contract_mismatches() -> None:
     schema = _load_schema("guard_event.schema.json")
 
@@ -771,6 +822,52 @@ def test_guard_event_schema_rejects_payload_contract_mismatches() -> None:
 
     with pytest.raises(JsonSchemaValidationError):
         validate(unknown_event, schema)
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["model_output_produced", "tool_result_produced"],
+)
+def test_guard_event_schema_rejects_post_event_pre_execution_true(
+    event_type: GuardEventType,
+) -> None:
+    schema = _load_schema("guard_event.schema.json")
+    if event_type == "model_output_produced":
+        event = GuardEvent(
+            trace_id="trace_schema_post_phase",
+            event_type=event_type,
+            payload=ModelCallPayload(
+                phase="output",
+                content_preview="visible answer",
+                contains_instruction_like_text=False,
+                contains_sensitive_data=False,
+                sanitized=True,
+            ),
+        )
+    else:
+        event = GuardEvent(
+            trace_id="trace_schema_post_phase",
+            event_type=event_type,
+            payload=ToolResultPayload(
+                tool=ToolDescriptor(name="read_file", call_id="call_schema_post"),
+                result=ToolResult(
+                    content_preview="ok",
+                    content_type="text/plain",
+                    size_bytes=2,
+                ),
+                will_enter_context=True,
+                will_persist=False,
+                sanitized=False,
+                contains_sensitive_data=False,
+                contains_instruction_like_text=False,
+            ),
+        )
+    payload = event.model_dump(mode="json")
+    validate(payload, schema)
+    payload["pre_execution"] = True
+
+    with pytest.raises(JsonSchemaValidationError):
+        validate(payload, schema)
 
 
 def _audit_event_json(*, schema_version: str, **overrides) -> dict:

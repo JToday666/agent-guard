@@ -641,6 +641,37 @@ class PostgresControlPlaneStore:
             finally:
                 self._active_store_session.reset(token)
 
+    @contextmanager
+    def runtime_outcome_transaction(
+        self, approval_id: str | None
+    ) -> Iterator[None]:
+        """Atomically validate and first-write one runtime outcome.
+
+        Audit-chain serialization is acquired before the approval row, matching
+        evaluation's audit-before-approval order.  Lease consumption locks the
+        same approval row, so it cannot commit between a no-lease authority
+        check and this transaction's audit insert.
+        """
+
+        if self._active_store_session.get() is not None:
+            raise RuntimeError("nested runtime outcome transactions are not supported")
+        with self._session_factory.begin() as session:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": _AUDIT_INTEGRITY_ADVISORY_LOCK_ID},
+            )
+            if approval_id is not None:
+                session.execute(
+                    select(approval_requests.c.approval_id)
+                    .where(approval_requests.c.approval_id == approval_id)
+                    .with_for_update()
+                ).scalar_one_or_none()
+            token = self._active_store_session.set(session)
+            try:
+                yield
+            finally:
+                self._active_store_session.reset(token)
+
     def verify_audit_integrity(self) -> AuditIntegrityStatus:
         stmt = (
             select(audit_events.c.payload_json)
@@ -1765,6 +1796,64 @@ class PostgresControlPlaneStore:
         with self._read_session() as session:
             row = session.execute(stmt).mappings().one_or_none()
         return _enforcement_binding_from_row(row) if row is not None else None
+
+    def approval_execution_was_consumed(self, approval_id: str) -> bool:
+        with self._read_session() as session:
+            binding_row = (
+                session.execute(
+                    select(enforcement_bindings).where(
+                        enforcement_bindings.c.approval_id == approval_id
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if binding_row is None or binding_row["grant_id"] is None:
+                return False
+            binding = _enforcement_binding_from_row(binding_row)
+            if binding.grant_id is None:  # narrowed from the authoritative row
+                return False
+
+            remaining_uses = session.execute(
+                select(capability_grant_runtime.c.remaining_uses).where(
+                    capability_grant_runtime.c.grant_id == binding.grant_id
+                )
+            ).scalar_one_or_none()
+            grant_consumed = remaining_uses == 0
+
+            consumption_id = _derive_consumption_id(
+                binding.grant_id,
+                binding.action_id,
+            )
+            consumption_row = (
+                session.execute(
+                    select(grant_consumptions).where(
+                        grant_consumptions.c.consumption_id == consumption_id
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            lease_row = (
+                session.execute(
+                    select(execution_leases).where(
+                        execution_leases.c.lease_id
+                        == _derive_lease_id(consumption_id)
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            exact_pair_exists = bool(
+                consumption_row is not None
+                and lease_row is not None
+                and _lease_row_matches_binding(
+                    lease_row,
+                    binding,
+                    consumption_row,
+                )
+            )
+            return grant_consumed or exact_pair_exists
 
     def register_approval_grant(
         self,

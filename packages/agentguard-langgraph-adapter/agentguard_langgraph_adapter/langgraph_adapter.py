@@ -25,6 +25,7 @@ from .event_models import (
     ToolExecutionResult,
     new_id,
 )
+from .strong_binding import ExecutionLeaseReference
 
 TOOL_METADATA = {
     "read_file": ("file", "file_read", "read"),
@@ -284,7 +285,7 @@ class LangGraphAdapter:
             adapter="agentguard_langgraph_bench",
             hook="tool_call_proposed",
             extra={
-            **mcp_hijacking_metadata(arguments, security_metadata),
+                **mcp_hijacking_metadata(arguments, security_metadata),
             },
         )
         if "compatibility" in security_metadata:
@@ -294,8 +295,7 @@ class LangGraphAdapter:
                 "user_task": security.get("user_task") or security.get("payload") or "",
                 "source_type": security.get("source_type", "dataset"),
                 "source_trust": security.get("source_trust", "untrusted"),
-                "agent_id": security.get("agent_id")
-                or _config_agent_id(self.config),
+                "agent_id": security.get("agent_id") or _config_agent_id(self.config),
                 "current_step": "before_tool",
                 "model_intent": security.get("model_intent"),
                 "derived_paths": [
@@ -694,6 +694,34 @@ class LangGraphAdapter:
                 "error": str(exc),
             }
 
+    def consume_execution_lease(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        deadline: float,
+    ) -> ExecutionLeaseReference:
+        """Consume one RTE-05 lease without retaining its bearer token."""
+
+        if not self.config.defense_enabled:
+            raise CoreClientError(
+                "execution lease unavailable while defense is disabled"
+            )
+        assert self.core_client is not None
+        consume = getattr(self.core_client, "consume_execution_lease", None)
+        if not callable(consume):
+            raise CoreClientError("Core client does not support execution leases")
+        lease = consume(
+            approval_id,
+            action_id=action_id,
+            authorization_fingerprint=authorization_fingerprint,
+            deadline=deadline,
+        )
+        if not isinstance(lease, ExecutionLeaseReference):
+            raise CoreClientError("Core client returned an invalid execution lease")
+        return lease
+
 
 def _allow_decision(reason: str) -> PolicyDecision:
     return PolicyDecision(
@@ -769,8 +797,17 @@ def _trusted_event_metadata(
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {"adapter": adapter, "hook": hook, **(extra or {})}
     task_id = security.get("task_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        security_metadata = security.get("metadata")
+        task_id = (
+            security_metadata.get("task_id")
+            if isinstance(security_metadata, dict)
+            else None
+        )
     if isinstance(task_id, str) and task_id.strip():
-        metadata["task_id"] = task_id.strip()
+        normalized_task_id = task_id.strip()
+        if len(normalized_task_id) <= 160:
+            metadata["task_id"] = normalized_task_id
     return metadata
 
 

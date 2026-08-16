@@ -86,16 +86,21 @@ def test_matrix_keys_cover_every_case_for_every_runtime() -> None:
                 assert str(entry.get("note") or "").strip(), (runtime, case_id)
 
 
-def test_rte05_preparation_cases_are_explicitly_dependency_blocked() -> None:
-    """Preparation 不得在 runtime integration evidence 到位前宣称 PASS。"""
-
+def test_rte05_integration_capability_claims_match_runtime_boundaries() -> None:
+    """Integration 的 strong-binding 声明必须精确匹配 runtime 边界。"""
     matrix = _load_matrix()
-    for runtime, entries in matrix["runtimes"].items():
-        for case_id in (f"CF-{index:02d}" for index in range(13, 18)):
-            assert entries[case_id]["status"] == "BLOCKED_BY_DEPENDENCY", (
-                runtime,
-                case_id,
-            )
+    langgraph = matrix["runtimes"]["langgraph"]
+    openclaw = matrix["runtimes"]["openclaw"]
+
+    for case_id in (f"CF-{index:02d}" for index in range(13, 17)):
+        assert langgraph[case_id]["status"] == "PASS", case_id
+    assert langgraph["CF-17"]["status"] == "NOT_SUPPORTED"
+    assert "active-call" in langgraph["CF-17"]["note"]
+
+    assert openclaw["CF-13"]["status"] == "NOT_SUPPORTED"
+    assert "replace-and-seal" in openclaw["CF-13"]["note"]
+    for case_id in (f"CF-{index:02d}" for index in range(14, 18)):
+        assert openclaw[case_id]["status"] == "PASS", case_id
 
 
 def test_matrix_pass_entries_have_existing_evidence_artifacts() -> None:
