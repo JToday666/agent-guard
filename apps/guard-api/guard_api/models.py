@@ -27,7 +27,9 @@ def _is_sha256_digest(value: str | None) -> bool:
     if value is None or not value.startswith("sha256:"):
         return False
     digest = value.removeprefix("sha256:")
-    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+    return len(digest) == 64 and all(
+        character in "0123456789abcdef" for character in digest
+    )
 
 
 class LlmApprovalReview(BaseModel):
@@ -128,12 +130,56 @@ class EvaluationApproval(BaseModel):
     llm_review: LlmApprovalReview | None = None
 
 
+class EnforcementBinding(BaseModel):
+    """Private-authority projection returned only for strongly bound ASK actions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["2.1"] = "2.1"
+    action_id: str = Field(min_length=1)
+    authorization_fingerprint: str = Field(pattern=r"^hmac-sha256:[0-9a-f]{64}$")
+    runtime_binding_id: str = Field(min_length=1)
+    requires_execution_lease: Literal[True] = True
+
+
+class ExecutionLeaseConsumeRequest(BaseModel):
+    """Caller-supplied exact-binding proof for one approval consumption."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_id: str = Field(min_length=1)
+    authorization_fingerprint: str = Field(pattern=r"^hmac-sha256:[0-9a-f]{64}$")
+
+
+class ExecutionLeaseConsumeResponse(BaseModel):
+    """Public lease hand-off; intentionally excludes grant and private binding data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lease_id: str = Field(min_length=1)
+    consumption_id: str = Field(min_length=1)
+    lease_token: str = Field(min_length=1)
+    expires_at: str
+
+    @model_validator(mode="after")
+    def normalize_expiry(self) -> Self:
+        expires_at = _rfc3339_timestamp(self.expires_at, "expires_at")
+        self.expires_at = expires_at.astimezone(timezone.utc).isoformat()
+        return self
+
+
 class GuardEvaluationResponse(BaseModel):
     decision: GuardDecision
     approval: EvaluationApproval | None = None
     # 本次评估写入的 policy_evaluation AuditEvent 稳定 ID（§9.9 links.policy_audit_id），
     # 供 Adapter / Plugin 回写 runtime_outcome 时建立关联；无审计写入时为 null。
     policy_audit_id: str | None = None
+    # RTE-05 强绑定仅对 eligible/non-degraded ASK 动作产生。
+    # ``exclude_if`` 保证 flag off / C1 响应键集与现有 wire 逐字节一致。
+    enforcement_binding: EnforcementBinding | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class EvaluationAttackSummary(BaseModel):
@@ -208,7 +254,10 @@ class EvaluationRun(BaseModel):
                 updates["dataset_version"] = self.dataset_version
             filled = case.model_copy(update=updates) if updates else case
             if self.dataset_locked:
-                if filled.dataset_id != self.dataset_id or filled.dataset_version != self.dataset_version:
+                if (
+                    filled.dataset_id != self.dataset_id
+                    or filled.dataset_version != self.dataset_version
+                ):
                     raise ValueError(
                         "locked evaluation case dataset identity must match its run"
                     )

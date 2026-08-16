@@ -1,5 +1,5 @@
 {
-  "schema": "rte-04-capability-matrix/1",
+  "schema": "rte-05-capability-matrix/1",
   "contract_source": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md §5",
   "allowed_statuses": [
     "PASS",
@@ -61,6 +61,26 @@
       "CF-12": {
         "status": "PASS",
         "evidence": "tests/test_runtime_conformance_langgraph.py"
+      },
+      "CF-13": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 只交付 Guard API/Core；LangGraph strong-binding runtime integration 尚未合入。"
+      },
+      "CF-14": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 LangGraph TOCTOU fail-closed runtime evidence。"
+      },
+      "CF-15": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 LangGraph replay/expiry invocation-count evidence。"
+      },
+      "CF-16": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 LangGraph LLM isolation runtime evidence。"
+      },
+      "CF-17": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 LangGraph >capacity 长运行 active-call 的无静默 FIFO 淘汰与可观测降级证据；若无 active cache，Integration 可按实证标记 NOT_SUPPORTED。"
       }
     },
     "openclaw": {
@@ -114,6 +134,26 @@
         "status": "PASS",
         "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs",
         "note": "真实隔离闭环已证明（RTE-04 硬化，契约 03 §7.2）：hook 层 modified（sanitized）处置 + fail-closed quarantine 在能关联原 action/policy 时同步替换结果并发 tool_result_quarantined 回执（executed + quarantined）；无关联时仅诊断不伪造 policy link。quarantined 回执构造层另有 mapping.test.mjs 覆盖。"
+      },
+      "CF-13": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 只交付 Guard API/Core；OpenClaw strong-binding runtime integration 尚未合入。"
+      },
+      "CF-14": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 OpenClaw TOCTOU fail-closed runtime evidence。"
+      },
+      "CF-15": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 OpenClaw replay/expiry invocation-count evidence。"
+      },
+      "CF-16": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 OpenClaw LLM isolation runtime evidence。"
+      },
+      "CF-17": {
+        "status": "BLOCKED_BY_DEPENDENCY",
+        "note": "Preparation PR 尚无 OpenClaw >capacity 长运行 active-call 的无静默 FIFO 淘汰、可观测降级与 C3 heartbeat evidence。"
       }
     }
   }

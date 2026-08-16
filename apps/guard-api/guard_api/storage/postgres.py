@@ -14,7 +14,17 @@ from typing import Any, Iterator, Literal, cast
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import CursorResult, create_engine, desc, func, select, text, update
-from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKeyConstraint, Index, Integer, Table, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Table,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
@@ -34,7 +44,11 @@ from agentguard_core import (
 )
 from agentguard_core.authority import TaskFact
 from agentguard_core.actions.canonical_json import canonical_sha256
-from agentguard_core.security_context import ExecutionLease, GrantConsumption
+from agentguard_core.security_context import (
+    CapabilityGrant,
+    ExecutionLease,
+    GrantConsumption,
+)
 from guard_api.models import (
     AdapterStatusRecord,
     ApprovalRequest,
@@ -44,11 +58,22 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.storage.base import (
+    ApprovalExecutionLeaseExpiredError,
+    ApprovalExecutionLeaseStateInvalidError,
+    ApprovalExecutionLeaseUnavailableError,
+    ApprovalLeaseAuthorizationError,
+    ApprovalLeaseConsumeCommand,
+    ApprovalLeaseConsumptionConflictError,
+    ApprovalLeaseExpiredError,
+    ApprovalLeaseNotConsumableError,
+    ApprovalLeaseNotFoundError,
     ApprovalStateConflictError,
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    EnforcementBindingConflictError,
+    EnforcementBindingRecord,
     EvaluationRunConflictError,
     GrantConsumptionResult,
     MAX_REBUILD_INPUT_LIMIT,
@@ -100,9 +125,11 @@ from guard_api.storage.sqlalchemy_models import (
     audit_integrity_heads,
     audit_events,
     browser_sessions,
+    capability_grant_runtime,
     config_audit_findings,
     credentials,
     evaluation_runs,
+    enforcement_bindings,
     launch_codes,
     memory_guard_changes,
     metadata,
@@ -190,6 +217,30 @@ def _lock_grant_identity(session: Session, grant_id: str) -> None:
     )
 
 
+def _lock_binding_identities(
+    session: Session, record: EnforcementBindingRecord
+) -> None:
+    """Serialize all three unique binding identities in stable lock order."""
+
+    lock_ids = {
+        int.from_bytes(
+            hashlib.sha256(f"binding:{kind}:{value}".encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        for kind, value in (
+            ("approval", record.approval_id),
+            ("event", record.event_id),
+            ("policy_audit", record.policy_audit_id),
+        )
+    }
+    for lock_id in sorted(lock_ids):
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": lock_id},
+        )
+
+
 def _derive_consumption_id(grant_id: str, action_id: str) -> str:
     """consumption_id 确定性派生（受限 JCS sha256，禁 uuid）。"""
     suffix = canonical_sha256(
@@ -200,9 +251,9 @@ def _derive_consumption_id(grant_id: str, action_id: str) -> str:
 
 def _derive_lease_id(consumption_id: str) -> str:
     """lease_id 确定性派生（受限 JCS sha256，禁 uuid）。"""
-    suffix = canonical_sha256(
-        {"consumption_id": consumption_id}
-    ).removeprefix("sha256:")
+    suffix = canonical_sha256({"consumption_id": consumption_id}).removeprefix(
+        "sha256:"
+    )
     return f"lease:{suffix}"
 
 
@@ -223,31 +274,8 @@ security_states = Table(
     ),
 )
 
-# V21-06 capability/lease 三表元数据（与迁移 0016_capability_lease 对齐）。
-# C5 决策：execution_leases 只存本权威 lease store，不与 security_states /
-# projection_records 交互。
-capability_grant_runtime = Table(
-    "capability_grant_runtime",
-    metadata,
-    Column("grant_id", Text, primary_key=True),
-    Column("scope_digest", Text, nullable=False),
-    Column("remaining_uses", Integer, nullable=False),
-    Column("expires_at", Text, nullable=True),
-    Column("authorization_fingerprint", Text, nullable=True),
-    Column("status", Text, nullable=False),
-    CheckConstraint(
-        "remaining_uses >= 0",
-        name="ck_capability_grant_runtime_remaining_uses_non_negative",
-    ),
-    CheckConstraint(
-        "status IN ('active', 'expired', 'revoked')",
-        name="ck_capability_grant_runtime_status",
-    ),
-    Index(
-        "ix_capability_grant_runtime_scope",
-        "scope_digest",
-    ),
-)
+# V21-06 capability/lease table metadata (migration 0016) is shared through
+# sqlalchemy_models; RTE-05 migration 0017 adds registration_digest there.
 
 grant_consumptions = Table(
     "grant_consumptions",
@@ -354,9 +382,7 @@ def _execution_lease_from_row(row: Any) -> ExecutionLease:
         issued_at=str(row["issued_at"]),
         expires_at=str(row["expires_at"]),
         token_digest=str(row["token_digest"]),
-        status=cast(
-            "Literal['consumed', 'expired', 'revoked']", str(row["status"])
-        ),
+        status=cast("Literal['consumed', 'expired', 'revoked']", str(row["status"])),
         evidence_refs=[],
     )
 
@@ -1372,8 +1398,7 @@ class PostgresControlPlaneStore:
                         update(security_states)
                         .where(
                             security_states.c.scope_digest == scope_digest,
-                            security_states.c.state_version
-                            == expected_state_version,
+                            security_states.c.state_version == expected_state_version,
                         )
                         .values(
                             state_version=record.state_version,
@@ -1420,9 +1445,7 @@ class PostgresControlPlaneStore:
                 )
                 return True
 
-    def mark_security_state_dirty(
-        self, scope_digest: str, domains: list[str]
-    ) -> None:
+    def mark_security_state_dirty(self, scope_digest: str, domains: list[str]) -> None:
         # 事务内 advisory lock：state_version 保持不变；无既有行时创建
         # version=0 的空态脏记录，与 memory 语义对齐。
         from agentguard_core.security_context import (
@@ -1436,14 +1459,18 @@ class PostgresControlPlaneStore:
         with self._session_factory() as session:
             with session.begin():
                 _lock_security_state_scope(session, scope_digest)
-                row = session.execute(
-                    select(
-                        security_states.c.state_version,
-                        security_states.c.canonical_payload,
-                        security_states.c.dirty_domains,
-                        security_states.c.projector_version,
-                    ).where(security_states.c.scope_digest == scope_digest)
-                ).mappings().one_or_none()
+                row = (
+                    session.execute(
+                        select(
+                            security_states.c.state_version,
+                            security_states.c.canonical_payload,
+                            security_states.c.dirty_domains,
+                            security_states.c.projector_version,
+                        ).where(security_states.c.scope_digest == scope_digest)
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
                 if row is None:
                     # F1 双口径同步：payload 内的 dirty_domains 与列同时写入。
                     empty_state = OnlineSecurityState(
@@ -1549,25 +1576,29 @@ class PostgresControlPlaneStore:
         source_revision: int,
         projector_version: str,
     ) -> ProjectionIdentityRecord | None:
-        row = session.execute(
-            select(
-                projection_records.c.scope_digest,
-                projection_records.c.source_record_type,
-                projection_records.c.source_record_id,
-                projection_records.c.source_revision,
-                projection_records.c.projector_version,
-                projection_records.c.delta_digest,
-                projection_records.c.delta_payload,
-                projection_records.c.applied_state_version,
-                projection_records.c.created_at,
-            ).where(
-                projection_records.c.scope_digest == scope_digest,
-                projection_records.c.source_record_type == source_record_type,
-                projection_records.c.source_record_id == source_record_id,
-                projection_records.c.source_revision == source_revision,
-                projection_records.c.projector_version == projector_version,
+        row = (
+            session.execute(
+                select(
+                    projection_records.c.scope_digest,
+                    projection_records.c.source_record_type,
+                    projection_records.c.source_record_id,
+                    projection_records.c.source_revision,
+                    projection_records.c.projector_version,
+                    projection_records.c.delta_digest,
+                    projection_records.c.delta_payload,
+                    projection_records.c.applied_state_version,
+                    projection_records.c.created_at,
+                ).where(
+                    projection_records.c.scope_digest == scope_digest,
+                    projection_records.c.source_record_type == source_record_type,
+                    projection_records.c.source_record_id == source_record_id,
+                    projection_records.c.source_revision == source_revision,
+                    projection_records.c.projector_version == projector_version,
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         return _projection_identity_record_from_row(row)
@@ -1612,6 +1643,461 @@ class PostgresControlPlaneStore:
         with self._read_session() as session:
             rows = session.execute(stmt).mappings().all()
         return [_projection_identity_record_from_row(row) for row in rows]
+
+    # RTE-05 private ActionIR binding storage and approval-bound lease path.
+
+    def save_enforcement_binding(
+        self, record: EnforcementBindingRecord
+    ) -> EnforcementBindingRecord:
+        if not record.requires_execution_lease or record.grant_id is not None:
+            raise EnforcementBindingConflictError(
+                "rte-05:binding_conflict", "private binding is invalid"
+            )
+        with self._write_session() as session:
+            _lock_binding_identities(session, record)
+            rows = (
+                session.execute(
+                    select(enforcement_bindings)
+                    .where(
+                        (enforcement_bindings.c.event_id == record.event_id)
+                        | (
+                            enforcement_bindings.c.policy_audit_id
+                            == record.policy_audit_id
+                        )
+                        | (enforcement_bindings.c.approval_id == record.approval_id)
+                    )
+                    .with_for_update()
+                )
+                .mappings()
+                .all()
+            )
+            if rows:
+                existing = _enforcement_binding_from_row(rows[0])
+                if len(rows) != 1 or _binding_semantic_payload(
+                    existing
+                ) != _binding_semantic_payload(record):
+                    raise EnforcementBindingConflictError(
+                        "rte-05:binding_conflict",
+                        "private binding identity conflicts with stored facts",
+                    )
+                return existing
+            session.execute(
+                pg_insert(enforcement_bindings).values(
+                    **_enforcement_binding_values(record)
+                )
+            )
+        return record
+
+    def get_enforcement_binding(
+        self, approval_id: str
+    ) -> EnforcementBindingRecord | None:
+        stmt = select(enforcement_bindings).where(
+            enforcement_bindings.c.approval_id == approval_id
+        )
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        return _enforcement_binding_from_row(row) if row is not None else None
+
+    def register_approval_grant(
+        self,
+        binding: EnforcementBindingRecord,
+        grant: CapabilityGrant,
+    ) -> EnforcementBindingRecord:
+        registration_digest = canonical_sha256(grant.model_dump(mode="json"))
+        with self._write_session() as session:
+            approval_row = (
+                session.execute(
+                    _approval_select()
+                    .where(approval_requests.c.approval_id == binding.approval_id)
+                    .with_for_update()
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if approval_row is None:
+                raise ApprovalLeaseNotFoundError(
+                    "rte-05:approval_not_found", "approval is not available"
+                )
+            approval = _approval_from_row(approval_row)
+            if (
+                _database_datetime(approval_row["expires_at"])
+                <= _database_datetime(approval_row["_database_now"])
+                or approval.status != "resolved"
+                or approval.decision != "allow_once"
+                or approval.resolution_source != "human"
+            ):
+                raise ApprovalLeaseNotConsumableError(
+                    "rte-05:approval_not_consumable",
+                    "approval is not consumable",
+                )
+            stored_row = (
+                session.execute(
+                    select(enforcement_bindings)
+                    .where(enforcement_bindings.c.approval_id == binding.approval_id)
+                    .with_for_update()
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if stored_row is None:
+                raise ApprovalExecutionLeaseUnavailableError(
+                    "rte-05:binding_unavailable",
+                    "private binding is not available",
+                )
+            stored = _enforcement_binding_from_row(stored_row)
+            if _binding_semantic_payload(stored) != _binding_semantic_payload(binding):
+                raise EnforcementBindingConflictError(
+                    "rte-05:binding_conflict",
+                    "private binding conflicts with stored facts",
+                )
+            if not _grant_matches_binding(grant, stored, approval):
+                raise EnforcementBindingConflictError(
+                    "rte-05:grant_registration_conflict",
+                    "runtime grant conflicts with private binding",
+                )
+
+            _lock_grant_identity(session, grant.grant_id)
+            grant_row = (
+                session.execute(
+                    select(capability_grant_runtime)
+                    .where(capability_grant_runtime.c.grant_id == grant.grant_id)
+                    .with_for_update()
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if grant_row is not None:
+                existing_fingerprint = grant_row["authorization_fingerprint"]
+                if (
+                    grant_row["registration_digest"] != registration_digest
+                    or grant_row["scope_digest"] != grant.scope_digest
+                    or grant_row["expires_at"] != grant.expires_at
+                    or existing_fingerprint is None
+                    or not _safe_compare(
+                        str(existing_fingerprint),
+                        binding.authorization_fingerprint,
+                    )
+                ):
+                    raise EnforcementBindingConflictError(
+                        "rte-05:grant_registration_conflict",
+                        "runtime grant registration conflicts with stored facts",
+                    )
+            else:
+                session.execute(
+                    pg_insert(capability_grant_runtime).values(
+                        grant_id=grant.grant_id,
+                        scope_digest=grant.scope_digest,
+                        remaining_uses=grant.remaining_uses,
+                        expires_at=grant.expires_at,
+                        authorization_fingerprint=(
+                            grant.exact_authorization_fingerprint
+                        ),
+                        status="active",
+                        registration_digest=registration_digest,
+                    )
+                )
+
+            if stored.grant_id not in (None, grant.grant_id):
+                raise EnforcementBindingConflictError(
+                    "rte-05:grant_registration_conflict",
+                    "private binding is already registered differently",
+                )
+            if stored.grant_id is None:
+                session.execute(
+                    update(enforcement_bindings)
+                    .where(
+                        enforcement_bindings.c.approval_id == stored.approval_id,
+                        enforcement_bindings.c.grant_id.is_(None),
+                    )
+                    .values(grant_id=grant.grant_id)
+                )
+            registered_values = dict(stored_row)
+            registered_values["grant_id"] = grant.grant_id
+            return _enforcement_binding_from_row(registered_values)
+
+    def consume_approval_execution_lease(
+        self, command: ApprovalLeaseConsumeCommand
+    ) -> GrantConsumptionResult:
+        with self._session_factory() as session:
+            with session.begin():
+                now = session.execute(select(func.now())).scalar_one()
+
+                # Fixed lock/check order: credential -> approval -> binding ->
+                # grant -> consumption -> lease.
+                credential_row = (
+                    session.execute(
+                        select(credentials)
+                        .where(credentials.c.credential_id == command.credential_id)
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if credential_row is None or not _credential_authorizes_binding(
+                    credential_row, command, now
+                ):
+                    raise ApprovalLeaseAuthorizationError(
+                        "rte-05:authorization_denied",
+                        "credential or bound identity is not authorized",
+                    )
+
+                approval_row = (
+                    session.execute(
+                        select(approval_requests)
+                        .where(approval_requests.c.approval_id == command.approval_id)
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if approval_row is None:
+                    raise ApprovalLeaseNotFoundError(
+                        "rte-05:approval_not_found", "approval is not available"
+                    )
+                approval_expires_at = _database_datetime(approval_row["expires_at"])
+                if (
+                    approval_row["resolved_at"] is None
+                    or approval_row["decision"] != "allow_once"
+                    or approval_row["resolution_source"] != "human"
+                ):
+                    raise ApprovalLeaseNotConsumableError(
+                        "rte-05:approval_not_consumable",
+                        "approval is not consumable",
+                    )
+                approval = _approval_from_locked_row(approval_row, now)
+
+                binding_row = (
+                    session.execute(
+                        select(enforcement_bindings)
+                        .where(
+                            enforcement_bindings.c.approval_id == command.approval_id
+                        )
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if binding_row is None:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:binding_unavailable",
+                        "private binding is not available",
+                    )
+                binding = _enforcement_binding_from_row(binding_row)
+                if not binding.requires_execution_lease:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:binding_unavailable",
+                        "private binding is not available",
+                    )
+                if not _binding_approval_invariants_match(binding, approval):
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid",
+                        "private approval authority state is inconsistent",
+                    )
+                if not _command_identity_matches(binding, command):
+                    raise ApprovalLeaseAuthorizationError(
+                        "rte-05:authorization_denied",
+                        "credential or bound identity is not authorized",
+                    )
+                if binding.action_id != command.action_id or not _safe_compare(
+                    binding.authorization_fingerprint,
+                    command.authorization_fingerprint,
+                ):
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "rte-05:consumption_conflict",
+                        "request conflicts with the private binding",
+                    )
+                if binding.grant_id is None:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:grant_unavailable",
+                        "runtime grant registration is not complete",
+                    )
+
+                _lock_grant_identity(session, binding.grant_id)
+                grant_row = (
+                    session.execute(
+                        select(capability_grant_runtime)
+                        .where(capability_grant_runtime.c.grant_id == binding.grant_id)
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if grant_row is None:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:grant_unavailable",
+                        "runtime grant registration is not complete",
+                    )
+                if not _registered_grant_matches_binding(grant_row, binding):
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid",
+                        "private approval authority state is inconsistent",
+                    )
+                grant_expires_at = parse_audit_timestamp(str(grant_row["expires_at"]))
+
+                consumption_id = _derive_consumption_id(
+                    binding.grant_id, binding.action_id
+                )
+                consumption_row = (
+                    session.execute(
+                        select(grant_consumptions)
+                        .where(grant_consumptions.c.consumption_id == consumption_id)
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if consumption_row is not None:
+                    if not _safe_compare(
+                        str(consumption_row["authorization_fingerprint"]),
+                        command.authorization_fingerprint,
+                    ):
+                        raise ApprovalLeaseConsumptionConflictError(
+                            "rte-05:consumption_conflict",
+                            "request conflicts with prior consumption",
+                        )
+                    lease_id = _derive_lease_id(consumption_id)
+                    lease_row = (
+                        session.execute(
+                            select(execution_leases)
+                            .where(execution_leases.c.lease_id == lease_id)
+                            .with_for_update()
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if lease_row is None or not _lease_row_matches_binding(
+                        lease_row, binding, consumption_row
+                    ):
+                        raise ApprovalExecutionLeaseStateInvalidError(
+                            "rte-05:state_invalid",
+                            "private execution lease state is inconsistent",
+                        )
+                    lease_status = str(lease_row["status"])
+                    if (
+                        approval_expires_at <= now
+                        or lease_status == "expired"
+                        or (parse_audit_timestamp(str(lease_row["expires_at"])) <= now)
+                    ):
+                        raise ApprovalExecutionLeaseExpiredError(
+                            "rte-05:execution_lease_expired",
+                            "execution lease has expired",
+                        )
+                    if grant_row["status"] != "active" or grant_expires_at <= now:
+                        raise ApprovalLeaseNotConsumableError(
+                            "rte-05:approval_not_consumable",
+                            "approval grant is not consumable",
+                        )
+                    if lease_status != "consumed" or not _safe_compare(
+                        str(lease_row["token_digest"]),
+                        lease_token_digest(command.lease_token),
+                    ):
+                        raise ApprovalLeaseConsumptionConflictError(
+                            "rte-05:consumption_conflict",
+                            "request conflicts with prior consumption",
+                        )
+                    return GrantConsumptionResult(
+                        consumption=_grant_consumption_from_row(consumption_row),
+                        lease=_execution_lease_from_row(lease_row),
+                        lease_token=command.lease_token,
+                        replayed=True,
+                    )
+
+                if approval_expires_at <= now or grant_expires_at <= now:
+                    raise ApprovalLeaseExpiredError(
+                        "rte-05:approval_expired", "approval has expired"
+                    )
+                if grant_row["status"] != "active":
+                    raise ApprovalLeaseNotConsumableError(
+                        "rte-05:approval_not_consumable",
+                        "approval grant is not consumable",
+                    )
+                if int(grant_row["remaining_uses"]) != 1:
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "rte-05:consumption_conflict",
+                        "approval grant has already been consumed",
+                    )
+                lease_expires_at = parse_audit_timestamp(command.expires_at)
+                if (
+                    lease_expires_at <= now
+                    or lease_expires_at > approval_expires_at
+                    or lease_expires_at > grant_expires_at
+                ):
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid",
+                        "execution lease expiry is outside authority bounds",
+                    )
+
+                cas_result = cast(
+                    "CursorResult[Any]",
+                    session.execute(
+                        update(capability_grant_runtime)
+                        .where(
+                            capability_grant_runtime.c.grant_id == binding.grant_id,
+                            capability_grant_runtime.c.remaining_uses == 1,
+                            capability_grant_runtime.c.status == "active",
+                        )
+                        .values(remaining_uses=0)
+                    ),
+                )
+                if cas_result.rowcount != 1:
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "rte-05:consumption_conflict",
+                        "approval grant has already been consumed",
+                    )
+                issued_at = _database_datetime_iso(now)
+                normalized_expires_at = _database_datetime_iso(lease_expires_at)
+                consumption = GrantConsumption(
+                    consumption_id=consumption_id,
+                    grant_id=binding.grant_id,
+                    action_id=binding.action_id,
+                    authorization_fingerprint=binding.authorization_fingerprint,
+                    sequence=None,
+                    evidence_refs=[],
+                )
+                session.execute(
+                    pg_insert(grant_consumptions).values(
+                        consumption_id=consumption_id,
+                        grant_id=binding.grant_id,
+                        action_id=binding.action_id,
+                        authorization_fingerprint=(binding.authorization_fingerprint),
+                        consumed_at=issued_at,
+                    )
+                )
+                lease = ExecutionLease(
+                    lease_id=_derive_lease_id(consumption_id),
+                    consumption_id=consumption_id,
+                    approval_id=binding.approval_id,
+                    grant_id=binding.grant_id,
+                    action_id=binding.action_id,
+                    authorization_fingerprint=binding.authorization_fingerprint,
+                    runtime_binding_id=binding.runtime_binding_id,
+                    issued_at=issued_at,
+                    expires_at=normalized_expires_at,
+                    token_digest=lease_token_digest(command.lease_token),
+                    status="consumed",
+                    evidence_refs=[],
+                )
+                session.execute(
+                    pg_insert(execution_leases).values(
+                        lease_id=lease.lease_id,
+                        token_digest=lease.token_digest,
+                        consumption_id=lease.consumption_id,
+                        approval_id=lease.approval_id,
+                        grant_id=lease.grant_id,
+                        action_id=lease.action_id,
+                        authorization_fingerprint=(lease.authorization_fingerprint),
+                        runtime_binding_id=lease.runtime_binding_id,
+                        issued_at=lease.issued_at,
+                        expires_at=lease.expires_at,
+                        status=lease.status,
+                    )
+                )
+                return GrantConsumptionResult(
+                    consumption=consumption,
+                    lease=lease,
+                    lease_token=command.lease_token,
+                    replayed=False,
+                )
 
     # V21-06 lease 协议方法权威实现（migration 0016 已建表）。
     # C4：原子消费的全部校验与写入在单事务内完成；行锁序固定
@@ -1664,9 +2150,7 @@ class PostgresControlPlaneStore:
             "status": status,
         }
 
-    def get_capability_grant_runtime(
-        self, grant_id: str
-    ) -> dict[str, Any] | None:
+    def get_capability_grant_runtime(self, grant_id: str) -> dict[str, Any] | None:
         """读 grant 运行时行（消费后 remaining_uses 校验/Phase 2 读路径）。"""
         stmt = select(capability_grant_runtime).where(
             capability_grant_runtime.c.grant_id == grant_id
@@ -1705,9 +2189,7 @@ class PostgresControlPlaneStore:
                 grant_row = (
                     session.execute(
                         select(capability_grant_runtime)
-                        .where(
-                            capability_grant_runtime.c.grant_id == grant_id
-                        )
+                        .where(capability_grant_runtime.c.grant_id == grant_id)
                         .with_for_update()
                     )
                     .mappings()
@@ -1728,8 +2210,7 @@ class PostgresControlPlaneStore:
                 existing = (
                     session.execute(
                         select(grant_consumptions).where(
-                            grant_consumptions.c.consumption_id
-                            == consumption_id
+                            grant_consumptions.c.consumption_id == consumption_id
                         )
                     )
                     .mappings()
@@ -1737,9 +2218,7 @@ class PostgresControlPlaneStore:
                 )
                 if existing is not None:
                     if not hmac_module.compare_digest(
-                        str(existing["authorization_fingerprint"]).encode(
-                            "utf-8"
-                        ),
+                        str(existing["authorization_fingerprint"]).encode("utf-8"),
                         fingerprint.encode("utf-8"),
                     ):
                         raise GrantConsumptionConflictError(
@@ -1759,8 +2238,7 @@ class PostgresControlPlaneStore:
                     if lease_row is None:
                         raise LeaseStoreError(
                             "v21-06:lease_missing",
-                            "consumption exists but its execution lease is "
-                            "missing",
+                            "consumption exists but its execution lease is " "missing",
                         )
                     # F1：终态校验先于 expires_at —— revoked/expired 状态
                     # 的 lease 不得被幂等重放绕过（撤销/过期语义
@@ -1836,12 +2314,8 @@ class PostgresControlPlaneStore:
                     "CursorResult[Any]",
                     session.execute(
                         update(capability_grant_runtime)
-                        .where(
-                            capability_grant_runtime.c.grant_id == grant_id
-                        )
-                        .where(
-                            capability_grant_runtime.c.remaining_uses > 0
-                        )
+                        .where(capability_grant_runtime.c.grant_id == grant_id)
+                        .where(capability_grant_runtime.c.remaining_uses > 0)
                         .values(
                             remaining_uses=(
                                 capability_grant_runtime.c.remaining_uses - 1
@@ -1895,9 +2369,7 @@ class PostgresControlPlaneStore:
                         approval_id=lease.approval_id,
                         grant_id=lease.grant_id,
                         action_id=lease.action_id,
-                        authorization_fingerprint=(
-                            lease.authorization_fingerprint
-                        ),
+                        authorization_fingerprint=(lease.authorization_fingerprint),
                         runtime_binding_id=lease.runtime_binding_id,
                         issued_at=lease.issued_at,
                         expires_at=lease.expires_at,
@@ -1959,8 +2431,7 @@ class PostgresControlPlaneStore:
                     raise KeyError(lease_id)
                 grant_scope = session.execute(
                     select(capability_grant_runtime.c.scope_digest).where(
-                        capability_grant_runtime.c.grant_id
-                        == row["grant_id"]
+                        capability_grant_runtime.c.grant_id == row["grant_id"]
                     )
                 ).scalar_one_or_none()
                 if grant_scope != scope_digest:
@@ -2285,6 +2756,198 @@ def _window_filter_conditions(query: AuditWindowQuery) -> list[Any]:
 
 def _bounded_limit(limit: int) -> int:
     return max(1, min(limit, MAX_REBUILD_INPUT_LIMIT))
+
+
+def _safe_compare(left: str, right: str) -> bool:
+    return hmac_module.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+def _binding_semantic_payload(record: EnforcementBindingRecord) -> tuple[Any, ...]:
+    return (
+        record.event_id,
+        record.policy_audit_id,
+        record.approval_id,
+        record.action_id,
+        record.action_type,
+        record.authorization_fingerprint,
+        record.runtime_binding_id,
+        record.scope_digest,
+        record.principal_id,
+        record.runtime,
+        record.agent_id,
+        record.policy_revision,
+        record.requires_execution_lease,
+        record.created_at,
+    )
+
+
+def _enforcement_binding_values(
+    record: EnforcementBindingRecord,
+) -> dict[str, Any]:
+    return {
+        "event_id": record.event_id,
+        "policy_audit_id": record.policy_audit_id,
+        "approval_id": record.approval_id,
+        "action_id": record.action_id,
+        "action_type": record.action_type,
+        "authorization_fingerprint": record.authorization_fingerprint,
+        "runtime_binding_id": record.runtime_binding_id,
+        "scope_digest": record.scope_digest,
+        "principal_id": record.principal_id,
+        "runtime": record.runtime,
+        "agent_id": record.agent_id,
+        "policy_revision": record.policy_revision,
+        "requires_execution_lease": record.requires_execution_lease,
+        "grant_id": record.grant_id,
+        "created_at": record.created_at,
+    }
+
+
+def _enforcement_binding_from_row(row: Any) -> EnforcementBindingRecord:
+    grant_id = row["grant_id"]
+    return EnforcementBindingRecord(
+        event_id=str(row["event_id"]),
+        policy_audit_id=str(row["policy_audit_id"]),
+        approval_id=str(row["approval_id"]),
+        action_id=str(row["action_id"]),
+        action_type=str(row["action_type"]),
+        authorization_fingerprint=str(row["authorization_fingerprint"]),
+        runtime_binding_id=str(row["runtime_binding_id"]),
+        scope_digest=str(row["scope_digest"]),
+        principal_id=str(row["principal_id"]),
+        runtime=str(row["runtime"]),
+        agent_id=str(row["agent_id"]),
+        policy_revision=str(row["policy_revision"]),
+        requires_execution_lease=bool(row["requires_execution_lease"]),
+        grant_id=str(grant_id) if grant_id is not None else None,
+        created_at=str(row["created_at"]),
+    )
+
+
+def _grant_matches_binding(
+    grant: CapabilityGrant,
+    binding: EnforcementBindingRecord,
+    approval: ApprovalRequest,
+) -> bool:
+    fingerprint = grant.exact_authorization_fingerprint
+    return bool(
+        grant.source_type == "human_approval"
+        and grant.source_ref == f"approval:{binding.approval_id}"
+        and grant.scope_digest == binding.scope_digest
+        and grant.subject_principal_id == binding.principal_id
+        and grant.subject_agent_id == binding.agent_id
+        and grant.action_types == [binding.action_type]
+        and fingerprint is not None
+        and _safe_compare(fingerprint, binding.authorization_fingerprint)
+        and grant.usage_limit == 1
+        and grant.remaining_uses == 1
+        and not grant.delegable
+        and not grant.revoked
+        and grant.expires_at == approval.expires_at
+        and grant.policy_revision == binding.policy_revision
+    )
+
+
+def _registered_grant_matches_binding(
+    grant: Any,
+    binding: EnforcementBindingRecord,
+) -> bool:
+    fingerprint = grant["authorization_fingerprint"]
+    return bool(
+        str(grant["grant_id"]) == binding.grant_id
+        and str(grant["scope_digest"]) == binding.scope_digest
+        and fingerprint is not None
+        and _safe_compare(str(fingerprint), binding.authorization_fingerprint)
+        and grant["expires_at"] is not None
+        and isinstance(grant["registration_digest"], str)
+    )
+
+
+def _credential_authorizes_binding(
+    row: Any,
+    command: ApprovalLeaseConsumeCommand,
+    now: datetime,
+) -> bool:
+    try:
+        credential = CredentialRecord.model_validate(row["payload_json"])
+    except ValueError:
+        return False
+    if str(row["credential_id"]) != command.credential_id:
+        return False
+    if not _safe_compare(str(row["token_hash"]), command.credential_token_hash):
+        return False
+    if row["revoked_at"] is not None or credential.revoked_at is not None:
+        return False
+    expires_at = row["expires_at"]
+    if expires_at is not None:
+        try:
+            if parse_audit_timestamp(str(expires_at)) <= now:
+                return False
+        except ValueError:
+            return False
+    return bool(
+        row["principal_type"] == credential.principal_type == "component"
+        and row["role"] == credential.role == "adapter"
+        and "approval:wait" in credential.scopes
+        and row["principal_id"] == credential.principal_id == command.principal_id
+        and row["runtime"] == credential.runtime == command.runtime
+        and row["agent_id"] == credential.agent_id == command.agent_id
+    )
+
+
+def _approval_from_locked_row(row: Any, now: datetime) -> ApprovalRequest:
+    values = dict(row)
+    values["_database_now"] = now
+    return _approval_from_row(values)
+
+
+def _binding_approval_invariants_match(
+    binding: EnforcementBindingRecord,
+    approval: ApprovalRequest,
+) -> bool:
+    return bool(
+        binding.approval_id == approval.approval_id
+        and binding.principal_id == approval.requesting_principal_id
+        and binding.runtime == approval.runtime
+        and binding.agent_id == approval.agent_id
+        and binding.action_id == approval.action_id
+    )
+
+
+def _command_identity_matches(
+    binding: EnforcementBindingRecord,
+    command: ApprovalLeaseConsumeCommand,
+) -> bool:
+    return bool(
+        binding.approval_id == command.approval_id
+        and binding.principal_id == command.principal_id
+        and binding.runtime == command.runtime
+        and binding.agent_id == command.agent_id
+    )
+
+
+def _lease_row_matches_binding(
+    lease: Any,
+    binding: EnforcementBindingRecord,
+    consumption: Any,
+) -> bool:
+    return bool(
+        str(lease["consumption_id"]) == str(consumption["consumption_id"])
+        and str(lease["approval_id"]) == binding.approval_id
+        and str(lease["grant_id"]) == binding.grant_id == str(consumption["grant_id"])
+        and str(lease["action_id"])
+        == binding.action_id
+        == str(consumption["action_id"])
+        and _safe_compare(
+            str(lease["authorization_fingerprint"]),
+            binding.authorization_fingerprint,
+        )
+        and _safe_compare(
+            str(consumption["authorization_fingerprint"]),
+            binding.authorization_fingerprint,
+        )
+        and str(lease["runtime_binding_id"]) == binding.runtime_binding_id
+    )
 
 
 def _task_fact_record_from_row(row: Any) -> TaskFactRecord:

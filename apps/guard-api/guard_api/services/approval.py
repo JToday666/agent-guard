@@ -256,6 +256,21 @@ class ApprovalService:
             return
         if approval.decision != "allow_once" or approval.resolution_source != "human":
             return
+        if self.settings.rte05_strong_binding_enabled:
+            binding = self.store.get_enforcement_binding(approval.approval_id)
+            if binding is None:
+                # A C1/degraded ASK deliberately has no strong binding and must
+                # never be upgraded into a consumable grant after resolution.
+                return
+            try:
+                self._project_strong_allow_once_grant(approval, binding)
+            except Exception:  # noqa: BLE001 - resolution stays committed; consume 503.
+                logger.warning(
+                    "rte-05 approval grant registration unavailable for approval %s; "
+                    "the bound action remains fail-closed",
+                    approval.approval_id,
+                )
+            return
         try:
             self._project_allow_once_grant(approval)
         except Exception:  # noqa: BLE001 - 投影故障必须收敛，绝不上抛。
@@ -266,6 +281,165 @@ class ApprovalService:
                 approval.approval_id,
                 exc_info=True,
             )
+
+    def _project_strong_allow_once_grant(
+        self, approval: ApprovalRequest, binding: Any
+    ) -> None:
+        """Project and register a consumable grant from the private ActionIR binding.
+
+        The projection must become visible in SecurityState before the runtime
+        grant row is registered.  A failure at either stage leaves ``grant_id``
+        unset on the private binding, so consume returns a retryable 503 instead
+        of falling back to C1.
+        """
+
+        self._ensure_strong_grant_registered(approval, binding)
+
+    def ensure_strong_approval_grant_registered(self, approval_id: str) -> bool:
+        """Retry-safe registration/backfill used by the consume endpoint.
+
+        A previous resolve may have projected state and then lost the runtime
+        registration write.  This method recognizes that exact projected grant
+        and registers it without creating a new projection.  It never upgrades
+        non-human or unbound C1 approvals.
+        """
+
+        if not self.settings.rte05_strong_binding_enabled:
+            return False
+        approval = self.store.get_approval(approval_id)
+        binding = self.store.get_enforcement_binding(approval_id)
+        if (
+            approval is None
+            or binding is None
+            or approval.status != "resolved"
+            or approval.decision != "allow_once"
+            or approval.resolution_source != "human"
+        ):
+            return False
+        if binding.grant_id is not None:
+            return True
+        try:
+            return self._ensure_strong_grant_registered(approval, binding)
+        except Exception:  # noqa: BLE001 - caller maps incomplete registration to 503.
+            return False
+
+    def _ensure_strong_grant_registered(
+        self, approval: ApprovalRequest, binding: Any
+    ) -> bool:
+        if self.state_service is None:
+            return False
+        if (
+            approval.resolved_at is not None
+            and approval.resolved_at >= approval.expires_at
+        ):
+            return False
+
+        scope = self._resolve_grant_scope(approval)
+        if scope is None:
+            return False
+        task_fact, audit_record = scope
+        if (
+            binding.approval_id != approval.approval_id
+            or binding.event_id != audit_record.links.get("event_id")
+            or binding.action_id != approval.action_id
+            or binding.principal_id != approval.requesting_principal_id
+            or binding.principal_id != task_fact.principal_id
+            or binding.runtime != approval.runtime
+            or binding.agent_id != approval.agent_id
+            or binding.scope_digest != task_fact.scope_digest
+            or not binding.authorization_fingerprint
+            or not binding.runtime_binding_id
+            or not binding.action_type
+            or not binding.policy_revision
+            or binding.requires_execution_lease is not True
+        ):
+            return False
+
+        policy_revision = str(binding.policy_revision)
+        grant = compile_approval_to_grant(
+            ApprovalGrantProjection(
+                approval_id=approval.approval_id,
+                scope_digest=binding.scope_digest,
+                principal_id=binding.principal_id,
+                subject_agent_id=binding.agent_id,
+                task_id=task_fact.task_id,
+                action_types=[binding.action_type],
+                resource_constraints=[],
+                destination_constraints=[],
+                argument_constraints=[],
+                resolution_source="human",
+                authorization_fingerprint=binding.authorization_fingerprint,
+                resolved_sequence=None,
+                expires_at=approval.expires_at,
+                policy_revision=policy_revision,
+            ),
+            GrantPolicyContext(
+                policy_revision=policy_revision,
+                scope_digest=binding.scope_digest,
+                principal_id=binding.principal_id,
+            ),
+        )
+
+        exact_projected = False
+        with self.state_service.store_access.scope_lock(binding.scope_digest):
+            state = self.state_service.ensure_ready(binding.scope_digest)
+            existing_grant = next(
+                (
+                    item
+                    for item in state.active_grants
+                    if item.grant_id == grant.grant_id
+                ),
+                None,
+            )
+            if existing_grant is not None:
+                exact_projected = existing_grant == grant
+            else:
+                projection = self.state_service.store_access.get_projection(
+                    binding.scope_digest,
+                    "approval",
+                    approval.approval_id,
+                    _APPROVAL_SOURCE_REVISION,
+                    PROJECTOR_VERSION,
+                )
+                delta = (
+                    SecurityStateDeltaV21.model_validate(projection.delta_payload)
+                    if projection is not None
+                    else _build_approval_grant_delta(
+                        approval,
+                        grant,
+                        scope_digest=binding.scope_digest,
+                        base_state_version=state.state_version,
+                    )
+                )
+                if not any(item == grant for item in delta.grant_upserts):
+                    return False
+                result = self.state_service.project_committed(
+                    CommittedRecord(
+                        record_id=f"approval-grant:{approval.approval_id}",
+                        committed=True,
+                        source_record_type="approval",
+                        source_record_id=approval.approval_id,
+                        source_revision=_APPROVAL_SOURCE_REVISION,
+                        scope_digest=binding.scope_digest,
+                        projector_version=PROJECTOR_VERSION,
+                        delta=delta,
+                    ),
+                    scope_digest=binding.scope_digest,
+                    verify_source_committed=self._verify_approval_committed,
+                )
+                if result.outcome in {"applied", "replayed_noop"}:
+                    projected = self.state_service.ensure_ready(binding.scope_digest)
+                    exact_projected = any(
+                        item == grant for item in projected.active_grants
+                    )
+        if not exact_projected:
+            return False
+        self.store.register_approval_grant(binding, grant)
+        logger.info(
+            "rte-05 approval grant registered for approval %s",
+            approval.approval_id,
+        )
+        return True
 
     def _project_allow_once_grant(self, approval: ApprovalRequest) -> None:
         """把已 commit 的 human ``allow_once`` 审批投影为单次 grant。
@@ -364,12 +538,8 @@ class ApprovalService:
         # fail-closed 且置脏，grant 永久不投影。
         with self.state_service.store_access.scope_lock(scope_digest):
             self.state_service.ensure_ready(scope_digest)
-            current = self.state_service.store_access.get_security_state(
-                scope_digest
-            )
-            base_state_version = (
-                current.state_version if current is not None else 0
-            )
+            current = self.state_service.store_access.get_security_state(scope_digest)
+            base_state_version = current.state_version if current is not None else 0
             delta = _build_approval_grant_delta(
                 approval,
                 grant,
@@ -417,9 +587,7 @@ class ApprovalService:
         reason = None
         evidence_event = approval.evidence.get("event")
         event_id = (
-            evidence_event.get("event_id")
-            if isinstance(evidence_event, dict)
-            else None
+            evidence_event.get("event_id") if isinstance(evidence_event, dict) else None
         )
         if not isinstance(event_id, str) or not event_id:
             reason = "approval evidence carries no event_id"
@@ -463,9 +631,7 @@ class ApprovalService:
         )
 
 
-def _llm_can_allow_once(
-    approval: ApprovalRequest, *, v2_enabled: bool = False
-) -> bool:
+def _llm_can_allow_once(approval: ApprovalRequest, *, v2_enabled: bool = False) -> bool:
     """LLM Reviewer 是否可自动 ``allow_once``。
 
     D4/D5（``10_决策记录`` L116-134 / ``11_决策记录`` D5）：V2 flag

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from guard_api.auth import CapabilityAuthService
 from guard_api.security_state import SecurityStateService
+from guard_api.security_state.lease_service import ApprovalExecutionLeaseService
 from guard_api.services import (
     ApprovalService,
     AuditService,
@@ -33,6 +34,7 @@ class ApiContext:
     config_audit_service: ConfigAuditService
     memory_guard_service: MemoryGuardService
     approval_service: ApprovalService
+    approval_execution_lease_service: ApprovalExecutionLeaseService
     metric_service: MetricService
     trace_service: TraceService
     policy_service: PolicyService

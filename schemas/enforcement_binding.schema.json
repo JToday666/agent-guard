@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.dev/schemas/enforcement_binding.schema.json",
+  "title": "RTE-05 Enforcement Binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action_id",
+    "authorization_fingerprint",
+    "runtime_binding_id",
+    "requires_execution_lease"
+  ],
+  "properties": {
+    "schema_version": { "const": "2.1" },
+    "action_id": { "type": "string", "minLength": 1 },
+    "authorization_fingerprint": {
+      "type": "string",
+      "pattern": "^hmac-sha256:[0-9a-f]{64}$"
+    },
+    "runtime_binding_id": { "type": "string", "minLength": 1 },
+    "requires_execution_lease": { "const": true }
+  }
+}

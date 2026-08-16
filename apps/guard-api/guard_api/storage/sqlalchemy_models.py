@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
@@ -304,6 +305,71 @@ approval_requests = Table(
         "agent_id",
         "created_at",
     ),
+)
+
+# RTE-05 private ActionIR enforcement binding.  This table is intentionally
+# absent from all public query/read models; it is consumed only by the guarded
+# approval lease transaction.
+enforcement_bindings = Table(
+    "enforcement_bindings",
+    metadata,
+    Column("event_id", Text, primary_key=True),
+    Column("policy_audit_id", Text, nullable=False, unique=True),
+    Column("approval_id", Text, nullable=False, unique=True),
+    Column("action_id", Text, nullable=False),
+    Column("action_type", Text, nullable=False),
+    Column("authorization_fingerprint", Text, nullable=False),
+    Column("runtime_binding_id", Text, nullable=False),
+    Column("scope_digest", Text, nullable=False),
+    Column("principal_id", Text, nullable=False),
+    Column("runtime", Text, nullable=False),
+    Column("agent_id", Text, nullable=False),
+    Column("policy_revision", Text, nullable=False),
+    Column("requires_execution_lease", Boolean, nullable=False),
+    Column("grant_id", Text, nullable=True),
+    Column("created_at", Text, nullable=False),
+    ForeignKeyConstraint(
+        ["approval_id"],
+        ["approval_requests.approval_id"],
+        name="fk_enforcement_bindings_approval_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["grant_id"],
+        ["capability_grant_runtime.grant_id"],
+        name="fk_enforcement_bindings_grant_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "requires_execution_lease",
+        name="ck_enforcement_bindings_requires_execution_lease",
+    ),
+    Index("ix_enforcement_bindings_runtime_agent", "runtime", "agent_id"),
+    Index("ix_enforcement_bindings_grant_id", "grant_id"),
+)
+
+# V21-06 runtime grant authority, extended by RTE-05 with a canonical digest
+# of the complete CapabilityGrant.  The digest supports exact registration
+# replay/conflict checks without persisting a broad JSON serializer output.
+capability_grant_runtime = Table(
+    "capability_grant_runtime",
+    metadata,
+    Column("grant_id", Text, primary_key=True),
+    Column("scope_digest", Text, nullable=False),
+    Column("remaining_uses", Integer, nullable=False),
+    Column("expires_at", Text, nullable=True),
+    Column("authorization_fingerprint", Text, nullable=True),
+    Column("status", Text, nullable=False),
+    Column("registration_digest", Text, nullable=True),
+    CheckConstraint(
+        "remaining_uses >= 0",
+        name="ck_capability_grant_runtime_remaining_uses_non_negative",
+    ),
+    CheckConstraint(
+        "status IN ('active', 'expired', 'revoked')",
+        name="ck_capability_grant_runtime_status",
+    ),
+    Index("ix_capability_grant_runtime_scope", "scope_digest"),
 )
 
 policy_snapshots = Table(

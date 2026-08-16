@@ -39,4 +39,9 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             )
         except EvaluationConflictError:
             raise ApiAuthError("EVALUATION_CONFLICT", status_code=409) from None
-        return response.model_dump(mode="json")
+        dumped = response.model_dump(mode="json")
+        # Keep the frozen C1 wire keyset even on older supported Pydantic
+        # releases that do not honor Field(exclude_if=...).
+        if response.enforcement_binding is None:
+            dumped.pop("enforcement_binding", None)
+        return dumped

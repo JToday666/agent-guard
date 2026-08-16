@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ContextManager, Protocol
 
@@ -17,7 +17,11 @@ from agentguard_core import (
     ProvenanceNode,
 )
 from agentguard_core.authority import TaskFact
-from agentguard_core.security_context import ExecutionLease, GrantConsumption
+from agentguard_core.security_context import (
+    CapabilityGrant,
+    ExecutionLease,
+    GrantConsumption,
+)
 
 from guard_api.models import (
     AdapterStatusRecord,
@@ -146,8 +150,100 @@ class GrantConsumptionResult:
 
     consumption: GrantConsumption
     lease: ExecutionLease
-    lease_token: str
+    lease_token: str = field(repr=False)
     replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EnforcementBindingRecord:
+    """Private authoritative ActionIR binding for one approval.
+
+    This record is deliberately a storage-only type.  In particular, the
+    authorization fingerprint must never be projected into Approval, Audit,
+    Trace, Provenance, Dashboard, Receipt, or log payloads.
+    """
+
+    event_id: str
+    policy_audit_id: str
+    approval_id: str
+    action_id: str
+    action_type: str
+    authorization_fingerprint: str = field(repr=False)
+    runtime_binding_id: str
+    scope_digest: str
+    principal_id: str
+    runtime: str
+    agent_id: str
+    policy_revision: str
+    requires_execution_lease: bool
+    grant_id: str | None = field(repr=False)
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalLeaseConsumeCommand:
+    """Trusted, internal command for an approval-bound lease consumption.
+
+    ``credential_token_hash`` and ``lease_token`` are transient inputs only;
+    implementations must not persist or include them in exception messages.
+    ``expires_at`` is computed by the Guard API service and is bounded again by
+    the authoritative approval/grant expiry inside the atomic transaction.
+    """
+
+    credential_id: str
+    credential_token_hash: str = field(repr=False)
+    principal_id: str
+    runtime: str
+    agent_id: str
+    approval_id: str
+    action_id: str
+    authorization_fingerprint: str = field(repr=False)
+    lease_token: str = field(repr=False)
+    expires_at: str
+
+
+class ApprovalLeaseStoreError(Exception):
+    """Base for sanitized RTE-05 storage errors."""
+
+    def __init__(self, reason_code: str, message: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(message)
+
+
+class EnforcementBindingConflictError(ApprovalLeaseStoreError):
+    """A private binding identity was reused with different immutable facts."""
+
+
+class ApprovalLeaseAuthorizationError(ApprovalLeaseStoreError):
+    """Credential or runtime-bound identity revalidation failed."""
+
+
+class ApprovalLeaseNotFoundError(ApprovalLeaseStoreError):
+    """The requested approval does not exist."""
+
+
+class ApprovalLeaseNotConsumableError(ApprovalLeaseStoreError):
+    """The approval/grant lifecycle does not permit consumption."""
+
+
+class ApprovalLeaseConsumptionConflictError(ApprovalLeaseStoreError):
+    """The request conflicts with the authoritative binding or prior consume."""
+
+
+class ApprovalLeaseExpiredError(ApprovalLeaseStoreError):
+    """The authoritative approval has expired."""
+
+
+class ApprovalExecutionLeaseExpiredError(ApprovalLeaseStoreError):
+    """An exact replay targeted an already expired execution lease."""
+
+
+class ApprovalExecutionLeaseUnavailableError(ApprovalLeaseStoreError):
+    """The private binding or projected runtime grant is not ready."""
+
+
+class ApprovalExecutionLeaseStateInvalidError(ApprovalLeaseStoreError):
+    """Private lease state violates an internal invariant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,7 +445,9 @@ class StateVersionConflictError(ValueError):
     旧版本永不静默覆盖。
     """
 
-    def __init__(self, *, expected_state_version: int, current_state_version: int) -> None:
+    def __init__(
+        self, *, expected_state_version: int, current_state_version: int
+    ) -> None:
         self.expected_state_version = expected_state_version
         self.current_state_version = current_state_version
         super().__init__(
@@ -365,7 +463,9 @@ class ProjectionDigestConflictError(ValueError):
     security alert，存储层拒绝写入，不静默覆盖。
     """
 
-    def __init__(self, *, projection_key: str, existing_digest: str, incoming_digest: str) -> None:
+    def __init__(
+        self, *, projection_key: str, existing_digest: str, incoming_digest: str
+    ) -> None:
         self.projection_key = projection_key
         self.existing_digest = existing_digest
         self.incoming_digest = incoming_digest
@@ -684,9 +784,7 @@ class ControlPlaneStore(Protocol):
         """读取单条 TaskFact revision；``revision=None`` 时读 head。"""
         ...
 
-    def list_task_fact_revisions(
-        self, task_id: str
-    ) -> list[TaskFactRecord]:
+    def list_task_fact_revisions(self, task_id: str) -> list[TaskFactRecord]:
         """按 revision 升序返回该任务的全部历史 revision。"""
         ...
 
@@ -709,9 +807,7 @@ class ControlPlaneStore(Protocol):
         """
         ...
 
-    def mark_security_state_dirty(
-        self, scope_digest: str, domains: list[str]
-    ) -> None:
+    def mark_security_state_dirty(self, scope_digest: str, domains: list[str]) -> None:
         """登记 projector failure / digest conflict 的脏态标记（V21-04, 02 §3）。
 
         契约：把 ``domains`` 并入既有记录的 dirty_domains 并置 dirty=True，
@@ -775,6 +871,38 @@ class ControlPlaneStore(Protocol):
         raise NotImplementedError(
             "V21-06: atomic grant consumption is not wired in Phase 0"
         )
+
+    def save_enforcement_binding(
+        self, record: EnforcementBindingRecord
+    ) -> EnforcementBindingRecord:
+        """Persist one immutable private binding, or return its exact replay.
+
+        ``event_id``, ``policy_audit_id`` and ``approval_id`` are unique
+        identities.  Reuse with different immutable binding facts is a
+        conflict; ``grant_id`` is populated only by
+        :meth:`register_approval_grant`.
+        """
+        ...
+
+    def get_enforcement_binding(
+        self, approval_id: str
+    ) -> EnforcementBindingRecord | None:
+        """Read a private binding by approval ID; never expose it publicly."""
+        ...
+
+    def register_approval_grant(
+        self,
+        binding: EnforcementBindingRecord,
+        grant: CapabilityGrant,
+    ) -> EnforcementBindingRecord:
+        """Idempotently register the exact grant and attach it to a binding."""
+        ...
+
+    def consume_approval_execution_lease(
+        self, command: ApprovalLeaseConsumeCommand
+    ) -> GrantConsumptionResult:
+        """Atomically revalidate approval authority and consume one lease."""
+        ...
 
     def get_execution_lease(
         self, scope_digest: str, lease_ref: str
