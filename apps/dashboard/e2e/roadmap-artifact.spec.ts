@@ -83,10 +83,12 @@ test("searches and filters nodes while preserving the derived Ready Queue", asyn
 
   const readyQueue = page.getByTestId("ready-queue");
   await expect(readyQueue).toBeVisible();
-  for (const nodeId of ["RSC-CT01", "CT05", "CT03R"]) {
+  for (const nodeId of ["RSC-CTPROV", "FE06", "CT05", "CT03R"]) {
     await expect(readyQueue.locator(`[data-node-ref="${nodeId}"]`)).toBeVisible();
   }
-  await expect(readyQueue.locator('[data-node-ref="FE04"]')).toHaveCount(0);
+  for (const nodeId of ["RSC-CT01", "FE04"]) {
+    await expect(readyQueue.locator(`[data-node-ref="${nodeId}"]`)).toHaveCount(0);
+  }
 });
 
 test("opens the evidence drawer from hash, pointer, and keyboard navigation", async ({ page }) => {
