@@ -1,28 +1,35 @@
 {
-  "schema_version": "1.0.0",
-  "id": "CT05",
-  "exact_title": "CT-PR-05 — Memory Bridge",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "ct",
-  "lifecycle": "not_started",
-  "revision": 0,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "audit-schema-and-storage"
   ],
+  "evidence_refs": [],
+  "exact_title": "CT-PR-05 — Memory Bridge",
+  "hold": false,
+  "id": "CT05",
+  "kind": "task",
+  "lane": "ct",
+  "lifecycle": "in_progress",
+  "notes": [],
+  "optional": false,
+  "revision": 1,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
   "source_refs": [
     {
-      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
       "heading": "# 8. CT-PR-05 — Memory Bridge",
-      "line_hint": 268
+      "line_hint": 268,
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md"
     }
   ],
-  "evidence_refs": [],
-  "work": null,
-  "notes": []
+  "work": {
+    "base_sha": "5b4430b0fa5e5b36cb4be97d1966bb66ad184147",
+    "branch": "codex/ct05-memory-bridge",
+    "owner": "implementation-owner",
+    "started_at": "2026-08-16T15:57:50Z",
+    "substate": "active",
+    "worktree_slug": "CT05"
+  }
 }
