@@ -172,6 +172,54 @@ test("graph and list reuse the same four-layer supervision presentation", async 
   expect(graphValues).toHaveLength(4);
 });
 
+test("multi-step preview shows ordered checkpoints and exact action outcomes", async ({ page }) => {
+  await page.goto("/evidence/trace_009");
+
+  const summary = page.locator(".execution-trace__summary");
+  await expect(page.getByRole("heading", { name: "运行已结束" })).toBeVisible();
+  await expect(summary).toContainText(/运行步骤\s*5/);
+  await expect(summary).toContainText(/受控动作\s*2/);
+  await expect(summary).toContainText(/等待审批\s*0/);
+  await expect(summary).toContainText(/风险步骤\s*1/);
+
+  const graphNodes = page.locator(".execution-node");
+  await expect(graphNodes).toHaveCount(5);
+  await expect(page.locator(".execution-node--checkpoint")).toHaveCount(3);
+  await expect(graphNodes.nth(0)).toContainText("获取网页内容");
+  await expect(graphNodes.nth(1)).toContainText("检查网页内容");
+  await expect(graphNodes.nth(2)).toContainText("检查输入上下文");
+  await expect(graphNodes.nth(3)).toContainText("检查模型输入");
+  await expect(graphNodes.nth(4)).toContainText("执行代码");
+  await expect(page.locator(".execution-flow__vue-flow .vue-flow__edge")).toHaveCount(4);
+
+  const fetch = graphNodes.filter({ hasText: "获取网页内容" });
+  await expect(fetch.locator('[data-supervision-layer="decision"]')).toContainText("允许");
+  await expect(fetch.locator('[data-supervision-layer="approval"]')).toContainText("无需审批");
+  await expect(fetch.locator('[data-supervision-layer="enforcement"]')).toContainText("证据不可用");
+  await expect(fetch.locator('[data-supervision-layer="execution"]')).toContainText("已执行");
+
+  const exec = graphNodes.filter({ hasText: "执行代码" });
+  await expect(exec.locator('[data-supervision-layer="decision"]')).toContainText("拒绝");
+  await expect(exec.locator('[data-supervision-layer="approval"]')).toContainText("无需审批");
+  await expect(exec.locator('[data-supervision-layer="enforcement"]')).toContainText("证据不可用");
+  await expect(exec.locator('[data-supervision-layer="execution"]')).toContainText("未调用");
+  await exec.click();
+  await expect(page.locator(".execution-inspector")).toContainText("运行时收据");
+  await expect(page.locator(".execution-inspector")).toContainText("已唯一关联");
+
+  const graphActionValues = await exec
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  const listItems = page.locator(".execution-list__item");
+  await expect(listItems).toHaveCount(5);
+  const listExec = listItems.filter({ hasText: "执行代码" });
+  const listActionValues = await listExec
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+  expect(listActionValues).toEqual(graphActionValues);
+});
+
 test("mock provenance shows Web content assembled into context without changing execution edges", async ({
   page,
 }) => {
@@ -299,5 +347,5 @@ test("evidence list keeps search and final status in the URL", async ({ page }) 
 
   await page.getByRole("button", { name: "清除筛选" }).click();
   await expect(page).toHaveURL(/\/evidence$/);
-  await expect(page.locator(".trace-table tbody tr")).toHaveCount(8);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(9);
 });

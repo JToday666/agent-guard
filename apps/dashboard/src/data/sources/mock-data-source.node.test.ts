@@ -6,6 +6,9 @@ import {
   OPENCLAW_REQUIRED_HOOKS,
 } from "../../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import type { GuardAuditEventDto } from "../../api/guard-api-types.ts";
+import { buildExecutionTrace } from "../evidence/execution-trace.ts";
+import { buildTraceEvidenceViewModel } from "../evidence/trace-evidence.ts";
+import { MOCK_MULTI_STEP_TRACE_ID } from "./mock-multi-step-trace.ts";
 import { MockDashboardDataSource } from "./mock-data-source.ts";
 
 test("mock preview source exposes reads only", () => {
@@ -31,6 +34,88 @@ test("mock runtime receipts preserve exact policy, event, decision and action li
   assert.equal(outcomeRaw.links?.event_id, policyRaw.links?.event_id);
   assert.equal(outcomeRaw.links?.decision_id, policyRaw.links?.decision_id);
   assert.equal(outcomeRaw.links?.action_id, policyRaw.links?.action_id);
+});
+
+test("mock multi-step trace projects five ordered steps with two strict runtime receipts", async () => {
+  const source = new MockDashboardDataSource(0);
+  const response = await source.getTraceDetail(MOCK_MULTI_STEP_TRACE_ID);
+  assert.equal(response.status, "modified");
+  if (response.status !== "modified") return;
+
+  const evidence = buildTraceEvidenceViewModel(
+    MOCK_MULTI_STEP_TRACE_ID,
+    response.value.events,
+    response.value.approvals,
+  );
+  const trace = buildExecutionTrace(evidence.events, response.value.approvals, {
+    elementSourceMode: "mock",
+    traceId: MOCK_MULTI_STEP_TRACE_ID,
+  });
+
+  assert.deepEqual(
+    trace.steps.map(({ displayName }) => displayName),
+    ["获取网页内容", "检查网页内容", "检查输入上下文", "检查模型输入", "执行代码"],
+  );
+  assert.deepEqual(
+    trace.steps.map(({ kind }) => kind),
+    ["action", "checkpoint", "checkpoint", "checkpoint", "action"],
+  );
+  assert.deepEqual(
+    trace.steps.filter(({ kind }) => kind === "action").map(({ actionId }) => actionId),
+    ["mock_action_multi_fetch_001", "mock_action_multi_exec_001"],
+  );
+  assert.equal(trace.lifecycleState, "completed");
+  assert.equal(trace.lifecycleSupervision.confirmedTerminal, true);
+  assert.match(trace.lifecycleSupervision.completionReason ?? "", /安全摘要路径完成/);
+  assert.equal(response.value.approvals.length, 0);
+
+  const fetch = trace.steps[0]!;
+  assert.equal(fetch.decision, "allow");
+  assert.equal(fetch.approval, "not_required");
+  assert.equal(fetch.supervision.enforcement.availability, "unavailable");
+  assert.equal(fetch.execution, "executed");
+  assert.equal(fetch.supervision.execution.receiptRecorded, true);
+
+  const exec = trace.steps.at(-1)!;
+  assert.equal(exec.decision, "deny");
+  assert.equal(exec.approval, "not_required");
+  assert.equal(exec.supervision.enforcement.availability, "unavailable");
+  assert.equal(exec.execution, "not_invoked");
+  assert.equal(exec.supervision.execution.receiptRecorded, true);
+  assert.equal(exec.supervision.controlIntegrity.status, "no_violation_observed");
+
+  const policies = response.value.events.filter(
+    ({ recordType }) => recordType === "policy_evaluation",
+  );
+  const outcomes = response.value.events.filter(
+    ({ recordType }) => recordType === "runtime_outcome",
+  );
+  assert.equal(policies.length, 5);
+  assert.equal(outcomes.length, 2);
+  for (const outcome of outcomes) {
+    const raw = outcome.raw as GuardAuditEventDto;
+    const metadata = raw.metadata as Record<string, unknown>;
+    const evidenceRecord = raw.evidence as Record<string, unknown>;
+    const policy = policies.find(({ id }) => id === raw.links.policy_audit_id);
+    assert.ok(policy);
+    assert.equal(raw.event_type, "runtime_outcome");
+    assert.equal(raw.latency_ms, null);
+    assert.deepEqual(Object.keys(metadata).sort(), ["agent_id", "outcome_kind"]);
+    assert.deepEqual(Object.keys(evidenceRecord).sort(), [
+      "approval",
+      "execution",
+      "intervention",
+      "result",
+      "side_effects",
+    ]);
+    assert.equal(
+      raw.audit_id,
+      `audit_outcome_${raw.links.event_id}_${String(metadata.outcome_kind)}`,
+    );
+    assert.equal(raw.links.event_id, (policy.raw as GuardAuditEventDto).links.event_id);
+    assert.equal(raw.links.decision_id, (policy.raw as GuardAuditEventDto).links.decision_id);
+    assert.equal(raw.links.action_id, (policy.raw as GuardAuditEventDto).links.action_id);
+  }
 });
 
 test("mock provenance graph contains evidence nodes and event references", async () => {
@@ -234,10 +319,13 @@ test("mock evaluation cases stay consistent with linked audit events", async () 
 test("mock audit window maps and deduplicates policy records", async () => {
   const source = new MockDashboardDataSource(0);
   const window = await source.getAuditWindow();
+  const integrity = await source.getAuditIntegrity();
 
   assert.ok(window.events.some((event) => event.recordType === "runtime_outcome"));
   assert.ok(window.events.every((event) => event.raw && typeof event.raw === "object"));
-  assert.equal(window.metrics.evaluationCount, 8);
+  assert.equal(window.metrics.evaluationCount, 13);
+  assert.equal(integrity.eventCount, window.events.length);
+  assert.equal(integrity.anchor.checkpointSequence, 25);
   assert.equal(
     window.metrics.allowCount + window.metrics.askCount + window.metrics.denyCount,
     window.metrics.evaluationCount,

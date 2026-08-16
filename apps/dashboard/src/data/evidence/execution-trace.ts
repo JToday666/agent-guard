@@ -42,6 +42,7 @@ const ACTION_LABELS: Readonly<Record<string, string>> = {
   search: "搜索信息",
   send_email: "发送邮件",
   send_message: "发送消息",
+  web_fetch: "获取网页内容",
   message_send_proposed: "发送消息",
   write_file: "写入文件",
 };
@@ -449,6 +450,7 @@ function displayName(
   if (category === "model_input") return "检查模型输入";
   if (category === "model_output") return "检查模型输出";
   if (category === "tool_result") {
+    if (name === "web_fetch") return "检查网页内容";
     const toolLabel = name ? (ACTION_LABELS[name] ?? name) : "工具";
     return `检查${toolLabel}返回内容`;
   }

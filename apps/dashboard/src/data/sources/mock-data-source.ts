@@ -45,6 +45,7 @@ import type {
 } from "./dashboard-data-source";
 import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
 import { approvals as fixtureApprovals, auditEvents as fixtureEvents } from "./mock-data.ts";
+import { MOCK_MULTI_STEP_AUDIT_EVENTS } from "./mock-multi-step-trace.ts";
 import contextIngressPreviewRaw from "../../../../../tests/fixtures/runtime_supervision/context_ingress_preview_v01.json" with { type: "json" };
 
 function loadContextIngressPreviewFixture(input: unknown): LoadedContextIngressPreviewFixture {
@@ -99,7 +100,14 @@ function readFixtureAuditEvent(event: AuditEventRow): GuardAuditEventDto {
   return raw as GuardAuditEventDto;
 }
 
-const mockAuditEvents = fixtureEvents.map(readFixtureAuditEvent);
+const mockAuditEvents = [
+  ...fixtureEvents.map(readFixtureAuditEvent),
+  ...MOCK_MULTI_STEP_AUDIT_EVENTS,
+];
+const mockAuditCheckpointSequence = Math.max(
+  0,
+  ...mockAuditEvents.map((event) => event.integrity?.sequence ?? 0),
+);
 
 const mockConfigAuditFindings: GuardConfigAuditFindingRecordDto[] = [
   {
@@ -300,14 +308,14 @@ const mockPolicyHistory: GuardPolicyHistoryDto[] = [
 
 const mockAuditIntegrity: GuardAuditIntegrityDto = {
   valid: true,
-  event_count: fixtureEvents.length,
+  event_count: mockAuditEvents.length,
   head_hash: "a".repeat(64),
   first_broken_audit_id: null,
   canonicalization: "jcs:rfc8785",
   anchor: {
     enabled: true,
     status: "current",
-    checkpoint_sequence: fixtureEvents.length,
+    checkpoint_sequence: mockAuditCheckpointSequence,
     checkpoint_head_hash: "a".repeat(64),
     checkpoint_hash: "b".repeat(64),
     checkpointed_at: "2026-06-28T08:30:00Z",
