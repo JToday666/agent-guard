@@ -30,6 +30,14 @@ const eventDto = {
     decision_id: "decision_api_001",
     event_id: "evt_api_001",
   },
+  evidence: {
+    policy: {
+      bundle_id: "default",
+      version: "api-smoke",
+      revision: 7,
+      canonical_digest: `sha256:${"a".repeat(64)}`,
+    },
+  },
   latency_ms: 4,
   record_type: "policy_evaluation",
   integrity: {
@@ -92,6 +100,11 @@ async function installApiRoutes(
       etag: string;
       events: Record<string, unknown>[];
     }>;
+    traceAfterResolution?: {
+      approvals: Record<string, unknown>[];
+      etag: string;
+      events: Record<string, unknown>[];
+    };
     traceStatus?: number;
   } = {},
 ) {
@@ -99,11 +112,15 @@ async function installApiRoutes(
   let provenanceFailuresRemaining = options.provenanceFailuresBeforeSuccess ?? 0;
   let provenanceSnapshotIndex = 0;
   let resolutionAttempted = false;
+  const resolveApprovalIds: string[] = [];
   let traceSnapshotIndex = 0;
   const traceConditionalHeaders: Array<string | null> = [];
   const provenanceConditionalHeaders: Array<string | null> = [];
   const traceEtag = '"trace-api-v1"';
   const provenanceEtag = '"provenance-api-v1"';
+  const defaultEvents =
+    options.events ??
+    (options.approvals?.length === 1 ? [approvalPolicyEvent(options.approvals[0]!)] : [eventDto]);
 
   await page.route("**/api/health?check_db=true", (route) =>
     route.fulfill({
@@ -140,7 +157,7 @@ async function installApiRoutes(
     }
 
     if (path === "/audit/window") {
-      const events = options.events ?? [eventDto];
+      const events = defaultEvents;
       return route.fulfill({
         json: {
           scope: {
@@ -178,15 +195,25 @@ async function installApiRoutes(
     }
     if (path.startsWith("/approvals/") && path.endsWith("/resolve")) {
       resolutionAttempted = true;
+      resolveApprovalIds.push(path.split("/")[2] ?? "");
+      const body = route.request().postDataJSON() as { decision?: unknown } | null;
+      const decision = body?.decision === "allow_once" ? "allow_once" : "deny";
       return route.fulfill({
         status: options.resolveApprovalStatus ?? 200,
         json:
           options.resolveApprovalStatus && options.resolveApprovalStatus >= 400
-            ? { error: { code: "INTERNAL_ERROR" } }
+            ? {
+                error: {
+                  code:
+                    options.resolveApprovalStatus === 409
+                      ? "APPROVAL_ALREADY_RESOLVED"
+                      : "INTERNAL_ERROR",
+                },
+              }
             : {
                 approval_id: path.split("/")[2],
                 status: "resolved",
-                decision: "deny",
+                decision,
               },
       });
     }
@@ -270,25 +297,39 @@ async function installApiRoutes(
           json: { error: { code: "TRACE_NOT_FOUND" } },
         });
       }
+      const postResolutionSnapshot = resolutionAttempted ? options.traceAfterResolution : undefined;
       const snapshot =
+        postResolutionSnapshot ??
         options.traceSnapshots?.[Math.min(traceSnapshotIndex, options.traceSnapshots.length - 1)];
       const activeTraceEtag = snapshot?.etag ?? traceEtag;
-      if (options.traceSnapshots && traceSnapshotIndex < options.traceSnapshots.length - 1) {
+      if (
+        !postResolutionSnapshot &&
+        options.traceSnapshots &&
+        traceSnapshotIndex < options.traceSnapshots.length - 1
+      ) {
         traceSnapshotIndex += 1;
       }
       if (route.request().headers()["if-none-match"] === activeTraceEtag) {
         return route.fulfill({ status: 304, headers: { ETag: activeTraceEtag } });
       }
-      const traceEvents = snapshot?.events ?? options.events ?? [eventDto];
+      const traceEvents = snapshot?.events ?? defaultEvents;
+      const traceApprovals = snapshot?.approvals ?? options.approvals ?? [];
       return route.fulfill({
         headers: { ETag: activeTraceEtag },
         json: {
           trace_id: "trace_api_001",
           audit_events: traceEvents,
-          approvals: snapshot?.approvals ?? options.approvals ?? [],
+          approvals: traceApprovals,
           audit_window: {
             limit: 500,
             returned_count: traceEvents.length,
+            has_more: false,
+            next_cursor: null,
+            snapshot_id: "snapshot-api-trace",
+          },
+          approval_window: {
+            limit: 500,
+            returned_count: traceApprovals.length,
             has_more: false,
           },
         },
@@ -402,6 +443,15 @@ async function installApiRoutes(
               metadata: {},
             },
           ],
+          provenance_window: {
+            node_limit: 500,
+            returned_node_count: 4,
+            nodes_have_more: false,
+            edge_limit: 500,
+            returned_edge_count: 3,
+            edges_have_more: false,
+            has_more: false,
+          },
         },
       });
     }
@@ -412,16 +462,16 @@ async function installApiRoutes(
     });
   });
 
-  return { provenanceConditionalHeaders, traceConditionalHeaders };
+  return { provenanceConditionalHeaders, resolveApprovalIds, traceConditionalHeaders };
 }
 
 function uncertainApproval() {
   return {
     approval_id: "approval_uncertain",
     trace_id: "trace_api_001",
-    subject_id: "call_uncertain",
+    subject_id: "action_api_001",
     subject_type: "tool_call",
-    action_id: "call_uncertain",
+    action_id: "action_api_001",
     action_name: "send_email",
     requesting_principal_id: "agent_api",
     runtime: "langgraph",
@@ -436,6 +486,49 @@ function uncertainApproval() {
     created_at: "2026-06-28T08:00:00Z",
     expires_at: "2099-06-28T08:05:00Z",
     resolved_at: null,
+    evidence: {
+      event: {
+        event_id: "evt_api_001",
+        event_type: "tool_call_proposed",
+        trace_id: "trace_api_001",
+        runtime: "langgraph",
+        source_type: "retrieved_context",
+        source_trust: "untrusted",
+        resource_targets: ["external@example.invalid"],
+      },
+      decision: {
+        decision_id: "decision_api_001",
+        decision: "ask",
+        risk_score: 64,
+        severity: "medium",
+        reason: "外部发送需要人工确认",
+        rule_hits: [{ rule_id: "P005_external_send" }, { rule_id: "P004_task_mismatch" }],
+      },
+    },
+    llm_review: null,
+    resolution_source: null,
+    resolved_by: null,
+    resolution_reason: null,
+  };
+}
+
+function approvalPolicyEvent(approval: Record<string, unknown>) {
+  const evidence = (approval.evidence ?? {}) as Record<string, Record<string, unknown>>;
+  const approvalEvent = evidence.event ?? {};
+  const approvalDecision = evidence.decision ?? {};
+  return {
+    ...eventDto,
+    links: {
+      ...eventDto.links,
+      action_id: String(approval.action_id ?? ""),
+      approval_id: String(approval.approval_id ?? ""),
+      decision_id: String(approvalDecision.decision_id ?? ""),
+      event_id: String(approvalEvent.event_id ?? ""),
+    },
+    metadata: {
+      ...eventDto.metadata,
+      action_name: String(approval.action_name ?? "未提供"),
+    },
   };
 }
 
@@ -449,6 +542,18 @@ function runtimeApproval(status: "pending" | "resolved", decision: "allow_once" 
     status,
     decision,
     resolved_at: status === "resolved" ? "2026-06-28T08:00:02Z" : null,
+  };
+}
+
+function settledApproval(decision: "allow_once" | "deny") {
+  return {
+    ...uncertainApproval(),
+    status: "resolved",
+    decision,
+    resolved_at: "2026-06-28T08:00:02Z",
+    resolution_source: "human",
+    resolved_by: "api-mode-operator",
+    resolution_reason: decision === "allow_once" ? "确认仅本次放行" : "拒绝本次授权",
   };
 }
 
@@ -583,6 +688,49 @@ test("API mode conditionally refreshes a running action until its terminal recei
   await expect(page.locator(".execution-trace__connection")).toContainText("运行结果已确认");
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v1"');
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v2"');
+});
+
+test("terminal reconciliation retries Provenance after its first failure", async ({ page }) => {
+  const terminalEvent = {
+    ...eventDto,
+    audit_id: "audit_trace_terminal_retry",
+    blocked: null,
+    decision: null,
+    event_type: "trace_completed",
+    integrity: {
+      ...eventDto.integrity,
+      sequence: 2,
+      prev_hash: "hash_api",
+      event_hash: "hash_trace_terminal_retry",
+    },
+    links: { event_id: "trace_api_001" },
+    reason: "本次运行已经结束",
+    record_type: "runtime_observation",
+    risk_score: null,
+    severity: null,
+    stage: "trace_completed",
+    summary: "本次运行已经结束",
+    timestamp: "2026-06-28T08:00:04Z",
+  };
+  const requests = await installApiRoutes(page, {
+    provenanceFailuresBeforeSuccess: 1,
+    traceSnapshots: [
+      {
+        approvals: [],
+        etag: '"trace-terminal-retry"',
+        events: [eventDto, terminalEvent],
+      },
+    ],
+  });
+
+  await page.goto("/evidence/trace_api_001?view=execution&execution_layout=list");
+  await expect(page.locator(".execution-trace__connection")).toContainText("2 秒后重试");
+  await expect
+    .poll(() => requests.provenanceConditionalHeaders.length, { timeout: 6_000 })
+    .toBeGreaterThanOrEqual(2);
+  await expect(page.locator(".execution-trace__connection")).toContainText(
+    "运行已结束，部分结果未确认",
+  );
 });
 
 test("API mode appends a new execution node without moving existing graph positions", async ({
@@ -804,6 +952,24 @@ test("API mode keeps independent validators for trace and provenance snapshots",
   await page.getByRole("button", { name: "更新溯源关系" }).click();
   await expect.poll(() => requests.provenanceConditionalHeaders).toContain('"provenance-api-v1"');
   await expect(page.locator(".prov-node--action")).toContainText("send_email");
+});
+
+test("a Trace 304 preserves the selected step and keyboard focus", async ({ page }) => {
+  const requests = await installApiRoutes(page);
+  await page.goto("/evidence/trace_api_001?view=execution&execution_layout=list");
+
+  const step = page.locator('.execution-list__item[data-action-id="action_api_001"]');
+  const trigger = step.locator(":scope > button");
+  await trigger.focus();
+  await trigger.press("Enter");
+  await expect(step).toHaveClass(/execution-list__item--selected/);
+  await expect(trigger).toBeFocused();
+
+  await expect
+    .poll(() => requests.traceConditionalHeaders, { timeout: 4_500 })
+    .toContain('"trace-api-v1"');
+  await expect(step).toHaveClass(/execution-list__item--selected/);
+  await expect(trigger).toBeFocused();
 });
 
 test("provenance updates preserve filters, collapsed stages and the selected node anchor", async ({
@@ -1116,7 +1282,7 @@ test("API mode keeps one-time approval confirmation accessible in a reduced-moti
 
   const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("该动作将绕过当前安全判断并继续执行一次");
+  await expect(dialog).toContainText("只会授权当前审批精确关联的动作与资源");
   await expect(page.getByRole("button", { name: "取消" })).toBeFocused();
   await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
     /confirm-dialog__signal--warning/,
@@ -1158,6 +1324,141 @@ test("API mode deny approval uses a danger confirmation and restores trigger foc
   await expect(trigger).toBeFocused();
 });
 
+test("API mode keeps target B read-only when the trace only carries basis A", async ({ page }) => {
+  const basisA = uncertainApproval();
+  const targetB = { ...uncertainApproval(), approval_id: "approval_target_b" };
+  const requests = await installApiRoutes(page, {
+    approvals: [targetB],
+    traceSnapshots: [
+      {
+        approvals: [basisA],
+        etag: '"trace-basis-a"',
+        events: [approvalPolicyEvent(basisA)],
+      },
+    ],
+  });
+
+  await page.goto("/approvals/approval_target_b");
+  const allowOnce = page.getByRole("button", { name: "仅本次放行" });
+  const deny = page.getByRole("button", { name: "拒绝授权" });
+  await expect(allowOnce).toBeDisabled();
+  await expect(deny).toBeDisabled();
+  await expect(page.getByText("审批依据尚未完成 Live 精确关联，当前只能查看")).toBeVisible();
+
+  await allowOnce.evaluate((button: HTMLButtonElement) => button.click());
+  await deny.evaluate((button: HTMLButtonElement) => button.click());
+  expect(requests.resolveApprovalIds).toEqual([]);
+});
+
+test("API mode rejects approval mutation when provenance is truncated", async ({ page }) => {
+  const requests = await installApiRoutes(page, {
+    approvals: [uncertainApproval()],
+    provenance: {
+      trace_id: "trace_api_001",
+      nodes: [],
+      edges: [],
+      provenance_window: {
+        node_limit: 500,
+        returned_node_count: 0,
+        nodes_have_more: true,
+        edge_limit: 500,
+        returned_edge_count: 0,
+        edges_have_more: false,
+        has_more: true,
+      },
+    },
+  });
+
+  await page.goto("/approvals/approval_uncertain");
+  const allowOnce = page.getByRole("button", { name: "仅本次放行" });
+  const deny = page.getByRole("button", { name: "拒绝授权" });
+  await expect(allowOnce).toBeDisabled();
+  await expect(deny).toBeDisabled();
+
+  await allowOnce.evaluate((button: HTMLButtonElement) => button.click());
+  await deny.evaluate((button: HTMLButtonElement) => button.click());
+  expect(requests.resolveApprovalIds).toEqual([]);
+});
+
+test("API mode rejects approval mutation when provenance completeness is unavailable", async ({
+  page,
+}) => {
+  const requests = await installApiRoutes(page, {
+    approvals: [uncertainApproval()],
+    provenance: {
+      trace_id: "trace_api_001",
+      nodes: [],
+      edges: [],
+    },
+  });
+
+  await page.goto("/approvals/approval_uncertain");
+  const allowOnce = page.getByRole("button", { name: "仅本次放行" });
+  const deny = page.getByRole("button", { name: "拒绝授权" });
+  await expect(allowOnce).toBeDisabled();
+  await expect(deny).toBeDisabled();
+
+  await allowOnce.evaluate((button: HTMLButtonElement) => button.click());
+  await deny.evaluate((button: HTMLButtonElement) => button.click());
+  expect(requests.resolveApprovalIds).toEqual([]);
+});
+
+test("API mode reads back a successful approval once without rewriting official ASK", async ({
+  page,
+}) => {
+  const resolved = settledApproval("allow_once");
+  const requests = await installApiRoutes(page, {
+    approvals: [uncertainApproval()],
+    dropApprovalAfterResolveFailure: true,
+    traceAfterResolution: {
+      approvals: [resolved],
+      etag: '"trace-approval-resolved"',
+      events: [approvalPolicyEvent(resolved)],
+    },
+  });
+
+  await page.goto("/approvals/approval_uncertain");
+  await page.getByRole("button", { name: "仅本次放行" }).click();
+  await page.getByRole("button", { name: "确认仅本次放行" }).click();
+
+  await expect(page).toHaveURL(/\/evidence\/trace_api_001/);
+  const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
+  await expect(action.locator('[data-supervision-layer="decision"]')).toContainText("需审批");
+  await expect(action.locator('[data-supervision-layer="approval"]')).toContainText("单次放行");
+  expect(requests.resolveApprovalIds).toEqual(["approval_uncertain"]);
+  expect(requests.traceConditionalHeaders.some((header) => header !== null)).toBe(true);
+});
+
+test("API mode reconciles a 409 once and never resends the approval mutation", async ({ page }) => {
+  const resolved = settledApproval("deny");
+  const requests = await installApiRoutes(page, {
+    approvals: [uncertainApproval()],
+    dropApprovalAfterResolveFailure: true,
+    resolveApprovalStatus: 409,
+    traceAfterResolution: {
+      approvals: [resolved],
+      etag: '"trace-approval-conflict"',
+      events: [approvalPolicyEvent(resolved)],
+    },
+  });
+
+  await page.goto("/approvals/approval_uncertain");
+  await page.getByRole("button", { name: "拒绝授权" }).click();
+  await page.getByRole("button", { name: "确认拒绝授权" }).click();
+
+  await expect(page.getByText("该审批已不在待处理状态，可能已由其他端完成。")).toBeVisible();
+  await expect(page.getByText("该审批不可用", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/approvals\/approval_uncertain$/);
+  expect(requests.resolveApprovalIds).toEqual(["approval_uncertain"]);
+  expect(requests.traceConditionalHeaders.some((header) => header !== null)).toBe(true);
+
+  await page.goto("/evidence/trace_api_001?view=execution&execution_layout=list");
+  const action = page.locator('.execution-list__item[data-action-id="action_api_001"]');
+  await expect(action.locator('[data-supervision-layer="decision"] dd')).toHaveText("需审批");
+  await expect(action.locator('[data-supervision-layer="approval"] dd')).toHaveText("已拒绝");
+  expect(requests.resolveApprovalIds).toEqual(["approval_uncertain"]);
+});
+
 test("API mode keeps an uncertain approval available when reconciliation still returns it", async ({
   page,
 }) => {
@@ -1193,8 +1494,8 @@ test("API mode leaves a removed uncertain approval without inferring its outcome
   await expect(
     page.getByText("审批提交结果未确认，已尝试刷新待审批队列，请以当前状态为准。"),
   ).toBeVisible();
-  await expect(page.getByText("审批队列已清空")).toBeVisible();
-  await expect(page).toHaveURL(/\/approvals$/);
+  await expect(page.getByText("该审批不可用", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/approvals\/approval_uncertain$/);
   await expect(page.getByText(/已拒绝|已允许/)).toHaveCount(0);
 });
 
@@ -1206,25 +1507,10 @@ test("API mode disables an approval when its expiry passes without another poll"
   await installApiRoutes(page, {
     approvals: [
       {
+        ...uncertainApproval(),
         approval_id: "approval_expiring",
-        trace_id: "trace_api_001",
-        subject_id: "call_expiring",
-        subject_type: "tool_call",
-        action_id: "call_expiring",
-        action_name: "send_email",
-        requesting_principal_id: "agent_api",
-        runtime: "langgraph",
-        agent_id: "agent_api",
-        status: "pending",
-        decision_options: ["allow_once", "deny"],
-        decision: null,
-        resource: "external@example.invalid",
-        reason: "外部发送需要人工确认",
-        risk_score: 64,
-        severity: "medium",
         created_at: new Date(now.getTime() - 60_000).toISOString(),
         expires_at: new Date(now.getTime() + 60_000).toISOString(),
-        resolved_at: null,
       },
     ],
   });

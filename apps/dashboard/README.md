@@ -47,9 +47,10 @@ Dashboard 默认通过同源代理路径访问 Guard API：
 VITE_API_BASE_URL=/api/v1
 VITE_API_HEALTH_URL=/api/health
 VITE_API_REQUEST_TIMEOUT_MS=10000
+VITE_RUNTIME_SUPERVISION_S1_ENABLED=true
 ```
 
-`VITE_API_REQUEST_TIMEOUT_MS` 必须为正数，非法值回退到 10 秒。API 与健康地址应保持为同源代理路径；`VITE_BACKEND_TARGET` 只配置 Vite 代理连接的后端地址，不支持浏览器跨域直连 Guard API。
+`VITE_API_REQUEST_TIMEOUT_MS` 必须为正数，非法值回退到 10 秒。`VITE_RUNTIME_SUPERVISION_S1_ENABLED` 默认开启；明确设为 `false`、`0`、`off` 或 `no` 时回退到 S0 只读监督，并拒绝全部审批写入。API 与健康地址应保持为同源代理路径；`VITE_BACKEND_TARGET` 只配置 Vite 代理连接的后端地址，不支持浏览器跨域直连 Guard API。
 
 ## 常用命令
 

@@ -46,6 +46,7 @@ export type DashboardBuildProfile = "production" | "development" | "test";
 export interface DashboardDataSourceCapabilities {
   readonly approvalMutation: boolean;
   readonly localReplayImport: boolean;
+  readonly runtimeSupervisionS1: boolean;
   readonly syntheticFacts: boolean;
 }
 
@@ -81,7 +82,7 @@ export interface DashboardReadDataSource {
 
 export interface ApprovalMutationDataSource {
   resolveApproval(
-    approval: ApprovalRequest,
+    approvalId: string,
     decision: "allow_once" | "deny",
     csrfToken: string,
   ): Promise<ApprovalResolution>;
@@ -95,6 +96,7 @@ export interface DashboardDataSourceHandle {
 
 export interface DashboardDataSourceRuntimeEnvironment {
   readonly isProduction: boolean;
+  readonly runtimeSupervisionS1Enabled?: boolean;
   readonly viteMode: string;
 }
 
@@ -111,10 +113,20 @@ export type ApprovalMutationPermission =
 export class DashboardMutationNotPermittedError extends Error {
   readonly code = "mutation_not_permitted" as const;
 
-  constructor() {
-    super("当前数据源为只读预览，不能处理审批。");
+  constructor(message = "当前审批不满足安全写入条件，不能提交处理结果。") {
+    super(message);
     this.name = "DashboardMutationNotPermittedError";
   }
+}
+
+const factoryOwnedDescriptors = new WeakSet<object>();
+
+export function isFactoryOwnedDashboardDataSourceDescriptor(
+  descriptor: unknown,
+): descriptor is DashboardDataSourceDescriptor {
+  return (
+    typeof descriptor === "object" && descriptor !== null && factoryOwnedDescriptors.has(descriptor)
+  );
 }
 
 export function createDashboardDataSourceDescriptor(
@@ -122,12 +134,15 @@ export function createDashboardDataSourceDescriptor(
 ): DashboardDataSourceDescriptor {
   const dataSourceMode: DashboardDataSourceMode =
     !environment.isProduction && environment.viteMode === "mock" ? "mock_preview" : "live_api";
+  const runtimeSupervisionS1 =
+    dataSourceMode === "live_api" && environment.runtimeSupervisionS1Enabled !== false;
   const capabilities = Object.freeze<DashboardDataSourceCapabilities>({
-    approvalMutation: dataSourceMode === "live_api",
+    approvalMutation: runtimeSupervisionS1,
     localReplayImport: false,
+    runtimeSupervisionS1,
     syntheticFacts: dataSourceMode === "mock_preview",
   });
-  return Object.freeze({
+  const descriptor = Object.freeze({
     owner: "dashboard_data_source_factory" as const,
     dataSourceMode,
     buildProfile: environment.isProduction
@@ -137,6 +152,8 @@ export function createDashboardDataSourceDescriptor(
         : ("development" as const),
     capabilities,
   });
+  factoryOwnedDescriptors.add(descriptor);
+  return descriptor;
 }
 
 export function selectApprovalMutationWriter(
@@ -145,8 +162,10 @@ export function selectApprovalMutationWriter(
 ): ApprovalMutationPermission {
   if (
     readOnlyOverride ||
+    !isFactoryOwnedDashboardDataSourceDescriptor(handle.descriptor) ||
     handle.descriptor.dataSourceMode !== "live_api" ||
     !handle.descriptor.capabilities.approvalMutation ||
+    !handle.descriptor.capabilities.runtimeSupervisionS1 ||
     !handle.approvalWriter
   ) {
     return { code: "mutation_not_permitted", permitted: false };

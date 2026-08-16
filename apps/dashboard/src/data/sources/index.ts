@@ -38,8 +38,8 @@ function createLazyApprovalWriter(
   loadSource: () => Promise<ApprovalMutationDataSource>,
 ): ApprovalMutationDataSource {
   const writer: ApprovalMutationDataSource = {
-    resolveApproval: (approval, decision, csrfToken) =>
-      loadSource().then((source) => source.resolveApproval(approval, decision, csrfToken)),
+    resolveApproval: (approvalId, decision, csrfToken) =>
+      loadSource().then((source) => source.resolveApproval(approvalId, decision, csrfToken)),
   };
   return Object.freeze(writer);
 }
@@ -47,6 +47,7 @@ function createLazyApprovalWriter(
 export function createDashboardDataSourceHandle(): DashboardDataSourceHandle {
   const descriptor = createDashboardDataSourceDescriptor({
     isProduction: import.meta.env.PROD,
+    runtimeSupervisionS1Enabled: dashboardEnv.runtimeSupervisionS1Enabled,
     viteMode: import.meta.env.MODE,
   });
   let sourcePromise: Promise<DashboardReadDataSource> | null = null;
