@@ -41,7 +41,7 @@ test("approval detail exposes explicit control-flow evidence fields", async ({ p
 
   const detail = page.locator(".approval-detail");
   await expect(detail).toContainText("关联事件");
-  await expect(detail).toContainText("evt_20260607_005");
+  await expect(detail).toContainText("guard_event_trace_005");
   await expect(detail).toContainText("证据链");
   await expect(detail).toContainText("trace_005");
   await expect(detail).toContainText("审批主体");

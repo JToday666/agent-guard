@@ -116,6 +116,7 @@
       </div>
 
       <ExecutionStepInspector
+        :approval-basis="selectedApprovalBasis"
         :lifecycle-state="trace.lifecycleState"
         :step="selectedStep"
         :step-number="selectedStepNumber"
@@ -156,6 +157,7 @@ import type {
   ExecutionTraceViewModel,
   TracePollingState,
 } from "../../types/dashboard";
+import type { ApprovalBasisViewModel } from "../../types/runtime-supervision";
 import ExecutionStepInspector from "./ExecutionStepInspector.vue";
 import ExecutionTraceList from "./ExecutionTraceList.vue";
 import ExecutionTraceToolbar from "./ExecutionTraceToolbar.vue";
@@ -169,6 +171,7 @@ const props = defineProps<{
   trace: ExecutionTraceViewModel;
   pollingState: TracePollingState;
   layout: ExecutionTraceLayout;
+  approvalBasisById?: Readonly<Record<string, ApprovalBasisViewModel>>;
   isWindowPartial?: boolean;
   selectedActionId?: string;
   selectedAuditId?: string;
@@ -226,6 +229,10 @@ const selectedStep = computed(
 const selectedStepNumber = computed(() => {
   if (!selectedStep.value) return undefined;
   return stepNumberById.value.get(selectedStep.value.stepId);
+});
+const selectedApprovalBasis = computed(() => {
+  const approvalId = selectedStep.value?.approvalId;
+  return approvalId ? props.approvalBasisById?.[approvalId] : undefined;
 });
 const stepNumberById = computed(
   () => new Map(props.trace.steps.map((step, index) => [step.stepId, index + 1])),
