@@ -1,0 +1,404 @@
+{
+  "fixture_schema_version": "runtime-supervision-fixture/0.1",
+  "fixture_id": "rsc_supervision_projection_v01",
+  "purpose": "contract_projection",
+  "source_mode": "mock",
+  "derived_from": ["tests/fixtures/runtime_safety_trace_v04.json"],
+  "contract_versions": {
+    "supervision": "runtime-supervision/0.1",
+    "audit": "0.4"
+  },
+  "contains_synthetic_facts": true,
+  "safe_for_demo_sandbox": true,
+  "fixture_kind": "supervision_projection",
+  "source_trace_id": "trace_runtime_safety_demo_001",
+  "trace_id": "mock_trace_supervision_projection_v01",
+  "element_source_mode": "mock",
+  "cases": [
+    {
+      "case_id": "ask_allow_once_executed",
+      "description": "ASK remains the official decision after a human allow_once approval; execution is shown only because a unique receipt exists.",
+      "expectations": [
+        "official_decision_is_ask",
+        "approval_is_allow_once",
+        "enforcement_is_unavailable",
+        "execution_is_receipt_confirmed"
+      ],
+      "supervision": {
+        "step_key": "action:mock_action_code_exec_approved_001",
+        "activity_state": "settled",
+        "semantics": {
+          "element_source_mode": "mock",
+          "availability": "recorded",
+          "certainty": "confirmed",
+          "decision_authority": "official",
+          "fact_authority": "none",
+          "derived_for_display": true,
+          "source_refs": [
+            {
+              "kind": "audit",
+              "id": "mock_audit_policy_code_exec_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            },
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_code_exec_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "action": {
+          "action_id": "mock_action_code_exec_approved_001",
+          "action_name": "safe_arithmetic",
+          "subject_type": "tool_call",
+          "resource_targets": ["sandbox:calculator"],
+          "argument_summary": null,
+          "occurred_at": "2026-08-07T02:00:01.000Z",
+          "source_refs": [
+            {
+              "kind": "action",
+              "id": "mock_action_code_exec_approved_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "official_decision": {
+          "availability": "recorded",
+          "decision_authority": "official",
+          "decision_id": "mock_decision_code_exec_001",
+          "decision": "ask",
+          "policy_audit_id": "mock_audit_policy_code_exec_001",
+          "risk_score": 72,
+          "severity": "high",
+          "rule_ids": ["P108_agent_abuse"],
+          "reason_codes": ["HUMAN_APPROVAL_REQUIRED"],
+          "reason": "Synthetic policy evidence requires one-time human approval.",
+          "source_refs": [
+            {
+              "kind": "decision",
+              "id": "mock_decision_code_exec_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "v21_assessment": "unavailable",
+        "approval": {
+          "availability": "recorded",
+          "approval_id": "mock_approval_code_exec_001",
+          "status": "allowed",
+          "decision": "allow_once",
+          "resolution_source": "human",
+          "created_at": "2026-08-07T02:00:01.100Z",
+          "expires_at": "2026-08-07T02:05:01.100Z",
+          "resolved_at": "2026-08-07T02:00:01.900Z",
+          "source_refs": [
+            {
+              "kind": "approval",
+              "id": "mock_approval_code_exec_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "enforcement": {
+          "availability": "unavailable",
+          "gate_state": "unknown",
+          "binding_check_status": "not_performed",
+          "lease_consume_outcome": "not_attempted",
+          "lease_id": null,
+          "consumption_id": null,
+          "reason_codes": ["RTE_05_EVIDENCE_UNAVAILABLE"],
+          "source_refs": []
+        },
+        "execution": {
+          "availability": "recorded",
+          "status": "executed",
+          "receipt_recorded": true,
+          "invoked_at": "2026-08-07T02:00:02.000Z",
+          "completed_at": "2026-08-07T02:00:02.050Z",
+          "tool_result_entered_context": true,
+          "persisted": true,
+          "side_effect_measurement": "measured",
+          "side_effect_count": 0,
+          "source_refs": [
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_code_exec_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "control_integrity": {
+          "status": "no_violation_observed",
+          "reason_codes": [],
+          "source_refs": [
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_code_exec_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "content_ingress_summary": {
+          "availability": "unavailable",
+          "stable_source_refs": [],
+          "raw_source_types": [],
+          "normalized_ct_source_types": [],
+          "ct_normalization_availability": "unavailable",
+          "trust_labels": [],
+          "taints": [],
+          "provenance_node_ids": []
+        }
+      }
+    },
+    {
+      "case_id": "deny_without_runtime_proof",
+      "description": "A DENY policy decision does not imply an enforcement block or a not_invoked runtime outcome.",
+      "expectations": [
+        "official_decision_is_deny",
+        "approval_is_not_applicable",
+        "enforcement_is_unknown",
+        "execution_is_unknown"
+      ],
+      "supervision": {
+        "step_key": "action:mock_action_external_write_denied_001",
+        "activity_state": "settled",
+        "semantics": {
+          "element_source_mode": "mock",
+          "availability": "partial",
+          "certainty": "supported",
+          "decision_authority": "official",
+          "fact_authority": "none",
+          "derived_for_display": true,
+          "source_refs": [
+            {
+              "kind": "audit",
+              "id": "mock_audit_policy_external_write_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "action": {
+          "action_id": "mock_action_external_write_denied_001",
+          "action_name": "publish_report",
+          "subject_type": "tool_call",
+          "resource_targets": ["https://sink.agentguard.test/reports/demo"],
+          "argument_summary": null,
+          "occurred_at": "2026-08-07T02:01:00.000Z",
+          "source_refs": [
+            {
+              "kind": "action",
+              "id": "mock_action_external_write_denied_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "official_decision": {
+          "availability": "recorded",
+          "decision_authority": "official",
+          "decision_id": "mock_decision_external_write_001",
+          "decision": "deny",
+          "policy_audit_id": "mock_audit_policy_external_write_001",
+          "risk_score": 96,
+          "severity": "critical",
+          "rule_ids": ["P104_data_exfiltration"],
+          "reason_codes": ["UNTRUSTED_EXTERNAL_EGRESS"],
+          "reason": "Synthetic policy evidence denies an untrusted external write.",
+          "source_refs": [
+            {
+              "kind": "decision",
+              "id": "mock_decision_external_write_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "v21_assessment": "unavailable",
+        "approval": {
+          "availability": "not_applicable",
+          "approval_id": null,
+          "status": "unknown",
+          "decision": null,
+          "resolution_source": null,
+          "created_at": null,
+          "expires_at": null,
+          "resolved_at": null,
+          "source_refs": []
+        },
+        "enforcement": {
+          "availability": "unavailable",
+          "gate_state": "unknown",
+          "binding_check_status": "not_performed",
+          "lease_consume_outcome": "not_attempted",
+          "lease_id": null,
+          "consumption_id": null,
+          "reason_codes": ["RTE_05_EVIDENCE_UNAVAILABLE"],
+          "source_refs": []
+        },
+        "execution": {
+          "availability": "unavailable",
+          "status": "unknown",
+          "receipt_recorded": false,
+          "invoked_at": null,
+          "completed_at": null,
+          "tool_result_entered_context": null,
+          "persisted": null,
+          "side_effect_measurement": "unknown",
+          "side_effect_count": null,
+          "source_refs": []
+        },
+        "control_integrity": {
+          "status": "unknown",
+          "reason_codes": ["RUNTIME_EVIDENCE_UNAVAILABLE"],
+          "source_refs": []
+        },
+        "content_ingress_summary": {
+          "availability": "unavailable",
+          "stable_source_refs": [],
+          "raw_source_types": [],
+          "normalized_ct_source_types": [],
+          "ct_normalization_availability": "unavailable",
+          "trust_labels": [],
+          "taints": [],
+          "provenance_node_ids": []
+        }
+      }
+    },
+    {
+      "case_id": "conflicting_runtime_receipts",
+      "description": "Conflicting candidate receipts remain unknown and surface a correlation conflict instead of selecting a terminal outcome.",
+      "expectations": [
+        "execution_is_unknown",
+        "receipt_recorded_is_false",
+        "control_integrity_is_correlation_conflict"
+      ],
+      "supervision": {
+        "step_key": "action:mock_action_conflicting_receipts_001",
+        "activity_state": "unknown",
+        "semantics": {
+          "element_source_mode": "mock",
+          "availability": "partial",
+          "certainty": "unknown",
+          "decision_authority": "official",
+          "fact_authority": "none",
+          "derived_for_display": true,
+          "source_refs": [
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_conflict_a_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            },
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_conflict_b_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "action": {
+          "action_id": "mock_action_conflicting_receipts_001",
+          "action_name": "sandbox_write",
+          "subject_type": "tool_call",
+          "resource_targets": ["sandbox:/reports/demo.txt"],
+          "argument_summary": null,
+          "occurred_at": "2026-08-07T02:02:00.000Z",
+          "source_refs": [
+            {
+              "kind": "action",
+              "id": "mock_action_conflicting_receipts_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "official_decision": {
+          "availability": "recorded",
+          "decision_authority": "official",
+          "decision_id": "mock_decision_conflicting_receipts_001",
+          "decision": "allow",
+          "policy_audit_id": "mock_audit_policy_conflicting_receipts_001",
+          "risk_score": 12,
+          "severity": "low",
+          "rule_ids": [],
+          "reason_codes": [],
+          "reason": "Synthetic policy evidence allows a sandbox-only write.",
+          "source_refs": [
+            {
+              "kind": "decision",
+              "id": "mock_decision_conflicting_receipts_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "v21_assessment": "unavailable",
+        "approval": {
+          "availability": "not_applicable",
+          "approval_id": null,
+          "status": "unknown",
+          "decision": null,
+          "resolution_source": null,
+          "created_at": null,
+          "expires_at": null,
+          "resolved_at": null,
+          "source_refs": []
+        },
+        "enforcement": {
+          "availability": "unavailable",
+          "gate_state": "unknown",
+          "binding_check_status": "not_performed",
+          "lease_consume_outcome": "not_attempted",
+          "lease_id": null,
+          "consumption_id": null,
+          "reason_codes": ["RTE_05_EVIDENCE_UNAVAILABLE"],
+          "source_refs": []
+        },
+        "execution": {
+          "availability": "partial",
+          "status": "unknown",
+          "receipt_recorded": false,
+          "invoked_at": null,
+          "completed_at": null,
+          "tool_result_entered_context": null,
+          "persisted": null,
+          "side_effect_measurement": "unknown",
+          "side_effect_count": null,
+          "source_refs": [
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_conflict_a_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            },
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_conflict_b_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "control_integrity": {
+          "status": "correlation_conflict",
+          "reason_codes": ["MULTIPLE_RUNTIME_RECEIPT_CANDIDATES"],
+          "source_refs": [
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_conflict_a_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            },
+            {
+              "kind": "receipt",
+              "id": "mock_receipt_conflict_b_001",
+              "trace_id": "mock_trace_supervision_projection_v01"
+            }
+          ]
+        },
+        "content_ingress_summary": {
+          "availability": "unavailable",
+          "stable_source_refs": [],
+          "raw_source_types": [],
+          "normalized_ct_source_types": [],
+          "ct_normalization_availability": "unavailable",
+          "trust_labels": [],
+          "taints": [],
+          "provenance_node_ids": []
+        }
+      }
+    }
+  ]
+}

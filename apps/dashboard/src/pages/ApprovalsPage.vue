@@ -13,6 +13,14 @@
 
     <div class="approvals-page__content">
       <InlineNotice
+        v-if="isReadOnly"
+        class="approval-readonly-notice"
+        title="只读审批视图"
+        tone="warning"
+      >
+        <p>{{ readonlyReason }}</p>
+      </InlineNotice>
+      <InlineNotice
         v-if="pageMessage"
         class="approval-page-message"
         title="审批队列已更新"
@@ -65,7 +73,9 @@
           </aside>
 
           <div v-if="selectedApproval" class="approval-detail-pane">
-            <RouterLink class="approval-detail-back" to="/approvals">返回审批队列</RouterLink>
+            <RouterLink class="approval-detail-back" :to="approvalQueueRoute">
+              返回审批队列
+            </RouterLink>
             <ApprovalDetail
               :approval="selectedApproval"
               :approval-routes="selectedApprovalRoutes"
@@ -95,6 +105,7 @@ import InlineNotice from "../components/common/InlineNotice.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
+import { dashboardDataSourceHandle } from "../data/sources";
 import { useAuthStore } from "../stores/authStore";
 import { useDashboardStore } from "../stores/dashboardStore";
 import type { ApprovalRequest } from "../types/dashboard";
@@ -107,12 +118,32 @@ const store = useDashboardStore();
 const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+const isMockPreview = dashboardDataSourceHandle.descriptor.dataSourceMode === "mock_preview";
 const actionMessage = ref("");
 const pageMessage = ref("");
 const pendingDecision = ref<"allow_once" | "deny" | null>(null);
 const approvalQueueRef = ref<HTMLElement | null>(null);
 const nowMs = ref(Date.now());
 let expiryClock: number | undefined;
+const isReadonlyRoute = computed(() => route.query.readonly === "1");
+const isReadOnly = computed(() => isMockPreview || isReadonlyRoute.value);
+const readonlyReason = computed(() =>
+  isMockPreview
+    ? "Mock Preview 使用固定合成样例，数据源不具备审批写入能力。移除 URL 参数也不会开放处理权限。"
+    : "当前链接以只读方式打开，仅可查看审批依据，不能提交处理结果。",
+);
+const approvalQueueRoute = computed(() => ({
+  path: "/approvals",
+  query: isReadOnly.value ? { readonly: "1" } : {},
+}));
+
+function approvalDetailRoute(approvalId: string) {
+  return {
+    path: `/approvals/${approvalId}`,
+    query: isReadOnly.value ? { readonly: "1" } : {},
+  };
+}
+
 const sortedApprovals = computed(() =>
   [...store.approvals].sort((left, right) => {
     if (left.riskScore !== right.riskScore) return right.riskScore - left.riskScore;
@@ -138,6 +169,7 @@ const isExpired = computed(() => {
   return isApprovalExpired(selectedApproval.value?.expiresAt, nowMs.value);
 });
 const resolutionDisabledReason = computed(() => {
+  if (isReadOnly.value) return readonlyReason.value;
   if (isSubmitting.value) return "审批正在提交";
   if (!authStore.csrfToken) return "浏览器会话尚未就绪，请刷新页面后重试";
   if (isExpired.value) return "审批已过期，不能继续处理";
@@ -156,14 +188,14 @@ watch(
     if (store.status === "idle" || store.status === "loading") return;
     const firstApprovalId = sortedApprovals.value[0]?.id;
     if (!firstApprovalId) {
-      if (requestedId.value) void router.replace("/approvals");
+      if (requestedId.value) void router.replace(approvalQueueRoute.value);
       return;
     }
     if (
       requestedId.value &&
       !store.approvals.some((approval) => approval.id === requestedId.value)
     ) {
-      void router.replace(`/approvals/${firstApprovalId}`);
+      void router.replace(approvalDetailRoute(firstApprovalId));
     }
   },
   { immediate: true },
@@ -205,7 +237,7 @@ watch(requestedId, async (approvalId, previousApprovalId) => {
 function handleSelectApproval(approval: ApprovalRequest) {
   actionMessage.value = "";
   pageMessage.value = "";
-  void router.push(`/approvals/${approval.id}`);
+  void router.push(approvalDetailRoute(approval.id));
 }
 async function handleResolveApproval(decision: "allow_once" | "deny") {
   if (!selectedApproval.value || !canResolveApproval.value) return;
@@ -215,13 +247,17 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
   pageMessage.value = "";
   pendingDecision.value = decision;
   try {
-    await store.resolveApproval(selectedApproval.value, decision);
+    await store.resolveApproval(selectedApproval.value, decision, {
+      readonly: isReadOnly.value,
+    });
     actionMessage.value = decision === "deny" ? "已拒绝该动作的本次授权" : "已允许该动作执行一次";
     if (traceRoute) {
       void router.push(traceRoute);
       return;
     }
-    if (!store.approvals.some((approval) => approval.id === id)) void router.replace("/approvals");
+    if (!store.approvals.some((approval) => approval.id === id)) {
+      void router.replace(approvalQueueRoute.value);
+    }
   } catch {
     const message = store.approvalResolutionError ?? "审批提交失败";
     if (
@@ -230,7 +266,7 @@ async function handleResolveApproval(decision: "allow_once" | "deny") {
     ) {
       pageMessage.value = message;
       if (!store.approvals.some((approval) => approval.id === id)) {
-        await router.replace("/approvals");
+        await router.replace(approvalQueueRoute.value);
       }
     } else {
       actionMessage.value = message;
@@ -261,11 +297,11 @@ function formatRelativeExpiry(value?: string | null) {
 .approvals-page__content {
   display: grid;
   gap: var(--space-3);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
 }
 .approvals-page__main {
-  grid-row: 2;
+  grid-row: 3;
   height: 100%;
   min-height: 0;
 }

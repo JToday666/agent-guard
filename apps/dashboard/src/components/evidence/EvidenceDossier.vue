@@ -81,7 +81,6 @@
         <li v-for="rule in primary.ruleHits" :key="rule.ruleId">
           <div>
             <strong>{{ rule.name ?? ruleLabel(rule.ruleId) }}</strong>
-            <code>{{ rule.ruleId }}</code>
           </div>
           <p>{{ rule.reason ?? "规则原因未记录" }}</p>
           <ul v-if="rule.evidence.length">

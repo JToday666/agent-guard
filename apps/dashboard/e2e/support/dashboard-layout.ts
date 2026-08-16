@@ -55,6 +55,11 @@ export async function expectPrimaryRoutesLayout(page: Page, traceId: string): Pr
     await page.goto(path);
     await expect(page.locator("main")).toHaveCount(1);
     await expect(page.locator("main")).toBeVisible();
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
     const dimensions = await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,
       mainWidth: document.querySelector<HTMLElement>("main")?.getBoundingClientRect().width ?? 0,

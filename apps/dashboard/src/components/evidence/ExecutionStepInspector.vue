@@ -8,20 +8,22 @@
           <code v-if="step.actionName" translate="no">{{ step.actionName }}</code>
         </div>
         <StatusBadge
-          :label="getDecisionLabel(step.decision)"
-          :tone="getDecisionTone(step.decision)"
+          :label="getDecisionLabel(step.supervision.officialDecision.decision)"
+          :tone="getDecisionTone(step.supervision.officialDecision.decision)"
         />
       </header>
 
       <div class="execution-inspector__state">
         <strong>{{ displayStatus(step) }}</strong>
-        <span>{{ getExecutionApprovalLabel(step.approval) }}</span>
+        <span>{{ getSemanticsSummary(step.supervision.semantics) }}</span>
       </div>
+
+      <ExecutionSupervisionCapsules v-if="step.kind === 'action'" :step="step" />
 
       <dl class="execution-inspector__facts">
         <div>
-          <dt>资源目标</dt>
-          <dd>{{ step.resourceSummary ?? "未记录" }}</dd>
+          <dt>动作 / 资源</dt>
+          <dd>{{ step.resourceSummary ?? "未记录资源目标" }}</dd>
         </div>
         <div>
           <dt>风险</dt>
@@ -39,13 +41,154 @@
         </div>
       </dl>
 
-      <section v-if="step.decisionReason" class="execution-inspector__section">
-        <h5>判定原因</h5>
-        <p>{{ step.decisionReason }}</p>
+      <section class="execution-inspector__section">
+        <h5>正式决策 / V2 Shadow</h5>
+        <div class="execution-inspector__comparison">
+          <article>
+            <span>OFFICIAL</span>
+            <strong>{{ getDecisionLabel(step.supervision.officialDecision.decision) }}</strong>
+            <p>{{ step.supervision.officialDecision.reason ?? "未记录判定原因" }}</p>
+            <small>
+              {{ getAvailabilityLabel(step.supervision.officialDecision.availability) }} ·
+              {{ step.supervision.officialDecision.ruleIds.length }} 条规则
+            </small>
+          </article>
+          <article class="is-shadow">
+            <span>V2 SHADOW</span>
+            <strong>{{ v21Disposition(step) }}</strong>
+            <p>{{ v21Summary(step) }}</p>
+            <small>
+              {{ getAuthorityLabel(step.supervision.v21Assessment.decisionAuthority) }} ·
+              {{ getAvailabilityLabel(step.supervision.v21Assessment.availability) }}
+            </small>
+          </article>
+        </div>
+      </section>
+
+      <section class="execution-inspector__section">
+        <h5>审批与依据</h5>
+        <dl class="execution-inspector__detail-grid">
+          <div>
+            <dt>审批状态</dt>
+            <dd>{{ layerValue(step, "approval") }}</dd>
+          </div>
+          <div>
+            <dt>审批 ID</dt>
+            <dd>{{ step.supervision.approval.approvalId ?? "未记录" }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>结构化依据</dt>
+            <dd>
+              {{
+                step.supervision.approval.availability === "recorded"
+                  ? "当前 Trace 仅返回审批状态，尚未返回结构化 Approval Basis。"
+                  : "审批依据不可用，不从判定原因或关键词推导。"
+              }}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="execution-inspector__section">
+        <h5>Enforcement</h5>
+        <dl class="execution-inspector__detail-grid">
+          <div>
+            <dt>门控状态</dt>
+            <dd>{{ layerValue(step, "enforcement") }}</dd>
+          </div>
+          <div>
+            <dt>Binding</dt>
+            <dd>{{ step.supervision.enforcement.bindingCheckStatus }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>证据边界</dt>
+            <dd>
+              {{
+                step.supervision.enforcement.availability === "unavailable"
+                  ? "强绑定门控证据尚未随 Trace 返回；不能由 DENY 推断 BLOCKED。"
+                  : step.supervision.enforcement.reasonCodes.join(" · ") || "已记录"
+              }}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="execution-inspector__section">
+        <h5>Runtime Outcome</h5>
+        <dl class="execution-inspector__detail-grid">
+          <div>
+            <dt>执行结果</dt>
+            <dd>{{ layerValue(step, "execution") }}</dd>
+          </div>
+          <div>
+            <dt>运行时收据</dt>
+            <dd>{{ step.supervision.execution.receiptRecorded ? "已唯一关联" : "未确认" }}</dd>
+          </div>
+          <div>
+            <dt>调用时间</dt>
+            <dd>{{ formatOptionalTime(step.supervision.execution.invokedAt) }}</dd>
+          </div>
+          <div>
+            <dt>完成时间</dt>
+            <dd>{{ formatOptionalTime(step.supervision.execution.completedAt) }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="execution-inspector__section">
+        <h5>来源、权威与完整性</h5>
+        <dl class="execution-inspector__detail-grid">
+          <div>
+            <dt>Source</dt>
+            <dd>{{ getSourceModeLabel(step.supervision.semantics.elementSourceMode) }}</dd>
+          </div>
+          <div>
+            <dt>Authority</dt>
+            <dd>{{ getAuthorityLabel(step.supervision.semantics.decisionAuthority) }}</dd>
+          </div>
+          <div>
+            <dt>Certainty</dt>
+            <dd>{{ getCertaintyLabel(step.supervision.semantics.certainty) }}</dd>
+          </div>
+          <div>
+            <dt>Availability</dt>
+            <dd>{{ getAvailabilityLabel(step.supervision.semantics.availability) }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>Control Integrity</dt>
+            <dd>{{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="execution-inspector__section">
+        <h5>内容进入上下文</h5>
+        <dl class="execution-inspector__detail-grid">
+          <div>
+            <dt>原始渠道</dt>
+            <dd>{{ listOrUnavailable(step.supervision.contentIngressSummary.rawSourceTypes) }}</dd>
+          </div>
+          <div>
+            <dt>信任标签</dt>
+            <dd>{{ listOrUnavailable(step.supervision.contentIngressSummary.trustLabels) }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>CT 归一化</dt>
+            <dd>
+              {{
+                step.supervision.contentIngressSummary.ctNormalizationAvailability === "unavailable"
+                  ? contentIngressUnavailable(step)
+                  : listOrUnavailable(
+                      step.supervision.contentIngressSummary.normalizedCtSourceTypes,
+                    )
+              }}
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section v-if="step.events.length" class="execution-inspector__section">
-        <h5>步骤记录</h5>
+        <h5>审计记录</h5>
         <ol class="execution-inspector__events">
           <li v-for="event in step.events" :key="event.auditId">
             <time :datetime="event.occurredAt">{{ formatTime(event.occurredAt) }}</time>
@@ -73,13 +216,13 @@
 
       <footer class="execution-inspector__actions">
         <RouterLink
-          v-if="step.approval === 'pending' && step.approvalId"
+          v-if="step.approvalId"
           class="execution-inspector__approval"
-          :to="`/approvals/${step.approvalId}`"
+          :to="approvalRoute(step)"
         >
-          处理审批
+          {{ isMockStep(step) ? "查看审批依据（只读）" : "查看审批依据" }}
         </RouterLink>
-        <button type="button" @click="emit('show-provenance', step)">查看安全依据</button>
+        <button type="button" @click="emit('show-provenance', step)">查看溯源关系</button>
         <button
           v-if="step.primaryAuditId"
           type="button"
@@ -93,7 +236,7 @@
     <div v-else class="execution-inspector__empty">
       <MousePointer2 :size="22" aria-hidden="true" />
       <strong>选择一个运行步骤</strong>
-      <p>查看安全判断、审批状态、运行结果和关联审计记录。</p>
+      <p>查看正式决策、审批、门控、运行时收据与关联证据。</p>
     </div>
   </aside>
 </template>
@@ -102,9 +245,16 @@
 import { MousePointer2 } from "@lucide/vue";
 
 import {
-  getExecutionApprovalLabel,
-  getExecutionCategoryLabel,
-} from "../../data/evidence/execution-trace";
+  getAvailabilityLabel,
+  getAuthorityLabel,
+  getCertaintyLabel,
+  getControlIntegrityLabel,
+  getSemanticsSummary,
+  getSourceModeLabel,
+  getSupervisionLayerDisplays,
+  type SupervisionLayerKey,
+} from "../../data/evidence/runtime-supervision-display.ts";
+import { getExecutionCategoryLabel } from "../../data/evidence/execution-trace";
 import type {
   AuditRecordType,
   ExecutionStepViewModel,
@@ -117,6 +267,7 @@ import {
   getRiskSeverityLabel,
 } from "../../utils/dashboard-formatters";
 import StatusBadge from "../common/StatusBadge.vue";
+import ExecutionSupervisionCapsules from "./ExecutionSupervisionCapsules.vue";
 
 defineOptions({ name: "ExecutionStepInspector" });
 
@@ -153,6 +304,50 @@ function recordTypeLabel(recordType: AuditRecordType): string {
 function formatTime(value: string): string {
   return formatDashboardDateTime(value) || "未记录";
 }
+
+function formatOptionalTime(value: string | null): string {
+  return value ? formatTime(value) : "未记录";
+}
+
+function listOrUnavailable(values: readonly string[]): string {
+  return values.length ? values.join(" · ") : "不可用";
+}
+
+function layerValue(step: ExecutionStepViewModel, key: SupervisionLayerKey): string {
+  return getSupervisionLayerDisplays(step).find((layer) => layer.key === key)?.value ?? "不可用";
+}
+
+function v21Disposition(step: ExecutionStepViewModel): string {
+  return step.supervision.v21Assessment.fastDisposition ?? "不可用";
+}
+
+function v21Summary(step: ExecutionStepViewModel): string {
+  const assessment = step.supervision.v21Assessment;
+  if (assessment.availability === "unavailable") {
+    return "当前 Trace 未携带可展示的 V2.1 影子评估。";
+  }
+  if (assessment.authorityVerification === "conflicted") {
+    return "影子证据不完整或与正式判定冲突，不提升其权威。";
+  }
+  return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；仅作影子解释，不改变正式决策。`;
+}
+
+function isMockStep(step: ExecutionStepViewModel): boolean {
+  return step.supervision.semantics.elementSourceMode === "mock";
+}
+
+function contentIngressUnavailable(step: ExecutionStepViewModel): string {
+  return isMockStep(step)
+    ? "CT 归一化不可用；溯源视图仅展示明确标记的 Mock 内容入口链。"
+    : "CT 归一化不可用；Live 数据不会回退到 Fixture。";
+}
+
+function approvalRoute(step: ExecutionStepViewModel) {
+  return {
+    path: `/approvals/${step.approvalId}`,
+    query: isMockStep(step) ? { readonly: "1" } : {},
+  };
+}
 </script>
 
 <style scoped lang="scss">
@@ -164,7 +359,7 @@ function formatTime(value: string): string {
   display: grid;
   gap: var(--space-4);
   grid-auto-rows: max-content;
-  max-height: 38rem;
+  max-height: 44rem;
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior-y: contain;
@@ -181,58 +376,57 @@ function formatTime(value: string): string {
   padding-bottom: var(--space-3);
 }
 
-.execution-inspector__header > div {
+.execution-inspector__header > div,
+.execution-inspector__state {
   display: grid;
-  gap: var(--space-1);
+  gap: 0.2rem;
   min-width: 0;
 }
 
 .execution-inspector__header span,
 .execution-inspector__header code,
 .execution-inspector__state span,
-.execution-inspector__facts dt,
+.execution-inspector dt,
 .execution-inspector__events :is(time, small),
 .execution-inspector__checks time {
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
 }
 
-.execution-inspector__header h4 {
-  font-size: var(--font-size-16);
+.execution-inspector__header h4,
+.execution-inspector__header code,
+.execution-inspector__state strong {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.execution-inspector__header code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.execution-inspector__header h4 {
+  font-size: var(--font-size-16);
 }
 
-.execution-inspector__state {
-  background: var(--color-surface-muted);
-  border-left: 3px solid var(--color-active);
+.execution-inspector__facts,
+.execution-inspector__detail-grid {
   display: grid;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-}
-
-.execution-inspector__facts {
-  display: grid;
-  gap: 1px;
+  gap: var(--space-2);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 0;
 }
 
-.execution-inspector__facts > div {
+.execution-inspector__facts > div,
+.execution-inspector__detail-grid > div {
   background: var(--color-surface-muted);
+  border-radius: var(--radius-1);
   display: grid;
-  gap: var(--space-1);
+  gap: 0.2rem;
   min-width: 0;
-  padding: var(--space-3);
+  padding: var(--space-2);
 }
 
-.execution-inspector__facts dd {
+.execution-inspector__detail-grid > .is-wide {
+  grid-column: 1 / -1;
+}
+
+.execution-inspector dd {
   font-size: var(--font-size-12);
   margin: 0;
   overflow-wrap: anywhere;
@@ -249,18 +443,52 @@ function formatTime(value: string): string {
 }
 
 .execution-inspector__section h5 {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-12);
+  letter-spacing: 0.02em;
+}
+
+.execution-inspector__comparison {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.execution-inspector__comparison article {
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-active);
+  border-radius: var(--radius-1);
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: var(--space-2);
+}
+
+.execution-inspector__comparison article.is-shadow {
+  border-left-color: var(--color-warning);
+}
+
+.execution-inspector__comparison span,
+.execution-inspector__comparison small {
+  color: var(--color-text-subtle);
+  font-family: var(--font-family-mono);
+  font-size: 0.58rem;
+}
+
+.execution-inspector__comparison strong {
   font-size: var(--font-size-12);
 }
 
-.execution-inspector__section p {
+.execution-inspector__comparison p {
   color: var(--color-text-muted);
-  font-size: var(--font-size-12);
-  overflow-wrap: anywhere;
+  font-size: var(--font-size-11);
+  line-height: 1.45;
 }
 
 .execution-inspector__events,
 .execution-inspector__checks ol {
   display: grid;
+  gap: var(--space-2);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -268,37 +496,32 @@ function formatTime(value: string): string {
 
 .execution-inspector__events li,
 .execution-inspector__checks li {
-  border-top: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-border-strong);
   display: grid;
-  gap: var(--space-1);
-  padding: var(--space-2) 0;
-}
-
-.execution-inspector__events span {
-  font-size: var(--font-size-12);
+  gap: 0.15rem;
+  padding-left: var(--space-2);
 }
 
 .execution-inspector__checks summary {
-  color: var(--color-link);
+  color: var(--color-text-muted);
   cursor: pointer;
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-semibold);
 }
 
 .execution-inspector__checks ol {
-  padding-top: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .execution-inspector__checks li > div {
   align-items: center;
   display: flex;
   gap: var(--space-2);
-  justify-content: space-between;
 }
 
 .execution-inspector__checks p {
   color: var(--color-text-muted);
-  font-size: var(--font-size-12);
+  font-size: var(--font-size-11);
   margin: 0;
 }
 
@@ -312,13 +535,12 @@ function formatTime(value: string): string {
 
 .execution-inspector__actions :is(button, a) {
   align-items: center;
-  background: var(--color-surface);
+  background: transparent;
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-2);
-  color: var(--color-link);
+  border-radius: var(--radius-1);
+  color: var(--color-text-muted);
   display: inline-flex;
-  font-size: var(--font-size-12);
-  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-11);
   justify-content: center;
   min-height: 2.375rem;
   padding: 0 var(--space-3);
@@ -326,13 +548,12 @@ function formatTime(value: string): string {
 }
 
 .execution-inspector__actions .execution-inspector__approval {
-  background: var(--color-warning-soft);
   border-color: var(--color-warning-border);
   color: var(--color-warning-strong);
 }
 
 .execution-inspector__empty {
-  align-items: center;
+  align-content: center;
   color: var(--color-text-subtle);
   display: grid;
   gap: var(--space-2);
@@ -342,7 +563,6 @@ function formatTime(value: string): string {
 }
 
 .execution-inspector__empty p {
-  font-size: var(--font-size-12);
   margin: 0;
   max-width: 16rem;
 }
@@ -350,7 +570,18 @@ function formatTime(value: string): string {
 @media (max-width: 82rem) {
   .execution-inspector {
     max-height: none;
-    overflow-y: visible;
+  }
+}
+
+@media (max-width: 30rem) {
+  .execution-inspector__comparison,
+  .execution-inspector__facts,
+  .execution-inspector__detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-inspector__detail-grid > .is-wide {
+    grid-column: auto;
   }
 }
 </style>

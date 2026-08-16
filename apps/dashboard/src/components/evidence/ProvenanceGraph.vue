@@ -141,10 +141,14 @@
               :class="[
                 `prov-node--${data.kind}`,
                 `prov-node--phase-${data.phase}`,
-                { 'prov-node--selected': data.nodeId === selectedNodeId },
+                {
+                  'prov-node--mock': data.metadata.source_mode === 'mock',
+                  'prov-node--selected': data.nodeId === selectedNodeId,
+                },
               ]"
               :aria-label="`${kindLabel(data.kind)}：${nodeLabel(data.label, data.kind)}`"
               :aria-pressed="data.nodeId === selectedNodeId"
+              :data-source-mode="data.metadata.source_mode || undefined"
               role="button"
               tabindex="0"
               :title="nodeTooltip(data)"
@@ -251,6 +255,7 @@ import type {
   ProvenanceGraph,
   ProvenanceNode,
 } from "../../types/dashboard";
+import type { EvidenceCertainty } from "../../types/runtime-supervision";
 import { getDecisionLabel, getEventTypeLabel } from "../../utils/dashboard-formatters";
 import { getProvenanceRelationLabel, getProvenanceRiskScore } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
@@ -812,7 +817,23 @@ async function runLayout(): Promise<void> {
 }
 
 function relationType(edge: ProvenanceEdge): string {
-  return metadataString(edge.metadata, "relation_type") || "causal";
+  return metadataString(edge.metadata, "relation_type") || "unknown";
+}
+
+function edgeCertainty(edge: ProvenanceEdge): EvidenceCertainty {
+  const declared = metadataString(edge.metadata, "certainty");
+  const origin = metadataString(edge.metadata, "flow_origin");
+  const strength = metadataString(edge.metadata, "flow_strength");
+  if (origin === "semantic_inferred" || strength === "possible") return "possible";
+  if (
+    declared === "confirmed" ||
+    declared === "supported" ||
+    declared === "possible" ||
+    declared === "unknown"
+  ) {
+    return declared;
+  }
+  return "unknown";
 }
 
 function edgeStroke(type: string): string {
@@ -824,7 +845,9 @@ function edgeStroke(type: string): string {
   return "var(--color-border-strong)";
 }
 
-function edgeDash(type: string): string | undefined {
+function edgeDash(type: string, certainty: EvidenceCertainty): string | undefined {
+  if (certainty === "possible") return "5 4";
+  if (certainty === "unknown") return "4 4";
   if (type === "detection") return "6 4";
   if (type === "approval") return "2 4";
   if (type === "audit") return "9 4";
@@ -840,6 +863,7 @@ const flowEdges = computed<Edge[]>(() =>
     )
     .map((edge) => {
       const type = relationType(edge);
+      const certainty = edgeCertainty(edge);
       const isInContext =
         !contextNodeIds.value ||
         (contextNodeIds.value.has(edge.sourceNodeId) &&
@@ -855,15 +879,22 @@ const flowEdges = computed<Edge[]>(() =>
       const stroke = edgeStroke(type);
       const sourceNode = nodeById.value.get(edge.sourceNodeId);
       const targetNode = nodeById.value.get(edge.targetNodeId);
+      const relationLabel = getProvenanceRelationLabel(edge.relation) || edge.relation;
+      const presentedRelationLabel =
+        certainty === "possible" ? `${relationLabel}（可能）` : relationLabel;
       return {
-        ariaLabel: `${kindLabel(sourceNode?.kind ?? "节点")} ${
-          getProvenanceRelationLabel(edge.relation) || edge.relation
-        } ${kindLabel(targetNode?.kind ?? "节点")}`,
-        class: [`prov-edge--${type}`, { "prov-edge--dimmed": !isInContext }],
-        data: { relationType: type },
+        ariaLabel: `${kindLabel(sourceNode?.kind ?? "节点")} ${presentedRelationLabel} ${kindLabel(
+          targetNode?.kind ?? "节点",
+        )}${certainty === "unknown" ? "，证据确定性未知" : ""}`,
+        class: [
+          `prov-edge--${type}`,
+          `prov-edge--certainty-${certainty}`,
+          { "prov-edge--dimmed": !isInContext },
+        ],
+        data: { certainty, relationType: type },
         id: edge.edgeId,
         interactionWidth: 18,
-        label: showLabel ? getProvenanceRelationLabel(edge.relation) || edge.relation : "",
+        label: showLabel ? presentedRelationLabel : "",
         labelBgBorderRadius: 4,
         labelBgPadding: [3, 5],
         labelBgStyle: {
@@ -888,7 +919,7 @@ const flowEdges = computed<Edge[]>(() =>
         style: {
           opacity: isInContext ? 0.95 : 0.18,
           stroke,
-          strokeDasharray: edgeDash(type),
+          strokeDasharray: edgeDash(type, certainty),
           strokeWidth: isFocused ? 2.4 : type === "execution" ? 2 : 1.5,
         },
         target: edge.targetNodeId,
@@ -1469,6 +1500,17 @@ onBeforeUnmount(() => {
 .prov-node--selected {
   border-color: var(--color-focus);
   box-shadow: var(--glow-focus-soft);
+}
+
+.prov-node--mock {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-warning) 8%, transparent),
+      transparent 58%
+    ),
+    var(--color-surface);
+  border-style: dashed;
 }
 
 .prov-node--task,

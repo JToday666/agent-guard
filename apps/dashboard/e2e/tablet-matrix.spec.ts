@@ -200,7 +200,7 @@ test("tablet approval workspace uses one pane only when the compact top bar is a
   const back = page.getByRole("link", { name: "返回审批队列" });
   await expect(back).toBeFocused();
   await back.click();
-  await expect(page).toHaveURL(/\/approvals$/);
+  await expect(page).toHaveURL(/\/approvals\?readonly=1$/);
   await expect(queue).toBeVisible();
   await expect(detail).toBeHidden();
   await expect(queue.getByRole("button").first()).toBeFocused();
@@ -287,18 +287,7 @@ test("tablet overlays stay inside the viewport and restore their triggers", asyn
     evidenceGridGeometry.scrollHeight - 1,
   );
   const approvalTrigger = page.getByRole("button", { name: "仅本次放行", exact: true });
-  await approvalTrigger.click();
-  const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".confirm-dialog__surface")).toHaveCSS(
-    "grid-auto-rows",
-    "max-content",
-  );
-  const dialogRect = await dialog.locator(".confirm-dialog__surface").boundingBox();
-  expect(dialogRect).not.toBeNull();
-  expect(dialogRect!.x).toBeGreaterThanOrEqual(0);
-  expect(dialogRect!.x + dialogRect!.width).toBeLessThanOrEqual(viewportWidth);
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(approvalTrigger).toBeFocused();
+  await expect(approvalTrigger).toBeDisabled();
+  await expect(page.getByText("只读审批视图")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "确认仅本次放行？" })).toHaveCount(0);
 });

@@ -6,6 +6,7 @@ import type {
   NormalizedAuditEvidence,
   ProvenanceNode,
 } from "../types/dashboard.ts";
+import { projectExecutionStepSupervision } from "../data/evidence/step-supervision.ts";
 import {
   findProvenanceNodeForAction,
   findProvenanceNodeForEvent,
@@ -81,7 +82,7 @@ function evidence(overrides: Partial<NormalizedAuditEvidence> = {}): NormalizedA
 }
 
 function step(overrides: Partial<ExecutionStepViewModel> = {}): ExecutionStepViewModel {
-  return {
+  const base: Omit<ExecutionStepViewModel, "supervision"> = {
     actionId: "call_1",
     actionName: "read_file",
     approval: "not_required",
@@ -112,7 +113,31 @@ function step(overrides: Partial<ExecutionStepViewModel> = {}): ExecutionStepVie
     severity: "low",
     statusLabel: "已完成安全判断，等待运行时回执",
     stepId: "action:call_1",
-    ...overrides,
+  };
+  const { supervision: overrideSupervision, ...stepOverrides } = overrides;
+  const merged = { ...base, ...stepOverrides };
+  return {
+    ...merged,
+    supervision:
+      overrideSupervision ??
+      projectExecutionStepSupervision({
+        traceId: "trace_1",
+        elementSourceMode: "mock",
+        stepId: merged.stepId,
+        category: merged.category,
+        phase: merged.phase,
+        actionId: merged.actionId,
+        actionName: merged.actionName,
+        resources: [],
+        stepEvents: [],
+        primary: null,
+        policyConflicted: false,
+        approval: { conflicted: false, id: null, request: null, status: "not_required" },
+        outcome: null,
+        outcomeConflicted: false,
+        identityConflicted: false,
+        hasExplicitStart: false,
+      }),
   };
 }
 

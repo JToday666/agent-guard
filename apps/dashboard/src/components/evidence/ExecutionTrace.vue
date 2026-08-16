@@ -353,6 +353,9 @@ function stepRevision(step: ExecutionStepViewModel): string {
     step.decision,
     step.approval,
     step.execution,
+    step.supervision.activityState,
+    step.supervision.enforcement.gateState,
+    step.supervision.controlIntegrity.status,
     step.auditIds.join("\u0000"),
   ].join("\u0001");
 }

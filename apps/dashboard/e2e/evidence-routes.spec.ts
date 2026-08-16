@@ -59,43 +59,23 @@ test("approval detail exposes explicit control-flow evidence fields", async ({ p
   expect(content?.indexOf("判定原因")).toBeLessThan(content?.indexOf("放行影响") ?? -1);
 });
 
-test("one-time approval requires confirmation and restores trigger focus", async ({ page }) => {
-  await page.goto("/approvals");
+test("mock preview approval is read only and never sends a resolution request", async ({
+  page,
+}) => {
+  const resolutionRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/approvals/") && request.url().endsWith("/resolve")) {
+      resolutionRequests.push(request.url());
+    }
+  });
+  await page.goto("/approvals?readonly=1");
 
-  const trigger = page.getByRole("button", { name: "仅本次放行" });
-  await trigger.click();
-
-  const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("该动作将绕过当前安全判断并继续执行一次");
-  await expect(page.getByRole("button", { name: "取消" })).toBeFocused();
-  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
-    /confirm-dialog__signal--warning/,
-  );
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
-});
-
-test("deny approval uses a danger confirmation and restores trigger focus", async ({ page }) => {
-  await page.goto("/approvals");
-
-  const trigger = page.getByRole("button", { name: "拒绝授权" });
-  await expect(trigger).toHaveCSS("min-height", "44px");
-  await trigger.click();
-
-  const dialog = page.getByRole("dialog", { name: "确认拒绝本次授权？" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("本次授权将被拒绝");
-  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
-    /confirm-dialog__signal--danger/,
-  );
-  await expect(page.getByRole("button", { name: "确认拒绝授权" })).toHaveCSS("min-height", "44px");
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await expect(page.getByText("只读审批视图")).toBeVisible();
+  await expect(page.getByText(/Mock Preview 使用固定合成样例/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "仅本次放行" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "拒绝授权" })).toBeDisabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(resolutionRequests).toEqual([]);
 });
 
 test("evidence detail keeps related approval and evaluation destinations", async ({ page }) => {
@@ -105,9 +85,14 @@ test("evidence detail keeps related approval and evaluation destinations", async
   const evaluationLink = page.getByRole("link", { name: "查看评测样本" });
 
   await expect(approvalLink).toBeVisible();
-  await expect(approvalLink).toHaveAttribute("href", /\/approvals\/ask_001$/);
+  await expect(approvalLink).toHaveAttribute("href", /\/approvals\/ask_001\?readonly=1$/);
   await expect(evaluationLink).toBeVisible();
   await expect(evaluationLink).toHaveAttribute("href", /\/evaluation\?case_id=PI-002$/);
+
+  await approvalLink.click();
+  await expect(page).toHaveURL(/\/approvals(?:\/[^?]+)?\?readonly=1$/);
+  await expect(page.getByRole("heading", { name: "人工审批" })).toBeVisible();
+  await expect(page.getByText("页面渲染异常")).toHaveCount(0);
 });
 
 test("evidence detail surfaces the final security conclusion", async ({ page }) => {
@@ -133,14 +118,24 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
   await expect(action).toBeVisible();
   await expect(action).toHaveClass(/execution-node--ask/);
-  await expect(action).toContainText("需审批");
-  await expect(action).toContainText("已执行");
+  await expect(action.locator('[data-supervision-layer="decision"]')).toContainText("需审批");
+  await expect(action.locator('[data-supervision-layer="approval"]')).toContainText("单次放行");
+  await expect(action.locator('[data-supervision-layer="enforcement"]')).toContainText(
+    "证据不可用",
+  );
+  await expect(action.locator('[data-supervision-layer="execution"]')).toContainText("已执行");
   await expect(action).not.toContainText("当前");
 
   await action.click();
   const inspector = page.locator(".execution-inspector");
   await expect(inspector).toContainText("单次放行");
-  await inspector.getByRole("button", { name: "查看安全依据" }).click();
+  await expect(inspector).toContainText("正式决策 / V2 Shadow");
+  await expect(inspector).toContainText("强绑定门控证据尚未随 Trace 返回");
+  await expect(inspector.getByRole("link", { name: "查看审批依据（只读）" })).toHaveAttribute(
+    "href",
+    /readonly=1/,
+  );
+  await inspector.getByRole("button", { name: "查看溯源关系" }).click();
   await expect(page).toHaveURL(/view=provenance/);
   await expect(page).toHaveURL(/action_id=action_trace_002/);
   await expect(page).toHaveURL(/node_id=/);
@@ -160,6 +155,109 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   await expect(page).toHaveURL(/action_id=action_trace_002/);
   await expect(page).toHaveURL(/node_id=/);
   await expect(page.locator(".prov-node--selected")).toContainText("send_email");
+});
+
+test("graph and list reuse the same four-layer supervision presentation", async ({ page }) => {
+  await page.goto("/evidence/trace_002");
+
+  const graphAction = page.locator(".execution-node").filter({ hasText: "发送邮件" });
+  await expect(graphAction).toBeVisible();
+  const graphValues = await graphAction
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  const listAction = page.locator(".execution-list__item").filter({ hasText: "发送邮件" });
+  await expect(listAction).toBeVisible();
+  const listValues = await listAction
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+
+  expect(listValues).toEqual(graphValues);
+  expect(graphValues).toHaveLength(4);
+});
+
+test("multi-step preview shows ordered checkpoints and exact action outcomes", async ({ page }) => {
+  await page.goto("/evidence/trace_009");
+
+  const summary = page.locator(".execution-trace__summary");
+  await expect(page.getByRole("heading", { name: "运行已结束" })).toBeVisible();
+  await expect(summary).toContainText(/运行步骤\s*5/);
+  await expect(summary).toContainText(/受控动作\s*2/);
+  await expect(summary).toContainText(/等待审批\s*0/);
+  await expect(summary).toContainText(/风险步骤\s*1/);
+
+  const graphNodes = page.locator(".execution-node");
+  await expect(graphNodes).toHaveCount(5);
+  await expect(page.locator(".execution-node--checkpoint")).toHaveCount(3);
+  await expect(graphNodes.nth(0)).toContainText("获取网页内容");
+  await expect(graphNodes.nth(1)).toContainText("检查网页内容");
+  await expect(graphNodes.nth(2)).toContainText("检查输入上下文");
+  await expect(graphNodes.nth(3)).toContainText("检查模型输入");
+  await expect(graphNodes.nth(4)).toContainText("执行代码");
+  await expect(page.locator(".execution-flow__vue-flow .vue-flow__edge")).toHaveCount(4);
+
+  const fetch = graphNodes.filter({ hasText: "获取网页内容" });
+  await expect(fetch.locator('[data-supervision-layer="decision"]')).toContainText("允许");
+  await expect(fetch.locator('[data-supervision-layer="approval"]')).toContainText("无需审批");
+  await expect(fetch.locator('[data-supervision-layer="enforcement"]')).toContainText("证据不可用");
+  await expect(fetch.locator('[data-supervision-layer="execution"]')).toContainText("已执行");
+
+  const exec = graphNodes.filter({ hasText: "执行代码" });
+  await expect(exec.locator('[data-supervision-layer="decision"]')).toContainText("拒绝");
+  await expect(exec.locator('[data-supervision-layer="approval"]')).toContainText("无需审批");
+  await expect(exec.locator('[data-supervision-layer="enforcement"]')).toContainText("证据不可用");
+  await expect(exec.locator('[data-supervision-layer="execution"]')).toContainText("未调用");
+  await exec.click();
+  await expect(page.locator(".execution-inspector")).toContainText("运行时收据");
+  await expect(page.locator(".execution-inspector")).toContainText("已唯一关联");
+
+  const graphActionValues = await exec
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  const listItems = page.locator(".execution-list__item");
+  await expect(listItems).toHaveCount(5);
+  const listExec = listItems.filter({ hasText: "执行代码" });
+  const listActionValues = await listExec
+    .locator("[data-supervision-layer]")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
+  expect(listActionValues).toEqual(graphActionValues);
+});
+
+test("mock provenance shows Web content assembled into context without changing execution edges", async ({
+  page,
+}) => {
+  await page.goto("/evidence/trace_005");
+  await page.getByRole("tab", { name: "溯源关系" }).click();
+
+  const mockNodes = page.locator('.prov-node[data-source-mode="mock"]');
+  await expect(mockNodes).toHaveCount(4);
+  await expect(mockNodes).toContainText([/Web 内容来源/, /上下文拼接/, /模型输入/, /高影响动作/]);
+
+  const sourceNode = mockNodes.filter({ hasText: "Web 内容来源" });
+  await sourceNode.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".provenance-inspector")).toContainText(
+    "MOCK PREVIEW · 固定合成内容入口，不是真实运行结果",
+  );
+  await expect(
+    page.locator(".vue-flow__edge-text").filter({ hasText: "汇入上下文" }),
+  ).toBeVisible();
+
+  const possibleEdge = page.locator(".prov-edge--certainty-possible");
+  await expect(possibleEdge).toHaveCount(1);
+  const possibleEdgeDash = await possibleEdge
+    .locator(".vue-flow__edge-path")
+    .evaluate((path) => getComputedStyle(path).strokeDasharray);
+  expect(possibleEdgeDash).not.toBe("none");
+  const modelInputNode = mockNodes.filter({ hasText: "模型输入" });
+  await modelInputNode.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".vue-flow__edge-text").filter({ hasText: "可能" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "执行轨迹" }).click();
+  await expect(page.locator('.execution-flow [data-source-mode="mock"]')).toHaveCount(0);
 });
 
 test("execution trace defaults to graph and keeps the list layout in the URL", async ({ page }) => {
@@ -254,5 +352,5 @@ test("evidence list keeps search and final status in the URL", async ({ page }) 
 
   await page.getByRole("button", { name: "清除筛选" }).click();
   await expect(page).toHaveURL(/\/evidence$/);
-  await expect(page.locator(".trace-table tbody tr")).toHaveCount(8);
+  await expect(page.locator(".trace-table tbody tr")).toHaveCount(9);
 });

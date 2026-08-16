@@ -11,7 +11,16 @@ import type {
   NormalizedAuditEvidence,
   TraceLifecycleState,
 } from "../../types/dashboard";
+import type {
+  DashboardDataSourceDescriptor,
+  ElementSourceMode,
+  RuntimeSupervisionViewModel,
+} from "../../types/runtime-supervision.ts";
 import { getEventTypeLabel } from "../../utils/dashboard-formatters.ts";
+import {
+  projectExecutionStepSupervision,
+  type SelectedApprovalEvidence,
+} from "./step-supervision.ts";
 
 const ACTION_LABELS: Readonly<Record<string, string>> = {
   browser_click: "点击页面元素",
@@ -33,6 +42,7 @@ const ACTION_LABELS: Readonly<Record<string, string>> = {
   search: "搜索信息",
   send_email: "发送邮件",
   send_message: "发送消息",
+  web_fetch: "获取网页内容",
   message_send_proposed: "发送消息",
   write_file: "写入文件",
 };
@@ -65,7 +75,11 @@ function compareEvents(
   const primaryOrder = useAuditSequence
     ? left.chainIndex! - right.chainIndex!
     : Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
-  return primaryOrder || left.auditId.localeCompare(right.auditId);
+  return (
+    primaryOrder ||
+    left.auditId.localeCompare(right.auditId) ||
+    JSON.stringify(stableJsonValue(left)).localeCompare(JSON.stringify(stableJsonValue(right)))
+  );
 }
 
 function uniqueAuditEvents(events: readonly NormalizedAuditEvidence[]): NormalizedAuditEvidence[] {
@@ -77,6 +91,37 @@ function uniqueAuditEvents(events: readonly NormalizedAuditEvidence[]): Normaliz
     if (!unique.has(event.auditId)) unique.set(event.auditId, event);
   }
   return [...unique.values()];
+}
+
+function stableJsonValue(value: unknown, ancestors = new WeakSet<object>()): unknown {
+  if (Array.isArray(value)) return value.map((item) => stableJsonValue(item, ancestors));
+  if (typeof value !== "object" || value === null) return value;
+  if (ancestors.has(value)) return "[Circular]";
+  ancestors.add(value);
+  const result = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, stableJsonValue(item, ancestors)]),
+  );
+  ancestors.delete(value);
+  return result;
+}
+
+function conflictingDuplicateAuditIds(
+  events: readonly NormalizedAuditEvidence[],
+): ReadonlySet<string> {
+  const firstSignatureById = new Map<string, string>();
+  const conflicts = new Set<string>();
+  for (const event of events) {
+    const signature = JSON.stringify(stableJsonValue(event));
+    const firstSignature = firstSignatureById.get(event.auditId);
+    if (firstSignature === undefined) {
+      firstSignatureById.set(event.auditId, signature);
+    } else if (firstSignature !== signature) {
+      conflicts.add(event.auditId);
+    }
+  }
+  return conflicts;
 }
 
 function logicalStepEvents(events: readonly NormalizedAuditEvidence[]): NormalizedAuditEvidence[] {
@@ -118,10 +163,11 @@ function evidenceApprovalStatus(
   return "unknown";
 }
 
-interface ApprovalSelection {
+interface ApprovalSelection extends SelectedApprovalEvidence {
   conflicted: boolean;
   id: string | null;
   status: ExecutionApprovalStatus;
+  request: ApprovalRequest | null;
 }
 
 function selectApproval(
@@ -132,7 +178,9 @@ function selectApproval(
   const linkedIds = new Set(
     events.flatMap((event) => (event.approval.approvalId ? [event.approval.approvalId] : [])),
   );
-  if (linkedIds.size > 1) return { conflicted: true, id: null, status: "unknown" };
+  if (linkedIds.size > 1) {
+    return { conflicted: true, id: null, request: null, status: "unknown" };
+  }
 
   const subjectApprovals = subjectId
     ? approvals.filter(
@@ -141,7 +189,7 @@ function selectApproval(
     : [];
   const linkedId = [...linkedIds][0] ?? null;
   if (!linkedId && subjectApprovals.length > 1) {
-    return { conflicted: true, id: null, status: "unknown" };
+    return { conflicted: true, id: null, request: null, status: "unknown" };
   }
   const selected = linkedId
     ? approvals.find((approval) => approval.id === linkedId)
@@ -152,12 +200,18 @@ function selectApproval(
   return {
     conflicted: false,
     id: linkedId ?? selected?.id ?? null,
+    request: selected ?? null,
     status: selected ? approvalStatus(selected) : evidenceApprovalStatus(fallbackEvent),
   };
 }
 
 interface PolicySelection {
   check: NormalizedAuditEvidence | null;
+  conflicted: boolean;
+}
+
+interface OutcomeSelection {
+  outcome: NormalizedAuditEvidence | null;
   conflicted: boolean;
 }
 
@@ -183,6 +237,34 @@ function selectPrimaryPolicyCheck(
     if (matches.length === 1) return { check: matches[0]!, conflicted: false };
   }
   return { check: checks.at(-1) ?? null, conflicted: false };
+}
+
+function selectRuntimeOutcome(
+  outcomes: readonly NormalizedAuditEvidence[],
+  policy: PolicySelection,
+  actionId: string | null,
+): OutcomeSelection {
+  if (policy.conflicted) return { conflicted: true, outcome: null };
+  const receiptCandidates = outcomes.filter(
+    (event) => event.execution.receiptRecorded && event.execution.status !== "unknown",
+  );
+  if (!policy.check) {
+    return { conflicted: receiptCandidates.length > 0, outcome: null };
+  }
+  const linkedCandidates = receiptCandidates.filter(
+    (event) =>
+      actionId !== null &&
+      event.actionId === actionId &&
+      event.policyAuditId === policy.check?.auditId &&
+      event.eventId !== null &&
+      event.eventId === policy.check?.eventId &&
+      event.decisionId !== null &&
+      event.decisionId === policy.check?.decisionId,
+  );
+  if (receiptCandidates.length !== linkedCandidates.length || linkedCandidates.length > 1) {
+    return { conflicted: true, outcome: null };
+  }
+  return { conflicted: false, outcome: linkedCandidates[0] ?? null };
 }
 
 function isExplicitStart(event: NormalizedAuditEvidence): boolean {
@@ -368,6 +450,7 @@ function displayName(
   if (category === "model_input") return "检查模型输入";
   if (category === "model_output") return "检查模型输出";
   if (category === "tool_result") {
+    if (name === "web_fetch") return "检查网页内容";
     const toolLabel = name ? (ACTION_LABELS[name] ?? name) : "工具";
     return `检查${toolLabel}返回内容`;
   }
@@ -382,6 +465,8 @@ function buildStep(
   stepId: string,
   events: readonly NormalizedAuditEvidence[],
   approvals: readonly ApprovalRequest[],
+  context: ExecutionProjectionContext,
+  duplicateConflicts: ReadonlySet<string>,
 ): ExecutionStepViewModel {
   const stepEvents = logicalStepEvents(events);
   const checks = uniquePolicyChecks(stepEvents);
@@ -395,13 +480,26 @@ function buildStep(
     ...new Set(stepEvents.flatMap((event) => (event.eventId ? [event.eventId] : []))),
   ];
   const subjectId = actionId ?? eventIds[0] ?? null;
-  const approval = selectApproval(subjectId, stepEvents, approvals);
-  const policy = selectPrimaryPolicyCheck(checks, outcomes, approval);
-  const outcome =
-    [...outcomes]
-      .reverse()
-      .find((event) => event.execution.receiptRecorded || event.execution.status !== "unknown") ??
-    outcomes.at(-1);
+  const selectedApproval = selectApproval(subjectId, stepEvents, approvals);
+  const approvalEvidenceConflicted = stepEvents.some(
+    (event) => event.approval.approvalId && duplicateConflicts.has(event.auditId),
+  );
+  const approval: ApprovalSelection = approvalEvidenceConflicted
+    ? { conflicted: true, id: null, request: null, status: "unknown" }
+    : selectedApproval;
+  const selectedPolicy = selectPrimaryPolicyCheck(checks, outcomes, approval);
+  const policyConflicted =
+    selectedPolicy.conflicted || checks.some((event) => duplicateConflicts.has(event.auditId));
+  const policy: PolicySelection = policyConflicted
+    ? { check: null, conflicted: true }
+    : selectedPolicy;
+  const selectedOutcome = selectRuntimeOutcome(outcomes, policy, actionId);
+  const outcomeConflicted =
+    selectedOutcome.conflicted || outcomes.some((event) => duplicateConflicts.has(event.auditId));
+  const outcomeSelection: OutcomeSelection = outcomeConflicted
+    ? { conflicted: true, outcome: null }
+    : selectedOutcome;
+  const outcome = outcomeSelection.outcome ?? undefined;
   const execution = outcome?.execution.status ?? "unknown";
   const hasStart = observations.some(isExplicitStart);
   const category = selectCategory(stepEvents);
@@ -460,14 +558,40 @@ function buildStep(
     severity: primary?.severity ?? "unknown",
     statusLabel: stepStatus(partial, outcomes.length > 0),
     stepId,
+    supervision: projectExecutionStepSupervision({
+      actionId,
+      actionName: name,
+      approval,
+      category,
+      elementSourceMode: context.elementSourceMode,
+      hasExplicitStart: hasStart,
+      identityConflicted: stepEvents.some((event) => duplicateConflicts.has(event.auditId)),
+      outcome: outcomeSelection.outcome,
+      outcomeConflicted: outcomeSelection.conflicted,
+      phase,
+      policyConflicted: policy.conflicted,
+      primary,
+      resources,
+      stepEvents,
+      stepId,
+      traceId: context.traceId,
+    }),
   };
 }
 
 function lifecycleState(
   events: readonly NormalizedAuditEvidence[],
   steps: readonly ExecutionStepViewModel[],
-): Pick<ExecutionTraceViewModel, "lifecycleAuditId" | "lifecycleLabel" | "lifecycleState"> {
+  duplicateConflicts: ReadonlySet<string>,
+): Pick<
+  ExecutionTraceViewModel,
+  "lifecycleAuditId" | "lifecycleLabel" | "lifecycleState" | "lifecycleSupervision"
+> {
+  const lifecycleConflict = events.some(
+    (event) => duplicateConflicts.has(event.auditId) && isTraceLifecycle(event),
+  );
   const lifecycle = [...events].reverse().find((event) => {
+    if (duplicateConflicts.has(event.auditId)) return false;
     if (event.recordType !== "runtime_observation") return false;
     return isTraceLifecycle(event) && event.eventType !== "trace_started";
   });
@@ -490,6 +614,12 @@ function lifecycleState(
     lifecycleAuditId: lifecycle?.auditId ?? null,
     lifecycleLabel: labels[state],
     lifecycleState: state,
+    lifecycleSupervision: {
+      confirmedTerminal: Boolean(lifecycle),
+      completionReason: lifecycleConflict
+        ? "生命周期审计记录冲突，终态未确认"
+        : (lifecycle?.resultSummary ?? lifecycle?.decisionReason ?? null),
+    },
   };
 }
 
@@ -499,10 +629,18 @@ function groupKey(event: NormalizedAuditEvidence): string | null {
   return null;
 }
 
+export interface ExecutionProjectionContext {
+  traceId: string;
+  elementSourceMode: ElementSourceMode;
+}
+
 export function buildExecutionTrace(
   events: readonly NormalizedAuditEvidence[],
-  approvals: readonly ApprovalRequest[] = [],
+  approvals: readonly ApprovalRequest[],
+  context: ExecutionProjectionContext,
 ): ExecutionTraceViewModel {
+  if (!context.traceId) throw new Error("Execution projection requires a stable traceId");
+  const duplicateConflicts = conflictingDuplicateAuditIds(events);
   const sorted = uniqueAuditEvents(events);
   const logical = logicalStepEvents(sorted);
   const grouped = new Map<string, NormalizedAuditEvidence[]>();
@@ -515,9 +653,93 @@ export function buildExecutionTrace(
     grouped.set(key, group);
   }
   const steps = [...grouped.entries()].map(([stepId, stepEvents]) =>
-    buildStep(stepId, stepEvents, approvals),
+    buildStep(stepId, stepEvents, approvals, context, duplicateConflicts),
   );
-  return { steps, ...lifecycleState(sorted, steps) };
+  return { steps, ...lifecycleState(sorted, steps, duplicateConflicts) };
+}
+
+export interface RuntimeSupervisionProjectionInput extends ExecutionProjectionContext {
+  events: readonly NormalizedAuditEvidence[];
+  approvals: readonly ApprovalRequest[];
+  dataSource: DashboardDataSourceDescriptor;
+  runtime?: string | null;
+  agentId?: string | null;
+}
+
+export function buildRuntimeSupervisionViewModel(
+  input: RuntimeSupervisionProjectionInput,
+): RuntimeSupervisionViewModel {
+  const execution = buildExecutionTrace(input.events, input.approvals, {
+    elementSourceMode: input.elementSourceMode,
+    traceId: input.traceId,
+  });
+  const receiptRequiredSteps = execution.steps.filter(
+    (step) => step.receiptExpectation === "required",
+  );
+  const recordedReceiptCount = receiptRequiredSteps.filter(
+    (step) => step.supervision.execution.availability === "recorded",
+  ).length;
+  const receiptAvailability =
+    receiptRequiredSteps.length === 0
+      ? "not_applicable"
+      : recordedReceiptCount === receiptRequiredSteps.length
+        ? "recorded"
+        : recordedReceiptCount > 0 ||
+            receiptRequiredSteps.some(
+              (step) => step.supervision.execution.availability === "partial",
+            )
+          ? "partial"
+          : "unavailable";
+  const correlationWarnings = execution.steps
+    .filter((step) => step.supervision.controlIntegrity.status === "correlation_conflict")
+    .map((step) => ({
+      code: "correlation_conflict" as const,
+      severity: "warning" as const,
+      message: `步骤 ${step.stepId} 存在无法唯一关联的监督证据。`,
+      sourceRefs: step.supervision.controlIntegrity.sourceRefs,
+    }));
+  const unsupportedV21Warnings = execution.steps
+    .filter(
+      (step) =>
+        step.supervision.v21Assessment.availability === "partial" &&
+        step.supervision.v21Assessment.authorityVerification === "conflicted",
+    )
+    .map((step) => ({
+      code: "unsupported_contract" as const,
+      severity: "warning" as const,
+      message: `步骤 ${step.stepId} 的 V2.1 影子证据不完整或与正式判定冲突。`,
+      sourceRefs: step.supervision.v21Assessment.sourceRefs,
+    }));
+  const warnings = [...correlationWarnings, ...unsupportedV21Warnings];
+  return {
+    schemaVersion: "runtime-supervision/0.1",
+    traceId: input.traceId,
+    dataSource: input.dataSource,
+    temporalState: execution.lifecycleSupervision.confirmedTerminal ? "historical" : "following",
+    runtime: input.runtime ?? null,
+    agentId: input.agentId ?? null,
+    execution,
+    approvalBasisById: {},
+    contextManifestByEventId: {},
+    provenancePresentation: { contractKind: "legacy", edges: [], nodes: [], warnings: [] },
+    completeness: {
+      auditEvents: input.events.length ? "recorded" : "unavailable",
+      approvals: input.approvals.length ? "recorded" : "unavailable",
+      provenance: "unavailable",
+      contextManifest: "unavailable",
+      runtimeReceipts: receiptAvailability,
+      truncatedReasons: [],
+    },
+    capabilities: {
+      facts: "unavailable",
+      contextManifest: "unavailable",
+      approvalBasis: "unavailable",
+      enforcementEvidence: "unavailable",
+      runtimeReceipts: receiptAvailability,
+      traceCompare: "unavailable",
+    },
+    warnings,
+  };
 }
 
 export function shouldContinueTracePolling(trace: ExecutionTraceViewModel): boolean {

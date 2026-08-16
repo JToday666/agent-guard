@@ -41,7 +41,8 @@ import type {
 import type {
   ConditionalRequestOptions,
   ConfigAuditFindingFilters,
-  DashboardDataSource,
+  ApprovalMutationDataSource,
+  DashboardReadDataSource,
   EventFilters,
 } from "./dashboard-data-source";
 import { AUDIT_EVENT_WINDOW_LIMIT } from "./dashboard-data-source.ts";
@@ -67,7 +68,7 @@ function buildConfigFindingQueryString(filters: ConfigAuditFindingFilters = {}):
   return `?${params.toString()}`;
 }
 
-export class ApiDashboardDataSource implements DashboardDataSource {
+export class ApiDashboardDataSource implements DashboardReadDataSource, ApprovalMutationDataSource {
   async getAuditWindow(filters?: EventFilters, signal?: AbortSignal) {
     const response = await requestJson<GuardAuditWindowDto>(
       `/audit/window${buildQueryString(filters, true)}`,

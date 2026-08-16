@@ -58,8 +58,8 @@ const LANE_DEFINITIONS: ReadonlyArray<Pick<ExecutionFlowLane, "id" | "label" | "
   },
 ];
 
-export const EXECUTION_FLOW_NODE_WIDTH = 236;
-export const EXECUTION_FLOW_NODE_HEIGHT = 138;
+export const EXECUTION_FLOW_NODE_WIDTH = 276;
+export const EXECUTION_FLOW_NODE_HEIGHT = 206;
 export const EXECUTION_FLOW_LANE_HEADER_HEIGHT = 64;
 export const EXECUTION_FLOW_COMPACT_WIDTH = 920;
 const HORIZONTAL_COLUMN_GAP = 52;

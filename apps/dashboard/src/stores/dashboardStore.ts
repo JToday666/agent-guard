@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
-import { dashboardDataSource } from "../data/sources/index";
+import { dashboardDataSourceHandle } from "../data/sources/index";
 import {
   createAuditWindow,
   groupDecisionTrend,
@@ -15,7 +15,11 @@ import {
   hasSameEvaluationRun,
   reconcileApprovals,
 } from "../data/dashboard/snapshot";
-import { AUDIT_EVENT_WINDOW_LIMIT } from "../data/sources/dashboard-data-source";
+import {
+  AUDIT_EVENT_WINDOW_LIMIT,
+  DashboardMutationNotPermittedError,
+  selectApprovalMutationWriter,
+} from "../data/sources/dashboard-data-source";
 import type {
   AdapterStatus,
   ApprovalRequest,
@@ -261,7 +265,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   async function refreshApprovals(): Promise<void> {
-    const pendingApprovals = await dashboardDataSource.getPendingApprovals();
+    const pendingApprovals = await dashboardDataSourceHandle.reader.getPendingApprovals();
     const enrichedApprovals = mergeApprovalsWithAuditEvidence(
       pendingApprovals,
       auditWindow.value.events,
@@ -316,10 +320,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
 
     const auditWindowRequest = resources.has("auditWindow")
-      ? dashboardDataSource.getAuditWindow({}, controller.signal)
+      ? dashboardDataSourceHandle.reader.getAuditWindow({}, controller.signal)
       : null;
     const policyHistoryRequest = resources.has("policyHistory")
-      ? dashboardDataSource.getPolicyHistory(controller.signal)
+      ? dashboardDataSourceHandle.reader.getPolicyHistory(controller.signal)
       : null;
     const tasks: RefreshTask[] = [];
 
@@ -345,7 +349,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: scope === "approvals",
         label: "审批队列",
         resource: "approvals",
-        promise: dashboardDataSource
+        promise: dashboardDataSourceHandle.reader
           .getPendingApprovals(controller.signal)
           .then(async (pendingApprovals) => {
             const visibleEvents = auditWindowRequest
@@ -365,9 +369,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: scope === "system",
         label: "服务健康",
         resource: "health",
-        promise: dashboardDataSource.getHealth(controller.signal).then((nextHealth) => {
-          health.value = nextHealth;
-        }),
+        promise: dashboardDataSourceHandle.reader
+          .getHealth(controller.signal)
+          .then((nextHealth) => {
+            health.value = nextHealth;
+          }),
       });
     }
 
@@ -387,7 +393,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: false,
         label: "策略摘要",
         resource: "policy",
-        promise: dashboardDataSource
+        promise: dashboardDataSourceHandle.reader
           .getCurrentPolicy(controller.signal)
           .then(async (summary) => {
             const history = policyHistoryRequest
@@ -410,7 +416,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: false,
         label: "审计完整性",
         resource: "auditIntegrity",
-        promise: dashboardDataSource
+        promise: dashboardDataSourceHandle.reader
           .getAuditIntegrity(controller.signal)
           .then((integrity) => {
             auditIntegrity.value = integrity;
@@ -430,7 +436,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: false,
         label: "安全评测",
         resource: "evaluationRun",
-        promise: dashboardDataSource
+        promise: dashboardDataSourceHandle.reader
           .getLatestEvaluationRun(controller.signal)
           .then((nextEvaluation) => {
             if (!hasSameEvaluationRun(evaluationRun.value, nextEvaluation)) {
@@ -452,7 +458,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: false,
         label: "配置检查",
         resource: "configAudit",
-        promise: dashboardDataSource
+        promise: dashboardDataSourceHandle.reader
           .getConfigAuditFindings({ limit: 20 }, controller.signal)
           .then((findings) => {
             configAuditFindings.value = findings;
@@ -472,7 +478,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
         critical: false,
         label: "OpenClaw 适配器",
         resource: "adapter",
-        promise: dashboardDataSource
+        promise: dashboardDataSourceHandle.reader
           .getAdapterStatus("openclaw", controller.signal)
           .then((adapterStatus) => {
             openclawStatus.value = adapterStatus;
@@ -591,14 +597,28 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return promise;
   }
 
-  async function resolveApproval(approval: ApprovalRequest, decision: "allow_once" | "deny") {
+  async function resolveApproval(
+    approval: ApprovalRequest,
+    decision: "allow_once" | "deny",
+    options: { readonly?: boolean } = {},
+  ) {
+    const mutationPermission = selectApprovalMutationWriter(
+      dashboardDataSourceHandle,
+      options.readonly,
+    );
+    if (!mutationPermission.permitted) {
+      const error = new DashboardMutationNotPermittedError();
+      approvalResolutionError.value = error.message;
+      approvalResolutionState.value = "failed";
+      throw error;
+    }
     if (submittingApprovalId.value) return;
     const auth = useAuthStore();
     submittingApprovalId.value = approval.id;
     approvalResolutionError.value = null;
     approvalResolutionState.value = "submitting";
     try {
-      const resolution = await dashboardDataSource.resolveApproval(
+      const resolution = await mutationPermission.writer.resolveApproval(
         approval,
         decision,
         auth.csrfToken,
@@ -640,7 +660,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     traceDetailLoadingId.value = traceId;
     traceDetailErrors.value = { ...traceDetailErrors.value, [traceId]: "" };
     try {
-      const response = await dashboardDataSource.getTraceDetail(traceId, {
+      const response = await dashboardDataSourceHandle.reader.getTraceDetail(traceId, {
         etag: cachedDetail ? traceEtags.get(traceId) : undefined,
         signal,
       });
@@ -790,7 +810,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     provenanceLoadingIds.add(traceId);
     provenanceErrors.value = { ...provenanceErrors.value, [traceId]: "" };
     try {
-      const response = await dashboardDataSource.getTraceProvenance(traceId, {
+      const response = await dashboardDataSourceHandle.reader.getTraceProvenance(traceId, {
         etag: cachedProvenance ? provenanceEtags.get(traceId) : undefined,
         signal,
       });

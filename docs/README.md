@@ -16,7 +16,8 @@ docs/
 ├── 06_delivery/          # 部署使用、实施路线、演示脚本
 ├── 07_auth/              # Capability Auth、前端与适配器鉴权
 ├── 08_api/               # 跨端 API 目标契约、联调结构与迁移清单
-└── AgentGuard_Runtime_Enforcement_Contract_v1_Final/  # Runtime Enforcement 契约冻结
+├── AgentGuard_Runtime_Enforcement_Contract_v1_Final/  # Runtime Enforcement 契约冻结
+└── AgentGuard_Runtime_Supervision_Console_Design/      # 运行时监督控制台增强设计候选稿
 ```
 
 ## 2. 开发阅读路径
@@ -54,18 +55,20 @@ docs/
 3. [Dashboard 与审批流](04_apps/dashboard_design.md)
 4. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
 5. [Agent 运行时安全可观测与动态治理设计](04_apps/runtime_safety_observability_design.md)
-6. [证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)
-7. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
-8. [实施路线与验收标准](06_delivery/implementation_plan.md)
+6. [运行时监督控制台增强设计包](AgentGuard_Runtime_Supervision_Console_Design/00_README_设计包索引.md)
+7. [证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)
+8. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
+9. [实施路线与验收标准](06_delivery/implementation_plan.md)
 
 ### API 联调与契约评审
 
 1. [接口契约与事件模型](02_core/interface_contract.md)
 2. [证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)
 3. [Agent 运行时安全可观测与动态治理设计](04_apps/runtime_safety_observability_design.md)
-4. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
-5. [Capability Auth 总体方案](07_auth/鉴权总体方案.md)
-6. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
+4. [运行时监督控制台增强设计包](AgentGuard_Runtime_Supervision_Console_Design/00_README_设计包索引.md)
+5. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
+6. [Capability Auth 总体方案](07_auth/鉴权总体方案.md)
+7. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
 
 ### Redteam 开发
 
@@ -113,6 +116,7 @@ docs/
 | [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort 与验收契约                    |
 | [AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md](AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md) | CORE / CT / RTE 三轨实施总路线图候选稿（Implementation Freeze Candidate；效力低于三套正式冻结分册，冲突时以分册为准） |
 | [AgentGuard_Runtime_Enforcement_Contract_v1_Final/](AgentGuard_Runtime_Enforcement_Contract_v1_Final/00_README_设计包索引.md) | Runtime Enforcement 契约冻结、字段/Schema/指标口径与 PR-RTE 实施计划 |
+| [AgentGuard_Runtime_Supervision_Console_Design/](AgentGuard_Runtime_Supervision_Console_Design/00_README_设计包索引.md) | 基于现有 Trace 控制台的任务监督图、CT 内容流、审批依据、字段/API 冻结与 S0-S6 实施验收候选方案 |
 
 ## 4. 维护规则
 

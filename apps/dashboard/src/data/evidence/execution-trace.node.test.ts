@@ -5,8 +5,13 @@ import test from "node:test";
 import { mapApproval, mapAuditEvent } from "../../api/guard-api-mappers.ts";
 import type { GuardApprovalDto, GuardAuditEventDto } from "../../api/guard-api-types.ts";
 import type { ApprovalRequest, NormalizedAuditEvidence } from "../../types/dashboard.ts";
+import { createDashboardDataSourceDescriptor } from "../sources/dashboard-data-source.ts";
 import { buildTraceEvidenceViewModel } from "./trace-evidence.ts";
-import { buildExecutionTrace, shouldContinueTracePolling } from "./execution-trace.ts";
+import {
+  buildExecutionTrace,
+  buildRuntimeSupervisionViewModel,
+  shouldContinueTracePolling,
+} from "./execution-trace.ts";
 
 interface FixtureSnapshot {
   included_audit_ids: string[];
@@ -63,6 +68,16 @@ function normalizedEvents(
   return buildTraceEvidenceViewModel(fixture.source_facts.trace_id, rows, approvals, null).events;
 }
 
+function buildTrace(
+  events: readonly NormalizedAuditEvidence[],
+  approvals: readonly ApprovalRequest[] = [],
+) {
+  return buildExecutionTrace(events, approvals, {
+    elementSourceMode: "mock",
+    traceId: fixture.source_facts.trace_id,
+  });
+}
+
 function evidence(
   base: NormalizedAuditEvidence,
   overrides: Partial<NormalizedAuditEvidence>,
@@ -94,8 +109,32 @@ function evidence(
   };
 }
 
+function completeV21Coverage() {
+  const domains = [
+    "task",
+    "source",
+    "capability",
+    "behavior",
+    "dataflow",
+    "memory",
+    "runtime_outcome",
+  ];
+  return Object.fromEntries(
+    domains.map((domain) => [
+      domain,
+      {
+        as_of_sequence: null,
+        domain,
+        projector_version: "v21-09.projector.1",
+        reason_codes: [],
+        status: "complete",
+      },
+    ]),
+  );
+}
+
 test("projects the two-action regression fixture without treating it as a product whitelist", () => {
-  const trace = buildExecutionTrace(normalizedEvents(), currentApproval());
+  const trace = buildTrace(normalizedEvents(), currentApproval());
 
   assert.equal(trace.lifecycleState, "completed");
   assert.equal(trace.steps.length, 2);
@@ -119,6 +158,13 @@ test("projects the two-action regression fixture without treating it as a produc
   assert.equal(code.approval, "allowed_once");
   assert.equal(code.execution, "executed");
   assert.equal(code.phase, "terminal");
+  assert.equal(code.supervision.officialDecision.decision, "ask");
+  assert.equal(code.supervision.approval.decision, "allow_once");
+  assert.equal(code.supervision.enforcement.availability, "unavailable");
+  assert.equal(code.supervision.execution.status, "executed");
+  assert.equal(code.supervision.execution.receiptRecorded, true);
+  assert.equal(code.supervision.v21Assessment.availability, "unavailable");
+  assert.equal(code.supervision.action?.argumentSummary, null);
   assert.deepEqual(
     code.policyChecks.map((check) => check.auditId),
     ["audit_policy_code_exec_001"],
@@ -129,10 +175,7 @@ test("projects the two-action regression fixture without treating it as a produc
 test("keeps decision, approval and execution as three independent facts", () => {
   for (const snapshot of fixture.expected_projection.snapshots) {
     const approvals = currentApproval(snapshot);
-    const trace = buildExecutionTrace(
-      normalizedEvents(snapshot.included_audit_ids, approvals),
-      approvals,
-    );
+    const trace = buildTrace(normalizedEvents(snapshot.included_audit_ids, approvals), approvals);
     const code = trace.steps.find((step) => step.actionId === "call_code_exec_001");
     assert.ok(code);
     assert.equal(code.decision, snapshot.expected_code_action.decision);
@@ -152,19 +195,26 @@ test("requires an explicit start observation before showing running", () => {
   )!;
 
   assert.equal(
-    buildExecutionTrace(
+    buildTrace(
       normalizedEvents(beforeStart.included_audit_ids, currentApproval(beforeStart)),
       currentApproval(beforeStart),
     ).steps.at(-1)?.statusLabel,
     "已放行，等待运行",
   );
   assert.equal(
-    buildExecutionTrace(
+    buildTrace(
       normalizedEvents(started.included_audit_ids, currentApproval(started)),
       currentApproval(started),
     ).steps.at(-1)?.statusLabel,
     "正在执行",
   );
+  const running = buildTrace(
+    normalizedEvents(started.included_audit_ids, currentApproval(started)),
+    currentApproval(started),
+  ).steps.at(-1)!;
+  assert.equal(running.supervision.activityState, "running");
+  assert.equal(running.supervision.execution.status, "unknown");
+  assert.equal(running.supervision.execution.receiptRecorded, false);
 });
 
 test("does not guess a primary decision from a broken policy audit link", () => {
@@ -173,11 +223,14 @@ test("does not guess a primary decision from a broken policy audit link", () => 
       ? { ...event, policyAuditId: "audit_missing" }
       : event,
   );
-  const code = buildExecutionTrace(corrupted, currentApproval()).steps.at(-1)!;
+  const code = buildTrace(corrupted, currentApproval()).steps.at(-1)!;
 
   assert.equal(code.decision, "unknown");
   assert.equal(code.primaryAuditId, code.auditIds[0]);
-  assert.equal(code.execution, "executed");
+  assert.equal(code.execution, "unknown");
+  assert.equal(code.supervision.officialDecision.decision, "unknown");
+  assert.equal(code.supervision.execution.availability, "partial");
+  assert.equal(code.supervision.controlIntegrity.status, "correlation_conflict");
 });
 
 test("deduplicates policy checks before grouping and keeps distinct checkpoints", () => {
@@ -191,7 +244,7 @@ test("deduplicates policy checks before grouping and keeps distinct checkpoints"
     eventId: "event_context",
     eventType: "context_assembled",
   });
-  const trace = buildExecutionTrace([...events, duplicate, checkpoint], currentApproval());
+  const trace = buildTrace([...events, duplicate, checkpoint], currentApproval());
   const context = trace.steps.find((step) => step.category === "context");
 
   assert.equal(trace.steps.length, 3);
@@ -298,7 +351,7 @@ test("shows every supported GuardEvent once while grouping one action lifecycle"
     }),
   ];
 
-  const trace = buildExecutionTrace(rows);
+  const trace = buildTrace(rows);
   const tool = trace.steps.find((step) => step.actionId === "call_complete_matrix");
   const policyEventIds = trace.steps.flatMap((step) =>
     step.events.flatMap((event) =>
@@ -344,7 +397,7 @@ test("uses a stable checkpoint fallback for a future policy event", () => {
     eventType: "future_guard_checkpoint",
   });
 
-  const trace = buildExecutionTrace([future]);
+  const trace = buildTrace([future]);
 
   assert.equal(trace.steps.length, 1);
   assert.equal(trace.steps[0]?.kind, "checkpoint");
@@ -371,11 +424,309 @@ test("stops after an explicit lifecycle terminal even when a receipt is missing"
     stage: "trace_completed",
   });
 
-  const observing = buildExecutionTrace([action]);
-  const terminal = buildExecutionTrace([action, completed]);
+  const observing = buildTrace([action]);
+  const terminal = buildTrace([action, completed]);
 
   assert.equal(shouldContinueTracePolling(observing), true);
   assert.equal(shouldContinueTracePolling(terminal), false);
   assert.equal(terminal.steps.length, 1);
   assert.equal(terminal.steps[0]?.phase, "evaluated");
+  assert.equal(observing.lifecycleSupervision.confirmedTerminal, false);
+  assert.equal(terminal.lifecycleSupervision.confirmedTerminal, true);
+});
+
+test("does not confirm a terminal lifecycle from conflicting duplicate audit ids", () => {
+  const base = normalizedEvents()[0]!;
+  const action = evidence(base, {
+    actionId: "mock_action_lifecycle_conflict",
+    auditId: "audit_lifecycle_conflict_action",
+    decision: "allow",
+    decisionId: "decision_lifecycle_conflict",
+    eventId: "event_lifecycle_conflict_action",
+    eventType: "tool_call_proposed",
+    toolName: "read_file",
+  });
+  const completed = evidence(base, {
+    auditId: "audit_lifecycle_conflict_terminal",
+    eventId: "event_lifecycle_conflict_terminal",
+    eventType: "trace_completed",
+    recordType: "runtime_observation",
+    resultSummary: "completed-a",
+    stage: "trace_completed",
+  });
+  const conflictingCompleted = { ...completed, resultSummary: "completed-b" };
+
+  const trace = buildTrace([action, completed, conflictingCompleted]);
+
+  assert.equal(trace.lifecycleSupervision.confirmedTerminal, false);
+  assert.equal(trace.lifecycleSupervision.completionReason, "生命周期审计记录冲突，终态未确认");
+  assert.equal(shouldContinueTracePolling(trace), true);
+});
+
+test("keeps deny, enforcement and execution proof independent", () => {
+  const base = normalizedEvents()[0]!;
+  const denied = evidence(base, {
+    actionId: "mock_action_denied_without_receipt",
+    auditId: "audit_denied_without_receipt",
+    decision: "deny",
+    decisionId: "decision_denied_without_receipt",
+    eventId: "event_denied_without_receipt",
+    eventType: "tool_call_proposed",
+    toolName: "send_message",
+  });
+
+  const step = buildTrace([denied]).steps[0]!;
+
+  assert.equal(step.supervision.officialDecision.decision, "deny");
+  assert.equal(step.supervision.enforcement.availability, "unavailable");
+  assert.equal(step.supervision.enforcement.gateState, "unknown");
+  assert.equal(step.supervision.execution.availability, "unavailable");
+  assert.equal(step.supervision.execution.status, "unknown");
+  assert.equal(step.supervision.execution.receiptRecorded, false);
+});
+
+test("fails closed when more than one runtime receipt can close an action", () => {
+  const base = normalizedEvents()[0]!;
+  const policy = evidence(base, {
+    actionId: "mock_action_receipt_conflict",
+    auditId: "audit_receipt_conflict_policy",
+    decision: "allow",
+    decisionId: "decision_receipt_conflict",
+    eventId: "event_receipt_conflict",
+    eventType: "tool_call_proposed",
+    toolName: "write_file",
+  });
+  const receipt = (auditId: string, status: "executed" | "not_invoked") =>
+    evidence(base, {
+      actionId: "mock_action_receipt_conflict",
+      auditId,
+      decision: "unknown",
+      eventId: "event_receipt_conflict",
+      eventType: status === "executed" ? "tool_call_completed" : "tool_call_not_invoked",
+      execution: {
+        ...base.execution,
+        receiptRecorded: true,
+        status,
+      },
+      policyAuditId: policy.auditId,
+      recordType: "runtime_outcome",
+      toolName: "write_file",
+    });
+
+  const step = buildTrace([
+    policy,
+    receipt("audit_receipt_conflict_a", "executed"),
+    receipt("audit_receipt_conflict_b", "not_invoked"),
+  ]).steps[0]!;
+
+  assert.equal(step.execution, "unknown");
+  assert.equal(step.supervision.execution.availability, "partial");
+  assert.equal(step.supervision.execution.receiptRecorded, false);
+  assert.equal(step.supervision.controlIntegrity.status, "correlation_conflict");
+});
+
+test("requires receipt event and decision links to match the selected policy", () => {
+  const corrupted = normalizedEvents().map((event) =>
+    event.auditId === "audit_outcome_code_exec_001"
+      ? { ...event, decisionId: "decision_for_another_action" }
+      : event,
+  );
+
+  const step = buildTrace(corrupted, currentApproval()).steps.at(-1)!;
+
+  assert.equal(step.supervision.officialDecision.decision, "ask");
+  assert.equal(step.supervision.execution.availability, "partial");
+  assert.equal(step.supervision.execution.status, "unknown");
+  assert.equal(step.supervision.execution.receiptRecorded, false);
+  assert.equal(step.supervision.controlIntegrity.status, "correlation_conflict");
+});
+
+test("marks duplicate audit ids with different content as an identity conflict", () => {
+  const base = normalizedEvents()[0]!;
+  const policy = evidence(base, {
+    actionId: "mock_action_duplicate_audit",
+    auditId: "audit_duplicate_identity",
+    decision: "allow",
+    decisionId: "decision_duplicate_identity",
+    eventId: "event_duplicate_identity",
+    eventType: "tool_call_proposed",
+    toolName: "read_file",
+  });
+  const conflictingDuplicate = { ...policy, decision: "deny" as const };
+
+  const trace = buildTrace([policy, conflictingDuplicate]);
+  const reversedTrace = buildTrace([conflictingDuplicate, policy]);
+  const step = trace.steps[0]!;
+
+  assert.equal(step.supervision.officialDecision.availability, "partial");
+  assert.equal(step.supervision.officialDecision.decision, "unknown");
+  assert.equal(step.supervision.semantics.availability, "partial");
+  assert.equal(step.supervision.controlIntegrity.status, "correlation_conflict");
+  assert.deepEqual(step.supervision.controlIntegrity.reasonCodes, ["DUPLICATE_AUDIT_ID_CONFLICT"]);
+  assert.deepEqual(trace, reversedTrace);
+});
+
+test("confirms a control violation when runtime progress follows denied approval", () => {
+  const base = normalizedEvents()[0]!;
+  const policy = evidence(base, {
+    actionId: "mock_action_started_after_approval_deny",
+    approval: {
+      approvalId: "approval_started_after_deny",
+      resolvedAt: "2026-08-09T08:00:01Z",
+      status: "denied",
+    },
+    auditId: "audit_started_after_approval_deny",
+    decision: "ask",
+    decisionId: "decision_started_after_approval_deny",
+    eventId: "event_started_after_approval_deny",
+    eventType: "tool_call_proposed",
+    toolName: "send_message",
+  });
+  const started = evidence(base, {
+    actionId: policy.actionId,
+    auditId: "audit_runtime_started_after_approval_deny",
+    eventId: policy.eventId,
+    eventType: "tool_call_started",
+    recordType: "runtime_observation",
+    stage: "tool_call_started",
+    toolName: policy.toolName,
+  });
+
+  const step = buildTrace([policy, started]).steps[0]!;
+
+  assert.equal(step.supervision.approval.status, "denied");
+  assert.equal(step.supervision.activityState, "running");
+  assert.equal(step.supervision.execution.status, "unknown");
+  assert.equal(step.supervision.controlIntegrity.status, "confirmed_violation");
+  assert.deepEqual(step.supervision.controlIntegrity.reasonCodes, [
+    "APPROVAL_DENY_FOLLOWED_BY_RUNTIME_PROGRESS",
+  ]);
+  assert.ok(
+    step.supervision.controlIntegrity.sourceRefs.some(
+      (source) => source.id === "audit_runtime_started_after_approval_deny",
+    ),
+  );
+  const sourceIdentities = step.supervision.controlIntegrity.sourceRefs.map(
+    (source) => `${source.id}\u0000${source.traceId}`,
+  );
+  assert.equal(new Set(sourceIdentities).size, sourceIdentities.length);
+});
+
+test("projects a valid V21-09 record only as verified shadow evidence", () => {
+  const base = normalizedEvents()[0]!;
+  const baseRaw = base.raw as Record<string, unknown>;
+  const baseEvidence = (baseRaw.evidence ?? {}) as Record<string, unknown>;
+  const shadow = evidence(base, {
+    actionId: "mock_action_v21_shadow",
+    auditId: "audit_v21_shadow",
+    decision: "allow",
+    decisionId: "decision_v21_shadow",
+    eventId: "event_v21_shadow",
+    eventType: "tool_call_proposed",
+    raw: {
+      ...baseRaw,
+      evidence: {
+        ...baseEvidence,
+        decision_v21: {
+          schema_version: "2.1",
+          payload: {
+            assessment_id: "assessment_shadow_001",
+            coverage: completeV21Coverage(),
+            degradation_ids: [],
+            divergence_category: "legacy_allow_v21_deny",
+            final_decision: "allow",
+            legacy_decision: "allow",
+            mode: "shadow",
+            v21_fast_disposition: "CLEAR_DENY",
+          },
+        },
+      },
+    },
+    toolName: "call_api",
+  });
+
+  const step = buildTrace([shadow]).steps[0]!;
+
+  assert.equal(step.supervision.officialDecision.decision, "allow");
+  assert.equal(step.supervision.v21Assessment.decisionAuthority, "shadow");
+  assert.equal(step.supervision.v21Assessment.authorityVerification, "verified");
+  assert.equal(step.supervision.v21Assessment.fastDisposition, "CLEAR_DENY");
+  assert.equal(step.supervision.v21Assessment.recordedFinalDecision, "allow");
+  assert.equal(step.supervision.v21Assessment.coverage.behavior, "complete");
+});
+
+test("does not verify shadow evidence that disagrees with the official decision", () => {
+  const base = normalizedEvents()[0]!;
+  const raw = base.raw as Record<string, unknown>;
+  const shadow = evidence(base, {
+    actionId: "mock_action_v21_shadow_mismatch",
+    auditId: "audit_v21_shadow_mismatch",
+    decision: "deny",
+    decisionId: "decision_v21_shadow_mismatch",
+    eventId: "event_v21_shadow_mismatch",
+    eventType: "tool_call_proposed",
+    raw: {
+      ...raw,
+      evidence: {
+        ...((raw.evidence ?? {}) as Record<string, unknown>),
+        decision_v21: {
+          schema_version: "2.1",
+          payload: {
+            assessment_id: "assessment_shadow_mismatch",
+            coverage: completeV21Coverage(),
+            degradation_ids: [],
+            divergence_category: null,
+            final_decision: "allow",
+            legacy_decision: "allow",
+            mode: "shadow",
+            v21_fast_disposition: "CLEAR_ALLOW",
+          },
+        },
+      },
+    },
+    toolName: "call_api",
+  });
+
+  const step = buildTrace([shadow]).steps[0]!;
+
+  assert.equal(step.supervision.officialDecision.decision, "deny");
+  assert.equal(step.supervision.v21Assessment.decisionAuthority, "none");
+  assert.equal(step.supervision.v21Assessment.authorityVerification, "conflicted");
+});
+
+test("builds a deterministic supervision wrapper without a second action projection", () => {
+  const events = normalizedEvents();
+  const approvals = currentApproval();
+  const input = {
+    approvals,
+    dataSource: createDashboardDataSourceDescriptor({ isProduction: false, viteMode: "mock" }),
+    elementSourceMode: "mock" as const,
+    events,
+    traceId: fixture.source_facts.trace_id,
+  };
+
+  const first = buildRuntimeSupervisionViewModel(input);
+  const second = buildRuntimeSupervisionViewModel(input);
+
+  assert.deepEqual(first, second);
+  assert.equal(first.schemaVersion, "runtime-supervision/0.1");
+  assert.equal(first.execution.steps.length, 2);
+  assert.equal(first.temporalState, "historical");
+  assert.equal(first.provenancePresentation.nodes.length, 0);
+});
+
+test("reports partial receipt completeness when one required action lacks a receipt", () => {
+  const events = normalizedEvents().filter(
+    (event) => event.auditId !== "audit_outcome_code_exec_001",
+  );
+  const viewModel = buildRuntimeSupervisionViewModel({
+    approvals: currentApproval(),
+    dataSource: createDashboardDataSourceDescriptor({ isProduction: false, viteMode: "mock" }),
+    elementSourceMode: "mock",
+    events,
+    traceId: fixture.source_facts.trace_id,
+  });
+
+  assert.equal(viewModel.completeness.runtimeReceipts, "partial");
+  assert.equal(viewModel.capabilities.runtimeReceipts, "partial");
 });

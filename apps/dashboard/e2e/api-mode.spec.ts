@@ -516,6 +516,7 @@ test("API mode conditionally refreshes a running action until its terminal recei
     links: {
       action_id: "action_api_001",
       approval_id: "approval_runtime",
+      decision_id: "decision_api_001",
       event_id: "evt_api_001",
       parent_audit_id: "audit_start_api_001",
       policy_audit_id: "audit_api_001",
@@ -572,9 +573,12 @@ test("API mode conditionally refreshes a running action until its terminal recei
 
   await page.goto("/evidence/trace_api_001");
   const action = page.locator(".execution-node").filter({ hasText: "发送邮件" });
-  await expect(action).toContainText("等待审批");
-  await expect(action).toContainText("正在执行", { timeout: 4_500 });
-  await expect(action).toContainText("已执行", { timeout: 5_000 });
+  const approvalLayer = action.locator('[data-supervision-layer="approval"]');
+  const executionLayer = action.locator('[data-supervision-layer="execution"]');
+  await expect(approvalLayer).toContainText("待审批");
+  await expect(approvalLayer).toContainText("单次放行", { timeout: 4_500 });
+  await expect(executionLayer).toContainText("正在执行", { timeout: 4_500 });
+  await expect(executionLayer).toContainText("已执行", { timeout: 5_000 });
   await expect(page.locator(".execution-trace__state-line")).toContainText("运行已结束");
   await expect(page.locator(".execution-trace__connection")).toContainText("运行结果已确认");
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v1"');
@@ -1097,6 +1101,61 @@ test("API mode renders degraded database health without marking the API offline"
     .filter({ hasText: "PostgreSQL" });
   await expect(apiRow).toContainText("正常");
   await expect(databaseRow).toContainText("异常");
+});
+
+test("API mode keeps one-time approval confirmation accessible in a reduced-motion narrow viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 1024, width: 768 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installApiRoutes(page, { approvals: [uncertainApproval()] });
+  await page.goto("/approvals/approval_uncertain");
+
+  const trigger = page.getByRole("button", { name: "仅本次放行" });
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "确认仅本次放行？" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("该动作将绕过当前安全判断并继续执行一次");
+  await expect(page.getByRole("button", { name: "取消" })).toBeFocused();
+  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
+    /confirm-dialog__signal--warning/,
+  );
+  const dialogSurface = dialog.locator(".confirm-dialog__surface");
+  await expect(dialogSurface).toHaveCSS("animation-name", "none");
+  const dialogRect = await dialogSurface.boundingBox();
+  expect(dialogRect).not.toBeNull();
+  expect(dialogRect!.x).toBeGreaterThanOrEqual(0);
+  expect(dialogRect!.y).toBeGreaterThanOrEqual(0);
+  expect(dialogRect!.x + dialogRect!.width).toBeLessThanOrEqual(768);
+  expect(dialogRect!.y + dialogRect!.height).toBeLessThanOrEqual(1024);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test("API mode deny approval uses a danger confirmation and restores trigger focus", async ({
+  page,
+}) => {
+  await installApiRoutes(page, { approvals: [uncertainApproval()] });
+  await page.goto("/approvals/approval_uncertain");
+
+  const trigger = page.getByRole("button", { name: "拒绝授权" });
+  await expect(trigger).toHaveCSS("min-height", "44px");
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "确认拒绝本次授权？" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("本次授权将被拒绝");
+  await expect(dialog.locator(".confirm-dialog__signal")).toHaveClass(
+    /confirm-dialog__signal--danger/,
+  );
+  await expect(page.getByRole("button", { name: "确认拒绝授权" })).toHaveCSS("min-height", "44px");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 });
 
 test("API mode keeps an uncertain approval available when reconciliation still returns it", async ({

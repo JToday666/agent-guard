@@ -33,7 +33,8 @@
           <small>资源目标</small>
           <span>{{ step.resourceSummary ?? "未记录" }}</span>
         </span>
-        <span class="execution-list__runtime">
+        <ExecutionSupervisionCapsules v-if="step.kind === 'action'" density="list" :step="step" />
+        <span v-else class="execution-list__runtime">
           <component
             :is="runtimeIcon(step)"
             :class="{ 'is-running': step.phase === 'waiting_receipt' }"
@@ -45,10 +46,6 @@
             <small>{{ getExecutionApprovalLabel(step.approval) }}</small>
           </span>
         </span>
-        <StatusBadge
-          :label="getDecisionLabel(step.decision)"
-          :tone="getDecisionTone(step.decision)"
-        />
         <span v-if="step.stepId === currentStepId" class="execution-list__current">当前</span>
         <ChevronRight :size="16" aria-hidden="true" />
       </button>
@@ -85,8 +82,7 @@ import type {
   ExecutionStepViewModel,
   TraceLifecycleState,
 } from "../../types/dashboard";
-import { getDecisionLabel, getDecisionTone } from "../../utils/dashboard-formatters";
-import StatusBadge from "../common/StatusBadge.vue";
+import ExecutionSupervisionCapsules from "./ExecutionSupervisionCapsules.vue";
 
 defineOptions({ name: "ExecutionTraceList" });
 
@@ -188,8 +184,8 @@ function categoryIcon(category: ExecutionStepCategory): Component {
   display: grid;
   gap: var(--space-3);
   grid-template-columns:
-    2.25rem minmax(12rem, 1.3fr) minmax(9rem, 0.8fr) minmax(11rem, 1fr)
-    auto auto auto;
+    2.25rem minmax(11rem, 1fr) minmax(8rem, 0.65fr) minmax(24rem, 1.55fr)
+    auto auto;
   min-height: 4.5rem;
   padding: var(--space-2) var(--space-3);
   text-align: left;
@@ -298,12 +294,28 @@ function categoryIcon(category: ExecutionStepCategory): Component {
 
 @media (max-width: 72rem) {
   .execution-list__item > button {
-    grid-template-columns: 2.25rem minmax(0, 1fr) minmax(10rem, 0.8fr) auto auto;
+    grid-template-columns: 2.25rem minmax(10rem, 0.85fr) minmax(20rem, 1.5fr) auto;
   }
 
   .execution-list__resource,
   .execution-list__current {
     display: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .execution-list__item > button {
+    align-items: start;
+    grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  }
+
+  .execution-list__item > button > :deep(.supervision-capsules) {
+    grid-column: 2 / -1;
+    width: 100%;
+  }
+
+  .execution-list__runtime {
+    grid-column: 2 / -1;
   }
 }
 
