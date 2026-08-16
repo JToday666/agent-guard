@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.dev/schemas/execution_lease_consume_response.schema.json",
+  "title": "RTE-05 Execution Lease Consume Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lease_id", "consumption_id", "lease_token", "expires_at"],
+  "properties": {
+    "lease_id": { "type": "string", "minLength": 1 },
+    "consumption_id": { "type": "string", "minLength": 1 },
+    "lease_token": { "type": "string", "minLength": 1 },
+    "expires_at": { "type": "string", "format": "date-time" }
+  }
+}

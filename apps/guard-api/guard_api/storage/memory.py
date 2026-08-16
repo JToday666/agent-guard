@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac as hmac_module
 from copy import deepcopy
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from threading import Lock, RLock
 from typing import Any, Callable, Iterator, cast
@@ -23,7 +23,11 @@ from agentguard_core import (
     utc_now_iso,
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
-from agentguard_core.security_context import ExecutionLease, GrantConsumption
+from agentguard_core.security_context import (
+    CapabilityGrant,
+    ExecutionLease,
+    GrantConsumption,
+)
 
 from guard_api.models import (
     AdapterStatusRecord,
@@ -34,11 +38,22 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.storage.base import (
+    ApprovalExecutionLeaseExpiredError,
+    ApprovalExecutionLeaseStateInvalidError,
+    ApprovalExecutionLeaseUnavailableError,
+    ApprovalLeaseAuthorizationError,
+    ApprovalLeaseConsumeCommand,
+    ApprovalLeaseConsumptionConflictError,
+    ApprovalLeaseExpiredError,
+    ApprovalLeaseNotConsumableError,
+    ApprovalLeaseNotFoundError,
     ApprovalStateConflictError,
     AuditEventFilters,
     AuditIdConflictError,
     AuditIntegrityStatus,
     AuditWindowQuery,
+    EnforcementBindingConflictError,
+    EnforcementBindingRecord,
     EvaluationRunConflictError,
     GrantConsumptionResult,
     MAX_REBUILD_INPUT_LIMIT,
@@ -98,14 +113,39 @@ def _derive_consumption_id(grant_id: str, action_id: str) -> str:
 
 def _derive_lease_id(consumption_id: str) -> str:
     """lease_id 确定性派生（受限 JCS sha256，禁 uuid）。"""
-    suffix = canonical_sha256(
-        {"consumption_id": consumption_id}
-    ).removeprefix("sha256:")
+    suffix = canonical_sha256({"consumption_id": consumption_id}).removeprefix(
+        "sha256:"
+    )
     return f"lease:{suffix}"
 
 
 def _system_utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _binding_semantic_payload(record: EnforcementBindingRecord) -> tuple[Any, ...]:
+    """Immutable binding facts; only the later registration link is excluded."""
+
+    return (
+        record.event_id,
+        record.policy_audit_id,
+        record.approval_id,
+        record.action_id,
+        record.action_type,
+        record.authorization_fingerprint,
+        record.runtime_binding_id,
+        record.scope_digest,
+        record.principal_id,
+        record.runtime,
+        record.agent_id,
+        record.policy_revision,
+        record.requires_execution_lease,
+        record.created_at,
+    )
+
+
+def _safe_compare(left: str, right: str) -> bool:
+    return hmac_module.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
 @dataclass(slots=True)
@@ -120,24 +160,23 @@ class MemoryControlPlaneStore:
     action_critic_reviews: dict[str, ActionCriticReview] = field(default_factory=dict)
     memory_changes: dict[str, MemoryGuardChange] = field(default_factory=dict)
     approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
+    enforcement_bindings: dict[str, EnforcementBindingRecord] = field(
+        default_factory=dict
+    )
     launch_codes: dict[str, StoredLaunchCode] = field(default_factory=dict)
     browser_sessions: dict[str, StoredBrowserSession] = field(default_factory=dict)
     policy_snapshot: PolicySnapshotRecord | None = None
     policy_snapshot_history: list[PolicySnapshotRecord] = field(default_factory=list)
     task_facts: dict[str, list[TaskFactRecord]] = field(default_factory=dict)
     security_states: dict[str, SecurityStateRecord] = field(default_factory=dict)
-    projection_records: dict[tuple[str, str, str, int, str], ProjectionIdentityRecord] = field(
-        default_factory=dict
-    )
+    projection_records: dict[
+        tuple[str, str, str, int, str], ProjectionIdentityRecord
+    ] = field(default_factory=dict)
     # V21-06 capability/lease 权威存储（C5：lease 只存本 store，不进
     # OnlineSecurityState）；migration 0016 三表的 memory 对应物。
     capability_grants: dict[str, dict[str, Any]] = field(default_factory=dict)
-    grant_consumption_records: dict[str, GrantConsumption] = field(
-        default_factory=dict
-    )
-    execution_lease_records: dict[str, ExecutionLease] = field(
-        default_factory=dict
-    )
+    grant_consumption_records: dict[str, GrantConsumption] = field(default_factory=dict)
+    execution_lease_records: dict[str, ExecutionLease] = field(default_factory=dict)
     audit_clock: Callable[[], datetime] = field(default=_system_utc_now, repr=False)
     audit_integrity_lock: Any = field(default_factory=RLock, init=False, repr=False)
     provenance_lock: Any = field(default_factory=RLock, init=False, repr=False)
@@ -146,10 +185,9 @@ class MemoryControlPlaneStore:
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     task_fact_lock: Any = field(default_factory=Lock, init=False, repr=False)
     security_state_lock: Any = field(default_factory=Lock, init=False, repr=False)
-    approval_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    approval_lease_lock: Any = field(default_factory=RLock, init=False, repr=False)
     memory_change_lock: Any = field(default_factory=RLock, init=False, repr=False)
     action_critic_lock: Any = field(default_factory=RLock, init=False, repr=False)
-    capability_lease_lock: Any = field(default_factory=Lock, init=False, repr=False)
     audit_events_by_id: dict[str, AuditEvent] = field(default_factory=dict)
     audit_ingested_at_by_id: dict[str, datetime] = field(default_factory=dict)
 
@@ -245,7 +283,7 @@ class MemoryControlPlaneStore:
             self.policy_evaluation_lock,
             self.audit_integrity_lock,
             self.provenance_lock,
-            self.approval_lock,
+            self.approval_lease_lock,
             self.memory_change_lock,
             self.action_critic_lock,
         ):
@@ -256,6 +294,7 @@ class MemoryControlPlaneStore:
                 "provenance_nodes": deepcopy(self.provenance_nodes),
                 "provenance_edges": deepcopy(self.provenance_edges),
                 "approvals": deepcopy(self.approvals),
+                "enforcement_bindings": deepcopy(self.enforcement_bindings),
                 "memory_changes": deepcopy(self.memory_changes),
                 "action_critic_reviews": deepcopy(self.action_critic_reviews),
             }
@@ -273,6 +312,8 @@ class MemoryControlPlaneStore:
                 self.provenance_edges.update(snapshot["provenance_edges"])
                 self.approvals.clear()
                 self.approvals.update(snapshot["approvals"])
+                self.enforcement_bindings.clear()
+                self.enforcement_bindings.update(snapshot["enforcement_bindings"])
                 self.memory_changes.clear()
                 self.memory_changes.update(snapshot["memory_changes"])
                 self.action_critic_reviews.clear()
@@ -473,27 +514,34 @@ class MemoryControlPlaneStore:
         self, credential: CredentialRecord | dict[str, Any]
     ) -> CredentialRecord:
         record = CredentialRecord.model_validate(credential)
-        self.credentials[record.credential_id] = record
-        return record
+        with self.approval_lease_lock:
+            self.credentials[record.credential_id] = record
+            return record
 
     def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
-        for credential in self.credentials.values():
-            if credential.token_hash == token_hash and credential.revoked_at is None:
-                return credential
+        with self.approval_lease_lock:
+            for credential in self.credentials.values():
+                if (
+                    credential.token_hash == token_hash
+                    and credential.revoked_at is None
+                ):
+                    return credential
         return None
 
     def list_credentials(self) -> list[CredentialRecord]:
-        return sorted(
-            self.credentials.values(), key=lambda credential: credential.created_at
-        )
+        with self.approval_lease_lock:
+            return sorted(
+                self.credentials.values(), key=lambda credential: credential.created_at
+            )
 
     def revoke_credential(
         self, credential_id: str, revoked_at: str
     ) -> CredentialRecord:
-        credential = self.credentials[credential_id]
-        revoked = credential.model_copy(update={"revoked_at": revoked_at})
-        self.credentials[credential_id] = revoked
-        return revoked
+        with self.approval_lease_lock:
+            credential = self.credentials[credential_id]
+            revoked = credential.model_copy(update={"revoked_at": revoked_at})
+            self.credentials[credential_id] = revoked
+            return revoked
 
     def add_action_critic_review(
         self, review: ActionCriticReview
@@ -591,9 +639,7 @@ class MemoryControlPlaneStore:
         task_id = record.task_fact.task_id
         with self.task_fact_lock:
             revisions = self.task_facts.get(task_id, [])
-            current_revision = (
-                revisions[-1].task_fact.revision if revisions else 0
-            )
+            current_revision = revisions[-1].task_fact.revision if revisions else 0
             if record.expected_revision != current_revision:
                 raise TaskRevisionConflictError(
                     expected_revision=record.expected_revision,
@@ -644,9 +690,7 @@ class MemoryControlPlaneStore:
             self.security_states[scope_digest] = deepcopy(record)
             return True
 
-    def mark_security_state_dirty(
-        self, scope_digest: str, domains: list[str]
-    ) -> None:
+    def mark_security_state_dirty(self, scope_digest: str, domains: list[str]) -> None:
         # state_version 保持不变：dirty 标记不影响 CAS 锚点；
         # state 不存在时创建 version=0 的空态脏记录。
         from agentguard_core.security_context import (
@@ -770,6 +814,340 @@ class MemoryControlPlaneStore:
             rows.sort(key=lambda item: item.applied_state_version)
             return [deepcopy(record) for record in rows[: _bounded_limit(limit)]]
 
+    # RTE-05 private binding and approval-bound lease authority.  One reentrant
+    # lock covers credential, approval, binding, grant, consumption, and lease
+    # state so readers never observe a partially registered/consumed chain.
+
+    def save_enforcement_binding(
+        self, record: EnforcementBindingRecord
+    ) -> EnforcementBindingRecord:
+        if not record.requires_execution_lease:
+            raise EnforcementBindingConflictError(
+                "rte-05:binding_conflict", "private binding is invalid"
+            )
+        with self.approval_lease_lock:
+            collisions = [
+                existing
+                for existing in self.enforcement_bindings.values()
+                if existing.approval_id == record.approval_id
+                or existing.event_id == record.event_id
+                or existing.policy_audit_id == record.policy_audit_id
+            ]
+            if collisions:
+                existing = collisions[0]
+                if len(collisions) != 1 or _binding_semantic_payload(
+                    existing
+                ) != _binding_semantic_payload(record):
+                    raise EnforcementBindingConflictError(
+                        "rte-05:binding_conflict",
+                        "private binding identity conflicts with stored facts",
+                    )
+                return deepcopy(existing)
+            if record.grant_id is not None:
+                raise EnforcementBindingConflictError(
+                    "rte-05:binding_conflict",
+                    "new private binding cannot be pre-registered",
+                )
+            self.enforcement_bindings[record.approval_id] = deepcopy(record)
+            return deepcopy(record)
+
+    def get_enforcement_binding(
+        self, approval_id: str
+    ) -> EnforcementBindingRecord | None:
+        with self.approval_lease_lock:
+            record = self.enforcement_bindings.get(approval_id)
+            return deepcopy(record) if record is not None else None
+
+    def register_approval_grant(
+        self,
+        binding: EnforcementBindingRecord,
+        grant: CapabilityGrant,
+    ) -> EnforcementBindingRecord:
+        with self.approval_lease_lock:
+            grants_snapshot = deepcopy(self.capability_grants)
+            bindings_snapshot = deepcopy(self.enforcement_bindings)
+            try:
+                stored = self.enforcement_bindings.get(binding.approval_id)
+                if stored is None:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:binding_unavailable",
+                        "private binding is not available",
+                    )
+                if _binding_semantic_payload(stored) != _binding_semantic_payload(
+                    binding
+                ):
+                    raise EnforcementBindingConflictError(
+                        "rte-05:binding_conflict",
+                        "private binding conflicts with stored facts",
+                    )
+                approval = self.approvals.get(stored.approval_id)
+                if approval is None:
+                    raise ApprovalLeaseNotFoundError(
+                        "rte-05:approval_not_found", "approval is not available"
+                    )
+                now = self.audit_clock()
+                if (
+                    now.tzinfo is None
+                    or parse_audit_timestamp(approval.expires_at) <= now
+                    or approval.status != "resolved"
+                    or approval.decision != "allow_once"
+                    or approval.resolution_source != "human"
+                ):
+                    raise ApprovalLeaseNotConsumableError(
+                        "rte-05:approval_not_consumable",
+                        "approval is not consumable",
+                    )
+                if not _grant_matches_binding(grant, stored, approval):
+                    raise EnforcementBindingConflictError(
+                        "rte-05:grant_registration_conflict",
+                        "runtime grant conflicts with private binding",
+                    )
+
+                registration_digest = canonical_sha256(grant.model_dump(mode="json"))
+                existing = self.capability_grants.get(grant.grant_id)
+                if existing is not None:
+                    existing_fingerprint = existing.get("authorization_fingerprint")
+                    if (
+                        existing.get("registration_digest") != registration_digest
+                        or existing.get("scope_digest") != grant.scope_digest
+                        or existing.get("expires_at") != grant.expires_at
+                        or not isinstance(existing_fingerprint, str)
+                        or not _safe_compare(
+                            existing_fingerprint,
+                            binding.authorization_fingerprint,
+                        )
+                    ):
+                        raise EnforcementBindingConflictError(
+                            "rte-05:grant_registration_conflict",
+                            "runtime grant registration conflicts with stored facts",
+                        )
+                else:
+                    self.capability_grants[grant.grant_id] = {
+                        "grant_id": grant.grant_id,
+                        "scope_digest": grant.scope_digest,
+                        "remaining_uses": grant.remaining_uses,
+                        "expires_at": grant.expires_at,
+                        "authorization_fingerprint": (
+                            grant.exact_authorization_fingerprint
+                        ),
+                        "status": "active",
+                        "registration_digest": registration_digest,
+                    }
+
+                if stored.grant_id not in (None, grant.grant_id):
+                    raise EnforcementBindingConflictError(
+                        "rte-05:grant_registration_conflict",
+                        "private binding is already registered differently",
+                    )
+                registered = replace(stored, grant_id=grant.grant_id)
+                self.enforcement_bindings[stored.approval_id] = registered
+                return deepcopy(registered)
+            except BaseException:
+                self.capability_grants.clear()
+                self.capability_grants.update(grants_snapshot)
+                self.enforcement_bindings.clear()
+                self.enforcement_bindings.update(bindings_snapshot)
+                raise
+
+    def consume_approval_execution_lease(
+        self, command: ApprovalLeaseConsumeCommand
+    ) -> GrantConsumptionResult:
+        with self.approval_lease_lock:
+            grants_snapshot = deepcopy(self.capability_grants)
+            consumptions_snapshot = deepcopy(self.grant_consumption_records)
+            leases_snapshot = deepcopy(self.execution_lease_records)
+            try:
+                now = self.audit_clock()
+                if now.tzinfo is None:
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid", "authority clock is invalid"
+                    )
+
+                # credential -> approval -> binding -> grant -> consumption -> lease
+                credential = self.credentials.get(command.credential_id)
+                if credential is None or not _credential_authorizes_binding(
+                    credential, command, now
+                ):
+                    raise ApprovalLeaseAuthorizationError(
+                        "rte-05:authorization_denied",
+                        "credential or bound identity is not authorized",
+                    )
+
+                approval = self.approvals.get(command.approval_id)
+                if approval is None:
+                    raise ApprovalLeaseNotFoundError(
+                        "rte-05:approval_not_found", "approval is not available"
+                    )
+                approval_expires_at = parse_audit_timestamp(approval.expires_at)
+                if (
+                    approval.status != "resolved"
+                    or approval.decision != "allow_once"
+                    or approval.resolution_source != "human"
+                ):
+                    raise ApprovalLeaseNotConsumableError(
+                        "rte-05:approval_not_consumable",
+                        "approval is not consumable",
+                    )
+
+                binding = self.enforcement_bindings.get(command.approval_id)
+                if binding is None or not binding.requires_execution_lease:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:binding_unavailable",
+                        "private binding is not available",
+                    )
+                if not _binding_approval_invariants_match(binding, approval):
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid",
+                        "private approval authority state is inconsistent",
+                    )
+                if not _command_identity_matches(binding, command):
+                    raise ApprovalLeaseAuthorizationError(
+                        "rte-05:authorization_denied",
+                        "credential or bound identity is not authorized",
+                    )
+                if binding.action_id != command.action_id or not _safe_compare(
+                    binding.authorization_fingerprint,
+                    command.authorization_fingerprint,
+                ):
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "rte-05:consumption_conflict",
+                        "request conflicts with the private binding",
+                    )
+                if binding.grant_id is None:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:grant_unavailable",
+                        "runtime grant registration is not complete",
+                    )
+
+                grant = self.capability_grants.get(binding.grant_id)
+                if grant is None:
+                    raise ApprovalExecutionLeaseUnavailableError(
+                        "rte-05:grant_unavailable",
+                        "runtime grant registration is not complete",
+                    )
+                if not _registered_grant_matches_binding(grant, binding):
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid",
+                        "private approval authority state is inconsistent",
+                    )
+                grant_expires_at = parse_audit_timestamp(str(grant["expires_at"]))
+
+                consumption_id = _derive_consumption_id(
+                    binding.grant_id, binding.action_id
+                )
+                existing = self.grant_consumption_records.get(consumption_id)
+                if existing is not None:
+                    if not _safe_compare(
+                        existing.authorization_fingerprint,
+                        command.authorization_fingerprint,
+                    ):
+                        raise ApprovalLeaseConsumptionConflictError(
+                            "rte-05:consumption_conflict",
+                            "request conflicts with prior consumption",
+                        )
+                    lease_id = _derive_lease_id(consumption_id)
+                    lease = self.execution_lease_records.get(lease_id)
+                    if lease is None or not _lease_matches_binding(
+                        lease, binding, existing
+                    ):
+                        raise ApprovalExecutionLeaseStateInvalidError(
+                            "rte-05:state_invalid",
+                            "private execution lease state is inconsistent",
+                        )
+                    if (
+                        approval_expires_at <= now
+                        or lease.status == "expired"
+                        or (parse_audit_timestamp(lease.expires_at) <= now)
+                    ):
+                        raise ApprovalExecutionLeaseExpiredError(
+                            "rte-05:execution_lease_expired",
+                            "execution lease has expired",
+                        )
+                    if grant["status"] != "active" or grant_expires_at <= now:
+                        raise ApprovalLeaseNotConsumableError(
+                            "rte-05:approval_not_consumable",
+                            "approval grant is not consumable",
+                        )
+                    if lease.status != "consumed" or not _safe_compare(
+                        lease.token_digest,
+                        lease_token_digest(command.lease_token),
+                    ):
+                        raise ApprovalLeaseConsumptionConflictError(
+                            "rte-05:consumption_conflict",
+                            "request conflicts with prior consumption",
+                        )
+                    return GrantConsumptionResult(
+                        consumption=deepcopy(existing),
+                        lease=deepcopy(lease),
+                        lease_token=command.lease_token,
+                        replayed=True,
+                    )
+
+                if approval_expires_at <= now or grant_expires_at <= now:
+                    raise ApprovalLeaseExpiredError(
+                        "rte-05:approval_expired", "approval has expired"
+                    )
+                if grant["status"] != "active":
+                    raise ApprovalLeaseNotConsumableError(
+                        "rte-05:approval_not_consumable",
+                        "approval grant is not consumable",
+                    )
+                if int(grant["remaining_uses"]) != 1:
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "rte-05:consumption_conflict",
+                        "approval grant has already been consumed",
+                    )
+                lease_expires_at = parse_audit_timestamp(command.expires_at)
+                if (
+                    lease_expires_at <= now
+                    or lease_expires_at > approval_expires_at
+                    or lease_expires_at > grant_expires_at
+                ):
+                    raise ApprovalExecutionLeaseStateInvalidError(
+                        "rte-05:state_invalid",
+                        "execution lease expiry is outside authority bounds",
+                    )
+
+                grant["remaining_uses"] = 0
+                consumption = GrantConsumption(
+                    consumption_id=consumption_id,
+                    grant_id=binding.grant_id,
+                    action_id=binding.action_id,
+                    authorization_fingerprint=binding.authorization_fingerprint,
+                    sequence=None,
+                    evidence_refs=[],
+                )
+                lease = ExecutionLease(
+                    lease_id=_derive_lease_id(consumption_id),
+                    consumption_id=consumption_id,
+                    approval_id=binding.approval_id,
+                    grant_id=binding.grant_id,
+                    action_id=binding.action_id,
+                    authorization_fingerprint=binding.authorization_fingerprint,
+                    runtime_binding_id=binding.runtime_binding_id,
+                    issued_at=now.astimezone(timezone.utc).isoformat(),
+                    expires_at=lease_expires_at.astimezone(timezone.utc).isoformat(),
+                    token_digest=lease_token_digest(command.lease_token),
+                    status="consumed",
+                    evidence_refs=[],
+                )
+                self.grant_consumption_records[consumption_id] = consumption
+                self.execution_lease_records[lease.lease_id] = lease
+                return GrantConsumptionResult(
+                    consumption=deepcopy(consumption),
+                    lease=deepcopy(lease),
+                    lease_token=command.lease_token,
+                    replayed=False,
+                )
+            except BaseException:
+                self.capability_grants.clear()
+                self.capability_grants.update(grants_snapshot)
+                self.grant_consumption_records.clear()
+                self.grant_consumption_records.update(consumptions_snapshot)
+                self.execution_lease_records.clear()
+                self.execution_lease_records.update(leases_snapshot)
+                raise
+
     # V21-06 capability/lease 权威存储实现（C4：单锁内同序
     # 读-校验-写，语义与 postgres 单事务一致；C5：lease 不进
     # OnlineSecurityState）。行锁序固定 grant→consumption→lease。
@@ -789,7 +1167,7 @@ class MemoryControlPlaneStore:
             raise ValueError(f"unsupported grant status: {status!r}")
         if remaining_uses < 0:
             raise ValueError("remaining_uses must be >= 0")
-        with self.capability_lease_lock:
+        with self.approval_lease_lock:
             if grant_id in self.capability_grants:
                 raise ValueError(f"grant already registered: {grant_id}")
             row = {
@@ -803,11 +1181,9 @@ class MemoryControlPlaneStore:
             self.capability_grants[grant_id] = row
             return deepcopy(row)
 
-    def get_capability_grant_runtime(
-        self, grant_id: str
-    ) -> dict[str, Any] | None:
+    def get_capability_grant_runtime(self, grant_id: str) -> dict[str, Any] | None:
         """读 grant 运行时行（消费后 remaining_uses 校验/Phase 2 读路径）。"""
-        with self.capability_lease_lock:
+        with self.approval_lease_lock:
             row = self.capability_grants.get(grant_id)
             return deepcopy(row) if row is not None else None
 
@@ -818,7 +1194,7 @@ class MemoryControlPlaneStore:
         grant_id = str(intent_payload["grant_id"])
         action_id = str(intent_payload["action_id"])
         fingerprint = str(intent_payload["authorization_fingerprint"])
-        with self.capability_lease_lock:
+        with self.approval_lease_lock:
             # 1) grant 行（锁序第一）：存在性 + scope 绑定。
             grant = self.capability_grants.get(grant_id)
             if grant is None:
@@ -866,9 +1242,7 @@ class MemoryControlPlaneStore:
                         "same-key retry after lease expiry must not issue "
                         "a new lease",
                     )
-                if parse_audit_timestamp(
-                    lease.expires_at
-                ) <= _system_utc_now():
+                if parse_audit_timestamp(lease.expires_at) <= _system_utc_now():
                     raise LeaseExpiredError(
                         "v21-06:execution_lease_expired",
                         "same-key retry after lease expiry must not issue "
@@ -901,8 +1275,7 @@ class MemoryControlPlaneStore:
             grant_expires_at = grant["expires_at"]
             if grant["status"] == "expired" or (
                 grant_expires_at is not None
-                and parse_audit_timestamp(grant_expires_at)
-                <= _system_utc_now()
+                and parse_audit_timestamp(grant_expires_at) <= _system_utc_now()
             ):
                 raise GrantExpiredError(
                     "v21-06:grant_expired",
@@ -947,9 +1320,7 @@ class MemoryControlPlaneStore:
                 runtime_binding_id=str(intent_payload["runtime_binding_id"]),
                 issued_at=str(intent_payload["issued_at"]),
                 expires_at=str(intent_payload["expires_at"]),
-                token_digest=lease_token_digest(
-                    str(intent_payload["lease_token"])
-                ),
+                token_digest=lease_token_digest(str(intent_payload["lease_token"])),
                 status="consumed",
                 evidence_refs=[],
             )
@@ -964,7 +1335,7 @@ class MemoryControlPlaneStore:
     def get_execution_lease(
         self, scope_digest: str, lease_ref: str
     ) -> ExecutionLease | None:
-        with self.capability_lease_lock:
+        with self.approval_lease_lock:
             lease = self.execution_lease_records.get(lease_ref)
             if lease is None:
                 for candidate in self.execution_lease_records.values():
@@ -992,7 +1363,7 @@ class MemoryControlPlaneStore:
                 f"lease transition reason must be 'expired' or 'revoked', "
                 f"got {reason!r}",
             )
-        with self.capability_lease_lock:
+        with self.approval_lease_lock:
             lease = self.execution_lease_records.get(lease_id)
             if lease is None:
                 raise KeyError(lease_id)
@@ -1006,7 +1377,7 @@ class MemoryControlPlaneStore:
             return deepcopy(updated)
 
     def create_approval(self, approval: ApprovalRequest) -> ApprovalRequest:
-        with self.approval_lock:
+        with self.approval_lease_lock:
             existing = self.approvals.get(approval.approval_id)
             if existing is not None:
                 current = _with_effective_approval_status(existing)
@@ -1031,7 +1402,7 @@ class MemoryControlPlaneStore:
             return _with_effective_approval_status(stored)
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
-        with self.approval_lock:
+        with self.approval_lease_lock:
             approvals = [
                 _with_effective_approval_status(item)
                 for item in self.approvals.values()
@@ -1047,7 +1418,7 @@ class MemoryControlPlaneStore:
         *,
         limit: int | None = None,
     ) -> list[ApprovalRequest]:
-        with self.approval_lock:
+        with self.approval_lease_lock:
             approvals = [
                 _with_effective_approval_status(item)
                 for item in self.approvals.values()
@@ -1060,7 +1431,7 @@ class MemoryControlPlaneStore:
         return ordered
 
     def get_approval(self, approval_id: str) -> ApprovalRequest | None:
-        with self.approval_lock:
+        with self.approval_lease_lock:
             approval = self.approvals.get(approval_id)
             if approval is None:
                 return None
@@ -1076,7 +1447,7 @@ class MemoryControlPlaneStore:
         resolution_reason: str | None = None,
         llm_review: LlmApprovalReview | None = None,
     ) -> ApprovalRequest:
-        with self.approval_lock:
+        with self.approval_lease_lock:
             approval = self.approvals[approval_id]
             current = _with_effective_approval_status(approval)
             if current.status != "pending":
@@ -1237,3 +1608,116 @@ def _with_effective_approval_status(
     if expires_at <= (now or datetime.now(timezone.utc)):
         return current.model_copy(update={"status": "expired", "decision": "deny"})
     return current
+
+
+def _grant_matches_binding(
+    grant: CapabilityGrant,
+    binding: EnforcementBindingRecord,
+    approval: ApprovalRequest,
+) -> bool:
+    fingerprint = grant.exact_authorization_fingerprint
+    return bool(
+        grant.source_type == "human_approval"
+        and grant.source_ref == f"approval:{binding.approval_id}"
+        and grant.scope_digest == binding.scope_digest
+        and grant.subject_principal_id == binding.principal_id
+        and grant.subject_agent_id == binding.agent_id
+        and grant.action_types == [binding.action_type]
+        and fingerprint is not None
+        and _safe_compare(fingerprint, binding.authorization_fingerprint)
+        and grant.usage_limit == 1
+        and grant.remaining_uses == 1
+        and not grant.delegable
+        and not grant.revoked
+        and grant.expires_at == approval.expires_at
+        and grant.policy_revision == binding.policy_revision
+    )
+
+
+def _registered_grant_matches_binding(
+    grant: dict[str, Any],
+    binding: EnforcementBindingRecord,
+) -> bool:
+    fingerprint = grant.get("authorization_fingerprint")
+    return bool(
+        grant.get("grant_id") == binding.grant_id
+        and grant.get("scope_digest") == binding.scope_digest
+        and isinstance(fingerprint, str)
+        and _safe_compare(fingerprint, binding.authorization_fingerprint)
+        and isinstance(grant.get("expires_at"), str)
+        and isinstance(grant.get("registration_digest"), str)
+    )
+
+
+def _credential_authorizes_binding(
+    credential: CredentialRecord,
+    command: ApprovalLeaseConsumeCommand,
+    now: datetime,
+) -> bool:
+    if credential.credential_id != command.credential_id:
+        return False
+    if not _safe_compare(credential.token_hash, command.credential_token_hash):
+        return False
+    if credential.revoked_at is not None:
+        return False
+    if credential.expires_at is not None:
+        try:
+            if parse_audit_timestamp(credential.expires_at) <= now:
+                return False
+        except ValueError:
+            return False
+    return bool(
+        credential.principal_type == "component"
+        and credential.role == "adapter"
+        and "approval:wait" in credential.scopes
+        and credential.principal_id == command.principal_id
+        and credential.runtime == command.runtime
+        and credential.agent_id == command.agent_id
+    )
+
+
+def _binding_approval_invariants_match(
+    binding: EnforcementBindingRecord,
+    approval: ApprovalRequest,
+) -> bool:
+    return bool(
+        binding.approval_id == approval.approval_id
+        and binding.principal_id == approval.requesting_principal_id
+        and binding.runtime == approval.runtime
+        and binding.agent_id == approval.agent_id
+        and binding.action_id == approval.action_id
+    )
+
+
+def _command_identity_matches(
+    binding: EnforcementBindingRecord,
+    command: ApprovalLeaseConsumeCommand,
+) -> bool:
+    return bool(
+        binding.approval_id == command.approval_id
+        and binding.principal_id == command.principal_id
+        and binding.runtime == command.runtime
+        and binding.agent_id == command.agent_id
+    )
+
+
+def _lease_matches_binding(
+    lease: ExecutionLease,
+    binding: EnforcementBindingRecord,
+    consumption: GrantConsumption,
+) -> bool:
+    return bool(
+        lease.consumption_id == consumption.consumption_id
+        and lease.approval_id == binding.approval_id
+        and lease.grant_id == binding.grant_id == consumption.grant_id
+        and lease.action_id == binding.action_id == consumption.action_id
+        and _safe_compare(
+            lease.authorization_fingerprint,
+            binding.authorization_fingerprint,
+        )
+        and _safe_compare(
+            consumption.authorization_fingerprint,
+            binding.authorization_fingerprint,
+        )
+        and lease.runtime_binding_id == binding.runtime_binding_id
+    )

@@ -1,7 +1,7 @@
 {
-  "schema": "rte-04-contract-cases/1",
+  "schema": "rte-05-contract-cases/1",
   "contract_source": "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md §3",
-  "scope_note": "P0 第一批 CF-01~CF-12（06 §6）；CF-13~CF-17 属 P1 Strong Binding，不在本注册表。",
+  "scope_note": "CF-01~CF-12 为 RTE-04；CF-13~CF-17 为 RTE-05 Strong Approval Binding。Preparation 仅登记冻结契约，runtime evidence 在 Integration PR 前保持 BLOCKED_BY_DEPENDENCY。",
   "cases": [
     {
       "id": "CF-01",
@@ -191,6 +191,101 @@
         ],
         "c2_required": false,
         "notes": "工具真实执行后结果被隔离：execution=executed + disposition=quarantined。"
+      }
+    },
+    {
+      "id": "CF-13",
+      "title": "Exact Approval Lease Binding",
+      "tier": 1,
+      "scope": "strong_binding",
+      "input": {
+        "decision": "ask",
+        "approval_resolution": "human_allow_once",
+        "binding": "exact"
+      },
+      "expect": {
+        "gate": "approval_released",
+        "invocation_count": 1,
+        "receipts": [
+          { "kind": "execution_completed", "execution_status": "executed" }
+        ],
+        "c2_required": true,
+        "notes": "evaluate 的 authoritative action/fingerprint 必须原样用于 consume；成功后才可 invoke，consume/start/terminal 使用同一 lease_id 与 consumption_id。"
+      }
+    },
+    {
+      "id": "CF-14",
+      "title": "Strong Binding TOCTOU Drift",
+      "tier": 1,
+      "scope": "strong_binding",
+      "input": {
+        "decision": "ask",
+        "approval_resolution": "human_allow_once",
+        "binding": "action_or_fingerprint_drift"
+      },
+      "expect": {
+        "gate": "binding_failed",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "审批等待期间 action_id 或 authorization_fingerprint 漂移必须 409 且 fail closed，不得回退 C1。"
+      }
+    },
+    {
+      "id": "CF-15",
+      "title": "Execution Lease Replay and Expiry",
+      "tier": 1,
+      "scope": "strong_binding",
+      "input": {
+        "decision": "ask",
+        "approval_resolution": "human_allow_once",
+        "consume": "same_request_replay_changed_fingerprint_then_expiry"
+      },
+      "expect": {
+        "gate": "binding_failed",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "有效期内相同 consume 重放返回同一 token/IDs；过期后固定 410 且不得调用工具。"
+      }
+    },
+    {
+      "id": "CF-16",
+      "title": "LLM Approval Isolation",
+      "tier": 1,
+      "scope": "strong_binding",
+      "input": {
+        "decision": "ask",
+        "approval_resolution": "llm_allow_once"
+      },
+      "expect": {
+        "gate": "binding_failed",
+        "invocation_count": 0,
+        "receipts": [
+          { "kind": "pre_execution_deny", "execution_status": "not_invoked" }
+        ],
+        "c2_required": false,
+        "notes": "仅 human allow_once 可注册消费 grant；LLM/system allow_once 不得获得 execution lease。"
+      }
+    },
+    {
+      "id": "CF-17",
+      "title": "Active Correlation Capacity",
+      "tier": 3,
+      "scope": "capacity",
+      "input": {
+        "active_calls": ">capacity",
+        "call_duration": "long_running"
+      },
+      "expect": {
+        "silent_fifo_evictions": 0,
+        "capacity_degradation": "observable",
+        "c2_required": true,
+        "notes": "构造超过 correlation capacity 的长运行 active calls；既有 active state 不得被静默 FIFO 淘汰，容量耗尽必须显式降级或策略化 fail-closed。OpenClaw 仅在本项 conformance 通过且未降级时声明 C3。"
       }
     }
   ]

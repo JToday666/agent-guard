@@ -109,9 +109,7 @@ class GuardApiSettings:
         default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID")
     )
     task_scope_active_key_id: str | None = field(
-        default_factory=lambda: _optional_env(
-            "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID"
-        )
+        default_factory=lambda: _optional_env("AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID")
     )
     task_scope_keys: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_TASK_SCOPE_KEYS"),
@@ -134,9 +132,7 @@ class GuardApiSettings:
     # 与 task scope keyring / audit checkpoint key 域隔离，不复用其他密钥。
     # flag on 而未配置时 shadow 禁用（编排器返回 None），不得硬编码兜底。
     v21_shadow_server_secret: str | None = field(
-        default_factory=lambda: _optional_env(
-            "AGENTGUARD_V21_SHADOW_SERVER_SECRET"
-        ),
+        default_factory=lambda: _optional_env("AGENTGUARD_V21_SHADOW_SERVER_SECRET"),
         repr=False,
     )
     # CT-PR-03b CT 事实投影独立 flag（裁决 D3：默认 false，与 V21
@@ -146,6 +142,13 @@ class GuardApiSettings:
     ct_fact_projection_enabled: bool = field(
         default_factory=lambda: _env_bool(
             "AGENTGUARD_CT_FACT_PROJECTION_ENABLED", default=False
+        )
+    )
+    # RTE-05 strong approval binding rollout gate.  Default-off preserves the
+    # frozen C1 evaluate/wait behavior and performs no binding/lease writes.
+    rte05_strong_binding_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED", default=False
         )
     )
 
@@ -318,6 +321,24 @@ class GuardApiSettings:
         if self.task_scope_configured():
             self.task_scope_signing_key()
 
+        if self.rte05_strong_binding_enabled:
+            if not self.v21_shadow_enabled:
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED requires "
+                    "AGENTGUARD_V21_SHADOW_ENABLED=true"
+                )
+            if self.v21_shadow_server_secret_bytes() is None:
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED requires "
+                    "AGENTGUARD_V21_SHADOW_SERVER_SECRET"
+                )
+            if not self.task_scope_configured():
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED requires "
+                    "AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID and "
+                    "AGENTGUARD_TASK_SCOPE_KEYS"
+                )
+
         externally_exposed = environment == "production" or not _is_loopback_host(
             self.host
         )
@@ -407,9 +428,7 @@ def _decode_checkpoint_key(value: str) -> bytes:
 def _decode_base64url_key(value: str, *, label: str) -> bytes:
     normalized = value.strip()
     if not _CHECKPOINT_KEY_PATTERN.fullmatch(normalized):
-        raise GuardApiConfigurationError(
-            f"{label} must be base64url encoded"
-        )
+        raise GuardApiConfigurationError(f"{label} must be base64url encoded")
     padding = "=" * (-len(normalized) % 4)
     try:
         decoded = base64.b64decode(
@@ -418,13 +437,9 @@ def _decode_base64url_key(value: str, *, label: str) -> bytes:
             validate=True,
         )
     except (binascii.Error, ValueError):
-        raise GuardApiConfigurationError(
-            f"{label} must be base64url encoded"
-        ) from None
+        raise GuardApiConfigurationError(f"{label} must be base64url encoded") from None
     if len(decoded) < 32:
-        raise GuardApiConfigurationError(
-            f"{label} must decode to at least 32 bytes"
-        )
+        raise GuardApiConfigurationError(f"{label} must decode to at least 32 bytes")
     return decoded
 
 

@@ -32,6 +32,8 @@ class AuthContext:
     role: str
     scopes: list[str]
     auth_method: str
+    credential_id: str | None = None
+    credential_token_hash: str | None = None
     runtime: str | None = None
     agent_id: str | None = None
 
@@ -84,6 +86,8 @@ class CapabilityAuthService:
             credential = self.store.get_credential_by_token_hash(_token_hash(token))
             if credential is None:
                 raise ApiAuthError("TOKEN_INVALID")
+            if credential.revoked_at is not None:
+                raise ApiAuthError("TOKEN_INVALID")
             if (
                 credential.expires_at is not None
                 and _parse_datetime(credential.expires_at) < _now()
@@ -95,6 +99,8 @@ class CapabilityAuthService:
                 role=credential.role,
                 scopes=credential.scopes,
                 auth_method="bearer",
+                credential_id=credential.credential_id,
+                credential_token_hash=_token_hash(token),
                 runtime=credential.runtime,
                 agent_id=credential.agent_id,
             )

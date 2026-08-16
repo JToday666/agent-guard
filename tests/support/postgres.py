@@ -27,6 +27,7 @@ CONTROL_PLANE_TABLES = [
     "task_facts",
     "projection_records",
     "security_states",
+    "enforcement_bindings",
     "execution_leases",
     "grant_consumptions",
     "capability_grant_runtime",

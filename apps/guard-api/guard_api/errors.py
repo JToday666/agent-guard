@@ -35,6 +35,15 @@ _ERROR_MESSAGES = {
     "APPROVAL_EXPIRED": "Approval has expired.",
     "APPROVAL_ALREADY_RESOLVED": "Approval has already been resolved.",
     "APPROVAL_WAIT_DENIED": "Approval wait is not allowed for this principal.",
+    "APPROVAL_CONSUMPTION_DENIED": (
+        "Approval execution lease consumption is not allowed for this principal."
+    ),
+    "APPROVAL_NOT_CONSUMABLE": "Approval cannot issue an execution lease.",
+    "APPROVAL_CONSUMPTION_CONFLICT": (
+        "Approval execution lease consumption conflicts with persisted state."
+    ),
+    "EXECUTION_LEASE_EXPIRED": "Execution lease has expired.",
+    "EXECUTION_LEASE_UNAVAILABLE": "Execution lease is temporarily unavailable.",
     "CREDENTIAL_NOT_FOUND": "Credential was not found.",
     "AUDIT_ID_CONFLICT": "The audit_id is already bound to different content.",
     "AUDIT_TIMESTAMP_INVALID": "Audit timestamps must be RFC 3339 values with a timezone.",

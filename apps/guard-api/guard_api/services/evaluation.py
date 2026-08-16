@@ -15,10 +15,15 @@ from agentguard_core import (
 )
 from guard_api.models import (
     ApprovalRequest,
+    EnforcementBinding,
     EvaluationApproval,
     GuardEvaluationResponse,
 )
-from guard_api.storage.base import parse_audit_timestamp
+from guard_api.storage.base import (
+    EnforcementBindingConflictError,
+    EnforcementBindingRecord,
+    parse_audit_timestamp,
+)
 from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
@@ -28,7 +33,12 @@ from .policy import PolicyService
 
 if TYPE_CHECKING:
     from .ct_projection import CtCommitPlan, CtProjectionService
-    from .v21_pipeline import V21PhaseCPlan, V21PipelineMaterials, V21PipelineService
+    from .v21_pipeline import (
+        V21PhaseBOutcome,
+        V21PhaseCPlan,
+        V21PipelineMaterials,
+        V21PipelineService,
+    )
     from .v21_shadow import V21ShadowService
 
 
@@ -44,6 +54,16 @@ _SESSION_IDENTITY_FIELDS: tuple[str, ...] = (
 )
 # payload 契约扩展时增补的可选字段（见 MemoryEventPayload.action_id）。
 _PAYLOAD_EXTENSION_FIELDS: tuple[str, ...] = ("action_id",)
+
+_ACTION_TYPE_BY_EVENT: dict[str, str] = {
+    "tool_call_proposed": "tool_call",
+    "context_assembled": "context_build",
+    "model_input_prepared": "model_call",
+    "model_output_produced": "model_call",
+    "tool_result_produced": "tool_result",
+    "memory_write_proposed": "memory_write",
+    "message_send_proposed": "message_send",
+}
 
 
 def canonical_request_dump(event: GuardEvent) -> dict[str, Any]:
@@ -151,9 +171,7 @@ class EvaluationService:
         # CT-PR-03b：事务外构建 bundle 与 commit 计划（纯 CPU）。
         ct_plan: "CtCommitPlan | None" = None
         if self.ct_projection_service is not None and materials is not None:
-            ct_plan = self.ct_projection_service.build_commit_bundle(
-                event, materials
-            )
+            ct_plan = self.ct_projection_service.build_commit_bundle(event, materials)
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         backfill_audit: AuditEvent | None = None
@@ -326,10 +344,12 @@ class EvaluationService:
         v21_evidence = None
         state_delta_evidence = None
         phase_c_plan: "V21PhaseCPlan | None" = None
+        phase_b_outcome: "V21PhaseBOutcome | None" = None
         finalize_metadata: dict[str, str] = {}
         if self.v21_pipeline is not None:
             outcome = self.v21_pipeline.build_phase_b(event, materials)
             if outcome is not None:
+                phase_b_outcome = outcome
                 v21_evidence = outcome.envelope
                 phase_c_plan = self.v21_pipeline.prepare_phase_c(outcome)
                 if phase_c_plan is not None:
@@ -341,9 +361,7 @@ class EvaluationService:
                     assert outcome.final_decision_digest is not None
                     finalize_metadata = {
                         "v21_final_decision_id": outcome.final_decision_id,
-                        "v21_final_decision_digest": (
-                            outcome.final_decision_digest
-                        ),
+                        "v21_final_decision_digest": (outcome.final_decision_digest),
                     }
         audit_event = self.audit_service.record_evaluation(
             event,
@@ -371,20 +389,25 @@ class EvaluationService:
             v21_evidence=v21_evidence,
             state_delta_evidence=state_delta_evidence,
             # CT-PR-03b D4：facts 信封随同一条审计记录原子提交。
-            ct_facts_evidence=(
-                ct_plan.envelope if ct_plan is not None else None
-            ),
+            ct_facts_evidence=(ct_plan.envelope if ct_plan is not None else None),
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
-            audit_id=(
-                phase_c_plan.audit_id if phase_c_plan is not None else None
-            ),
+            audit_id=(phase_c_plan.audit_id if phase_c_plan is not None else None),
+        )
+        binding = self._save_enforcement_binding(
+            event,
+            approval=approval,
+            audit=audit_event,
+            materials=materials,
+            phase_b_outcome=phase_b_outcome,
+            requesting_principal_id=requesting_principal_id,
         )
         return (
             GuardEvaluationResponse(
                 decision=decision,
                 approval=self._approval_summary(approval),
                 policy_audit_id=audit_event.audit_id,
+                enforcement_binding=binding,
             ),
             audit_event,
             phase_c_plan,
@@ -414,10 +437,97 @@ class EvaluationService:
         approval_id = audit.links.get("approval_id")
         if approval_id:
             approval = self.approval_service.get_approval(approval_id)
+        binding = None
+        if approval is not None:
+            stored_binding = self.audit_service.store.get_enforcement_binding(
+                approval.approval_id
+            )
+            if stored_binding is not None:
+                binding = self._public_binding(stored_binding)
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),
             policy_audit_id=audit.audit_id,
+            enforcement_binding=binding,
+        )
+
+    def _save_enforcement_binding(
+        self,
+        event: GuardEvent,
+        *,
+        approval: ApprovalRequest | None,
+        audit: AuditEvent,
+        materials: "V21PipelineMaterials",
+        phase_b_outcome: "V21PhaseBOutcome | None",
+        requesting_principal_id: str,
+    ) -> EnforcementBinding | None:
+        """Persist an eligible ASK ActionIR binding inside the evaluation txn."""
+
+        if not self.approval_service.settings.rte05_strong_binding_enabled:
+            return None
+        if (
+            approval is None
+            or materials.decision.decision != "ask"
+            or "allow_once" not in approval.decision_options
+            or phase_b_outcome is None
+            or phase_b_outcome.revalidation.status != "valid"
+            or materials.snapshot is None
+            or materials.scope_digest is None
+            or materials.degraded_kind is not None
+            or bool(materials.assessment.degradations)
+        ):
+            return None
+
+        assessment = materials.assessment
+        scope = materials.snapshot.scope
+        agent_id = event.security_context.agent_id
+        if (
+            not assessment.action_id
+            or not assessment.authorization_fingerprint
+            or assessment.action_id != approval.action_id
+            or scope.scope_digest != materials.scope_digest
+            or scope.principal_id != requesting_principal_id
+            or scope.principal_id != approval.requesting_principal_id
+            or scope.runtime != event.runtime
+            or scope.runtime != approval.runtime
+            or not scope.runtime_binding_id
+            or not agent_id
+            or agent_id != approval.agent_id
+        ):
+            return None
+
+        record = EnforcementBindingRecord(
+            event_id=event.event_id,
+            policy_audit_id=audit.audit_id,
+            approval_id=approval.approval_id,
+            action_id=assessment.action_id,
+            action_type=_ACTION_TYPE_BY_EVENT.get(event.event_type, event.event_type),
+            authorization_fingerprint=assessment.authorization_fingerprint,
+            runtime_binding_id=scope.runtime_binding_id,
+            scope_digest=scope.scope_digest,
+            principal_id=scope.principal_id,
+            runtime=scope.runtime,
+            agent_id=agent_id,
+            policy_revision=materials.snapshot.policy_revision,
+            requires_execution_lease=True,
+            grant_id=None,
+            created_at=approval.created_at,
+        )
+        try:
+            stored = self.audit_service.store.save_enforcement_binding(record)
+        except EnforcementBindingConflictError:
+            raise EvaluationConflictError(event.event_id) from None
+        return self._public_binding(stored)
+
+    @staticmethod
+    def _public_binding(record: EnforcementBindingRecord) -> EnforcementBinding:
+        if record.requires_execution_lease is not True:
+            raise EvaluationConflictError(record.event_id)
+        return EnforcementBinding(
+            action_id=record.action_id,
+            authorization_fingerprint=record.authorization_fingerprint,
+            runtime_binding_id=record.runtime_binding_id,
+            requires_execution_lease=True,
         )
 
     def _approval_summary(

@@ -24,7 +24,7 @@ import hashlib
 import hmac
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentguard_core.actions.canonical_json import canonical_json_bytes
 from agentguard_core.security_context import ExecutionLease
@@ -32,7 +32,22 @@ from agentguard_core.security_context.projection.authority_verdict import (
     ConsumptionIntent,
 )
 
-from guard_api.storage.base import ControlPlaneStore, GrantConsumptionResult
+from guard_api.storage.base import (
+    ApprovalExecutionLeaseUnavailableError,
+    ApprovalLeaseAuthorizationError,
+    ApprovalLeaseConsumeCommand,
+    ApprovalLeaseConsumptionConflictError,
+    ApprovalLeaseExpiredError,
+    ApprovalLeaseNotConsumableError,
+    ApprovalLeaseNotFoundError,
+    ApprovalLeaseStoreError,
+    ControlPlaneStore,
+    GrantConsumptionResult,
+)
+
+if TYPE_CHECKING:
+    from guard_api.auth import AuthContext
+    from guard_api.services.approval import ApprovalService
 
 __all__ = [
     "DEFAULT_LEASE_TTL_SECONDS",
@@ -51,6 +66,8 @@ __all__ = [
     "LeaseTokenMismatchError",
     "LeaseTransitionError",
     "LeaseService",
+    "ApprovalExecutionLeaseService",
+    "approval_execution_lease_service_from_settings",
     "derive_lease_token",
     "derive_lease_token_key",
     "lease_service_from_settings",
@@ -215,10 +232,7 @@ def lease_token_digest(lease_token: str) -> str:
     """``token_digest``：明文 token 的 sha256（唯一落库形态，01 §15）。"""
     if not lease_token:
         raise ValueError("lease_token must be non-empty")
-    return (
-        "sha256:"
-        + hashlib.sha256(lease_token.encode("utf-8")).hexdigest()
-    )
+    return "sha256:" + hashlib.sha256(lease_token.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +263,7 @@ class LeaseService:
         存储层单事务完成全部权威校验与写入；失败路径抛结构化异常，
         不吞错、不部分提交。
         """
-        if not isinstance(self.lease_token_key, bytes) or (
-            not self.lease_token_key
-        ):
+        if not isinstance(self.lease_token_key, bytes) or (not self.lease_token_key):
             raise ValueError("lease_token_key must be non-empty bytes")
         if self.lease_ttl_seconds <= 0:
             raise ValueError("lease_ttl_seconds must be positive")
@@ -260,9 +272,7 @@ class LeaseService:
         if moment.tzinfo is None:
             raise ValueError("lease clock must include a timezone")
         issued_at = moment.isoformat()
-        expires_at = (
-            moment + timedelta(seconds=self.lease_ttl_seconds)
-        ).isoformat()
+        expires_at = (moment + timedelta(seconds=self.lease_ttl_seconds)).isoformat()
         lease_token = derive_lease_token(
             self.lease_token_key,
             grant_id=intent.grant_id,
@@ -290,6 +300,156 @@ class LeaseService:
         return self.store.expire_or_revoke_lease(scope_digest, lease_id, reason)
 
 
+@dataclass(slots=True)
+class ApprovalExecutionLeaseService:
+    """RTE-05 approval-bound lease orchestration.
+
+    Public callers supply only the ActionIR action ID and authorization
+    fingerprint.  All remaining authority is recovered from the authenticated
+    credential, approval, and private binding and is revalidated atomically by
+    the store.
+    """
+
+    store: ControlPlaneStore
+    approval_service: ApprovalService
+    lease_token_key: bytes
+    lease_ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS
+
+    def consume(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        auth_context: AuthContext,
+        now: datetime | None = None,
+    ) -> GrantConsumptionResult:
+        try:
+            return self._consume(
+                approval_id,
+                action_id=action_id,
+                authorization_fingerprint=authorization_fingerprint,
+                auth_context=auth_context,
+                now=now,
+            )
+        except ApprovalLeaseStoreError:
+            raise
+        except Exception:
+            # Never let driver/internal exception text escape the stable API
+            # envelope.  Transient/unclassified failures are retryable and the
+            # bound action remains fail-closed.
+            raise ApprovalExecutionLeaseUnavailableError(
+                "rte-05:lease_unavailable", "execution lease is unavailable"
+            ) from None
+
+    def _consume(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        auth_context: AuthContext,
+        now: datetime | None = None,
+    ) -> GrantConsumptionResult:
+        moment = now or datetime.now(timezone.utc)
+        if moment.tzinfo is None:
+            raise ValueError("lease clock must include a timezone")
+        approval = self.store.get_approval(approval_id)
+        if approval is None:
+            raise ApprovalLeaseNotFoundError(
+                "rte-05:approval_not_found", "approval was not found"
+            )
+        credential_id = auth_context.credential_id
+        credential_token_hash = auth_context.credential_token_hash
+        runtime = auth_context.runtime
+        agent_id = auth_context.agent_id
+        if (
+            credential_id is None
+            or credential_token_hash is None
+            or runtime is None
+            or agent_id is None
+            or auth_context.principal_id != approval.requesting_principal_id
+            or runtime != approval.runtime
+            or agent_id != approval.agent_id
+        ):
+            raise ApprovalLeaseAuthorizationError(
+                "rte-05:identity_mismatch", "authenticated identity mismatch"
+            )
+
+        approval_expires_at = _parse_lease_datetime(approval.expires_at)
+        if approval.status == "expired":
+            raise ApprovalLeaseExpiredError(
+                "rte-05:approval_expired", "approval has expired"
+            )
+        if (
+            approval.status != "resolved"
+            or approval.decision != "allow_once"
+            or approval.resolution_source != "human"
+        ):
+            raise ApprovalLeaseNotConsumableError(
+                "rte-05:approval_not_consumable", "approval is not consumable"
+            )
+
+        binding = self.store.get_enforcement_binding(approval_id)
+        if binding is None or not binding.requires_execution_lease:
+            if moment >= approval_expires_at:
+                raise ApprovalLeaseExpiredError(
+                    "rte-05:approval_expired", "approval has expired"
+                )
+            raise ApprovalExecutionLeaseUnavailableError(
+                "rte-05:binding_unavailable", "execution binding is unavailable"
+            )
+        if binding.action_id != action_id or not hmac.compare_digest(
+            binding.authorization_fingerprint,
+            authorization_fingerprint,
+        ):
+            raise ApprovalLeaseConsumptionConflictError(
+                "rte-05:binding_mismatch", "execution binding mismatch"
+            )
+
+        if binding.grant_id is None:
+            # A consumption cannot exist before grant registration.  Once the
+            # approval expires, recovery is terminal rather than retryable.
+            if moment >= approval_expires_at:
+                raise ApprovalLeaseExpiredError(
+                    "rte-05:approval_expired", "approval has expired"
+                )
+            self.approval_service.ensure_strong_approval_grant_registered(approval_id)
+            # Readiness is evaluated at request entry.  Even if the bounded
+            # backfill succeeds synchronously, this attempt returns retryable
+            # 503 and performs no consumption; the next identical request may
+            # consume the now-registered grant.
+            raise ApprovalExecutionLeaseUnavailableError(
+                "rte-05:grant_unavailable", "execution lease is unavailable"
+            )
+        grant_id = binding.grant_id
+
+        lease_token = derive_lease_token(
+            self.lease_token_key,
+            grant_id=grant_id,
+            action_id=binding.action_id,
+            authorization_fingerprint=binding.authorization_fingerprint,
+        )
+        expires_at = min(
+            moment + timedelta(seconds=self.lease_ttl_seconds),
+            approval_expires_at,
+        ).isoformat()
+        return self.store.consume_approval_execution_lease(
+            ApprovalLeaseConsumeCommand(
+                credential_id=credential_id,
+                credential_token_hash=credential_token_hash,
+                principal_id=auth_context.principal_id,
+                runtime=runtime,
+                agent_id=agent_id,
+                approval_id=approval_id,
+                action_id=action_id,
+                authorization_fingerprint=authorization_fingerprint,
+                lease_token=lease_token,
+                expires_at=expires_at,
+            )
+        )
+
+
 def lease_service_from_settings(
     store: ControlPlaneStore,
     settings: Any,
@@ -302,3 +462,25 @@ def lease_service_from_settings(
         lease_token_key=derive_lease_token_key(settings.control_token),
         lease_ttl_seconds=lease_ttl_seconds,
     )
+
+
+def approval_execution_lease_service_from_settings(
+    store: ControlPlaneStore,
+    settings: Any,
+    approval_service: ApprovalService,
+    *,
+    lease_ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
+) -> ApprovalExecutionLeaseService:
+    return ApprovalExecutionLeaseService(
+        store=store,
+        approval_service=approval_service,
+        lease_token_key=derive_lease_token_key(settings.control_token),
+        lease_ttl_seconds=lease_ttl_seconds,
+    )
+
+
+def _parse_lease_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

@@ -21,6 +21,9 @@ from guard_api.llm_approval import HttpLlmApprovalReviewer, LlmApprovalReviewer
 from guard_api.middleware import RequestBodyLimitMiddleware
 from guard_api.routers import ApiContext, register_routes
 from guard_api.security_state import SecurityStateService
+from guard_api.security_state.lease_service import (
+    approval_execution_lease_service_from_settings,
+)
 from guard_api.services import (
     ApprovalService,
     AuditCheckpointService,
@@ -107,6 +110,11 @@ def create_app(
         or HttpLlmApprovalReviewer.from_settings(settings),
         provenance_writer=provenance_writer,
         state_service=security_state_service,
+    )
+    approval_execution_lease_service = approval_execution_lease_service_from_settings(
+        store,
+        settings,
+        approval_service,
     )
     metric_service = MetricService(store=store)
     trace_service = TraceService(
@@ -292,6 +300,7 @@ def create_app(
             config_audit_service=config_audit_service,
             memory_guard_service=memory_guard_service,
             approval_service=approval_service,
+            approval_execution_lease_service=approval_execution_lease_service,
             metric_service=metric_service,
             trace_service=trace_service,
             policy_service=policy_service,
