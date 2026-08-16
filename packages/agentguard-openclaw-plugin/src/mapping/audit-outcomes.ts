@@ -2,9 +2,58 @@ import type {
   GuardEvaluationResponse,
   GuardEvent,
   JsonObject,
+  ExecutionLeaseLinks,
+  RuntimeEnforcementEvidence,
   RuntimeOutcomeReceipt,
   RuntimeReceiptKind,
 } from "../types.js";
+
+const ENFORCEMENT_GATE_STATES = new Set([
+  "evaluating",
+  "allowed",
+  "approval_pending",
+  "approval_released",
+  "blocked",
+  "timed_out",
+  "binding_failed",
+]);
+const BINDING_CHECK_STATUSES = new Set([
+  "not_applicable",
+  "not_performed",
+  "passed",
+  "failed",
+  "unknown",
+]);
+const LEASE_CONSUME_OUTCOMES = new Set([
+  "not_applicable",
+  "not_attempted",
+  "consumed",
+  "expired",
+  "revoked",
+  "rejected",
+  "unknown",
+]);
+const RTE05_REASON_CODES = new Set([
+  "rte-05:binding_exact",
+  "rte-05:binding_invalid",
+  "rte-05:binding_mismatch",
+  "rte-05:approval_not_human",
+  "rte-05:approval_not_consumable",
+  "rte-05:approval_not_found",
+  "rte-05:identity_denied",
+  "rte-05:approval_expired",
+  "rte-05:approval_timed_out",
+  "rte-05:lease_consumed",
+  "rte-05:consumption_conflict",
+  "rte-05:lease_rejected",
+  "rte-05:lease_expired",
+  "rte-05:lease_revoked",
+  "rte-05:lease_unavailable",
+  "rte-05:lease_response_invalid",
+  "rte-05:lease_consume_timed_out",
+  "rte-05:multiple_binding_conflict",
+  "rte-05:correlation_capacity_exhausted",
+]);
 
 /**
  * runtime_outcome 干预种类（契约 §9.4 / §13）。
@@ -42,6 +91,8 @@ export type RuntimeOutcomeOptions = {
   invokedAt?: string | null;
   completedAt?: string;
   error?: string | null;
+  lease?: ExecutionLeaseLinks;
+  enforcement?: RuntimeEnforcementEvidence;
 };
 
 const INTERVENTION_REASON: Record<RuntimeOutcomeKind, string> = {
@@ -81,7 +132,7 @@ export function buildRuntimeOutcomeAuditEvent(
     throw new Error("runtime outcome receipt requires an integer risk_score");
   }
   const severity = receiptSeverity(decision.severity);
-  const actionId = toolCallId(guardEvent);
+  const actionId = toolCallId(guardEvent) ?? `act_${guardEvent.event_id}`;
   const approval = options.approval ?? null;
   const outcomeKind = receiptKind(kind, options);
 
@@ -97,6 +148,19 @@ export function buildRuntimeOutcomeAuditEvent(
     links.approval_id = approval.approvalId;
   } else if (evaluation.approval) {
     links.approval_id = evaluation.approval.approval_id;
+  }
+  if (options.lease) {
+    links.lease_id = options.lease.leaseId;
+    links.consumption_id = options.lease.consumptionId;
+  }
+  if (options.enforcement) {
+    validateEnforcementEvidence(options.enforcement, {
+      hasLease: options.lease !== undefined,
+      outcomeKind,
+      executionStatus: executionStatusForKind(kind),
+    });
+  } else if (options.lease) {
+    throw new Error("runtime execution lease links require enforcement evidence");
   }
 
   return {
@@ -138,8 +202,118 @@ export function buildRuntimeOutcomeAuditEvent(
       side_effects: sideEffectsEvidence(kind),
       result: resultEvidence(kind, options),
       approval: approvalEvidence(kind, approval, evaluation),
+      ...(options.enforcement
+        ? {
+            enforcement: {
+              ...options.enforcement,
+              reason_codes: [...options.enforcement.reason_codes],
+            },
+          }
+        : {}),
     },
   };
+}
+
+export function validateEnforcementEvidence(
+  enforcement: unknown,
+  options: {
+    hasLease: boolean;
+    outcomeKind: RuntimeReceiptKind;
+    executionStatus?: unknown;
+  },
+): void {
+  if (
+    typeof enforcement !== "object" ||
+    enforcement === null ||
+    Array.isArray(enforcement)
+  ) {
+    throw new Error("runtime enforcement evidence must be an object");
+  }
+  const value = enforcement as Record<string, unknown>;
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [
+    "binding_check_status",
+    "gate_state",
+    "lease_consume_outcome",
+    "reason_codes",
+  ];
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index]) ||
+    typeof value.gate_state !== "string" ||
+    !ENFORCEMENT_GATE_STATES.has(value.gate_state) ||
+    typeof value.binding_check_status !== "string" ||
+    !BINDING_CHECK_STATUSES.has(value.binding_check_status) ||
+    typeof value.lease_consume_outcome !== "string" ||
+    !LEASE_CONSUME_OUTCOMES.has(value.lease_consume_outcome) ||
+    !Array.isArray(value.reason_codes)
+  ) {
+    throw new Error("runtime enforcement evidence has an invalid schema");
+  }
+  const reasonCodes = value.reason_codes;
+  if (
+    reasonCodes.length < 1 ||
+    reasonCodes.length > 4 ||
+    reasonCodes.some(
+      (reason) => typeof reason !== "string" || !RTE05_REASON_CODES.has(reason),
+    ) ||
+    new Set(reasonCodes).size !== reasonCodes.length
+  ) {
+    throw new Error(
+      "runtime enforcement evidence requires 1-4 unique canonical reason codes",
+    );
+  }
+  const consumed = value.lease_consume_outcome === "consumed";
+  const releasedConsume =
+    value.binding_check_status === "passed" &&
+    value.gate_state === "approval_released";
+  const blockedAfterConsume =
+    options.outcomeKind === "pre_execution_deny" &&
+    value.binding_check_status === "failed" &&
+    value.gate_state === "binding_failed" &&
+    reasonCodes.includes("rte-05:binding_mismatch") &&
+    reasonCodes.includes("rte-05:lease_consumed");
+  if (
+    consumed &&
+    (!options.hasLease || (!releasedConsume && !blockedAfterConsume))
+  ) {
+    throw new Error("consumed enforcement evidence requires exact lease linkage");
+  }
+  if (!consumed && options.hasLease) {
+    throw new Error("failed enforcement evidence cannot include lease linkage");
+  }
+  if (value.gate_state === "approval_released" && !consumed) {
+    throw new Error("consumed enforcement evidence requires released gate");
+  }
+  const failedGate = ["binding_failed", "timed_out", "blocked"].includes(
+    value.gate_state,
+  );
+  if (failedGate && options.outcomeKind !== "pre_execution_deny") {
+    throw new Error("failed enforcement gate requires pre-execution deny");
+  }
+  if (
+    failedGate &&
+    options.executionStatus !== undefined &&
+    options.executionStatus !== "not_invoked"
+  ) {
+    throw new Error("failed enforcement gate requires not-invoked execution");
+  }
+  if (
+    options.outcomeKind === "approval_release" &&
+    (!consumed || value.gate_state !== "approval_released")
+  ) {
+    throw new Error("strong approval release requires a consumed lease");
+  }
+}
+
+function executionStatusForKind(kind: RuntimeOutcomeKind): string {
+  if (kind === "pre_execution_deny") {
+    return "not_invoked";
+  }
+  if (kind === "approval_release") {
+    return "unknown";
+  }
+  return kind === "execution_completed" ? "executed" : "failed";
 }
 
 /** terminal 回执用 runtime_observation/enforcement_violation；其余回执用 kind 自身。 */

@@ -372,6 +372,21 @@ class MemoryControlPlaneStore:
                 self.provenance_edges.update(snapshot["provenance_edges"])
                 raise
 
+    @contextmanager
+    def runtime_outcome_transaction(
+        self, approval_id: str | None
+    ) -> Iterator[None]:
+        """Serialize receipt first-write authority with lease consumption.
+
+        The lock order matches ``evaluation_transaction``.  The approval lock
+        is also the consume CAS lock, so a weak no-lease receipt cannot pass its
+        authority check and then race a consume before entering the audit chain.
+        """
+
+        del approval_id
+        with self.audit_integrity_lock, self.approval_lease_lock:
+            yield
+
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
         with self.provenance_lock:
             existing = self.provenance_nodes.get(node.node_id)
@@ -926,6 +941,31 @@ class MemoryControlPlaneStore:
         with self.approval_lease_lock:
             record = self.enforcement_bindings.get(approval_id)
             return deepcopy(record) if record is not None else None
+
+    def approval_execution_was_consumed(self, approval_id: str) -> bool:
+        with self.approval_lease_lock:
+            binding = self.enforcement_bindings.get(approval_id)
+            if binding is None or binding.grant_id is None:
+                return False
+
+            grant = self.capability_grants.get(binding.grant_id)
+            grant_consumed = bool(
+                grant is not None and grant.get("remaining_uses") == 0
+            )
+            consumption_id = _derive_consumption_id(
+                binding.grant_id,
+                binding.action_id,
+            )
+            consumption = self.grant_consumption_records.get(consumption_id)
+            lease = self.execution_lease_records.get(
+                _derive_lease_id(consumption_id)
+            )
+            exact_pair_exists = bool(
+                consumption is not None
+                and lease is not None
+                and _lease_matches_binding(lease, binding, consumption)
+            )
+            return grant_consumed or exact_pair_exists
 
     def register_approval_grant(
         self,

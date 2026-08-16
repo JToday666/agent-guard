@@ -759,6 +759,44 @@ test("approval_release receipts keep execution status unknown until observed", (
   assert.equal(event.metadata.outcome_kind, "approval_release");
 });
 
+test("non-tool outcome receipts always use the canonical ActionIR action id", () => {
+  const guardEvent = buildMessageSendGuardEvent(
+    { to: "security@example.test", content: "approved message" },
+    { channelId: "email", runId: "run-message-outcome" },
+  );
+  const evaluation = {
+    decision: {
+      decision_id: "decision_message_outcome",
+      decision: "ask",
+      risk_score: 70,
+      severity: "high",
+      rule_hits: [],
+      reason: "approval required",
+    },
+    approval: {
+      approval_id: "approval_message_outcome",
+      status: "resolved",
+      decision_options: ["allow_once", "deny"],
+    },
+    policy_audit_id: "audit_policy_message_outcome",
+  };
+
+  const receipt = buildRuntimeOutcomeAuditEvent(
+    guardEvent,
+    evaluation,
+    "approval_release",
+    {
+      approval: {
+        approvalId: "approval_message_outcome",
+        status: "allowed",
+        decision: "allow_once",
+      },
+    },
+  );
+
+  assert.equal(receipt.links.action_id, `act_${guardEvent.event_id}`);
+});
+
 test("tool_result_quarantine receipts distinguish modified and quarantined dispositions", () => {
   const { guardEvent, evaluation } = outcomeFixture();
   const quarantined = buildRuntimeOutcomeAuditEvent(

@@ -64,9 +64,21 @@ def _iter_retained_cases():
         yield case, False
 
 
+def _guard_event(case: dict) -> GuardEvent:
+    """Migrate frozen legacy fixtures to the server-owned phase contract."""
+
+    payload = dict(case["event"])
+    if payload.get("event_type") in {
+        "model_output_produced",
+        "tool_result_produced",
+    }:
+        payload["pre_execution"] = False
+    return GuardEvent.model_validate(payload)
+
+
 def _shadow_evaluate(case: dict, *, is_malicious: bool) -> ShadowEvaluation:
     """legacy evaluate 为主，ActionIR 旁路；正常路径下无降级。"""
-    event = GuardEvent.model_validate(case["event"])
+    event = _guard_event(case)
     if event.is_malicious is not is_malicious:
         raise ValueError(f"case {case['case_id']} label conflict")
     policies = PolicyBundle.model_validate(case.get("policies", {}))
@@ -128,7 +140,7 @@ def test_action_ir_build_is_deterministic_on_retained_cases() -> None:
     for index, (case, is_malicious) in enumerate(_iter_retained_cases()):
         if index >= 5:
             break
-        event = GuardEvent.model_validate(case["event"])
+        event = _guard_event(case)
         first = build_action_ir(event, server_secret=SHADOW_SECRET)
         second = build_action_ir(event, server_secret=SHADOW_SECRET)
         assert first == second, case["case_id"]
@@ -147,7 +159,7 @@ def test_builder_failure_does_not_alter_legacy_decision(monkeypatch) -> None:
 
     checked = 0
     for case, is_malicious in _iter_retained_cases():
-        event = GuardEvent.model_validate(case["event"])
+        event = _guard_event(case)
         policies = PolicyBundle.model_validate(case.get("policies", {}))
 
         # builder 旁路必须失败（模拟注入的异常）。
@@ -173,7 +185,7 @@ def test_builder_failure_does_not_alter_legacy_decision(monkeypatch) -> None:
 
 def test_build_shadow_evaluation_success_path_has_no_degradation() -> None:
     case, is_malicious = next(iter(_iter_retained_cases()))
-    event = GuardEvent.model_validate(case["event"])
+    event = _guard_event(case)
     policies = PolicyBundle.model_validate(case.get("policies", {}))
     decision = evaluate(event, policies)
 
@@ -197,7 +209,7 @@ def test_build_shadow_evaluation_failure_path_degrades_without_raising(
     monkeypatch.setattr(builder_module, "normalize_arguments", _boom)
 
     case, is_malicious = next(iter(_iter_retained_cases()))
-    event = GuardEvent.model_validate(case["event"])
+    event = _guard_event(case)
     policies = PolicyBundle.model_validate(case.get("policies", {}))
     decision = evaluate(event, policies)
 

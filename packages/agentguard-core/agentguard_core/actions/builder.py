@@ -45,7 +45,12 @@ from .fingerprints import audit_fingerprint, authorization_fingerprint
 from .models import NORMALIZER_VERSION, ActionEffect, ActionIR, CanonicalResource
 from .normalize import normalize_arguments
 
-__all__ = ["ShadowEvaluation", "build_action_ir", "build_shadow_evaluation"]
+__all__ = [
+    "ShadowEvaluation",
+    "build_action_ir",
+    "build_shadow_evaluation",
+    "canonical_action_id",
+]
 
 # 外部目标 kind：进入 ActionIR.destinations；其余进入 resources。
 _DESTINATION_KINDS = frozenset({"url", "api", "email"})
@@ -99,6 +104,23 @@ class ShadowEvaluation:
     decision: GuardDecision
     action_ir: ActionIR | None
     degradation: EvaluationDegradation | None
+
+
+def canonical_action_id(event: GuardEvent) -> str:
+    """Return the frozen action identity for a GuardEvent.
+
+    Approval, policy-audit, ActionIR, binding, lease, and receipt correlation
+    must all use this function's output. Tool lifecycle events keep the native
+    call ID; an explicitly correlated memory write keeps its source action ID;
+    every other event receives the deterministic ``act_<event_id>`` identity.
+    """
+
+    payload = event.payload
+    if isinstance(payload, (ToolCallPayload, ToolResultPayload)):
+        return payload.tool.call_id
+    if isinstance(payload, MemoryEventPayload) and payload.action_id:
+        return payload.action_id
+    return f"act_{event.event_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -457,15 +479,18 @@ def build_action_ir(
         runtime_binding_id = f"binding:claim:{event.runtime}:{agent_id}"
         reason_codes.append("claim.runtime_binding_id")
     if scope_digest is None:
-        scope_digest = "sha256:" + hashlib.sha256(
-            canonical_json_bytes(
-                {
-                    "claim": "scope_digest",
-                    "runtime": event.runtime,
-                    "agent_id": agent_id,
-                }
-            )
-        ).hexdigest()
+        scope_digest = (
+            "sha256:"
+            + hashlib.sha256(
+                canonical_json_bytes(
+                    {
+                        "claim": "scope_digest",
+                        "runtime": event.runtime,
+                        "agent_id": agent_id,
+                    }
+                )
+            ).hexdigest()
+        )
         reason_codes.append("claim.scope_digest")
 
     payload = event.payload
@@ -483,9 +508,7 @@ def build_action_ir(
     )
     reason_codes.extend(normalized_arguments.reason_codes)
 
-    produced = _payload_resources(
-        event, reason_codes=reason_codes, resolver=resolver
-    )
+    produced = _payload_resources(event, reason_codes=reason_codes, resolver=resolver)
     resources = [item for item in produced if item.kind not in _DESTINATION_KINDS]
     destinations = [item for item in produced if item.kind in _DESTINATION_KINDS]
 
@@ -509,12 +532,7 @@ def build_action_ir(
         else None
     )
 
-    if isinstance(payload, (ToolCallPayload, ToolResultPayload)):
-        action_id = payload.tool.call_id
-    elif isinstance(payload, MemoryEventPayload) and payload.action_id:
-        action_id = payload.action_id
-    else:
-        action_id = f"act_{event.event_id}"
+    action_id = canonical_action_id(event)
 
     placeholder = ActionIR(
         event_id=event.event_id,

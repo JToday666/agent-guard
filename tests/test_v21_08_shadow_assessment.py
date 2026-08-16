@@ -13,6 +13,7 @@ import importlib.util
 from pathlib import Path
 
 from agentguard_core import GuardEvent, PolicyBundle, evaluate
+from agentguard_core.actions import canonical_action_id
 from agentguard_core.authority.models import EvaluationClock, SecurityStateScope
 from agentguard_core.decisions import shadow as shadow_module
 from agentguard_core.decisions.divergence import (
@@ -65,6 +66,18 @@ def _iter_retained_cases():
         yield case, False
 
 
+def _guard_event(case: dict) -> GuardEvent:
+    """Migrate frozen legacy fixtures to the server-owned phase contract."""
+
+    payload = dict(case["event"])
+    if payload.get("event_type") in {
+        "model_output_produced",
+        "tool_result_produced",
+    }:
+        payload["pre_execution"] = False
+    return GuardEvent.model_validate(payload)
+
+
 def _decision_semantic_dump(decision):
     """决策语义投影：剔除非确定性字段后的全字段 dump。
 
@@ -89,7 +102,7 @@ def test_evaluate_with_results_decision_matches_evaluate_case_by_case() -> None:
     distribution: dict[str, int] = {}
     checked = 0
     for case, _is_malicious in _iter_retained_cases():
-        event = GuardEvent.model_validate(case["event"])
+        event = _guard_event(case)
         policies = PolicyBundle.model_validate(case.get("policies", {}))
 
         official = evaluate(event, policies)
@@ -118,7 +131,7 @@ def test_evaluate_with_results_exposes_detector_failure_results() -> None:
             raise RuntimeError("simulated detector failure")
 
     case, _ = next(iter(_iter_retained_cases()))
-    event = GuardEvent.model_validate(case["event"])
+    event = _guard_event(case)
 
     engine = GuardEngine(detectors=[_BoomDetector()])
     decision, detections = engine.evaluate_with_results(event)
@@ -142,7 +155,7 @@ PROJECTOR_VERSION = "v21-07.projector.2"
 
 def _first_case():
     case, _ = next(iter(_iter_retained_cases()))
-    event = GuardEvent.model_validate(case["event"])
+    event = _guard_event(case)
     policies = PolicyBundle.model_validate(case.get("policies", {}))
     return event, policies
 
@@ -367,7 +380,7 @@ def test_action_ir_failure_degrades_without_raising(monkeypatch) -> None:
 
     assert assessment.disposition == "DEFER"
     assert assessment.impact == "high"  # 保守假设
-    assert assessment.action_id == f"act_{event.event_id}"
+    assert assessment.action_id == canonical_action_id(event)
     assert assessment.authorization_fingerprint == ""
     shadow_ids = _shadow_degradation_ids(assessment)
     assert len(shadow_ids) == 1
@@ -492,7 +505,7 @@ def test_legacy_detections_feed_signals_deterministically() -> None:
     """detection_results 经 legacy_adapter 转 signals 后喂给 fusion。"""
     engine = GuardEngine()
     case, _ = next(iter(_iter_retained_cases()))
-    event = GuardEvent.model_validate(case["event"])
+    event = _guard_event(case)
     policies = PolicyBundle.model_validate(case.get("policies", {}))
     _decision, detections = engine.evaluate_with_results(event, policies)
 

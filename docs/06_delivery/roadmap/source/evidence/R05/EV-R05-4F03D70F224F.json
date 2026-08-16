@@ -1,0 +1,11 @@
+{
+  "id": "EV-R05-4F03D70F224F",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "R05",
+  "recorded_at": "2026-08-16T16:03:06Z",
+  "ref": "local:rte05-regression-2026-08-17",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Verified local regression: Guard API/Core 451 passed (15 PostgreSQL-environment skips); LangGraph/receipt/conformance 115 passed (6 PostgreSQL-environment skips); static and secret-safety checks passed."
+}

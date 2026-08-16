@@ -1,0 +1,11 @@
+{
+  "id": "EV-R05-051F0C471046",
+  "kind": "e2e",
+  "metadata": {},
+  "node_id": "R05",
+  "recorded_at": "2026-08-16T16:03:10Z",
+  "ref": "local:openclaw-2026.7.1-2-memory-canary",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Verified restricted pinned-host Memory canary: compiled OpenClaw plugin 18/18 files, registry 9/9, live consume-to-invoke-to-terminal chain 1/1. This is not CF-13/C3 proof because the host lacks authoritative start and atomic replace-and-seal."
+}

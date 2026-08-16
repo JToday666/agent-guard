@@ -1,10 +1,10 @@
 import { isIP } from "node:net";
 
 import {
-  OPENCLAW_FAIL_CLOSED_HOOKS,
   OPENCLAW_REQUIRED_HOOK_COUNT,
   OPENCLAW_REQUIRED_HOOKS,
 } from "../hook-contract.mjs";
+import { OPENCLAW_EFFECTIVE_FAIL_CLOSED_HOOKS } from "./runtime/host-capabilities.js";
 import type {
   AgentGuardPluginConfig,
   AdapterHeartbeatInput,
@@ -12,6 +12,8 @@ import type {
   ApprovalWaitResponse,
   ConfigAuditEvent,
   ConfigAuditResult,
+  EnforcementBinding,
+  ExecutionLeaseReference,
   GuardEvaluationResponse,
   GuardEvent,
   MessageHookResult,
@@ -34,6 +36,22 @@ type ApprovalWaiter = {
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const ENCODED_LINE_BREAK = /%0[ad]/iu;
+const AUTHORIZATION_FINGERPRINT = /^hmac-sha256:[0-9a-f]{64}$/u;
+const SECRET_FINGERPRINT = /hmac-sha256:[0-9a-f]{64}/gu;
+const LEASE_TOKEN = /lease-v1:[0-9a-f]{64}/gu;
+const STRICT_LEASE_TOKEN = /^lease-v1:[0-9a-f]{64}$/u;
+const LEASE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
+const RUNTIME_BINDING_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+const RFC3339_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u;
+const MAX_LEASE_CONSUME_ATTEMPTS = 5;
+const MAX_GUARD_API_RESPONSE_BYTES = 1024 * 1024;
+
+type GuardApiJsonResponse = {
+  ok: boolean;
+  status: number;
+  body: unknown;
+};
 
 const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   guardApiBaseUrl: "http://127.0.0.1:8088",
@@ -42,6 +60,8 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   requestTimeoutMs: 5000,
   approvalPollIntervalMs: 1000,
   approvalTimeoutMs: 25000,
+  strongApprovalBindingEnabled: false,
+  runtimeBindingId: "",
   diagnosticLogging: false,
   agentId: "main",
 };
@@ -50,6 +70,22 @@ export class GuardApiError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GuardApiError";
+  }
+}
+
+export type GuardApiResponseFailure =
+  | "timed_out"
+  | "too_large"
+  | "malformed";
+
+/** Stable, body-free classification for bounded response handling failures. */
+export class GuardApiResponseError extends GuardApiError {
+  readonly failure: GuardApiResponseFailure;
+
+  constructor(failure: GuardApiResponseFailure) {
+    super(`Guard API response failed: ${failure}`);
+    this.name = "GuardApiResponseError";
+    this.failure = failure;
   }
 }
 
@@ -169,6 +205,37 @@ export class GuardApiPermanentError extends GuardApiError {
   }
 }
 
+export type ExecutionLeaseFailure =
+  | "identity_denied"
+  | "approval_not_found"
+  | "approval_not_consumable"
+  | "consumption_conflict"
+  | "approval_expired"
+  | "lease_expired"
+  | "lease_revoked"
+  | "lease_unavailable"
+  | "timed_out"
+  | "invalid_response"
+  | "rejected";
+
+/** Stable, bounded consume failure. It never retains a response body. */
+export class ExecutionLeaseConsumeError extends GuardApiError {
+  readonly failure: ExecutionLeaseFailure;
+  readonly status: number | null;
+  readonly code: string | null;
+
+  constructor(
+    failure: ExecutionLeaseFailure,
+    options: { status?: number; code?: string } = {},
+  ) {
+    super(`Execution lease consume failed: ${failure}`);
+    this.name = "ExecutionLeaseConsumeError";
+    this.failure = failure;
+    this.status = options.status ?? null;
+    this.code = options.code ?? null;
+  }
+}
+
 /** §12.3 审计提交响应：首次写入与幂等重放用 created/idempotent_replay 区分。 */
 export type AuditSubmitResponse = {
   ok: boolean;
@@ -205,7 +272,7 @@ export class GuardApiClient {
       method: "POST",
       body: JSON.stringify(event),
     });
-    return (await response.json()) as GuardEvaluationResponse;
+    return parseEvaluationResponse(response.body);
   }
 
   async evaluateConfigAudit(
@@ -219,7 +286,7 @@ export class GuardApiClient {
       method: "POST",
       body: JSON.stringify(event),
     });
-    return (await response.json()) as ConfigAuditResult;
+    return response.body as ConfigAuditResult;
   }
 
   async submitRuntimeObservation(
@@ -233,7 +300,7 @@ export class GuardApiClient {
       method: "POST",
       body: JSON.stringify(event),
     });
-    return (await response.json()) as AuditSubmitResponse;
+    return response.body as AuditSubmitResponse;
   }
 
   /**
@@ -253,7 +320,7 @@ export class GuardApiClient {
         method: "POST",
         body: JSON.stringify(event),
       });
-      return (await response.json()) as AuditSubmitResponse;
+      return response.body as AuditSubmitResponse;
     } catch (error) {
       if (
         error instanceof GuardApiConflictError ||
@@ -302,18 +369,25 @@ export class GuardApiClient {
         hooks,
         hook_count: hooks.length,
         expected_hook_count: OPENCLAW_REQUIRED_HOOK_COUNT,
-        fail_closed_stages: [...OPENCLAW_FAIL_CLOSED_HOOKS],
+        fail_closed_stages: [...OPENCLAW_EFFECTIVE_FAIL_CLOSED_HOOKS],
         enforcement_mode: this.config.enforcementMode,
       }),
     });
-    return (await response.json()) as Record<string, unknown>;
+    return response.body as Record<string, unknown>;
   }
 
-  async waitForApproval(approvalId: string): Promise<ApprovalWaitResponse> {
-    const deadline = Date.now() + this.config.approvalTimeoutMs;
+  approvalDeadlineMs(): number {
+    return Date.now() + this.config.approvalTimeoutMs;
+  }
+
+  async waitForApproval(
+    approvalId: string,
+    deadlineMs = this.approvalDeadlineMs(),
+  ): Promise<ApprovalWaitResponse> {
+    const deadline = deadlineMs;
     while (Date.now() < deadline) {
       const remainingMs = deadline - Date.now();
-      let response: Response;
+      let response: GuardApiJsonResponse;
       try {
         response = await this.request(
           `/v1/approvals/${encodeURIComponent(approvalId)}/wait`,
@@ -322,47 +396,180 @@ export class GuardApiClient {
         );
       } catch (error) {
         if (Date.now() >= deadline) {
-          return { status: "timeout", decision: "deny" };
+          return timeoutApproval();
         }
-        throw error;
+        if (
+          error instanceof GuardApiPermanentError ||
+          error instanceof GuardApiConflictError
+        ) {
+          throw error;
+        }
+        if (
+          error instanceof GuardApiResponseError &&
+          error.failure !== "timed_out"
+        ) {
+          throw error;
+        }
+        await delayWithinDeadline(
+          this.config.approvalPollIntervalMs,
+          deadline,
+        );
+        continue;
       }
-      const parsed = (await response.json()) as ApprovalWaitResponse;
+      const parsed = parseApprovalWaitResponse(response.body);
       if (parsed.status !== "pending") {
         return parsed;
       }
-      const delayMs = Math.min(
-        this.config.approvalPollIntervalMs,
-        Math.max(0, deadline - Date.now()),
-      );
-      if (delayMs > 0) {
-        await delay(delayMs);
-      }
+      await delayWithinDeadline(this.config.approvalPollIntervalMs, deadline);
     }
-    return { status: "timeout", decision: "deny" };
+    return timeoutApproval();
+  }
+
+  /**
+   * Consume a strong approval binding using one immutable request body.
+   * The plaintext lease token is validated in this stack frame and discarded;
+   * callers receive only non-secret correlation IDs.
+   */
+  async consumeExecutionLease(
+    approvalId: string,
+    binding: EnforcementBinding,
+    deadlineMs: number,
+  ): Promise<ExecutionLeaseReference> {
+    const path = `/v1/approvals/${encodeURIComponent(approvalId)}/execution-leases/consume`;
+    const serializedBody = JSON.stringify({
+      action_id: binding.action_id,
+      authorization_fingerprint: binding.authorization_fingerprint,
+    });
+
+    for (
+      let attempt = 0;
+      attempt < MAX_LEASE_CONSUME_ATTEMPTS && Date.now() < deadlineMs;
+      attempt += 1
+    ) {
+      const remainingMs = deadlineMs - Date.now();
+      let response: GuardApiJsonResponse;
+      try {
+        response = await this.requestRaw(
+          path,
+          { method: "POST", body: serializedBody },
+          Math.min(this.config.requestTimeoutMs, remainingMs),
+        );
+      } catch (error) {
+        if (error instanceof GuardApiResponseError) {
+          if (error.failure !== "timed_out") {
+            throw new ExecutionLeaseConsumeError("invalid_response");
+          }
+          if (Date.now() >= deadlineMs) {
+            throw new ExecutionLeaseConsumeError("timed_out");
+          }
+        }
+        if (Date.now() >= deadlineMs) {
+          throw new ExecutionLeaseConsumeError("timed_out");
+        }
+        if (attempt + 1 >= MAX_LEASE_CONSUME_ATTEMPTS) {
+          throw new ExecutionLeaseConsumeError("lease_unavailable");
+        }
+        await delayWithinDeadline(
+          this.config.approvalPollIntervalMs,
+          deadlineMs,
+        );
+        continue;
+      }
+
+      if (response.ok) {
+        return parseExecutionLeaseResponse(response.body);
+      }
+
+      const code = boundedErrorCode(response.body);
+      if (response.status === 409) {
+        if (code === "APPROVAL_NOT_CONSUMABLE") {
+          throw new ExecutionLeaseConsumeError("approval_not_consumable", {
+            status: response.status,
+            code,
+          });
+        }
+        if (code === "APPROVAL_CONSUMPTION_CONFLICT") {
+          throw new ExecutionLeaseConsumeError("consumption_conflict", {
+            status: response.status,
+            code,
+          });
+        }
+        throw new ExecutionLeaseConsumeError("rejected", {
+          status: response.status,
+          code: code ?? undefined,
+        });
+      }
+      if (response.status === 410) {
+        const failure =
+          code === "APPROVAL_EXPIRED"
+            ? "approval_expired"
+            : code === "EXECUTION_LEASE_EXPIRED"
+              ? "lease_expired"
+              : "rejected";
+        throw new ExecutionLeaseConsumeError(failure, {
+          status: response.status,
+          code: code ?? undefined,
+        });
+      }
+      if (response.status === 403) {
+        throw new ExecutionLeaseConsumeError("identity_denied", {
+          status: response.status,
+          code: code ?? undefined,
+        });
+      }
+      if (response.status === 404) {
+        throw new ExecutionLeaseConsumeError("approval_not_found", {
+          status: response.status,
+          code: code ?? undefined,
+        });
+      }
+      if (
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status === 503 ||
+        response.status >= 500
+      ) {
+        if (Date.now() >= deadlineMs) {
+          throw new ExecutionLeaseConsumeError("timed_out", {
+            status: response.status,
+            code: code ?? undefined,
+          });
+        }
+        if (attempt + 1 >= MAX_LEASE_CONSUME_ATTEMPTS) {
+          throw new ExecutionLeaseConsumeError("lease_unavailable", {
+            status: response.status,
+            code: code ?? undefined,
+          });
+        }
+        await delayWithinDeadline(
+          this.config.approvalPollIntervalMs,
+          deadlineMs,
+        );
+        continue;
+      }
+      if (code === "APPROVAL_NOT_CONSUMABLE") {
+        throw new ExecutionLeaseConsumeError("approval_not_consumable", {
+          status: response.status,
+          code,
+        });
+      }
+      throw new ExecutionLeaseConsumeError("rejected", {
+        status: response.status,
+        code: code ?? undefined,
+      });
+    }
+    throw new ExecutionLeaseConsumeError(
+      Date.now() >= deadlineMs ? "timed_out" : "lease_unavailable",
+    );
   }
 
   private async request(
     path: string,
     init: RequestInit,
     timeoutMs = this.config.requestTimeoutMs,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  ): Promise<GuardApiJsonResponse> {
+    const response = await this.requestRaw(path, init, timeoutMs);
     try {
-      const response = await this.fetchImpl(
-        `${trimTrailingSlash(this.config.guardApiBaseUrl)}${path}`,
-        {
-          ...init,
-          redirect: "error",
-          signal: controller.signal,
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${this.config.adapterToken}`,
-            "Content-Type": "application/json",
-            ...(init.headers ?? {}),
-          },
-        },
-      );
       if (!response.ok) {
         logDiagnostic(
           this.config,
@@ -394,15 +601,174 @@ export class GuardApiClient {
       if (error instanceof GuardApiError) {
         throw error;
       }
+      throw new GuardApiError("Guard API request failed");
+    }
+  }
+
+  private async requestRaw(
+    path: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<GuardApiJsonResponse> {
+    const controller = new AbortController();
+    const boundedTimeoutMs = Math.max(1, timeoutMs);
+    const deadlineMs = Date.now() + boundedTimeoutMs;
+    const timeout = setTimeout(() => controller.abort(), boundedTimeoutMs);
+    let abortListener: (() => void) | undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      abortListener = () => reject(new GuardApiResponseError("timed_out"));
+      controller.signal.addEventListener("abort", abortListener, {
+        once: true,
+      });
+    });
+    try {
+      const response = await Promise.race([
+        this.fetchImpl(
+          `${trimTrailingSlash(this.config.guardApiBaseUrl)}${path}`,
+          {
+            ...init,
+            redirect: "error",
+            signal: controller.signal,
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${this.config.adapterToken}`,
+              "Content-Type": "application/json",
+              ...(init.headers ?? {}),
+            },
+          },
+        ),
+        abortPromise,
+      ]);
+      const body = await readBoundedJsonResponse(
+        response,
+        controller.signal,
+        abortPromise,
+      );
+      if (Date.now() >= deadlineMs || controller.signal.aborted) {
+        throw new GuardApiResponseError("timed_out");
+      }
+      return { ok: response.ok, status: response.status, body };
+    } catch (error) {
+      const classified = classifyResponseHandlingError(
+        error,
+        controller.signal.aborted,
+      );
+      controller.abort();
       logDiagnostic(this.config, "Guard API request failed", {
         path,
-        error: error instanceof Error ? error.message : String(error),
+        error_type: diagnosticErrorType(classified),
       });
+      if (classified instanceof GuardApiResponseError) {
+        throw classified;
+      }
       throw new GuardApiError("Guard API request failed");
     } finally {
       clearTimeout(timeout);
+      if (abortListener) {
+        controller.signal.removeEventListener("abort", abortListener);
+      }
     }
   }
+}
+
+async function readBoundedJsonResponse(
+  response: Response,
+  signal: AbortSignal,
+  abortPromise: Promise<never>,
+): Promise<unknown> {
+  const declaredLength = response.headers.get("content-length");
+  if (
+    declaredLength !== null &&
+    /^\d+$/u.test(declaredLength) &&
+    Number(declaredLength) > MAX_GUARD_API_RESPONSE_BYTES
+  ) {
+    throw new GuardApiResponseError("too_large");
+  }
+  if (!response.body) {
+    if (response.ok) {
+      throw new GuardApiResponseError("malformed");
+    }
+    return null;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let completed = false;
+  try {
+    while (true) {
+      const chunk = await Promise.race([reader.read(), abortPromise]);
+      if (chunk.done) {
+        completed = true;
+        break;
+      }
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > MAX_GUARD_API_RESPONSE_BYTES) {
+        throw new GuardApiResponseError("too_large");
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    if (!completed) {
+      void reader.cancel().catch(() => undefined);
+    }
+  }
+  if (signal.aborted) {
+    throw new GuardApiResponseError("timed_out");
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new GuardApiResponseError("malformed");
+  }
+  if (!text.trim()) {
+    if (response.ok) {
+      throw new GuardApiResponseError("malformed");
+    }
+    return null;
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    if (response.ok) {
+      throw new GuardApiResponseError("malformed");
+    }
+    return null;
+  }
+}
+
+function classifyResponseHandlingError(
+  error: unknown,
+  aborted: boolean,
+): unknown {
+  if (error instanceof GuardApiResponseError) {
+    return error;
+  }
+  return aborted ? new GuardApiResponseError("timed_out") : error;
+}
+
+function diagnosticErrorType(error: unknown): string {
+  if (error instanceof GuardApiResponseError) {
+    return `response_${error.failure}`;
+  }
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "abort";
+  }
+  if (error instanceof TypeError) {
+    return "type_error";
+  }
+  if (error instanceof Error) {
+    return "error";
+  }
+  return "non_error_throwable";
 }
 
 export function buildPluginConfig(
@@ -432,6 +798,9 @@ export function buildPluginConfig(
       input?.approvalTimeoutMs,
       DEFAULT_CONFIG.approvalTimeoutMs,
     ),
+    strongApprovalBindingEnabled:
+      input?.strongApprovalBindingEnabled === true,
+    runtimeBindingId: optionalRuntimeBindingId(input?.runtimeBindingId),
     diagnosticLogging: input?.diagnosticLogging === true,
     agentId: nonEmptyString(input?.agentId, DEFAULT_CONFIG.agentId),
   };
@@ -530,7 +899,7 @@ export async function decisionToMessageResult(
 }
 
 /** 把审批等待结果映射为 §9.8 evidence 稳定状态（timeout→expired）。 */
-function approvalEvidenceFromWait(
+export function approvalEvidenceFromWait(
   approvalId: string,
   wait: ApprovalWaitResponse,
 ): OutcomeApprovalEvidence {
@@ -598,12 +967,237 @@ function enforcementMode(
     : fallback;
 }
 
+function optionalRuntimeBindingId(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  if (
+    typeof value !== "string" ||
+    !RUNTIME_BINDING_IDENTIFIER.test(value)
+  ) {
+    throw new GuardApiError(
+      "runtimeBindingId must be a 1-256 character trusted runtime identifier",
+    );
+  }
+  return value;
+}
+
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function delayWithinDeadline(
+  requestedMs: number,
+  deadlineMs: number,
+): Promise<void> {
+  const wakeAtMs = Math.min(Date.now() + requestedMs, deadlineMs);
+  while (Date.now() < wakeAtMs) {
+    await delay(wakeAtMs - Date.now());
+  }
+}
+
+function timeoutApproval(): ApprovalWaitResponse {
+  return {
+    status: "timeout",
+    decision: "deny",
+    resolution_source: null,
+  };
+}
+
+function parseEvaluationResponse(value: unknown): GuardEvaluationResponse {
+  if (!isRecord(value) || !isRecord(value.decision)) {
+    throw new GuardApiError("Guard API evaluation response is invalid");
+  }
+  const candidate = value as unknown as GuardEvaluationResponse;
+  const bindingValue = value.enforcement_binding;
+  if (bindingValue === undefined) {
+    return candidate;
+  }
+  try {
+    return {
+      ...candidate,
+      enforcement_binding: parseEnforcementBinding(bindingValue),
+    };
+  } catch {
+    // Preserve only the fact that the field was present. The raw fingerprint
+    // must not escape the response parser into runtime state or diagnostics.
+    return { ...candidate, enforcement_binding: { invalid: true } };
+  }
+}
+
+function parseEnforcementBinding(value: unknown): EnforcementBinding {
+  if (!isRecord(value)) {
+    throw new GuardApiError("Guard API enforcement binding is invalid");
+  }
+  const keys = Object.keys(value).sort();
+  const expected = [
+    "action_id",
+    "authorization_fingerprint",
+    "requires_execution_lease",
+    "runtime_binding_id",
+    "schema_version",
+  ];
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, index) => key !== expected[index]) ||
+    value.schema_version !== "2.1" ||
+    typeof value.action_id !== "string" ||
+    value.action_id.length === 0 ||
+    typeof value.authorization_fingerprint !== "string" ||
+    !AUTHORIZATION_FINGERPRINT.test(value.authorization_fingerprint) ||
+    typeof value.runtime_binding_id !== "string" ||
+    !RUNTIME_BINDING_IDENTIFIER.test(value.runtime_binding_id) ||
+    value.requires_execution_lease !== true
+  ) {
+    throw new GuardApiError("Guard API enforcement binding is invalid");
+  }
+  return {
+    schema_version: "2.1",
+    action_id: value.action_id,
+    authorization_fingerprint: value.authorization_fingerprint,
+    runtime_binding_id: value.runtime_binding_id,
+    requires_execution_lease: true,
+  };
+}
+
+function parseApprovalWaitResponse(value: unknown): ApprovalWaitResponse {
+  if (
+    !isRecord(value) ||
+    (value.status !== "pending" &&
+      value.status !== "resolved" &&
+      value.status !== "expired")
+  ) {
+    throw new GuardApiError("Guard API approval response is invalid");
+  }
+  const decision = value.decision;
+  const resolutionSource = value.resolution_source;
+  if (
+    decision !== "allow_once" &&
+    decision !== "deny" &&
+    decision !== null
+  ) {
+    throw new GuardApiError("Guard API approval response is invalid");
+  }
+  if (
+    resolutionSource !== undefined &&
+    resolutionSource !== null &&
+    resolutionSource !== "human" &&
+    resolutionSource !== "llm" &&
+    resolutionSource !== "system"
+  ) {
+    throw new GuardApiError("Guard API approval response is invalid");
+  }
+  return {
+    status: value.status,
+    decision,
+    ...(resolutionSource === undefined
+      ? {}
+      : { resolution_source: resolutionSource }),
+  };
+}
+
+function parseExecutionLeaseResponse(value: unknown): ExecutionLeaseReference {
+  if (!isRecord(value)) {
+    throw new ExecutionLeaseConsumeError("invalid_response");
+  }
+  const keys = Object.keys(value).sort();
+  const expected = ["consumption_id", "expires_at", "lease_id", "lease_token"];
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, index) => key !== expected[index]) ||
+    typeof value.lease_id !== "string" ||
+    !LEASE_IDENTIFIER.test(value.lease_id) ||
+    typeof value.consumption_id !== "string" ||
+    !LEASE_IDENTIFIER.test(value.consumption_id) ||
+    typeof value.lease_token !== "string" ||
+    !STRICT_LEASE_TOKEN.test(value.lease_token) ||
+    typeof value.expires_at !== "string"
+  ) {
+    throw new ExecutionLeaseConsumeError("invalid_response");
+  }
+  const expiresAtMs = strictRfc3339EpochMs(value.expires_at);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    throw new ExecutionLeaseConsumeError("invalid_response");
+  }
+
+  // Intentionally do not return or retain value.lease_token.
+  return {
+    leaseId: value.lease_id,
+    consumptionId: value.consumption_id,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+}
+
+function strictRfc3339EpochMs(value: string): number {
+  const match = RFC3339_TIMESTAMP.exec(value);
+  if (!match) {
+    return Number.NaN;
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText,
+    fractionText = "", zoneText, signText, offsetHourText, offsetMinuteText] =
+    match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const millisecond = Number(`${fractionText}000`.slice(0, 3));
+  const local = new Date(0);
+  local.setUTCFullYear(year, month - 1, day);
+  local.setUTCHours(hour, minute, second, millisecond);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return Number.NaN;
+  }
+  let offsetMinutes = 0;
+  if (zoneText !== "Z") {
+    const offsetHour = Number(offsetHourText);
+    const offsetMinute = Number(offsetMinuteText);
+    if (offsetHour > 23 || offsetMinute > 59) {
+      return Number.NaN;
+    }
+    offsetMinutes = (offsetHour * 60 + offsetMinute) *
+      (signText === "+" ? 1 : -1);
+  }
+  const expected = local.getTime() - offsetMinutes * 60_000;
+  const parsed = Date.parse(value);
+  return parsed === expected ? parsed : Number.NaN;
+}
+
+function boundedErrorCode(value: unknown): string | null {
+  if (!isRecord(value) || !isRecord(value.error)) {
+    return null;
+  }
+  const code = value.error.code;
+  return typeof code === "string" && LEASE_ERROR_CODES.has(code) ? code : null;
+}
+
+const LEASE_ERROR_CODES: ReadonlySet<string> = new Set([
+  "APPROVAL_CONSUMPTION_DENIED",
+  "APPROVAL_NOT_FOUND",
+  "APPROVAL_NOT_CONSUMABLE",
+  "APPROVAL_CONSUMPTION_CONFLICT",
+  "APPROVAL_EXPIRED",
+  "EXECUTION_LEASE_EXPIRED",
+  "EXECUTION_LEASE_UNAVAILABLE",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function logDiagnostic(
@@ -623,7 +1217,12 @@ export function logDiagnostic(
 
 function sanitizeDiagnostic(value: unknown, adapterToken: string): unknown {
   if (typeof value === "string") {
-    return adapterToken ? value.replaceAll(adapterToken, "[redacted]") : value;
+    const withoutAdapterToken = adapterToken
+      ? value.replaceAll(adapterToken, "[redacted]")
+      : value;
+    return withoutAdapterToken
+      .replace(SECRET_FINGERPRINT, "[redacted-fingerprint]")
+      .replace(LEASE_TOKEN, "[redacted-lease-token]");
   }
   if (Array.isArray(value)) {
     return value.map((item) => sanitizeDiagnostic(item, adapterToken));

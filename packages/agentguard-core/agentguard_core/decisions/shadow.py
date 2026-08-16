@@ -45,7 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from ..actions.builder import build_action_ir
+from ..actions.builder import build_action_ir, canonical_action_id
 from ..actions.canonical_json import canonical_sha256
 from ..actions.models import ActionIR
 from ..decisions.evidence import (
@@ -432,7 +432,7 @@ def _assess_kernel(
         authorization_fingerprint = action_ir.authorization_fingerprint
         audit_fingerprint = action_ir.audit_fingerprint
     else:
-        action_id = f"act_{event.event_id}"
+        action_id = canonical_action_id(event)
         impact = "high"  # 保守假设，fail-closed。
         authorization_fingerprint = ""
         audit_fingerprint = ""

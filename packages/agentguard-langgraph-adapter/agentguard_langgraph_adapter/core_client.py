@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import re
+import time
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -10,6 +14,22 @@ import httpx
 from .config import DEFAULT_API_MODE, validate_api_mode
 from .endpoint_policy import GuardApiEndpointError, validate_guard_api_base_url
 from .event_models import PolicyDecision, RuleHit
+from .strong_binding import (
+    ExecutionLeaseConsumeError,
+    ExecutionLeaseCorrelation,
+    ExecutionLeaseReference,
+)
+
+_LEASE_TOKEN = re.compile(r"^lease-v1:[0-9a-f]{64}$")
+_LEASE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_RFC3339 = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
+_LEASE_RESPONSE_KEYS = frozenset(
+    {"lease_id", "consumption_id", "lease_token", "expires_at"}
+)
+_MAX_LEASE_CONSUME_ATTEMPTS = 5
 
 
 class CoreClientProtocol(Protocol):
@@ -22,6 +42,15 @@ class CoreClientProtocol(Protocol):
     def wait_for_approval(
         self, approval_id: str, timeout: float | None = None
     ) -> dict[str, Any]: ...
+
+    def consume_execution_lease(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        deadline: float,
+    ) -> ExecutionLeaseReference: ...
 
 
 class CoreClientError(RuntimeError):
@@ -74,7 +103,102 @@ class AgentGuardCoreClient:
                 "legacy api_mode does not support Guard API approval waiting; "
                 "use guard-api-v0.3"
             )
+        if _LEASE_IDENTIFIER.fullmatch(approval_id) is None:
+            raise ExecutionLeaseConsumeError("rejected")
         return self._get_json(f"/v1/approvals/{approval_id}/wait", timeout=timeout)
+
+    def consume_execution_lease(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        deadline: float,
+    ) -> ExecutionLeaseReference:
+        """Consume an exact execution lease with bounded, same-body retries."""
+
+        if _api_mode(self.config) != "guard-api-v0.3":
+            raise UnsupportedApiModeError(
+                "legacy api_mode does not support execution leases; use guard-api-v0.3"
+            )
+        if (
+            _LEASE_IDENTIFIER.fullmatch(approval_id) is None
+            or _LEASE_IDENTIFIER.fullmatch(action_id) is None
+            or re.fullmatch(r"hmac-sha256:[0-9a-f]{64}", authorization_fingerprint)
+            is None
+        ):
+            raise ExecutionLeaseConsumeError("rejected")
+        try:
+            base_url = validate_guard_api_base_url(self.config.core_base_url)
+        except GuardApiEndpointError as exc:
+            raise ExecutionLeaseConsumeError("rejected") from exc
+        path = f"/v1/approvals/{approval_id}/execution-leases/consume"
+        url = base_url + path
+        # Serialize exactly once. Every retry uses these identical bytes.
+        body = json.dumps(
+            {
+                "action_id": action_id,
+                "authorization_fingerprint": authorization_fingerprint,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+        for attempt in range(_MAX_LEASE_CONSUME_ATTEMPTS):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ExecutionLeaseConsumeError("timed_out")
+            timeout = min(float(self.config.timeout), remaining)
+            try:
+                with httpx.Client(
+                    timeout=max(timeout, 0.001), follow_redirects=False
+                ) as client:
+                    response = client.post(
+                        url,
+                        headers=self._headers(),
+                        content=body,
+                    )
+            except httpx.RequestError:
+                if attempt + 1 >= _MAX_LEASE_CONSUME_ATTEMPTS:
+                    raise ExecutionLeaseConsumeError("lease_unavailable") from None
+                _lease_retry_pause(attempt=attempt, deadline=deadline)
+                continue
+
+            status = response.status_code
+            if response.is_redirect:
+                raise ExecutionLeaseConsumeError("rejected", status_code=status)
+            if status in {408, 429} or status >= 500:
+                if attempt + 1 >= _MAX_LEASE_CONSUME_ATTEMPTS:
+                    if deadline - time.monotonic() <= 0:
+                        raise ExecutionLeaseConsumeError(
+                            "timed_out", status_code=status
+                        )
+                    raise ExecutionLeaseConsumeError(
+                        "lease_unavailable", status_code=status
+                    )
+                _lease_retry_pause(attempt=attempt, deadline=deadline)
+                continue
+            if not 200 <= status < 300:
+                raise _lease_http_error(response)
+            try:
+                payload = response.json()
+            except ValueError:
+                raise ExecutionLeaseConsumeError(
+                    "invalid_response", status_code=status
+                ) from None
+            lease = _lease_reference_from_response(payload, status_code=status)
+            if deadline - time.monotonic() <= 0:
+                raise ExecutionLeaseConsumeError(
+                    "timed_out",
+                    status_code=status,
+                    correlation=ExecutionLeaseCorrelation(
+                        lease_id=lease.lease_id,
+                        consumption_id=lease.consumption_id,
+                    ),
+                )
+            return lease
+        raise ExecutionLeaseConsumeError("lease_unavailable")
 
     def _get_json(self, path: str, timeout: float | None = None) -> dict[str, Any]:
         return self._request_json(
@@ -161,7 +285,112 @@ def _decision_with_top_level_approval(
     policy_audit_id = response.get("policy_audit_id")
     if isinstance(policy_audit_id, str) and policy_audit_id:
         enriched["policy_audit_id"] = policy_audit_id
+    # Keep the strong binding transient on PolicyDecision.  The model marks it
+    # repr/serialization-excluded so its fingerprint cannot enter receipts or
+    # runtime state through a generic model_dump().
+    if "enforcement_binding" in response:
+        enriched["enforcement_binding"] = response.get("enforcement_binding")
     return enriched
+
+
+def _lease_retry_pause(*, attempt: int, deadline: float) -> None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ExecutionLeaseConsumeError("timed_out")
+    delay = min(0.05 * (2**attempt), 0.25, remaining)
+    if delay > 0:
+        time.sleep(delay)
+
+
+def _lease_http_error(response: httpx.Response) -> ExecutionLeaseConsumeError:
+    status = response.status_code
+    code: str | None = None
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        raw_code = error.get("code") if isinstance(error, dict) else None
+        if isinstance(raw_code, str):
+            code = raw_code
+    except ValueError:
+        pass
+    failure_by_code = {
+        "APPROVAL_NOT_FOUND": "approval_not_found",
+        "APPROVAL_NOT_CONSUMABLE": "approval_not_consumable",
+        "APPROVAL_CONSUMPTION_CONFLICT": "consumption_conflict",
+        "APPROVAL_EXPIRED": "approval_expired",
+        "EXECUTION_LEASE_EXPIRED": "lease_expired",
+        "EXECUTION_LEASE_REVOKED": "lease_revoked",
+        "EXECUTION_LEASE_UNAVAILABLE": "lease_unavailable",
+    }
+    if status == 403:
+        failure = "identity_denied"
+    elif code in failure_by_code:
+        failure = failure_by_code[code]
+    elif status == 404:
+        failure = "approval_not_found"
+    elif status == 503:
+        failure = "lease_unavailable"
+    else:
+        failure = "rejected"
+    return ExecutionLeaseConsumeError(failure, status_code=status)
+
+
+def _lease_reference_from_response(
+    payload: object, *, status_code: int
+) -> ExecutionLeaseReference:
+    if not isinstance(payload, dict) or set(payload) != _LEASE_RESPONSE_KEYS:
+        raise ExecutionLeaseConsumeError("invalid_response", status_code=status_code)
+    lease_id = payload.get("lease_id")
+    consumption_id = payload.get("consumption_id")
+    lease_token = payload.pop("lease_token", None)
+    expires_at = payload.get("expires_at")
+    correlation: ExecutionLeaseCorrelation | None = None
+    if (
+        isinstance(lease_id, str)
+        and _LEASE_IDENTIFIER.fullmatch(lease_id) is not None
+        and isinstance(consumption_id, str)
+        and _LEASE_IDENTIFIER.fullmatch(consumption_id) is not None
+    ):
+        correlation = ExecutionLeaseCorrelation(
+            lease_id=lease_id,
+            consumption_id=consumption_id,
+        )
+    if (
+        correlation is None
+        or not isinstance(lease_token, str)
+        or _LEASE_TOKEN.fullmatch(lease_token) is None
+        or not isinstance(expires_at, str)
+        or _RFC3339.fullmatch(expires_at) is None
+    ):
+        if isinstance(lease_token, str):
+            del lease_token
+        raise ExecutionLeaseConsumeError(
+            "invalid_response",
+            status_code=status_code,
+            correlation=correlation,
+        )
+    # The bearer lease token is validated and immediately discarded.  Only the
+    # non-secret IDs and expiry leave this call frame.
+    del lease_token
+    try:
+        parsed_expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise ExecutionLeaseConsumeError(
+            "invalid_response",
+            status_code=status_code,
+            correlation=correlation,
+        ) from None
+    if parsed_expiry.tzinfo is None or parsed_expiry <= datetime.now(timezone.utc):
+        raise ExecutionLeaseConsumeError(
+            "invalid_response",
+            status_code=status_code,
+            correlation=correlation,
+        )
+    return ExecutionLeaseReference(
+        lease_id=correlation.lease_id,
+        consumption_id=correlation.consumption_id,
+        expires_at=parsed_expiry.astimezone(timezone.utc).isoformat(),
+    )
 
 
 @dataclass(slots=True)
@@ -206,6 +435,16 @@ class FakeDenyCoreClient:
         self, approval_id: str, timeout: float | None = None
     ) -> dict[str, Any]:
         return {"status": "resolved", "decision": "deny"}
+
+    def consume_execution_lease(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        deadline: float,
+    ) -> ExecutionLeaseReference:
+        raise ExecutionLeaseConsumeError("lease_unavailable")
 
 
 @dataclass(slots=True)
@@ -253,6 +492,16 @@ class FakeAskCoreClient:
     ) -> dict[str, Any]:
         return {"status": "pending", "decision": None}
 
+    def consume_execution_lease(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        deadline: float,
+    ) -> ExecutionLeaseReference:
+        raise ExecutionLeaseConsumeError("lease_unavailable")
+
 
 @dataclass(slots=True)
 class FakeAllowCoreClient:
@@ -284,3 +533,13 @@ class FakeAllowCoreClient:
         self, approval_id: str, timeout: float | None = None
     ) -> dict[str, Any]:
         return {"status": "resolved", "decision": "allow_once"}
+
+    def consume_execution_lease(
+        self,
+        approval_id: str,
+        *,
+        action_id: str,
+        authorization_fingerprint: str,
+        deadline: float,
+    ) -> ExecutionLeaseReference:
+        raise ExecutionLeaseConsumeError("lease_unavailable")

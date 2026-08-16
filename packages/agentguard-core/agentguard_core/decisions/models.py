@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..ids import new_id, utc_now_iso
+
+_RUNTIME_SECRET_MATERIAL = re.compile(r"(?:hmac-sha256|lease-v1):[0-9a-f]{64}")
 
 Decision = Literal["allow", "deny", "ask"]
 AuditRecordType = Literal[
@@ -26,6 +29,49 @@ RuntimeOutcomeKind = Literal[
 RuntimeExecutionStatus = Literal["not_invoked", "executed", "failed", "unknown"]
 RuntimeResultDisposition = Literal[
     "not_applicable", "passed_through", "modified", "quarantined", "unknown"
+]
+RuntimeEnforcementGateState = Literal[
+    "evaluating",
+    "allowed",
+    "approval_pending",
+    "approval_released",
+    "blocked",
+    "timed_out",
+    "binding_failed",
+    "unknown",
+]
+RuntimeBindingCheckStatus = Literal[
+    "not_applicable", "not_performed", "passed", "failed", "unknown"
+]
+RuntimeLeaseConsumeOutcome = Literal[
+    "not_applicable",
+    "not_attempted",
+    "consumed",
+    "expired",
+    "revoked",
+    "rejected",
+    "unknown",
+]
+RuntimeEnforcementReasonCode = Literal[
+    "rte-05:binding_exact",
+    "rte-05:binding_invalid",
+    "rte-05:binding_mismatch",
+    "rte-05:approval_not_human",
+    "rte-05:approval_not_consumable",
+    "rte-05:approval_not_found",
+    "rte-05:approval_expired",
+    "rte-05:identity_denied",
+    "rte-05:approval_timed_out",
+    "rte-05:lease_consumed",
+    "rte-05:consumption_conflict",
+    "rte-05:lease_rejected",
+    "rte-05:lease_expired",
+    "rte-05:lease_revoked",
+    "rte-05:lease_unavailable",
+    "rte-05:lease_response_invalid",
+    "rte-05:lease_consume_timed_out",
+    "rte-05:multiple_binding_conflict",
+    "rte-05:correlation_capacity_exhausted",
 ]
 
 
@@ -148,6 +194,24 @@ class RuntimeOutcomeLinks(BaseModel):
         max_length=256,
         exclude_if=lambda value: value is None,
     )
+    lease_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+        exclude_if=lambda value: value is None,
+    )
+    consumption_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def _validate_execution_lease_links(self) -> "RuntimeOutcomeLinks":
+        if (self.lease_id is None) != (self.consumption_id is None):
+            raise ValueError("lease_id and consumption_id must be provided together")
+        return self
 
 
 class RuntimeOutcomeMetadata(BaseModel):
@@ -251,6 +315,23 @@ class RuntimeApprovalEvidence(BaseModel):
         return self
 
 
+class RuntimeEnforcementEvidence(BaseModel):
+    """Bounded, non-secret evidence for RTE-05 runtime enforcement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gate_state: RuntimeEnforcementGateState
+    binding_check_status: RuntimeBindingCheckStatus
+    lease_consume_outcome: RuntimeLeaseConsumeOutcome
+    reason_codes: list[RuntimeEnforcementReasonCode] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def _validate_reason_codes(self) -> "RuntimeEnforcementEvidence":
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("enforcement reason_codes must be unique")
+        return self
+
+
 class RuntimeOutcomeEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -259,6 +340,10 @@ class RuntimeOutcomeEvidence(BaseModel):
     side_effects: RuntimeSideEffectsEvidence
     result: RuntimeResultEvidence
     approval: RuntimeApprovalEvidence
+    enforcement: RuntimeEnforcementEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class RuntimeOutcomeReceipt(AuditEvent):
@@ -301,6 +386,105 @@ class RuntimeOutcomeReceipt(AuditEvent):
         status = self.evidence.execution.status
         disposition = self.evidence.result.disposition
         kind = self.metadata.outcome_kind
+        enforcement = self.evidence.enforcement
+        has_execution_lease = self.links.lease_id is not None
+        if self.links.approval_id != self.evidence.approval.approval_id:
+            raise ValueError("approval evidence must match the receipt approval link")
+        if enforcement is not None:
+            consumed = enforcement.lease_consume_outcome == "consumed"
+            released_consume = (
+                enforcement.binding_check_status == "passed"
+                and enforcement.gate_state == "approval_released"
+            )
+            post_consume_deny_shape = (
+                enforcement.gate_state,
+                enforcement.binding_check_status,
+                frozenset(enforcement.reason_codes),
+            )
+            blocked_after_consume = kind == "pre_execution_deny" and (
+                post_consume_deny_shape
+                in {
+                    (
+                        "binding_failed",
+                        "failed",
+                        frozenset(
+                            {
+                                "rte-05:binding_mismatch",
+                                "rte-05:lease_consumed",
+                            }
+                        ),
+                    ),
+                    (
+                        "timed_out",
+                        "passed",
+                        frozenset(
+                            {
+                                "rte-05:binding_exact",
+                                "rte-05:lease_consume_timed_out",
+                            }
+                        ),
+                    ),
+                    (
+                        "binding_failed",
+                        "passed",
+                        frozenset(
+                            {
+                                "rte-05:binding_exact",
+                                "rte-05:lease_expired",
+                            }
+                        ),
+                    ),
+                    (
+                        "binding_failed",
+                        "passed",
+                        frozenset(
+                            {
+                                "rte-05:binding_exact",
+                                "rte-05:lease_response_invalid",
+                            }
+                        ),
+                    ),
+                    (
+                        "binding_failed",
+                        "failed",
+                        frozenset({"rte-05:multiple_binding_conflict"}),
+                    ),
+                }
+            )
+            if consumed and (
+                not has_execution_lease
+                or self.links.action_id is None
+                or self.links.approval_id is None
+                or not (released_consume or blocked_after_consume)
+                or self.evidence.approval.status != "allowed"
+                or self.evidence.approval.decision != "allow_once"
+            ):
+                raise ValueError(
+                    "consumed enforcement requires exact binding, allowed approval, "
+                    "a released or post-consume-denied gate, and execution lease links"
+                )
+            if has_execution_lease and not consumed:
+                raise ValueError(
+                    "execution lease links require consumed enforcement evidence"
+                )
+            if enforcement.gate_state == "approval_released" and not consumed:
+                raise ValueError(
+                    "an approval-released enforcement gate requires a consumed lease"
+                )
+            if (
+                enforcement.gate_state
+                in {
+                    "binding_failed",
+                    "timed_out",
+                    "blocked",
+                }
+                and status != "not_invoked"
+            ):
+                raise ValueError(
+                    "failed enforcement gates require a not-invoked outcome"
+                )
+        elif has_execution_lease:
+            raise ValueError("execution lease links require enforcement evidence")
         if kind == "pre_execution_deny" and (
             status != "not_invoked" or disposition != "not_applicable"
         ):
@@ -321,6 +505,10 @@ class RuntimeOutcomeReceipt(AuditEvent):
             raise ValueError("execution_completed requires executed status")
         if kind == "execution_failed" and status != "failed":
             raise ValueError("execution_failed requires failed status")
+        if _RUNTIME_SECRET_MATERIAL.search(self.model_dump_json()) is not None:
+            raise ValueError(
+                "runtime outcome receipts cannot contain strong-binding secret material"
+            )
         return self
 
 

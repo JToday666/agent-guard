@@ -29,6 +29,7 @@ test("capability: clean tracker declares C2 execution closure with zero degradat
     C0_observe: true,
     C1_pre_execution_enforcement: true,
     C2_execution_closure: true,
+    C3_strong_approval_binding: false,
     C4_result_isolation: true,
   });
   assert.deepEqual(capability.correlation, { stable_native_action_id: true });
@@ -46,6 +47,7 @@ test("capability: capacity exhaustion degrades C2 while C1 stays intact", () => 
 
 test("capability: correlation-loss degradations stop advertising C2 and stable native identity (review P1)", () => {
   for (const reason of [
+    "tool_call_state_duplicate_active_id",
     "after_tool_call_missing_action_id",
     "after_tool_call_correlation_missing",
     "after_tool_call_policy_linkage_missing",
@@ -76,6 +78,66 @@ test("capability: clean tracker keeps C2 and stable native identity", () => {
   );
   assert.equal(capability.profiles.C2_execution_closure, true);
   assert.deepEqual(capability.correlation, { stable_native_action_id: true });
+});
+
+test("capability: C3 stays disabled without host replace-and-seal support", () => {
+  const clean = new EvidenceDegradationTracker();
+  const active = buildRuntimeEnforcementCapability(clean, {
+    activationEnabled: true,
+    enforcementMode: "enforce",
+    runtimeBindingId: "binding:openclaw:test",
+  });
+  assert.equal(active.profiles.C3_strong_approval_binding, false);
+  assert.deepEqual(active.strong_approval_binding, {
+    requested: true,
+    host_replace_and_seal_supported: false,
+    residual_boundary:
+      "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+  });
+
+  const futureHost = buildRuntimeEnforcementCapability(clean, {
+    activationEnabled: true,
+    enforcementMode: "enforce",
+    runtimeBindingId: "binding:openclaw:test",
+    hostReplaceAndSealSupported: true,
+  });
+  assert.equal(futureHost.profiles.C3_strong_approval_binding, true);
+
+  for (const options of [
+    {
+      activationEnabled: false,
+      enforcementMode: "enforce",
+      runtimeBindingId: "binding:openclaw:test",
+    },
+    {
+      activationEnabled: true,
+      enforcementMode: "observe",
+      runtimeBindingId: "binding:openclaw:test",
+    },
+    {
+      activationEnabled: true,
+      enforcementMode: "disabled",
+      runtimeBindingId: "binding:openclaw:test",
+    },
+    { activationEnabled: true, enforcementMode: "enforce" },
+  ]) {
+    assert.equal(
+      buildRuntimeEnforcementCapability(clean, options).profiles
+        .C3_strong_approval_binding,
+      false,
+    );
+  }
+
+  const degraded = new EvidenceDegradationTracker();
+  degraded.record("strong_binding_operational_degradation");
+  assert.equal(
+    buildRuntimeEnforcementCapability(degraded, {
+      activationEnabled: true,
+      enforcementMode: "enforce",
+      runtimeBindingId: "binding:openclaw:test",
+    }).profiles.C3_strong_approval_binding,
+    false,
+  );
 });
 
 test("persist linkage: correlated tool_result_persist only sets resultPersistObserved", () => {

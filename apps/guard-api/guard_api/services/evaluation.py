@@ -107,6 +107,17 @@ _ACTION_TYPE_BY_EVENT: dict[str, str] = {
     "message_send_proposed": "message_send",
 }
 
+# Execution leases authorize only concrete side-effect proposals. Lifecycle
+# observations and model/context events cannot acquire authority even if a
+# malformed adapter claims ``pre_execution=true``.
+_STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES = frozenset(
+    {
+        "tool_call_proposed",
+        "memory_write_proposed",
+        "message_send_proposed",
+    }
+)
+
 
 def canonical_request_dump(event: GuardEvent) -> dict[str, Any]:
     """request_digest 的规范化 dump 口径。
@@ -586,6 +597,8 @@ class EvaluationService:
             return None
         if (
             approval is None
+            or event.pre_execution is not True
+            or event.event_type not in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
             or materials.decision.decision != "ask"
             or "allow_once" not in approval.decision_options
             or phase_b_outcome is None

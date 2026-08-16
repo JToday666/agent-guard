@@ -33,11 +33,10 @@ cron_changed
 resolve_exec_env
 ```
 
-固定执行与 fail-closed 阶段：
+固定执行且宿主 runner fail-closed 的阶段（heartbeat 只声明这些阶段）：
 
 ```text
 before_tool_call
-message_sending
 before_install
 before_agent_run
 before_agent_finalize
@@ -45,7 +44,7 @@ tool_result_persist
 before_message_write
 ```
 
-`before_agent_run` 是 OpenClaw 正式支持的模型输入 gate；`before_prompt_build`、`llm_input` 和 `llm_output` 是观察 hook，不再返回 SDK 不支持的伪 `block`。`before_agent_finalize` 可要求安全重写，最终外发仍由 `message_sending` 取消。`tool_result_persist` 和 `before_message_write` 是同步 hook，只执行本地脱敏、清洗或隔离；远端结果评估异步写入证据，不伪装成同步远端裁决。工具消息在进入下一次模型调用前，会在 `before_agent_run` 作为不可信上下文再次评估。
+`before_agent_run` 是 OpenClaw 正式支持的模型输入 gate；`before_prompt_build`、`llm_input` 和 `llm_output` 是观察 hook，不再返回 SDK 不支持的伪 `block`。`before_agent_finalize` 可要求安全重写，最终外发仍由 `message_sending` 取消。插件在 `message_sending` 内把 Guard API 的 bounded 错误捕获为明确 `cancel`，但 OpenClaw 对未被插件捕获的 handler 异常/宿主 timeout 采用 fail-open，因此 heartbeat 不把该阶段声明为宿主 fail-closed。`tool_result_persist` 和 `before_message_write` 是同步 hook，只执行本地脱敏、清洗或隔离；远端结果评估异步写入证据，不伪装成同步远端裁决。工具消息在进入下一次模型调用前，会在 `before_agent_run` 作为不可信上下文再次评估。
 
 RTE-03 terminal outcome closure：`before_tool_call` 在返回前同步写入 GateState 与 policy linkage；`after_tool_call`（观察型，不进 fail-closed 清单）对已放行调用产 `execution_completed/failed` runtime_outcome 回执。两条硬安全约束：blocked/timed_out/binding_failed gate 下 after hook 到达只记诊断、绝不派生 terminal fact（pin `openclaw@2026.7.1-2` 已证明 blocked 调用也会触发 after hook，Q9）；成败只能用非空 `error` 字符串判定，不得依赖 result/error 字段存在性（falsy 成功两者皆无，Q5）。回执中 `tool_result_entered_context/persisted` 保持 null，`side_effects` 一律 not_measured。
 
@@ -68,13 +67,15 @@ OpenClaw plugin config 示例：
   "requestTimeoutMs": 5000,
   "approvalPollIntervalMs": 1000,
   "approvalTimeoutMs": 25000,
+  "strongApprovalBindingEnabled": false,
+  "runtimeBindingId": "binding:cred_openclaw_main",
   "diagnosticLogging": false
 }
 ```
 
 `adapterToken` 只接受 OpenClaw SecretRef，OpenClaw 在插件注册前把它解析为字符串；明文 token 和插件内环境变量回退均不再支持。SecretRef provider 需在 OpenClaw 的 `secrets.providers` 中配置。仓库开发安装脚本会把根 `.env` 中的 token 写入权限为 `0600` 的 `.openclaw-dev/secrets/openclaw-adapter-token`，并配置 file SecretRef，token 不进入 OpenClaw 主配置。
 
-`agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`approvalTimeoutMs` 是唯一审批等待上限；插件会把 Guard API 请求超时、审批超时和轮询间隔一并计入阻断 hook 的 SDK timeout。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
+`agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`runtimeBindingId` 是与该 credential principal 一起可信下发的 `binding:<principal_id>`，不得从 evaluate 响应或工具参数学习；服务端一旦声明 execution lease，缺失或不匹配会在等待/consume 前 fail closed。`strongApprovalBindingEnabled` 默认 `false`，启用 canary strong-binding 处理，但当前 OpenClaw hook API 无法在最终调用边界原子地 replace-and-seal 参数/消息，因此 heartbeat 的 C3 始终保持 false。插件会在 consume 前后复验完整 action snapshot，在成功时返回批准内容的深拷贝，并以最低安全整数优先级尽量成为最后修改 hook；同优先级或更低优先级的其他插件仍是明确的残余信任边界。`approvalTimeoutMs` 是审批等待与 consume 重试共享的唯一 deadline；每个 Guard API 请求的 `requestTimeoutMs` 同时覆盖 headers 和有界 body 读取/解析，JSON 响应最大 1 MiB，停滞、超限或无效响应均在插件内安全分类。409/410 不重试，网络、429、5xx/503 仅以完全相同请求在 deadline 内有界重试。插件只保留 lease/consumption ID，明文 lease token 在响应解析栈内验证后丢弃。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
 
 ## Windows 支持
 

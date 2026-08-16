@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import NoReturn
 
 from agentguard_core import (
     ActionCriticReview,
@@ -14,6 +15,7 @@ from agentguard_core import (
 )
 from pydantic import ValidationError
 
+from guard_api.models import ApprovalRequest
 from guard_api.storage.base import ControlPlaneStore
 from guard_api.storage.integrity import CANONICALIZATION
 
@@ -24,6 +26,9 @@ from .audit_checkpoint import (
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
 from .redaction import sanitize_audit_event
+
+_RUNTIME_OUTCOME_AUDIT_ID_PREFIX = "audit_outcome_"
+_BOUND_FAILURE_GATE_STATES = frozenset({"binding_failed", "timed_out", "blocked"})
 
 
 class PolicyEvaluationWriteForbiddenError(ValueError):
@@ -77,6 +82,13 @@ class AuditService:
         # §12.1 守卫：仅拒显式声明 policy_evaluation 的入站记录。
         if event.record_type == "policy_evaluation":
             raise PolicyEvaluationWriteForbiddenError(event.audit_id)
+        if event.record_type != "runtime_outcome" and event.audit_id.startswith(
+            _RUNTIME_OUTCOME_AUDIT_ID_PREFIX
+        ):
+            # Runtime receipt IDs are deterministic and caller-known. Reserve
+            # their namespace so a generic audit placeholder cannot win the
+            # immutable first write and permanently block the real receipt.
+            raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID")
         if event.record_type == "runtime_outcome":
             receipt = (
                 event
@@ -85,10 +97,22 @@ class AuditService:
             )
             if not isinstance(receipt, RuntimeOutcomeReceipt):  # pragma: no cover
                 raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID")
-            self._validate_runtime_outcome_parent(receipt)
-            event = AuditEvent.model_validate(receipt.model_dump(mode="json"))
-        event = sanitize_audit_event(event)
-        is_new = self.store.add_audit_event(event)
+            with self.store.runtime_outcome_transaction(receipt.links.approval_id):
+                parent = self._validate_runtime_outcome_parent(receipt)
+                # Live approval/lease state is authoritative for a first write.
+                # The store context serializes this check and the audit insert
+                # against the approval row / consume CAS. Exact replays bypass
+                # live-state validation so later expiry or revocation cannot
+                # invalidate evidence already committed to the immutable chain.
+                if self.store.get_audit_event(receipt.audit_id) is None:
+                    self._validate_runtime_outcome_authority(receipt, parent)
+                event = sanitize_audit_event(
+                    AuditEvent.model_validate(receipt.model_dump(mode="json"))
+                )
+                is_new = self.store.add_audit_event(event)
+        else:
+            event = sanitize_audit_event(event)
+            is_new = self.store.add_audit_event(event)
         persisted = self.store.get_audit_event(event.audit_id) or event
         # 同内容重试也执行确定性 upsert，用于修复首次请求在 audit 已提交后
         # provenance 写入失败形成的可检测部分状态。
@@ -101,7 +125,9 @@ class AuditService:
             "idempotent_replay": not is_new,
         }
 
-    def _validate_runtime_outcome_parent(self, receipt: RuntimeOutcomeReceipt) -> None:
+    def _validate_runtime_outcome_parent(
+        self, receipt: RuntimeOutcomeReceipt
+    ) -> AuditEvent:
         parent = self.store.get_audit_event(receipt.links.policy_audit_id)
         if parent is None or parent.record_type != "policy_evaluation":
             raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_NOT_FOUND")
@@ -139,6 +165,325 @@ class AuditService:
         }
         if actual != expected:
             raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_MISMATCH")
+        return parent
+
+    def _validate_runtime_outcome_authority(
+        self,
+        receipt: RuntimeOutcomeReceipt,
+        parent: AuditEvent,
+    ) -> None:
+        """Validate authority-bearing adapter evidence against private state.
+
+        Runtime receipts are observations, not authority. A receipt may copy
+        display-safe binding/consume outcomes only when the immutable private
+        binding, approval, and consumed lease prove the exact same action and
+        identity. All failures intentionally collapse to the existing generic
+        parent-mismatch code so fingerprints, grant IDs, and storage state are
+        never reflected into an adapter-visible error.
+        """
+
+        parent_approval_id = parent.links.get("approval_id")
+        approval_evidence = receipt.evidence.approval
+        if approval_evidence.approval_id != parent_approval_id:
+            self._runtime_outcome_authority_mismatch()
+
+        binding = (
+            self.store.get_enforcement_binding(parent_approval_id)
+            if parent_approval_id is not None
+            else None
+        )
+        enforcement = receipt.evidence.enforcement
+        has_lease_links = receipt.links.lease_id is not None
+
+        # An unbound/C1 parent can still produce a legacy approval-release
+        # receipt, but it cannot claim strong binding or lease consumption.
+        if binding is None:
+            if enforcement is not None or has_lease_links:
+                self._runtime_outcome_authority_mismatch()
+            if receipt.metadata.outcome_kind == "approval_release":
+                self._validate_released_approval(
+                    receipt,
+                    parent,
+                    require_human=False,
+                )
+            return
+
+        binding_facts = (
+            binding.event_id,
+            binding.policy_audit_id,
+            binding.approval_id,
+            binding.action_id,
+            binding.runtime,
+            binding.agent_id,
+            binding.requires_execution_lease,
+        )
+        receipt_facts = (
+            receipt.links.event_id,
+            parent.audit_id,
+            receipt.links.approval_id,
+            receipt.links.action_id,
+            receipt.runtime,
+            receipt.metadata.agent_id,
+            True,
+        )
+        if binding_facts != receipt_facts:
+            self._runtime_outcome_authority_mismatch()
+
+        approval = self.store.get_approval(binding.approval_id)
+        if approval is None or (
+            approval.approval_id,
+            approval.action_id,
+            approval.requesting_principal_id,
+            approval.runtime,
+            approval.agent_id,
+        ) != (
+            binding.approval_id,
+            binding.action_id,
+            binding.principal_id,
+            binding.runtime,
+            binding.agent_id,
+        ):
+            self._runtime_outcome_authority_mismatch()
+
+        # A strong-binding parent makes every runtime outcome an RTE-05 claim.
+        # Omitting enforcement must not downgrade it to the legacy/C1 contract
+        # or reserve the deterministic receipt identity with forged approval
+        # evidence.
+        if enforcement is None:
+            self._runtime_outcome_authority_mismatch()
+        self._validate_bound_outcome_shape(receipt)
+        self._validate_bound_approval_evidence(receipt, approval)
+
+        if not has_lease_links:
+            # A pre-consume failure may arrive after the approval row resolves,
+            # but it cannot win the deterministic terminal identity after this
+            # binding's single-use authority has actually been consumed.  The
+            # immutable-replay short circuit in submit() deliberately runs
+            # before this live-state check.
+            if self.store.approval_execution_was_consumed(binding.approval_id):
+                self._runtime_outcome_authority_mismatch()
+            return
+
+        released_consume = (
+            enforcement.gate_state == "approval_released"
+            and enforcement.binding_check_status == "passed"
+            and enforcement.lease_consume_outcome == "consumed"
+        )
+        # A runtime may fail closed after the server atomically consumes the
+        # lease but before invocation begins (final input drift, local
+        # deadline/lease expiry, or an invalid lease response).  Such a denial
+        # must retain the exact lease pair and use one of the frozen bounded
+        # shapes below so that single-use authority is never hidden behind a
+        # generic failure claim.
+        post_consume_deny_shape = (
+            enforcement.gate_state,
+            enforcement.binding_check_status,
+            frozenset(enforcement.reason_codes),
+        )
+        blocked_after_consume = (
+            receipt.metadata.outcome_kind == "pre_execution_deny"
+            and enforcement.lease_consume_outcome == "consumed"
+            and post_consume_deny_shape
+            in {
+                (
+                    "binding_failed",
+                    "failed",
+                    frozenset(
+                        {"rte-05:binding_mismatch", "rte-05:lease_consumed"}
+                    ),
+                ),
+                (
+                    "timed_out",
+                    "passed",
+                    frozenset(
+                        {
+                            "rte-05:binding_exact",
+                            "rte-05:lease_consume_timed_out",
+                        }
+                    ),
+                ),
+                (
+                    "binding_failed",
+                    "passed",
+                    frozenset(
+                        {"rte-05:binding_exact", "rte-05:lease_expired"}
+                    ),
+                ),
+                (
+                    "binding_failed",
+                    "passed",
+                    frozenset(
+                        {
+                            "rte-05:binding_exact",
+                            "rte-05:lease_response_invalid",
+                        }
+                    ),
+                ),
+                (
+                    "binding_failed",
+                    "failed",
+                    frozenset({"rte-05:multiple_binding_conflict"}),
+                ),
+            }
+        )
+        if not (released_consume or blocked_after_consume):
+            self._runtime_outcome_authority_mismatch()
+        self._validate_released_approval(
+            receipt,
+            parent,
+            require_human=True,
+        )
+        lease_id = receipt.links.lease_id
+        if binding.grant_id is None or lease_id is None:
+            self._runtime_outcome_authority_mismatch()
+        lease = self.store.get_execution_lease(
+            binding.scope_digest,
+            lease_id,
+        )
+        # consumed -> expired/revoked is a legitimate later transition. The
+        # immutable lease/consumption identity remains the authority proof for
+        # a delayed receipt and must not cause post-execution evidence loss.
+        if lease is None or (
+            lease.lease_id,
+            lease.consumption_id,
+            lease.approval_id,
+            lease.grant_id,
+            lease.action_id,
+            lease.authorization_fingerprint,
+            lease.runtime_binding_id,
+        ) != (
+            lease_id,
+            receipt.links.consumption_id,
+            binding.approval_id,
+            binding.grant_id,
+            binding.action_id,
+            binding.authorization_fingerprint,
+            binding.runtime_binding_id,
+        ):
+            self._runtime_outcome_authority_mismatch()
+
+    def _validate_bound_outcome_shape(
+        self,
+        receipt: RuntimeOutcomeReceipt,
+    ) -> None:
+        enforcement = receipt.evidence.enforcement
+        if enforcement is None:  # narrowed by caller; defensive for direct use
+            self._runtime_outcome_authority_mismatch()
+        has_lease_links = receipt.links.lease_id is not None
+        if receipt.metadata.outcome_kind == "pre_execution_deny":
+            if (
+                not has_lease_links
+                and enforcement.gate_state not in _BOUND_FAILURE_GATE_STATES
+            ):
+                self._runtime_outcome_authority_mismatch()
+            return
+        # Every other bound outcome represents release or post-release runtime
+        # activity, which is impossible without the exact consumed lease pair.
+        if not has_lease_links:
+            self._runtime_outcome_authority_mismatch()
+
+    def _validate_bound_approval_evidence(
+        self,
+        receipt: RuntimeOutcomeReceipt,
+        approval: ApprovalRequest,
+    ) -> None:
+        evidence = receipt.evidence.approval
+        enforcement = receipt.evidence.enforcement
+        if enforcement is None:  # narrowed by caller; defensive for direct use
+            self._runtime_outcome_authority_mismatch()
+        reason_codes = frozenset(enforcement.reason_codes)
+        has_lease_links = receipt.links.lease_id is not None
+
+        # These two observations are deliberately weaker than a terminal
+        # approval claim.  Durable receipt delivery can occur after a pending
+        # approval monotonically resolves, so validating them only against the
+        # current row would discard legitimate pre-execution evidence.
+        pending_observation = (
+            evidence.status in {"pending", "unknown"}
+            and evidence.decision is None
+            and not has_lease_links
+        )
+        if pending_observation:
+            return
+        local_wait_timeout = (
+            evidence.status == "expired"
+            and evidence.decision is None
+            and not has_lease_links
+            and enforcement.gate_state == "timed_out"
+            and enforcement.binding_check_status == "passed"
+            and enforcement.lease_consume_outcome == "not_attempted"
+            and "rte-05:approval_timed_out" in reason_codes
+        )
+        if local_wait_timeout:
+            return
+
+        # Stronger terminal claims must match authoritative private state.
+        if approval.status == "expired":
+            if (
+                evidence.status != "expired"
+                or evidence.decision is not None
+                or enforcement.gate_state not in _BOUND_FAILURE_GATE_STATES
+                or "rte-05:approval_expired" not in reason_codes
+            ):
+                self._runtime_outcome_authority_mismatch()
+            return
+
+        if approval.status != "resolved":
+            self._runtime_outcome_authority_mismatch()
+        if approval.decision == "deny":
+            if (
+                evidence.status != "denied"
+                or evidence.decision != "deny"
+                or has_lease_links
+                or enforcement.gate_state not in _BOUND_FAILURE_GATE_STATES
+                or "rte-05:approval_not_consumable" not in reason_codes
+            ):
+                self._runtime_outcome_authority_mismatch()
+            return
+        if approval.decision != "allow_once" or (
+            evidence.status != "allowed" or evidence.decision != "allow_once"
+        ):
+            self._runtime_outcome_authority_mismatch()
+
+        claims_non_human = "rte-05:approval_not_human" in reason_codes
+        if approval.resolution_source != "human":
+            if (
+                has_lease_links
+                or enforcement.gate_state != "binding_failed"
+                or not claims_non_human
+            ):
+                self._runtime_outcome_authority_mismatch()
+        elif claims_non_human:
+            self._runtime_outcome_authority_mismatch()
+
+    def _validate_released_approval(
+        self,
+        receipt: RuntimeOutcomeReceipt,
+        parent: AuditEvent,
+        *,
+        require_human: bool,
+    ) -> None:
+        approval_id = parent.links.get("approval_id")
+        approval = (
+            self.store.get_approval(approval_id) if approval_id is not None else None
+        )
+        evidence = receipt.evidence.approval
+        if approval is None or (
+            approval.status != "resolved"
+            or approval.decision != "allow_once"
+            or evidence.approval_id != approval.approval_id
+            or evidence.status != "allowed"
+            or evidence.decision != "allow_once"
+            or approval.action_id != receipt.links.action_id
+            or approval.runtime != receipt.runtime
+            or approval.agent_id != receipt.metadata.agent_id
+            or (require_human and approval.resolution_source != "human")
+        ):
+            self._runtime_outcome_authority_mismatch()
+
+    @staticmethod
+    def _runtime_outcome_authority_mismatch() -> NoReturn:
+        raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_MISMATCH")
 
     def record_evaluation(
         self,
