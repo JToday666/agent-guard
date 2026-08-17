@@ -1,28 +1,35 @@
 {
-  "schema_version": "1.0.0",
-  "id": "FE08",
-  "exact_title": "FE-RSC-08 — Display-safe RTE binding and consume state",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "fe",
-  "lifecycle": "not_started",
-  "revision": 0,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "dashboard-types-mappers-store"
   ],
+  "evidence_refs": [],
+  "exact_title": "FE-RSC-08 — Display-safe RTE binding and consume state",
+  "hold": false,
+  "id": "FE08",
+  "kind": "task",
+  "lane": "fe",
+  "lifecycle": "in_progress",
+  "notes": [],
+  "optional": false,
+  "revision": 1,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
   "source_refs": [
     {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
       "heading": "## 13. 前端 PR 拆分",
-      "line_hint": 664
+      "line_hint": 664,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
     }
   ],
-  "evidence_refs": [],
-  "work": null,
-  "notes": []
+  "work": {
+    "base_sha": "9af70afab4f4e3358d07021a8613a4c0971e6b06",
+    "branch": "codex/fe08-display-safe-enforcement",
+    "owner": "codex",
+    "started_at": "2026-08-17T04:35:57Z",
+    "substate": "active",
+    "worktree_slug": "FE08"
+  }
 }
