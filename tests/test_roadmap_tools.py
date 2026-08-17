@@ -179,10 +179,10 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "CT05",
     ):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05", "CT04", "FE08"):
+    for node_id in ("R05",):
         assert nodes[node_id]["effective_status"] == "in_progress"
     assert nodes["RM-00"]["effective_status"] == "completed"
-    for node_id in ("CT03R", "RSC-CTPROV"):
+    for node_id in ("C10", "CT04", "FE06", "FE08", "CT03R", "RSC-CTPROV"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
 
@@ -191,7 +191,7 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"CT03R", "RSC-CTPROV"} <= ready_ids
+    assert {"C10", "CT04", "FE06", "FE08", "CT03R", "RSC-CTPROV"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -200,11 +200,7 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "G-A",
         "R05P",
         "R05",
-        "CT04",
-        "FE06",
-        "FE08",
         "RM-00",
-        "C10",
         "CT05",
     }.isdisjoint(ready_ids)
 
@@ -219,28 +215,24 @@ def test_ready_is_derived_and_cannot_be_written_into_machine_source(
     assert_validation_failure(result, "ready", "additional", "unknown")
 
 
-def test_claimed_ct04_serializes_c10_on_shared_core_surface(
+def test_released_r05_surfaces_make_c10_claimable(
     roadmap_root: Path,
 ) -> None:
     nodes = normalized_nodes(build_normalized(roadmap_root))
     core_v21_10 = nodes["C10"]
 
-    assert core_v21_10["can_start"] is False
-    assert core_v21_10["effective_status"] == "not_ready"
+    assert core_v21_10["can_start"] is True
+    assert core_v21_10["effective_status"] == "ready"
     assert core_v21_10["unmet_dependencies"] == []
-    assert core_v21_10["resource_conflicts"] == [
-        {"node_id": "CT04", "surfaces": ["core-evaluation-activation"]}
-    ]
+    assert core_v21_10["resource_conflicts"] == []
 
     result = run_tool(roadmap_root, "explain", "C10", "--json")
     assert_succeeds(result)
     explanation = json.loads(result.stdout)
     assert explanation["id"] == "C10"
-    assert explanation["can_start"] is False
+    assert explanation["can_start"] is True
     assert explanation["unmet_dependencies"] == []
-    assert explanation["resource_conflicts"] == [
-        {"node_id": "CT04", "surfaces": ["core-evaluation-activation"]}
-    ]
+    assert explanation["resource_conflicts"] == []
 
 
 def test_reference_runtime_surface_cannot_authorize_openclaw_changes(

@@ -7824,14 +7824,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7872,14 +7865,7 @@
       "outgoing_edges": [
         "E-001-C00-C01"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -7899,14 +7885,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7949,14 +7928,7 @@
       "outgoing_edges": [
         "E-002-C01-C02"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -7976,14 +7948,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8026,14 +7991,7 @@
       "outgoing_edges": [
         "E-003-C02-C03"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8053,14 +8011,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8103,14 +8054,7 @@
       "outgoing_edges": [
         "E-004-C03-C04"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8130,14 +8074,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8182,14 +8119,7 @@
         "E-006-C04-C06",
         "E-007-C04-C07"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8209,14 +8139,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8259,14 +8182,7 @@
       "outgoing_edges": [
         "E-008-C05-C08"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8286,14 +8202,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8336,14 +8245,7 @@
       "outgoing_edges": [
         "E-009-C06-C08"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8363,14 +8265,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8413,14 +8308,7 @@
       "outgoing_edges": [
         "E-010-C07-C08"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8440,14 +8328,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8492,14 +8373,7 @@
       "outgoing_edges": [
         "E-011-C08-C09"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8519,14 +8393,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8572,14 +8439,7 @@
         "E-038-C09-G-A",
         "E-047-C09-R05P"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -8599,21 +8459,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
       "change_surfaces": [
         "core-evaluation-activation"
       ],
-      "effective_status": "not_ready",
+      "effective_status": "ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
@@ -8640,14 +8493,7 @@
         "E-059-C10-G-SL",
         "E-115-C10-S4"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task",
@@ -8676,12 +8522,6 @@
           "from": "C10",
           "id": "E-015-C10-C13",
           "rationale": "C13 requires C10."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8711,14 +8551,7 @@
       "outgoing_edges": [
         "E-016-C13-G-SEM"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -8748,12 +8581,6 @@
           "from": "G-SEM",
           "id": "E-017-G-SEM-C14",
           "rationale": "Semantic upgrade-only starts only after its admission evidence passes."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8787,14 +8614,7 @@
         "E-142-C14-MASTER-FINAL",
         "E-160-C14-S6"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -8838,12 +8658,6 @@
           "from": "G-B",
           "id": "E-062-G-B-C11",
           "rationale": "C11 requires G-B."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8882,14 +8696,7 @@
         "E-126-C11-FE10B",
         "E-128-C11-S5O"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -8921,12 +8728,6 @@
           "from": "C11",
           "id": "E-014-C11-C12",
           "rationale": "C12 requires C11."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8960,14 +8761,7 @@
         "E-083-C12-G-ENG",
         "E-141-C12-MASTER-FINAL"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -9292,14 +9086,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -9345,14 +9132,7 @@
         "E-025-CT03B-CT05",
         "E-103-CT03B-FE06"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -9566,14 +9346,14 @@
       "blocked_reasons": [],
       "can_activate": true,
       "can_exit": true,
-      "can_start": false,
+      "can_start": true,
       "change_surfaces": [
         "guard-api-production-wiring",
         "core-evaluation-activation",
         "langgraph-runtime-integration"
       ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
+      "effective_status": "ready",
+      "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "CT-PR-04 — Context Builder",
@@ -9585,7 +9365,7 @@
       ],
       "kind": "task",
       "lane": "ct",
-      "lifecycle": "in_progress",
+      "lifecycle": "not_started",
       "notes": [
         "Gate A is complete. Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE records that CT04 owns the shared frozen models, Guard API builder, and LangGraph reference-runtime enforcement required for one real Context Builder slice."
       ],
@@ -9601,7 +9381,7 @@
         "E-125-CT04-FE10B"
       ],
       "resource_conflicts": [],
-      "revision": 2,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -9615,14 +9395,7 @@
       ],
       "topological_rank": 10,
       "unmet_dependencies": [],
-      "work": {
-        "base_sha": "9af70afab4f4e3358d07021a8613a4c0971e6b06",
-        "branch": "codex/ct04-context-builder",
-        "owner": "codex",
-        "started_at": "2026-08-17T04:36:26Z",
-        "substate": "active",
-        "worktree_slug": "CT04"
-      }
+      "work": null
     },
     {
       "activation_blockers": [
@@ -9692,12 +9465,6 @@
           "from": "CT04",
           "id": "E-029-CT04-CT04M",
           "rationale": "CT04M requires CT04."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -9729,14 +9496,7 @@
         "E-120-CT04M-FE10A",
         "E-158-CT04M-C11"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -9766,12 +9526,6 @@
           "from": "CT04",
           "id": "E-030-CT04-CT06",
           "rationale": "CT06 requires CT04."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -9806,14 +9560,7 @@
         "E-143-CT06-MASTER-FINAL",
         "E-156-CT06-G-A"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -10133,14 +9880,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -10207,15 +9947,7 @@
       "outgoing_edges": [
         "E-048-R05P-R05"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 2,
       "roles": [
         "task"
@@ -10756,14 +10488,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -10889,15 +10614,7 @@
       "outgoing_edges": [
         "E-036-I01-G-A"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 3,
       "roles": [
         "task"
@@ -10933,12 +10650,6 @@
           "from": "C10",
           "id": "E-054-C10-I02A",
           "rationale": "I02A requires C10."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, langgraph-runtime-integration"
         }
       ],
       "can_activate": false,
@@ -10974,16 +10685,7 @@
         "E-056-I02A-G-B",
         "E-117-I02A-S4"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring",
-            "langgraph-runtime-integration"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -11020,12 +10722,6 @@
           "from": "G-B",
           "id": "E-065-G-B-I03",
           "rationale": "I03 requires G-B."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11061,14 +10757,7 @@
         "E-140-I03-CT-FINAL-DOD",
         "E-144-I03-MASTER-FINAL"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -11113,12 +10802,6 @@
           "from": "G-B",
           "id": "E-071-G-B-I02B",
           "rationale": "I02B requires G-B."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11155,15 +10838,7 @@
         "E-073-I02B-ROL1",
         "E-130-I02B-S5O"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -11209,12 +10884,6 @@
           "from": "G-B",
           "id": "E-068-G-B-I04",
           "rationale": "I04 requires G-B."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11252,15 +10921,7 @@
         "E-129-I04-S5O",
         "E-145-I04-MASTER-FINAL"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -11292,12 +10953,6 @@
           "from": "C12",
           "id": "E-074-C12-C12-R",
           "rationale": "C12-R requires C12."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11329,15 +10984,7 @@
       "outgoing_edges": [
         "E-077-C12-R-G-SR"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -11374,12 +11021,6 @@
           "from": "I02B",
           "id": "E-073-I02B-ROL1",
           "rationale": "ROL1 requires I02B."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11416,15 +11057,7 @@
         "E-123-ROL1-FE10B",
         "E-131-ROL1-S5O"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -11462,12 +11095,6 @@
           "from": "ROL1",
           "id": "E-076-ROL1-I03-R",
           "rationale": "I03-R requires ROL1."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04",
-          "id": "resource:CT04",
-          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11501,15 +11128,7 @@
       "outgoing_edges": [
         "E-078-I03-R-G-SR"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04",
-          "surfaces": [
-            "core-evaluation-activation",
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -11535,12 +11154,12 @@
       "blocked_reasons": [],
       "can_activate": true,
       "can_exit": true,
-      "can_start": false,
+      "can_start": true,
       "change_surfaces": [
         "dashboard-types-mappers-store"
       ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
+      "effective_status": "ready",
+      "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "FE-RSC-08 — Display-safe RTE binding and consume state",
@@ -11552,7 +11171,7 @@
       ],
       "kind": "task",
       "lane": "fe",
-      "lifecycle": "in_progress",
+      "lifecycle": "not_started",
       "notes": [],
       "optional": false,
       "outgoing_edges": [
@@ -11560,7 +11179,7 @@
         "E-124-FE08-FE10B"
       ],
       "resource_conflicts": [],
-      "revision": 1,
+      "revision": 0,
       "roles": [
         "task"
       ],
@@ -11574,26 +11193,12 @@
       ],
       "topological_rank": 0,
       "unmet_dependencies": [],
-      "work": {
-        "base_sha": "9af70afab4f4e3358d07021a8613a4c0971e6b06",
-        "branch": "codex/fe08-display-safe-enforcement",
-        "owner": "codex",
-        "started_at": "2026-08-17T04:35:57Z",
-        "substate": "active",
-        "worktree_slug": "FE08"
-      }
+      "work": null
     },
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11635,14 +11240,7 @@
         "E-089-FE00-FE01",
         "E-092-FE00-S0"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -11662,14 +11260,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11713,14 +11304,7 @@
         "E-090-FE01-FE02",
         "E-093-FE01-S0"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -11740,14 +11324,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11792,14 +11369,7 @@
         "E-094-FE02-S0",
         "E-099-FE02-FE05"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -11819,14 +11389,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11869,14 +11432,7 @@
       "outgoing_edges": [
         "E-095-FE03-S0"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -11896,14 +11452,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11946,14 +11495,7 @@
       "outgoing_edges": [
         "E-097-FE04-S1"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -11971,6 +11513,55 @@
       "work": null
     },
     {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
+      "change_surfaces": [
+        "dashboard-types-mappers-store"
+      ],
+      "effective_status": "ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "FE06",
+      "incoming_edges": [
+        "E-102-RSC-CT01-FE06",
+        "E-103-CT03B-FE06"
+      ],
+      "kind": "task",
+      "lane": "fe",
+      "lifecycle": "not_started",
+      "notes": [
+        "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
+      ],
+      "optional": false,
+      "outgoing_edges": [
+        "E-104-FE06-FE07"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 13. 前端 PR 拆分",
+          "line_hint": 662,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 7,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
       "activation_blockers": [
         "E-098-CT03R-FE05"
       ],
@@ -11981,12 +11572,6 @@
           "from": "CT03R",
           "id": "E-098-CT03R-FE05",
           "rationale": "FE05 requires CT03R."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12017,14 +11602,7 @@
       "outgoing_edges": [
         "E-101-FE05-S2R"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -12041,69 +11619,6 @@
       "unmet_dependencies": [
         "E-098-CT03R-FE05"
       ],
-      "work": null
-    },
-    {
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
-      "change_surfaces": [
-        "dashboard-types-mappers-store"
-      ],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "FE06",
-      "incoming_edges": [
-        "E-102-RSC-CT01-FE06",
-        "E-103-CT03B-FE06"
-      ],
-      "kind": "task",
-      "lane": "fe",
-      "lifecycle": "not_started",
-      "notes": [
-        "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
-      ],
-      "optional": false,
-      "outgoing_edges": [
-        "E-104-FE06-FE07"
-      ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
-      "revision": 1,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 13. 前端 PR 拆分",
-          "line_hint": 662,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 7,
-      "unmet_dependencies": [],
       "work": null
     },
     {
@@ -12124,12 +11639,6 @@
           "from": "RSC-CTPROV",
           "id": "E-105-RSC-CTPROV-FE07",
           "rationale": "FE07 requires RSC-CTPROV."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12163,14 +11672,7 @@
       "outgoing_edges": [
         "E-108-FE07-S2"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -12201,12 +11703,6 @@
           "from": "G-SCHEMA-DIFF",
           "id": "E-088-G-SCHEMA-DIFF-FE09",
           "rationale": "FE09 requires G-SCHEMA-DIFF."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12236,14 +11732,7 @@
       ],
       "optional": true,
       "outgoing_edges": [],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -12273,12 +11762,6 @@
           "from": "CT04M",
           "id": "E-120-CT04M-FE10A",
           "rationale": "FE10A requires CT04M."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12308,14 +11791,7 @@
       "outgoing_edges": [
         "E-121-FE10A-S5C"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -12366,12 +11842,6 @@
           "from": "C11",
           "id": "E-126-C11-FE10B",
           "rationale": "FE10B requires C11."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12407,14 +11877,7 @@
       "outgoing_edges": [
         "E-132-FE10B-S5O"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -12439,14 +11902,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12501,14 +11957,7 @@
       "outgoing_edges": [
         "E-096-S0-FE04"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "stage"
@@ -12528,14 +11977,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12593,14 +12035,7 @@
         "E-153-S1-CT05",
         "E-154-S1-CT03R"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "stage"
@@ -12632,15 +12067,9 @@
           "from": "FE05",
           "id": "E-101-FE05-S2R",
           "rationale": "S2R requires FE05."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -12669,14 +12098,7 @@
       "outgoing_edges": [
         "E-109-S2R-S2"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage"
@@ -12792,15 +12214,9 @@
           "from": "A-S2-14",
           "id": "E-A-S2-14-S2",
           "rationale": "S2 cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -12862,14 +12278,7 @@
         "E-110-S2-S3",
         "E-157-S2-I01"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "stage"
@@ -12955,15 +12364,9 @@
           "from": "A-S3-10",
           "id": "E-A-S3-10-S3",
           "rationale": "S3 cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13013,14 +12416,7 @@
         "E-112-S3-S3PLUS",
         "E-114-S3-S4"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage"
@@ -13048,12 +12444,6 @@
           "from": "S3",
           "id": "E-112-S3-S3PLUS",
           "rationale": "S3PLUS requires S3."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -13081,14 +12471,7 @@
       "notes": [],
       "optional": true,
       "outgoing_edges": [],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage"
@@ -13218,15 +12601,9 @@
           "from": "A-S4-12",
           "id": "E-A-S4-12-S4",
           "rationale": "S4 cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13287,14 +12664,7 @@
       "outgoing_edges": [
         "E-127-S4-S5O"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage"
@@ -13362,15 +12732,9 @@
           "from": "A-S5C-06",
           "id": "E-A-S5C-06-S5C",
           "rationale": "S5C cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13411,14 +12775,7 @@
       "outgoing_edges": [
         "E-133-S5C-S5"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage",
@@ -13637,15 +12994,9 @@
           "from": "A-S5O-27",
           "id": "E-A-S5O-27-S5O",
           "rationale": "S5O cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13736,14 +13087,7 @@
       "outgoing_edges": [
         "E-134-S5O-S5"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage",
@@ -13800,15 +13144,9 @@
           "from": "A-S5-04",
           "id": "E-A-S5-04-S5",
           "rationale": "S5 cannot exit until this documented acceptance item is verified."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "FE08",
-          "id": "resource:FE08",
-          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": false,
+      "can_activate": true,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13846,14 +13184,7 @@
         "E-135-S5-S6",
         "E-159-S5-C12"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "FE08",
-          "surfaces": [
-            "dashboard-types-mappers-store"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "stage"
@@ -27248,10 +26579,14 @@
     }
   ],
   "ready_queue": [
+    "FE08",
     "CT03R",
-    "RSC-CTPROV"
+    "RSC-CTPROV",
+    "FE06",
+    "C10",
+    "CT04"
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "099f5351f3ea8dcc19c46f3ee65b31178dd14966e8d47f1c56d4697bfd2131db"
+  "source_digest": "746ddb241d3ebb35f3411d33a3fc1b3dc0d7b8854940b5c5fc3b190034847645"
 }
