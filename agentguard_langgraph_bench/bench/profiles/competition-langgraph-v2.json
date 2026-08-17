@@ -6,7 +6,7 @@
   "identity": {
     "principal_id": "competition-langgraph-runner",
     "agent_id": "competition-langgraph-agent",
-    "runtime_binding_id": "competition-langgraph-v2"
+    "runtime_binding_id": "binding:competition-langgraph-runner"
   },
   "dataset": {
     "path": "agentguard_langgraph_bench/bench/datasets/attack_cases",

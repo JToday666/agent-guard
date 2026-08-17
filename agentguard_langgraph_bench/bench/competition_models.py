@@ -105,6 +105,18 @@ class IdentitySpec:
     agent_id: str
     runtime_binding_id: str
 
+    def __post_init__(self) -> None:
+        if not self.principal_id or not self.agent_id:
+            raise CompetitionConfigurationError(
+                "competition identity requires principal_id and agent_id"
+            )
+        expected_binding = f"binding:{self.principal_id}"
+        if self.runtime_binding_id != expected_binding:
+            raise CompetitionConfigurationError(
+                "competition runtime_binding_id must equal the server-derived "
+                f"{expected_binding!r}"
+            )
+
     def public_dump(self) -> dict[str, str]:
         return {
             "principal_id": self.principal_id,

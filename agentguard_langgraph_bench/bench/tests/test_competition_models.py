@@ -35,6 +35,9 @@ def test_packaged_competition_profile_freezes_five_distinct_arms() -> None:
     assert a4.official_decision_source is OfficialDecisionSource.V21
     assert a4.context_mode.value == "required"
     assert profile.dataset.case_count == 70
+    assert profile.identity.runtime_binding_id == (
+        f"binding:{profile.identity.principal_id}"
+    )
     assert profile.effective_digest.startswith("sha256:")
 
 
@@ -76,6 +79,15 @@ def test_profile_parser_rejects_arm_roster_drift(tmp_path: Path) -> None:
     raw = json.loads(profile.source_path.read_text(encoding="utf-8"))
     raw["arms"][1]["v21_rollout_mode"] = "shadow"
     raw["arms"][1]["v21_enabled"] = True
+
+    with pytest.raises(CompetitionConfigurationError):
+        parse_competition_profile(raw, source_path=tmp_path / "profile.json")
+
+
+def test_profile_parser_rejects_self_asserted_runtime_binding(tmp_path: Path) -> None:
+    profile = load_competition_profile()
+    raw = json.loads(profile.source_path.read_text(encoding="utf-8"))
+    raw["identity"]["runtime_binding_id"] = "client-selected-binding"
 
     with pytest.raises(CompetitionConfigurationError):
         parse_competition_profile(raw, source_path=tmp_path / "profile.json")
