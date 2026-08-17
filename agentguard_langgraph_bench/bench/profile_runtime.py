@@ -58,6 +58,12 @@ from ..demo_agent.graph import _pre_model_capture, initial_state_from_case
 from .config import BenchConfig, ensure_sandbox
 from .dataset_loader import load_attack_cases
 from .models import AttackCase
+from .profile_corpus import (
+    CorpusDatasetIdentity,
+    CorpusRunResult,
+    ProfileCorpusError,
+    run_profile_corpus,
+)
 from .profile_dashboard import run_dashboard_chromium_probe
 from .profile_runner import (
     ExecutionResult,
@@ -134,6 +140,7 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
     policy = _reference_policy()
     _initialize_store(store)
     app = create_app(store=store, settings=settings, policy_bundle=policy)
+    corpus: CorpusRunResult | None = None
 
     with tempfile.TemporaryDirectory(prefix="agentguard-reference-profile-") as raw:
         scratch = Path(raw)
@@ -193,6 +200,35 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
                     (cases["JB-003"], denied),
                 ),
             )
+            if request.full_corpus:
+                try:
+                    corpus = run_profile_corpus(
+                        core_base_url=base_url,
+                        adapter_token=_ADAPTER_TOKEN,
+                        dataset_path=request.profile.dataset.path,
+                        dataset_identity=CorpusDatasetIdentity(
+                            dataset_id=request.profile.dataset.dataset_id,
+                            dataset_version=request.profile.dataset.dataset_version,
+                            dataset_digest=request.profile.dataset.dataset_digest,
+                            case_count=request.profile.dataset.full_case_count,
+                        ),
+                        output_root=request.artifacts / "paired",
+                        runtime_binding_id=_RUNTIME_BINDING_ID,
+                        provision_task_fact=lambda case, trace_id: _create_task_fact(
+                            store=store,
+                            settings=settings,
+                            case=case,
+                            trace_id=trace_id,
+                        ),
+                        selected_case_ids=None,
+                        adapter_name=_AGENT_ID,
+                    )
+                except ProfileCorpusError as exc:
+                    raise InvalidProfileRun(str(exc)) from exc
+                if not corpus.run_valid:
+                    raise InvalidProfileRun("full corpus paired run is invalid")
+                if corpus.artifact_integrity.get("ok") is not True:
+                    raise InvalidProfileRun("full corpus artifact integrity failed")
             context_policy_audit_id = next(
                 (
                     str(event["audit_id"])
@@ -228,6 +264,7 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
             paired=paired,
             evaluation_run=evaluation_run,
             dashboard=dashboard,
+            corpus=corpus,
             contracts=contracts,
             metrics=metrics,
         )
@@ -1441,6 +1478,64 @@ def _paired_report(
     }
 
 
+def _corpus_summary(
+    request: RunRequest, corpus: CorpusRunResult | None
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "schema_version": "reference-profile-corpus/1.0",
+        "requested": request.full_corpus,
+        "full_case_count": request.profile.dataset.full_case_count,
+        "contract_probe_case_ids": [_ASK_CASE_ID, _DRIFT_CASE_ID],
+        "effect_metrics_gate_exit_status": False,
+    }
+    if corpus is None:
+        return {
+            **summary,
+            "status": "not_requested",
+            "executed_dataset_case_ids": ["BN-001", "JB-003"],
+        }
+
+    paired = corpus.paired_report
+    cases = paired.get("cases")
+    executed_case_ids = (
+        [
+            str(item["case_id"])
+            for item in cases
+            if isinstance(item, Mapping) and item.get("case_id")
+        ]
+        if isinstance(cases, list)
+        else []
+    )
+    paired_summary = {
+        key: _sanitize_value(paired.get(key))
+        for key in (
+            "schema_version",
+            "run_valid",
+            "run_status",
+            "invalid_reasons",
+            "defense_effect_interpretable",
+            "dataset",
+            "effects",
+            "effect_metrics_gate_exit_status",
+        )
+        if paired.get(key) is not None
+    }
+    return {
+        **summary,
+        "status": "passed",
+        "run_valid": corpus.run_valid,
+        "executed_dataset_case_ids": executed_case_ids,
+        "paired_report": paired_summary,
+        "effect_metrics": _sanitize_value(dict(corpus.effect_metrics)),
+        "artifact_integrity": _sanitize_value(dict(corpus.artifact_integrity)),
+        "artifacts": {
+            "paired_report": f"paired/{corpus.artifact_paths['paired_report']}",
+            "effect_metrics": f"paired/{corpus.artifact_paths['effect_metrics']}",
+            "sha256_manifest": f"paired/{corpus.artifact_paths['sha256_manifest']}",
+        },
+    }
+
+
 def _artifacts(
     *,
     request: RunRequest,
@@ -1451,6 +1546,7 @@ def _artifacts(
     paired: Mapping[str, Any],
     evaluation_run: Mapping[str, Any],
     dashboard: Mapping[str, Any],
+    corpus: CorpusRunResult | None,
     contracts: Mapping[str, Mapping[str, Any]],
     metrics: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -1502,14 +1598,7 @@ def _artifacts(
         "paired-report.json": dict(paired),
         "evaluation-run.json": _sanitize_value(dict(evaluation_run)),
         "dashboard/acceptance.json": dict(dashboard),
-        "corpus/summary.json": {
-            "schema_version": "reference-profile-corpus/1.0",
-            "requested": request.full_corpus,
-            "full_case_count": request.profile.dataset.full_case_count,
-            "executed_dataset_case_ids": ["BN-001", "JB-003"],
-            "contract_probe_case_ids": [_ASK_CASE_ID, _DRIFT_CASE_ID],
-            "effect_metrics_gate_exit_status": False,
-        },
+        "corpus/summary.json": _corpus_summary(request, corpus),
         "acceptance.json": {
             "schema_version": "reference-profile-acceptance/1.0",
             "functional_passed": all(

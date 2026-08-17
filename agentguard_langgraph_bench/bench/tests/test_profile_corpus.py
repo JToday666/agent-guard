@@ -12,6 +12,8 @@ from agentguard_langgraph_bench.bench.profile_corpus import (
     ProfileCorpusError,
     run_profile_corpus,
 )
+from agentguard_langgraph_bench.bench.profile_runner import RunRequest, load_profile
+from agentguard_langgraph_bench.bench.profile_runtime import _corpus_summary
 
 
 DATASET = Path("agentguard_langgraph_bench/bench/datasets/attack_cases")
@@ -160,6 +162,25 @@ def test_profile_corpus_runs_two_case_real_pair_and_returns_json_artifacts(
     assert result.artifact_integrity["sha256_manifest"]["artifact_count"] >= 10
     assert (tmp_path / "paired" / "sha256-manifest.json").is_file()
     json.dumps(result.as_dict())
+
+    summary = _corpus_summary(
+        RunRequest(
+            profile=load_profile("reference-langgraph"),
+            artifacts=tmp_path,
+            storage="memory",
+            full_corpus=True,
+            llm_observation=False,
+        ),
+        result,
+    )
+    assert summary["run_valid"] is True
+    assert set(summary["executed_dataset_case_ids"]) == {"BN-001", "PI-001"}
+    assert summary["paired_report"]["dataset"]["case_count"] == 2
+    assert summary["effect_metrics"]["gate_exit_status"] is False
+    assert summary["artifact_integrity"]["ok"] is True
+    assert summary["artifacts"]["paired_report"] == (
+        "paired/paired-baseline-report.json"
+    )
 
 
 def test_profile_corpus_rejects_fake_core_output(tmp_path: Path) -> None:
