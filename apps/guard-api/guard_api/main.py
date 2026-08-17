@@ -31,6 +31,7 @@ from guard_api.services import (
     AuditWindowRequestError,
     AuditWindowService,
     ConfigAuditService,
+    CriticalDecisionEvidenceError,
     ContextBuilderService,
     CtProjectionService,
     EvaluationService,
@@ -225,6 +226,12 @@ def create_app(
         _: Request, exc: V21OfficialEvaluationUnavailableError
     ) -> JSONResponse:
         return error_response(exc.code, status_code=503)
+
+    @app.exception_handler(CriticalDecisionEvidenceError)
+    async def critical_decision_evidence_handler(
+        _: Request, __: CriticalDecisionEvidenceError
+    ) -> JSONResponse:
+        return error_response("V21_OFFICIAL_EVIDENCE_COMMIT_FAILED", status_code=503)
 
     @app.exception_handler(ProvenanceConflictError)
     async def provenance_conflict_handler(

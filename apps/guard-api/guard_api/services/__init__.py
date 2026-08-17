@@ -6,6 +6,7 @@ from .audit_checkpoint import AuditCheckpointService
 from .audit_window import AuditWindowRequestError, AuditWindowService
 from .config_audit import ConfigAuditService
 from .competition import (
+    CriticalDecisionEvidenceError,
     FrozenCompetitionActivation,
     load_frozen_competition_activation,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "AuditWindowRequestError",
     "AuditWindowService",
     "ConfigAuditService",
+    "CriticalDecisionEvidenceError",
     "FrozenCompetitionActivation",
     "ContextBuilderService",
     "ContextManifestAuditRecord",

@@ -14,6 +14,7 @@ from agentguard_core import (
     ContextBuildPayload,
     GuardDecision,
     GuardEvent,
+    DecisionAuthority,
     MemoryGuardChange,
     MemoryEventPayload,
     MessageSendPayload,
@@ -27,6 +28,10 @@ from agentguard_core.events import derive_resources
 
 from guard_api.storage.integrity import canonical_sha256
 
+from .competition import (
+    CriticalDecisionEvidenceError,
+    strict_decision_authority_envelope,
+)
 from .redaction import (
     CONTENT_PREVIEW_LIMIT,
     CONTEXT_SOURCES_LIMIT,
@@ -80,6 +85,8 @@ def build_audit_event(
     v21_evidence: dict[str, object] | None = None,
     state_delta_evidence: dict[str, object] | None = None,
     ct_facts_evidence: dict[str, object] | None = None,
+    decision_authority_evidence: dict[str, object] | None = None,
+    decision_authority: DecisionAuthority | None = None,
     audit_id: str | None = None,
 ) -> AuditEvent:
     """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
@@ -302,12 +309,26 @@ def build_audit_event(
                             evidence["decision_v21"] = budget_dropped_reference(
                                 v21_value
                             )
+    if decision_authority_evidence is not None:
+        bounded_authority = strict_decision_authority_envelope(
+            decision_authority_evidence
+        )
+        collision = set(bounded_authority) & set(evidence)
+        if collision:
+            raise CriticalDecisionEvidenceError(
+                "decision authority evidence collides with reserved evidence keys"
+            )
+        evidence = {**evidence, **bounded_authority}
+        if evidence_serialized_size(evidence) > MAX_EVIDENCE_BYTES:
+            raise CriticalDecisionEvidenceError(
+                "decision authority evidence exceeds the audit evidence budget"
+            )
     # 只可能携带 audit_id（str）：标注收窄为 dict[str, str]，避免
     # **kwargs 展开时 pyright 无法把 object 值匹配到 str 参数。
     audit_kwargs: dict[str, str] = {}
     if audit_id is not None:
         audit_kwargs["audit_id"] = audit_id
-    return AuditEvent(
+    built = AuditEvent(
         schema_version="0.4",
         record_type="policy_evaluation",
         trace_id=event.trace_id,
@@ -330,6 +351,11 @@ def build_audit_event(
         evidence=evidence,
         **audit_kwargs,
     )
+    if decision_authority is None:
+        return built
+    dumped = built.model_dump(mode="json")
+    dumped["decision_authority"] = decision_authority.model_dump(mode="json")
+    return AuditEvent.model_validate(dumped)
 
 
 def _policy_evaluation_evidence(

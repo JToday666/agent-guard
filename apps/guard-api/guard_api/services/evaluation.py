@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentguard_core import (
     ActionCritic,
     AuditEvent,
+    DecisionAuthority,
     GuardDecision,
     GuardEngine,
     GuardEvent,
     MemoryEventPayload,
     MemoryGuardChange,
+    V21AuthoritySelectionError,
+    V21SelectionEligibility,
+    V21SelectionResult,
+    build_decision_authority_evidence,
+    decision_authority_envelope,
+    select_v21_authority,
 )
+from agentguard_core.decisions.evidence_builder import (
+    build_decision_evidence_v21,
+    decision_evidence_v21_envelope,
+)
+from agentguard_core.decisions.shadow import ABSENT_SNAPSHOT_ID
 from agentguard_core.security_context import (
     ASSESSMENT_OVERLAY_COMPONENT_ID,
     AssessmentTransientFacts,
@@ -35,6 +47,7 @@ from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
 from .audit import AuditService
+from .competition import CriticalDecisionEvidenceError
 from .context_manifest import (
     ContextManifestPrepared,
     context_manifest_anchor_from_policy,
@@ -45,6 +58,7 @@ from .context_manifest import (
 )
 from .memory import MemoryGuardService
 from .policy import PolicyService
+from .v21_pipeline import V21OfficialEvaluationUnavailableError
 
 if TYPE_CHECKING:
     from agentguard_core.security_context import ContextAssemblyPlan
@@ -592,24 +606,14 @@ class EvaluationService:
         (bundle N)"矛盾组合（TOCTOU），故删除事务内 policy I/O。
         """
         bundle = materials.bundle
-        # Phase A 单跑的 legacy 官方决策（同源同实现，不双跑检测器）。
+        # Phase B and authoritative selection run before every mutating service.
+        # No critic, approval, memory, audit, binding or receipt can observe the
+        # current decision until the unique selected result is known.
         decision = materials.decision
-        critic_review = self.action_critic.review(event, decision)
-        approval = self.approval_service.create_for_decision(
-            event,
-            decision,
-            requesting_principal_id=requesting_principal_id,
-        )
-        approval = self.approval_service.auto_review_with_llm(approval)
-        memory_change = self._record_memory_change(
-            event, decision, requesting_principal_id=requesting_principal_id
-        )
-        # Phase B（事务内）：revalidate + 证据构建；失败收敛为 None，
-        # legacy 主链不受影响。valid 时同步确定性构造 Phase C 计划与
-        # state_delta_v21 引用信封（D2：信封随 audit commit 写入，
-        # delta_digest 冻结时刻即真实）；stale → 无 Phase C、无信封。
         v21_evidence = None
         state_delta_evidence = None
+        authority: DecisionAuthority | None = None
+        authority_evidence: dict[str, object] | None = None
         phase_c_plan: "V21PhaseCPlan | None" = None
         phase_b_outcome: "V21PhaseBOutcome | None" = None
         finalize_metadata: dict[str, str] = {}
@@ -618,6 +622,55 @@ class EvaluationService:
             if outcome is not None:
                 phase_b_outcome = outcome
                 v21_evidence = outcome.envelope
+                selection = self._select_competition_authority(
+                    event,
+                    materials=materials,
+                    outcome=outcome,
+                )
+                if selection is not None:
+                    decision = selection.selected_decision
+                    authority = selection.authority
+                    activation = self.competition_activation
+                    assert activation is not None
+                    snapshot_id = (
+                        materials.snapshot.snapshot_id
+                        if materials.snapshot is not None
+                        else ABSENT_SNAPSHOT_ID
+                    )
+                    evidence = build_decision_authority_evidence(
+                        result=selection,
+                        assessment=materials.assessment,
+                        activation=activation.manifest,
+                        snapshot_id=snapshot_id,
+                        state_version=(
+                            materials.state_version
+                            if materials.snapshot is not None
+                            else 0
+                        ),
+                    )
+                    authority_evidence = decision_authority_envelope(evidence)
+                    stale_codes = (
+                        list(outcome.revalidation.reason_codes)
+                        if outcome.revalidation.status == "stale"
+                        else []
+                    )
+                    selected_evidence = build_decision_evidence_v21(
+                        materials.assessment,
+                        legacy_decision=materials.decision.decision,
+                        snapshot_id=snapshot_id,
+                        state_version=(
+                            materials.state_version
+                            if materials.snapshot is not None
+                            else 0
+                        ),
+                        coverage=materials.coverage,
+                        mode=authority.mode,
+                        selected_decision=decision.decision,
+                        revalidation_stale_reason_codes=stale_codes,
+                    )
+                    v21_evidence = decision_evidence_v21_envelope(
+                        selected_evidence
+                    )
                 phase_c_plan = self.v21_pipeline.prepare_phase_c(outcome)
                 if phase_c_plan is not None:
                     state_delta_evidence = phase_c_plan.envelope
@@ -630,6 +683,29 @@ class EvaluationService:
                         "v21_final_decision_id": outcome.final_decision_id,
                         "v21_final_decision_digest": (outcome.final_decision_digest),
                     }
+        if (
+            self.competition_activation is not None
+            and self.v21_pipeline is not None
+            and self.v21_pipeline.active
+            and authority is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_OFFICIAL_SELECTOR_UNAVAILABLE"
+            )
+
+        # From this point forward every side effect consumes exactly the selected
+        # decision and its committed authority projection.
+        critic_review = self.action_critic.review(event, decision)
+        approval = self.approval_service.create_for_decision(
+            event,
+            decision,
+            requesting_principal_id=requesting_principal_id,
+            decision_authority=authority,
+        )
+        approval = self.approval_service.auto_review_with_llm(approval)
+        memory_change = self._record_memory_change(
+            event, decision, requesting_principal_id=requesting_principal_id
+        )
         audit_event = self.audit_service.record_evaluation(
             event,
             decision,
@@ -658,6 +734,8 @@ class EvaluationService:
             state_delta_evidence=state_delta_evidence,
             # CT-PR-03b D4：facts 信封随同一条审计记录原子提交。
             ct_facts_evidence=(ct_plan.envelope if ct_plan is not None else None),
+            decision_authority_evidence=authority_evidence,
+            decision_authority=authority,
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
             audit_id=(phase_c_plan.audit_id if phase_c_plan is not None else None),
@@ -672,6 +750,8 @@ class EvaluationService:
             materials=materials,
             phase_b_outcome=phase_b_outcome,
             requesting_principal_id=requesting_principal_id,
+            selected_decision=decision,
+            decision_authority=authority,
         )
         return (
             GuardEvaluationResponse(
@@ -680,10 +760,136 @@ class EvaluationService:
                 policy_audit_id=audit_event.audit_id,
                 enforcement_binding=binding,
                 context_plan=committed_context_plan,
+                decision_authority=authority,
             ),
             audit_event,
             phase_c_plan,
         )
+
+    def _select_competition_authority(
+        self,
+        event: GuardEvent,
+        *,
+        materials: "V21PipelineMaterials",
+        outcome: "V21PhaseBOutcome",
+    ) -> V21SelectionResult | None:
+        activation = self.competition_activation
+        if activation is None:
+            return None
+        if self.v21_pipeline is None:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_OFFICIAL_PIPELINE_UNAVAILABLE"
+            )
+        raw_mode = self.v21_pipeline.mode
+        if raw_mode not in {"shadow", "limited_enable", "active"}:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_OFFICIAL_MODE_INVALID"
+            )
+        mode = cast(
+            Literal["shadow", "limited_enable", "active"],
+            raw_mode,
+        )
+        manifest = activation.manifest
+        auth = materials.auth_context
+        expected_binding = (
+            f"binding:{auth.principal_id}" if auth is not None else None
+        )
+        scope = materials.snapshot.scope if materials.snapshot is not None else None
+        scope_identity_valid = bool(
+            scope is None
+            or (
+                scope.principal_id == manifest.principal_id
+                and scope.runtime == manifest.runtime
+                and scope.runtime_binding_id == manifest.runtime_binding_id
+            )
+        )
+        trusted_identity_valid = bool(
+            auth is not None
+            and auth.principal_id == manifest.principal_id
+            and auth.runtime == manifest.runtime == event.runtime
+            and auth.agent_id == manifest.agent_id
+            and auth.agent_id == event.security_context.agent_id
+            and expected_binding == manifest.runtime_binding_id
+            and scope_identity_valid
+        )
+        action_ir = materials.action_ir
+        action_ir_consistent = bool(
+            materials.snapshot is None
+            or action_ir is None
+            or (
+                action_ir.event_id == event.event_id
+                and action_ir.action_id == materials.assessment.action_id
+                and action_ir.authorization_fingerprint
+                == materials.assessment.authorization_fingerprint
+                and action_ir.audit_fingerprint
+                == materials.assessment.audit_fingerprint
+                and action_ir.principal_id == manifest.principal_id
+                and action_ir.runtime_binding_id == manifest.runtime_binding_id
+                and action_ir.agent_id == manifest.agent_id
+            )
+        )
+        action_ir_complete = bool(
+            materials.snapshot is not None
+            and action_ir is not None
+            and action_ir_consistent
+        )
+        ownership_valid = bool(
+            trusted_identity_valid
+            and scope is not None
+            and scope.principal_id == manifest.principal_id
+            and scope.runtime == manifest.runtime
+            and scope.runtime_binding_id == manifest.runtime_binding_id
+            and (
+                action_ir is None
+                or (
+                    action_ir.principal_id == scope.principal_id
+                    and action_ir.scope_digest == scope.scope_digest
+                )
+            )
+        )
+        eligibility = V21SelectionEligibility(
+            activation_valid=True,
+            trusted_identity_valid=trusted_identity_valid,
+            profile_valid=(
+                manifest.profile_id == "competition-langgraph-v2"
+                and manifest.runtime == "langgraph"
+            ),
+            revalidation_valid=outcome.revalidation.status == "valid",
+            pipeline_complete=(
+                outcome.raw_v21_decision is not None
+                and materials.degraded_kind != "component_failure"
+                and action_ir_consistent
+            ),
+            ownership_valid=ownership_valid,
+            action_ir_complete=action_ir_complete,
+            task_fact_present=bool(
+                materials.task_id is not None and materials.snapshot is not None
+            ),
+        )
+        snapshot_id = (
+            materials.snapshot.snapshot_id
+            if materials.snapshot is not None
+            else ABSENT_SNAPSHOT_ID
+        )
+        try:
+            return select_v21_authority(
+                event_id=event.event_id,
+                current_decision=materials.decision,
+                raw_v21_decision=outcome.raw_v21_decision,
+                assessment=materials.assessment,
+                coverage=materials.coverage,
+                mode=mode,
+                activation=manifest,
+                eligibility=eligibility,
+                snapshot_id=snapshot_id,
+                state_version=(
+                    materials.state_version
+                    if materials.snapshot is not None
+                    else 0
+                ),
+            )
+        except V21AuthoritySelectionError as exc:
+            raise V21OfficialEvaluationUnavailableError(exc.code) from exc
 
     @staticmethod
     def _context_manifest_metadata(
@@ -785,6 +991,35 @@ class EvaluationService:
         if raw_decision is None:
             raise EvaluationConflictError(audit.links.get("event_id", ""))
         decision = GuardDecision.model_validate(raw_decision)
+        authority: DecisionAuthority | None = None
+        evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
+        raw_authority_envelope = evidence.get("decision_authority")
+        raw_top_authority = (audit.model_extra or {}).get("decision_authority")
+        if raw_authority_envelope is not None or raw_top_authority is not None:
+            if raw_authority_envelope is None or raw_top_authority is None:
+                raise CriticalDecisionEvidenceError(
+                    "historical authority carrier is incomplete"
+                )
+            try:
+                authority = DecisionAuthority.model_validate(raw_top_authority)
+                raw_v21 = evidence.get("decision_v21")
+                if not isinstance(raw_v21, dict):
+                    raise ValueError("historical DecisionEvidenceV21 is absent")
+                self.audit_service._validate_decision_authority_commit(
+                    audit,
+                    expected_envelope={
+                        "decision_authority": raw_authority_envelope,
+                    },
+                    expected_decision=decision,
+                    expected_authority=authority,
+                    expected_v21_evidence={"decision_v21": raw_v21},
+                )
+            except CriticalDecisionEvidenceError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - immutable carrier boundary.
+                raise CriticalDecisionEvidenceError(
+                    "historical decision authority cannot be reconstructed"
+                ) from exc
         approval: ApprovalRequest | None = None
         approval_id = audit.links.get("approval_id")
         if approval_id:
@@ -796,11 +1031,25 @@ class EvaluationService:
             )
             if stored_binding is not None:
                 binding = self._public_binding(stored_binding)
+        if authority is not None and authority.source == "v21":
+            if authority.approval_release == "strong_binding_required" and (
+                approval is None or binding is None
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "historical reviewable V2 ASK lacks approval or binding"
+                )
+            if authority.approval_release == "forbidden" and (
+                approval is not None or binding is not None
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "historical unreleasable V2 ASK carries release authority"
+                )
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),
             policy_audit_id=audit.audit_id,
             enforcement_binding=binding,
+            decision_authority=authority,
         )
 
     def _save_enforcement_binding(
@@ -812,27 +1061,52 @@ class EvaluationService:
         materials: "V21PipelineMaterials",
         phase_b_outcome: "V21PhaseBOutcome | None",
         requesting_principal_id: str,
+        selected_decision: GuardDecision,
+        decision_authority: DecisionAuthority | None,
     ) -> EnforcementBinding | None:
         """Persist an eligible ASK ActionIR binding inside the evaluation txn."""
 
-        if not self.approval_service.settings.rte05_strong_binding_enabled:
+        approval_release = (
+            decision_authority.approval_release
+            if decision_authority is not None
+            and decision_authority.source == "v21"
+            else None
+        )
+        if approval_release == "forbidden":
+            if approval is not None:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_FORBIDDEN_ASK_CREATED_APPROVAL"
+                )
             return None
-        if (
+        binding_required = approval_release == "strong_binding_required"
+        if not self.approval_service.settings.rte05_strong_binding_enabled:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_DISABLED"
+                )
+            return None
+        eligible = not (
             approval is None
             or event.pre_execution is not True
             or event.event_type not in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
-            or materials.decision.decision != "ask"
+            or selected_decision.decision != "ask"
             or "allow_once" not in approval.decision_options
             or phase_b_outcome is None
             or phase_b_outcome.revalidation.status != "valid"
             or materials.snapshot is None
             or materials.scope_digest is None
             or materials.degraded_kind is not None
-            or bool(materials.assessment.degradations)
-        ):
+        )
+        if not eligible:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_MATERIALS_INVALID"
+                )
             return None
 
+        assert approval is not None
         assessment = materials.assessment
+        assert materials.snapshot is not None
         scope = materials.snapshot.scope
         agent_id = event.security_context.agent_id
         if (
@@ -848,6 +1122,10 @@ class EvaluationService:
             or not agent_id
             or agent_id != approval.agent_id
         ):
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_IDENTITY_MISMATCH"
+                )
             return None
 
         record = EnforcementBindingRecord(
@@ -870,7 +1148,26 @@ class EvaluationService:
         try:
             stored = self.audit_service.store.save_enforcement_binding(record)
         except EnforcementBindingConflictError:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_CONFLICT"
+                ) from None
             raise EvaluationConflictError(event.event_id) from None
+        except Exception as exc:  # noqa: BLE001 - official write must be atomic.
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_SAVE_FAILED"
+                ) from exc
+            raise
+        readback = self.audit_service.store.get_enforcement_binding(
+            approval.approval_id
+        )
+        if readback != stored:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_READBACK_FAILED"
+                )
+            raise EvaluationConflictError(event.event_id)
         return self._public_binding(stored)
 
     @staticmethod

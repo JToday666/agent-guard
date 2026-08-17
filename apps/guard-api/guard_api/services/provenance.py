@@ -772,6 +772,22 @@ class ProvenanceWriter:
         decision = _first_string(guard_decision.get("decision"), event.decision)
         if decision is None:
             return None
+        authority = (event.model_extra or {}).get("decision_authority")
+        authority_metadata: dict[str, Any] = {}
+        if isinstance(authority, dict):
+            authority_metadata = {
+                "authority_source": authority.get("source"),
+                "authority_mode": authority.get("mode"),
+                "authority_selection_basis": authority.get("selection_basis"),
+                "authority_matched_path_ids": authority.get("matched_path_ids"),
+                "authority_legacy_floor_applied": authority.get(
+                    "legacy_floor_applied"
+                ),
+                "authority_activation_ref_digest": authority.get(
+                    "activation_ref_digest"
+                ),
+                "authority_approval_release": authority.get("approval_release"),
+            }
         return ProvenanceNode(
             node_id=f"decision:{decision_id}",
             trace_id=event.trace_id,
@@ -785,6 +801,7 @@ class ProvenanceWriter:
                 "risk_score": guard_decision.get("risk_score", event.risk_score),
                 "severity": guard_decision.get("severity", event.severity),
                 "reason_summary": guard_decision.get("reason", event.reason),
+                **authority_metadata,
             },
         )
 

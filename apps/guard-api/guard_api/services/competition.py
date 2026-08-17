@@ -7,9 +7,11 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from agentguard_core import (
     CompetitionActivationManifestV1,
+    DecisionAuthorityEvidenceV1,
     verify_competition_activation_manifest,
 )
 
@@ -17,6 +19,45 @@ from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.integrity import canonical_sha256
 
 _MAX_ACTIVATION_BYTES = 64 * 1024
+
+
+class CriticalDecisionEvidenceError(RuntimeError):
+    """Critical authority evidence could not be preserved byte-for-byte."""
+
+
+def strict_decision_authority_envelope(value: object) -> dict[str, Any]:
+    """Validate and normalize the critical sibling without truncation/drop."""
+
+    if not isinstance(value, dict) or set(value) != {"decision_authority"}:
+        raise CriticalDecisionEvidenceError(
+            "decision authority evidence must use its reserved sibling key"
+        )
+    raw_envelope = value.get("decision_authority")
+    if not isinstance(raw_envelope, dict) or set(raw_envelope) != {
+        "schema_version",
+        "payload",
+    }:
+        raise CriticalDecisionEvidenceError(
+            "decision authority evidence envelope is malformed"
+        )
+    if raw_envelope.get("schema_version") != "1.0":
+        raise CriticalDecisionEvidenceError(
+            "decision authority evidence schema version is unsupported"
+        )
+    try:
+        payload = DecisionAuthorityEvidenceV1.model_validate(
+            raw_envelope.get("payload")
+        )
+    except ValueError as exc:
+        raise CriticalDecisionEvidenceError(
+            "decision authority evidence payload is invalid"
+        ) from exc
+    return {
+        "decision_authority": {
+            "schema_version": "1.0",
+            "payload": payload.model_dump(mode="json"),
+        }
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +165,8 @@ def load_frozen_competition_activation(
 
 
 __all__ = [
+    "CriticalDecisionEvidenceError",
     "FrozenCompetitionActivation",
     "load_frozen_competition_activation",
+    "strict_decision_authority_envelope",
 ]

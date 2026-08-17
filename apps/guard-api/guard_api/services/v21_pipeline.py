@@ -543,7 +543,11 @@ class V21PipelineService:
 
         try:
             resolved = self._resolve_snapshot_v(event, bundle, clock, policy_revision)
-        except Exception:  # noqa: BLE001 - snapshot 读取失败 → 组件降级。
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            if self.active:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_SNAPSHOT_READ_FAILED"
+                ) from exc
             logger.warning(
                 "v21 pipeline phase A snapshot read failed for event %s",
                 event.event_id,
