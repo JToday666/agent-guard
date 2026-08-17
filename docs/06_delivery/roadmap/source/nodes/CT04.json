@@ -5,18 +5,25 @@
     "core-evaluation-activation",
     "langgraph-runtime-integration"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/CT04/EV-CT04-2FAEC2005ECB.json",
+    "evidence/CT04/EV-CT04-53E27A74AB70.json",
+    "evidence/CT04/EV-CT04-613A8D69EA79.json",
+    "evidence/CT04/EV-CT04-66616A0EFEAF.json",
+    "evidence/CT04/EV-CT04-88B40554EDB9.json",
+    "evidence/CT04/EV-CT04-A50D0B979B21.json"
+  ],
   "exact_title": "CT-PR-04 — Context Builder",
   "hold": false,
   "id": "CT04",
   "kind": "task",
   "lane": "ct",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [
     "Gate A is complete. Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE records that CT04 owns the shared frozen models, Guard API builder, and LangGraph reference-runtime enforcement required for one real Context Builder slice."
   ],
   "optional": false,
-  "revision": 2,
+  "revision": 3,
   "roles": [
     "task"
   ],
@@ -31,9 +38,10 @@
   "work": {
     "base_sha": "4323ef5d03ad2631f130ed832758bf1934583ec1",
     "branch": "codex/ct04-context-builder",
+    "completed_commit": "318f15f1e4779f673d8f96dc4e91c901426eba4d",
     "owner": "codex",
     "started_at": "2026-08-17T04:54:08Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "CT04"
   }
 }

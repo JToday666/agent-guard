@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04-53E27A74AB70",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "CT04",
+  "recorded_at": "2026-08-17T05:52:59Z",
+  "ref": "self-review:ct04-four-boundary-fixes",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Independent review found and verified fixes for privileged-role spoofing, provider-key leakage, V21 flag coupling, and annotation closing-tag escape"
+}

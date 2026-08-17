@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04-88B40554EDB9",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "CT04",
+  "recorded_at": "2026-08-17T05:52:50Z",
+  "ref": "local:ct04-final-53+backend-236",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Final Core/API/LangGraph seam suite passed 53 tests; broader backend focused regression passed 236 with one skip; Ruff and Pyright passed"
+}
