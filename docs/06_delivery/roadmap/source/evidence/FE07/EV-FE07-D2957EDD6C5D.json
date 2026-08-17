@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE07-D2957EDD6C5D",
+  "kind": "ci",
+  "metadata": {},
+  "node_id": "FE07",
+  "recorded_at": "2026-08-17T10:17:12Z",
+  "ref": "https://github.com/JToday666/agent-guard/actions/runs/31958860645/job/95193647341",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR #159 Dashboard S2 live Memory E2E passed the live Provenance presentation and deep-link path"
+}
