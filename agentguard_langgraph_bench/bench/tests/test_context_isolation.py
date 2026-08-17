@@ -450,6 +450,8 @@ def test_competition_canonical_sources_keep_fixed_system_task_and_page_evidence(
     assert sources[1]["source_id"] == f"langgraph:task:{case.case_id}"
     assert sources[1]["content"] == case.input.payload
     assert sources[2]["source_type"] == "tool_result"
+    assert sources[2]["role"] == "user"
+    assert sources[2]["content"].startswith("Runtime case evidence (untrusted):")
     assert "http://127.0.0.1:18080/local-pages/public/index.html" in sources[2][
         "content"
     ]
@@ -525,6 +527,18 @@ def test_competition_context_modes_share_sources_and_tools_but_only_required_tra
     )
     assert captured_messages["off"] == captured_messages["observe"]
     assert captured_messages["required"] != captured_messages["observe"]
+    assert all(
+        message.get("role") != "tool"
+        for messages in captured_messages.values()
+        for message in messages
+    )
+    assert all(
+        any(
+            "Runtime tool observation (untrusted):" in str(message.get("content") or "")
+            for message in messages
+        )
+        for messages in captured_messages.values()
+    )
     assert evidence["off"]["context_plan_digest"] is None
     assert evidence["observe"]["context_plan_digest"].startswith("sha256:")
     assert evidence["required"]["context_plan_digest"].startswith("sha256:")

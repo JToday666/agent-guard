@@ -51,7 +51,8 @@ class _ProviderHandler(BaseHTTPRequestHandler):
             if isinstance(item, dict) and isinstance(item.get("function"), dict)
         }
         has_tool_result = any(
-            isinstance(item, dict) and item.get("role") == "tool"
+            isinstance(item, dict)
+            and "Runtime tool observation (untrusted):" in str(item.get("content") or "")
             for item in payload.get("messages", [])
         )
         if "agentguard_competition_probe" in tool_names:
@@ -367,9 +368,15 @@ def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(
 
     assert len(_ProviderHandler.requests) == 3
     assert _ProviderHandler.authorization == [f"Bearer {_PROVIDER_KEY}"] * 3
-    assert any(
-        item.get("role") == "tool" for item in _ProviderHandler.requests[2]["messages"]
-    )
+    observations = [
+        str(item.get("content") or "")
+        for item in _ProviderHandler.requests[2]["messages"]
+        if "Runtime tool observation (untrusted):"
+        in str(item.get("content") or "")
+    ]
+    assert len(observations) == 1
+    assert 'authority="evidence-only"' in observations[0]
+    assert "AgentGuard Operations Onboarding Note" in observations[0]
 
     row = result.rows[0]
     assert row["run_valid"] is True

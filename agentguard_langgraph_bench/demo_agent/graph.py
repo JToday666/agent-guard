@@ -3078,11 +3078,18 @@ def _planner_context_sources(
                 "source_id": f"langgraph:case-evidence:{case.case_id}",
                 "source_type": "tool_result",
                 "source_trust": "untrusted",
-                "role": "tool",
-                "content": json.dumps(
-                    case_evidence,
-                    ensure_ascii=False,
-                    sort_keys=True,
+                # This is runtime evidence, not an OpenAI ToolMessage: there is
+                # no preceding assistant tool-call ID to bind it to. Keep the
+                # source type authoritative for Guard while presenting it as a
+                # plainly labelled, untrusted user-role observation.
+                "role": "user",
+                "content": (
+                    "Runtime case evidence (untrusted):\n"
+                    + json.dumps(
+                        case_evidence,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
                 ),
             }
         )
@@ -3096,8 +3103,11 @@ def _planner_context_sources(
                 "source_id": f"langgraph:tool-result:{index}",
                 "source_type": "tool_result",
                 "source_trust": "untrusted",
-                "role": "tool",
-                "content": observation,
+                # Do not emit an orphan ToolMessage. The result remains typed
+                # as untrusted tool evidence for Context Builder and is bound
+                # by its content digest before entering the model.
+                "role": "user",
+                "content": f"Runtime tool observation (untrusted):\n{observation}",
             }
         )
     return sources
