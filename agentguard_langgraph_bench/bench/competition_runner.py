@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+from ipaddress import ip_address
 import json
 import re
 import sys
@@ -19,7 +20,7 @@ from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
-from urllib.parse import quote, quote_plus
+from urllib.parse import quote, quote_plus, urlsplit
 
 from pydantic import ValidationError
 
@@ -651,6 +652,11 @@ def resolve_run_request(
         max_retries=planner.max_retries,
         max_tool_rounds=planner.max_tool_rounds,
     )
+    if main_suite and not _formal_provider_endpoint_is_qualifiable(provider.base_url):
+        raise InvalidCompetitionRun(
+            "provider_endpoint_not_qualifiable",
+            "matrix/product require an HTTPS, non-loopback provider endpoint",
+        )
     return RunRequest(
         profile=effective,
         artifacts=args.artifacts,
@@ -985,7 +991,27 @@ def _qualification_eligible(
         and len(cases) == request.profile.dataset.case_count == 70
         and tuple(arm.arm_id for arm in arms) == _ARM_IDS
         and request.profile.is_official_active
+        and _formal_provider_endpoint_is_qualifiable(request.provider.base_url)
     )
+
+
+def _formal_provider_endpoint_is_qualifiable(base_url: str) -> bool:
+    """Keep local programmable endpoints outside formal product qualification."""
+
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    hostname = parsed.hostname.lower().rstrip(".")
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        return False
+    try:
+        address = ip_address(hostname)
+    except ValueError:
+        return True
+    if address.is_loopback:
+        return False
+    ipv4_mapped = getattr(address, "ipv4_mapped", None)
+    return not (ipv4_mapped is not None and ipv4_mapped.is_loopback)
 
 
 def _effective_config_digest(request: RunRequest) -> str:

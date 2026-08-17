@@ -60,7 +60,7 @@ def _request(tmp_path: Path, *extra: str):
             "--llm-model",
             "stub-model",
             "--llm-base-url",
-            "http://127.0.0.1:43122/v1",
+            "https://provider.example/v1",
             *extra,
         ]
     )
@@ -896,7 +896,7 @@ def test_json_then_cli_precedence_and_secret_is_never_public(
                 "planner": {
                     "provider_id": "json-provider",
                     "model": "json-model",
-                    "base_url": "http://127.0.0.1:43123/v1",
+                    "base_url": "https://provider.example/v1",
                     "api_key_env": "JSON_PROVIDER_KEY",
                     "max_tool_rounds": 8,
                 },
@@ -1060,6 +1060,79 @@ def test_qualification_defensively_requires_exact_350_case_runs(
     repeated = replace(request, profile=replace(request.profile, repeats=2))
     assert _expected_case_runs(repeated) == 700
     assert _qualification_eligible(repeated, cases, arms) is False
+
+    loopback_provider = replace(
+        request,
+        provider=replace(request.provider, base_url="https://localhost/v1"),
+    )
+    assert _qualification_eligible(loopback_provider, cases, arms) is False
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://127.0.0.1:43122/v1",
+        "https://localhost/v1",
+        "https://provider.localhost/v1",
+        "https://127.0.0.1/v1",
+        "https://[::1]/v1",
+        "https://[::ffff:127.0.0.1]/v1",
+    ],
+)
+@pytest.mark.parametrize("suite", ["matrix", "product"])
+def test_main_suite_rejects_nonqualifiable_provider_endpoint(
+    tmp_path: Path,
+    suite: str,
+    base_url: str,
+) -> None:
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--suite",
+            suite,
+            "--full-corpus",
+            "--artifacts",
+            str(tmp_path / "artifacts"),
+            "--llm-model",
+            "stub-model",
+            "--llm-base-url",
+            base_url,
+        ]
+    )
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        resolve_run_request(args, environ={"AGENTGUARD_LLM_API_KEY": _SECRET})
+
+    assert caught.value.reason_code == "provider_endpoint_not_qualifiable"
+
+
+def test_main_suite_nonqualifiable_provider_is_cli_exit_two(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AGENTGUARD_LLM_API_KEY", _SECRET)
+
+    exit_code = main(
+        [
+            "run",
+            "--suite",
+            "product",
+            "--full-corpus",
+            "--artifacts",
+            str(tmp_path / "artifacts"),
+            "--llm-model",
+            "stub-model",
+            "--llm-base-url",
+            "https://localhost/v1",
+        ]
+    )
+
+    assert exit_code == 2
+    diagnostic = json.loads(capsys.readouterr().err)
+    assert diagnostic["status"] == "invalid"
+    assert diagnostic["competition_qualified"] is False
+    assert diagnostic["reason_code"] == "provider_endpoint_not_qualifiable"
 
 
 def test_variant_json_then_cli_precedence(tmp_path: Path) -> None:
