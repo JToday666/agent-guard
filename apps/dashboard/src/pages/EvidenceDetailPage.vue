@@ -153,6 +153,7 @@
             </InlineNotice>
             <ExecutionTrace
               :approval-basis-by-id="runtimeSupervision.approvalBasisById"
+              :context-manifest-by-event-id="runtimeSupervision.contextManifestByEventId"
               :is-window-partial="isExecutionWindowPartial"
               :layout="executionLayout"
               :polling-state="tracePollingState"

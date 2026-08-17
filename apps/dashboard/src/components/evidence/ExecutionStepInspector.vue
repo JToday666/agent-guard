@@ -65,6 +65,168 @@
         </div>
       </section>
 
+      <section
+        v-if="step.category === 'context'"
+        class="execution-inspector__section context-manifest"
+        data-testid="context-manifest-panel"
+      >
+        <header class="context-manifest__header">
+          <div>
+            <h5>Context Manifest</h5>
+            <p>仅展示同一 Trace 中按 GuardEvent ID 精确关联的持久化清单。</p>
+          </div>
+          <StatusBadge
+            :label="manifestStatusLabel(contextManifest)"
+            :tone="manifestTone(contextManifest)"
+          />
+        </header>
+
+        <p v-if="!contextManifest" class="context-manifest__notice">
+          Manifest 不可用；不会从原始 Prompt、内容入口或 Provenance 推断。
+        </p>
+        <template v-else>
+          <p v-if="contextManifest.missingReasons.length" class="context-manifest__notice">
+            {{ contextManifest.missingReasons.join(" · ") }}
+          </p>
+          <dl class="execution-inspector__detail-grid context-manifest__identity">
+            <div>
+              <dt>证据状态</dt>
+              <dd>{{ getAvailabilityLabel(contextManifest.availability) }}</dd>
+            </div>
+            <div>
+              <dt>GuardEvent ID</dt>
+              <dd>
+                <code translate="no">{{ contextManifest.eventId }}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Plan ID</dt>
+              <dd>
+                <code translate="no">{{ contextManifest.planId ?? "不可用" }}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Context Ref</dt>
+              <dd>
+                <code translate="no">{{ contextManifest.contextRef ?? "不可用" }}</code>
+              </dd>
+            </div>
+            <div class="is-wide">
+              <dt>Plan Digest</dt>
+              <dd>
+                <code translate="no">{{ contextManifest.planDigest ?? "不可用" }}</code>
+              </dd>
+            </div>
+            <div class="is-wide">
+              <dt>Manifest Digest</dt>
+              <dd>
+                <code translate="no">{{ contextManifest.manifestDigest ?? "不可用" }}</code>
+              </dd>
+            </div>
+          </dl>
+
+          <dl
+            v-if="contextManifest.counts"
+            class="context-manifest__counts"
+            aria-label="上下文清单统计"
+          >
+            <div>
+              <dt>总计</dt>
+              <dd>{{ contextManifest.counts.total }}</dd>
+            </div>
+            <div>
+              <dt>已返回</dt>
+              <dd>{{ contextManifest.counts.returned }}</dd>
+            </div>
+            <div>
+              <dt>纳入</dt>
+              <dd>{{ contextManifest.counts.included }}</dd>
+            </div>
+            <div>
+              <dt>隔离</dt>
+              <dd>{{ contextManifest.counts.quarantined }}</dd>
+            </div>
+            <div>
+              <dt>排除</dt>
+              <dd>{{ contextManifest.counts.excluded }}</dd>
+            </div>
+            <div>
+              <dt>不可信</dt>
+              <dd>{{ contextManifest.counts.untrusted }}</dd>
+            </div>
+          </dl>
+
+          <div v-if="contextManifest.counts" class="context-manifest__source-counts">
+            <span>来源分布</span>
+            <code
+              v-for="[sourceType, count] in Object.entries(contextManifest.counts.bySourceType)"
+              :key="sourceType"
+              translate="no"
+              >{{ sourceType }} {{ count }}</code
+            >
+          </div>
+
+          <ol v-if="contextManifest.chunks.length" class="context-manifest__chunks">
+            <li v-for="chunk in contextManifest.chunks" :key="chunk.chunkId">
+              <header>
+                <div>
+                  <strong>{{ chunk.sourceType }}</strong>
+                  <code translate="no">{{ chunk.sourceRef }}</code>
+                </div>
+                <StatusBadge
+                  :label="manifestDispositionLabel(chunk.disposition)"
+                  :tone="manifestDispositionTone(chunk.disposition)"
+                />
+              </header>
+              <dl>
+                <div>
+                  <dt>Compartment</dt>
+                  <dd>{{ chunk.compartment }}</dd>
+                </div>
+                <div>
+                  <dt>Trust / Authority</dt>
+                  <dd>{{ chunk.trust }} / {{ chunk.factAuthority }}</dd>
+                </div>
+                <div>
+                  <dt>Taints</dt>
+                  <dd>{{ listOrUnavailable(chunk.taints) }}</dd>
+                </div>
+                <div>
+                  <dt>Transform</dt>
+                  <dd>{{ manifestTransformLabel(chunk) }}</dd>
+                </div>
+                <div v-if="chunk.contentDigest" class="is-wide">
+                  <dt>Content Digest</dt>
+                  <dd>
+                    <code translate="no">{{ chunk.contentDigest }}</code>
+                  </dd>
+                </div>
+                <div class="is-wide">
+                  <dt>安全 Preview</dt>
+                  <dd>{{ chunk.safePreview ?? "不展示" }}</dd>
+                </div>
+                <div v-if="chunk.reasonCodes.length" class="is-wide">
+                  <dt>原因</dt>
+                  <dd>{{ chunk.reasonCodes.join(" · ") }}</dd>
+                </div>
+              </dl>
+            </li>
+          </ol>
+          <p
+            v-else-if="contextManifest.state === 'budget_dropped'"
+            class="context-manifest__notice"
+          >
+            清单因审计证据预算降级为完整制品摘要；不从其他载荷回填 chunk。
+          </p>
+          <p
+            v-else-if="contextManifest.availability !== 'recorded'"
+            class="context-manifest__notice"
+          >
+            当前没有可安全展示的 chunk。
+          </p>
+        </template>
+      </section>
+
       <section class="execution-inspector__section">
         <h5>Approval Basis</h5>
         <dl class="execution-inspector__detail-grid">
@@ -344,7 +506,11 @@ import type {
   ExecutionStepViewModel,
   TraceLifecycleState,
 } from "../../types/dashboard";
-import type { ApprovalBasisViewModel } from "../../types/runtime-supervision";
+import type {
+  ApprovalBasisViewModel,
+  ContextManifestChunkPresentation,
+  ContextManifestViewModel,
+} from "../../types/runtime-supervision";
 import {
   formatDashboardDateTime,
   getDecisionLabel,
@@ -358,6 +524,7 @@ defineOptions({ name: "ExecutionStepInspector" });
 
 const props = defineProps<{
   approvalBasis?: ApprovalBasisViewModel;
+  contextManifest?: ContextManifestViewModel;
   lifecycleState: TraceLifecycleState;
   step?: ExecutionStepViewModel;
   stepNumber?: number;
@@ -397,6 +564,45 @@ function formatOptionalTime(value: string | null): string {
 
 function listOrUnavailable(values: readonly string[]): string {
   return values.length ? values.join(" · ") : "不可用";
+}
+
+function manifestStatusLabel(manifest: ContextManifestViewModel | undefined): string {
+  if (!manifest) return "不可用";
+  const labels: Record<ContextManifestViewModel["state"], string> = {
+    budget_dropped: "预算降级",
+    correlation_conflict: "关联冲突",
+    invalid: "契约无效",
+    missing: "未记录",
+    recorded: manifest.availability === "recorded" ? "已记录" : "部分记录",
+    window_truncated: "窗口截断",
+  };
+  return labels[manifest.state];
+}
+
+function manifestTone(
+  manifest: ContextManifestViewModel | undefined,
+): "neutral" | "success" | "warning" | "danger" {
+  if (!manifest || manifest.availability === "unavailable") return "neutral";
+  if (manifest.state === "correlation_conflict" || manifest.state === "invalid") return "danger";
+  return manifest.availability === "recorded" ? "success" : "warning";
+}
+
+function manifestDispositionLabel(
+  disposition: ContextManifestChunkPresentation["disposition"],
+): string {
+  return { excluded: "已排除", included: "已纳入", quarantined: "已隔离" }[disposition];
+}
+
+function manifestDispositionTone(
+  disposition: ContextManifestChunkPresentation["disposition"],
+): "success" | "warning" | "danger" {
+  return { excluded: "danger", included: "success", quarantined: "warning" }[disposition] as
+    "success" | "warning" | "danger";
+}
+
+function manifestTransformLabel(chunk: ContextManifestChunkPresentation): string {
+  if (!chunk.transformationAction) return "preserved";
+  return `${chunk.transformState} / ${chunk.transformationAction}`;
 }
 
 function approvalBasisSummary(basis: ApprovalBasisViewModel | undefined): string {
@@ -639,6 +845,129 @@ function approvalRoute(step: ExecutionStepViewModel) {
   line-height: 1.45;
 }
 
+.context-manifest {
+  border-block: 1px solid var(--color-border);
+  padding-block: var(--space-3);
+}
+
+.context-manifest__header {
+  align-items: start;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.context-manifest__header > div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.context-manifest__header p,
+.context-manifest__notice {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+  line-height: 1.5;
+}
+
+.context-manifest__notice {
+  background: var(--color-surface-muted);
+  border-left: 2px solid var(--color-warning);
+  padding: var(--space-2);
+}
+
+.context-manifest__counts {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+}
+
+.context-manifest__counts > div {
+  background: var(--color-surface-muted);
+  padding: var(--space-2);
+}
+
+.context-manifest__counts dd {
+  font-size: var(--font-size-16);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+}
+
+.context-manifest__source-counts {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.context-manifest__source-counts span,
+.context-manifest__source-counts code {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+}
+
+.context-manifest__source-counts code {
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-1);
+  padding: 0.2rem 0.35rem;
+}
+
+.context-manifest__chunks {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.context-manifest__chunks > li {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+}
+
+.context-manifest__chunks header {
+  align-items: start;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.context-manifest__chunks header > div {
+  display: grid;
+  min-width: 0;
+}
+
+.context-manifest__chunks header strong {
+  font-size: var(--font-size-12);
+}
+
+.context-manifest__chunks header code {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-11);
+  overflow-wrap: anywhere;
+}
+
+.context-manifest__chunks dl {
+  display: grid;
+  gap: var(--space-1);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.context-manifest__chunks dl > div {
+  min-width: 0;
+}
+
+.context-manifest__chunks dl > .is-wide {
+  grid-column: 1 / -1;
+}
+
 .execution-inspector__events,
 .execution-inspector__checks ol {
   display: grid;
@@ -732,6 +1061,15 @@ function approvalRoute(step: ExecutionStepViewModel) {
   .execution-inspector__facts,
   .execution-inspector__detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .context-manifest__counts,
+  .context-manifest__chunks dl {
+    grid-template-columns: 1fr;
+  }
+
+  .context-manifest__chunks dl > .is-wide {
+    grid-column: auto;
   }
 
   .execution-inspector__detail-grid > .is-wide {
