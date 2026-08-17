@@ -51,13 +51,13 @@ def _evidence() -> dict[str, list[dict[str, object]]]:
     return {
         "failure_injection": [
             {
-                "check_id": "fi-guard-api-unavailable",
+                "check_id": "fi-snapshot-read-failure",
                 "kind": "failure_injection",
                 "status": "passed",
                 "evidence_refs": [
                     "test:tests/test_v21_09_pipeline.py::test_pipeline_phase_a_snapshot_read_failure_component_failure"
                 ],
-                "reason_code": "guard_api_unavailable_fail_closed",
+                "reason_code": "snapshot_read_failure_degrades_component",
             }
         ],
         "flag_rollback": [
@@ -459,6 +459,27 @@ def test_evidence_checks_reject_runtime_authority_and_secret_material(
     payload["failure_injection"][0][field] = value  # type: ignore[index]
 
     with pytest.raises(ValidationError):
+        _build_report(payload)
+
+
+@pytest.mark.parametrize(
+    "opaque_value",
+    [
+        "artifact:agt_tok_" + "a" * 32,
+        "artifact:eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZ2VudCJ9.c2lnbmF0dXJlMTIzNA",
+        "artifact:bearer_abcdefghijklmnopqrstuvwxyz123456",
+        "artifact:Bearer:abcdefghijklmnopqrstuvwxyz123456",
+    ],
+)
+def test_evidence_checks_reject_opaque_authentication_tokens(
+    opaque_value: str,
+) -> None:
+    payload = _report_payload()
+    payload["failure_injection"][0]["evidence_refs"] = [  # type: ignore[index]
+        opaque_value
+    ]
+
+    with pytest.raises(ValidationError, match="authentication material"):
         _build_report(payload)
 
 

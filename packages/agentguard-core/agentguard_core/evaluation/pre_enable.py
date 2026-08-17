@@ -83,6 +83,14 @@ _FORBIDDEN_RUNTIME_DIGEST_RE = re.compile(
     r"(?:hmac-sha256:[0-9a-f]{64}|lease-v1:[0-9a-f]{64})",
     re.IGNORECASE,
 )
+_OPAQUE_AUTH_TOKEN_RE = re.compile(
+    r"(?:"
+    r"agt_tok_[0-9a-f]{32}"
+    r"|[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    r"|bearer(?:[:_-])[A-Za-z0-9._-]{8,}"
+    r")",
+    re.IGNORECASE,
+)
 _DEGRADED_DIVERGENCE_CATEGORIES = frozenset(
     {
         DEGRADED_COMPONENT_FAILURE,
@@ -888,6 +896,8 @@ def _display_safe_token(value: str, *, field_name: str) -> str:
         raise ValueError(f"{field_name} contains a forbidden sensitive key")
     if _FORBIDDEN_RUNTIME_DIGEST_RE.search(value) is not None:
         raise ValueError(f"{field_name} contains a forbidden runtime digest")
+    if _OPAQUE_AUTH_TOKEN_RE.search(value) is not None:
+        raise ValueError(f"{field_name} contains opaque authentication material")
     return value
 
 
