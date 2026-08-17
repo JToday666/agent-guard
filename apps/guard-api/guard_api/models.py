@@ -183,7 +183,7 @@ class GuardEvaluationResponse(BaseModel):
     # 供 Adapter / Plugin 回写 runtime_outcome 时建立关联；无审计写入时为 null。
     policy_audit_id: str | None = None
     # RTE-05 强绑定仅对 eligible/non-degraded ASK 动作产生。
-    # ``exclude_if`` 保证 flag off / C1 响应键集与现有 wire 逐字节一致。
+    # ``exclude_if`` 保证 V2 mode off / C1 响应键集与现有 wire 逐字节一致。
     enforcement_binding: EnforcementBinding | None = Field(
         default=None,
         exclude_if=lambda value: value is None,

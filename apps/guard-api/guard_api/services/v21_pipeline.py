@@ -1,4 +1,4 @@
-"""V21-09 四段式编排 pipeline（shadow-only，flag 默认关闭）。
+"""V21-09 四段式编排 pipeline（shadow-only，V2 mode 默认 off）。
 
 契约依据：``12_决策记录_V21-09前置.md`` D3（revoked 来源：online state
 record 同源同锁只读）、D4（四段式事务边界 / S8 消除）、D5（clock 正式化：
@@ -23,7 +23,7 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
   ``degraded_stale_judgment``，legacy 主链不受影响；
 - **Phase C（事务提交后投影）**：``run_phase_c`` —— Phase B audit
   commit 成功且事务退出后（02 §3 commit→project 时序：投影在事务
-  外），flag on 且 revalidation valid 时 scope_lock 内
+  外），V2 mode enabled 且 revalidation valid 时 scope_lock 内
   ensure_ready → base 校验 → ``project_committed``（verify 钩子复核
   审计记录存在性，F0-8）；delta 在 Phase B 以 materials 的
   state_version 为 base 确定性构造（信封 delta_digest 冻结时刻即真实，
@@ -37,7 +37,7 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
 与 ``v21_shadow.py``（V21-08 编排器）的关系（T2 处置裁决）：pipeline
 吸收四段式编排主路径；``V21ShadowService`` 保留为 Phase A 彻底失败
 （``run_phase_a`` 返回 None）时的逐字节降级回退路径——其降级信封形状
-与 V21-08 完全一致，flag off 时两者均零行为变化。
+与 V21-08 完全一致，V2 mode off 时两者均零行为变化。
 
 降级收敛范式（V21-08 既有）：全链路异常不外抛、绝不影响 legacy
 decision / approval / audit 主链；Phase A 不可恢复异常 → 返回 None
@@ -349,9 +349,9 @@ def build_evaluation_delta(
 class V21PipelineService:
     """V21-09 四段式编排器（shadow-only；只读旁路，绝不外抛）。
 
-    构造即完成 flag / secret 解析（与 V21ShadowService 同一门控口径：
-    复用 ``AGENTGUARD_V21_SHADOW_ENABLED`` 与 server secret 配置）；
-    flag off 时 ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。
+    构造即完成 mode / secret 解析（与 V21ShadowService 同一门控口径：
+    复用 ``AGENTGUARD_V21_MODE`` 与 server secret 配置）；mode off 时
+    ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。
     """
 
     def __init__(
@@ -376,9 +376,9 @@ class V21PipelineService:
         self._server_secret = self._load_server_secret(settings)
 
     def _load_server_secret(self, settings: GuardApiSettings) -> bytes | None:
-        """flag on 时解析 server secret；未配置/非法 → pipeline 禁用。
+        """V2 mode enabled 时解析 server secret；未配置/非法 → pipeline 禁用。
 
-        与 V21ShadowService 同一口径：绝不硬编码兜底密钥；flag off 时
+        与 V21ShadowService 同一口径：绝不硬编码兜底密钥；mode off 时
         不读取任何密钥配置。
         """
 
@@ -965,7 +965,7 @@ class V21PipelineService:
 
         判定口径：审计 evidence 存在 ``state_delta_v21`` 信封即“当时
         revalidation valid 且 scope 在场”的直接标志（信封仅在
-        ``prepare_phase_c`` 成功时写入）；无信封（flag off 存量 /
+        ``prepare_phase_c`` 成功时写入）；无信封（mode off 存量 /
         降级 / stale）→ 不补。补投影材料全部自审计记录重建（不重
         算）：``metadata.task_id`` → 权威 active TaskFact →
         scope_digest；``decision_v21`` payload 的 state_version →
@@ -990,7 +990,7 @@ class V21PipelineService:
         evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
         delta_envelope = evidence.get("state_delta_v21")
         if not isinstance(delta_envelope, dict):
-            # 无信封：当时未产生投影计划（flag off / 降级 / stale），
+            # 无信封：当时未产生投影计划（mode off / 降级 / stale），
             # 无补投影可做，静默返回。
             return
         reference = delta_envelope.get("payload")

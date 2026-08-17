@@ -124,17 +124,8 @@ class GuardApiSettings:
             default=DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS,
         )
     )
-    # V21-08 shadow feature flag（11_决策记录_V21-08前置.md D3：默认
-    # false；flag off 时 shadow 全链路不执行，evaluate 行为逐字节不变）。
-    v21_shadow_enabled: bool = field(
-        default_factory=lambda: _env_bool(
-            "AGENTGUARD_V21_SHADOW_ENABLED", default=False
-        )
-    )
-    # Unified V2.1 authority mode.  The legacy shadow boolean remains accepted
-    # for existing reference-profile callers, but new deployments should set
-    # this value explicitly.  ``effective_v21_mode`` provides the single
-    # compatibility boundary used by services.
+    # Unified V2.1 authority mode.  ``off`` is the global default; reference
+    # and competition profiles must select their mode explicitly.
     v21_mode: str = field(
         default_factory=lambda: (
             os.getenv("AGENTGUARD_V21_MODE", "off").strip().lower()
@@ -150,13 +141,13 @@ class GuardApiSettings:
     )
     # shadow ActionIR 指纹专用 server secret（base64url，≥32 字节）。
     # 与 task scope keyring / audit checkpoint key 域隔离，不复用其他密钥。
-    # flag on 而未配置时 shadow 禁用（编排器返回 None），不得硬编码兜底。
+    # mode enabled 而未配置时 V2 禁用（编排器返回 None），不得硬编码兜底。
     v21_shadow_server_secret: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_V21_SHADOW_SERVER_SECRET"),
         repr=False,
     )
     # CT-PR-03b CT 事实投影独立 flag（裁决 D3：默认 false，与 V21
-    # shadow flag 解耦；flag off 时 CT 全链路不执行，evaluate 行为
+    # V2 authority mode 解耦；CT flag off 时 CT 全链路不执行，evaluate 行为
     # 逐字节不变。生效另需 pipeline 材料就绪，server secret 复用
     # AGENTGUARD_V21_SHADOW_SERVER_SECRET）。
     ct_fact_projection_enabled: bool = field(
@@ -310,12 +301,9 @@ class GuardApiSettings:
         )
 
     def effective_v21_mode(self) -> str:
-        """Return the normalized V2.1 mode with legacy-shadow compatibility."""
+        """Return the normalized V2.1 authority mode."""
 
-        mode = self.v21_mode.strip().lower()
-        if mode != "off":
-            return mode
-        return "shadow" if self.v21_shadow_enabled else "off"
+        return self.v21_mode.strip().lower()
 
     def v21_enabled(self) -> bool:
         return self.effective_v21_mode() != "off"
@@ -454,7 +442,7 @@ class GuardApiSettings:
             if effective_v21_mode == "off":
                 raise GuardApiConfigurationError(
                     "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED requires "
-                    "AGENTGUARD_V21_MODE != off (or the legacy shadow flag)"
+                    "AGENTGUARD_V21_MODE != off"
                 )
             if self.v21_shadow_server_secret_bytes() is None:
                 raise GuardApiConfigurationError(

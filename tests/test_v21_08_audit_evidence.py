@@ -3,7 +3,7 @@
 覆盖 T5 验收口径（memory 后端为主，postgres 环境可用则覆盖）：
 
 - flag off：evidence 形状与现状完全一致（8 键）、evaluate 响应不变；
-- flag on（``AGENTGUARD_V21_SHADOW_ENABLED`` +
+- shadow mode（``AGENTGUARD_V21_MODE=shadow`` +
   ``AGENTGUARD_V21_SHADOW_SERVER_SECRET`` 已配置）：同一条
   policy_evaluation 审计记录内嵌 ``decision_v21`` 信封（01 §28 形状），
   不新增第二条审计记录；
@@ -71,7 +71,7 @@ def _settings(
     return GuardApiSettings(
         control_token="control-secret",
         storage_backend="memory",
-        v21_shadow_enabled=shadow_enabled,
+        v21_mode="shadow" if shadow_enabled else "off",
         v21_shadow_server_secret=secret,
         max_request_body_bytes=max_request_body_bytes,
     )

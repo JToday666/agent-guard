@@ -62,7 +62,7 @@ def _settings(
     return GuardApiSettings(
         control_token="control-secret",
         storage_backend="memory",
-        v21_shadow_enabled=shadow_enabled,
+        v21_mode="shadow" if shadow_enabled else "off",
         v21_shadow_server_secret=secret,
     )
 
@@ -143,19 +143,22 @@ def _payload(envelope: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# settings：flag 默认值与 secret 形态
+# settings：mode 默认值与 secret 形态
 # ---------------------------------------------------------------------------
 
 
-def test_settings_flag_defaults_off(monkeypatch) -> None:
-    monkeypatch.delenv("AGENTGUARD_V21_SHADOW_ENABLED", raising=False)
-    assert GuardApiSettings().v21_shadow_enabled is False
-
+def test_settings_mode_defaults_off_and_reads_explicit_env(monkeypatch) -> None:
     monkeypatch.setenv("AGENTGUARD_V21_SHADOW_ENABLED", "true")
-    assert GuardApiSettings().v21_shadow_enabled is True
-    monkeypatch.setenv("AGENTGUARD_V21_SHADOW_ENABLED", "not-a-bool")
+    monkeypatch.delenv("AGENTGUARD_V21_MODE", raising=False)
+    settings = GuardApiSettings()
+    assert settings.effective_v21_mode() == "off"
+    assert not hasattr(settings, "v21_shadow_enabled")
+
+    monkeypatch.setenv("AGENTGUARD_V21_MODE", "shadow")
+    assert GuardApiSettings().effective_v21_mode() == "shadow"
+    monkeypatch.setenv("AGENTGUARD_V21_MODE", "not-a-mode")
     with pytest.raises(GuardApiConfigurationError):
-        GuardApiSettings()
+        GuardApiSettings().validate_for_startup()
 
 
 def test_settings_shadow_secret_validation() -> None:

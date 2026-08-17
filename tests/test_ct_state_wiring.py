@@ -89,7 +89,7 @@ def _settings(*, ct_enabled: bool = True) -> GuardApiSettings:
     return GuardApiSettings(
         control_token="control-secret",
         storage_backend="memory",
-        v21_shadow_enabled=True,
+        v21_mode="shadow",
         v21_shadow_server_secret=_TEST_SECRET,
         ct_fact_projection_enabled=ct_enabled,
         task_scope_active_key_id="ct-test-key-1",

@@ -1,7 +1,7 @@
-"""V21-08 shadow 旁路编排薄层（flag 默认关闭，零行为变化）。
+"""V21-08 shadow 旁路编排薄层（V2 mode 默认 off，零行为变化）。
 
-契约依据：``11_决策记录_V21-08前置.md`` D3（feature flag
-``AGENTGUARD_V21_SHADOW_ENABLED`` 默认 false）、D7（不 bump
+契约依据：``11_决策记录_V21-08前置.md`` D3（V2.1 mode 默认
+``off``）、D7（不 bump
 PROJECTOR_VERSION、decision_v21 为 append-only 审计键）与完整方案
 §14（shadow 即保存九项证据）。
 
@@ -175,7 +175,7 @@ def _recategorize_shadow_degradation(
 class V21ShadowService:
     """V21-08 shadow 旁路编排器（只读；绝不改变官方决策链）。
 
-    构造即完成 flag / secret 解析：flag off 时 ``build_shadow_evidence``
+    构造即完成 mode / secret 解析：mode off 时 ``build_shadow_evidence``
     仅一次布尔判断后返回 ``None``，不触碰任何配置、存储与状态。
     """
 
@@ -192,11 +192,11 @@ class V21ShadowService:
         self._server_secret = self._load_server_secret(settings)
 
     def _load_server_secret(self, settings: GuardApiSettings) -> bytes | None:
-        """flag on 时解析 server secret；任何异常收敛为 shadow 禁用。
+        """V2 mode enabled 时解析 server secret；异常收敛为 shadow 禁用。
 
-        行为口径（写进 D3 实施约定）：flag on 而 secret 未配置/非法 →
+        行为口径（写进 D3 实施约定）：mode enabled 而 secret 未配置/非法 →
         shadow **禁用**（返回 None），不产证据、不降级伪造；绝不硬编码
-        兜底密钥。flag off 时不读取任何密钥配置。
+        兜底密钥。mode off 时不读取任何密钥配置。
         """
 
         if not self._enabled:

@@ -103,7 +103,7 @@ def create_app(
         cursor_signing_key=settings.audit_cursor_signing_key(),
     )
     config_audit_service = ConfigAuditService(store=store, audit_service=audit_service)
-    # V21-08：安全状态门面（构造无 I/O；flag off 时不产生任何 I/O）。
+    # V21-08：安全状态门面（构造无 I/O；V2 mode off 时不产生任何 I/O）。
     # 提前创建以便 ApprovalService 承接 human allow_once → grant 投影（T6），
     # 且与 V21ShadowService 共用同一实例，不重复注册。
     security_state_service = SecurityStateService(store)
@@ -130,8 +130,8 @@ def create_app(
         policy_bundle=policy_bundle,
         policy_provider=policy_provider,
     )
-    # V21-08：shadow 旁路编排器（flag 默认关闭，D3）。
-    # 构造无 I/O；flag off 时 build_shadow_evidence 仅一次布尔判断，
+    # V21-08：shadow 旁路编排器（V2 mode 默认 off，D3）。
+    # 构造无 I/O；mode off 时 build_shadow_evidence 仅一次布尔判断，
     # evaluate 热路径不引入任何额外状态读取。
     v21_shadow_service = V21ShadowService(
         settings=settings,
@@ -139,7 +139,7 @@ def create_app(
         state_service=security_state_service,
     )
     # V21-09：四段式编排器（D4，shadow-only）。与 V21ShadowService 同一
-    # flag/secret 门控；就绪时 evaluate 编排切换为 pipeline（Phase A
+    # mode/secret 门控；就绪时 evaluate 编排切换为 pipeline（Phase A
     # 事务外、Phase B 短事务），Phase A 彻底失败回退 V21-08 逐字节路径。
     v21_pipeline_service = V21PipelineService(
         settings=settings,

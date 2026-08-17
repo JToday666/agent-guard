@@ -55,7 +55,7 @@ def build_s2_backend(
 ) -> tuple[Any, GuardApiSettings]:
     settings_args: dict[str, Any] = {
         "control_token": CONTROL_TOKEN,
-        "v21_shadow_enabled": True,
+        "v21_mode": "shadow",
         "v21_shadow_server_secret": _SHADOW_SECRET,
         "ct_fact_projection_enabled": True,
         "task_scope_active_key_id": _KEY_ID,

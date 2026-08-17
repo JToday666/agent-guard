@@ -389,7 +389,7 @@ def _pipeline_settings(
     return GuardApiSettings(
         control_token="control-secret",
         storage_backend="memory",
-        v21_shadow_enabled=enabled,
+        v21_mode="shadow" if enabled else "off",
         v21_shadow_server_secret=secret,
     )
 

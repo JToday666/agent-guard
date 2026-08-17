@@ -2,9 +2,9 @@
 
 V21-08（``11_决策记录_V21-08前置.md`` D5，承接 ``10_决策记录`` D4）：
 
-1. **决策面收紧**：V2 flag（``settings.v21_shadow_enabled``）开启时
+1. **决策面收紧**：V2 mode（``settings.v21_enabled()``）开启时
    LLM Reviewer 只能 deny 或保持 pending，不得生成 allow（
-   ``_llm_can_allow_once`` 恒 False）；flag off 保持现状（legacy
+   ``_llm_can_allow_once`` 恒 False）；mode off 保持现状（current
    official）。投影层另有 fail-closed 双保险（capability.py
    ``compile_approval_to_grant`` 拒绝非 human 来源），接线侧不重复
    实现状态机。
@@ -257,7 +257,7 @@ class ApprovalService:
     def _maybe_project_allow_once_grant(self, approval: ApprovalRequest) -> None:
         """human ``allow_once`` 终态后的 grant 投影入口（绝不外抛）。
 
-        仅 V2 flag 开启时执行（flag off 与现状逐字节一致）；仅 human
+        仅 V2 mode 开启时执行（mode off 与现状逐字节一致）；仅 human
         ``allow_once`` 触发。**任何失败收敛为告警日志**：审批决议已在
         存储层生效并完成 provenance 写入，投影失败不得反向影响审批面
         （fail-closed：不投影，不伪造 grant）。
@@ -645,9 +645,9 @@ class ApprovalService:
 def _llm_can_allow_once(approval: ApprovalRequest, *, v2_enabled: bool = False) -> bool:
     """LLM Reviewer 是否可自动 ``allow_once``。
 
-    D4/D5（``10_决策记录`` L116-134 / ``11_决策记录`` D5）：V2 flag
+    D4/D5（``10_决策记录`` L116-134 / ``11_决策记录`` D5）：V2 mode
     开启时恒 False——LLM Reviewer V2 路径只能 deny 或保持 pending，不得
-    生成 allow；flag off 保持现状（legacy official：low/medium 且选项含
+    生成 allow；mode off 保持现状（current official：low/medium 且选项含
     allow_once 时可自动批准）。
     """
 

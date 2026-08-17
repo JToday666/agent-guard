@@ -124,7 +124,7 @@ def _live_backend(
             storage_backend=backend,
             database_url=database_url or GuardApiSettings().database_url,
             control_token=CONTROL_TOKEN,
-            v21_shadow_enabled=True,
+            v21_mode="shadow",
             v21_shadow_server_secret=V21_SECRET,
             task_scope_active_key_id=TASK_SCOPE_KEY_ID,
             task_scope_keys=json.dumps({TASK_SCOPE_KEY_ID: TASK_SCOPE_KEY}),

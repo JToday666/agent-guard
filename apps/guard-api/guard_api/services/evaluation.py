@@ -230,7 +230,7 @@ class EvaluationService:
         self.approval_service = approval_service
         self.memory_guard_service = memory_guard_service
         self.action_critic = action_critic or ActionCritic()
-        # V21-08 shadow 旁路编排器（flag 默认关闭）。T5 在 audit 落盘前
+        # V21-08 shadow 旁路编排器（V2 mode 默认 off）。T5 在 audit 落盘前
         # 调用它旁路产出 decision_v21 信封；判定/审批主流程不使用它
         # （legacy = 唯一官方决策者，04 §1-§2）。V21-09 起它同时是
         # pipeline Phase A 彻底失败时的逐字节降级回退路径。
@@ -596,7 +596,7 @@ class EvaluationService:
         事务窗口内：legacy 链照常（decision/detections 直接消费 Phase A
         单跑结果，不双跑检测器）+ Phase B 短事务 revalidate 与证据构建；
         **无 snapshot/task/policy 全量 I/O**（S8 消除）。legacy 决策与
-        flag off 路径同源同实现（evaluate_with_results 同内核），官方
+        mode off 路径同源同实现（evaluate_with_results 同内核），官方
         响应不变。
 
         审计 policy_revision 直接用 ``materials.policy_revision``（Phase A
@@ -677,7 +677,7 @@ class EvaluationService:
                 if outcome.final_decision_id is not None:
                     # D11：finalize 产物确定性引用写审计 metadata
                     # （仅 revalidate valid 且非降级路径；stale/降级/
-                    # flag off 时键集逐字节不变）。
+                    # mode off 时键集逐字节不变）。
                     assert outcome.final_decision_digest is not None
                     if authority is not None and authority.source == "v21":
                         finalize_metadata = {
