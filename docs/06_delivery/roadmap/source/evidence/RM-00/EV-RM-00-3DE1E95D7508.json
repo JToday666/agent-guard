@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-3DE1E95D7508",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-16T17:52:11Z",
+  "ref": "local:python-fast-final-2026-08-17",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Final Python fast command: 1918 passed and 128 skipped in 222.12s while excluding Gate A integration, PostgreSQL-specialized and runtime E2E files"
+}

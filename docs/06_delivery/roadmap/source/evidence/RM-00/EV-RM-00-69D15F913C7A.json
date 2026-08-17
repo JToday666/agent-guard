@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-69D15F913C7A",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-16T17:43:44Z",
+  "ref": "origin/dev:.github/workflows/ci.yml",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Extended CI job body is byte-identical to the previous CI jobs and can restore the former gate"
+}
