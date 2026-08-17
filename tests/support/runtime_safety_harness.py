@@ -107,6 +107,7 @@ def build_runtime_app(
     *,
     store: ControlPlaneStore,
     settings: GuardApiSettings,
+    policy_bundle: PolicyBundle | None = None,
 ) -> Any:
     """Initialize the test store and create the real Guard API application."""
 
@@ -121,7 +122,9 @@ def build_runtime_app(
     return create_app(
         store=store,
         settings=settings,
-        policy_bundle=runtime_safety_policy(),
+        policy_bundle=(
+            policy_bundle if policy_bundle is not None else runtime_safety_policy()
+        ),
     )
 
 

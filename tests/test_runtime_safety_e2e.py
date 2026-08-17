@@ -14,7 +14,7 @@ from typing import Any, Iterator
 import pytest
 import uvicorn
 
-from agentguard_core import build_competition_activation_manifest
+from agentguard_core import RuleOverride, build_competition_activation_manifest
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_langgraph_adapter.config import AgentGuardLangGraphConfig
 from agentguard_langgraph_adapter.context_guard import (
@@ -222,9 +222,21 @@ def test_reference_langgraph_operational_profile_uses_strong_runtime_binding(
 def test_active_v21_reviewable_ask_executes_once_with_bound_receipts(
     tmp_path: Path,
 ) -> None:
-    """Close the V2 official ASK chain through the real adapter and API."""
+    """Close a detector-driven V2 safety-floor ASK through adapter and API."""
 
-    policy = runtime_safety_policy()
+    base_policy = runtime_safety_policy()
+    policy = base_policy.model_copy(
+        update={
+            "rule_overrides": {
+                **base_policy.rule_overrides,
+                "P001_sensitive_file_access": RuleOverride(
+                    decision="ask",
+                    risk_score=72,
+                    severity="high",
+                ),
+            }
+        }
+    )
     manifest = build_competition_activation_manifest(
         server_secret=base64.urlsafe_b64decode(REFERENCE_V21_SECRET),
         principal_id="cred_runtime_demo",
@@ -254,7 +266,11 @@ def test_active_v21_reviewable_ask_executes_once_with_bound_receipts(
         ),
     )
     store = MemoryControlPlaneStore()
-    app = build_runtime_app(store=store, settings=settings)
+    app = build_runtime_app(
+        store=store,
+        settings=settings,
+        policy_bundle=policy,
+    )
     case_id = "LGV2-ACTIVE-REVIEWABLE-ASK"
     trace_id = "trace_v21_active_reviewable_ask"
     task_text = "Summarize the quarterly results already present in the conversation."
@@ -321,7 +337,7 @@ def test_active_v21_reviewable_ask_executes_once_with_bound_receipts(
             )
             result = gateway.invoke_tool(
                 tool_name="read_file",
-                arguments={"path": "/docs/public.txt"},
+                arguments={"path": "/private/quarterly-results.txt"},
                 security={
                     "case_id": case_id,
                     "attack_type": "agent_abuse",
@@ -343,7 +359,9 @@ def test_active_v21_reviewable_ask_executes_once_with_bound_receipts(
     assert result.approval_id == resolved["approval_id"]
     assert result.lease_id
     assert result.consumption_id
-    assert runtime.calls == [("read_file", {"path": "/docs/public.txt"})]
+    assert runtime.calls == [
+        ("read_file", {"path": "/private/quarterly-results.txt"})
+    ]
 
     action_audits = [
         event
@@ -362,10 +380,29 @@ def test_active_v21_reviewable_ask_executes_once_with_bound_receipts(
         "mode": "active",
         "selection_basis": "profile_all",
         "matched_path_ids": [],
-        "legacy_floor_applied": False,
+        "legacy_floor_applied": True,
         "activation_ref_digest": manifest.activation_ref_digest,
         "approval_release": "strong_binding_required",
     }
+    authority_evidence = policy_events[0]["evidence"]["decision_authority"][
+        "payload"
+    ]
+    assert authority_evidence["current_decision"]["decision"] == "ask"
+    assert {
+        hit["rule_id"]
+        for hit in authority_evidence["current_decision"]["rule_hits"]
+    } == {"P001_sensitive_file_access"}
+    assert authority_evidence["raw_v21_decision"]["decision"] == "allow"
+    assert authority_evidence["selected_decision"]["decision"] == "ask"
+    assert authority_evidence["selected_decision"]["decision_id"].startswith(
+        "dec:v21-official:"
+    )
+    v21_evidence = policy_events[0]["evidence"]["decision_v21"]["payload"]
+    assert v21_evidence["degradation_ids"] == []
+    assert all(
+        coverage["status"] in {"complete", "not_applicable"}
+        for coverage in v21_evidence["coverage"].values()
+    )
     starts = [
         event
         for event in action_audits
