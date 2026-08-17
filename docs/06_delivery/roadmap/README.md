@@ -50,21 +50,26 @@ no active exclusive-surface conflict
 start 条件但仍有 activation/exit 门槛时，蓝色节点带锁徽标；这表示“可以开发”，不表示
 “可以启用或宣称完成”。
 
-当前 `origin/dev@0f3652e` 快照：
+本轮以 `origin/dev@fdc4b15` 为基线更新：
 
-- 绿色：B0、CORE C00–C09、CT00/01/02A/02B/03A/03B、RTE01–04、R05P、
+- 绿色：B0、控制面 `RM-00`、CORE C00–C09、CT00/01/02A/02B/03A/03B/05、RTE01–04、R05P、
   Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1，以及 `RSC-CT01`、
   CT scoped activation、`I01`、Gate A；
-- 琥珀色：正式 `R05`（`codex/rte-05-integration`）以及控制面 bootstrap `RM-00`
-  （`codex/roadmap-control`）；
-- 蓝色：`RSC-CTPROV`、`FE06`、`CT05`、可选 `CT03R`；
-- 灰色：C10、CT04、S2 及其后续。C10/CT04 的 Gate A 前置已满足，但仍因
+- 琥珀色：正式 `R05`（`codex/rte-05-integration`）；
+- 蓝色：`RSC-CTPROV`、`FE06`、可选 `CT03R`；其中前两项已有 `b814a67` 的
+  observed implementation，但仍需按控制面补齐正式 claim/close；
+- 灰色：C10、CT04、FE07、S2 及其后续。C10/CT04 的 Gate A 前置已满足，但仍因
   R05 active claim 的共享 activation surface 冲突而不可 claim。
 
-R05 Integration 的脏 worktree 证明工作正在实施，不代表 RTE-05 Integration 或 Gate B
-已经通过。它当前独占 evaluation、Guard API production wiring 与 runtime binding activation
-表面；C10/CT04 可继续不触及正式 activation 的研究和测试准备，但正式 claim 必须等资源
-冲突解除。
+R05 implementation 已在 `67ad24d` 合入并登记 commit/test/review/E2E 证据，但
+OpenClaw 2026.7.1-2 仍缺 atomic replace-and-seal 和 authoritative invocation-start hook，
+因此 CF-13/C3 与 Gate B 仍不能关闭。R05 继续独占 evaluation、Guard API production
+wiring 与 runtime binding activation 表面；C10/CT04 可做不触及正式 activation 的研究和
+测试准备，正式 claim 必须等宿主能力阻塞解除并释放资源。
+
+S2-L 的 typed Provenance writer、FE-RSC-06/07、Memory/PostgreSQL live path 与 parity 已在
+`b814a67` 合入。由于这些实现早于对应节点的正式 claim/close，本图将其记录为 observed
+implementation，不倒填或改写生命周期历史；正式 S2 Stage 仍需逐节点完成 reconciliation。
 
 ## 3. 节点和边契约
 
@@ -138,9 +143,9 @@ uv run python scripts/roadmap-tools.py check-diff \
 
 ## 5. 最快并行路线
 
-1. S1、RSC-CT01、I01 和 Gate A 已进入基线；当前可并行 claim
-   `RSC-CTPROV`、`FE06`、`CT05`，有资源时做可选 CT03R。
-2. RSC-CTPROV 与 FE06 汇合到 FE07/S2；R05 Integration 同时继续，但其共享
+1. CT05、S1、RSC-CT01、I01 和 Gate A 已进入基线；当前先并行 reconciliation claim
+   `RSC-CTPROV`、`FE06`，有资源时做可选 CT03R。
+2. RSC-CTPROV 与 FE06 正式关闭后收口 FE07/S2；R05 host-capability closure 同时继续，但其共享
    activation surface 由 integration owner 串行收口。
 3. R05 释放共享表面后，C10、CT04、S3 并行；C10+R05 后立即 I02A→Gate B。
 4. Gate B 后最大并行 C11/C12、CT04M/S5-C、CT06、I03、R06、R07、I04、I02B

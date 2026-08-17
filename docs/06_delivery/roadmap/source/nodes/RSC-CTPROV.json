@@ -8,7 +8,7 @@
   ],
   "lane": "integration",
   "lifecycle": "not_started",
-  "revision": 0,
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -24,5 +24,7 @@
   ],
   "evidence_refs": [],
   "work": null,
-  "notes": []
+  "notes": [
+    "Observed implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
+  ]
 }

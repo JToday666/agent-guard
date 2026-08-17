@@ -7548,78 +7548,6 @@
   ],
   "nodes": [
     {
-      "acceptance_parent": null,
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [
-        "roadmap-catalog-and-generated"
-      ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
-      "evidence_items": [
-        {
-          "id": "EV-RM-00-WORKTREE",
-          "kind": "worktree",
-          "metadata": {
-            "base_sha": "cdf3625736f9a4e054d022ee0f64592e4405f581",
-            "bootstrap_exception": true,
-            "worktree": "/tmp/agent-guard-roadmap-control"
-          },
-          "node_id": "RM-00",
-          "recorded_at": null,
-          "ref": "codex/roadmap-control",
-          "schema_version": "1.0.0",
-          "status": "pending",
-          "summary": "The roadmap control plane is being implemented and verified in its dedicated foundation worktree."
-        }
-      ],
-      "evidence_refs": [
-        "evidence/RM-00/EV-RM-00-WORKTREE.json"
-      ],
-      "exact_title": "R-0 — 路线图基础与执行控制面",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "RM-00",
-      "incoming_edges": [],
-      "kind": "task",
-      "lane": "baseline",
-      "lifecycle": "in_progress",
-      "notes": [
-        "Bootstrap allocation: this node records the isolated foundation worktree before the control plane can enforce its own claim protocol.",
-        "The foundation branch was rebased from its original cdf3625 bootstrap base to current origin/dev f435bff before handoff.",
-        "Keep amber until implementation, tests and acceptance are merged into origin/dev; only then close it green."
-      ],
-      "optional": false,
-      "outgoing_edges": [],
-      "resource_conflicts": [],
-      "revision": 1,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 1. 制品和真值边界",
-          "line_hint": 7,
-          "path": "docs/06_delivery/roadmap/README.md"
-        }
-      ],
-      "topological_rank": 0,
-      "unmet_dependencies": [],
-      "work": {
-        "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
-        "branch": "codex/roadmap-control",
-        "owner": "integration-owner",
-        "started_at": null,
-        "substate": "active",
-        "worktree_slug": "agent-guard-roadmap-control"
-      }
-    },
-    {
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [],
@@ -7675,6 +7603,223 @@
       "topological_rank": 0,
       "unmet_dependencies": [],
       "work": null
+    },
+    {
+      "acceptance_parent": null,
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "roadmap-catalog-and-generated"
+      ],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-RM-00-060CB84559AF",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-17T02:08:49Z",
+          "ref": "1a2e94a85ac9e62fb2da9db3987ed16b102eb3c3",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Roadmap control plane and fast-gate policy merged into origin/dev via PR #163"
+        },
+        {
+          "id": "EV-RM-00-21F2827A5EB2",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:43:39Z",
+          "ref": "local:node-fast-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Node fast gate passed in 36.19s including dashboard, OpenClaw plugin, bench tools and local shims"
+        },
+        {
+          "id": "EV-RM-00-2B844CD6A3C5",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-17T01:39:48Z",
+          "ref": "local://pytest-fast-no-postgres-origin-dev-67ad24d",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Fast gate rebased onto origin/dev 67ad24d: 1916 passed, 17 skipped, 133 deselected in 244.92s"
+        },
+        {
+          "id": "EV-RM-00-3623F6C69CDE",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:43:34Z",
+          "ref": "local:python-fast-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Python fast gate: 1918 passed, 16 skipped, 146 deselected in 218.95s; ruff and pyright passed"
+        },
+        {
+          "id": "EV-RM-00-3DE1E95D7508",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:52:11Z",
+          "ref": "local:python-fast-final-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Final Python fast command: 1918 passed and 128 skipped in 222.12s while excluding Gate A integration, PostgreSQL-specialized and runtime E2E files"
+        },
+        {
+          "id": "EV-RM-00-494B694B6465",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-17T01:33:07Z",
+          "ref": "local://pytest-fast-no-postgres-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Python fast gate excludes PostgreSQL variants: 1861 passed, 16 skipped, 124 deselected in 230.74s"
+        },
+        {
+          "id": "EV-RM-00-531026C29D16",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:52:20Z",
+          "ref": "origin/dev:.github/workflows/ci.yml",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Rollback restores the original ci.yml from origin/dev"
+        },
+        {
+          "id": "EV-RM-00-69D15F913C7A",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:43:44Z",
+          "ref": "origin/dev:.github/workflows/ci.yml",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Extended CI job body is byte-identical to the previous CI jobs and can restore the former gate"
+        },
+        {
+          "id": "EV-RM-00-6A1F23923C6C",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-17T02:08:56Z",
+          "ref": "github-actions:pull/166",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Hosted fast-gate stabilization is recorded; CI pass/fail is non-gating for this integration-owner status refresh"
+        },
+        {
+          "id": "EV-RM-00-722D411BD5BF",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:44:22Z",
+          "ref": "local:ci-simplification-diff-review-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Reviewed workflow triggers, two-job fast gate, explicit test markers, full extended job preservation and release trigger isolation"
+        },
+        {
+          "id": "EV-RM-00-8AF058577424",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-16T17:52:15Z",
+          "ref": "local:rm00-surface-audit-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Final scope is ci.yml only; prior extended/release/marker evidence was superseded after check-diff ownership audit and must not be referenced during close"
+        },
+        {
+          "id": "EV-RM-00-980704FC7CD8",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "RM-00",
+          "recorded_at": "2026-08-17T01:55:43Z",
+          "ref": "local://python-fast-exact-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Exact Python workflow command passed: 1986 passed, 16 skipped, 133 deselected in 240.33s; OpenClaw live and pnpm-dependent contracts excluded"
+        },
+        {
+          "id": "EV-RM-00-WORKTREE",
+          "kind": "worktree",
+          "metadata": {
+            "base_sha": "cdf3625736f9a4e054d022ee0f64592e4405f581",
+            "bootstrap_exception": true,
+            "worktree": "/tmp/agent-guard-roadmap-control"
+          },
+          "node_id": "RM-00",
+          "recorded_at": null,
+          "ref": "codex/roadmap-control",
+          "schema_version": "1.0.0",
+          "status": "pending",
+          "summary": "The roadmap control plane is being implemented and verified in its dedicated foundation worktree."
+        }
+      ],
+      "evidence_refs": [
+        "evidence/RM-00/EV-RM-00-060CB84559AF.json",
+        "evidence/RM-00/EV-RM-00-21F2827A5EB2.json",
+        "evidence/RM-00/EV-RM-00-2B844CD6A3C5.json",
+        "evidence/RM-00/EV-RM-00-3623F6C69CDE.json",
+        "evidence/RM-00/EV-RM-00-3DE1E95D7508.json",
+        "evidence/RM-00/EV-RM-00-494B694B6465.json",
+        "evidence/RM-00/EV-RM-00-531026C29D16.json",
+        "evidence/RM-00/EV-RM-00-69D15F913C7A.json",
+        "evidence/RM-00/EV-RM-00-6A1F23923C6C.json",
+        "evidence/RM-00/EV-RM-00-722D411BD5BF.json",
+        "evidence/RM-00/EV-RM-00-8AF058577424.json",
+        "evidence/RM-00/EV-RM-00-980704FC7CD8.json",
+        "evidence/RM-00/EV-RM-00-WORKTREE.json"
+      ],
+      "exact_title": "R-0 — 路线图基础与执行控制面",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "RM-00",
+      "incoming_edges": [],
+      "kind": "task",
+      "lane": "baseline",
+      "lifecycle": "completed",
+      "notes": [
+        "Bootstrap allocation: this node records the isolated foundation worktree before the control plane can enforce its own claim protocol.",
+        "The foundation branch was rebased from its original cdf3625 bootstrap base to current origin/dev f435bff before handoff.",
+        "Keep amber until implementation, tests and acceptance are merged into origin/dev; only then close it green."
+      ],
+      "optional": false,
+      "outgoing_edges": [],
+      "resource_conflicts": [],
+      "revision": 2,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 1. 制品和真值边界",
+          "line_hint": 7,
+          "path": "docs/06_delivery/roadmap/README.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": {
+        "base_sha": "f435bffdf360ec2fb29f0ea29b09537282650285",
+        "branch": "codex/roadmap-control",
+        "completed_commit": "1a2e94a85ac9e62fb2da9db3987ed16b102eb3c3",
+        "owner": "integration-owner",
+        "started_at": null,
+        "substate": "closed",
+        "worktree_slug": "agent-guard-roadmap-control"
+      }
     },
     {
       "activation_blockers": [],
@@ -10135,8 +10280,52 @@
         "runtime-binding-activation"
       ],
       "effective_status": "in_progress",
-      "evidence_gap": true,
+      "evidence_gap": false,
       "evidence_items": [
+        {
+          "id": "EV-R05-051F0C471046",
+          "kind": "e2e",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-16T16:03:10Z",
+          "ref": "local:openclaw-2026.7.1-2-memory-canary",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Verified restricted pinned-host Memory canary: compiled OpenClaw plugin 18/18 files, registry 9/9, live consume-to-invoke-to-terminal chain 1/1. This is not CF-13/C3 proof because the host lacks authoritative start and atomic replace-and-seal."
+        },
+        {
+          "id": "EV-R05-4F03D70F224F",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-16T16:03:06Z",
+          "ref": "local:rte05-regression-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Verified local regression: Guard API/Core 451 passed (15 PostgreSQL-environment skips); LangGraph/receipt/conformance 115 passed (6 PostgreSQL-environment skips); static and secret-safety checks passed."
+        },
+        {
+          "id": "EV-R05-8ADDBD90353A",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-17T02:09:02Z",
+          "ref": "67ad24dfbb4f6c84b68f8c490f9a8daeda6a37a3",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "RTE-05 strong approval binding implementation merged into origin/dev via PR #162; host capability closure remains blocked"
+        },
+        {
+          "id": "EV-R05-DD1CA08320ED",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-16T15:55:49Z",
+          "ref": "codex-security-scan:7f41d101-6fd3-48fc-9282-c0be9b3ef89f",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Security diff scan and post-fix reviews closed all P0/P1/P2 findings."
+        },
         {
           "id": "EV-R05-WORKTREE",
           "kind": "worktree",
@@ -10154,6 +10343,10 @@
         }
       ],
       "evidence_refs": [
+        "evidence/R05/EV-R05-051F0C471046.json",
+        "evidence/R05/EV-R05-4F03D70F224F.json",
+        "evidence/R05/EV-R05-8ADDBD90353A.json",
+        "evidence/R05/EV-R05-DD1CA08320ED.json",
         "evidence/R05/EV-R05-WORKTREE.json"
       ],
       "exact_title": "PR-RTE-05 — Strong Approval Binding",
@@ -10169,8 +10362,8 @@
       "lane": "rte",
       "lifecycle": "in_progress",
       "notes": [
-        "Active dirty worktree proves implementation has started, not that RTE-05 Integration or Gate B has passed.",
-        "Its exclusive activation surfaces overlap I01 and require serialized integration.",
+        "Implementation and verified local evidence merged into origin/dev at 67ad24d via PR #162; this proves code integration, not CF-13/C3 host closure or Gate B.",
+        "The active claim remains open only for upstream host-capability verification and continues to reserve evaluation, Guard API production wiring, and runtime-binding activation surfaces.",
         "BLOCKED: openclaw@2026.7.1-2 lacks atomic replace-and-seal and an authoritative invocation-start hook; CF-13/C3 cannot be verified without an upstream host capability"
       ],
       "optional": false,
@@ -10185,7 +10378,7 @@
         "E-116-R05-S4"
       ],
       "resource_conflicts": [],
-      "revision": 2,
+      "revision": 3,
       "roles": [
         "task"
       ],
@@ -10521,14 +10714,16 @@
       "kind": "task",
       "lane": "integration",
       "lifecycle": "not_started",
-      "notes": [],
+      "notes": [
+        "Observed implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-105-RSC-CTPROV-FE07",
         "E-107-RSC-CTPROV-S2"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -11671,13 +11866,15 @@
       "kind": "task",
       "lane": "fe",
       "lifecycle": "not_started",
-      "notes": [],
+      "notes": [
+        "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-104-FE06-FE07"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -11797,13 +11994,15 @@
       "kind": "task",
       "lane": "fe",
       "lifecycle": "not_started",
-      "notes": [],
+      "notes": [
+        "Observed Source/Flow presentation and Provenance deep-link implementation landed in origin/dev at b814a67 via PR #159; formal lifecycle remains blocked on closing RSC-CTPROV and FE06."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-108-FE07-S2"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -12460,14 +12659,16 @@
       "kind": "stage",
       "lane": "stage",
       "lifecycle": "not_started",
-      "notes": [],
+      "notes": [
+        "S2-L implementation, Memory/PostgreSQL live paths, and parity evidence landed in origin/dev at b814a67 via PR #159; formal Stage exit remains open until RSC-CTPROV, FE06, FE07, and the documented acceptance nodes are reconciled and closed."
+      ],
       "optional": false,
       "outgoing_edges": [
         "E-110-S2-S3",
         "E-157-S2-I01"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "stage"
       ],
@@ -26773,5 +26974,5 @@
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "385b691bd89b7c25c2c9d363541129f9461f67a5ecf85d5e0ad812d0acce4fc8"
+  "source_digest": "510b31daa9e8055dfa61cac0dd9b1ff6f54f4ed473d066ddf2dd419b653cd654"
 }

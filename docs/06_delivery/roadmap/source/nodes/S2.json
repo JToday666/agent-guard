@@ -8,7 +8,7 @@
   ],
   "lane": "stage",
   "lifecycle": "not_started",
-  "revision": 0,
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -24,5 +24,7 @@
   ],
   "evidence_refs": [],
   "work": null,
-  "notes": []
+  "notes": [
+    "S2-L implementation, Memory/PostgreSQL live paths, and parity evidence landed in origin/dev at b814a67 via PR #159; formal Stage exit remains open until RSC-CTPROV, FE06, FE07, and the documented acceptance nodes are reconciled and closed."
+  ]
 }
