@@ -562,6 +562,12 @@ def resolve_run_request(
             value_sources[key] = "cli"
             explicit_variant = True
 
+    try:
+        repeats = _strict_int(scalar_values["repeats"], "repeats")
+        seed = _strict_int(scalar_values["seed"], "seed")
+    except CompetitionConfigurationError as exc:
+        raise InvalidCompetitionRun("configuration_invalid", str(exc)) from exc
+
     main_suite = suite in {CompetitionSuite.MATRIX, CompetitionSuite.PRODUCT}
     if main_suite:
         if explicit_variant:
@@ -573,6 +579,11 @@ def resolve_run_request(
             raise InvalidCompetitionRun(
                 "full_corpus_required",
                 "matrix/product require the exact frozen 70-case corpus",
+            )
+        if repeats != 1:
+            raise InvalidCompetitionRun(
+                "exact_matrix_repeat_required",
+                "matrix/product require exactly one pass over the frozen A0-A4 matrix",
             )
         variant = None
     else:
@@ -622,8 +633,8 @@ def resolve_run_request(
             planner=planner,
             suite=suite,
             full_corpus=full_corpus,
-            repeats=_strict_int(scalar_values["repeats"], "repeats"),
-            seed=_strict_int(scalar_values["seed"], "seed"),
+            repeats=repeats,
+            seed=seed,
         )
         api_key = resolve_api_key(planner.api_key_env, environ=environ)
     except (CompetitionConfigurationError, ModelExchangeError, ValueError) as exc:
@@ -970,6 +981,7 @@ def _qualification_eligible(
         request.profile.suite in {CompetitionSuite.MATRIX, CompetitionSuite.PRODUCT}
         and request.profile.full_corpus
         and not request.selected_case_ids
+        and request.profile.repeats == 1
         and len(cases) == request.profile.dataset.case_count == 70
         and tuple(arm.arm_id for arm in arms) == _ARM_IDS
         and request.profile.is_official_active

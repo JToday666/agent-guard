@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 from urllib.parse import quote
 
@@ -22,6 +22,10 @@ from agentguard_langgraph_bench.bench.competition_runner import (
     ArmRunResult,
     ExitCode,
     InvalidCompetitionRun,
+    _execution_arms,
+    _expected_case_runs,
+    _load_frozen_cases,
+    _qualification_eligible,
     build_parser,
     main,
     resolve_run_request,
@@ -634,6 +638,64 @@ def test_main_suite_rejects_axis_overrides(suite: str, tmp_path: Path) -> None:
         resolve_run_request(args, environ={"AGENTGUARD_LLM_API_KEY": _SECRET})
 
     assert caught.value.reason_code == "variant_not_allowed_for_suite"
+
+
+@pytest.mark.parametrize("source", ["cli", "config"])
+def test_main_suite_rejects_repeat_override(
+    source: str, tmp_path: Path
+) -> None:
+    config_args: list[str] = []
+    cli_args: list[str] = []
+    if source == "config":
+        config = tmp_path / "repeats.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "schema_version": COMPETITION_CONFIG_SCHEMA_VERSION,
+                    "repeats": 2,
+                }
+            ),
+            encoding="utf-8",
+        )
+        config_args = ["--config", str(config)]
+    else:
+        cli_args = ["--repeats", "2"]
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--suite",
+            "product",
+            "--full-corpus",
+            "--artifacts",
+            str(tmp_path / "artifacts"),
+            "--llm-model",
+            "stub-model",
+            "--llm-base-url",
+            "http://127.0.0.1:43122/v1",
+            *config_args,
+            *cli_args,
+        ]
+    )
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        resolve_run_request(args, environ={"AGENTGUARD_LLM_API_KEY": _SECRET})
+
+    assert caught.value.reason_code == "exact_matrix_repeat_required"
+
+
+def test_qualification_defensively_requires_exact_350_case_runs(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    cases = _load_frozen_cases(request.profile)
+    arms = _execution_arms(request)
+
+    assert _expected_case_runs(request) == 350
+    assert _qualification_eligible(request, cases, arms) is True
+
+    repeated = replace(request, profile=replace(request.profile, repeats=2))
+    assert _expected_case_runs(repeated) == 700
+    assert _qualification_eligible(repeated, cases, arms) is False
 
 
 def test_variant_json_then_cli_precedence(tmp_path: Path) -> None:
