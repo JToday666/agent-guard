@@ -120,6 +120,16 @@
       ]
     },
     {
+      "id": "competition-langgraph-bench-runner",
+      "label": "Competition LangGraph runner and orchestrator",
+      "path_patterns": [
+        "agentguard_langgraph_bench/bench/**",
+        "agentguard_langgraph_bench/adapters/langgraph_demo/**",
+        "agentguard_langgraph_bench/demo_agent/**",
+        "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+      ]
+    },
+    {
       "id": "dashboard-types-mappers-store",
       "label": "Dashboard types, mappers and stores",
       "path_patterns": [

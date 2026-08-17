@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "id": "LGV2-C",
+  "exact_title": "LGV2-C — Core selector, three modes and official evidence",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "core",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "core-evaluation-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
+      "heading": "### LGV2-C — Core selector、三态与 official evidence",
+      "line_hint": 35
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": [
+    "Competition-only V2 authority extension; it does not complete formal C11, Gate B or S5-O."
+  ]
+}

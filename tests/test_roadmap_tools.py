@@ -182,12 +182,17 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "I01",
         "G-A",
         "CT05",
+        "CT04",
+        "FE08",
+        "RSC-CTPROV",
+        "FE06",
+        "FE07",
     ):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05", "CT04", "FE08"):
+    for node_id in ("R05",):
         assert nodes[node_id]["effective_status"] == "in_progress"
     assert nodes["RM-00"]["effective_status"] == "completed"
-    for node_id in ("CT03R", "RSC-CTPROV"):
+    for node_id in ("CT03R", "LGV2-C", "LGV2-B"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
 
@@ -196,7 +201,7 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"CT03R", "RSC-CTPROV"} <= ready_ids
+    assert {"CT03R", "LGV2-C", "LGV2-B"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -211,6 +216,8 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "RM-00",
         "C10",
         "CT05",
+        "LGV2-I",
+        "LGV2-FE",
     }.isdisjoint(ready_ids)
 
 
@@ -224,28 +231,64 @@ def test_ready_is_derived_and_cannot_be_written_into_machine_source(
     assert_validation_failure(result, "ready", "additional", "unknown")
 
 
-def test_claimed_ct04_serializes_c10_on_shared_core_surface(
+def test_claimed_lgv2_core_serializes_c13_on_shared_core_surface(
     roadmap_root: Path,
 ) -> None:
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "LGV2-C",
+        lifecycle="in_progress",
+        revision=1,
+        work={
+            "base_sha": "deadbee",
+            "branch": "codex/lgv2-c-test",
+            "owner": "roadmap-test",
+            "started_at": None,
+            "substate": "active",
+            "worktree_slug": "lgv2-c-test",
+        },
+    )
     nodes = normalized_nodes(build_normalized(roadmap_root))
-    core_v21_10 = nodes["C10"]
+    semantic_shadow = nodes["C13"]
 
-    assert core_v21_10["can_start"] is False
-    assert core_v21_10["effective_status"] == "not_ready"
-    assert core_v21_10["unmet_dependencies"] == []
-    assert core_v21_10["resource_conflicts"] == [
-        {"node_id": "CT04", "surfaces": ["core-evaluation-activation"]}
+    assert semantic_shadow["can_start"] is False
+    assert semantic_shadow["effective_status"] == "not_ready"
+    assert semantic_shadow["unmet_dependencies"] == []
+    assert semantic_shadow["resource_conflicts"] == [
+        {"node_id": "LGV2-C", "surfaces": ["core-evaluation-activation"]}
     ]
 
-    result = run_tool(roadmap_root, "explain", "C10", "--json")
+    result = run_tool(roadmap_root, "explain", "C13", "--json")
     assert_succeeds(result)
     explanation = json.loads(result.stdout)
-    assert explanation["id"] == "C10"
+    assert explanation["id"] == "C13"
     assert explanation["can_start"] is False
     assert explanation["unmet_dependencies"] == []
     assert explanation["resource_conflicts"] == [
-        {"node_id": "CT04", "surfaces": ["core-evaluation-activation"]}
+        {"node_id": "LGV2-C", "surfaces": ["core-evaluation-activation"]}
     ]
+
+
+def test_lgv2_competition_dependencies_and_surfaces_are_scoped(
+    roadmap_root: Path,
+) -> None:
+    document = build_normalized(roadmap_root)
+    nodes = normalized_nodes(document)
+
+    assert nodes["LGV2-C"]["effective_status"] == "ready"
+    assert nodes["LGV2-B"]["effective_status"] == "ready"
+    assert nodes["LGV2-I"]["effective_status"] == "not_ready"
+    assert nodes["LGV2-I"]["unmet_dependencies"] == ["E-LGV2-C-I"]
+    assert nodes["LGV2-I"]["resource_conflicts"] == []
+    assert nodes["LGV2-FE"]["effective_status"] == "not_ready"
+    assert nodes["LGV2-FE"]["unmet_dependencies"] == ["E-LGV2-I-FE"]
+
+    assert nodes["R05"]["change_surfaces"] == ["openclaw-host-capability"]
+    assert nodes["LGV2-B"]["change_surfaces"] == [
+        "competition-langgraph-bench-runner"
+    ]
+    assert "openclaw-host-capability" not in nodes["LGV2-I"]["change_surfaces"]
 
 
 def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
@@ -291,6 +334,18 @@ def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
 def test_ct04_check_diff_accepts_langgraph_and_rejects_openclaw(
     roadmap_root: Path,
 ) -> None:
+    # Rewind the two completed descendants as well as CT04.  The canonical
+    # roadmap now records this historical slice as completed, and validation
+    # correctly rejects a completed child whose prerequisite is made active.
+    for node_id in ("CT04M", "FE10A"):
+        mutate_object(
+            roadmap_root,
+            "nodes",
+            node_id,
+            lifecycle="not_started",
+            revision=0,
+            work=None,
+        )
     mutate_object(
         roadmap_root,
         "nodes",

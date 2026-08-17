@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "id": "LGV2-I",
+  "exact_title": "LGV2-I — Guard API, ASK, RTE and replay wiring",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "integration",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "guard-api-production-wiring",
+    "audit-schema-and-storage",
+    "runtime-binding-activation"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
+      "heading": "### LGV2-I — Guard API、ASK、RTE 与 replay 接线",
+      "line_hint": 46
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": [
+    "This is a LangGraph competition integration slice; formal I02B, I04, ROL1 and cross-runtime activation remain unchanged."
+  ]
+}
