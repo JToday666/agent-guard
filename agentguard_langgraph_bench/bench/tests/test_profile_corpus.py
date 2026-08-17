@@ -44,6 +44,8 @@ def _executor(
     on_core_mode: str = "real_core",
     invalid_case: str | None = None,
     defense_effective: bool = True,
+    missing_integrity_case: str | None = None,
+    integrity_summary_case_count: int | None = None,
 ):
     requests: list[CorpusPassRequest] = []
 
@@ -80,7 +82,14 @@ def _executor(
             "core_mode": core_mode,
             "case_count": len(rows),
             "run_integrity_failed": False,
-            "artifact_integrity": {"ok": True, "case_count": len(rows)},
+            "artifact_integrity": {
+                "ok": True,
+                "case_count": (
+                    len(rows)
+                    if integrity_summary_case_count is None
+                    else integrity_summary_case_count
+                ),
+            },
             "asr_before": (
                 sum(row["attack_success"] for row in malicious_rows)
                 / len(malicious_rows)
@@ -114,7 +123,17 @@ def _executor(
             (
                 "artifact_integrity_manifest",
                 "artifact-integrity.json",
-                {"ok": True},
+                {
+                    "ok": True,
+                    "case_count": sum(
+                        row["case_id"] != missing_integrity_case for row in rows
+                    ),
+                    "cases": {
+                        row["case_id"]: {"case_id": row["case_id"], "ok": True}
+                        for row in rows
+                        if row["case_id"] != missing_integrity_case
+                    },
+                },
             ),
         ):
             path = run_dir / name
@@ -205,6 +224,44 @@ def test_profile_corpus_rejects_fake_core_output(tmp_path: Path) -> None:
             dataset_path=DATASET,
             dataset_identity=_identity(),
             output_root=tmp_path / "fake-core",
+            runtime_binding_id="binding:reference-langgraph",
+            provision_task_fact=lambda case, trace_id: f"task_{case.case_id}",
+            selected_case_ids=("PI-001", "BN-001"),
+            pass_executor=execute,
+        )
+
+
+def test_profile_corpus_rejects_integrity_manifest_missing_selected_case(
+    tmp_path: Path,
+) -> None:
+    execute, _ = _executor(missing_integrity_case="PI-001")
+
+    with pytest.raises(ProfileCorpusError, match="manifest case set"):
+        run_profile_corpus(
+            core_base_url="http://127.0.0.1:8088",
+            adapter_token="adapter-test-token",
+            dataset_path=DATASET,
+            dataset_identity=_identity(),
+            output_root=tmp_path / "missing-integrity-case",
+            runtime_binding_id="binding:reference-langgraph",
+            provision_task_fact=lambda case, trace_id: f"task_{case.case_id}",
+            selected_case_ids=("PI-001", "BN-001"),
+            pass_executor=execute,
+        )
+
+
+def test_profile_corpus_rejects_integrity_summary_case_count_mismatch(
+    tmp_path: Path,
+) -> None:
+    execute, _ = _executor(integrity_summary_case_count=1)
+
+    with pytest.raises(ProfileCorpusError, match="summary has the wrong case count"):
+        run_profile_corpus(
+            core_base_url="http://127.0.0.1:8088",
+            adapter_token="adapter-test-token",
+            dataset_path=DATASET,
+            dataset_identity=_identity(),
+            output_root=tmp_path / "integrity-count-mismatch",
             runtime_binding_id="binding:reference-langgraph",
             provision_task_fact=lambda case, trace_id: f"task_{case.case_id}",
             selected_case_ids=("PI-001", "BN-001"),

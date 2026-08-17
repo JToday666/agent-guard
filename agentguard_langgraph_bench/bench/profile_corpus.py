@@ -450,6 +450,12 @@ def _admit_pass(
     _validate_row_bindings(rows, selected_cases, expected_mode)
     _attach_snapshot(summary, snapshot)
     paths = _admit_artifact_paths(result.artifact_paths, root=root)
+    _validate_pass_artifact_integrity(
+        summary,
+        paths["artifact_integrity_manifest"],
+        selected_cases,
+        expected_mode,
+    )
     return summary, rows, paths
 
 
@@ -489,6 +495,45 @@ def _validate_row_bindings(
         raise ProfileCorpusError(f"{label} rows do not bind to the selected dataset")
     if not all(case_run_keys) or len(case_run_keys) != len(set(case_run_keys)):
         raise ProfileCorpusError(f"{label} rows have invalid case identities")
+
+
+def _validate_pass_artifact_integrity(
+    summary: Mapping[str, Any],
+    manifest_path: Path,
+    selected_cases: Sequence[AttackCase],
+    label: str,
+) -> None:
+    expected_case_ids = {case.case_id for case in selected_cases}
+    expected_case_count = len(expected_case_ids)
+    integrity = summary.get("artifact_integrity")
+    if not isinstance(integrity, Mapping) or integrity.get("ok") is not True:
+        raise ProfileCorpusError(f"{label} artifact integrity is not valid")
+    if integrity.get("case_count") != expected_case_count:
+        raise ProfileCorpusError(
+            f"{label} artifact integrity summary has the wrong case count"
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProfileCorpusError(
+            f"{label} artifact integrity manifest is invalid"
+        ) from exc
+    if not isinstance(manifest, Mapping) or manifest.get("ok") is not True:
+        raise ProfileCorpusError(f"{label} artifact integrity manifest is not valid")
+    cases = manifest.get("cases")
+    if not isinstance(cases, Mapping):
+        raise ProfileCorpusError(
+            f"{label} artifact integrity manifest has no case index"
+        )
+    actual_case_ids = {str(case_id) for case_id in cases}
+    if actual_case_ids != expected_case_ids:
+        raise ProfileCorpusError(
+            f"{label} artifact integrity manifest case set does not match selected cases"
+        )
+    if manifest.get("case_count") != expected_case_count:
+        raise ProfileCorpusError(
+            f"{label} artifact integrity manifest has the wrong case count"
+        )
 
 
 def _admit_artifact_paths(

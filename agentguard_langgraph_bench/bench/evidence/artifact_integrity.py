@@ -22,17 +22,48 @@ OPTIONAL_UNPRODUCED_GENERIC_ARTIFACTS = {
 def build_artifact_integrity_manifest(run_or_artifact_dir: Path, *, output_path: Path | None = None) -> dict[str, Any]:
     root = run_or_artifact_dir.expanduser().resolve()
     replay_dirs = _find_replay_dirs(root)
-    if replay_dirs:
-        cases = {_case_key_for_replay_dir(case_dir): check_case_artifacts(case_dir, root=root) for case_dir in replay_dirs}
-    else:
-        cases = {_case_key_for_generic_case_dir(case_dir): check_generic_case_artifacts(case_dir, root=root) for case_dir in _find_generic_case_dirs(root)}
+    generic_dirs = _find_generic_case_dirs(root)
+    cases: dict[str, dict[str, Any]] = {}
+    replay_case_ids: set[str] = set()
+    index_conflicts: list[dict[str, str]] = []
+    for case_dir in replay_dirs:
+        case_id = _case_key_for_replay_dir(case_dir)
+        if case_id in replay_case_ids:
+            index_conflicts.append(
+                {
+                    "case_id": case_id,
+                    "reason": "duplicate_replay_case",
+                    "ignored_artifact_dir": _relative(case_dir, root),
+                }
+            )
+            continue
+        replay_case_ids.add(case_id)
+        cases[case_id] = check_case_artifacts(case_dir, root=root)
+    for case_dir in generic_dirs:
+        case_id = _case_key_for_generic_case_dir(case_dir)
+        if case_id in replay_case_ids:
+            continue
+        if case_id in cases:
+            index_conflicts.append(
+                {
+                    "case_id": case_id,
+                    "reason": "duplicate_generic_case",
+                    "ignored_artifact_dir": _relative(case_dir, root),
+                }
+            )
+            continue
+        cases[case_id] = check_generic_case_artifacts(case_dir, root=root)
     manifest = {
         "schema_version": "1.0",
         "root": str(root),
         "case_count": len(cases),
         "cases": cases,
-        "ok": bool(cases) and all(item.get("ok") for item in cases.values()),
+        "ok": bool(cases)
+        and not index_conflicts
+        and all(item.get("ok") for item in cases.values()),
     }
+    if index_conflicts:
+        manifest["index_conflicts"] = index_conflicts
     if not cases:
         manifest["error"] = "no cases indexed"
     if output_path is not None:
