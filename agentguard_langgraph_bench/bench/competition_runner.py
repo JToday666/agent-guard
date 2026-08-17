@@ -1,9 +1,9 @@
 """Strict LangGraph V2 competition runner and artifact contract.
 
 This module owns the frozen five-arm schedule, provider/config admission,
-display-safe artifacts and stable 0/1/2 exit semantics.  The live Guard API
-executor is intentionally injected: LGV2-B can establish the runner contract
-before LGV2-I lands the official selector and TaskFact/RTE wiring.
+display-safe artifacts and stable 0/1/2 exit semantics.  The default executor
+starts the live loopback Guard API, provisions TaskFacts, and runs the real
+LangGraph graph; tests may inject an executor only for contract isolation.
 """
 
 from __future__ import annotations
@@ -1021,7 +1021,7 @@ def _preflight_payload(
         "arm_ids": [arm.arm_id for arm in arms],
         "expected_case_runs": _expected_case_runs(request),
         "provider": request.provider.public_dump(),
-        "live_executor_dependency": "LGV2-I",
+        "live_executor": "guard_api_loopback",
     }
 
 
