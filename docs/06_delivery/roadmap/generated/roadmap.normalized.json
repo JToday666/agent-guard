@@ -10305,6 +10305,17 @@
           "summary": "Verified local regression: Guard API/Core 451 passed (15 PostgreSQL-environment skips); LangGraph/receipt/conformance 115 passed (6 PostgreSQL-environment skips); static and secret-safety checks passed."
         },
         {
+          "id": "EV-R05-842F9478027F",
+          "kind": "e2e",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-17T02:08:17Z",
+          "ref": "local:openclaw-2026.7.1-2-memory-postgres-live-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Verified pinned OpenClaw live consume-to-invoke-to-terminal and TOCTOU zero-invocation chains against real Uvicorn Guard API on Memory and PostgreSQL; host CF-13 seal/start-hook limitation remains explicit."
+        },
+        {
           "id": "EV-R05-8ADDBD90353A",
           "kind": "commit",
           "metadata": {},
@@ -10314,6 +10325,39 @@
           "schema_version": "1.0.0",
           "status": "verified",
           "summary": "RTE-05 strong approval binding implementation merged into origin/dev via PR #162; host capability closure remains blocked"
+        },
+        {
+          "id": "EV-R05-99791578FCD8",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-17T02:07:52Z",
+          "ref": "github:actions/31962457264",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "PR #162 CI verified Python 3.12/PostgreSQL 16, Node 24, and OpenClaw runtime smoke on Linux/Windows for 2026.6.6 and 2026.7.1-2."
+        },
+        {
+          "id": "EV-R05-99ED0E7567EE",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-17T02:07:41Z",
+          "ref": "67ad24dfbb4f6c84b68f8c490f9a8daeda6a37a3",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "RTE-05 implementation merged to origin/dev through PR #162."
+        },
+        {
+          "id": "EV-R05-DB949069BBCD",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "R05",
+          "recorded_at": "2026-08-17T02:08:05Z",
+          "ref": "local:rte05-memory-postgres-2026-08-17",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Verified current origin/dev baseline: Guard API/lease 66, LangGraph 14, contract/registry/schema 95, and OpenClaw plugin 204 tests passed across Memory and PostgreSQL where applicable."
         },
         {
           "id": "EV-R05-DD1CA08320ED",
@@ -10345,7 +10389,11 @@
       "evidence_refs": [
         "evidence/R05/EV-R05-051F0C471046.json",
         "evidence/R05/EV-R05-4F03D70F224F.json",
+        "evidence/R05/EV-R05-842F9478027F.json",
         "evidence/R05/EV-R05-8ADDBD90353A.json",
+        "evidence/R05/EV-R05-99791578FCD8.json",
+        "evidence/R05/EV-R05-99ED0E7567EE.json",
+        "evidence/R05/EV-R05-DB949069BBCD.json",
         "evidence/R05/EV-R05-DD1CA08320ED.json",
         "evidence/R05/EV-R05-WORKTREE.json"
       ],
@@ -10362,7 +10410,7 @@
       "lane": "rte",
       "lifecycle": "in_progress",
       "notes": [
-        "Implementation and verified local evidence merged into origin/dev at 67ad24d via PR #162; this proves code integration, not CF-13/C3 host closure or Gate B.",
+        "Implementation plus verified local, hosted CI, and Memory/PostgreSQL live evidence merged or landed on origin/dev through 54c6836; this proves code integration, not CF-13/C3 host closure or Gate B.",
         "The active claim remains open only for upstream host-capability verification and continues to reserve evaluation, Guard API production wiring, and runtime-binding activation surfaces.",
         "BLOCKED: openclaw@2026.7.1-2 lacks atomic replace-and-seal and an authoritative invocation-start hook; CF-13/C3 cannot be verified without an upstream host capability"
       ],
@@ -26974,5 +27022,5 @@
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "510b31daa9e8055dfa61cac0dd9b1ff6f54f4ed473d066ddf2dd419b653cd654"
+  "source_digest": "896b86edf9c3d8694b60e794ea4023642c8e515a9cef5a76b732a7d4468fedd1"
 }

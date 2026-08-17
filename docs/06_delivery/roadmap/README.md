@@ -50,7 +50,7 @@ no active exclusive-surface conflict
 start 条件但仍有 activation/exit 门槛时，蓝色节点带锁徽标；这表示“可以开发”，不表示
 “可以启用或宣称完成”。
 
-本轮以 `origin/dev@fdc4b15` 为基线更新：
+本轮以 `origin/dev@54c6836` 为基线更新：
 
 - 绿色：B0、控制面 `RM-00`、CORE C00–C09、CT00/01/02A/02B/03A/03B/05、RTE01–04、R05P、
   Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1，以及 `RSC-CT01`、
