@@ -40,12 +40,17 @@ class AgentGuardLangGraphConfig:
     defense_enabled: bool = True
     runtime: str = "langgraph"
     agent_id: str = "langgraph"
+    # Trusted credential-side binding identity.  Strong evaluate responses are
+    # unusable (and fail closed) unless this exact value is provisioned.
+    runtime_binding_id: str | None = None
     api_mode: ApiMode = DEFAULT_API_MODE
 
     def __post_init__(self) -> None:
         self.core_base_url = validate_guard_api_base_url(self.core_base_url)
         self.api_mode = validate_api_mode(self.api_mode)
         warn_if_legacy_api_mode(self.api_mode)
+        if self.timeout <= 0:
+            raise ValueError("timeout must be greater than 0")
 
     @property
     def core_api_mode(self) -> ApiMode:

@@ -22,6 +22,7 @@ from agentguard_core import (
     ToolCallPayload,
     ToolResultPayload,
 )
+from agentguard_core.actions import canonical_action_id
 from agentguard_core.events import derive_resources
 
 from guard_api.storage.integrity import canonical_sha256
@@ -278,8 +279,8 @@ def build_audit_event(
                     if isinstance(ct_value, dict) and not ct_value.get(
                         "_budget_dropped"
                     ):
-                        evidence["ct_transient_facts"] = (
-                            budget_dropped_reference(ct_value)
+                        evidence["ct_transient_facts"] = budget_dropped_reference(
+                            ct_value
                         )
                     # 评审 S7：两分支行为等价，合并为单一赋值。
                     merged = dict(evidence)
@@ -298,8 +299,8 @@ def build_audit_event(
                         # 最后降级 decision_v21（先于权威键）。
                         v21_value = evidence.get("decision_v21")
                         if v21_value is not None:
-                            evidence["decision_v21"] = (
-                                budget_dropped_reference(v21_value)
+                            evidence["decision_v21"] = budget_dropped_reference(
+                                v21_value
                             )
     # 只可能携带 audit_id（str）：标注收窄为 dict[str, str]，避免
     # **kwargs 展开时 pyright 无法把 object 值匹配到 str 参数。
@@ -653,7 +654,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
     resource_targets = [resource.target for resource in resources if resource.target]
     payload = event.payload
     if isinstance(payload, ToolCallPayload):
-        action_id = payload.tool.call_id
+        action_id = canonical_action_id(event)
         action_name = payload.tool.name
         return EventDescription(
             subject_id=action_id,
@@ -675,7 +676,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
         )
 
     if isinstance(payload, ToolResultPayload):
-        action_id = payload.tool.call_id
+        action_id = canonical_action_id(event)
         action_name = payload.tool.name
         return EventDescription(
             subject_id=action_id,
@@ -696,10 +697,11 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
             },
         )
 
-    explicit_action_id = getattr(payload, "action_id", None)
-    action_id = (
-        explicit_action_id.strip()
-        if isinstance(explicit_action_id, str) and explicit_action_id.strip()
+    action_id = canonical_action_id(event)
+    explicit_subject_id = getattr(payload, "action_id", None)
+    subject_id = (
+        explicit_subject_id.strip()
+        if isinstance(explicit_subject_id, str) and explicit_subject_id.strip()
         else event.event_id
     )
     action_name = event.event_type
@@ -708,7 +710,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
     )
     metadata: dict[str, object] = {
         "event_type": event.event_type,
-        "subject_id": action_id,
+        "subject_id": subject_id,
         "subject_type": event.event_type,
     }
     if is_action:
@@ -739,7 +741,7 @@ def describe_guard_event(event: GuardEvent) -> EventDescription:
         metadata["memory_key"] = payload_memory.key
 
     return EventDescription(
-        subject_id=action_id,
+        subject_id=subject_id,
         subject_type=event.event_type,
         action_id=action_id,
         action_name=action_name,

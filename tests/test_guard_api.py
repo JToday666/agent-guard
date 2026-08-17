@@ -237,6 +237,7 @@ def _p1_guard_event_payload(
     payload: dict,
     source_trust: str = "untrusted",
     is_malicious: bool = True,
+    pre_execution: bool = True,
 ) -> dict:
     return {
         "schema_version": "0.3",
@@ -248,7 +249,7 @@ def _p1_guard_event_payload(
         "attack_type": "indirect_prompt_injection",
         "is_malicious": is_malicious,
         "timestamp": "2026-06-11T00:00:00+00:00",
-        "pre_execution": True,
+        "pre_execution": pre_execution,
         "security_context": {
             "user_task": "Review external content safely",
             "source_type": "webpage",
@@ -481,7 +482,9 @@ def test_production_configuration_requires_secure_cookie_and_strong_token(
     with pytest.raises(GuardApiConfigurationError, match="external audit checkpoint"):
         settings.validate_for_startup()
 
-    settings.audit_checkpoint_path = str(tmp_path / "agentguard-audit-checkpoints.jsonl")
+    settings.audit_checkpoint_path = str(
+        tmp_path / "agentguard-audit-checkpoints.jsonl"
+    )
     settings.audit_checkpoint_key = _AUDIT_CHECKPOINT_TEST_KEY
     settings.audit_checkpoint_key_id = "test-key-2026"
     with pytest.raises(GuardApiConfigurationError, match="task scope keyring"):
@@ -1422,10 +1425,7 @@ def test_runtime_outcome_receipt_is_strict_parent_bound_and_idempotent() -> None
     assert mismatch.status_code == 409
     assert mismatch.json()["error"]["code"] == "RUNTIME_OUTCOME_PARENT_MISMATCH"
     assert missing_parent.status_code == 422
-    assert (
-        missing_parent.json()["error"]["code"]
-        == "RUNTIME_OUTCOME_PARENT_NOT_FOUND"
-    )
+    assert missing_parent.json()["error"]["code"] == "RUNTIME_OUTCOME_PARENT_NOT_FOUND"
     assert invalid.status_code == 422
     assert invalid.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
 
@@ -1436,6 +1436,95 @@ def test_runtime_outcome_receipt_is_strict_parent_bound_and_idempotent() -> None
     )
     assert extra_field.status_code == 422
     assert extra_field.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
+
+
+def test_rte05_unbound_parent_rejects_forged_enforcement_before_first_write() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=settings))
+    headers = {"Authorization": "Bearer adapter-secret"}
+    evaluation = client.post(
+        "/v1/guard/evaluate", headers=headers, json=_guard_event_payload()
+    )
+    parent = store.get_audit_event(evaluation.json()["policy_audit_id"])
+    assert parent is not None
+    receipt = _runtime_outcome_payload(parent)
+    event_id = receipt["links"]["event_id"]
+    receipt["audit_id"] = f"audit_outcome_{event_id}_approval_release"
+    receipt["metadata"]["outcome_kind"] = "approval_release"
+    receipt["links"].update(
+        {
+            "lease_id": "lease_api_rte05",
+            "consumption_id": "consume_api_rte05",
+        }
+    )
+    receipt["evidence"]["execution"].update(
+        {
+            "status": "unknown",
+            "tool_result_entered_context": None,
+            "persisted": None,
+        }
+    )
+    receipt["evidence"]["side_effects"] = {
+        "measurement_status": "unknown",
+        "count": None,
+        "summary": None,
+    }
+    receipt["evidence"]["result"] = {
+        "disposition": "unknown",
+        "summary": None,
+        "sanitized": None,
+    }
+    receipt["evidence"]["approval"].update(
+        {
+            "status": "allowed",
+            "decision": "allow_once",
+            "resolved_at": receipt["timestamp"],
+        }
+    )
+    receipt["evidence"]["enforcement"] = {
+        "gate_state": "approval_released",
+        "binding_check_status": "passed",
+        "lease_consume_outcome": "consumed",
+        "reason_codes": ["rte-05:binding_exact", "rte-05:lease_consumed"],
+    }
+
+    placeholder = _audit_event_payload(
+        audit_id=receipt["audit_id"],
+        trace_id=receipt["trace_id"],
+        decision="allow",
+        runtime=receipt["runtime"],
+    )
+    placeholder_response = client.post(
+        "/v1/audit/events",
+        headers=headers,
+        json=placeholder,
+    )
+    response = client.post("/v1/audit/events", headers=headers, json=receipt)
+
+    assert placeholder_response.status_code == 422
+    assert placeholder_response.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "RUNTIME_OUTCOME_PARENT_MISMATCH",
+        "message": "Runtime outcome receipt conflicts with its policy evaluation.",
+        "details": [],
+    }
+    assert "lease_api_rte05" not in response.text
+    assert "consume_api_rte05" not in response.text
+    assert store.get_audit_event(receipt["audit_id"]) is None
+
+    for forbidden_key in (
+        "lease_token",
+        "authorization_fingerprint",
+        "grant_id",
+        "detail",
+    ):
+        invalid = json.loads(json.dumps(receipt))
+        invalid["evidence"]["enforcement"][forbidden_key] = "must-not-persist"
+        rejected = client.post("/v1/audit/events", headers=headers, json=invalid)
+        assert rejected.status_code == 422
+        assert rejected.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
 
 
 def test_audit_events_submit_reports_created_and_idempotent_replay() -> None:
@@ -1676,6 +1765,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         event_id="evt_openclaw_result_evidence",
         event_type="tool_result_produced",
         trace_id="trace_openclaw_result_evidence",
+        pre_execution=False,
         payload={
             "tool": {
                 "name": "fetch",
@@ -1830,6 +1920,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 event_id="evt_model_output_api",
                 event_type="model_output_produced",
                 trace_id="trace_p1_model_output",
+                pre_execution=False,
                 payload={
                     "phase": "output",
                     "content_preview": "system prompt: token=abc123",
@@ -1851,6 +1942,7 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
                 event_id="evt_tool_result_api",
                 event_type="tool_result_produced",
                 trace_id="trace_p1_tool_result",
+                pre_execution=False,
                 payload={
                     "tool": {
                         "name": "fetch_url",
@@ -1986,10 +2078,11 @@ def test_guard_evaluate_supports_p1_payload_audit_approval_and_metrics(
     assert audit_event["rule_hits"] == expected_rule_ids
     assert audit_event["links"]["event_id"] == event["event_id"]
     payload_tool = event["payload"].get("tool")
+    explicit_action_id = event["payload"].get("action_id")
     expected_action_id = (
         payload_tool["call_id"]
-        if event["event_type"] == "tool_result_produced"
-        else event["event_id"]
+        if event["event_type"] in {"tool_call_proposed", "tool_result_produced"}
+        else explicit_action_id or f"act_{event['event_id']}"
     )
     expected_display_action_name = (
         payload_tool["name"]
@@ -3413,7 +3506,7 @@ def test_p1_message_send_approval_can_resolve_and_wait() -> None:
     approval = next(item for item in pending if item["approval_id"] == approval_id)
     assert approval["subject_id"] == "evt_message_ask_flow"
     assert approval["subject_type"] == "message_send_proposed"
-    assert approval["action_id"] == "evt_message_ask_flow"
+    assert approval["action_id"] == "act_evt_message_ask_flow"
     assert approval["action_name"] == "message_send_proposed"
     assert "tool_call_id" not in approval
     assert "tool" not in approval
@@ -4186,9 +4279,8 @@ def test_postgres_snapshot_record_readback_ignores_legacy_enforcement_mode(
     assert record.revision == 3
     assert record.policy_bundle.bundle_id == "legacy-policy-3"
     assert record.policy_bundle.allowed_email_domains == ["legacy.example"]
-    assert (
-        "default_enforcement_mode"
-        not in record.policy_bundle.model_dump(mode="json")
+    assert "default_enforcement_mode" not in record.policy_bundle.model_dump(
+        mode="json"
     )
 
 
@@ -4216,9 +4308,8 @@ def test_postgres_snapshot_history_readback_ignores_legacy_enforcement_mode() ->
         "legacy-policy-1",
     ]
     for record in history:
-        assert (
-            "default_enforcement_mode"
-            not in record.policy_bundle.model_dump(mode="json")
+        assert "default_enforcement_mode" not in record.policy_bundle.model_dump(
+            mode="json"
         )
 
 

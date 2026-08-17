@@ -41,6 +41,8 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "enforcementMode",
     "guardApiBaseUrl",
     "requestTimeoutMs",
+    "runtimeBindingId",
+    "strongApprovalBindingEnabled",
   ]);
   assert.deepEqual(manifest.configSchema.required, ["adapterToken"]);
   const adapterToken = properties.adapterToken;
@@ -69,6 +71,22 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     { path: "adapterToken", expected: "string" },
   ]);
   assert.equal("approvalWaitBudgetMs" in properties, false);
+  assert.deepEqual(properties.strongApprovalBindingEnabled, {
+    type: "boolean",
+    default: false,
+    description:
+      "Enable canary strong-binding processing. Server-declared execution leases are always enforced, but current OpenClaw cannot atomically replace and seal the final action, so heartbeat C3 remains false.",
+  });
+  assert.equal(
+    manifest.uiHints.strongApprovalBindingEnabled.help,
+    "Enables canary processing; current OpenClaw lacks atomic replace-and-seal, so C3 is not advertised. Server-declared execution leases still fail closed.",
+  );
+  assert.deepEqual(properties.runtimeBindingId, {
+    type: "string",
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+    description:
+      "Trusted runtime binding identifier provisioned with this OpenClaw adapter. It must exactly match a server-declared strong binding.",
+  });
 });
 
 test("hook contract uses supported OpenClaw enforcement surfaces", () => {

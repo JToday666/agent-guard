@@ -7,7 +7,12 @@
 
 from __future__ import annotations
 
-from .builder import ShadowEvaluation, build_action_ir, build_shadow_evaluation
+from .builder import (
+    ShadowEvaluation,
+    build_action_ir,
+    build_shadow_evaluation,
+    canonical_action_id,
+)
 from .canonical_json import (
     CanonicalizationError,
     canonical_hmac_sha256,
@@ -111,6 +116,7 @@ __all__ = [
     "build_action_ir",
     "build_shadow_evaluation",
     "canonical_hmac_sha256",
+    "canonical_action_id",
     "canonical_json",
     "canonical_json_bytes",
     "canonical_sha256",

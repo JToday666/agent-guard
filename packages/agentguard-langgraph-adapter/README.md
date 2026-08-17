@@ -24,6 +24,7 @@
 
 - 事件评估：`POST /v1/guard/evaluate`
 - 审批等待：`GET /v1/approvals/{approval_id}/wait`
+- 强绑定 lease：`POST /v1/approvals/{approval_id}/execution-leases/consume`
 
 策略审计（`policy_evaluation`）由 Guard API 在 `POST /v1/guard/evaluate` 内部唯一
 写入，适配器在该模式下不再经 `POST /v1/audit/events` 重复提交（契约 §12.1/§22.1）。
@@ -31,6 +32,26 @@
 旧 Core 仍可通过 `api_mode="legacy"` 显式启用。该模式仅依赖
 `/v1/evaluate/tool-call` 和 `/v1/audit/event`，不提供 P1 运行时事件或审批等待能力，
 并会发出弃用提示。未知的 `api_mode` 会直接报错，不会回退到 legacy。
+
+## RTE-05 Strong Approval Binding
+
+Guard API 返回 `requires_execution_lease=true` 时，SDK 只接受与本次 action ID
+以及本地可信配置完全一致的 runtime binding；`runtime_binding_id` 应与 credential
+principal 一起带外配置，例如：
+
+```python
+AgentGuardLangGraphConfig(
+    core_base_url="http://127.0.0.1:8088",
+    token="...",
+    runtime_binding_id="binding:cred_langgraph_main",
+)
+```
+
+缺少 binding 的旧响应继续保持 C1 行为；一旦服务端声明 strong binding，配置缺失、
+action/runtime mismatch、非人工 `allow_once`、409/410、非法响应或超时都会
+fail closed 且不调用工具。网络、429、5xx/503 只在原审批 deadline 内以完全相同
+请求有界重试。SDK 不本地重算 authorization fingerprint，明文 lease token 仅在
+consume 响应解析栈内验证后丢弃，结果与回执只携带 lease/consumption ID。
 
 ## 验证
 

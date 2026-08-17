@@ -155,6 +155,7 @@ def _default_llm_provider() -> str:
 class BenchConfig:
     core_base_url: str = "http://127.0.0.1:8088"
     token: str = "demo-token"
+    runtime_binding_id: str | None = None
     timeout: float = 5.0
     fail_closed: bool = True
     defense_enabled: bool = True
@@ -214,6 +215,7 @@ class BenchConfig:
         *,
         core_base_url: str | None = None,
         token: str | None = None,
+        runtime_binding_id: str | None = None,
         timeout: float | None = None,
         fail_closed: bool = True,
         defense_enabled: bool = True,
@@ -327,6 +329,7 @@ class BenchConfig:
         return cls(
             core_base_url=core_base_url or "http://127.0.0.1:8088",
             token=token or "demo-token",
+            runtime_binding_id=runtime_binding_id or os.getenv("AGENTGUARD_RUNTIME_BINDING_ID") or None,
             timeout=timeout if timeout is not None else 5.0,
             fail_closed=fail_closed,
             defense_enabled=defense_enabled,

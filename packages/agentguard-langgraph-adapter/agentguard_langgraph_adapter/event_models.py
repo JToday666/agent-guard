@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .strong_binding import normalize_approval_resolution
+
+_RUNTIME_SECRET_MATERIAL = re.compile(r"(?:hmac-sha256|lease-v1):[0-9a-f]{64}")
 
 Decision = Literal["allow", "deny", "ask"]
 AuditRecordType = Literal[
@@ -40,6 +45,49 @@ RuntimeOutcomeKind = Literal[
     "tool_result_quarantined",
     "execution_completed",
     "execution_failed",
+]
+RuntimeEnforcementGateState = Literal[
+    "evaluating",
+    "allowed",
+    "approval_pending",
+    "approval_released",
+    "blocked",
+    "timed_out",
+    "binding_failed",
+    "unknown",
+]
+RuntimeBindingCheckStatus = Literal[
+    "not_applicable", "not_performed", "passed", "failed", "unknown"
+]
+RuntimeLeaseConsumeOutcome = Literal[
+    "not_applicable",
+    "not_attempted",
+    "consumed",
+    "expired",
+    "revoked",
+    "rejected",
+    "unknown",
+]
+RuntimeEnforcementReasonCode = Literal[
+    "rte-05:binding_exact",
+    "rte-05:binding_invalid",
+    "rte-05:binding_mismatch",
+    "rte-05:approval_not_human",
+    "rte-05:approval_not_consumable",
+    "rte-05:approval_not_found",
+    "rte-05:approval_expired",
+    "rte-05:identity_denied",
+    "rte-05:approval_timed_out",
+    "rte-05:lease_consumed",
+    "rte-05:consumption_conflict",
+    "rte-05:lease_rejected",
+    "rte-05:lease_expired",
+    "rte-05:lease_revoked",
+    "rte-05:lease_unavailable",
+    "rte-05:lease_response_invalid",
+    "rte-05:lease_consume_timed_out",
+    "rte-05:multiple_binding_conflict",
+    "rte-05:correlation_capacity_exhausted",
 ]
 
 
@@ -144,6 +192,10 @@ class PolicyDecision(BaseModel):
     # evaluate 响应回显的策略审计 ID（契约 §9.9 links.policy_audit_id），
     # 供 runtime_outcome 回执建立不可变的父记录关联。
     policy_audit_id: str | None = None
+    # RTE-05 authorization fingerprint is transient consume input only.  Keep
+    # the untrusted raw shape for strict gateway validation, while excluding it
+    # from repr/model_dump so it cannot leak through receipts or runtime state.
+    enforcement_binding: Any | None = Field(default=None, exclude=True, repr=False)
 
     @property
     def blocked(self) -> bool:
@@ -189,15 +241,23 @@ class RuntimeOutcomeLinks(BaseModel):
     event_id: str
     decision_id: str
     policy_audit_id: str
-    action_id: str | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    action_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     approval_id: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     parent_audit_id: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    lease_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    consumption_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_execution_lease_pair(self) -> "RuntimeOutcomeLinks":
+        if (self.lease_id is None) != (self.consumption_id is None):
+            raise ValueError("lease_id and consumption_id must be present together")
+        return self
 
 
 class RuntimeOutcomeMetadata(BaseModel):
@@ -205,6 +265,21 @@ class RuntimeOutcomeMetadata(BaseModel):
 
     agent_id: str
     outcome_kind: RuntimeOutcomeKind
+
+
+class RuntimeEnforcementEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gate_state: RuntimeEnforcementGateState
+    binding_check_status: RuntimeBindingCheckStatus
+    lease_consume_outcome: RuntimeLeaseConsumeOutcome
+    reason_codes: list[RuntimeEnforcementReasonCode] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_reason_codes(self) -> "RuntimeEnforcementEvidence":
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("enforcement reason_codes must be unique")
+        return self
 
 
 class RuntimeOutcomeEvidence(BaseModel):
@@ -215,6 +290,16 @@ class RuntimeOutcomeEvidence(BaseModel):
     side_effects: dict[str, Any]
     result: dict[str, Any]
     approval: dict[str, Any]
+    enforcement: RuntimeEnforcementEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("approval")
+    @classmethod
+    def validate_approval_timestamp(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if value.get("resolved_at") is None:
+            return value
+        return normalize_approval_resolution(value)
 
 
 class RuntimeOutcomeReceipt(AuditEvent):
@@ -225,7 +310,9 @@ class RuntimeOutcomeReceipt(AuditEvent):
     event_type: Literal["runtime_outcome"] = "runtime_outcome"
     decision: Decision  # pyright: ignore[reportGeneralTypeIssues]
     risk_score: int = Field(ge=0, le=100)  # pyright: ignore[reportGeneralTypeIssues]
-    severity: Literal["low", "medium", "high", "critical"]  # pyright: ignore[reportGeneralTypeIssues]
+    severity: Literal[  # pyright: ignore[reportGeneralTypeIssues]
+        "low", "medium", "high", "critical"
+    ]
     blocked: bool  # pyright: ignore[reportGeneralTypeIssues]
     links: RuntimeOutcomeLinks  # pyright: ignore[reportGeneralTypeIssues]
     latency_ms: Literal[None] = None
@@ -242,6 +329,100 @@ class RuntimeOutcomeReceipt(AuditEvent):
             raise ValueError("runtime outcome completed_at must equal timestamp")
         if self.evidence.execution.get("receipt_recorded") is not True:
             raise ValueError("runtime outcome must be marked as recorded")
+        enforcement = self.evidence.enforcement
+        has_execution_lease = self.links.lease_id is not None
+        if enforcement is not None:
+            consumed = enforcement.lease_consume_outcome == "consumed"
+            released_consume = (
+                enforcement.binding_check_status == "passed"
+                and enforcement.gate_state == "approval_released"
+            )
+            post_consume_deny_shape = (
+                enforcement.gate_state,
+                enforcement.binding_check_status,
+                frozenset(enforcement.reason_codes),
+            )
+            blocked_after_consume = self.metadata.outcome_kind == "pre_execution_deny" and (
+                post_consume_deny_shape
+                in {
+                    (
+                        "binding_failed",
+                        "failed",
+                        frozenset(
+                            {
+                                "rte-05:binding_mismatch",
+                                "rte-05:lease_consumed",
+                            }
+                        ),
+                    ),
+                    (
+                        "timed_out",
+                        "passed",
+                        frozenset(
+                            {
+                                "rte-05:binding_exact",
+                                "rte-05:lease_consume_timed_out",
+                            }
+                        ),
+                    ),
+                    (
+                        "binding_failed",
+                        "passed",
+                        frozenset(
+                            {
+                                "rte-05:binding_exact",
+                                "rte-05:lease_expired",
+                            }
+                        ),
+                    ),
+                    (
+                        "binding_failed",
+                        "passed",
+                        frozenset(
+                            {
+                                "rte-05:binding_exact",
+                                "rte-05:lease_response_invalid",
+                            }
+                        ),
+                    ),
+                    (
+                        "binding_failed",
+                        "failed",
+                        frozenset({"rte-05:multiple_binding_conflict"}),
+                    ),
+                }
+            )
+            if consumed and (
+                not has_execution_lease
+                or not (released_consume or blocked_after_consume)
+                or self.evidence.approval.get("status") != "allowed"
+                or self.evidence.approval.get("decision") != "allow_once"
+            ):
+                raise ValueError(
+                    "consumed enforcement requires exact binding, allowed approval, "
+                    "a released or post-consume-denied gate, and execution lease links"
+                )
+            if has_execution_lease and not consumed:
+                raise ValueError(
+                    "execution lease links require consumed enforcement evidence"
+                )
+            if enforcement.gate_state == "approval_released" and not consumed:
+                raise ValueError(
+                    "an approval-released enforcement gate requires a consumed lease"
+                )
+            if (
+                enforcement.gate_state in {"binding_failed", "timed_out", "blocked"}
+                and self.evidence.execution.get("status") != "not_invoked"
+            ):
+                raise ValueError(
+                    "failed enforcement gates require a not-invoked outcome"
+                )
+        elif has_execution_lease:
+            raise ValueError("execution lease links require enforcement evidence")
+        if _RUNTIME_SECRET_MATERIAL.search(self.model_dump_json()) is not None:
+            raise ValueError(
+                "runtime outcome receipts cannot contain strong-binding secret material"
+            )
         return self
 
 
@@ -277,3 +458,22 @@ class ToolExecutionResult(BaseModel):
     sanitize_applied: bool = False
     quarantine_applied: bool = False
     runtime_receipt_error: str | None = None
+    lease_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    consumption_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("approval_resolution")
+    @classmethod
+    def validate_approval_resolution_timestamp(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return normalize_approval_resolution(value)
+
+    @model_validator(mode="after")
+    def validate_execution_lease_result_pair(self) -> "ToolExecutionResult":
+        if (self.lease_id is None) != (self.consumption_id is None):
+            raise ValueError("lease_id and consumption_id must be present together")
+        return self

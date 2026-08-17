@@ -131,7 +131,8 @@ def _base_event(
         "runtime": "langgraph",
         "trace_id": _TRACE_ID,
         "timestamp": timestamp,
-        "pre_execution": True,
+        "pre_execution": event_type
+        not in {"model_output_produced", "tool_result_produced"},
         "security_context": {
             "user_task": "Summarize a tool result and send the approved summary.",
             "source_type": "user",

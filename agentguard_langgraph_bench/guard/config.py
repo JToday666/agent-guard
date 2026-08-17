@@ -22,6 +22,7 @@ class GuardConfig:
     defense_enabled: bool = True
     runtime: str = "unknown"
     agent_id: str = "unknown_agent"
+    runtime_binding_id: str | None = None
     schema_version: str = "0.3"
     event_type: str = "tool_call_proposed"
     api_mode: ApiMode = DEFAULT_API_MODE
@@ -44,5 +45,6 @@ class GuardConfig:
             defense_enabled=config.defense_enabled,
             runtime=runtime,
             agent_id=agent_id,
+            runtime_binding_id=getattr(config, "runtime_binding_id", None),
             api_mode=getattr(config, "core_api_mode", DEFAULT_API_MODE),
         )

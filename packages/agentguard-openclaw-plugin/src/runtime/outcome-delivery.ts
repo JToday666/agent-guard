@@ -17,6 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { logDiagnostic, type GuardApiClient } from "../guard-api-client.js";
+import { validateEnforcementEvidence } from "../mapping/audit-outcomes.js";
 import type {
   AgentGuardPluginConfig,
   RuntimeOutcomeReceipt,
@@ -32,6 +33,15 @@ const DEFAULT_DRAIN_INTERVAL_MS = 15_000;
 const MAX_PENDING_RECEIPTS = 10_000;
 const MAX_RECEIPT_BYTES = 512 * 1024;
 const MAX_SPOOL_BYTES = 64 * 1024 * 1024;
+const LEASE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
+const RUNTIME_RECEIPT_KINDS = new Set([
+  "pre_execution_deny",
+  "approval_release",
+  "tool_result_modified",
+  "tool_result_quarantined",
+  "execution_completed",
+  "execution_failed",
+]);
 
 type OutcomeEnvelope = {
   version: typeof SPOOL_VERSION;
@@ -301,6 +311,9 @@ export class RuntimeOutcomeDelivery {
 
 function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
   const expectedAuditId = `audit_outcome_${receipt.links?.event_id}_${receipt.metadata?.outcome_kind}`;
+  const leaseId = receipt.links?.lease_id;
+  const consumptionId = receipt.links?.consumption_id;
+  const enforcement = receipt.evidence?.enforcement;
   if (
     receipt.schema_version !== "0.4" ||
     receipt.record_type !== "runtime_outcome" ||
@@ -309,10 +322,41 @@ function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
     !receipt.links?.decision_id ||
     !receipt.links?.policy_audit_id ||
     !receipt.metadata?.agent_id ||
-    !receipt.metadata?.outcome_kind ||
+    !RUNTIME_RECEIPT_KINDS.has(receipt.metadata?.outcome_kind) ||
     receipt.evidence?.execution?.receipt_recorded !== true
   ) {
     throw new Error("runtime outcome receipt is missing its strict identity");
+  }
+  const leaseLinksPresent = leaseId !== undefined || consumptionId !== undefined;
+  if (
+    (leaseId === undefined) !== (consumptionId === undefined) ||
+    (leaseLinksPresent &&
+      (typeof leaseId !== "string" || typeof consumptionId !== "string"))
+  ) {
+    throw new Error("runtime outcome receipt lease links must be paired");
+  }
+  const hasLease = typeof leaseId === "string" && typeof consumptionId === "string";
+  if (
+    hasLease &&
+    (!LEASE_IDENTIFIER.test(leaseId) || !LEASE_IDENTIFIER.test(consumptionId))
+  ) {
+    throw new Error("runtime outcome receipt lease links are invalid");
+  }
+  if (enforcement !== undefined) {
+    validateEnforcementEvidence(enforcement, {
+      hasLease,
+      outcomeKind: receipt.metadata.outcome_kind,
+      executionStatus: receipt.evidence.execution.status,
+    });
+  } else if (hasLease) {
+    throw new Error("runtime outcome receipt lease links require enforcement evidence");
+  }
+  const serialized = stableJson(receipt);
+  if (
+    /hmac-sha256:[0-9a-f]{64}/u.test(serialized) ||
+    /lease-v1:[0-9a-f]{64}/u.test(serialized)
+  ) {
+    throw new Error("runtime outcome receipt contains strong-binding secret material");
   }
 }
 

@@ -77,6 +77,16 @@
         "maximum": 600000,
         "default": 25000
       },
+      "strongApprovalBindingEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable canary strong-binding processing. Server-declared execution leases are always enforced, but current OpenClaw cannot atomically replace and seal the final action, so heartbeat C3 remains false."
+      },
+      "runtimeBindingId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+        "description": "Trusted runtime binding identifier provisioned with this OpenClaw adapter. It must exactly match a server-declared strong binding."
+      },
       "diagnosticLogging": {
         "type": "boolean"
       },
@@ -99,6 +109,14 @@
     },
     "enforcementMode": {
       "label": "Enforcement mode"
+    },
+    "strongApprovalBindingEnabled": {
+      "label": "Strong approval binding canary",
+      "help": "Enables canary processing; current OpenClaw lacks atomic replace-and-seal, so C3 is not advertised. Server-declared execution leases still fail closed."
+    },
+    "runtimeBindingId": {
+      "label": "Runtime binding ID",
+      "help": "Provision this value out of band. Missing or mismatched values fail closed for server-declared bindings."
     },
     "diagnosticLogging": {
       "label": "Diagnostic logging"

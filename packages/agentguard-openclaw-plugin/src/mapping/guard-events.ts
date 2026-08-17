@@ -79,6 +79,7 @@ export function buildToolCallGuardEvent(
   const derivedResources = derivedResourcesForTool(event, context, toolArgs);
   const derivedPaths = derivedPathTargets(event, context, derivedResources);
   const runtimePolicy = runtimePolicyForTool(event, context);
+  const taskId = stringMaybe(context.taskId ?? context.task_id);
   const securityMetadata: JsonObject = {
     session_key: context.sessionKey ?? null,
     tool_kind: event.toolKind ?? context.toolKind ?? null,
@@ -87,6 +88,7 @@ export function buildToolCallGuardEvent(
   const eventMetadata: JsonObject = {
     openclaw_hook: "before_tool_call",
     session_key: context.sessionKey ?? null,
+    ...(taskId ? { task_id: taskId } : {}),
   };
   if (runtimePolicy) {
     securityMetadata.runtime_policy = runtimePolicy;
@@ -146,6 +148,7 @@ export function buildMessageSendGuardEvent(
     String(event.threadId ?? ""),
   );
   const security = runtimeSecurityFields(event, context);
+  const taskId = stringMaybe(context.taskId ?? context.task_id);
   const derivedResources = derivedResourcesForMessage(event, context);
 
   return {
@@ -194,6 +197,7 @@ export function buildMessageSendGuardEvent(
     metadata: {
       openclaw_hook: "message_sending",
       message_metadata: event.metadata ?? {},
+      ...(taskId ? { task_id: taskId } : {}),
     },
   };
 }

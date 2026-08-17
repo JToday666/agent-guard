@@ -102,9 +102,7 @@ def test_canonical_json_rejects_float_and_unknown_types() -> None:
 
 
 def test_canonical_sha256_golden_digest() -> None:
-    expected = "sha256:" + hashlib.sha256(
-        b'{"a":[true,null,"x"],"b":1}'
-    ).hexdigest()
+    expected = "sha256:" + hashlib.sha256(b'{"a":[true,null,"x"],"b":1}').hexdigest()
     assert canonical_sha256({"b": 1, "a": [True, None, "x"]}) == expected
 
 
@@ -346,7 +344,9 @@ def test_authorization_fingerprint_reacts_to_identity_changes() -> None:
         ir.authorization_fingerprint
     )
 
-    effect_changed = ir.model_copy(update={"effects": ActionEffect(code_execution=True)})
+    effect_changed = ir.model_copy(
+        update={"effects": ActionEffect(code_execution=True)}
+    )
     assert authorization_fingerprint(SECRET, effect_changed) != (
         ir.authorization_fingerprint
     )
@@ -457,8 +457,7 @@ def test_matches_destination_domain_op_covers_subdomains_only() -> None:
     assert matches_destination(constraint, [_url_destination("example.com")]) is True
     # 形似域名不是子域：绝不匹配。
     assert (
-        matches_destination(constraint, [_url_destination("evilexample.com")])
-        is False
+        matches_destination(constraint, [_url_destination("evilexample.com")]) is False
     )
 
 
@@ -496,9 +495,7 @@ def test_unknown_constraint_ops_fail_closed() -> None:
 def test_argument_constraint_cannot_see_non_security_relevant_items() -> None:
     # /note 非 security key：值相同、指针相同，但 security_relevant=False 不可见。
     result = normalize_arguments({"note": "secret-value"})
-    constraint = ArgumentConstraint(
-        json_pointer="/note", op="eq", value="secret-value"
-    )
+    constraint = ArgumentConstraint(json_pointer="/note", op="eq", value="secret-value")
     assert matches_argument(constraint, result.canonical) is False
 
 
@@ -518,9 +515,7 @@ def test_json_pointer_items_sorted_with_golden_argument_digest() -> None:
 
 def test_argument_eq_requires_exact_type_no_int_float_cross_match() -> None:
     arguments = CanonicalArguments(
-        items=[
-            CanonicalArgument(json_pointer="/key", value=1, security_relevant=True)
-        ],
+        items=[CanonicalArgument(json_pointer="/key", value=1, security_relevant=True)],
         canonicalization_version=CANONICALIZATION_VERSION,
         argument_digest="sha256:test",
     )
@@ -572,12 +567,8 @@ def _model_input_event(event_id: str) -> GuardEvent:
 
 def test_authorization_fingerprint_is_stable_across_event_ids() -> None:
     # 除 event_id 外完全相同的非 tool_call 事件：授权指纹必须相等。
-    first_ir = build_action_ir(
-        _model_input_event("evt_m4_1"), server_secret=SECRET
-    )
-    second_ir = build_action_ir(
-        _model_input_event("evt_m4_2"), server_secret=SECRET
-    )
+    first_ir = build_action_ir(_model_input_event("evt_m4_1"), server_secret=SECRET)
+    second_ir = build_action_ir(_model_input_event("evt_m4_2"), server_secret=SECRET)
     assert first_ir.authorization_fingerprint == second_ir.authorization_fingerprint
     # audit 指纹承担关联职责：event_id 变更必须改变 audit 指纹。
     assert first_ir.audit_fingerprint != second_ir.audit_fingerprint
@@ -740,6 +731,26 @@ def test_action_id_preserves_payload_identity() -> None:
     )
     assert build_action_ir(memory, server_secret=SECRET).action_id == (
         "call_memory_001"
+    )
+
+    message = GuardEvent.model_validate(
+        {
+            "event_type": "message_send_proposed",
+            "event_id": "evt_message",
+            "trace_id": "trace_action",
+            "runtime": "openclaw",
+            "payload": {
+                "channel": "email",
+                "recipient": "reviewer@example.test",
+                "content_preview": "weekly status",
+                "contains_sensitive_data": False,
+                "sanitized": False,
+                "derived_resources": [],
+            },
+        }
+    )
+    assert build_action_ir(message, server_secret=SECRET).action_id == (
+        "act_evt_message"
     )
 
 

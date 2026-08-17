@@ -19,12 +19,17 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 import pytest
+from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate
 from pydantic import ValidationError as PydanticValidationError
 
 from agentguard_core import RuntimeOutcomeReceipt
 from agentguard_core.decisions.models import (
+    RuntimeBindingCheckStatus,
+    RuntimeEnforcementGateState,
+    RuntimeEnforcementReasonCode,
     RuntimeExecutionStatus,
+    RuntimeLeaseConsumeOutcome,
     RuntimeOutcomeKind,
     RuntimeResultDisposition,
 )
@@ -269,8 +274,7 @@ def test_execution_status_and_disposition_enums_are_in_parity() -> None:
         ]["enum"]
     )
     fixture_statuses = {
-        _load_fixture(kind)["evidence"]["execution"]["status"]
-        for kind in OUTCOME_KINDS
+        _load_fixture(kind)["evidence"]["execution"]["status"] for kind in OUTCOME_KINDS
     }
     fixture_dispositions = {
         _load_fixture(kind)["evidence"]["result"]["disposition"]
@@ -280,9 +284,307 @@ def test_execution_status_and_disposition_enums_are_in_parity() -> None:
     # fixture 出现的取值必须是 schema 枚举与模型 Literal 的子集，
     # 且 schema 枚举与模型 Literal 完全一致。
     assert fixture_statuses <= execution_enum == set(get_args(RuntimeExecutionStatus))
-    assert fixture_dispositions <= disposition_enum == set(
-        get_args(RuntimeResultDisposition)
+    assert (
+        fixture_dispositions
+        <= disposition_enum
+        == set(get_args(RuntimeResultDisposition))
     )
+
+
+def _strong_approval_release_payload() -> dict[str, Any]:
+    payload = _load_fixture("approval_release")
+    payload["links"].update(
+        {
+            "lease_id": "lease_rte05_fixture",
+            "consumption_id": "consume_rte05_fixture",
+        }
+    )
+    payload["evidence"]["enforcement"] = {
+        "gate_state": "approval_released",
+        "binding_check_status": "passed",
+        "lease_consume_outcome": "consumed",
+        "reason_codes": ["rte-05:binding_exact", "rte-05:lease_consumed"],
+    }
+    return payload
+
+
+def _post_consume_pre_execution_deny_payload() -> dict[str, Any]:
+    payload = _strong_approval_release_payload()
+    event_id = payload["links"]["event_id"]
+    payload["audit_id"] = f"audit_outcome_{event_id}_pre_execution_deny"
+    payload["metadata"]["outcome_kind"] = "pre_execution_deny"
+    payload["evidence"]["intervention"] = {
+        "type": "approval_release",
+        "reason": "Final binding revalidation denied invocation after consume.",
+    }
+    payload["evidence"]["execution"].update(
+        {
+            "status": "not_invoked",
+            "error": None,
+            "tool_result_entered_context": False,
+            "persisted": False,
+        }
+    )
+    payload["evidence"]["side_effects"] = {
+        "measurement_status": "measured",
+        "count": 0,
+        "summary": "The invocation boundary was not entered.",
+    }
+    payload["evidence"]["result"] = {
+        "disposition": "not_applicable",
+        "summary": None,
+        "sanitized": False,
+    }
+    payload["evidence"]["enforcement"] = {
+        "gate_state": "binding_failed",
+        "binding_check_status": "failed",
+        "lease_consume_outcome": "consumed",
+        "reason_codes": [
+            "rte-05:binding_mismatch",
+            "rte-05:lease_consumed",
+        ],
+    }
+    return payload
+
+
+def test_rte05_enforcement_evidence_is_strict_additive_and_schema_aligned() -> None:
+    c1_payload = _load_fixture("approval_release")
+    c1_dump = RuntimeOutcomeReceipt.model_validate(c1_payload).model_dump(mode="json")
+    assert "lease_id" not in c1_dump["links"]
+    assert "consumption_id" not in c1_dump["links"]
+    assert "enforcement" not in c1_dump["evidence"]
+
+    payload = _strong_approval_release_payload()
+    receipt = RuntimeOutcomeReceipt.model_validate(payload)
+    dumped = receipt.model_dump(mode="json")
+    schema = _load_schema("runtime_outcome_receipt.schema.json")
+    validate(dumped, schema)
+    validate(dumped, _load_schema("audit_event.schema.json"))
+
+    assert dumped["links"]["lease_id"] == "lease_rte05_fixture"
+    assert dumped["links"]["consumption_id"] == "consume_rte05_fixture"
+    assert dumped["evidence"]["enforcement"] == payload["evidence"]["enforcement"]
+
+    enforcement_schema = schema["properties"]["evidence"]["properties"]["enforcement"]
+    assert set(enforcement_schema["properties"]["gate_state"]["enum"]) == set(
+        get_args(RuntimeEnforcementGateState)
+    )
+    assert set(enforcement_schema["properties"]["binding_check_status"]["enum"]) == set(
+        get_args(RuntimeBindingCheckStatus)
+    )
+    assert set(
+        enforcement_schema["properties"]["lease_consume_outcome"]["enum"]
+    ) == set(get_args(RuntimeLeaseConsumeOutcome))
+    assert set(
+        enforcement_schema["properties"]["reason_codes"]["items"]["enum"]
+    ) == set(get_args(RuntimeEnforcementReasonCode))
+
+
+@pytest.mark.parametrize(
+    ("gate_state", "binding_check_status", "reason_codes"),
+    (
+        (
+            "binding_failed",
+            "failed",
+            ["rte-05:binding_mismatch", "rte-05:lease_consumed"],
+        ),
+        (
+            "timed_out",
+            "passed",
+            ["rte-05:binding_exact", "rte-05:lease_consume_timed_out"],
+        ),
+        (
+            "binding_failed",
+            "passed",
+            ["rte-05:binding_exact", "rte-05:lease_expired"],
+        ),
+        (
+            "binding_failed",
+            "passed",
+            ["rte-05:binding_exact", "rte-05:lease_response_invalid"],
+        ),
+    ),
+)
+def test_rte05_post_consume_pre_execution_deny_is_model_schema_aligned(
+    gate_state: str,
+    binding_check_status: str,
+    reason_codes: list[str],
+) -> None:
+    payload = _post_consume_pre_execution_deny_payload()
+    payload["evidence"]["enforcement"].update(
+        {
+            "gate_state": gate_state,
+            "binding_check_status": binding_check_status,
+            "reason_codes": reason_codes,
+        }
+    )
+
+    receipt = RuntimeOutcomeReceipt.model_validate(payload)
+
+    validate(
+        receipt.model_dump(mode="json"),
+        _load_schema("runtime_outcome_receipt.schema.json"),
+    )
+    assert receipt.metadata.outcome_kind == "pre_execution_deny"
+    assert receipt.evidence.enforcement is not None
+    assert receipt.evidence.enforcement.lease_consume_outcome == "consumed"
+
+
+@pytest.mark.parametrize("weak_status", ("pending", "expired"))
+def test_weak_approval_evidence_cannot_claim_consumed_release(
+    weak_status: str,
+) -> None:
+    payload = _strong_approval_release_payload()
+    payload["evidence"]["approval"].update(
+        {"status": weak_status, "decision": None, "resolved_at": None}
+    )
+
+    with pytest.raises(PydanticValidationError):
+        RuntimeOutcomeReceipt.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        validate(payload, _load_schema("runtime_outcome_receipt.schema.json"))
+
+
+@pytest.mark.parametrize("missing", ["lease_id", "consumption_id"])
+def test_rte05_execution_lease_links_must_be_present_as_a_pair(missing: str) -> None:
+    payload = _strong_approval_release_payload()
+    payload["links"].pop(missing)
+
+    with pytest.raises(PydanticValidationError, match="provided together"):
+        RuntimeOutcomeReceipt.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        validate(payload, _load_schema("runtime_outcome_receipt.schema.json"))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        pytest.param(
+            {"reason_codes": ["rte-05:not_allowlisted"]},
+            id="reason-not-allowlisted",
+        ),
+        pytest.param(
+            {
+                "reason_codes": [
+                    "rte-05:binding_exact",
+                    "rte-05:binding_exact",
+                ]
+            },
+            id="duplicate-reason",
+        ),
+        pytest.param(
+            {
+                "reason_codes": [
+                    "rte-05:binding_exact",
+                    "rte-05:lease_consumed",
+                    "rte-05:approval_not_human",
+                    "rte-05:binding_mismatch",
+                    "rte-05:lease_expired",
+                ]
+            },
+            id="too-many-reasons",
+        ),
+        pytest.param({"lease_token": "secret"}, id="lease-token-forbidden"),
+        pytest.param(
+            {"authorization_fingerprint": "secret"},
+            id="fingerprint-forbidden",
+        ),
+        pytest.param({"grant_id": "secret"}, id="grant-id-forbidden"),
+        pytest.param({"detail": "free text"}, id="free-text-forbidden"),
+    ],
+)
+def test_rte05_enforcement_rejects_unbounded_or_secret_fields(
+    mutation: dict[str, Any],
+) -> None:
+    payload = _strong_approval_release_payload()
+    payload["evidence"]["enforcement"].update(mutation)
+
+    with pytest.raises(PydanticValidationError):
+        RuntimeOutcomeReceipt.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        validate(payload, _load_schema("runtime_outcome_receipt.schema.json"))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        pytest.param("consumed-without-links", id="consumed-without-links"),
+        pytest.param("consumed-with-binding-failed", id="consumed-binding-failed"),
+        pytest.param("consumed-without-release", id="consumed-without-release"),
+        pytest.param("links-with-rejected-outcome", id="links-non-consumed"),
+        pytest.param("links-without-enforcement", id="links-no-enforcement"),
+        pytest.param("released-without-consume", id="released-non-consumed"),
+        pytest.param("failed-gate-was-invoked", id="failed-gate-invoked"),
+        pytest.param(
+            "consumed-with-pending-approval",
+            id="consumed-pending-approval",
+        ),
+    ],
+)
+def test_rte05_enforcement_cross_field_invariants(mutation: str) -> None:
+    payload = _strong_approval_release_payload()
+    enforcement = payload["evidence"]["enforcement"]
+    if mutation == "consumed-without-links":
+        payload["links"].pop("lease_id")
+        payload["links"].pop("consumption_id")
+    elif mutation == "consumed-with-binding-failed":
+        enforcement["binding_check_status"] = "failed"
+    elif mutation == "consumed-without-release":
+        enforcement["gate_state"] = "allowed"
+    elif mutation == "links-with-rejected-outcome":
+        enforcement["lease_consume_outcome"] = "rejected"
+        enforcement["reason_codes"] = ["rte-05:lease_rejected"]
+    elif mutation == "links-without-enforcement":
+        payload["evidence"].pop("enforcement")
+    elif mutation == "released-without-consume":
+        payload["links"].pop("lease_id")
+        payload["links"].pop("consumption_id")
+        enforcement["lease_consume_outcome"] = "not_attempted"
+        enforcement["reason_codes"] = ["rte-05:binding_exact"]
+    elif mutation == "failed-gate-was-invoked":
+        payload["links"].pop("lease_id")
+        payload["links"].pop("consumption_id")
+        enforcement.update(
+            {
+                "gate_state": "binding_failed",
+                "binding_check_status": "failed",
+                "lease_consume_outcome": "not_attempted",
+                "reason_codes": ["rte-05:binding_mismatch"],
+            }
+        )
+        payload["evidence"]["execution"]["status"] = "executed"
+    elif mutation == "consumed-with-pending-approval":
+        payload["metadata"]["outcome_kind"] = "execution_completed"
+        payload["audit_id"] = (
+            f"audit_outcome_{payload['links']['event_id']}_execution_completed"
+        )
+        payload["evidence"]["execution"]["status"] = "executed"
+        payload["evidence"]["result"]["disposition"] = "passed_through"
+        payload["evidence"]["approval"].update(
+            {"status": "pending", "decision": None, "resolved_at": None}
+        )
+    else:  # pragma: no cover - parameter set is frozen above
+        raise AssertionError(mutation)
+
+    with pytest.raises(PydanticValidationError):
+        RuntimeOutcomeReceipt.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        validate(payload, _load_schema("runtime_outcome_receipt.schema.json"))
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "hmac-sha256:" + "a" * 64,
+        "lease-v1:" + "b" * 64,
+    ],
+)
+def test_rte05_runtime_receipt_rejects_secret_material_anywhere(secret: str) -> None:
+    payload = _strong_approval_release_payload()
+    payload["reason"] = f"must never persist {secret}"
+
+    with pytest.raises(PydanticValidationError):
+        RuntimeOutcomeReceipt.model_validate(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -323,12 +625,12 @@ def test_gate_state_contract_constants_are_guarded() -> None:
     }
 
     for state in get_args(GateState):
-        assert execution_authorized(state) is (
-            state in _EXECUTION_AUTHORIZED_STATES
-        )
+        assert execution_authorized(state) is (state in _EXECUTION_AUTHORIZED_STATES)
 
     # execution_authorized 当且仅当 state ∈ {allowed, approval_released}。
-    assert {state for state in get_args(GateState) if execution_authorized(state)} == _EXECUTION_AUTHORIZED_STATES
+    assert {
+        state for state in get_args(GateState) if execution_authorized(state)
+    } == _EXECUTION_AUTHORIZED_STATES
 
 
 # _validate_receipt 已实现的 outcome_kind 一致性规则（kind -> 必须满足的
@@ -370,7 +672,9 @@ def test_fixture_variants_rejected_by_every_kind_specific_rule() -> None:
                 or payload["evidence"]["result"]["disposition"]
                 != rule.get("disposition", payload["evidence"]["result"]["disposition"])
                 or payload["evidence"]["approval"]["status"]
-                != rule.get("approval_status", payload["evidence"]["approval"]["status"])
+                != rule.get(
+                    "approval_status", payload["evidence"]["approval"]["status"]
+                )
             )
             if violates:
                 with pytest.raises(PydanticValidationError):

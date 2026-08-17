@@ -1,0 +1,11 @@
+{
+  "id": "EV-R05-DD1CA08320ED",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "R05",
+  "recorded_at": "2026-08-16T15:55:49Z",
+  "ref": "codex-security-scan:7f41d101-6fd3-48fc-9282-c0be9b3ef89f",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Security diff scan and post-fix reviews closed all P0/P1/P2 findings."
+}

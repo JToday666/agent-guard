@@ -63,24 +63,28 @@
         "evidence": "tests/test_runtime_conformance_langgraph.py"
       },
       "CF-13": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 只交付 Guard API/Core；LangGraph strong-binding runtime integration 尚未合入。"
+        "status": "PASS",
+        "evidence": "tests/test_rte05_runtime_conformance_langgraph.py",
+        "note": "真实 Guard API 链验证 exact binding 与 lease consume 后才允许 invoke，并关联 consume/start/terminal IDs。"
       },
       "CF-14": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 LangGraph TOCTOU fail-closed runtime evidence。"
+        "status": "PASS",
+        "evidence": "tests/test_rte05_runtime_conformance_langgraph.py",
+        "note": "action/fingerprint 漂移以 invocation_count=0 的 fail-closed 证据覆盖。"
       },
       "CF-15": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 LangGraph replay/expiry invocation-count evidence。"
+        "status": "PASS",
+        "evidence": "tests/test_rte05_runtime_conformance_langgraph.py",
+        "note": "相同请求 replay 与 approval/lease expiry 均由真实 invocation-count 及 receipt 关联验证。"
       },
       "CF-16": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 LangGraph LLM isolation runtime evidence。"
+        "status": "PASS",
+        "evidence": "tests/test_rte05_runtime_conformance_langgraph.py",
+        "note": "system/LLM allow_once 不能释放 strong binding，invocation_count 保持 0。"
       },
       "CF-17": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 LangGraph >capacity 长运行 active-call 的无静默 FIFO 淘汰与可观测降级证据；若无 active cache，Integration 可按实证标记 NOT_SUPPORTED。"
+        "status": "NOT_SUPPORTED",
+        "note": "LangGraph reference boundary 不维护跨 hook active-call correlation cache；同步调用内局部状态无 FIFO capacity/eviction 语义。"
       }
     },
     "openclaw": {
@@ -136,24 +140,28 @@
         "note": "真实隔离闭环已证明（RTE-04 硬化，契约 03 §7.2）：hook 层 modified（sanitized）处置 + fail-closed quarantine 在能关联原 action/policy 时同步替换结果并发 tool_result_quarantined 回执（executed + quarantined）；无关联时仅诊断不伪造 policy link。quarantined 回执构造层另有 mapping.test.mjs 覆盖。"
       },
       "CF-13": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 只交付 Guard API/Core；OpenClaw strong-binding runtime integration 尚未合入。"
+        "status": "NOT_SUPPORTED",
+        "note": "openclaw@2026.7.1-2 的 public hook host 无法在 consume 后对最终动作执行 atomic replace-and-seal，也不暴露 authoritative tool-start hook；受限的单插件 host-path canary 只复验 consume→invoke→terminal 与零调用失败路径，不生成 production start fact，也不能据此声明 runtime-wide exact binding capability。"
       },
       "CF-14": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 OpenClaw TOCTOU fail-closed runtime evidence。"
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte05-strong-binding.test.mjs",
+        "note": "审批等待期间的 action/fingerprint 漂移在 release 前以 invocation_count=0 的 fail-closed 证据独立覆盖；本 case 不扩大为 CF-13 的 final-boundary seal 声明。"
       },
       "CF-15": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 OpenClaw replay/expiry invocation-count evidence。"
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte05-strong-binding.test.mjs",
+        "note": "相同请求 replay 与 approval/lease expiry 均由 host harness 的 invocation-count 及 receipt 关联验证。"
       },
       "CF-16": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 OpenClaw LLM isolation runtime evidence。"
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte05-strong-binding.test.mjs",
+        "note": "system/LLM allow_once 不能释放 strong binding，invocation_count 保持 0。"
       },
       "CF-17": {
-        "status": "BLOCKED_BY_DEPENDENCY",
-        "note": "Preparation PR 尚无 OpenClaw >capacity 长运行 active-call 的无静默 FIFO 淘汰、可观测降级与 C3 heartbeat evidence。"
+        "status": "PASS",
+        "evidence": "packages/agentguard-openclaw-plugin/test/rte05-strong-binding.test.mjs",
+        "note": ">capacity active-call harness 验证无静默 FIFO 淘汰与可观测降级；通过本项只是 C3 的必要条件，当前 host 仍因缺 atomic replace-and-seal 保持 heartbeat C3=false。"
       }
     }
   }
