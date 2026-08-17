@@ -623,13 +623,14 @@ class V21PipelineService:
             )
         if (
             self._competition_model_output_observation
+            and self.active
             and event.event_type == "model_output_produced"
         ):
             # Competition-only contract B: model output is an inbound
             # observation, not a new outbound action. Detectors, signals and
             # taint still run; only source/dataflow/memory coverage is N/A for
             # this already server-attested event.
-            assess_kwargs["event_not_applicable_actions"] = frozenset(
+            assess_kwargs["source_dataflow_not_required_actions"] = frozenset(
                 {"model_call"}
             )
         outcome = shadow_assess_with_coverage(

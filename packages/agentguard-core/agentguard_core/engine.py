@@ -142,7 +142,7 @@ class GuardEngine:
         revoked_grant_ids: Sequence[str] = (),
         transient_facts: "AssessmentTransientFacts | None" = None,
         memory_not_required_actions: frozenset[str] = frozenset(),
-        event_not_applicable_actions: frozenset[str] = frozenset(),
+        source_dataflow_not_required_actions: frozenset[str] = frozenset(),
     ) -> "FastAssessment":
         """V21-09 正式 ``assess(event, policies, snapshot) -> FastAssessment``。
 
@@ -163,7 +163,9 @@ class GuardEngine:
             revoked_grant_ids=revoked_grant_ids,
             transient_facts=transient_facts,
             memory_not_required_actions=memory_not_required_actions,
-            event_not_applicable_actions=event_not_applicable_actions,
+            source_dataflow_not_required_actions=(
+                source_dataflow_not_required_actions
+            ),
         )
 
     def finalize(
