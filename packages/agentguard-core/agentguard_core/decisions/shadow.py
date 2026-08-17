@@ -399,6 +399,7 @@ def _assess_kernel(
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
+    event_not_applicable_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
     """V21-08 shadow 与 V21-09 正式 assess 的**唯一**编排主体。
 
@@ -480,6 +481,7 @@ def _assess_kernel(
                 PolicyProfile(
                     policy_revision=snapshot.policy_revision,
                     policy_digest=snapshot.policy_digest,
+                    not_applicable_actions=event_not_applicable_actions,
                     memory_not_required_actions=memory_not_required_actions,
                 ),
             )
@@ -691,6 +693,7 @@ def assess(
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
+    event_not_applicable_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
     """V21-09 正式 Core API（完整方案 §15，L3181-3198）。
 
@@ -720,6 +723,7 @@ def assess(
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
         memory_not_required_actions=memory_not_required_actions,
+        event_not_applicable_actions=event_not_applicable_actions,
     ).assessment
 
 
@@ -733,6 +737,7 @@ def shadow_assess_with_coverage(
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
+    event_not_applicable_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
     """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
 
@@ -748,6 +753,7 @@ def shadow_assess_with_coverage(
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
         memory_not_required_actions=memory_not_required_actions,
+        event_not_applicable_actions=event_not_applicable_actions,
     )
 
 
@@ -761,6 +767,7 @@ def shadow_assess(
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
+    event_not_applicable_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
     """V21-08 shadow 快路径评估（纯函数；同输入必同输出）。
 
@@ -793,6 +800,7 @@ def shadow_assess(
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
         memory_not_required_actions=memory_not_required_actions,
+        event_not_applicable_actions=event_not_applicable_actions,
     ).assessment
 
 

@@ -141,6 +141,14 @@ def create_app(
     # V21-09：四段式编排器（D4，shadow-only）。与 V21ShadowService 同一
     # mode/secret 门控；就绪时 evaluate 编排切换为 pipeline（Phase A
     # 事务外、Phase B 短事务），Phase A 彻底失败回退 V21-08 逐字节路径。
+    competition_active = (
+        competition_activation is not None
+        and settings.effective_v21_mode() == "active"
+        and competition_activation.manifest.profile_id
+        == "competition-langgraph-v2"
+        and competition_activation.manifest.runtime == "langgraph"
+        and competition_activation.manifest.selection_basis == "profile_all"
+    )
     v21_pipeline_service = V21PipelineService(
         settings=settings,
         store=store,
@@ -148,10 +156,10 @@ def create_app(
         policy_service=policy_service,
         memory_not_required_actions=(
             frozenset({"model_call"})
-            if competition_activation is not None
-            and settings.effective_v21_mode() == "active"
+            if competition_active
             else frozenset()
         ),
+        competition_model_output_observation=competition_active,
     )
     # CT-PR-03b：CT 事实投影编排器（D2/D3：独立 flag，默认关闭；
     # 仅 pipeline 材料就绪时生效）。构造无 I/O；flag off 时全部入口

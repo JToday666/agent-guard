@@ -365,6 +365,7 @@ class V21PipelineService:
             Callable[[GuardEvent, FastAssessment], "SemanticJudgment | None"] | None
         ) = None,
         memory_not_required_actions: frozenset[str] = frozenset(),
+        competition_model_output_observation: bool = False,
     ) -> None:
         self._store = store
         self._state_service = state_service
@@ -373,6 +374,9 @@ class V21PipelineService:
         # V21-09 恒 None，零开销。
         self._semantic_provider = semantic_provider
         self._memory_not_required_actions = memory_not_required_actions
+        self._competition_model_output_observation = (
+            competition_model_output_observation
+        )
         self._mode = settings.effective_v21_mode()
         self._enabled = self._mode != "off"
         self._server_secret = self._load_server_secret(settings)
@@ -616,6 +620,17 @@ class V21PipelineService:
         if self._memory_not_required_actions:
             assess_kwargs["memory_not_required_actions"] = (
                 self._memory_not_required_actions
+            )
+        if (
+            self._competition_model_output_observation
+            and event.event_type == "model_output_produced"
+        ):
+            # Competition-only contract B: model output is an inbound
+            # observation, not a new outbound action. Detectors, signals and
+            # taint still run; only source/dataflow/memory coverage is N/A for
+            # this already server-attested event.
+            assess_kwargs["event_not_applicable_actions"] = frozenset(
+                {"model_call"}
             )
         outcome = shadow_assess_with_coverage(
             event,
