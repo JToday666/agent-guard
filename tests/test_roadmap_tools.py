@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import fnmatch
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,11 +26,15 @@ def roadmap_root(tmp_path: Path) -> Path:
 
 
 def run_tool(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment.pop("GITHUB_HEAD_REF", None)
+    environment.pop("GITHUB_EVENT_NAME", None)
     return subprocess.run(
         [sys.executable, str(ROADMAP_TOOL), "--root", str(root), *arguments],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,
+        env=environment,
         text=True,
     )
 
@@ -181,18 +187,16 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     for node_id in ("R05",):
         assert nodes[node_id]["effective_status"] == "in_progress"
     assert nodes["RM-00"]["effective_status"] == "completed"
-    for node_id in ("FE06", "CT03R", "RSC-CTPROV"):
+    for node_id in ("C10", "CT04", "FE06", "FE08", "CT03R", "RSC-CTPROV"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
-    for node_id in ("C10",):
-        assert nodes[node_id]["effective_status"] == "not_ready"
 
     result = run_tool(roadmap_root, "ready", "--json")
     assert_succeeds(result)
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"FE06", "CT03R", "RSC-CTPROV"} <= ready_ids
+    assert {"C10", "CT04", "FE06", "FE08", "CT03R", "RSC-CTPROV"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -202,7 +206,6 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "R05P",
         "R05",
         "RM-00",
-        "C10",
         "CT05",
     }.isdisjoint(ready_ids)
 
@@ -217,32 +220,152 @@ def test_ready_is_derived_and_cannot_be_written_into_machine_source(
     assert_validation_failure(result, "ready", "additional", "unknown")
 
 
-def test_satisfied_start_dependencies_still_report_resource_conflict(
+def test_released_r05_surfaces_make_c10_claimable(
     roadmap_root: Path,
 ) -> None:
     nodes = normalized_nodes(build_normalized(roadmap_root))
     core_v21_10 = nodes["C10"]
 
-    assert core_v21_10["can_start"] is False
-    assert core_v21_10["effective_status"] == "not_ready"
+    assert core_v21_10["can_start"] is True
+    assert core_v21_10["effective_status"] == "ready"
     assert core_v21_10["unmet_dependencies"] == []
-    assert core_v21_10["resource_conflicts"]
+    assert core_v21_10["resource_conflicts"] == []
 
     result = run_tool(roadmap_root, "explain", "C10", "--json")
     assert_succeeds(result)
     explanation = json.loads(result.stdout)
     assert explanation["id"] == "C10"
-    assert explanation["can_start"] is False
+    assert explanation["can_start"] is True
     assert explanation["unmet_dependencies"] == []
-    assert explanation["resource_conflicts"]
+    assert explanation["resource_conflicts"] == []
+
+
+def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
+    roadmap_root: Path,
+) -> None:
+    document = build_normalized(roadmap_root)
+    nodes = normalized_nodes(document)
+    catalog = read_json(machine_dir(roadmap_root) / "roadmap.json")
+    surfaces = {
+        surface["id"]: surface["path_patterns"]
+        for surface in catalog["exclusive_surfaces"]
+    }
+
+    assert "langgraph-runtime-integration" in nodes["CT04"]["change_surfaces"]
+    assert "runtime-binding-activation" not in nodes["CT04"]["change_surfaces"]
+    assert "langgraph-runtime-integration" in nodes["I02A"]["change_surfaces"]
+    assert "runtime-binding-activation" not in nodes["I02A"]["change_surfaces"]
+    residual_paths = (
+        "packages/agentguard-openclaw-plugin/src/index.ts",
+        "packages/agentguard-openclaw-bench-tools/src/index.ts",
+        "scripts/openclaw-rte05-host-chain.mjs",
+        "tests/runtime_conformance/contract_cases.json",
+        "tests/test_openclaw_plugin_contract.py",
+        "tests/test_rte05_openclaw_live.py",
+        "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md",
+    )
+    residual_patterns = surfaces["openclaw-host-capability"]
+    for path in residual_paths:
+        assert any(fnmatch.fnmatchcase(path, pattern) for pattern in residual_patterns)
+
+    for node_id in ("CT04", "I02A"):
+        authorized_patterns = [
+            pattern
+            for surface_id in nodes[node_id]["change_surfaces"]
+            for pattern in surfaces[surface_id]
+        ]
+        for path in residual_paths:
+            assert not any(
+                fnmatch.fnmatchcase(path, pattern) for pattern in authorized_patterns
+            ), f"{node_id} unexpectedly authorizes residual R05 path {path}"
+
+
+def test_ct04_check_diff_accepts_langgraph_and_rejects_openclaw(
+    roadmap_root: Path,
+) -> None:
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "CT04",
+        lifecycle="in_progress",
+        revision=2,
+        work={
+            "base_sha": "deadbee",
+            "branch": "codex/ct04-test",
+            "owner": "roadmap-test",
+            "started_at": None,
+            "substate": "active",
+            "worktree_slug": "ct04-test",
+        },
+    )
+    initialize_git_fixture(roadmap_root, branch="codex/ct04-test")
+
+    def append_evidence(evidence_id: str) -> None:
+        destination = (
+            machine_dir(roadmap_root) / "evidence" / "CT04" / f"{evidence_id}.json"
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        write_json(
+            destination,
+            {
+                "schema_version": "1.0.0",
+                "id": evidence_id,
+                "node_id": "CT04",
+                "kind": "test",
+                "ref": f"pytest:{evidence_id.lower()}",
+                "status": "pending",
+                "summary": "surface authorization probe",
+                "recorded_at": None,
+                "metadata": {},
+            },
+        )
+
+    allowed = (
+        roadmap_root
+        / "packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter/context_guard.py"
+    )
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    allowed.write_text("# allowed reference-runtime change\n", encoding="utf-8")
+    append_evidence("EV-CT04-ALLOWED")
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "allowed LangGraph change").returncode == 0
+    assert_succeeds(
+        run_tool(
+            roadmap_root,
+            "check-diff",
+            "--base-ref",
+            "HEAD^",
+            "--head-ref",
+            "HEAD",
+        )
+    )
+
+    forbidden = (
+        roadmap_root / "packages/agentguard-openclaw-plugin/src/context_guard.ts"
+    )
+    forbidden.parent.mkdir(parents=True, exist_ok=True)
+    forbidden.write_text("// forbidden residual host change\n", encoding="utf-8")
+    append_evidence("EV-CT04-FORBIDDEN")
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "forbidden OpenClaw change").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+    assert_validation_failure(result, "ct04", "does not own", "openclaw")
 
 
 def test_active_exclusive_surface_conflict_removes_otherwise_ready_node(
     roadmap_root: Path,
 ) -> None:
-    active = read_json(object_path(roadmap_root, "nodes", "I01"))
+    active = read_json(object_path(roadmap_root, "nodes", "R05"))
     active_surfaces = active["change_surfaces"]
-    assert active_surfaces, "I01 must reserve at least one exclusive surface"
+    assert active_surfaces, "R05 must reserve its residual exclusive surface"
     mutate_object(
         roadmap_root,
         "nodes",
@@ -277,8 +400,7 @@ def test_blocked_node_is_not_ready_even_when_dependencies_are_satisfied(
 def test_blocked_active_claim_keeps_exclusive_surface_reserved(
     roadmap_root: Path,
 ) -> None:
-    active = read_json(object_path(roadmap_root, "nodes", "I01"))
-    mutate_object(roadmap_root, "nodes", "I01", blocked=True)
+    active = read_json(object_path(roadmap_root, "nodes", "R05"))
     mutate_object(
         roadmap_root,
         "nodes",
@@ -639,6 +761,22 @@ def test_evidence_rename_cannot_evade_append_only_check(roadmap_root: Path) -> N
 def test_close_rejects_unmet_start_exit_and_resource_blockers(
     roadmap_root: Path,
 ) -> None:
+    active = read_json(object_path(roadmap_root, "nodes", "R05"))
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "C10",
+        change_surfaces=list(active["change_surfaces"]),
+        lifecycle="in_progress",
+        work={
+            "base_sha": "deadbee",
+            "branch": "codex/c10-test",
+            "owner": "roadmap-test",
+            "started_at": None,
+            "substate": "active",
+            "worktree_slug": "c10-test",
+        },
+    )
     before = read_json(object_path(roadmap_root, "nodes", "C10"))
 
     result = run_tool(
@@ -648,7 +786,7 @@ def test_close_rejects_unmet_start_exit_and_resource_blockers(
         "--commit",
         "deadbee",
         "--expected-revision",
-        "0",
+        "1",
     )
 
     assert_validation_failure(result, "cannot exit", "resource", "r05")

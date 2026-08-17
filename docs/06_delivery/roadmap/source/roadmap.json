@@ -31,7 +31,15 @@
         "packages/agentguard-core/**",
         "apps/guard-api/guard_api/services/evaluation.py",
         "apps/guard-api/tests/**",
-        "tests/**",
+        "tests/conftest.py",
+        "tests/fixtures/**",
+        "tests/support/**",
+        "tests/test_context_*.py",
+        "tests/test_core_*.py",
+        "tests/test_ct_*.py",
+        "tests/test_evaluation_run_*.py",
+        "tests/test_gate_a_*.py",
+        "tests/test_v21_*.py",
         "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/**"
       ]
     },
@@ -40,7 +48,22 @@
       "label": "Guard API production evaluation wiring",
       "path_patterns": [
         "apps/guard-api/**",
-        "tests/**",
+        "tests/conftest.py",
+        "tests/fixtures/**",
+        "tests/support/**",
+        "tests/test_audit_*.py",
+        "tests/test_context_*.py",
+        "tests/test_ct_*.py",
+        "tests/test_eval_*.py",
+        "tests/test_evidence_*.py",
+        "tests/test_gate_a_*.py",
+        "tests/test_guard_api*.py",
+        "tests/test_postgres_*.py",
+        "tests/test_provenance_*.py",
+        "tests/test_redaction.py",
+        "tests/test_rte05_execution_lease_api.py",
+        "tests/test_store_*.py",
+        "tests/test_trace_*.py",
         "docs/AgentGuard_Runtime_Supervision_Console_Design/**"
       ]
     },
@@ -69,6 +92,31 @@
         "tests/runtime_conformance/**",
         "apps/guard-api/**",
         "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/**"
+      ]
+    },
+    {
+      "id": "openclaw-host-capability",
+      "label": "Residual OpenClaw host capability verification",
+      "path_patterns": [
+        "packages/agentguard-openclaw-plugin/**",
+        "packages/agentguard-openclaw-bench-tools/**",
+        "scripts/openclaw-rte05-host-chain.mjs",
+        "tests/runtime_conformance/**",
+        "tests/test_openclaw_*.py",
+        "tests/test_rte05_openclaw_*.py",
+        "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/**"
+      ]
+    },
+    {
+      "id": "langgraph-runtime-integration",
+      "label": "LangGraph reference-runtime integration",
+      "path_patterns": [
+        "agentguard_langgraph_bench/**",
+        "packages/agentguard-langgraph-adapter/**",
+        "tests/test_rte05_runtime_conformance_langgraph.py",
+        "tests/test_runtime_conformance_langgraph.py",
+        "tests/test_runtime_safety_*.py",
+        "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/**"
       ]
     },
     {

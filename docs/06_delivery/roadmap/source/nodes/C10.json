@@ -2,11 +2,11 @@
   "schema_version": "1.0.0",
   "id": "C10",
   "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
-  "kind": "gate",
+  "kind": "task",
   "roles": ["task", "gate"],
   "lane": "core",
   "lifecycle": "not_started",
-  "revision": 0,
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
@@ -21,6 +21,6 @@
   "evidence_refs": [],
   "work": null,
   "notes": [
-    "Contract/interface research and test preparation are permitted, but program-level Gate A blocks formal start and production activation."
+    "Gate A is complete. This node is claimable implementation work with both task and gate roles; its report is evidence for Gate B but does not itself assert a numerical effect threshold or formal Gate B completion."
   ]
 }

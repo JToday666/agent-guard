@@ -92,7 +92,9 @@ source ref；纯 Git 顺序只能使用 `observed_sequence`。
 
 关键裁决位于 `source/decisions/`：RTE-05 在 Gate B 前；RTE-06/07 并行；CT04 有
 Gate A 项目级叠加门槛；S5-C/S5-O 独立后汇合；Competition S6 与 Full Master Final
-不得混称。
+不得混称。`D-OPERATIONAL-MVP-LANGGRAPH-SCOPE` 进一步冻结 reference profile 边界：
+OpenClaw host 缺口继续阻塞 R05/Gate B/正式 S4，但不再占用已验证 LangGraph、Context
+Builder 和 display-safe evidence 的开发表面。
 
 ## 4. 强制维护流程
 
@@ -154,9 +156,10 @@ uv run python scripts/roadmap-tools.py check-diff \
 
 1. CT05、S1、RSC-CT01、I01 和 Gate A 已进入基线；当前先并行 reconciliation claim
    `RSC-CTPROV`、`FE06`，有资源时做可选 CT03R。
-2. RSC-CTPROV 与 FE06 正式关闭后收口 FE07/S2；R05 host-capability closure 同时继续，但其共享
-   activation surface 由 integration owner 串行收口。
-3. R05 释放共享表面后，C10、CT04、S3 并行；C10+R05 后立即 I02A→Gate B。
+2. RSC-CTPROV 与 FE06 正式关闭后收口 FE07/S2；R05 host-capability closure 同时继续，
+   但只保留 OpenClaw host capability 的独占表面。
+3. C10 与 CT04 共享 activation 表面并由 integration owner 串行；FE08 可与其中一个并行。
+   C10 后可启动 reference-profile I02A；R05 仍作为 Gate B 与正式 S4 的 exit blocker。
 4. Gate B 后最大并行 C11/C12、CT04M/S5-C、CT06、I03、R06、R07、I04、I02B
    和 FE08/S4；共享 activation 仍串行集成。
 5. S5 与 Stateful Rollout Gate 汇合 Competition S6；C13→Semantic Gate→C14 单独汇合

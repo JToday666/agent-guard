@@ -8,12 +8,14 @@
   ],
   "lane": "ct",
   "lifecycle": "not_started",
-  "revision": 0,
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
   "change_surfaces": [
-    "guard-api-production-wiring"
+    "guard-api-production-wiring",
+    "core-evaluation-activation",
+    "langgraph-runtime-integration"
   ],
   "source_refs": [
     {
@@ -25,6 +27,6 @@
   "evidence_refs": [],
   "work": null,
   "notes": [
-    "Interface preparation is allowed, but formal production activation is blocked by Gate A."
+    "Gate A is complete. Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE records that CT04 owns the shared frozen models, Guard API builder, and LangGraph reference-runtime enforcement required for one real Context Builder slice."
   ]
 }
