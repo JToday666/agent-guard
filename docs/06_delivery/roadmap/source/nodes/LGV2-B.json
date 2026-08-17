@@ -1,31 +1,38 @@
 {
-  "schema_version": "1.0.0",
-  "id": "LGV2-B",
-  "exact_title": "LGV2-B — Real LLM runner, experiment matrix and artifacts",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "integration",
-  "lifecycle": "not_started",
-  "revision": 0,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "competition-langgraph-bench-runner"
   ],
-  "source_refs": [
-    {
-      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
-      "heading": "### LGV2-B — 真实 LLM runner、实验矩阵与制品",
-      "line_hint": 60
-    }
-  ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "LGV2-B — Real LLM runner, experiment matrix and artifacts",
+  "hold": false,
+  "id": "LGV2-B",
+  "kind": "task",
+  "lane": "integration",
+  "lifecycle": "in_progress",
   "notes": [
     "May be developed before Core/API integration; product activation and closure remain dependency-gated.",
     "A missing real OpenAI-compatible provider credential prevents live 70x5 qualification but not offline contract implementation."
-  ]
+  ],
+  "optional": false,
+  "revision": 1,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "### LGV2-B — 真实 LLM runner、实验矩阵与制品",
+      "line_hint": 60,
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+    }
+  ],
+  "work": {
+    "base_sha": "aee332d81e92cab29566618c38c1eea9a5989a4e",
+    "branch": "codex/LGV2-B-runner",
+    "owner": "codex-root",
+    "started_at": "2026-08-17T14:12:21Z",
+    "substate": "active",
+    "worktree_slug": "LGV2-B"
+  }
 }
