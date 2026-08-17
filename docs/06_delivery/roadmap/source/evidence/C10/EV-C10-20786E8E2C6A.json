@@ -1,0 +1,11 @@
+{
+  "id": "EV-C10-20786E8E2C6A",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "C10",
+  "recorded_at": "2026-08-17T06:27:37Z",
+  "ref": "plan:c10-optional-extension-rollback",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Rollback stops attaching the optional pre_enable_report extension; current official decisions and existing EvaluationRun API/storage wire behavior remain unchanged"
+}

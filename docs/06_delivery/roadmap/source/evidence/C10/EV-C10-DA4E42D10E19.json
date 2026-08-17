@@ -1,0 +1,11 @@
+{
+  "id": "EV-C10-DA4E42D10E19",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "C10",
+  "recorded_at": "2026-08-17T06:27:25Z",
+  "ref": "local:c10-core-194-passed",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "C10 typed aggregation, explicit denominator, tamper rejection, EvaluationRun extra-field and Memory store roundtrip plus focused Core regressions: 194 passed"
+}
