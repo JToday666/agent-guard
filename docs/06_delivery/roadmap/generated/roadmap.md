@@ -1,6 +1,6 @@
 # AgentGuard 全轨实施路线图
 
-> Source digest: `746ddb241d3ebb35f3411d33a3fc1b3dc0d7b8854940b5c5fc3b190034847645`
+> Source digest: `92383e5d3ba78e33fde7ecd75ec1ec9cdba3c3d9a8807828bae152c31dbe47a2`
 
 状态：🟢 已完成 · 🟠 正在实施 · 🔵 可启动 · ⚪ 未实施且不可启动。
 
@@ -71,8 +71,8 @@ flowchart LR
     N_FE02["FE02 · FE-RSC-02 — Unique execution projector and required supervision ViewModel"]
     N_FE03["FE03 · FE-RSC-03 — Three-lane action capsule and detail skeleton"]
     N_FE04["FE04 · FE-RSC-04 — Approval basis mapper and private Live mutation selector"]
-    N_FE06["FE06 · FE-RSC-06 — CT fact and Provenance compatibility mapper"]
     N_FE05["FE05 · FE-RSC-05 — Replay Artifact importer"]
+    N_FE06["FE06 · FE-RSC-06 — CT fact and Provenance compatibility mapper"]
     N_FE07["FE07 · FE-RSC-07 — Source/Flow presentation and Provenance deep links"]
     N_FE09["FE09 · FE-RSC-09 — Two-Trace aggregate comparison"]
     N_FE10A["FE10A · FE-RSC-10A — Bounded Context Manifest UI"]
@@ -280,9 +280,9 @@ flowchart LR
   N_C14 -. "none · non_blocking" .-> N_S6
   N_G_A == "start · hard_dependency" ==> N_C10
   class N_B0,N_RM_00,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_CT05,N_R01,N_R02,N_R03,N_R04,N_R05P,N_RSC_CT01,N_I01,N_FE00,N_FE01,N_FE02,N_FE03,N_FE04,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD,N_G_CTACT,N_G_A completed
-  class N_R05 inProgress
-  class N_C10,N_CT03R,N_CT04,N_RSC_CTPROV,N_FE08,N_FE06 ready
-  class N_C13,N_C14,N_C11,N_C12,N_CT_O1,N_CT04M,N_CT06,N_CT_O2,N_R06,N_R07,N_I02A,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE07,N_FE09,N_FE10A,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
+  class N_CT04,N_R05,N_FE08 inProgress
+  class N_CT03R,N_RSC_CTPROV ready
+  class N_C10,N_C13,N_C14,N_C11,N_C12,N_CT_O1,N_CT04M,N_CT06,N_CT_O2,N_R06,N_R07,N_I02A,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE06,N_FE07,N_FE09,N_FE10A,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
   classDef completed fill:#1F9D63,color:#fff,stroke:#126540
   classDef inProgress fill:#D99000,color:#111,stroke:#8a5900
   classDef ready fill:#2774D8,color:#fff,stroke:#174985
@@ -291,12 +291,8 @@ flowchart LR
 
 ## Ready Queue
 
-- `FE08`
 - `CT03R`
 - `RSC-CTPROV`
-- `FE06`
-- `C10`
-- `CT04`
 
 ## 完整节点表
 
@@ -314,7 +310,7 @@ flowchart LR
 | `C07` | core | task | completed | 否 | V21-07 — Behavior / Sequence |
 | `C08` | core | task | completed | 否 | V21-08 — Fusion Shadow + Early Audit Evidence |
 | `C09` | core | task | completed | 否 | V21-09 — assess/finalize + CAS Revalidation |
-| `C10` | core | task | ready | 是 | V21-10 — Receipt / Evaluation Pre-enable Gate |
+| `C10` | core | task | not_ready | 否 | V21-10 — Receipt / Evaluation Pre-enable Gate |
 | `C13` | core | task | not_ready | 否 | V21-13 — Semantic Shadow |
 | `C14` | core | task | not_ready | 否 | V21-14 — Optional Semantic Upgrade-only |
 | `C11` | core | task | not_ready | 否 | V21-11 — Limited Enable |
@@ -327,7 +323,7 @@ flowchart LR
 | `CT03B` | ct | task | completed | 否 | CT-PR-03b — Committed Delta Builder production wiring |
 | `CT03R` | ct | task | ready | 是 | CT-PR-03R — Offline Replay Artifact Exporter |
 | `CT05` | ct | task | completed | 否 | CT-PR-05 — Memory Bridge |
-| `CT04` | ct | task | ready | 是 | CT-PR-04 — Context Builder |
+| `CT04` | ct | task | in_progress | 否 | CT-PR-04 — Context Builder |
 | `CT-O1` | ct | task | not_ready | 否 | logical isolation |
 | `CT04M` | ct | task | not_ready | 否 | CT-PR-04-M/INT — Bounded Manifest Producer |
 | `CT06` | ct | task | not_ready | 否 | CT-PR-06 — Declassification Evidence |
@@ -350,14 +346,14 @@ flowchart LR
 | `C12-R` | integration | task | not_ready | 否 | V21-12-R — Stateful case/cohort rollout extension |
 | `ROL1` | integration | task | not_ready | 否 | INT-RSC-ROLLOUT-01 — Scope audit and policy ref |
 | `I03-R` | integration | task | not_ready | 否 | INT-PR-03R — Stateful evidence audit and rollback Gate |
-| `FE08` | fe | task | ready | 是 | FE-RSC-08 — Display-safe RTE binding and consume state |
+| `FE08` | fe | task | in_progress | 否 | FE-RSC-08 — Display-safe RTE binding and consume state |
 | `FE00` | fe | task | completed | 否 | FE-RSC-00 — Deep-frozen data-source descriptor and Preview isolation |
 | `FE01` | fe | task | completed | 否 | FE-RSC-01 — S0/S1 presentation types and action lifecycle Fixture |
 | `FE02` | fe | task | completed | 否 | FE-RSC-02 — Unique execution projector and required supervision ViewModel |
 | `FE03` | fe | task | completed | 否 | FE-RSC-03 — Three-lane action capsule and detail skeleton |
 | `FE04` | fe | task | completed | 否 | FE-RSC-04 — Approval basis mapper and private Live mutation selector |
-| `FE06` | fe | task | ready | 是 | FE-RSC-06 — CT fact and Provenance compatibility mapper |
 | `FE05` | fe | task | not_ready | 否 | FE-RSC-05 — Replay Artifact importer |
+| `FE06` | fe | task | not_ready | 否 | FE-RSC-06 — CT fact and Provenance compatibility mapper |
 | `FE07` | fe | task | not_ready | 否 | FE-RSC-07 — Source/Flow presentation and Provenance deep links |
 | `FE09` | fe | task | not_ready | 否 | FE-RSC-09 — Two-Trace aggregate comparison |
 | `FE10A` | fe | task | not_ready | 否 | FE-RSC-10A — Bounded Context Manifest UI |
