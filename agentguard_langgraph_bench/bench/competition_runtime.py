@@ -617,6 +617,7 @@ def _bench_config(
         "competition_arm_id": request.arm.arm_id,
         "competition_repeat_index": request.repeat_index,
         "competition_context_mode": request.arm.context_mode.value,
+        "competition_rte_mode": request.arm.rte_mode.value,
     }
     return BenchConfig(**values)
 

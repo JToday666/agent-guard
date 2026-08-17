@@ -40,6 +40,12 @@ SUPPORTED_COMPETITION_CONTEXT_MODES: tuple[CompetitionContextMode, ...] = (
     "observe",
     "required",
 )
+CompetitionRteMode = Literal["off", "observe", "enforce"]
+SUPPORTED_COMPETITION_RTE_MODES: tuple[CompetitionRteMode, ...] = (
+    "off",
+    "observe",
+    "enforce",
+)
 
 
 def validate_competition_context_mode(value: object) -> CompetitionContextMode:
@@ -48,6 +54,22 @@ def validate_competition_context_mode(value: object) -> CompetitionContextMode:
         supported = ", ".join(SUPPORTED_COMPETITION_CONTEXT_MODES)
         raise ValueError(
             f"competition_context_mode must be one of: {supported}; got {value!r}"
+        )
+    return mode  # type: ignore[return-value]
+
+
+def validate_competition_rte_mode(
+    value: object | None,
+) -> CompetitionRteMode | None:
+    if value is None:
+        return None
+    mode = str(value).strip().lower()
+    if not mode:
+        return None
+    if mode not in SUPPORTED_COMPETITION_RTE_MODES:
+        supported = ", ".join(SUPPORTED_COMPETITION_RTE_MODES)
+        raise ValueError(
+            f"competition_rte_mode must be one of: {supported}; got {value!r}"
         )
     return mode  # type: ignore[return-value]
 
@@ -221,6 +243,8 @@ class BenchConfig:
     competition_arm_id: str = ""
     competition_repeat_index: int = 0
     competition_context_mode: CompetitionContextMode = "off"
+    # ``None`` preserves the existing non-competition receipt contract.
+    competition_rte_mode: CompetitionRteMode | None = None
     # Populated only after the reference runner creates authoritative TaskFacts.
     trusted_task_ids_by_case: dict[str, str] = field(default_factory=dict)
     trusted_trace_ids_by_case: dict[str, str] = field(default_factory=dict)
@@ -241,6 +265,9 @@ class BenchConfig:
         )
         self.competition_context_mode = validate_competition_context_mode(
             self.competition_context_mode
+        )
+        self.competition_rte_mode = validate_competition_rte_mode(
+            self.competition_rte_mode
         )
         if self.competition_repeat_index < 0:
             raise ValueError("competition_repeat_index must be non-negative")
@@ -314,6 +341,7 @@ class BenchConfig:
         competition_arm_id: str | None = None,
         competition_repeat_index: int | None = None,
         competition_context_mode: str | None = None,
+        competition_rte_mode: str | None = None,
         strict_runtime_targets: bool | None = None,
         agent_visible_payload_mode: str | None = None,
         closure_on_partial: bool | None = None,
@@ -475,6 +503,9 @@ class BenchConfig:
                 competition_context_mode
                 or os.getenv("AGENTGUARD_COMPETITION_CONTEXT_MODE")
                 or "off"
+            ),
+            competition_rte_mode=validate_competition_rte_mode(
+                competition_rte_mode
             ),
             strict_runtime_targets=(
                 _env_bool("AGENTGUARD_BENCH_STRICT_RUNTIME_TARGETS", False)

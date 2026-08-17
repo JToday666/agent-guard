@@ -40,9 +40,12 @@ def runtime_receipts_enabled(guard_adapter: Any) -> bool:
     config = getattr(guard_adapter, "config", None)
     mode = getattr(config, "core_api_mode", getattr(config, "api_mode", None))
     defense_enabled = getattr(config, "defense_enabled", True)
+    competition_mode = bool(getattr(config, "competition_mode", False))
+    competition_rte_mode = getattr(config, "competition_rte_mode", None)
     return bool(
         defense_enabled
         and mode == "guard-api-v0.3"
+        and not (competition_mode and competition_rte_mode == "off")
         and callable(getattr(guard_adapter, "submit_audit_event", None))
     )
 

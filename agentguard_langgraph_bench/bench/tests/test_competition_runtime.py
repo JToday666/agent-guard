@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterator
@@ -12,6 +13,7 @@ from agentguard_langgraph_adapter.context_guard import REFERENCE_RUNTIME_FACT
 
 from agentguard_langgraph_bench.bench.competition_models import (
     CompetitionSuite,
+    RteMode,
     load_competition_profile,
 )
 from agentguard_langgraph_bench.bench.competition_runner import (
@@ -20,6 +22,7 @@ from agentguard_langgraph_bench.bench.competition_runner import (
 )
 from agentguard_langgraph_bench.bench.competition_runtime import (
     _PREFLIGHT_TOOL,
+    _bench_config,
     execute_competition_arm,
 )
 from agentguard_langgraph_bench.bench.dataset_loader import load_attack_cases
@@ -132,6 +135,32 @@ def _arm_request(tmp_path: Path, base_url: str) -> ArmRunRequest:
     )
 
 
+def test_bench_config_propagates_each_competition_rte_mode(tmp_path: Path) -> None:
+    request = _arm_request(tmp_path, "http://127.0.0.1:9/v1")
+    case_id = request.cases[0].case_id
+
+    for rte_mode in RteMode:
+        variant = replace(
+            request,
+            arm=replace(request.arm, rte_mode=rte_mode),
+        )
+        config = _bench_config(
+            variant,
+            base_url="http://127.0.0.1:8088",
+            adapter_token="adapter-token",
+            scratch=tmp_path / rte_mode.value,
+            task_ids={case_id: f"task-{rte_mode.value}"},
+            trace_ids={case_id: f"trace-{rte_mode.value}"},
+        )
+
+        assert config.competition_rte_mode == rte_mode.value
+        assert GuardConfig.from_bench_config(
+            config,
+            runtime="langgraph",
+            agent_id="langgraph-demo",
+        ).competition_rte_mode == rte_mode.value
+
+
 def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
     tmp_path: Path,
 ) -> None:
@@ -146,6 +175,7 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
                 "fallback": config.llm_fallback_to_case_plan,
                 "closure": config.closure_on_partial,
                 "context": config.context_isolation_mode,
+                "rte": config.competition_rte_mode,
                 "task_id": config.trusted_task_ids_by_case[case.case_id],
                 "trace_id": config.trusted_trace_ids_by_case[case.case_id],
             }
@@ -257,6 +287,7 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
         "fallback": False,
         "closure": False,
         "context": "off",
+        "rte": "enforce",
         "task_id": result.rows[0]["task_fact"]["task_id"],
         "trace_id": result.rows[0]["task_fact"]["trace_id"],
     }

@@ -421,6 +421,7 @@ class GuardedToolGateway:
                 )
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
+        start_receipt_error: str | None = None
         if self._supports_action_receipts(receipt_decision):
             started = build_tool_started_observation(
                 receipt_event,
@@ -431,8 +432,11 @@ class GuardedToolGateway:
                 lease_id=lease_id,
                 consumption_id=consumption_id,
             )
-            start_error = self._record_receipt(started)
-            if start_error is not None:
+            start_receipt_error = self._record_receipt(started)
+            if (
+                start_receipt_error is not None
+                and self._competition_rte_mode() != "observe"
+            ):
                 terminal_error = self._record_outcome(
                     receipt_event,
                     receipt_decision,
@@ -464,11 +468,12 @@ class GuardedToolGateway:
                     runtime_terminal=True,
                     terminal_reason="runtime_receipt_failure",
                     safe_message="The tool call was not executed because its start receipt could not be recorded.",
-                    runtime_receipt_error=terminal_error or start_error,
+                    runtime_receipt_error=terminal_error or start_receipt_error,
                     lease_id=lease_id,
                     consumption_id=consumption_id,
                 )
-            start_audit_id = started.audit_id
+            if start_receipt_error is None:
+                start_audit_id = started.audit_id
             # The live lease authorized the action when this receipt persisted.
             # Do not turn later clock movement into a false start + not_invoked.
         try:
@@ -541,7 +546,7 @@ class GuardedToolGateway:
                 consumption_id=consumption_id,
             )
             if not result_outcome_attempted:
-                payload.runtime_receipt_error = self._record_outcome(
+                terminal_receipt_error = self._record_outcome(
                     receipt_event,
                     receipt_decision,
                     execution_status="executed",
@@ -555,6 +560,13 @@ class GuardedToolGateway:
                     enforcement=enforcement,
                     lease_id=lease_id,
                     consumption_id=consumption_id,
+                )
+                payload.runtime_receipt_error = (
+                    start_receipt_error or terminal_receipt_error
+                )
+            else:
+                payload.runtime_receipt_error = (
+                    start_receipt_error or payload.runtime_receipt_error
                 )
             return payload
         except Exception as exc:
@@ -614,7 +626,7 @@ class GuardedToolGateway:
                 counts_as_effective_block=False,
                 sanitize_applied=_decision_has_effect(decision, "patch"),
                 quarantine_applied=_decision_has_effect(decision, "quarantine"),
-                runtime_receipt_error=receipt_error,
+                runtime_receipt_error=start_receipt_error or receipt_error,
                 lease_id=lease_id,
                 consumption_id=consumption_id,
             )
@@ -718,6 +730,13 @@ class GuardedToolGateway:
             runtime_receipts_enabled(self.guard_adapter)
             and getattr(decision, "policy_audit_id", None)
         )
+
+    def _competition_rte_mode(self) -> str | None:
+        config = getattr(self.guard_adapter, "config", None)
+        if not bool(getattr(config, "competition_mode", False)):
+            return None
+        mode = getattr(config, "competition_rte_mode", None)
+        return str(mode).strip().lower() if mode is not None else None
 
     def _record_outcome(
         self,

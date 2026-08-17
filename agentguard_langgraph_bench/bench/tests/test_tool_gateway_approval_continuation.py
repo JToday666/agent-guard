@@ -323,6 +323,108 @@ def test_gateway_records_explicit_trace_lifecycle_with_parent_receipt(tmp_path) 
     assert completed["links"]["parent_audit_id"] == started["audit_id"]
 
 
+def test_competition_rte_off_skips_trace_and_action_receipts(tmp_path) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _FailingStartReceiptAllowGuard("off")
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+    )
+
+    assert gateway.record_trace_lifecycle(
+        trace_id="trace_rte_off",
+        state="trace_started",
+        runtime="langgraph",
+        case_id="BN-RTE-OFF",
+    ) is None
+    result = gateway.invoke_tool(
+        tool_name="write_file",
+        arguments={"path": "/reports/rte-off.txt", "content": "executed"},
+        security={
+            "case_id": "BN-RTE-OFF",
+            "attack_type": "benign",
+            "is_malicious": False,
+        },
+        trace_id="trace_rte_off",
+        call_id="call_rte_off",
+    )
+
+    assert result.executed is True
+    assert result.runtime_receipt_error is None
+    assert guard.submitted == []
+    assert (tmp_path / "files" / "reports" / "rte-off.txt").exists()
+
+
+def test_competition_rte_observe_keeps_invocation_on_start_receipt_failure(
+    tmp_path,
+) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _FailingStartReceiptAllowGuard("observe")
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="write_file",
+        arguments={"path": "/reports/rte-observe.txt", "content": "executed"},
+        security={
+            "case_id": "BN-RTE-OBSERVE",
+            "attack_type": "benign",
+            "is_malicious": False,
+        },
+        trace_id="trace_rte_observe",
+        call_id="call_rte_observe",
+    )
+
+    assert result.executed is True
+    assert result.blocked is False
+    assert result.runtime_receipt_error == (
+        "Runtime receipt submission failed: simulated start write failure"
+    )
+    assert [event["record_type"] for event in guard.submitted] == [
+        "runtime_observation",
+        "runtime_outcome",
+    ]
+    assert "parent_audit_id" not in guard.submitted[1]["links"]
+    assert (tmp_path / "files" / "reports" / "rte-observe.txt").exists()
+
+
+def test_competition_rte_enforce_blocks_before_start_receipt_is_persisted(
+    tmp_path,
+) -> None:
+    ensure_sandbox(tmp_path)
+    guard = _FailingStartReceiptAllowGuard("enforce")
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=MockToolRegistry(tmp_path),
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="write_file",
+        arguments={"path": "/reports/rte-enforce.txt", "content": "blocked"},
+        security={
+            "case_id": "BN-RTE-ENFORCE",
+            "attack_type": "benign",
+            "is_malicious": False,
+        },
+        trace_id="trace_rte_enforce",
+        call_id="call_rte_enforce",
+    )
+
+    assert result.executed is False
+    assert result.blocked is True
+    assert result.block_semantics == "runtime_receipt_failure"
+    assert result.runtime_receipt_error == (
+        "Runtime receipt submission failed: simulated start write failure"
+    )
+    assert [event["record_type"] for event in guard.submitted] == [
+        "runtime_observation",
+        "runtime_outcome",
+    ]
+    assert not (tmp_path / "files" / "reports" / "rte-enforce.txt").exists()
+
+
 class _AskApprovalGuard:
     def __init__(self, resolution: dict[str, Any]) -> None:
         self.resolution = resolution
@@ -433,3 +535,21 @@ class _ReceiptAllowGuard(_ReceiptAskApprovalGuard):
         decision.reason = "allowed by test policy"
         decision.approval = None
         return event, decision
+
+
+class _FailingStartReceiptAllowGuard(_ReceiptAllowGuard):
+    def __init__(self, competition_rte_mode: str) -> None:
+        super().__init__()
+        self.config = SimpleNamespace(
+            core_api_mode="guard-api-v0.3",
+            defense_enabled=True,
+            competition_mode=True,
+            competition_rte_mode=competition_rte_mode,
+        )
+
+    def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
+        dumped = audit_event.model_dump(mode="json")
+        self.submitted.append(dumped)
+        if dumped.get("stage") == "tool_call_started":
+            return {"ok": False, "error": "simulated start write failure"}
+        return {"ok": True, "audit_id": audit_event.audit_id}
