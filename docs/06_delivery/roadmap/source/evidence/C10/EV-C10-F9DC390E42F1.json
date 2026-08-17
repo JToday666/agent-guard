@@ -1,0 +1,11 @@
+{
+  "id": "EV-C10-F9DC390E42F1",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "C10",
+  "recorded_at": "2026-08-17T07:09:12Z",
+  "ref": "extension:pre_enable_report-optional",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Removing the optional pre_enable_report attachment leaves current official decisions and existing evaluation behavior unchanged."
+}

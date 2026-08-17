@@ -7827,8 +7827,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -7874,7 +7874,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -7902,8 +7902,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -7951,7 +7951,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -7979,8 +7979,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8028,7 +8028,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8056,8 +8056,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8105,7 +8105,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8133,8 +8133,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8184,7 +8184,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8212,8 +8212,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8261,7 +8261,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8289,8 +8289,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8338,7 +8338,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8366,8 +8366,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8415,7 +8415,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8443,8 +8443,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8494,7 +8494,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8522,8 +8522,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8574,7 +8574,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8599,17 +8599,98 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
       "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation"
       ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
-      "evidence_items": [],
-      "evidence_refs": [],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-C10-092D59560FB7",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "C10",
+          "recorded_at": "2026-08-17T07:10:27Z",
+          "ref": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Correct full origin/dev merge identity for C10."
+        },
+        {
+          "id": "EV-C10-0F32693F9AF9",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "C10",
+          "recorded_at": "2026-08-17T07:09:03Z",
+          "ref": "local:c10-core-final-review",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Independent functional review confirmed the Core report is mergeable after denominator, unknown-outcome, divergence, latency and credential handling fixes."
+        },
+        {
+          "id": "EV-C10-26E24A123215",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "C10",
+          "recorded_at": "2026-08-17T07:08:54Z",
+          "ref": "github:pr-177-node-fast-release-success",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "PR 177 Node fast gate and release artifact verification completed successfully; no CI remediation was performed."
+        },
+        {
+          "id": "EV-C10-34A7E95D9E27",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "C10",
+          "recorded_at": "2026-08-17T07:08:44Z",
+          "ref": "local:c10-66-focused-237-related",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Trusted denominator anchor, divergence, ASR/label availability, finite latency, canonical ordering and display-safe evidence tests passed."
+        },
+        {
+          "id": "EV-C10-909EE027AEC0",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "C10",
+          "recorded_at": "2026-08-17T07:08:34Z",
+          "ref": "254f8f6e",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "C10 pre-enable report implementation is merged and reachable from origin/dev."
+        },
+        {
+          "id": "EV-C10-F9DC390E42F1",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "C10",
+          "recorded_at": "2026-08-17T07:09:12Z",
+          "ref": "extension:pre_enable_report-optional",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Removing the optional pre_enable_report attachment leaves current official decisions and existing evaluation behavior unchanged."
+        }
+      ],
+      "evidence_refs": [
+        "evidence/C10/EV-C10-092D59560FB7.json",
+        "evidence/C10/EV-C10-0F32693F9AF9.json",
+        "evidence/C10/EV-C10-26E24A123215.json",
+        "evidence/C10/EV-C10-34A7E95D9E27.json",
+        "evidence/C10/EV-C10-909EE027AEC0.json",
+        "evidence/C10/EV-C10-F9DC390E42F1.json"
+      ],
       "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
       "exit_blockers": [],
       "hold": false,
@@ -8620,7 +8701,7 @@
       ],
       "kind": "task",
       "lane": "core",
-      "lifecycle": "in_progress",
+      "lifecycle": "completed",
       "notes": [
         "Gate A is complete. This node is claimable implementation work with both task and gate roles; its report is evidence for Gate B but does not itself assert a numerical effect threshold or formal Gate B completion."
       ],
@@ -8633,8 +8714,15 @@
         "E-059-C10-G-SL",
         "E-115-C10-S4"
       ],
-      "resource_conflicts": [],
-      "revision": 2,
+      "resource_conflicts": [
+        {
+          "node_id": "I02A",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
+      "revision": 3,
       "roles": [
         "task",
         "gate"
@@ -8652,28 +8740,21 @@
       "work": {
         "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
         "branch": "codex/c10-pre-enable-report",
+        "completed_commit": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
         "owner": "codex",
         "started_at": "2026-08-17T06:06:29Z",
-        "substate": "active",
+        "substate": "closed",
         "worktree_slug": "C10"
       }
     },
     {
-      "activation_blockers": [
-        "E-015-C10-C13"
-      ],
+      "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [
         {
-          "constraint": "start",
-          "from": "C10",
-          "id": "E-015-C10-C13",
-          "rationale": "C13 requires C10."
-        },
-        {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8688,9 +8769,7 @@
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "V21-13 — Semantic Shadow",
-      "exit_blockers": [
-        "E-015-C10-C13"
-      ],
+      "exit_blockers": [],
       "hold": false,
       "id": "C13",
       "incoming_edges": [
@@ -8706,7 +8785,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8725,9 +8804,7 @@
         }
       ],
       "topological_rank": 11,
-      "unmet_dependencies": [
-        "E-015-C10-C13"
-      ],
+      "unmet_dependencies": [],
       "work": null
     },
     {
@@ -8744,8 +8821,8 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8782,7 +8859,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8808,18 +8885,11 @@
     },
     {
       "activation_blockers": [
-        "E-013-C10-C11",
         "E-061-G-SL-C11",
         "E-062-G-B-C11"
       ],
       "blocked": false,
       "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "C10",
-          "id": "E-013-C10-C11",
-          "rationale": "C11 requires C10."
-        },
         {
           "constraint": "start",
           "from": "G-SL",
@@ -8834,8 +8904,8 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8851,7 +8921,6 @@
       "evidence_refs": [],
       "exact_title": "V21-11 — Limited Enable",
       "exit_blockers": [
-        "E-013-C10-C11",
         "E-061-G-SL-C11",
         "E-062-G-B-C11"
       ],
@@ -8877,7 +8946,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8897,7 +8966,6 @@
       ],
       "topological_rank": 14,
       "unmet_dependencies": [
-        "E-013-C10-C11",
         "E-061-G-SL-C11",
         "E-062-G-B-C11"
       ],
@@ -8917,8 +8985,8 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8955,7 +9023,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -9288,8 +9356,8 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
+          "from": "I02A",
+          "id": "resource:I02A",
           "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
@@ -9340,7 +9408,7 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "CT04M",
+          "node_id": "I02A",
           "surfaces": [
             "guard-api-production-wiring"
           ]
@@ -9413,14 +9481,7 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        }
-      ],
+      "blocked_reasons": [],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -9535,14 +9596,7 @@
         "E-064-CT05-I03",
         "E-155-CT05-G-A"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 2,
       "roles": [
         "task"
@@ -9573,15 +9627,9 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, langgraph-runtime-integration"
         }
       ],
       "can_activate": false,
@@ -9696,15 +9744,11 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "guard-api-production-wiring"
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "langgraph-runtime-integration"
           ]
         }
       ],
@@ -9730,61 +9774,6 @@
         "started_at": "2026-08-17T04:54:08Z",
         "substate": "closed",
         "worktree_slug": "CT04"
-      }
-    },
-    {
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [
-        "guard-api-production-wiring",
-        "audit-schema-and-storage"
-      ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "CT-PR-04-M/INT — Bounded Manifest Producer",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "CT04M",
-      "incoming_edges": [
-        "E-029-CT04-CT04M"
-      ],
-      "kind": "task",
-      "lane": "ct",
-      "lifecycle": "in_progress",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-120-CT04M-FE10A",
-        "E-158-CT04M-C11"
-      ],
-      "resource_conflicts": [],
-      "revision": 1,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 14. 后端/集成 PR 建议",
-          "line_hint": 713,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 11,
-      "unmet_dependencies": [],
-      "work": {
-        "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
-        "branch": "codex/ct04m-manifest",
-        "owner": "codex",
-        "started_at": "2026-08-17T06:05:42Z",
-        "substate": "active",
-        "worktree_slug": "CT04M"
       }
     },
     {
@@ -9837,9 +9826,9 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -9874,9 +9863,8 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "CT04M",
+          "node_id": "I02A",
           "surfaces": [
-            "audit-schema-and-storage",
             "guard-api-production-wiring"
           ]
         }
@@ -9896,6 +9884,150 @@
       "topological_rank": 11,
       "unmet_dependencies": [],
       "work": null
+    },
+    {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "guard-api-production-wiring",
+        "audit-schema-and-storage"
+      ],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-CT04M-5E3A301B8BE9",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "CT04M",
+          "recorded_at": "2026-08-17T07:08:25Z",
+          "ref": "flag:AGENTGUARD_CONTEXT_BUILDER_ENABLED=false",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Default-off Context Builder removes transient plan and Manifest while preserving the current official evaluation path."
+        },
+        {
+          "id": "EV-CT04M-72BB252EBC0B",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "CT04M",
+          "recorded_at": "2026-08-17T07:07:52Z",
+          "ref": "local:ct04m-24-focused-259-related",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Context Manifest schema, transaction, replay, drift, rollback, preview, budget, Trace/ETag and no-Provenance coverage passed; PostgreSQL-only cases were environment-skipped."
+        },
+        {
+          "id": "EV-CT04M-8BE3B11EF35A",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "CT04M",
+          "recorded_at": "2026-08-17T07:10:18Z",
+          "ref": "eca94a8544534705eb3b03e6d23bc32cf5a1efad",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Correct full origin/dev merge identity for CT04M."
+        },
+        {
+          "id": "EV-CT04M-A44D3E4FB186",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "CT04M",
+          "recorded_at": "2026-08-17T07:07:44Z",
+          "ref": "eca94a8e",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Bounded Context Manifest implementation is merged and reachable from origin/dev."
+        },
+        {
+          "id": "EV-CT04M-D688F0D8ECF1",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "CT04M",
+          "recorded_at": "2026-08-17T07:08:01Z",
+          "ref": "github:pr-178-node-fast-release-success",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "PR 178 Node fast gate and release artifact verification completed successfully; no CI remediation was performed."
+        },
+        {
+          "id": "EV-CT04M-EB4E3255640E",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "CT04M",
+          "recorded_at": "2026-08-17T07:08:13Z",
+          "ref": "local:ct04m-functional-boundary-review",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Functional review verified Audit/Trace-only bounded Manifest persistence, fail-closed plan release, no new Context API/table, and fixed preview disclosure cases."
+        }
+      ],
+      "evidence_refs": [
+        "evidence/CT04M/EV-CT04M-5E3A301B8BE9.json",
+        "evidence/CT04M/EV-CT04M-72BB252EBC0B.json",
+        "evidence/CT04M/EV-CT04M-8BE3B11EF35A.json",
+        "evidence/CT04M/EV-CT04M-A44D3E4FB186.json",
+        "evidence/CT04M/EV-CT04M-D688F0D8ECF1.json",
+        "evidence/CT04M/EV-CT04M-EB4E3255640E.json"
+      ],
+      "exact_title": "CT-PR-04-M/INT — Bounded Manifest Producer",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "CT04M",
+      "incoming_edges": [
+        "E-029-CT04-CT04M"
+      ],
+      "kind": "task",
+      "lane": "ct",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-120-CT04M-FE10A",
+        "E-158-CT04M-C11"
+      ],
+      "resource_conflicts": [
+        {
+          "node_id": "I02A",
+          "surfaces": [
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
+      "revision": 2,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 14. 后端/集成 PR 建议",
+          "line_hint": 713,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 11,
+      "unmet_dependencies": [],
+      "work": {
+        "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
+        "branch": "codex/ct04m-manifest",
+        "completed_commit": "eca94a8544534705eb3b03e6d23bc32cf5a1efad",
+        "owner": "codex",
+        "started_at": "2026-08-17T06:05:42Z",
+        "substate": "closed",
+        "worktree_slug": "CT04M"
+      }
     },
     {
       "activation_blockers": [
@@ -10201,15 +10333,9 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -10280,14 +10406,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -10783,21 +10904,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
       "change_surfaces": [
         "audit-schema-and-storage"
       ],
-      "effective_status": "not_ready",
+      "effective_status": "ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
@@ -10819,14 +10933,7 @@
         "E-105-RSC-CTPROV-FE07",
         "E-107-RSC-CTPROV-S2"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 1,
       "roles": [
         "task"
@@ -10849,15 +10956,9 @@
       "blocked_reasons": [
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -10987,14 +11088,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -11024,46 +11120,23 @@
       }
     },
     {
-      "activation_blockers": [
-        "E-054-C10-I02A"
-      ],
+      "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "C10",
-          "id": "E-054-C10-I02A",
-          "rationale": "I02A requires C10."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
       "can_start": false,
       "change_surfaces": [
         "guard-api-production-wiring",
         "core-evaluation-activation",
         "langgraph-runtime-integration"
       ],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
+      "effective_status": "in_progress",
+      "evidence_gap": true,
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "INT-PR-02A — Current official decision → RTE",
-      "exit_blockers": [
-        "E-054-C10-I02A"
-      ],
+      "exit_blockers": [],
       "hold": false,
       "id": "I02A",
       "incoming_edges": [
@@ -11072,7 +11145,7 @@
       ],
       "kind": "task",
       "lane": "integration",
-      "lifecycle": "not_started",
+      "lifecycle": "in_progress",
       "notes": [
         "Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE limits this operational integration slice to the LangGraph reference runtime; formal cross-runtime S4 remains blocked by R05."
       ],
@@ -11081,21 +11154,8 @@
         "E-056-I02A-G-B",
         "E-117-I02A-S4"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "C10",
-          "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "guard-api-production-wiring"
-          ]
-        }
-      ],
-      "revision": 1,
+      "resource_conflicts": [],
+      "revision": 2,
       "roles": [
         "task"
       ],
@@ -11108,10 +11168,15 @@
         }
       ],
       "topological_rank": 11,
-      "unmet_dependencies": [
-        "E-054-C10-I02A"
-      ],
-      "work": null
+      "unmet_dependencies": [],
+      "work": {
+        "base_sha": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
+        "branch": "codex/i02a-langgraph-operational",
+        "owner": "codex",
+        "started_at": "2026-08-17T07:12:33Z",
+        "substate": "active",
+        "worktree_slug": "I02A"
+      }
     },
     {
       "activation_blockers": [
@@ -11127,9 +11192,9 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11166,9 +11231,8 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "CT04M",
+          "node_id": "I02A",
           "surfaces": [
-            "audit-schema-and-storage",
             "guard-api-production-wiring"
           ]
         }
@@ -11212,15 +11276,9 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11258,14 +11316,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -11310,15 +11363,9 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11357,14 +11404,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -11402,15 +11444,9 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11444,15 +11480,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "audit-schema-and-storage",
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -11496,15 +11526,9 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11543,15 +11567,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "audit-schema-and-storage",
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -11596,15 +11614,9 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "C10",
-          "id": "resource:C10",
-          "rationale": "exclusive surface conflict: core-evaluation-activation"
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT04M",
-          "id": "resource:CT04M",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+          "from": "I02A",
+          "id": "resource:I02A",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11640,15 +11652,9 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "C10",
+          "node_id": "I02A",
           "surfaces": [
-            "core-evaluation-activation"
-          ]
-        },
-        {
-          "node_id": "CT04M",
-          "surfaces": [
-            "audit-schema-and-storage",
+            "core-evaluation-activation",
             "guard-api-production-wiring"
           ]
         }
@@ -11675,7 +11681,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11717,7 +11730,14 @@
         "E-089-FE00-FE01",
         "E-092-FE00-S0"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -11737,7 +11757,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11826,7 +11853,14 @@
         "E-119-FE08-S4",
         "E-124-FE08-FE10B"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -11854,7 +11888,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11898,7 +11939,14 @@
         "E-090-FE01-FE02",
         "E-093-FE01-S0"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -11918,7 +11966,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11963,7 +12018,14 @@
         "E-094-FE02-S0",
         "E-099-FE02-FE05"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -11983,7 +12045,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12026,7 +12095,14 @@
       "outgoing_edges": [
         "E-095-FE03-S0"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12046,7 +12122,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12089,7 +12172,14 @@
       "outgoing_edges": [
         "E-097-FE04-S1"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12107,55 +12197,6 @@
       "work": null
     },
     {
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": true,
-      "change_surfaces": [
-        "dashboard-types-mappers-store"
-      ],
-      "effective_status": "ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "FE06",
-      "incoming_edges": [
-        "E-102-RSC-CT01-FE06",
-        "E-103-CT03B-FE06"
-      ],
-      "kind": "task",
-      "lane": "fe",
-      "lifecycle": "not_started",
-      "notes": [
-        "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
-      ],
-      "optional": false,
-      "outgoing_edges": [
-        "E-104-FE06-FE07"
-      ],
-      "resource_conflicts": [],
-      "revision": 1,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 13. 前端 PR 拆分",
-          "line_hint": 662,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 7,
-      "unmet_dependencies": [],
-      "work": null
-    },
-    {
       "activation_blockers": [
         "E-098-CT03R-FE05"
       ],
@@ -12166,6 +12207,12 @@
           "from": "CT03R",
           "id": "E-098-CT03R-FE05",
           "rationale": "FE05 requires CT03R."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12196,7 +12243,14 @@
       "outgoing_edges": [
         "E-101-FE05-S2R"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -12213,6 +12267,69 @@
       "unmet_dependencies": [
         "E-098-CT03R-FE05"
       ],
+      "work": null
+    },
+    {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "dashboard-types-mappers-store"
+      ],
+      "effective_status": "not_ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "FE06",
+      "incoming_edges": [
+        "E-102-RSC-CT01-FE06",
+        "E-103-CT03B-FE06"
+      ],
+      "kind": "task",
+      "lane": "fe",
+      "lifecycle": "not_started",
+      "notes": [
+        "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
+      ],
+      "optional": false,
+      "outgoing_edges": [
+        "E-104-FE06-FE07"
+      ],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
+      "revision": 1,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 13. 前端 PR 拆分",
+          "line_hint": 662,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 7,
+      "unmet_dependencies": [],
       "work": null
     },
     {
@@ -12233,6 +12350,12 @@
           "from": "RSC-CTPROV",
           "id": "E-105-RSC-CTPROV-FE07",
           "rationale": "FE07 requires RSC-CTPROV."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12266,7 +12389,14 @@
       "outgoing_edges": [
         "E-108-FE07-S2"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12287,6 +12417,59 @@
       "work": null
     },
     {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": false,
+      "change_surfaces": [
+        "dashboard-types-mappers-store"
+      ],
+      "effective_status": "in_progress",
+      "evidence_gap": true,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "FE-RSC-10A — Bounded Context Manifest UI",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "FE10A",
+      "incoming_edges": [
+        "E-120-CT04M-FE10A"
+      ],
+      "kind": "task",
+      "lane": "fe",
+      "lifecycle": "in_progress",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-121-FE10A-S5C"
+      ],
+      "resource_conflicts": [],
+      "revision": 1,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 13. 前端 PR 拆分",
+          "line_hint": 666,
+          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+        }
+      ],
+      "topological_rank": 12,
+      "unmet_dependencies": [],
+      "work": {
+        "base_sha": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
+        "branch": "codex/fe10a-manifest-c10-ui",
+        "owner": "codex",
+        "started_at": "2026-08-17T07:12:14Z",
+        "substate": "active",
+        "worktree_slug": "FE10A"
+      }
+    },
+    {
       "activation_blockers": [
         "E-088-G-SCHEMA-DIFF-FE09"
       ],
@@ -12297,6 +12480,12 @@
           "from": "G-SCHEMA-DIFF",
           "id": "E-088-G-SCHEMA-DIFF-FE09",
           "rationale": "FE09 requires G-SCHEMA-DIFF."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12326,7 +12515,14 @@
       ],
       "optional": true,
       "outgoing_edges": [],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -12342,65 +12538,6 @@
       "topological_rank": 12,
       "unmet_dependencies": [
         "E-088-G-SCHEMA-DIFF-FE09"
-      ],
-      "work": null
-    },
-    {
-      "activation_blockers": [
-        "E-120-CT04M-FE10A"
-      ],
-      "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start",
-          "from": "CT04M",
-          "id": "E-120-CT04M-FE10A",
-          "rationale": "FE10A requires CT04M."
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
-      "change_surfaces": [
-        "dashboard-types-mappers-store"
-      ],
-      "effective_status": "not_ready",
-      "evidence_gap": false,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "FE-RSC-10A — Bounded Context Manifest UI",
-      "exit_blockers": [
-        "E-120-CT04M-FE10A"
-      ],
-      "hold": false,
-      "id": "FE10A",
-      "incoming_edges": [
-        "E-120-CT04M-FE10A"
-      ],
-      "kind": "task",
-      "lane": "fe",
-      "lifecycle": "not_started",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-121-FE10A-S5C"
-      ],
-      "resource_conflicts": [],
-      "revision": 0,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "## 13. 前端 PR 拆分",
-          "line_hint": 666,
-          "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
-        }
-      ],
-      "topological_rank": 12,
-      "unmet_dependencies": [
-        "E-120-CT04M-FE10A"
       ],
       "work": null
     },
@@ -12422,6 +12559,12 @@
           "from": "C11",
           "id": "E-126-C11-FE10B",
           "rationale": "FE10B requires C11."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12455,7 +12598,14 @@
       "outgoing_edges": [
         "E-132-FE10B-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -12478,7 +12628,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12533,7 +12690,14 @@
       "outgoing_edges": [
         "E-096-S0-FE04"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "stage"
@@ -12553,7 +12717,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12611,7 +12782,14 @@
         "E-153-S1-CT05",
         "E-154-S1-CT03R"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "stage"
@@ -12643,9 +12821,15 @@
           "from": "FE05",
           "id": "E-101-FE05-S2R",
           "rationale": "S2R requires FE05."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -12674,7 +12858,14 @@
       "outgoing_edges": [
         "E-109-S2R-S2"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -12790,9 +12981,15 @@
           "from": "A-S2-14",
           "id": "E-A-S2-14-S2",
           "rationale": "S2 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -12854,7 +13051,14 @@
         "E-110-S2-S3",
         "E-157-S2-I01"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "stage"
@@ -12940,9 +13144,15 @@
           "from": "A-S3-10",
           "id": "E-A-S3-10-S3",
           "rationale": "S3 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -12992,7 +13202,14 @@
         "E-112-S3-S3PLUS",
         "E-114-S3-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13020,6 +13237,12 @@
           "from": "S3",
           "id": "E-112-S3-S3PLUS",
           "rationale": "S3PLUS requires S3."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -13047,7 +13270,14 @@
       "notes": [],
       "optional": true,
       "outgoing_edges": [],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13075,12 +13305,6 @@
           "from": "S3",
           "id": "E-114-S3-S4",
           "rationale": "S4 requires S3."
-        },
-        {
-          "constraint": "exit",
-          "from": "C10",
-          "id": "E-115-C10-S4",
-          "rationale": "S4 requires C10."
         },
         {
           "constraint": "exit",
@@ -13171,9 +13395,15 @@
           "from": "A-S4-12",
           "id": "E-A-S4-12-S4",
           "rationale": "S4 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13186,7 +13416,6 @@
       "exact_title": "S4 — Bound Runtime Proof / Gate B",
       "exit_blockers": [
         "E-114-S3-S4",
-        "E-115-C10-S4",
         "E-116-R05-S4",
         "E-117-I02A-S4",
         "E-118-G-B-S4",
@@ -13233,7 +13462,14 @@
       "outgoing_edges": [
         "E-127-S4-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13295,9 +13531,15 @@
           "from": "A-S5C-06",
           "id": "E-A-S5C-06-S5C",
           "rationale": "S5C cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13337,7 +13579,14 @@
       "outgoing_edges": [
         "E-133-S5C-S5"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage",
@@ -13556,9 +13805,15 @@
           "from": "A-S5O-27",
           "id": "E-A-S5O-27-S5O",
           "rationale": "S5O cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13649,7 +13904,14 @@
       "outgoing_edges": [
         "E-134-S5O-S5"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage",
@@ -13706,9 +13968,15 @@
           "from": "A-S5-04",
           "id": "E-A-S5-04-S5",
           "rationale": "S5 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "FE10A",
+          "id": "resource:FE10A",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13746,7 +14014,14 @@
         "E-135-S5-S6",
         "E-159-S5-C12"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "FE10A",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -14724,12 +14999,6 @@
         },
         {
           "constraint": "exit",
-          "from": "C10",
-          "id": "E-057-C10-G-B",
-          "rationale": "G-B requires C10."
-        },
-        {
-          "constraint": "exit",
           "from": "R05",
           "id": "E-058-R05-G-B",
           "rationale": "RTE-05 precedes Gate B; Gate B does not precede RTE-05."
@@ -14794,7 +15063,6 @@
       "exact_title": "Gate B：当前 Official Decision → RTE",
       "exit_blockers": [
         "E-056-I02A-G-B",
-        "E-057-C10-G-B",
         "E-058-R05-G-B",
         "E-A-GB-01-G-B",
         "E-A-GB-02-G-B",
@@ -14947,12 +15215,6 @@
       "blocked_reasons": [
         {
           "constraint": "exit",
-          "from": "C10",
-          "id": "E-059-C10-G-SL",
-          "rationale": "G-SL requires C10."
-        },
-        {
-          "constraint": "exit",
           "from": "G-B",
           "id": "E-060-G-B-G-SL",
           "rationale": "G-SL requires G-B."
@@ -15010,7 +15272,6 @@
       "evidence_refs": [],
       "exact_title": "Shadow → Limited Gate",
       "exit_blockers": [
-        "E-059-C10-G-SL",
         "E-060-G-B-G-SL",
         "E-A-GSL-01-G-SL",
         "E-A-GSL-02-G-SL",
@@ -27142,10 +27403,10 @@
   ],
   "ready_queue": [
     "CT03R",
-    "FE06",
+    "RSC-CTPROV",
     "CT-O1"
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "c27772e5fa02023db6a81d86d78f6e6d904b20b2435f0b54a3b49ef7bcee534d"
+  "source_digest": "5e46917cf750254438ade5a874ce084e2452ba7b8aa169696fea03bab4b3f82f"
 }

@@ -4,16 +4,23 @@
     "guard-api-production-wiring",
     "audit-schema-and-storage"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/CT04M/EV-CT04M-5E3A301B8BE9.json",
+    "evidence/CT04M/EV-CT04M-72BB252EBC0B.json",
+    "evidence/CT04M/EV-CT04M-8BE3B11EF35A.json",
+    "evidence/CT04M/EV-CT04M-A44D3E4FB186.json",
+    "evidence/CT04M/EV-CT04M-D688F0D8ECF1.json",
+    "evidence/CT04M/EV-CT04M-EB4E3255640E.json"
+  ],
   "exact_title": "CT-PR-04-M/INT — Bounded Manifest Producer",
   "hold": false,
   "id": "CT04M",
   "kind": "task",
   "lane": "ct",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [],
   "optional": false,
-  "revision": 1,
+  "revision": 2,
   "roles": [
     "task"
   ],
@@ -28,9 +35,10 @@
   "work": {
     "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
     "branch": "codex/ct04m-manifest",
+    "completed_commit": "eca94a8544534705eb3b03e6d23bc32cf5a1efad",
     "owner": "codex",
     "started_at": "2026-08-17T06:05:42Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "CT04M"
   }
 }

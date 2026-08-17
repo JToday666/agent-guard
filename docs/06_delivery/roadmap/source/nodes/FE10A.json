@@ -1,28 +1,35 @@
 {
-  "schema_version": "1.0.0",
-  "id": "FE10A",
-  "exact_title": "FE-RSC-10A — Bounded Context Manifest UI",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "fe",
-  "lifecycle": "not_started",
-  "revision": 0,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "dashboard-types-mappers-store"
   ],
+  "evidence_refs": [],
+  "exact_title": "FE-RSC-10A — Bounded Context Manifest UI",
+  "hold": false,
+  "id": "FE10A",
+  "kind": "task",
+  "lane": "fe",
+  "lifecycle": "in_progress",
+  "notes": [],
+  "optional": false,
+  "revision": 1,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
   "source_refs": [
     {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
       "heading": "## 13. 前端 PR 拆分",
-      "line_hint": 666
+      "line_hint": 666,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
     }
   ],
-  "evidence_refs": [],
-  "work": null,
-  "notes": []
+  "work": {
+    "base_sha": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
+    "branch": "codex/fe10a-manifest-c10-ui",
+    "owner": "codex",
+    "started_at": "2026-08-17T07:12:14Z",
+    "substate": "active",
+    "worktree_slug": "FE10A"
+  }
 }

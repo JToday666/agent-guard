@@ -1,32 +1,39 @@
 {
-  "schema_version": "1.0.0",
-  "id": "I02A",
-  "exact_title": "INT-PR-02A — Current official decision → RTE",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "integration",
-  "lifecycle": "not_started",
-  "revision": 1,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "guard-api-production-wiring",
     "core-evaluation-activation",
     "langgraph-runtime-integration"
   ],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
-      "heading": "## 4. 推荐依赖主线",
-      "line_hint": 101
-    }
-  ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "INT-PR-02A — Current official decision → RTE",
+  "hold": false,
+  "id": "I02A",
+  "kind": "task",
+  "lane": "integration",
+  "lifecycle": "in_progress",
   "notes": [
     "Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE limits this operational integration slice to the LangGraph reference runtime; formal cross-runtime S4 remains blocked by R05."
-  ]
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "## 4. 推荐依赖主线",
+      "line_hint": 101,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+    }
+  ],
+  "work": {
+    "base_sha": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
+    "branch": "codex/i02a-langgraph-operational",
+    "owner": "codex",
+    "started_at": "2026-08-17T07:12:33Z",
+    "substate": "active",
+    "worktree_slug": "I02A"
+  }
 }

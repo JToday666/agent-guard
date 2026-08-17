@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04M-72BB252EBC0B",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "CT04M",
+  "recorded_at": "2026-08-17T07:07:52Z",
+  "ref": "local:ct04m-24-focused-259-related",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Context Manifest schema, transaction, replay, drift, rollback, preview, budget, Trace/ETag and no-Provenance coverage passed; PostgreSQL-only cases were environment-skipped."
+}

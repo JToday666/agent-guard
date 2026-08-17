@@ -3,18 +3,25 @@
   "change_surfaces": [
     "core-evaluation-activation"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/C10/EV-C10-092D59560FB7.json",
+    "evidence/C10/EV-C10-0F32693F9AF9.json",
+    "evidence/C10/EV-C10-26E24A123215.json",
+    "evidence/C10/EV-C10-34A7E95D9E27.json",
+    "evidence/C10/EV-C10-909EE027AEC0.json",
+    "evidence/C10/EV-C10-F9DC390E42F1.json"
+  ],
   "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
   "hold": false,
   "id": "C10",
   "kind": "task",
   "lane": "core",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [
     "Gate A is complete. This node is claimable implementation work with both task and gate roles; its report is evidence for Gate B but does not itself assert a numerical effect threshold or formal Gate B completion."
   ],
   "optional": false,
-  "revision": 2,
+  "revision": 3,
   "roles": [
     "task",
     "gate"
@@ -30,9 +37,10 @@
   "work": {
     "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
     "branch": "codex/c10-pre-enable-report",
+    "completed_commit": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
     "owner": "codex",
     "started_at": "2026-08-17T06:06:29Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "C10"
   }
 }
