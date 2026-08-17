@@ -50,26 +50,28 @@ no active exclusive-surface conflict
 start 条件但仍有 activation/exit 门槛时，蓝色节点带锁徽标；这表示“可以开发”，不表示
 “可以启用或宣称完成”。
 
-本轮以 `origin/dev@54c6836` 为基线更新：
+截至 2026-08-17，功能冻结基线为 `origin/dev@6193dc4`（PR #182），后续提交只同步
+路线图生命周期与证据：
 
-- 绿色：B0、控制面 `RM-00`、CORE C00–C09、CT00/01/02A/02B/03A/03B/05、RTE01–04、R05P、
-  Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1，以及 `RSC-CT01`、
-  CT scoped activation、`I01`、Gate A；
-- 琥珀色：正式 `R05`（`codex/rte-05-integration`）；
-- 蓝色：`RSC-CTPROV`、`FE06`、可选 `CT03R`；其中前两项已有 `b814a67` 的
-  observed implementation，但仍需按控制面补齐正式 claim/close；
-- 灰色：C10、CT04、FE07、S2 及其后续。C10/CT04 的 Gate A 前置已满足，但仍因
-  R05 active claim 的共享 activation surface 冲突而不可 claim。
+- 绿色：原有 B0、`RM-00`、CORE C00–C09、CT00/01/02A/02B/03A/03B/05、RTE01–04、
+  R05P、Native-ID/C2/R05 Freeze Gates、FE00–FE04、S0、S1、`RSC-CT01`、
+  CT scoped activation、`I01`、Gate A；本轮新增完成 C10、CT04、CT04M、FE08、
+  FE10A、I02A、`RSC-CTPROV`、FE06 和 FE07；
+- 琥珀色且阻塞：正式 `R05`（`codex/rte-05-integration`）；
+- 蓝色 Ready Queue：C13、可选 CT03R、可选 CT-O1、CT06；
+- 灰色/未完成：S2、Gate B、正式 S4、正式 S5-C 及其后续门槛；现有 Operational MVP
+  证据不得解释为这些 Stage/Gate 已通过。
 
 R05 implementation 已在 `67ad24d` 合入并登记 commit/test/review/E2E 证据，但
 OpenClaw 2026.7.1-2 仍缺 atomic replace-and-seal 和 authoritative invocation-start hook，
-因此 CF-13/C3 与 Gate B 仍不能关闭。R05 继续独占 evaluation、Guard API production
-wiring 与 runtime binding activation 表面；C10/CT04 可做不触及正式 activation 的研究和
-测试准备，正式 claim 必须等宿主能力阻塞解除并释放资源。
+因此 R05 保持 blocked，CF-13/C3、Gate B 与正式 S4 均不能关闭。
+`D-OPERATIONAL-MVP-LANGGRAPH-SCOPE` 已将验证完成的 LangGraph、Context Builder 和
+display-safe evidence 开发表面与该宿主缺口解耦；这允许 C10、CT04/CT04M、FE08/FE10A
+和 I02A 正式完成，但不改变 R05 或跨 runtime 的正式结论。
 
 S2-L 的 typed Provenance writer、FE-RSC-06/07、Memory/PostgreSQL live path 与 parity 已在
-`b814a67` 合入。由于这些实现早于对应节点的正式 claim/close，本图将其记录为 observed
-implementation，不倒填或改写生命周期历史；正式 S2 Stage 仍需逐节点完成 reconciliation。
+`b814a67` 合入；`RSC-CTPROV`、FE06 和 FE07 现已按正式 claim/evidence/close 生命周期完成
+reconciliation。该收口只完成三个原子任务，S2 仍有未完成验收项，不能据此宣称 Stage 绿色。
 
 ## 3. 节点和边契约
 
@@ -154,16 +156,15 @@ uv run python scripts/roadmap-tools.py check-diff \
 
 ## 5. 最快并行路线
 
-1. CT05、S1、RSC-CT01、I01 和 Gate A 已进入基线；当前先并行 reconciliation claim
-   `RSC-CTPROV`、`FE06`，有资源时做可选 CT03R。
-2. RSC-CTPROV 与 FE06 正式关闭后收口 FE07/S2；R05 host-capability closure 同时继续，
-   但只保留 OpenClaw host capability 的独占表面。
-3. C10 与 CT04 共享 activation 表面并由 integration owner 串行；FE08 可与其中一个并行。
-   C10 后可启动 reference-profile I02A；R05 仍作为 Gate B 与正式 S4 的 exit blocker。
-4. Gate B 后最大并行 C11/C12、CT04M/S5-C、CT06、I03、R06、R07、I04、I02B
-   和 FE08/S4；共享 activation 仍串行集成。
-5. S5 与 Stateful Rollout Gate 汇合 Competition S6；C13→Semantic Gate→C14 单独汇合
-   Full Master Final，不拖慢 Competition 关键路径。
+1. Operational MVP 已完成 C10、CT04/CT04M、FE08/FE10A 与 reference-profile I02A；
+   current official 保持权威，V2 保持 shadow，LangGraph 强绑定与 Context required 链已闭合。
+2. PR #159 的 `RSC-CTPROV`、FE06、FE07 已完成正式 reconciliation；S2 的其他验收项继续
+   按节点推进，不因这三个任务绿色而整体关闭。
+3. 当前 Ready Queue 为 C13、可选 CT03R、可选 CT-O1、CT06；是否启动仍需遵守 claim、
+   worktree 与独占修改表面规则。
+4. R05 只保留 OpenClaw host capability 缺口并保持 blocked；它继续阻塞 Gate B 与正式 S4，
+   不回退已验证的 LangGraph Operational MVP。
+5. 正式 S5-C、S2 和后续 Stage/Gate 仅在各自剩余验收与证据满足后关闭；当前不作绿色声明。
 
 任何路线变化都必须先修改机器源和 decision，再重新生成并通过校验；不能只改图形位置或
 文字说明来绕开真实依赖。

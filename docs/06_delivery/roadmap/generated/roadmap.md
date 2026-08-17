@@ -1,6 +1,6 @@
 # AgentGuard 全轨实施路线图
 
-> Source digest: `161b42731178e9a5d719a93a9e3b54eb2bd8fba4e86fdb19cacab9c4007728ac`
+> Source digest: `d8efafc7992b25901cbe1bade21665cb0f8f666ae4b89cdf4d005ebf793d8bf1`
 
 状态：🟢 已完成 · 🟠 正在实施 · 🔵 可启动 · ⚪ 未实施且不可启动。
 
@@ -279,8 +279,8 @@ flowchart LR
   N_S5 -. "none · non_blocking" .-> N_C12
   N_C14 -. "none · non_blocking" .-> N_S6
   N_G_A == "start · hard_dependency" ==> N_C10
-  class N_B0,N_RM_00,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_C10,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_CT05,N_CT04,N_CT04M,N_R01,N_R02,N_R03,N_R04,N_R05P,N_RSC_CT01,N_RSC_CTPROV,N_I01,N_I02A,N_FE00,N_FE08,N_FE01,N_FE02,N_FE03,N_FE04,N_FE06,N_FE10A,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD,N_G_CTACT,N_G_A completed
-  class N_R05,N_FE07 inProgress
+  class N_B0,N_RM_00,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_C10,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_CT05,N_CT04,N_CT04M,N_R01,N_R02,N_R03,N_R04,N_R05P,N_RSC_CT01,N_RSC_CTPROV,N_I01,N_I02A,N_FE00,N_FE08,N_FE01,N_FE02,N_FE03,N_FE04,N_FE06,N_FE07,N_FE10A,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD,N_G_CTACT,N_G_A completed
+  class N_R05 inProgress
   class N_C13,N_CT03R,N_CT_O1,N_CT06 ready
   class N_C14,N_C11,N_C12,N_CT_O2,N_R06,N_R07,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE09,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
   classDef completed fill:#1F9D63,color:#fff,stroke:#126540
@@ -356,7 +356,7 @@ flowchart LR
 | `FE04` | fe | task | completed | 否 | FE-RSC-04 — Approval basis mapper and private Live mutation selector |
 | `FE05` | fe | task | not_ready | 否 | FE-RSC-05 — Replay Artifact importer |
 | `FE06` | fe | task | completed | 否 | FE-RSC-06 — CT fact and Provenance compatibility mapper |
-| `FE07` | fe | task | in_progress | 否 | FE-RSC-07 — Source/Flow presentation and Provenance deep links |
+| `FE07` | fe | task | completed | 否 | FE-RSC-07 — Source/Flow presentation and Provenance deep links |
 | `FE09` | fe | task | not_ready | 否 | FE-RSC-09 — Two-Trace aggregate comparison |
 | `FE10A` | fe | task | completed | 否 | FE-RSC-10A — Bounded Context Manifest UI |
 | `FE10B` | fe | task | not_ready | 否 | FE-RSC-10B — Rollout strict projection and V2 authority UI |

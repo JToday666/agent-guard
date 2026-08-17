@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE07-63E3D909F46B",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "FE07",
+  "recorded_at": "2026-08-17T10:17:23Z",
+  "ref": "revert:b814a67531879cc6d505f71f3fcba58b1b5c7c14",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Reverting the additive presentation returns Provenance details to unavailable without rereading raw events, creating synthetic links or mutating backend evidence"
+}
