@@ -72,6 +72,17 @@
       ]
     },
     {
+      "id": "openclaw-host-capability",
+      "label": "Residual OpenClaw host capability verification",
+      "path_patterns": [
+        "packages/agentguard-openclaw-plugin/**",
+        "packages/agentguard-openclaw-bench-tools/**",
+        "scripts/openclaw-rte05-host-chain.mjs",
+        "tests/runtime_conformance/**",
+        "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/**"
+      ]
+    },
+    {
       "id": "dashboard-types-mappers-store",
       "label": "Dashboard types, mappers and stores",
       "path_patterns": [

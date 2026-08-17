@@ -181,18 +181,16 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     for node_id in ("R05",):
         assert nodes[node_id]["effective_status"] == "in_progress"
     assert nodes["RM-00"]["effective_status"] == "completed"
-    for node_id in ("FE06", "CT03R", "RSC-CTPROV"):
+    for node_id in ("C10", "CT04", "FE06", "FE08", "CT03R", "RSC-CTPROV"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
-    for node_id in ("C10",):
-        assert nodes[node_id]["effective_status"] == "not_ready"
 
     result = run_tool(roadmap_root, "ready", "--json")
     assert_succeeds(result)
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"FE06", "CT03R", "RSC-CTPROV"} <= ready_ids
+    assert {"C10", "CT04", "FE06", "FE08", "CT03R", "RSC-CTPROV"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -202,7 +200,6 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "R05P",
         "R05",
         "RM-00",
-        "C10",
         "CT05",
     }.isdisjoint(ready_ids)
 
@@ -217,32 +214,32 @@ def test_ready_is_derived_and_cannot_be_written_into_machine_source(
     assert_validation_failure(result, "ready", "additional", "unknown")
 
 
-def test_satisfied_start_dependencies_still_report_resource_conflict(
+def test_released_r05_surfaces_make_c10_claimable(
     roadmap_root: Path,
 ) -> None:
     nodes = normalized_nodes(build_normalized(roadmap_root))
     core_v21_10 = nodes["C10"]
 
-    assert core_v21_10["can_start"] is False
-    assert core_v21_10["effective_status"] == "not_ready"
+    assert core_v21_10["can_start"] is True
+    assert core_v21_10["effective_status"] == "ready"
     assert core_v21_10["unmet_dependencies"] == []
-    assert core_v21_10["resource_conflicts"]
+    assert core_v21_10["resource_conflicts"] == []
 
     result = run_tool(roadmap_root, "explain", "C10", "--json")
     assert_succeeds(result)
     explanation = json.loads(result.stdout)
     assert explanation["id"] == "C10"
-    assert explanation["can_start"] is False
+    assert explanation["can_start"] is True
     assert explanation["unmet_dependencies"] == []
-    assert explanation["resource_conflicts"]
+    assert explanation["resource_conflicts"] == []
 
 
 def test_active_exclusive_surface_conflict_removes_otherwise_ready_node(
     roadmap_root: Path,
 ) -> None:
-    active = read_json(object_path(roadmap_root, "nodes", "I01"))
+    active = read_json(object_path(roadmap_root, "nodes", "R05"))
     active_surfaces = active["change_surfaces"]
-    assert active_surfaces, "I01 must reserve at least one exclusive surface"
+    assert active_surfaces, "R05 must reserve its residual exclusive surface"
     mutate_object(
         roadmap_root,
         "nodes",
@@ -277,8 +274,7 @@ def test_blocked_node_is_not_ready_even_when_dependencies_are_satisfied(
 def test_blocked_active_claim_keeps_exclusive_surface_reserved(
     roadmap_root: Path,
 ) -> None:
-    active = read_json(object_path(roadmap_root, "nodes", "I01"))
-    mutate_object(roadmap_root, "nodes", "I01", blocked=True)
+    active = read_json(object_path(roadmap_root, "nodes", "R05"))
     mutate_object(
         roadmap_root,
         "nodes",
@@ -639,6 +635,22 @@ def test_evidence_rename_cannot_evade_append_only_check(roadmap_root: Path) -> N
 def test_close_rejects_unmet_start_exit_and_resource_blockers(
     roadmap_root: Path,
 ) -> None:
+    active = read_json(object_path(roadmap_root, "nodes", "R05"))
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "C10",
+        change_surfaces=list(active["change_surfaces"]),
+        lifecycle="in_progress",
+        work={
+            "base_sha": "deadbee",
+            "branch": "codex/c10-test",
+            "owner": "roadmap-test",
+            "started_at": None,
+            "substate": "active",
+            "worktree_slug": "c10-test",
+        },
+    )
     before = read_json(object_path(roadmap_root, "nodes", "C10"))
 
     result = run_tool(
@@ -648,7 +660,7 @@ def test_close_rejects_unmet_start_exit_and_resource_blockers(
         "--commit",
         "deadbee",
         "--expected-revision",
-        "0",
+        "1",
     )
 
     assert_validation_failure(result, "cannot exit", "resource", "r05")
