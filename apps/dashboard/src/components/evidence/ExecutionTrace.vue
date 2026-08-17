@@ -117,6 +117,7 @@
 
       <ExecutionStepInspector
         :approval-basis="selectedApprovalBasis"
+        :context-manifest="selectedContextManifest"
         :lifecycle-state="trace.lifecycleState"
         :step="selectedStep"
         :step-number="selectedStepNumber"
@@ -157,7 +158,10 @@ import type {
   ExecutionTraceViewModel,
   TracePollingState,
 } from "../../types/dashboard";
-import type { ApprovalBasisViewModel } from "../../types/runtime-supervision";
+import type {
+  ApprovalBasisViewModel,
+  ContextManifestViewModel,
+} from "../../types/runtime-supervision";
 import ExecutionStepInspector from "./ExecutionStepInspector.vue";
 import ExecutionTraceList from "./ExecutionTraceList.vue";
 import ExecutionTraceToolbar from "./ExecutionTraceToolbar.vue";
@@ -172,6 +176,7 @@ const props = defineProps<{
   pollingState: TracePollingState;
   layout: ExecutionTraceLayout;
   approvalBasisById?: Readonly<Record<string, ApprovalBasisViewModel>>;
+  contextManifestByEventId?: Readonly<Record<string, ContextManifestViewModel>>;
   isWindowPartial?: boolean;
   selectedActionId?: string;
   selectedAuditId?: string;
@@ -233,6 +238,14 @@ const selectedStepNumber = computed(() => {
 const selectedApprovalBasis = computed(() => {
   const approvalId = selectedStep.value?.approvalId;
   return approvalId ? props.approvalBasisById?.[approvalId] : undefined;
+});
+const selectedContextManifest = computed(() => {
+  if (selectedStep.value?.category !== "context") return undefined;
+  const manifests = selectedStep.value.eventIds.flatMap((eventId) => {
+    const manifest = props.contextManifestByEventId?.[eventId];
+    return manifest ? [manifest] : [];
+  });
+  return manifests.length === 1 ? manifests[0] : undefined;
 });
 const stepNumberById = computed(
   () => new Map(props.trace.steps.map((step, index) => [step.stepId, index + 1])),

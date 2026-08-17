@@ -25,6 +25,7 @@ import type {
 } from "../../types/runtime-supervision.ts";
 import { getEventTypeLabel } from "../../utils/dashboard-formatters.ts";
 import { projectApprovalBasis } from "./approval-basis-projector.ts";
+import { projectContextManifests } from "./context-manifest-projector.ts";
 import { applyCtContentToSteps, projectCtPresentation } from "./provenance-presentation.ts";
 import {
   projectExecutionStepSupervision,
@@ -837,6 +838,11 @@ export function buildRuntimeSupervisionViewModel(
   };
   const truncationReasons = windowTruncationReasons(input);
   const approvalBasis = buildApprovalBasisById(input, execution, truncationReasons);
+  const contextManifests = projectContextManifests({
+    auditWindowTruncated: input.auditWindow?.hasMore === true,
+    events: input.events,
+    traceId: input.traceId,
+  });
   const receiptRequiredSteps = execution.steps.filter(
     (step) => step.receiptExpectation === "required",
   );
@@ -888,6 +894,7 @@ export function buildRuntimeSupervisionViewModel(
     ...correlationWarnings,
     ...unsupportedV21Warnings,
     ...approvalBasis.warnings,
+    ...contextManifests.warnings,
     ...ctProjection.presentation.warnings,
     ...windowWarnings,
   ];
@@ -914,19 +921,19 @@ export function buildRuntimeSupervisionViewModel(
     agentId: input.agentId ?? uniqueApprovalValue(input.approvals, (approval) => approval.agentId),
     execution,
     approvalBasisById: approvalBasis.approvalBasisById,
-    contextManifestByEventId: {},
+    contextManifestByEventId: contextManifests.contextManifestByEventId,
     provenancePresentation: ctProjection.presentation,
     completeness: {
       auditEvents: auditAvailability,
       approvals: approvalsAvailability,
       provenance: provenanceTruncated ? "partial" : ctProjection.provenanceAvailability,
-      contextManifest: "unavailable",
+      contextManifest: contextManifests.availability,
       runtimeReceipts: receiptAvailability,
       truncatedReasons: truncationReasons,
     },
     capabilities: {
       facts: ctProjection.factAvailability,
-      contextManifest: "unavailable",
+      contextManifest: contextManifests.availability,
       approvalBasis: approvalBasis.availability,
       enforcementEvidence: enforcementAvailability,
       runtimeReceipts: receiptAvailability,

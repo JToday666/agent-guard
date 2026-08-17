@@ -9,6 +9,7 @@ import {
 } from "../data/approvals/approval-mutation-gate";
 import { isCompatiblePendingApprovalSnapshot } from "../data/approvals/approval-snapshot";
 import { buildRuntimeSupervisionViewModel } from "../data/evidence/execution-trace";
+import { projectPreEnableReport } from "../data/evaluation/pre-enable-report";
 import {
   getTracePollBackoffMs,
   isSuccessfulConditionalRead,
@@ -78,6 +79,7 @@ const emptyEvaluationRun: EvaluationRun = {
   asrAfter: null,
   perAttack: [],
   cases: [],
+  preEnableReport: projectPreEnableReport(null),
 };
 
 const unknownOpenClawStatus: AdapterStatus = {

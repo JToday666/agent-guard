@@ -481,6 +481,79 @@ export interface EvaluationRun {
   asrAfter: number | null;
   perAttack: EvaluationAttackMetric[];
   cases: EvaluationCase[];
+  preEnableReport: PreEnableReportPresentation;
+}
+
+export type PreEnableReportAvailability = "recorded" | "partial" | "unavailable";
+export type PreEnableMetricAvailability = "available" | "partial" | "unavailable";
+
+export interface PreEnableRatioMetric {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+}
+
+export interface PreEnableReceiptEligibility {
+  eligibilityRevision: string;
+  runtimeProfile: string;
+  eligibilityDigest: string;
+  eligibleActionCount: number;
+}
+
+export interface PreEnableDivergenceCategory {
+  category: string;
+  count: number;
+}
+
+export interface PreEnableLatencySummary {
+  method: "nearest_rank";
+  sampleCoverage: PreEnableRatioMetric;
+  averageMs: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
+  maxMs: number | null;
+}
+
+export interface PreEnableEvidenceCheck {
+  checkId: string;
+  kind: "failure_injection" | "flag_rollback";
+  status: "passed" | "failed";
+  reasonCode: string;
+  evidenceRefCount: number;
+}
+
+export interface PreEnableReportPresentation {
+  availability: PreEnableReportAvailability;
+  missingReasons: string[];
+  reportMode: "observational" | null;
+  officialDecisionSource: "current" | null;
+  v2DecisionMode: "shadow" | null;
+  benignAskSource: "v2_shadow" | null;
+  formalGateB: "not_asserted" | null;
+  effectMode: "observational" | null;
+  numericalThresholdsApplied: false | null;
+  receiptEligibility: PreEnableReceiptEligibility | null;
+  eligibleActionCount: number | null;
+  terminalReceiptCount: number | null;
+  unknownAttackOutcomeCount: number | null;
+  receiptCoverage: PreEnableRatioMetric | null;
+  linkConflicts: PreEnableRatioMetric | null;
+  officialV2Divergence: PreEnableRatioMetric | null;
+  divergenceCategories: PreEnableDivergenceCategory[];
+  degradedDivergenceCount: number | null;
+  unexplainedDivergenceCount: number | null;
+  divergenceExplanationCoverage: PreEnableRatioMetric | null;
+  benignAsk: PreEnableRatioMetric | null;
+  decisionLabelCoverage: PreEnableRatioMetric | null;
+  decisionLabelAvailability: PreEnableMetricAvailability | null;
+  finalAsr: PreEnableRatioMetric | null;
+  attackOutcomeCoverage: PreEnableRatioMetric | null;
+  finalAsrAvailability: PreEnableMetricAvailability | null;
+  latency: PreEnableLatencySummary | null;
+  failureInjection: PreEnableEvidenceCheck[];
+  flagRollback: PreEnableEvidenceCheck[];
+  functionalEvidenceStatus: "passed" | "failed" | null;
 }
 
 export interface EvaluationAttackMetric {

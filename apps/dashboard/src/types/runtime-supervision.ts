@@ -427,6 +427,68 @@ export interface ApprovalBasisViewModel {
   missingReasons: string[];
 }
 
+export type ContextManifestDisposition = "included" | "quarantined" | "excluded";
+
+export interface ContextManifestCountsPresentation {
+  total: number;
+  returned: number;
+  included: number;
+  excluded: number;
+  quarantined: number;
+  sensitive: number;
+  untrusted: number;
+  bySourceType: Record<string, number>;
+}
+
+export interface ContextManifestChunkPresentation {
+  chunkId: string;
+  sourceRef: string;
+  sourceType: string;
+  compartment:
+    | "authority"
+    | "authenticated_task"
+    | "trusted_runtime_fact"
+    | "untrusted_evidence"
+    | "memory_context"
+    | "model_derived";
+  trust: "trusted" | "untrusted" | "unknown";
+  factAuthority: "authoritative" | "trusted_claim" | "untrusted_claim" | "model_judgment";
+  taints: Array<
+    "UNTRUSTED" | "EXTERNAL_INSTRUCTION" | "SENSITIVE" | "CREDENTIAL" | "PERSISTENT_UNTRUSTED"
+  >;
+  transformState: "preserved" | "annotated" | "quarantined" | "excluded";
+  transformationAction: "annotate" | "quarantine" | "exclude" | null;
+  disposition: ContextManifestDisposition;
+  reasonCodes: string[];
+  contentDigest: string | null;
+  safePreview: string | null;
+  instructionLike: boolean;
+  sensitive: boolean;
+}
+
+export interface ContextManifestViewModel {
+  schemaVersion: "context-manifest-presentation/0.1";
+  eventId: string;
+  availability: Exclude<Availability, "not_applicable">;
+  state:
+    | "recorded"
+    | "budget_dropped"
+    | "missing"
+    | "window_truncated"
+    | "correlation_conflict"
+    | "invalid";
+  auditId: string | null;
+  planId: string | null;
+  contextRef: string | null;
+  planDigest: string | null;
+  manifestDigest: string | null;
+  counts: ContextManifestCountsPresentation | null;
+  chunks: ContextManifestChunkPresentation[];
+  reasonCodes: string[];
+  missingReasons: string[];
+  sourceRefs: EvidenceLocator[];
+}
+
 export interface SupervisionCompleteness {
   auditEvents: Availability;
   approvals: Availability;
@@ -458,7 +520,7 @@ export interface RuntimeSupervisionViewModel {
   agentId: string | null;
   execution: ExecutionTraceViewModel;
   approvalBasisById: Record<string, ApprovalBasisViewModel>;
-  contextManifestByEventId: Record<string, never>;
+  contextManifestByEventId: Record<string, ContextManifestViewModel>;
   provenancePresentation: ProvenancePresentationViewModel;
   completeness: SupervisionCompleteness;
   capabilities: SupervisionCapabilities;

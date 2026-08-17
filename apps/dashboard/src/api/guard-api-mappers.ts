@@ -14,6 +14,7 @@ import type {
 } from "./guard-api-types";
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence.ts";
+import { projectPreEnableReport } from "../data/evaluation/pre-enable-report.ts";
 import type {
   AdapterStatus,
   ApprovalDecision,
@@ -478,6 +479,7 @@ export function emptyEvaluationRun(): EvaluationRun {
     asrAfter: null,
     perAttack: [],
     cases: [],
+    preEnableReport: projectPreEnableReport(null),
   };
 }
 
@@ -523,6 +525,7 @@ export function mapEvaluationRun(dto: GuardEvaluationRunDto): EvaluationRun {
     asrAfter: readNullableNumber(dto.asr_after),
     perAttack,
     cases,
+    preEnableReport: projectPreEnableReport(dto.pre_enable_report),
   };
 }
 
