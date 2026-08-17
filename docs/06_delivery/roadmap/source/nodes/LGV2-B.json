@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "id": "LGV2-B",
+  "exact_title": "LGV2-B — Real LLM runner, experiment matrix and artifacts",
+  "kind": "task",
+  "roles": [
+    "task"
+  ],
+  "lane": "integration",
+  "lifecycle": "not_started",
+  "revision": 0,
+  "optional": false,
+  "blocked": false,
+  "hold": false,
+  "change_surfaces": [
+    "competition-langgraph-bench-runner"
+  ],
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
+      "heading": "### LGV2-B — 真实 LLM runner、实验矩阵与制品",
+      "line_hint": 60
+    }
+  ],
+  "evidence_refs": [],
+  "work": null,
+  "notes": [
+    "May be developed before Core/API integration; product activation and closure remain dependency-gated.",
+    "A missing real OpenAI-compatible provider credential prevents live 70x5 qualification but not offline contract implementation."
+  ]
+}

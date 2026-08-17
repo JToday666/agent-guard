@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-LGV2-I-FE",
+  "from": "LGV2-I",
+  "to": "LGV2-FE",
+  "relation": "hard_dependency",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "The read-only competition mapper requires the committed decision-authority, ASK, binding and receipt shapes from Guard API/RTE integration.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
+      "heading": "## 4. 实施依赖与资源边界",
+      "line_hint": 88
+    }
+  ],
+  "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE"
+}

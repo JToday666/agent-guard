@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-LGV2-C-I",
+  "from": "LGV2-C",
+  "to": "LGV2-I",
+  "relation": "hard_dependency",
+  "constraint": "start",
+  "blocking": "hard",
+  "rationale": "Guard API and RTE authoritative wiring requires the completed deterministic Core selector and official evidence contract.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
+      "heading": "## 4. 实施依赖与资源边界",
+      "line_hint": 85
+    }
+  ],
+  "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE"
+}

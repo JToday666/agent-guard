@@ -7492,6 +7492,101 @@
         }
       ],
       "to": "S6"
+    },
+    {
+      "blocking": "hard",
+      "constraint": "exit",
+      "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE",
+      "from": "LGV2-B",
+      "id": "E-LGV2-B-FE",
+      "provenance": "program_decision",
+      "rationale": "Dashboard work may begin from the API contract, but its typed competition report cannot close until the runner artifact shape is complete.",
+      "relation": "required_input",
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 实施依赖与资源边界",
+          "line_hint": 88,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "to": "LGV2-FE"
+    },
+    {
+      "blocking": "hard",
+      "constraint": "activate",
+      "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE",
+      "from": "LGV2-C",
+      "id": "E-LGV2-C-B",
+      "provenance": "program_decision",
+      "rationale": "Runner and artifact contracts can be developed independently, but product activation requires the completed V2 selector and official evidence semantics.",
+      "relation": "required_input",
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 实施依赖与资源边界",
+          "line_hint": 86,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "to": "LGV2-B"
+    },
+    {
+      "blocking": "hard",
+      "constraint": "start",
+      "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE",
+      "from": "LGV2-C",
+      "id": "E-LGV2-C-I",
+      "provenance": "program_decision",
+      "rationale": "Guard API and RTE authoritative wiring requires the completed deterministic Core selector and official evidence contract.",
+      "relation": "hard_dependency",
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 实施依赖与资源边界",
+          "line_hint": 85,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "to": "LGV2-I"
+    },
+    {
+      "blocking": "hard",
+      "constraint": "exit",
+      "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE",
+      "from": "LGV2-I",
+      "id": "E-LGV2-I-B",
+      "provenance": "program_decision",
+      "rationale": "The real product matrix cannot close before selected decisions, ASK/binding, receipts and replay are wired end to end.",
+      "relation": "join",
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 实施依赖与资源边界",
+          "line_hint": 86,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "to": "LGV2-B"
+    },
+    {
+      "blocking": "hard",
+      "constraint": "start",
+      "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE",
+      "from": "LGV2-I",
+      "id": "E-LGV2-I-FE",
+      "provenance": "program_decision",
+      "rationale": "The read-only competition mapper requires the committed decision-authority, ASK, binding and receipt shapes from Guard API/RTE integration.",
+      "relation": "hard_dependency",
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "## 4. 实施依赖与资源边界",
+          "line_hint": 88,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "to": "LGV2-FE"
     }
   ],
   "lanes": [
@@ -7820,6 +7915,53 @@
         "substate": "closed",
         "worktree_slug": "agent-guard-roadmap-control"
       }
+    },
+    {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
+      "change_surfaces": [
+        "core-evaluation-activation"
+      ],
+      "effective_status": "ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "LGV2-C — Core selector, three modes and official evidence",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "LGV2-C",
+      "incoming_edges": [],
+      "kind": "task",
+      "lane": "core",
+      "lifecycle": "not_started",
+      "notes": [
+        "Competition-only V2 authority extension; it does not complete formal C11, Gate B or S5-O."
+      ],
+      "optional": false,
+      "outgoing_edges": [
+        "E-LGV2-C-B",
+        "E-LGV2-C-I"
+      ],
+      "resource_conflicts": [],
+      "revision": 0,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### LGV2-C — Core selector、三态与 official evidence",
+          "line_hint": 35,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": null
     },
     {
       "activation_blockers": [],
@@ -10501,6 +10643,138 @@
       "work": null
     },
     {
+      "activation_blockers": [
+        "E-LGV2-C-I"
+      ],
+      "blocked": false,
+      "blocked_reasons": [
+        {
+          "constraint": "start",
+          "from": "LGV2-C",
+          "id": "E-LGV2-C-I",
+          "rationale": "Guard API and RTE authoritative wiring requires the completed deterministic Core selector and official evidence contract."
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "guard-api-production-wiring",
+        "audit-schema-and-storage",
+        "runtime-binding-activation"
+      ],
+      "effective_status": "not_ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "LGV2-I — Guard API, ASK, RTE and replay wiring",
+      "exit_blockers": [
+        "E-LGV2-C-I"
+      ],
+      "hold": false,
+      "id": "LGV2-I",
+      "incoming_edges": [
+        "E-LGV2-C-I"
+      ],
+      "kind": "task",
+      "lane": "integration",
+      "lifecycle": "not_started",
+      "notes": [
+        "This is a LangGraph competition integration slice; formal I02B, I04, ROL1 and cross-runtime activation remain unchanged."
+      ],
+      "optional": false,
+      "outgoing_edges": [
+        "E-LGV2-I-B",
+        "E-LGV2-I-FE"
+      ],
+      "resource_conflicts": [],
+      "revision": 0,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### LGV2-I — Guard API、ASK、RTE 与 replay 接线",
+          "line_hint": 46,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "topological_rank": 1,
+      "unmet_dependencies": [
+        "E-LGV2-C-I"
+      ],
+      "work": null
+    },
+    {
+      "activation_blockers": [
+        "E-LGV2-C-B"
+      ],
+      "blocked": false,
+      "blocked_reasons": [
+        {
+          "constraint": "activate",
+          "from": "LGV2-C",
+          "id": "E-LGV2-C-B",
+          "rationale": "Runner and artifact contracts can be developed independently, but product activation requires the completed V2 selector and official evidence semantics."
+        },
+        {
+          "constraint": "exit",
+          "from": "LGV2-I",
+          "id": "E-LGV2-I-B",
+          "rationale": "The real product matrix cannot close before selected decisions, ASK/binding, receipts and replay are wired end to end."
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": true,
+      "change_surfaces": [
+        "competition-langgraph-bench-runner"
+      ],
+      "effective_status": "ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "LGV2-B — Real LLM runner, experiment matrix and artifacts",
+      "exit_blockers": [
+        "E-LGV2-C-B",
+        "E-LGV2-I-B"
+      ],
+      "hold": false,
+      "id": "LGV2-B",
+      "incoming_edges": [
+        "E-LGV2-C-B",
+        "E-LGV2-I-B"
+      ],
+      "kind": "task",
+      "lane": "integration",
+      "lifecycle": "not_started",
+      "notes": [
+        "May be developed before Core/API integration; product activation and closure remain dependency-gated.",
+        "A missing real OpenAI-compatible provider credential prevents live 70x5 qualification but not offline contract implementation."
+      ],
+      "optional": false,
+      "outgoing_edges": [
+        "E-LGV2-B-FE"
+      ],
+      "resource_conflicts": [],
+      "revision": 0,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### LGV2-B — 真实 LLM runner、实验矩阵与制品",
+          "line_hint": 60,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "topological_rank": 2,
+      "unmet_dependencies": [],
+      "work": null
+    },
+    {
       "activation_blockers": [],
       "blocked": false,
       "blocked_reasons": [],
@@ -11775,6 +12049,73 @@
       ],
       "topological_rank": 2,
       "unmet_dependencies": [],
+      "work": null
+    },
+    {
+      "activation_blockers": [
+        "E-LGV2-I-FE"
+      ],
+      "blocked": false,
+      "blocked_reasons": [
+        {
+          "constraint": "start",
+          "from": "LGV2-I",
+          "id": "E-LGV2-I-FE",
+          "rationale": "The read-only competition mapper requires the committed decision-authority, ASK, binding and receipt shapes from Guard API/RTE integration."
+        },
+        {
+          "constraint": "exit",
+          "from": "LGV2-B",
+          "id": "E-LGV2-B-FE",
+          "rationale": "Dashboard work may begin from the API contract, but its typed competition report cannot close until the runner artifact shape is complete."
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "dashboard-types-mappers-store"
+      ],
+      "effective_status": "not_ready",
+      "evidence_gap": false,
+      "evidence_items": [],
+      "evidence_refs": [],
+      "exact_title": "LGV2-FE — Read-only competition Dashboard presentation",
+      "exit_blockers": [
+        "E-LGV2-B-FE",
+        "E-LGV2-I-FE"
+      ],
+      "hold": false,
+      "id": "LGV2-FE",
+      "incoming_edges": [
+        "E-LGV2-B-FE",
+        "E-LGV2-I-FE"
+      ],
+      "kind": "task",
+      "lane": "fe",
+      "lifecycle": "not_started",
+      "notes": [
+        "Must say Competition profile official and must not be presented as formal S5-O."
+      ],
+      "optional": false,
+      "outgoing_edges": [],
+      "resource_conflicts": [],
+      "revision": 0,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "### LGV2-FE — 只读 Dashboard 展示",
+          "line_hint": 73,
+          "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md"
+        }
+      ],
+      "topological_rank": 3,
+      "unmet_dependencies": [
+        "E-LGV2-I-FE"
+      ],
       "work": null
     },
     {
@@ -27057,6 +27398,8 @@
     }
   ],
   "ready_queue": [
+    "LGV2-C",
+    "LGV2-B",
     "CT03R",
     "C13",
     "CT-O1",
@@ -27064,5 +27407,5 @@
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "d8efafc7992b25901cbe1bade21665cb0f8f666ae4b89cdf4d005ebf793d8bf1"
+  "source_digest": "70a415049d367de2fc53789e44a32a5f72d459c2e9a1aa4e488c317dc467d33e"
 }

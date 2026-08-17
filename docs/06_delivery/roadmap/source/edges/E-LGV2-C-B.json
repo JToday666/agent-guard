@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "id": "E-LGV2-C-B",
+  "from": "LGV2-C",
+  "to": "LGV2-B",
+  "relation": "required_input",
+  "constraint": "activate",
+  "blocking": "hard",
+  "rationale": "Runner and artifact contracts can be developed independently, but product activation requires the completed V2 selector and official evidence semantics.",
+  "provenance": "program_decision",
+  "source_refs": [
+    {
+      "path": "docs/06_delivery/LangGraph_Competition_V2_Official_Implementation.md",
+      "heading": "## 4. 实施依赖与资源边界",
+      "line_hint": 86
+    }
+  ],
+  "decision_id": "D-COMPETITION-LANGGRAPH-V2-ACTIVE"
+}

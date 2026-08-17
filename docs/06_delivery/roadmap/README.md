@@ -58,7 +58,7 @@ start 条件但仍有 activation/exit 门槛时，蓝色节点带锁徽标；这
   CT scoped activation、`I01`、Gate A；本轮新增完成 C10、CT04、CT04M、FE08、
   FE10A、I02A、`RSC-CTPROV`、FE06 和 FE07；
 - 琥珀色且阻塞：正式 `R05`（`codex/rte-05-integration`）；
-- 蓝色 Ready Queue：C13、可选 CT03R、可选 CT-O1、CT06；
+- 蓝色 Ready Queue：LGV2-C、LGV2-B、C13、可选 CT03R、可选 CT-O1、CT06；
 - 灰色/未完成：S2、Gate B、正式 S4、正式 S5-C 及其后续门槛；现有 Operational MVP
   证据不得解释为这些 Stage/Gate 已通过。
 
@@ -68,6 +68,11 @@ OpenClaw 2026.7.1-2 仍缺 atomic replace-and-seal 和 authoritative invocation-
 `D-OPERATIONAL-MVP-LANGGRAPH-SCOPE` 已将验证完成的 LangGraph、Context Builder 和
 display-safe evidence 开发表面与该宿主缺口解耦；这允许 C10、CT04/CT04M、FE08/FE10A
 和 I02A 正式完成，但不改变 R05 或跨 runtime 的正式结论。
+
+`D-COMPETITION-LANGGRAPH-V2-ACTIVE` 另行登记了受冻结 activation manifest
+限定的 `competition-langgraph-v2` 专项路线。LGV2-C 和 LGV2-B 可独立
+claim；LGV2-I 在 Core selector 完成后接线 Guard API/RTE，LGV2-FE 再做只读
+展示。该专项不更改 C11/I02B/I04/ROL1、R05、Gate B 或正式 S5-O。
 
 S2-L 的 typed Provenance writer、FE-RSC-06/07、Memory/PostgreSQL live path 与 parity 已在
 `b814a67` 合入；`RSC-CTPROV`、FE06 和 FE07 现已按正式 claim/evidence/close 生命周期完成
@@ -160,7 +165,8 @@ uv run python scripts/roadmap-tools.py check-diff \
    current official 保持权威，V2 保持 shadow，LangGraph 强绑定与 Context required 链已闭合。
 2. PR #159 的 `RSC-CTPROV`、FE06、FE07 已完成正式 reconciliation；S2 的其他验收项继续
    按节点推进，不因这三个任务绿色而整体关闭。
-3. 当前 Ready Queue 为 C13、可选 CT03R、可选 CT-O1、CT06；是否启动仍需遵守 claim、
+3. 当前 Ready Queue 为 LGV2-C、LGV2-B、C13、可选 CT03R、可选 CT-O1、CT06；
+   是否启动仍需遵守 claim、
    worktree 与独占修改表面规则。
 4. R05 只保留 OpenClaw host capability 缺口并保持 blocked；它继续阻塞 Gate B 与正式 S4，
    不回退已验证的 LangGraph Operational MVP。
