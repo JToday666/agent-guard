@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from dataclasses import fields
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -14,6 +16,7 @@ from agentguard_langgraph_bench.bench.competition_models import (
     canonical_sha256,
 )
 from agentguard_langgraph_bench.bench.competition_runner import (
+    ArtifactDirectory,
     ArmRunRequest,
     ArmRunResult,
     ExitCode,
@@ -265,6 +268,8 @@ def test_full_stub_matrix_writes_qualified_competition_report_and_manifest(
     assert report["arms"][3]["v21_selection_rate"] == 1.0
     assert report["arms"][0]["receipt_coverage"] is None
     manifest = json.loads((root / "sha256-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["secret_scan"]["status"] == "passed"
+    assert manifest["secret_scan"]["files_scanned"] == manifest["artifact_count"]
     actual = {
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
@@ -275,6 +280,107 @@ def test_full_stub_matrix_writes_qualified_competition_report_and_manifest(
         content = (root / item["relative_path"]).read_bytes()
         assert item["sha256"] == "sha256:" + hashlib.sha256(content).hexdigest()
         assert _SECRET.encode() not in content
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        "sk/a+b=c?",
+        "Bearer sk/a+b=c?",
+        quote("sk/a+b=c?", safe=""),
+        base64.b64encode(b"sk/a+b=c?").decode("ascii"),
+        base64.urlsafe_b64encode(b"sk/a+b=c?").decode("ascii"),
+    ],
+)
+@pytest.mark.parametrize("writer", ["json", "jsonl"])
+def test_artifact_writer_rejects_provider_credential_variants_before_write(
+    tmp_path: Path,
+    encoded: str,
+    writer: str,
+) -> None:
+    artifacts = ArtifactDirectory(
+        tmp_path / "artifacts",
+        forbidden_secrets=("sk/a+b=c?",),
+    )
+    artifacts.create()
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        if writer == "json":
+            artifacts.write_json("unsafe.json", {"diagnostic": encoded})
+        else:
+            artifacts.write_jsonl("unsafe.jsonl", [{"diagnostic": encoded}])
+
+    assert caught.value.reason_code == "artifact_secret_detected"
+    assert not (artifacts.root / f"unsafe.{writer}").exists()
+    assert "sk/a+b=c?" not in str(caught.value)
+
+
+def test_manifest_rescan_removes_executor_file_with_encoded_credential(
+    tmp_path: Path,
+) -> None:
+    secret = "sk/a+b=c?"
+    artifacts = ArtifactDirectory(
+        tmp_path / "artifacts",
+        forbidden_secrets=(secret,),
+    )
+    artifacts.create()
+    leaked = artifacts.root / "executor-debug.log"
+    leaked.write_text(base64.b64encode(secret.encode()).decode(), encoding="utf-8")
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        artifacts.finalize_manifest(status="passed")
+
+    assert caught.value.reason_code == "artifact_secret_detected"
+    assert not leaked.exists()
+    assert secret not in str(caught.value)
+
+
+@pytest.mark.parametrize("surface", ["row", "contract", "exception"])
+def test_runner_invalidates_secret_bearing_executor_output_without_persisting_it(
+    tmp_path: Path,
+    surface: str,
+) -> None:
+    request = _request(tmp_path)
+    stub = StubArmExecutor()
+
+    def executor(arm_request: ArmRunRequest) -> ArmRunResult:
+        if surface == "exception":
+            raise InvalidCompetitionRun(
+                arm_request.provider.api_key,
+                f"unsafe executor diagnostic: {arm_request.provider.api_key}",
+            )
+        result = stub(arm_request)
+        if surface == "row":
+            rows = list(result.rows)
+            rows[0] = {**rows[0], "run_status": arm_request.provider.api_key}
+            return ArmRunResult(rows=tuple(rows), contracts=result.contracts)
+        return ArmRunResult(
+            rows=result.rows,
+            contracts={
+                "unsafe_contract": {
+                    "status": "failed",
+                    "reason_code": arm_request.provider.api_key,
+                }
+            },
+        )
+
+    exit_code = run(request, executor=executor)
+
+    assert exit_code is ExitCode.INVALID_RUN
+    report = json.loads((request.artifacts / "result.json").read_text())
+    assert report["reason_code"] == "artifact_secret_detected"
+    assert report["competition_qualified"] is False
+    variants = {
+        _SECRET.encode(),
+        f"Bearer {_SECRET}".encode(),
+        quote(_SECRET, safe="").encode(),
+        base64.b64encode(_SECRET.encode()),
+        base64.urlsafe_b64encode(_SECRET.encode()),
+    }
+    for path in request.artifacts.rglob("*"):
+        if path.is_file():
+            content = path.read_bytes()
+            assert all(value not in content for value in variants)
 
 
 def test_valid_matrix_with_observed_authority_mismatch_is_exit_one(

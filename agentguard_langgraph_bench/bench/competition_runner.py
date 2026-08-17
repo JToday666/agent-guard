@@ -9,6 +9,7 @@ before LGV2-I lands the official selector and TaskFact/RTE wiring.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+from urllib.parse import quote, quote_plus
 
 from pydantic import ValidationError
 
@@ -210,8 +212,14 @@ ArmExecutor = Callable[[ArmRunRequest], ArmRunResult]
 class ArtifactDirectory:
     """New-root-only deterministic JSON/JSONL writer with full SHA-256 inventory."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        forbidden_secrets: Sequence[str] = (),
+    ) -> None:
         self.root = root.expanduser().resolve()
+        self._forbidden_secret_patterns = _secret_patterns(forbidden_secrets)
 
     def create(self) -> None:
         if self.root.exists():
@@ -224,10 +232,11 @@ class ArtifactDirectory:
     def write_json(self, relative_path: str, payload: Any) -> Path:
         path = self._path(relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        content = (
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         )
+        self._assert_secret_free(content.encode("utf-8"))
+        path.write_text(content, encoding="utf-8")
         return path
 
     def write_jsonl(self, relative_path: str, rows: Sequence[Any]) -> Path:
@@ -238,11 +247,24 @@ class ArtifactDirectory:
             + "\n"
             for row in rows
         )
+        self._assert_secret_free(content.encode("utf-8"))
         path.write_text(content, encoding="utf-8")
         return path
 
     def finalize_manifest(self, *, status: str) -> Path:
         manifest_path = self.root / "sha256-manifest.json"
+        secret_bearing_files = self._secret_bearing_files(exclude=manifest_path)
+        if secret_bearing_files:
+            # The output root was created exclusively for this run.  Remove only
+            # files proven to contain the configured provider credential before
+            # producing a safe invalid-run report; never retain or name them in
+            # diagnostics.
+            for path in secret_bearing_files:
+                path.unlink()
+            raise InvalidCompetitionRun(
+                "artifact_secret_detected",
+                "artifact credential scan failed",
+            )
         entries: list[dict[str, Any]] = []
         for path in sorted(self.root.rglob("*")):
             if not path.is_file() or path == manifest_path:
@@ -270,6 +292,13 @@ class ArtifactDirectory:
                 "algorithm": "sha256",
                 "run_status": status,
                 "self_excluded": manifest_path.name,
+                "secret_scan": {
+                    "status": "passed",
+                    "files_scanned": len(entries),
+                    "credential_variants_checked": len(
+                        self._forbidden_secret_patterns
+                    ),
+                },
                 "artifact_count": len(entries),
                 "artifacts": entries,
             },
@@ -289,6 +318,36 @@ class ArtifactDirectory:
                 "artifact_path_invalid", "artifact path must name a file"
             )
         return candidate
+
+    def _assert_secret_free(self, content: bytes) -> None:
+        if self._contains_secret(content):
+            raise InvalidCompetitionRun(
+                "artifact_secret_detected",
+                "artifact credential scan failed",
+            )
+
+    def safe_reason_code(self, value: str) -> str:
+        encoded = str(value).encode("utf-8", errors="replace")
+        return "artifact_secret_detected" if self._contains_secret(encoded) else value
+
+    def _contains_secret(self, content: bytes) -> bool:
+        return any(pattern in content for pattern in self._forbidden_secret_patterns)
+
+    def _secret_bearing_files(self, *, exclude: Path) -> list[Path]:
+        contaminated: list[Path] = []
+        for path in sorted(self.root.rglob("*")):
+            if path == exclude or path.is_symlink() or not path.is_file():
+                continue
+            try:
+                content = path.read_bytes()
+            except OSError as exc:
+                raise InvalidCompetitionRun(
+                    "artifact_scan_failed",
+                    "artifact credential scan could not read an output file",
+                ) from exc
+            if self._contains_secret(content):
+                contaminated.append(path)
+        return contaminated
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -569,7 +628,10 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
     arms = _execution_arms(request)
     qualification_eligible = _qualification_eligible(request, cases, arms)
     selected_executor = executor or _live_executor_unavailable
-    artifacts = ArtifactDirectory(request.artifacts)
+    artifacts = ArtifactDirectory(
+        request.artifacts,
+        forbidden_secrets=(request.provider.api_key,),
+    )
     artifacts.create()
     all_rows: list[dict[str, Any]] = []
     contract_failures: list[dict[str, str]] = []
@@ -1391,6 +1453,7 @@ def _write_invalid_artifacts(
     rows: Sequence[Mapping[str, Any]],
     reason_code: str,
 ) -> None:
+    reason_code = artifacts.safe_reason_code(reason_code)
     report = _competition_report(
         request=request,
         rows=rows,
@@ -1398,6 +1461,10 @@ def _write_invalid_artifacts(
         exit_code=ExitCode.INVALID_RUN,
         competition_qualified=False,
     )
+    # Invalid diagnostics must remain writable even when malformed public
+    # provider labels happened to contain the provider credential.
+    report["provider_id"] = None
+    report["model"] = None
     report["reason_code"] = reason_code
     artifacts.write_json(
         "admission.json",
@@ -1533,6 +1600,24 @@ def _json_safe(value: Any) -> Any:
     raise InvalidCompetitionRun(
         "case_artifact_not_json", "case artifact contains a non-JSON value"
     )
+
+
+def _secret_patterns(values: Sequence[str]) -> tuple[bytes, ...]:
+    patterns: set[bytes] = set()
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        raw = value.encode("utf-8")
+        encoded_values = {
+            value,
+            f"Bearer {value}",
+            quote(value, safe=""),
+            quote_plus(value, safe=""),
+            base64.b64encode(raw).decode("ascii"),
+            base64.urlsafe_b64encode(raw).decode("ascii"),
+        }
+        patterns.update(item.encode("utf-8") for item in encoded_values if item)
+    return tuple(sorted(patterns))
 
 
 def _file_sha256(path: Path) -> str:
