@@ -83,6 +83,15 @@
       ]
     },
     {
+      "id": "langgraph-runtime-integration",
+      "label": "LangGraph reference-runtime integration",
+      "path_patterns": [
+        "agentguard_langgraph_bench/**",
+        "packages/agentguard-langgraph-adapter/**",
+        "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/**"
+      ]
+    },
+    {
       "id": "dashboard-types-mappers-store",
       "label": "Dashboard types, mappers and stores",
       "path_patterns": [

@@ -234,6 +234,25 @@ def test_released_r05_surfaces_make_c10_claimable(
     assert explanation["resource_conflicts"] == []
 
 
+def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
+    roadmap_root: Path,
+) -> None:
+    document = build_normalized(roadmap_root)
+    nodes = normalized_nodes(document)
+    catalog = read_json(machine_dir(roadmap_root) / "roadmap.json")
+    surfaces = {
+        surface["id"]: surface["path_patterns"]
+        for surface in catalog["exclusive_surfaces"]
+    }
+
+    assert "langgraph-runtime-integration" in nodes["CT04"]["change_surfaces"]
+    assert "runtime-binding-activation" not in nodes["CT04"]["change_surfaces"]
+    assert "langgraph-runtime-integration" in nodes["I02A"]["change_surfaces"]
+    assert "runtime-binding-activation" not in nodes["I02A"]["change_surfaces"]
+    assert all("openclaw" not in pattern for pattern in surfaces["langgraph-runtime-integration"])
+    assert any("openclaw" in pattern for pattern in surfaces["openclaw-host-capability"])
+
+
 def test_active_exclusive_surface_conflict_removes_otherwise_ready_node(
     roadmap_root: Path,
 ) -> None:

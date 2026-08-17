@@ -8,14 +8,14 @@
   ],
   "lane": "integration",
   "lifecycle": "not_started",
-  "revision": 0,
+  "revision": 1,
   "optional": false,
   "blocked": false,
   "hold": false,
   "change_surfaces": [
     "guard-api-production-wiring",
     "core-evaluation-activation",
-    "runtime-binding-activation"
+    "langgraph-runtime-integration"
   ],
   "source_refs": [
     {
@@ -26,5 +26,7 @@
   ],
   "evidence_refs": [],
   "work": null,
-  "notes": []
+  "notes": [
+    "Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE limits this operational integration slice to the LangGraph reference runtime; formal cross-runtime S4 remains blocked by R05."
+  ]
 }

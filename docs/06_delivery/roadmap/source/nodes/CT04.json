@@ -15,7 +15,7 @@
   "change_surfaces": [
     "guard-api-production-wiring",
     "core-evaluation-activation",
-    "runtime-binding-activation"
+    "langgraph-runtime-integration"
   ],
   "source_refs": [
     {
