@@ -87,6 +87,11 @@ _MAX_DERIVED_RESOURCES = 16
 REASON_DERIVED_RESOURCE_LIMIT = "resources.derived_limit_exceeded"
 REASON_RESOURCE_TARGET_MISSING = "resources.target_missing"
 
+# Scoped normalization revision for the competition-only model-output
+# observation projection.  The default remains NORMALIZER_VERSION so ordinary
+# model input/output and every shadow caller retain their existing identities.
+_MODEL_OUTPUT_OBSERVATION_NORMALIZER_VERSION = "v21-02-normalizer-3"
+
 _DERIVED_RESOURCE_KIND_ALIASES: Mapping[str, str] = {
     "browser": "url",
     "message": "email",
@@ -458,6 +463,7 @@ def build_action_ir(
     principal_id: str | None = None,
     runtime_binding_id: str | None = None,
     resolver: SymlinkResolver | None = None,
+    model_output_observation: bool = False,
 ) -> ActionIR:
     """把 GuardEvent 编排为确定性 ActionIR。
 
@@ -465,6 +471,11 @@ def build_action_ir(
     V21-03 接入点：Task Authority API（task_id/task_revision/scope_digest）
     与 Runtime Binding Registry（principal_id/runtime_binding_id）。
     """
+    if model_output_observation and event.event_type != "model_output_produced":
+        raise ValueError(
+            "model_output_observation requires event_type=model_output_produced"
+        )
+
     reason_codes: list[str] = []
     agent_id = event.security_context.agent_id
 
@@ -500,7 +511,7 @@ def build_action_ir(
         else None
     )
     action_type = _ACTION_TYPE_BY_EVENT.get(event.event_type, event.event_type)
-    effects = _effects_for_event(event)
+    effects = ActionEffect() if model_output_observation else _effects_for_event(event)
     impact = _impact_for_effects(effects)
 
     normalized_arguments = normalize_arguments(
@@ -561,7 +572,11 @@ def build_action_ir(
         argument_digest=normalized_arguments.canonical.argument_digest,
         authorization_fingerprint="",
         audit_fingerprint="",
-        normalizer_version=NORMALIZER_VERSION,
+        normalizer_version=(
+            _MODEL_OUTPUT_OBSERVATION_NORMALIZER_VERSION
+            if model_output_observation
+            else NORMALIZER_VERSION
+        ),
     )
     return placeholder.model_copy(
         update={

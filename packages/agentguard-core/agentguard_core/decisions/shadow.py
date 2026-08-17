@@ -338,6 +338,25 @@ def _overlay_lookup_targets(action_ir: ActionIR) -> tuple[str, ...]:
     return tuple(sorted(refs))
 
 
+def _is_competition_model_output_observation(
+    event: GuardEvent,
+    source_dataflow_not_required_actions: frozenset[str],
+) -> bool:
+    """Recognize the server-scoped competition observation projection.
+
+    The Guard API supplies the policy marker only for a verified LangGraph
+    competition activation.  Core additionally pins the exact runtime and
+    event type so the shared ``model_call`` action type cannot affect model
+    input or shadow evaluations.
+    """
+
+    return (
+        event.runtime == "langgraph"
+        and event.event_type == "model_output_produced"
+        and "model_call" in source_dataflow_not_required_actions
+    )
+
+
 def _overlay_truncation_degradation(event_id: str) -> EvaluationDegradation:
     return EvaluationDegradation(
         degradation_id=f"gate-a:overlay-truncated:{event_id}",
@@ -417,6 +436,10 @@ def _assess_kernel(
         detection_results, event_id=event.event_id
     )
     consumed_overlay_digest: str | None = None
+    model_output_observation = _is_competition_model_output_observation(
+        event,
+        source_dataflow_not_required_actions,
+    )
 
     # 1) ActionIR 构建（失败 → 全降级路径，保守 impact high）。
     action_ir: ActionIR | None = None
@@ -432,9 +455,14 @@ def _assess_kernel(
                 scope_digest=scope.scope_digest,
                 principal_id=scope.principal_id,
                 runtime_binding_id=scope.runtime_binding_id,
+                model_output_observation=model_output_observation,
             )
         else:
-            action_ir = build_action_ir(event, server_secret=server_secret)
+            action_ir = build_action_ir(
+                event,
+                server_secret=server_secret,
+                model_output_observation=model_output_observation,
+            )
     except Exception:  # noqa: BLE001 - 旁路评估失败必须收敛，不外抛。
         action_ir = None
         action_ir_failed = True
@@ -485,6 +513,11 @@ def _assess_kernel(
                         source_dataflow_not_required_actions
                     ),
                     memory_not_required_actions=memory_not_required_actions,
+                    observation_actions=(
+                        frozenset({"model_call"})
+                        if model_output_observation
+                        else frozenset()
+                    ),
                 ),
             )
             state = _state_from_snapshot(snapshot, revoked_grant_ids=revoked_grant_ids)

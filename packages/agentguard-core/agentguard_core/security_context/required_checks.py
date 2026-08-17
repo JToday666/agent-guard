@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 #: plan 映射规则版本：任何表驱动规则变化必须升级，不得静默改变 plan_id。
-REQUIRED_CHECK_PLAN_VERSION = "v21-04-plan-3"
+REQUIRED_CHECK_PLAN_VERSION = "v21-04-plan-4"
 
 #: CoverageMap 固定域顺序（01 §17）；plan 列表按此序稳定排序。
 _DOMAIN_ORDER: tuple[CoverageDomain, ...] = (
@@ -76,6 +76,11 @@ class PolicyProfile(BaseModel):
         default_factory=frozenset
     )
 
+    #: Server-attested observation action types retain behavior inspection even
+    #: when their ActionIR impact is low.  Explicit memory lineage remains a
+    #: required domain for these observations.
+    observation_actions: frozenset[str] = Field(default_factory=frozenset)
+
     #: policy 仅声明不需要 memory 判定的非持久动作类型。
     #: ``effects.persistence`` 或显式 memory resource/source 始终优先，
     #: 不允许被此集合豁免。
@@ -114,6 +119,8 @@ def build_required_check_plan(
       移出 required；policy 声明无需 capability 的低影响动作同理；
     - policy 声明 ``source_dataflow_not_required_actions`` 时仅移出
       source/dataflow，不影响 memory；
+    - policy 声明 ``observation_actions`` 时追加 behavior；若观察事件显式
+      引用 memory resource/source，同时追加 memory；
     - policy 声明 ``memory_not_required_actions`` 时仅移出 memory，
       且只对非持久、未显式引用 memory resource/source 的动作生效；
     - ``policy.requires_task_authority=False`` → task 移入 optional；
@@ -163,6 +170,18 @@ def build_required_check_plan(
     ):
         required.discard("memory")
         reason_codes.append("v21-04:policy_memory_not_required")
+    if action_type in policy.observation_actions:
+        required.add("behavior")
+        reason_codes.append("v21-04:policy_observation_behavior_required")
+        if action_ir is not None and (
+            any(resource.kind == "memory" for resource in action_ir.resources)
+            or any(
+                ref.startswith(("memory:", "memory://", "source:memory:"))
+                for ref in action_ir.data_refs
+            )
+        ):
+            required.add("memory")
+            reason_codes.append("v21-04:policy_observation_memory_lineage")
     if action_type in policy.capability_not_required_actions:
         required.discard("capability")
         reason_codes.append("v21-04:policy_capability_not_required")

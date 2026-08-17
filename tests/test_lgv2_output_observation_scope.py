@@ -8,13 +8,25 @@ from typing import Literal
 
 from fastapi.testclient import TestClient
 
-from agentguard_core import GuardEvent, ModelCallPayload, SecurityContext
+from agentguard_core import (
+    GuardEvent,
+    ModelCallPayload,
+    PolicyBundle,
+    RuleHit,
+    SecurityContext,
+)
+from agentguard_core.actions import ActionEffect
 from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.decisions import DetectionResult
+from agentguard_core.decisions.shadow import shadow_assess_with_coverage
+from agentguard_core.security_context import AssessmentTransientFacts
 from guard_api.main import create_app
 from guard_api.services import PolicyService
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.support.auth import add_adapter_credential
 from tests.test_lgv2_api_official import _activation, _settings
+from tests.test_gate_a_core_overlay import SCOPE, _flow, _source
+from tests.test_v21_08_shadow_assessment import _snapshot
 from tests.test_v21_09_pipeline import _TASK_ID, _commit_task_fact
 
 _ADAPTER_HEADERS = {"Authorization": "Bearer adapter-secret"}
@@ -185,3 +197,82 @@ def test_active_output_memory_lineage_keeps_memory_required(
     assert coverage["source"]["status"] == "not_applicable"
     assert coverage["dataflow"]["status"] == "not_applicable"
     assert coverage["memory"]["status"] != "not_applicable"
+
+
+def test_scoped_output_is_low_impact_without_dropping_signal_or_taint_inputs() -> None:
+    source = _source()
+    event = _model_event(
+        event_id="evt_active_output_possible_influence",
+        phase="output",
+        visible_source_refs=(source.source_id,),
+    )
+    transient = AssessmentTransientFacts.from_primitives(
+        event_id=event.event_id,
+        scope_digest=SCOPE,
+        source_facts=[source],
+        flow_facts=[
+            _flow(
+                "flow-output-possible-influence",
+                source_ref=source.source_id,
+                target_ref=f"model_output:{event.event_id}",
+                relation="influenced_by",
+                taints=["UNTRUSTED"],
+            )
+        ],
+    )
+    detection = DetectionResult(
+        decision="ask",
+        risk_score=72,
+        category="prompt_injection",
+        rule_hit=RuleHit(
+            rule_id="P101_prompt_injection",
+            severity="high",
+            evidence=["high_confidence=true"],
+        ),
+        reason="prompt injection detector fixture",
+        severity="high",
+    )
+    snapshot = _snapshot().model_copy(update={"sources": [source]})
+
+    ordinary = shadow_assess_with_coverage(
+        event,
+        PolicyBundle(),
+        snapshot,
+        server_secret=b"lgv2-output-observation-core-test",
+        detection_results=[detection],
+        transient_facts=transient,
+    )
+    observation = shadow_assess_with_coverage(
+        event,
+        PolicyBundle(),
+        snapshot,
+        server_secret=b"lgv2-output-observation-core-test",
+        detection_results=[detection],
+        transient_facts=transient,
+        memory_not_required_actions=frozenset({"model_call"}),
+        source_dataflow_not_required_actions=frozenset({"model_call"}),
+    )
+
+    assert ordinary.action_ir is not None
+    assert ordinary.action_ir.impact == "high"
+    assert (
+        "v21-08:influence_rule:INFLUENCE-POSSIBLE-HIGH"
+        in ordinary.assessment.reason_codes
+    )
+    assert observation.action_ir is not None
+    assert observation.action_ir.effects == ActionEffect()
+    assert observation.action_ir.impact == "low"
+    assert observation.assessment.impact == "low"
+    assert set(observation.assessment.required_check_plan.required_domains) == {
+        "task",
+        "capability",
+        "behavior",
+    }
+    assert (
+        "v21-08:influence_rule:INFLUENCE-POSSIBLE-HIGH"
+        not in observation.assessment.reason_codes
+    )
+    assert observation.assessment.signals == ordinary.assessment.signals
+    assert observation.action_ir.data_refs == ordinary.action_ir.data_refs
+    assert observation.consumed_overlay_digest == transient.overlay_digest
+    assert transient.flow_facts[0].taints == ["UNTRUSTED"]

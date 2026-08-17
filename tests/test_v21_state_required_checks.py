@@ -167,7 +167,7 @@ def test_competition_policy_can_waive_only_memory_for_plain_model_call() -> None
         make_policy(memory_not_required_actions=frozenset({"model_call"})),
     )
 
-    assert REQUIRED_CHECK_PLAN_VERSION == "v21-04-plan-3"
+    assert REQUIRED_CHECK_PLAN_VERSION == "v21-04-plan-4"
     assert "memory" in default_plan.required_domains
     assert set(competition_plan.required_domains) == {
         "task",
@@ -183,17 +183,15 @@ def test_competition_policy_can_waive_only_memory_for_plain_model_call() -> None
 
 def test_competition_output_observation_waives_source_dataflow_only() -> None:
     action = make_action(
-        impact="high",
+        impact="low",
         action_type="model_call",
-        external_communication=True,
-        data_egress=True,
-        network_access=True,
     )
     plan = build_required_check_plan(
         action,
         make_policy(
             source_dataflow_not_required_actions=frozenset({"model_call"}),
             memory_not_required_actions=frozenset({"model_call"}),
+            observation_actions=frozenset({"model_call"}),
         ),
     )
 
@@ -203,23 +201,22 @@ def test_competition_output_observation_waives_source_dataflow_only() -> None:
         "v21-04:policy_source_dataflow_not_required" in plan.reason_codes
     )
     assert "v21-04:policy_memory_not_required" in plan.reason_codes
+    assert "v21-04:policy_observation_behavior_required" in plan.reason_codes
 
 
 def test_output_observation_source_dataflow_waiver_keeps_memory_lineage_required(
 ) -> None:
     action = make_action(
-        impact="high",
+        impact="low",
         action_type="model_call",
         data_refs=["source:memory:evt-context:0"],
-        external_communication=True,
-        data_egress=True,
-        network_access=True,
     )
     plan = build_required_check_plan(
         action,
         make_policy(
             source_dataflow_not_required_actions=frozenset({"model_call"}),
             memory_not_required_actions=frozenset({"model_call"}),
+            observation_actions=frozenset({"model_call"}),
         ),
     )
 
@@ -227,6 +224,7 @@ def test_output_observation_source_dataflow_waiver_keeps_memory_lineage_required
     assert "dataflow" not in plan.required_domains
     assert "memory" in plan.required_domains
     assert "v21-04:policy_memory_not_required" not in plan.reason_codes
+    assert "v21-04:policy_observation_memory_lineage" in plan.reason_codes
 
 
 def test_competition_memory_waiver_cannot_override_persistence() -> None:
