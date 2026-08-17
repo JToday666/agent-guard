@@ -136,7 +136,7 @@ def operational_runtime_settings(
         storage_backend=storage_backend,
         database_url=database_url or GuardApiSettings().database_url,
         control_token=CONTROL_TOKEN,
-        v21_shadow_enabled=True,
+        v21_mode="shadow",
         v21_shadow_server_secret=REFERENCE_V21_SECRET,
         ct_fact_projection_enabled=True,
         context_builder_enabled=True,
