@@ -150,6 +150,84 @@ def test_manifest_preview_is_field_aware_and_never_discloses_restricted_content(
     assert "Ignore prior instructions" not in serialized
 
 
+def test_serialized_manifest_denies_runtime_authority_fields_and_values() -> None:
+    hmac_fingerprint = "hmac-sha256:" + "a" * 64
+    lease_token = "lease-v1:" + "b" * 64
+    adapter_token = "agt_tok_" + "c" * 32
+    jwt = (
+        "eyJhbGciOiJIUzI1NiJ9."
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    )
+    forbidden_fields = (
+        "nonce",
+        "authorization_fingerprint",
+        "runtime_binding_id",
+        "enforcement_binding",
+        "lease_token",
+        "token_digest",
+        "credential",
+        "password",
+        "secret",
+        "api_key",
+    )
+    forbidden_previews = [
+        '"nonce": "nonce-runtime-1"',
+        '"authorization_fingerprint": "sha256:' + "d" * 64 + '"',
+        "runtime_binding_id=binding:adapter-main",
+        "enforcement_binding=approval-released",
+        "lease_token=opaque-runtime-token",
+        "token_digest=sha256:" + "d" * 64,
+        "credential=opaque-credential",
+        "password=opaque-password",
+        "secret=opaque-secret",
+        "api_key=opaque-api-key",
+        "fingerprint=" + hmac_fingerprint,
+        "opaque=" + lease_token,
+        "adapter=" + adapter_token,
+        "identity=" + jwt,
+    ]
+    safe_artifact = "artifact=sha256:" + "e" * 64
+    event, result = _assembly(
+        [
+            _source(
+                f"unsafe-{index}",
+                "file",
+                preview,
+                sequence_index=index,
+            )
+            for index, preview in enumerate(forbidden_previews)
+        ]
+        + [
+            _source(
+                "safe-artifact",
+                "file",
+                safe_artifact,
+                sequence_index=len(forbidden_previews),
+            )
+        ],
+        event_id="evt_manifest_runtime_material_preview",
+    )
+
+    prepared = prepare_context_manifest(event, result.plan)
+    payload = prepared.audit_record.evidence.context_manifest
+
+    assert isinstance(payload, ContextManifestEnvelope)
+    assert all(
+        chunk.content_preview is None
+        for chunk in payload.chunks[: len(forbidden_previews)]
+    )
+    assert payload.chunks[-1].content_preview == safe_artifact
+    serialized = prepared.audit_record.model_dump_json(by_alias=True)
+    assert all(preview not in serialized for preview in forbidden_previews)
+    assert all(field not in serialized for field in forbidden_fields)
+    assert hmac_fingerprint not in serialized
+    assert lease_token not in serialized
+    assert adapter_token not in serialized
+    assert jwt not in serialized
+    assert safe_artifact in serialized
+
+
 def test_manifest_budget_degrades_only_to_typed_digest_reference() -> None:
     event, result = _assembly(
         [_source("web", "web", "ordinary evidence", sequence_index=0)],

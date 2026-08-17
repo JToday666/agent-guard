@@ -8,6 +8,7 @@ full prompt and is intentionally independent of generic audit redaction.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
@@ -40,6 +41,26 @@ CONTEXT_MANIFEST_AUDIT_ID_PREFIX = "audit_context_manifest_"
 CONTEXT_MANIFEST_EVENT_TYPE = "context_manifest_recorded"
 CONTEXT_MANIFEST_MAX_CHUNKS = 20
 CONTEXT_MANIFEST_PREVIEW_LIMIT = 240
+
+_DISPLAY_UNSAFE_PREVIEW_FIELD = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"nonce|"
+    r"authorization[ _-]*fingerprint|"
+    r"runtime[ _-]*binding[ _-]*id|"
+    r"enforcement[ _-]*binding|"
+    r"lease[ _-]*token|"
+    r"token[ _-]*digest|"
+    r"credentials?|passwords?|secrets?|api[ _-]*keys?"
+    r")(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_DISPLAY_UNSAFE_PREVIEW_VALUE = re.compile(
+    r"(?<![A-Za-z0-9])(?:hmac-sha256|lease-v1):[0-9a-f]{64}(?![0-9a-f])|"
+    r"(?<![A-Za-z0-9_])agt_tok_[0-9a-f]{32}(?![0-9a-f])|"
+    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."
+    r"[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])",
+    re.IGNORECASE,
+)
 
 Sha256Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 ScopeDigest = Annotated[str, Field(pattern=r"^(?:sha256|hmac-sha256):[0-9a-f]{64}$")]
@@ -730,6 +751,11 @@ def _safe_preview(*, source: ContextSource, chunk: ContextChunk) -> str | None:
         return None
     candidate = source.summary
     if not isinstance(candidate, str) or not candidate:
+        return None
+    if (
+        _DISPLAY_UNSAFE_PREVIEW_FIELD.search(candidate) is not None
+        or _DISPLAY_UNSAFE_PREVIEW_VALUE.search(candidate) is not None
+    ):
         return None
     if scrub_text(candidate) != candidate:
         return None
