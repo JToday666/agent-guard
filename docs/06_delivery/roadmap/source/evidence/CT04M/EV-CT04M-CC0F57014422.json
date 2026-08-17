@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04M-CC0F57014422",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "CT04M",
+  "recorded_at": "2026-08-17T06:49:48Z",
+  "ref": "local:ct04m-focused-23+regression-259",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Strict manifest, digest/window/preview/budget, evaluation transaction/replay/drift/rollback, external forgery, Trace/ETag and no-Provenance tests passed; Ruff and Pyright passed; PostgreSQL variants skipped locally when the configured test database was unavailable"
+}

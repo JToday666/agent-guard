@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04M-F8DFE17D162A",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "CT04M",
+  "recorded_at": "2026-08-17T06:50:15Z",
+  "ref": "flag:AGENTGUARD_CONTEXT_BUILDER_ENABLED=false",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Context Builder remains default-off; flag-off evaluate wire parity omits both transient plan and Manifest while preserving the current official path"
+}
