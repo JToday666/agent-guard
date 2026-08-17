@@ -275,6 +275,86 @@ def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
             ), f"{node_id} unexpectedly authorizes residual R05 path {path}"
 
 
+def test_ct04_check_diff_accepts_langgraph_and_rejects_openclaw(
+    roadmap_root: Path,
+) -> None:
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "CT04",
+        lifecycle="in_progress",
+        revision=2,
+        work={
+            "base_sha": "deadbee",
+            "branch": "codex/ct04-test",
+            "owner": "roadmap-test",
+            "started_at": None,
+            "substate": "active",
+            "worktree_slug": "ct04-test",
+        },
+    )
+    initialize_git_fixture(roadmap_root, branch="codex/ct04-test")
+
+    def append_evidence(evidence_id: str) -> None:
+        destination = (
+            machine_dir(roadmap_root) / "evidence" / "CT04" / f"{evidence_id}.json"
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        write_json(
+            destination,
+            {
+                "schema_version": "1.0.0",
+                "id": evidence_id,
+                "node_id": "CT04",
+                "kind": "test",
+                "ref": f"pytest:{evidence_id.lower()}",
+                "status": "pending",
+                "summary": "surface authorization probe",
+                "recorded_at": None,
+                "metadata": {},
+            },
+        )
+
+    allowed = (
+        roadmap_root
+        / "packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter/context_guard.py"
+    )
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    allowed.write_text("# allowed reference-runtime change\n", encoding="utf-8")
+    append_evidence("EV-CT04-ALLOWED")
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "allowed LangGraph change").returncode == 0
+    assert_succeeds(
+        run_tool(
+            roadmap_root,
+            "check-diff",
+            "--base-ref",
+            "HEAD^",
+            "--head-ref",
+            "HEAD",
+        )
+    )
+
+    forbidden = (
+        roadmap_root / "packages/agentguard-openclaw-plugin/src/context_guard.ts"
+    )
+    forbidden.parent.mkdir(parents=True, exist_ok=True)
+    forbidden.write_text("// forbidden residual host change\n", encoding="utf-8")
+    append_evidence("EV-CT04-FORBIDDEN")
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "forbidden OpenClaw change").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+    assert_validation_failure(result, "ct04", "does not own", "openclaw")
+
+
 def test_active_exclusive_surface_conflict_removes_otherwise_ready_node(
     roadmap_root: Path,
 ) -> None:
