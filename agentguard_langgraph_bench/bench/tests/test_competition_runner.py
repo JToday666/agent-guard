@@ -235,7 +235,13 @@ class StubArmExecutor:
                 }
             )
             if (
-                self.mutation in {"a1_deny_execute", "a1_missing_correlation"}
+                self.mutation
+                in {
+                    "a1_deny_execute",
+                    "a1_missing_correlation",
+                    "a1_runtime_receipt_error",
+                    "a1_terminal_receipt_missing",
+                }
                 and request.arm.arm_id == "A1"
                 and case.case_id == request.cases[0].case_id
             ):
@@ -247,6 +253,16 @@ class StubArmExecutor:
                 }
                 if self.mutation == "a1_missing_correlation":
                     correlation = {key: None for key in correlation}
+                elif self.mutation in {
+                    "a1_runtime_receipt_error",
+                    "a1_terminal_receipt_missing",
+                }:
+                    correlation = {
+                        "decision": "allow",
+                        "decision_id": "dec-a1-allow",
+                        "policy_audit_id": "audit-a1-allow",
+                        "approval_release": "not_applicable",
+                    }
                 rows[-1]["tool_executions"] = [
                     {
                         "action_id": "call-a1-denied",
@@ -263,7 +279,12 @@ class StubArmExecutor:
                         "receipt_count": 1,
                     }
                 ]
-                rows[-1]["receipt_covered"] = True
+                if self.mutation == "a1_terminal_receipt_missing":
+                    rows[-1]["terminal_receipts"] = []
+                rows[-1]["receipt_covered"] = self.mutation not in {
+                    "a1_runtime_receipt_error",
+                    "a1_terminal_receipt_missing",
+                }
         return ArmRunResult(
             rows=tuple(rows),
             contracts={
@@ -550,6 +571,56 @@ def test_a1_invocation_without_committed_decision_correlation_is_exit_two(
     assert exit_code is ExitCode.INVALID_RUN
     report = json.loads((request.artifacts / "result.json").read_text(encoding="utf-8"))
     assert report["reason_code"] == "runtime_decision_correlation_missing"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["a1_runtime_receipt_error", "a1_terminal_receipt_missing"],
+)
+def test_a1_incomplete_runtime_receipt_evidence_is_exit_two(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    request = _request(tmp_path)
+
+    exit_code = run(request, executor=StubArmExecutor(mutation=mutation))
+
+    assert exit_code is ExitCode.INVALID_RUN
+    report = json.loads((request.artifacts / "result.json").read_text(encoding="utf-8"))
+    assert report["reason_code"] == "runtime_receipt_evidence_incomplete"
+
+
+def test_guarded_pre_model_block_without_action_allows_false_receipt_coverage(
+    tmp_path: Path,
+) -> None:
+    run_request = _request(tmp_path)
+    case = _load_frozen_cases(run_request.profile)[0]
+    arm = next(item for item in run_request.profile.arms if item.arm_id == "A1")
+    request = ArmRunRequest(
+        profile=run_request.profile,
+        arm=arm,
+        repeat_index=0,
+        seed=run_request.profile.seed,
+        cases=(case,),
+        provider=run_request.provider,
+        artifact_directory=tmp_path / "A1-pre-model",
+        suite=run_request.profile.suite,
+        qualification_eligible=False,
+    )
+
+    failures = _validate_tool_and_receipt_evidence(
+        {
+            "tool_executions": [],
+            "terminal_receipts": [],
+            "receipt_covered": False,
+        },
+        request=request,
+        case=case,
+        exchanges=(),
+        identity=f"A1/r0/{case.case_id}",
+    )
+
+    assert failures == []
 
 
 @pytest.mark.parametrize(

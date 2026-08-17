@@ -1364,6 +1364,11 @@ def _validate_tool_and_receipt_evidence(
                 "runtime_receipt_claim_mismatch",
                 f"receipt coverage is not supported by evidence for {identity}",
             )
+        if executions and receipt_covered is not True:
+            raise InvalidCompetitionRun(
+                "runtime_receipt_evidence_incomplete",
+                f"guarded action lacks complete terminal receipt evidence for {identity}",
+            )
     elif receipt_covered is not None:
         raise InvalidCompetitionRun(
             "runtime_receipt_claim_invalid",
@@ -1378,15 +1383,6 @@ def _validate_tool_and_receipt_evidence(
                 "arm_id": request.arm.arm_id,
                 "case_id": identity.rsplit("/", 1)[-1],
                 "reason_code": "tool_action_invoked_more_than_once",
-            }
-        )
-    if executions and request.arm.rte_mode is RteMode.ENFORCE and not receipt_covered:
-        failures.append(
-            {
-                "contract": "terminal_receipt_coverage",
-                "arm_id": request.arm.arm_id,
-                "case_id": identity.rsplit("/", 1)[-1],
-                "reason_code": "terminal_receipt_not_covered",
             }
         )
     for action_id, execution in executions.items():
