@@ -334,6 +334,9 @@ def verify_competition_activation_manifest(
 
     if not isinstance(server_secret, bytes) or len(server_secret) < 32:
         return False
+    recomputed_digest = canonical_sha256(manifest.digest_projection())
+    if not hmac.compare_digest(recomputed_digest, manifest.activation_ref_digest):
+        return False
     expected = _activation_signature(server_secret, manifest.activation_ref_digest)
     return hmac.compare_digest(expected, manifest.server_signature)
 

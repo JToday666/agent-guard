@@ -246,6 +246,13 @@ def test_activation_manifest_is_strict_canonical_and_server_signed() -> None:
         manifest, server_secret=b"another-valid-server-secret"
     )
 
+    # Pydantic's frozen model prevents field reassignment but a nested list can
+    # still be mutated by trusted process code.  Verification must recompute
+    # the manifest digest rather than trusting the stored digest alone.
+    mutable = manifest.model_copy(deep=True)
+    mutable.enabled_path_ids.pop()
+    assert not verify_competition_activation_manifest(mutable, server_secret=SECRET)
+
     tampered = manifest.model_dump(mode="json")
     tampered["profile_digest"] = "sha256:" + "9" * 64
     with pytest.raises(ValidationError, match="activation_ref_digest"):
