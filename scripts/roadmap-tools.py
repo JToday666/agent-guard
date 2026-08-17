@@ -38,6 +38,19 @@ CONTROL_PLANE_PATTERNS = (
     "scripts/roadmap-tools.py",
     "tests/test_roadmap_tools.py",
 )
+# Claude Code/AttackBench is an independent benchmark harness, not a product
+# runtime activation claim.  Keep this exception conditional on the diff
+# containing the canonical Claude Code adapter/smoke entrypoint and consisting
+# only of benchmark-tooling paths; ordinary runtime changes remain claim-bound.
+STANDALONE_BENCHMARK_PATH_PATTERNS = (
+    "agentguard_langgraph_bench/**",
+    "benchmarks/claude-code-mcp-bridge/**",
+    "scripts/claude_code_smoke.py",
+)
+STANDALONE_BENCHMARK_MARKER_PATTERNS = (
+    "agentguard_langgraph_bench/adapters/claude_code/**",
+    "scripts/claude_code_smoke.py",
+)
 
 
 class RoadmapError(RuntimeError):
@@ -1214,6 +1227,13 @@ def _valid_lifecycle_transition(before: str, after: str) -> bool:
     return after in allowed.get(before, set())
 
 
+def _is_standalone_benchmark_diff(paths: Sequence[str]) -> bool:
+    """Return whether a Claude Code benchmark-only diff needs no claim."""
+    return bool(paths) and any(
+        _matches_any(path, STANDALONE_BENCHMARK_MARKER_PATTERNS) for path in paths
+    ) and all(_matches_any(path, STANDALONE_BENCHMARK_PATH_PATTERNS) for path in paths)
+
+
 def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
     roadmap.validate()
     changes = _git_changed_paths(roadmap.root, base_ref, head_ref)
@@ -1309,6 +1329,8 @@ def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
     implementation_paths = sorted(
         path for path in changed_paths if not _matches_any(path, CONTROL_PLANE_PATTERNS)
     )
+    if _is_standalone_benchmark_diff(implementation_paths):
+        implementation_paths = []
     added_evidence_nodes = {
         path[len(evidence_prefix) :].split("/", 1)[0]
         for status, path in changes

@@ -38,9 +38,9 @@ class ClaudeCodeAdapter:
         self.config = config
         self.tool_server: Any = None
         self.model = str(getattr(config, "claude_code_model", "") or os.getenv("ANTHROPIC_MODEL") or "qwen3.7-plus")
-        self.timeout_seconds = float(os.getenv("AGENTGUARD_CLAUDE_CODE_TIMEOUT", "180"))
-        self.max_turns = int(os.getenv("AGENTGUARD_CLAUDE_CODE_MAX_TURNS", "8"))
-        self.max_budget_usd = float(os.getenv("AGENTGUARD_CLAUDE_CODE_MAX_BUDGET_USD", "1"))
+        self.timeout_seconds = float(os.getenv("AGENTGUARD_CLAUDE_CODE_TIMEOUT", "600"))
+        self.max_turns = int(os.getenv("AGENTGUARD_CLAUDE_CODE_MAX_TURNS", "48"))
+        self.max_budget_usd = float(os.getenv("AGENTGUARD_CLAUDE_CODE_MAX_BUDGET_USD", "2"))
         self.bridge_path = self._resolve_bridge_path()
 
     def setup(self, context: dict[str, Any]) -> None:

@@ -141,6 +141,15 @@ uv run python scripts/roadmap-tools.py check-diff \
 不删除历史证据。功能 worktree 不得修改其他节点状态，不得手改 `generated/`。关闭节点后
 由生成器重新计算 Ready Queue，下游只能在更新后的蓝色状态进入 `dev` 后 claim。
 
+独立基准工具例外：Claude Code/AttackBench 基准运行器、MCP bridge、紧凑报告和 smoke
+维护不代表产品 runtime activation，因此不要求伪造或借用路线图 claim。`check-diff` 仅在
+实现差异同时满足以下条件时适用该例外：包含
+`agentguard_langgraph_bench/adapters/claude_code/**` 或 `scripts/claude_code_smoke.py`
+这一 canonical marker；所有实现路径均位于 `agentguard_langgraph_bench/**`、
+`benchmarks/claude-code-mcp-bridge/**` 或 `scripts/claude_code_smoke.py`；并且没有产品
+代码、Guard API、策略或路线图节点变更。任何不满足这些条件的差异仍遵守完整 claim、surface
+和 evidence 门禁。
+
 ## 5. 最快并行路线
 
 1. CT05、S1、RSC-CT01、I01 和 Gate A 已进入基线；当前先并行 reconciliation claim

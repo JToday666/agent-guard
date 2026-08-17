@@ -116,6 +116,12 @@ def _source_candidates(source_path: str) -> list[Path]:
     if not raw:
         return []
     raw = raw.removeprefix("file://")
+    parsed = urlparse(raw)
+    if parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost"}:
+        # The local fixture server exposes logical paths such as
+        # ``/local-instrumentation/...``.  Treat that URL path as a logical
+        # source alias, not as an absolute filesystem path.
+        raw = parsed.path.lstrip("/")
     normalized = raw.replace("\\", "/").lstrip("./")
     candidates: list[Path] = []
 
@@ -130,6 +136,14 @@ def _source_candidates(source_path: str) -> list[Path]:
         mapped = _source_map().get(_source_map_key(normalized))
         if mapped:
             add(Path(mapped))
+        for prefix, root in (
+            ("local-instrumentation/", LOCAL_INSTRUMENTATION_ROOT),
+            ("local-pages/", LOCAL_INSTRUMENTATION_ROOT),
+            ("instrumentation/", INSTRUMENTATION_ROOT),
+            ("pages/", INSTRUMENTATION_ROOT),
+        ):
+            if normalized.startswith(prefix):
+                add(root / normalized.removeprefix(prefix))
         if normalized.startswith("support/reference/") or normalized.startswith("rag/poisonedrag/"):
             add(LOCAL_SUPPORT_FILES_ROOT / normalized)
         for prefix in ("MCPSafety/", "mcpsafety/"):
@@ -683,20 +697,25 @@ class _RealBrowserRuntimeCore:
         self.screenshot_dir = sandbox_dir / "browser" / "screenshots"
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._sessions: dict[str, RealBrowserSession] = {}
+        self._playwright: Any = None
         self._recordings: dict[str, dict[str, Any]] = {}
         self._server: ThreadingHTTPServer | None = None
         self._server_thread: Thread | None = None
 
     def start(self, *, session_id: str, url: str, source_path: str | None = None) -> dict[str, Any]:
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(INSTRUMENTATION_ROOT / ".playwright-browsers"))
         existing = self._sessions.get(session_id)
         requested_source = resolve_local_source(source_path)
         if existing is not None:
             if requested_source is not None:
                 requested_source = self._replay_entry_source(requested_source)
             if requested_source is not None and existing.source_path is not None and requested_source.resolve() != existing.source_path.resolve():
-                raise BrowserRuntimeError(f"browser session {session_id} already exists for a different source")
-            return self._existing_session_result(session_id, existing)
+                # Claude Code may reuse a guessed session id while correcting
+                # the fixture path.  A case has one isolated browser runtime,
+                # so finalize the stale session and replace it safely.
+                self.finalize(session_id)
+                existing = None
+            else:
+                return self._existing_session_result(session_id, existing)
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
@@ -719,7 +738,10 @@ class _RealBrowserRuntimeCore:
         recorder = ContinuousFrameRecorder(starting_dir, fps=CONTINUOUS_FRAME_FPS, viewport=REPLAY_VIEWPORT)
         recording_started_at = _utc_now_iso()
 
-        pw = sync_playwright().start()
+        created_playwright = self._playwright is None
+        if created_playwright:
+            self._playwright = sync_playwright().start()
+        pw = self._playwright
         try:
             browser_type = self._browser_type(pw)
             launch_kwargs: dict[str, Any] = {"headless": True, "timeout": 15000}
@@ -771,7 +793,9 @@ class _RealBrowserRuntimeCore:
             if screenshot.exists():
                 shutil.copyfile(screenshot, start_step)
         except Exception:
-            pw.stop()
+            if created_playwright and self._playwright is pw:
+                pw.stop()
+                self._playwright = None
             shutil.rmtree(starting_dir, ignore_errors=True)
             raise
 
@@ -1209,7 +1233,6 @@ class _RealBrowserRuntimeCore:
         for stage, closer in (
             ("close_browser_context", session.context.close),
             ("close_browser", session.browser.close),
-            ("stop_playwright", session.playwright.stop),
         ):
             try:
                 closer()
@@ -1339,6 +1362,11 @@ class _RealBrowserRuntimeCore:
         if self._server_thread is not None:
             self._server_thread.join(timeout=2)
             self._server_thread = None
+        if self._playwright is not None:
+            try:
+                self._playwright.stop()
+            finally:
+                self._playwright = None
 
     def _artifact_dir(self, session_id: str) -> Path:
         return self.sandbox_dir / "browser" / "replay_artifacts" / _safe_artifact_name(session_id)
@@ -1388,14 +1416,40 @@ class _RealBrowserRuntimeCore:
         return getattr(playwright, self.browser_engine)
 
     def _chromium_executable_path(self) -> Path | None:
-        browser_root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or INSTRUMENTATION_ROOT / ".playwright-browsers")
-        candidates = sorted(browser_root.glob("chromium-*/chrome-linux*/chrome"), reverse=True)
-        for candidate in candidates:
-            if candidate.exists() and os.access(candidate, os.X_OK):
-                return candidate
+        configured_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+        roots = [Path(configured_root)] if configured_root else []
+        # Prefer a benchmark-local browser cache when explicitly configured,
+        # but also honor Playwright's standard per-user cache.  The previous
+        # unconditional default to ``Instrumentation/.playwright-browsers``
+        # made a valid `playwright install chromium` invisible to the runtime.
+        roots.extend(
+            [
+                INSTRUMENTATION_ROOT / ".playwright-browsers",
+                Path.home() / ".cache" / "ms-playwright",
+            ]
+        )
+        seen: set[Path] = set()
+        for browser_root in roots:
+            resolved_root = browser_root.expanduser().resolve()
+            if resolved_root in seen:
+                continue
+            seen.add(resolved_root)
+            candidates = sorted(resolved_root.glob("chromium-*/chrome-linux*/chrome"), reverse=True)
+            for candidate in candidates:
+                if candidate.exists() and os.access(candidate, os.X_OK):
+                    return candidate
         return None
 
     def _locator(self, session: RealBrowserSession, *, selector: str) -> Any:
+        if selector.startswith("aria/"):
+            label = selector.removeprefix("aria/")
+            labeled = session.page.get_by_label(label, exact=True)
+            try:
+                if labeled.count() > 0:
+                    return labeled
+            except Exception:
+                pass
+            return session.page.get_by_role("button", name=label, exact=True)
         if selector.startswith("id="):
             return session.page.locator(f'[id="{self._css_attr(selector[3:])}"]')
         if selector.startswith("testid="):

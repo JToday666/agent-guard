@@ -566,6 +566,33 @@ def test_evidence_only_diff_must_belong_to_current_branch_claim(
     assert_validation_failure(result, "evidence-only", "active roadmap claim")
 
 
+def test_claude_code_benchmark_only_diff_is_outside_roadmap_claims(
+    roadmap_root: Path,
+) -> None:
+    initialize_git_fixture(roadmap_root, branch="codex/claude-code-maintenance")
+    paths = (
+        roadmap_root / "agentguard_langgraph_bench/adapters/claude_code/adapter.py",
+        roadmap_root / "agentguard_langgraph_bench/bench/browser_runtime.py",
+        roadmap_root / "scripts/claude_code_smoke.py",
+    )
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# benchmark fixture\n", encoding="utf-8")
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "Claude benchmark maintenance").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+
+    assert_succeeds(result)
+
+
 def test_evidence_rename_cannot_evade_append_only_check(roadmap_root: Path) -> None:
     source = (
         machine_dir(roadmap_root) / "evidence" / "CT03R" / "EV-CT03R-UNREFERENCED.json"
