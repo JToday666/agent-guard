@@ -143,14 +143,36 @@
         <dl class="execution-inspector__detail-grid">
           <div>
             <dt>门控状态</dt>
-            <dd>{{ layerValue(step, "enforcement") }}</dd>
+            <dd>{{ enforcementGateLabel(step) }}</dd>
           </div>
           <div>
-            <dt>Binding</dt>
-            <dd>{{ step.supervision.enforcement.bindingCheckStatus }}</dd>
+            <dt>绑定校验</dt>
+            <dd>{{ enforcementBindingLabel(step) }}</dd>
+          </div>
+          <div>
+            <dt>租约消费</dt>
+            <dd>{{ enforcementConsumeLabel(step) }}</dd>
+          </div>
+          <div>
+            <dt>证据可用性</dt>
+            <dd>{{ getAvailabilityLabel(step.supervision.enforcement.availability) }}</dd>
+          </div>
+          <div>
+            <dt>Lease ID</dt>
+            <dd>
+              <code translate="no">{{ step.supervision.enforcement.leaseId ?? "未产生" }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>Consumption ID</dt>
+            <dd>
+              <code translate="no">{{
+                step.supervision.enforcement.consumptionId ?? "未产生"
+              }}</code>
+            </dd>
           </div>
           <div class="is-wide">
-            <dt>证据边界</dt>
+            <dt>受控原因</dt>
             <dd>
               {{
                 step.supervision.enforcement.availability === "unavailable"
@@ -205,7 +227,10 @@
           </div>
           <div class="is-wide">
             <dt>Control Integrity</dt>
-            <dd>{{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }}</dd>
+            <dd>
+              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }} ·
+              {{ step.supervision.controlIntegrity.reasonCodes.join(" · ") || "未发现违例原因" }}
+            </dd>
           </div>
         </dl>
       </section>
@@ -406,6 +431,44 @@ function approvalResolutionActor(basis: ApprovalBasisViewModel | undefined): str
 
 function layerValue(step: ExecutionStepViewModel, key: SupervisionLayerKey): string {
   return getSupervisionLayerDisplays(step).find((layer) => layer.key === key)?.value ?? "不可用";
+}
+
+function enforcementGateLabel(step: ExecutionStepViewModel): string {
+  const labels = {
+    evaluating: "校验中",
+    allowed: "已放行",
+    approval_pending: "等待审批",
+    approval_released: "审批已单次放行",
+    blocked: "已阻断",
+    timed_out: "已超时",
+    binding_failed: "绑定失败",
+    unknown: "状态未知",
+  } as const;
+  return labels[step.supervision.enforcement.gateState];
+}
+
+function enforcementBindingLabel(step: ExecutionStepViewModel): string {
+  const labels = {
+    not_applicable: "不适用",
+    not_performed: "未执行",
+    passed: "已通过",
+    failed: "失败",
+    unknown: "未知",
+  } as const;
+  return labels[step.supervision.enforcement.bindingCheckStatus];
+}
+
+function enforcementConsumeLabel(step: ExecutionStepViewModel): string {
+  const labels = {
+    not_applicable: "不适用",
+    not_attempted: "未尝试",
+    consumed: "已消费",
+    expired: "已过期",
+    revoked: "已撤销",
+    rejected: "已拒绝",
+    unknown: "未知",
+  } as const;
+  return labels[step.supervision.enforcement.leaseConsumeOutcome];
 }
 
 function v21Disposition(step: ExecutionStepViewModel): string {

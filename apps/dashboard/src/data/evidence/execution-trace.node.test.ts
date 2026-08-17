@@ -136,6 +136,125 @@ function completeV21Coverage() {
   );
 }
 
+const rteReasonCodes = {
+  released: ["rte-05:binding_exact", "rte-05:lease_consumed"],
+  preConsumeFailure: ["rte-05:binding_exact", "rte-05:approval_not_consumable"],
+  postConsumeFailure: ["rte-05:binding_mismatch", "rte-05:lease_consumed"],
+} as const;
+
+function rteLinks(overrides: Record<string, unknown> = {}) {
+  return {
+    action_id: "action_rte_001",
+    approval_id: "approval_rte_001",
+    decision_id: "decision_rte_001",
+    event_id: "event_rte_001",
+    policy_audit_id: "audit_policy_rte_001",
+    ...overrides,
+  };
+}
+
+function rteEnforcement(overrides: Record<string, unknown> = {}) {
+  return {
+    binding_check_status: "passed",
+    gate_state: "approval_released",
+    lease_consume_outcome: "consumed",
+    reason_codes: [...rteReasonCodes.released],
+    ...overrides,
+  };
+}
+
+function rteStepEvents(
+  options: {
+    enforcement?: Record<string, unknown>;
+    executionStatus?: "executed" | "failed" | "not_invoked";
+    includeLeasePair?: boolean;
+    links?: Record<string, unknown>;
+    startLinks?: Record<string, unknown> | null;
+  } = {},
+) {
+  const base = normalizedEvents()[0]!;
+  const includeLeasePair = options.includeLeasePair !== false;
+  const links = rteLinks({
+    ...(includeLeasePair
+      ? { consumption_id: "consumption_rte_001", lease_id: "lease_rte_001" }
+      : {}),
+    ...options.links,
+  });
+  const policy = evidence(base, {
+    actionId: "action_rte_001",
+    approval: {
+      approvalId: "approval_rte_001",
+      resolvedAt: "2026-08-09T08:00:01Z",
+      status: "allowed",
+    },
+    auditId: "audit_policy_rte_001",
+    decision: "ask",
+    decisionId: "decision_rte_001",
+    eventId: "event_rte_001",
+    eventType: "tool_call_proposed",
+    toolName: "code_exec",
+  });
+  const outcome = evidence(base, {
+    actionId: "action_rte_001",
+    approval: {
+      approvalId: "approval_rte_001",
+      resolvedAt: "2026-08-09T08:00:01Z",
+      status: "allowed",
+    },
+    auditId: "audit_outcome_rte_001",
+    decision: "ask",
+    decisionId: "decision_rte_001",
+    eventId: "event_rte_001",
+    eventType: "runtime_outcome",
+    execution: {
+      ...base.execution,
+      completedAt: "2026-08-09T08:00:03Z",
+      invokedAt: options.executionStatus === "not_invoked" ? null : "2026-08-09T08:00:02Z",
+      receiptRecorded: true,
+      status: options.executionStatus ?? "executed",
+    },
+    policyAuditId: "audit_policy_rte_001",
+    raw: {
+      evidence: { enforcement: rteEnforcement(options.enforcement) },
+      links,
+    },
+    recordType: "runtime_outcome",
+    toolName: "code_exec",
+  });
+  const events = [policy];
+  if (options.startLinks !== null) {
+    const startLinks = rteLinks(
+      options.startLinks ?? {
+        ...(includeLeasePair
+          ? { consumption_id: "consumption_rte_001", lease_id: "lease_rte_001" }
+          : {}),
+      },
+    );
+    events.push(
+      evidence(base, {
+        actionId: "action_rte_001",
+        approval: {
+          approvalId: "approval_rte_001",
+          resolvedAt: "2026-08-09T08:00:01Z",
+          status: "allowed",
+        },
+        auditId: "audit_start_rte_001",
+        decision: "unknown",
+        decisionId: String(startLinks.decision_id),
+        eventId: String(startLinks.event_id),
+        eventType: "tool_call_started",
+        policyAuditId: String(startLinks.policy_audit_id),
+        raw: { links: startLinks },
+        recordType: "runtime_observation",
+        stage: "tool_call_started",
+        toolName: "code_exec",
+      }),
+    );
+  }
+  events.push(outcome);
+  return events;
+}
+
 test("projects the two-action regression fixture without treating it as a product whitelist", () => {
   const trace = buildTrace(normalizedEvents(), currentApproval());
 
@@ -569,7 +688,7 @@ test("marks duplicate audit ids with different content as an identity conflict",
   assert.deepEqual(trace, reversedTrace);
 });
 
-test("confirms a control violation when runtime progress follows denied approval", () => {
+test("does not claim a confirmed gate violation from approval state alone", () => {
   const base = normalizedEvents()[0]!;
   const policy = evidence(base, {
     actionId: "mock_action_started_after_approval_deny",
@@ -600,9 +719,9 @@ test("confirms a control violation when runtime progress follows denied approval
   assert.equal(step.supervision.approval.status, "denied");
   assert.equal(step.supervision.activityState, "running");
   assert.equal(step.supervision.execution.status, "unknown");
-  assert.equal(step.supervision.controlIntegrity.status, "confirmed_violation");
+  assert.equal(step.supervision.controlIntegrity.status, "suspected");
   assert.deepEqual(step.supervision.controlIntegrity.reasonCodes, [
-    "APPROVAL_DENY_FOLLOWED_BY_RUNTIME_PROGRESS",
+    "APPROVAL_DENY_FOLLOWED_BY_RUNTIME_PROGRESS_UNVERIFIED",
   ]);
   assert.ok(
     step.supervision.controlIntegrity.sourceRefs.some(
@@ -613,6 +732,197 @@ test("confirms a control violation when runtime progress follows denied approval
     (source) => `${source.id}\u0000${source.traceId}`,
   );
   assert.equal(new Set(sourceIdentities).size, sourceIdentities.length);
+});
+
+test("projects exact consumed release evidence with one matching start and terminal pair", () => {
+  const events = rteStepEvents();
+  const step = buildTrace(events).steps[0]!;
+
+  assert.equal(step.supervision.enforcement.availability, "recorded");
+  assert.equal(step.supervision.enforcement.gateState, "approval_released");
+  assert.equal(step.supervision.enforcement.bindingCheckStatus, "passed");
+  assert.equal(step.supervision.enforcement.leaseConsumeOutcome, "consumed");
+  assert.equal(step.supervision.enforcement.leaseId, "lease_rte_001");
+  assert.equal(step.supervision.enforcement.consumptionId, "consumption_rte_001");
+  assert.deepEqual(step.supervision.enforcement.reasonCodes, rteReasonCodes.released);
+  assert.equal(step.supervision.controlIntegrity.status, "no_violation_observed");
+
+  const viewModel = buildRuntimeSupervisionViewModel({
+    approvals: [],
+    dataSource: createDashboardDataSourceDescriptor({ isProduction: false, viteMode: "test" }),
+    elementSourceMode: "live",
+    events,
+    traceId: fixture.source_facts.trace_id,
+  });
+  assert.equal(viewModel.capabilities.enforcementEvidence, "recorded");
+});
+
+test("aggregates enforcement capability without letting an ordinary unavailable step hide evidence", () => {
+  const base = normalizedEvents()[0]!;
+  const ordinaryDeny = evidence(base, {
+    actionId: "action_without_rte_evidence",
+    auditId: "audit_policy_without_rte_evidence",
+    decision: "deny",
+    decisionId: "decision_without_rte_evidence",
+    eventId: "event_without_rte_evidence",
+    eventType: "tool_call_proposed",
+    toolName: "send_message",
+  });
+  const descriptor = createDashboardDataSourceDescriptor({ isProduction: false, viteMode: "test" });
+  const recorded = buildRuntimeSupervisionViewModel({
+    approvals: [],
+    dataSource: descriptor,
+    elementSourceMode: "live",
+    events: [...rteStepEvents(), ordinaryDeny],
+    traceId: fixture.source_facts.trace_id,
+  });
+  assert.equal(recorded.capabilities.enforcementEvidence, "recorded");
+
+  const partial = buildRuntimeSupervisionViewModel({
+    approvals: [],
+    dataSource: descriptor,
+    elementSourceMode: "live",
+    events: [
+      ...rteStepEvents({
+        links: { consumption_id: undefined },
+      }),
+      ordinaryDeny,
+    ],
+    traceId: fixture.source_facts.trace_id,
+  });
+  assert.equal(partial.capabilities.enforcementEvidence, "partial");
+});
+
+test("projects bounded pre-consume and post-consume fail-closed evidence", () => {
+  const preConsume = buildTrace(
+    rteStepEvents({
+      enforcement: {
+        binding_check_status: "passed",
+        gate_state: "binding_failed",
+        lease_consume_outcome: "rejected",
+        reason_codes: [...rteReasonCodes.preConsumeFailure],
+      },
+      executionStatus: "not_invoked",
+      includeLeasePair: false,
+      startLinks: null,
+    }),
+  ).steps[0]!;
+  assert.equal(preConsume.supervision.enforcement.availability, "recorded");
+  assert.equal(preConsume.supervision.enforcement.leaseConsumeOutcome, "rejected");
+  assert.equal(preConsume.supervision.enforcement.leaseId, null);
+
+  const postConsume = buildTrace(
+    rteStepEvents({
+      enforcement: {
+        binding_check_status: "failed",
+        gate_state: "binding_failed",
+        lease_consume_outcome: "consumed",
+        reason_codes: [...rteReasonCodes.postConsumeFailure],
+      },
+      executionStatus: "not_invoked",
+      startLinks: null,
+    }),
+  ).steps[0]!;
+  assert.equal(postConsume.supervision.enforcement.availability, "recorded");
+  assert.equal(postConsume.supervision.enforcement.leaseConsumeOutcome, "consumed");
+  assert.equal(postConsume.supervision.enforcement.leaseId, "lease_rte_001");
+  assert.equal(postConsume.supervision.controlIntegrity.status, "no_violation_observed");
+});
+
+test("fails closed on single-sided lease links and malformed bounded enforcement", () => {
+  const cases: Array<{ name: string; events: NormalizedAuditEvidence[] }> = [
+    {
+      name: "single-sided-pair",
+      events: rteStepEvents({ links: { consumption_id: undefined } }),
+    },
+    {
+      name: "unknown-enum",
+      events: rteStepEvents({ enforcement: { gate_state: "unknown" } }),
+    },
+    {
+      name: "duplicate-reason",
+      events: rteStepEvents({
+        enforcement: {
+          reason_codes: ["rte-05:binding_exact", "rte-05:binding_exact"],
+        },
+      }),
+    },
+    {
+      name: "free-text-reason",
+      events: rteStepEvents({ enforcement: { reason_codes: ["looks safe to me"] } }),
+    },
+    {
+      name: "extra-enforcement-field",
+      events: rteStepEvents({ enforcement: { unexpected: true } }),
+    },
+  ];
+
+  for (const item of cases) {
+    const enforcement = buildTrace(item.events).steps[0]!.supervision.enforcement;
+    assert.equal(enforcement.availability, "partial", item.name);
+    assert.equal(enforcement.gateState, "unknown", item.name);
+    assert.equal(enforcement.leaseId, null, item.name);
+    assert.equal(enforcement.consumptionId, null, item.name);
+  }
+});
+
+test("marks consumed start and terminal identity drift as a correlation conflict", () => {
+  const step = buildTrace(rteStepEvents({ startLinks: { decision_id: "decision_rte_drifted" } }))
+    .steps[0]!;
+
+  assert.equal(step.supervision.enforcement.availability, "partial");
+  assert.deepEqual(step.supervision.enforcement.reasonCodes, ["RTE_05_CORRELATION_CONFLICT"]);
+  assert.equal(step.supervision.controlIntegrity.status, "correlation_conflict");
+});
+
+test("confirms runtime progress after a correlated failed gate, not from DENY alone", () => {
+  const step = buildTrace(
+    rteStepEvents({
+      enforcement: {
+        binding_check_status: "passed",
+        gate_state: "binding_failed",
+        lease_consume_outcome: "rejected",
+        reason_codes: [...rteReasonCodes.preConsumeFailure],
+      },
+      executionStatus: "not_invoked",
+      includeLeasePair: false,
+    }),
+  ).steps[0]!;
+
+  assert.equal(step.supervision.enforcement.availability, "recorded");
+  assert.equal(step.supervision.controlIntegrity.status, "confirmed_violation");
+  assert.deepEqual(step.supervision.controlIntegrity.reasonCodes, [
+    "BINDING_FAILED_FOLLOWED_BY_RUNTIME_PROGRESS",
+  ]);
+
+  const denied = evidence(normalizedEvents()[0]!, {
+    actionId: "action_deny_without_binding",
+    auditId: "audit_deny_without_binding",
+    decision: "deny",
+    decisionId: "decision_deny_without_binding",
+    eventId: "event_deny_without_binding",
+    eventType: "tool_call_proposed",
+  });
+  assert.equal(buildTrace([denied]).steps[0]!.supervision.enforcement.availability, "unavailable");
+});
+
+test("never carries forbidden runtime secret material into the display projection", () => {
+  const step = buildTrace(
+    rteStepEvents({
+      enforcement: { lease_token: "display-secret-value" },
+      links: { nonce: "display-secret-nonce" },
+    }),
+  ).steps[0]!;
+  const serialized = JSON.stringify(step.supervision);
+
+  assert.equal(step.supervision.enforcement.availability, "partial");
+  assert.equal(serialized.includes("display-secret-value"), false);
+  assert.equal(serialized.includes("display-secret-nonce"), false);
+  assert.equal(serialized.includes("lease_token"), false);
+  assert.equal(serialized.includes("nonce"), false);
+  assert.equal(serialized.includes("authorization_fingerprint"), false);
+  assert.equal(serialized.includes("runtime_binding"), false);
+  assert.equal(serialized.includes("token_digest"), false);
 });
 
 test("projects a valid V21-09 record only as verified shadow evidence", () => {

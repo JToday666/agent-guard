@@ -24,6 +24,96 @@ import type {
 type StepKey = `action:${string}` | `event:${string}`;
 type JsonRecord = Record<string, unknown>;
 
+const ENFORCEMENT_GATE_STATES = [
+  "evaluating",
+  "allowed",
+  "approval_pending",
+  "approval_released",
+  "blocked",
+  "timed_out",
+  "binding_failed",
+  "unknown",
+] as const;
+
+const BINDING_CHECK_STATUSES = [
+  "not_applicable",
+  "not_performed",
+  "passed",
+  "failed",
+  "unknown",
+] as const;
+
+const LEASE_CONSUME_OUTCOMES = [
+  "not_applicable",
+  "not_attempted",
+  "consumed",
+  "expired",
+  "revoked",
+  "rejected",
+  "unknown",
+] as const;
+
+const ENFORCEMENT_REASON_CODES = new Set([
+  "rte-05:binding_exact",
+  "rte-05:binding_invalid",
+  "rte-05:binding_mismatch",
+  "rte-05:approval_not_human",
+  "rte-05:approval_not_consumable",
+  "rte-05:approval_not_found",
+  "rte-05:approval_expired",
+  "rte-05:identity_denied",
+  "rte-05:approval_timed_out",
+  "rte-05:lease_consumed",
+  "rte-05:consumption_conflict",
+  "rte-05:lease_rejected",
+  "rte-05:lease_expired",
+  "rte-05:lease_revoked",
+  "rte-05:lease_unavailable",
+  "rte-05:lease_response_invalid",
+  "rte-05:lease_consume_timed_out",
+  "rte-05:multiple_binding_conflict",
+  "rte-05:correlation_capacity_exhausted",
+]);
+
+const ENFORCEMENT_KEYS = new Set([
+  "gate_state",
+  "binding_check_status",
+  "lease_consume_outcome",
+  "reason_codes",
+]);
+
+const RUNTIME_LINK_KEYS = new Set([
+  "event_id",
+  "decision_id",
+  "policy_audit_id",
+  "action_id",
+  "approval_id",
+  "parent_audit_id",
+  "lease_id",
+  "consumption_id",
+]);
+
+type EnforcementGateState = EnforcementPresentation["gateState"];
+type BindingCheckStatus = EnforcementPresentation["bindingCheckStatus"];
+type LeaseConsumeOutcome = EnforcementPresentation["leaseConsumeOutcome"];
+
+interface ParsedRuntimeLinks {
+  eventId: string;
+  decisionId: string;
+  policyAuditId: string;
+  actionId: string;
+  approvalId: string | null;
+  leaseId: string | null;
+  consumptionId: string | null;
+}
+
+interface ParsedEnforcement {
+  gateState: EnforcementGateState;
+  bindingCheckStatus: BindingCheckStatus;
+  leaseConsumeOutcome: LeaseConsumeOutcome;
+  reasonCodes: string[];
+}
+
 export interface SelectedApprovalEvidence {
   conflicted: boolean;
   id: string | null;
@@ -64,6 +154,133 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
     : [];
+}
+
+function exactRecord(value: unknown, keys: ReadonlySet<string>): JsonRecord | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as JsonRecord;
+  return Object.keys(record).every((key) => keys.has(key)) ? record : null;
+}
+
+function identifier(value: unknown, maxLength: number): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength ? value : null;
+}
+
+function optionalIdentifier(
+  record: JsonRecord,
+  key: string,
+  maxLength: number,
+): string | null | undefined {
+  if (!(key in record)) return null;
+  return identifier(record[key], maxLength) ?? undefined;
+}
+
+function enumMember<T extends string>(value: unknown, values: readonly T[]): T | null {
+  return typeof value === "string" && values.includes(value as T) ? (value as T) : null;
+}
+
+function parseRuntimeLinks(value: unknown): ParsedRuntimeLinks | null {
+  const record = exactRecord(value, RUNTIME_LINK_KEYS);
+  if (!record) return null;
+  const eventId = identifier(record.event_id, 160);
+  const decisionId = identifier(record.decision_id, 160);
+  const policyAuditId = identifier(record.policy_audit_id, 256);
+  const actionId = identifier(record.action_id, 160);
+  const approvalId = optionalIdentifier(record, "approval_id", 160);
+  const leaseId = optionalIdentifier(record, "lease_id", 160);
+  const consumptionId = optionalIdentifier(record, "consumption_id", 160);
+  if (
+    !eventId ||
+    !decisionId ||
+    !policyAuditId ||
+    !actionId ||
+    approvalId === undefined ||
+    leaseId === undefined ||
+    consumptionId === undefined ||
+    (leaseId === null) !== (consumptionId === null)
+  ) {
+    return null;
+  }
+  return {
+    eventId,
+    decisionId,
+    policyAuditId,
+    actionId,
+    approvalId,
+    leaseId,
+    consumptionId,
+  };
+}
+
+function parseEnforcement(value: unknown): ParsedEnforcement | null {
+  const record = exactRecord(value, ENFORCEMENT_KEYS);
+  if (!record || Object.keys(record).length !== ENFORCEMENT_KEYS.size) return null;
+  const gateState = enumMember(record.gate_state, ENFORCEMENT_GATE_STATES);
+  const bindingCheckStatus = enumMember(record.binding_check_status, BINDING_CHECK_STATUSES);
+  const leaseConsumeOutcome = enumMember(record.lease_consume_outcome, LEASE_CONSUME_OUTCOMES);
+  const reasonCodes = Array.isArray(record.reason_codes)
+    ? record.reason_codes.filter((value): value is string => typeof value === "string")
+    : [];
+  if (
+    gateState === null ||
+    bindingCheckStatus === null ||
+    leaseConsumeOutcome === null ||
+    gateState === "unknown" ||
+    bindingCheckStatus === "unknown" ||
+    leaseConsumeOutcome === "unknown" ||
+    reasonCodes.length < 1 ||
+    reasonCodes.length > 4 ||
+    reasonCodes.length !== (record.reason_codes as unknown[] | undefined)?.length ||
+    new Set(reasonCodes).size !== reasonCodes.length ||
+    reasonCodes.some((code) => !ENFORCEMENT_REASON_CODES.has(code))
+  ) {
+    return null;
+  }
+  return { gateState, bindingCheckStatus, leaseConsumeOutcome, reasonCodes };
+}
+
+function rawEnvelope(event: NormalizedAuditEvidence): {
+  evidence: JsonRecord;
+  links: unknown;
+} {
+  const raw = asRecord(event.raw);
+  return { evidence: asRecord(raw.evidence), links: raw.links };
+}
+
+function isExplicitStart(event: NormalizedAuditEvidence): boolean {
+  return (
+    event.recordType === "runtime_observation" &&
+    (event.eventType === "tool_call_started" || event.stage === "tool_call_started")
+  );
+}
+
+function linksMatch(left: ParsedRuntimeLinks, right: ParsedRuntimeLinks): boolean {
+  return (
+    left.eventId === right.eventId &&
+    left.actionId === right.actionId &&
+    left.decisionId === right.decisionId &&
+    left.policyAuditId === right.policyAuditId &&
+    left.approvalId === right.approvalId &&
+    left.leaseId === right.leaseId &&
+    left.consumptionId === right.consumptionId
+  );
+}
+
+function partialEnforcement(
+  input: StepSupervisionProjectionInput,
+  reasonCode: "RTE_05_EVIDENCE_INVALID" | "RTE_05_CORRELATION_CONFLICT",
+): EnforcementPresentation {
+  const receipts = input.stepEvents.filter((event) => event.recordType === "runtime_outcome");
+  return {
+    availability: "partial",
+    gateState: "unknown",
+    bindingCheckStatus: "unknown",
+    leaseConsumeOutcome: "unknown",
+    leaseId: null,
+    consumptionId: null,
+    reasonCodes: [reasonCode],
+    sourceRefs: auditLocators(receipts, input.traceId),
+  };
 }
 
 function stepKey(value: string): StepKey {
@@ -353,16 +570,110 @@ function projectOfficialDecision(
   };
 }
 
-function projectEnforcement(): EnforcementPresentation {
+function projectEnforcement(input: StepSupervisionProjectionInput): EnforcementPresentation {
+  if (input.outcomeConflicted) {
+    return partialEnforcement(input, "RTE_05_CORRELATION_CONFLICT");
+  }
+  const outcome = input.outcome;
+  if (!outcome) {
+    return {
+      availability: "unavailable",
+      gateState: "unknown",
+      bindingCheckStatus: "not_performed",
+      leaseConsumeOutcome: "not_attempted",
+      leaseId: null,
+      consumptionId: null,
+      reasonCodes: ["RTE_05_EVIDENCE_UNAVAILABLE"],
+      sourceRefs: [],
+    };
+  }
+  const raw = rawEnvelope(outcome);
+  if (!("enforcement" in raw.evidence)) {
+    const links = exactRecord(raw.links, RUNTIME_LINK_KEYS);
+    if (links && ("lease_id" in links || "consumption_id" in links)) {
+      return partialEnforcement(input, "RTE_05_EVIDENCE_INVALID");
+    }
+    return {
+      availability: "unavailable",
+      gateState: "unknown",
+      bindingCheckStatus: "not_performed",
+      leaseConsumeOutcome: "not_attempted",
+      leaseId: null,
+      consumptionId: null,
+      reasonCodes: ["RTE_05_EVIDENCE_UNAVAILABLE"],
+      sourceRefs: locator("receipt", outcome.auditId, input.traceId),
+    };
+  }
+  const enforcement = parseEnforcement(raw.evidence.enforcement);
+  const links = parseRuntimeLinks(raw.links);
+  if (!enforcement || !links) {
+    return partialEnforcement(input, "RTE_05_EVIDENCE_INVALID");
+  }
+  const selectedIdentityMatches =
+    links.eventId === outcome.eventId &&
+    links.eventId === input.primary?.eventId &&
+    links.actionId === outcome.actionId &&
+    links.actionId === input.actionId &&
+    links.decisionId === outcome.decisionId &&
+    links.decisionId === input.primary?.decisionId &&
+    links.policyAuditId === outcome.policyAuditId &&
+    links.policyAuditId === input.primary?.auditId &&
+    (links.approvalId === null || links.approvalId === input.approval.id);
+  if (!selectedIdentityMatches) {
+    return partialEnforcement(input, "RTE_05_CORRELATION_CONFLICT");
+  }
+
+  const hasLeasePair = links.leaseId !== null && links.consumptionId !== null;
+  const consumed = enforcement.leaseConsumeOutcome === "consumed";
+  const failedGate = ["blocked", "binding_failed", "timed_out"].includes(enforcement.gateState);
+  const released = enforcement.gateState === "approval_released";
+  const shapeValid =
+    hasLeasePair === consumed &&
+    (!released || (enforcement.bindingCheckStatus === "passed" && consumed)) &&
+    (!failedGate || outcome.execution.status === "not_invoked") &&
+    (!consumed ||
+      (links.approvalId !== null &&
+        links.approvalId === input.approval.id &&
+        input.approval.status === "allowed_once"));
+  if (!shapeValid) {
+    return partialEnforcement(input, "RTE_05_EVIDENCE_INVALID");
+  }
+
+  const starts = input.stepEvents.filter(isExplicitStart);
+  if ((released && consumed) || (failedGate && starts.length > 0)) {
+    if (starts.length !== 1) {
+      return partialEnforcement(input, "RTE_05_CORRELATION_CONFLICT");
+    }
+    const start = starts[0]!;
+    const startLinks = parseRuntimeLinks(rawEnvelope(start).links);
+    if (
+      !startLinks ||
+      !linksMatch(startLinks, links) ||
+      start.eventId !== links.eventId ||
+      start.actionId !== links.actionId ||
+      start.decisionId !== links.decisionId ||
+      start.policyAuditId !== links.policyAuditId ||
+      start.approval.approvalId !== links.approvalId
+    ) {
+      return partialEnforcement(input, "RTE_05_CORRELATION_CONFLICT");
+    }
+  }
+
+  const sourceRefs = uniqueLocators([
+    ...locator("receipt", outcome.auditId, input.traceId),
+    ...locator("lease", links.leaseId, input.traceId),
+    ...locator("consumption", links.consumptionId, input.traceId),
+    ...auditLocators(starts, input.traceId),
+  ]);
   return {
-    availability: "unavailable",
-    gateState: "unknown",
-    bindingCheckStatus: "not_performed",
-    leaseConsumeOutcome: "not_attempted",
-    leaseId: null,
-    consumptionId: null,
-    reasonCodes: ["RTE_05_EVIDENCE_UNAVAILABLE"],
-    sourceRefs: [],
+    availability: "recorded",
+    gateState: enforcement.gateState,
+    bindingCheckStatus: enforcement.bindingCheckStatus,
+    leaseConsumeOutcome: enforcement.leaseConsumeOutcome,
+    leaseId: links.leaseId,
+    consumptionId: links.consumptionId,
+    reasonCodes: enforcement.reasonCodes,
+    sourceRefs,
   };
 }
 
@@ -433,11 +744,13 @@ function projectControlIntegrity(
   input: StepSupervisionProjectionInput,
   official: OfficialDecisionPresentation,
   approval: ApprovalPresentation,
+  enforcement: EnforcementPresentation,
   execution: ExecutionPresentation,
 ): ControlIntegrityPresentation {
   const allRefs = uniqueLocators([
     ...official.sourceRefs,
     ...approval.sourceRefs,
+    ...enforcement.sourceRefs,
     ...execution.sourceRefs,
     ...auditLocators(input.stepEvents, input.traceId),
   ]);
@@ -455,10 +768,31 @@ function projectControlIntegrity(
       sourceRefs: allRefs,
     };
   }
+  if (enforcement.availability === "partial") {
+    return {
+      status: "correlation_conflict",
+      reasonCodes: ["ENFORCEMENT_EVIDENCE_CONFLICT"],
+      sourceRefs: allRefs,
+    };
+  }
   const executionAdvanced =
     input.hasExplicitStart ||
     (execution.receiptRecorded &&
       (execution.status === "executed" || execution.status === "failed"));
+  const failedGate =
+    enforcement.availability === "recorded" &&
+    (enforcement.gateState === "blocked" ||
+      enforcement.gateState === "binding_failed" ||
+      enforcement.gateState === "timed_out")
+      ? enforcement.gateState
+      : null;
+  if (executionAdvanced && failedGate) {
+    return {
+      status: "confirmed_violation",
+      reasonCodes: [`${failedGate.toUpperCase()}_FOLLOWED_BY_RUNTIME_PROGRESS`],
+      sourceRefs: allRefs,
+    };
+  }
   const prohibitedBy = [
     official.decision === "deny" ? "OFFICIAL_DENY" : null,
     approval.status === "denied" ? "APPROVAL_DENY" : null,
@@ -466,8 +800,10 @@ function projectControlIntegrity(
   ].filter((value): value is string => value !== null);
   if (executionAdvanced && prohibitedBy.length > 0) {
     return {
-      status: "confirmed_violation",
-      reasonCodes: prohibitedBy.map((reason) => `${reason}_FOLLOWED_BY_RUNTIME_PROGRESS`),
+      status: "suspected",
+      reasonCodes: prohibitedBy.map(
+        (reason) => `${reason}_FOLLOWED_BY_RUNTIME_PROGRESS_UNVERIFIED`,
+      ),
       sourceRefs: allRefs,
     };
   }
@@ -481,12 +817,16 @@ function projectControlIntegrity(
   };
 }
 
-function projectSemantics(input: StepSupervisionProjectionInput): DisplayEvidenceSemantics {
+function projectSemantics(
+  input: StepSupervisionProjectionInput,
+  enforcement: EnforcementPresentation,
+): DisplayEvidenceSemantics {
   const conflicted =
     input.identityConflicted ||
     input.policyConflicted ||
     input.approval.conflicted ||
-    input.outcomeConflicted;
+    input.outcomeConflicted ||
+    enforcement.availability === "partial";
   return {
     elementSourceMode: input.elementSourceMode,
     availability: conflicted ? "partial" : "recorded",
@@ -534,12 +874,13 @@ export function projectExecutionStepSupervision(
 ): ExecutionStepSupervisionDetails {
   const officialDecision = projectOfficialDecision(input);
   const approval = projectApproval(input);
+  const enforcement = projectEnforcement(input);
   const execution = projectExecution(input);
   const actionRefs = locator("action", input.actionId, input.traceId);
   return {
     stepKey: stepKey(input.stepId),
     activityState: activityState(input),
-    semantics: projectSemantics(input),
+    semantics: projectSemantics(input, enforcement),
     action: input.actionId
       ? {
           actionId: input.actionId,
@@ -556,9 +897,15 @@ export function projectExecutionStepSupervision(
       ? unavailableV21Assessment()
       : projectV21Assessment(input.primary, input.traceId),
     approval,
-    enforcement: projectEnforcement(),
+    enforcement,
     execution,
-    controlIntegrity: projectControlIntegrity(input, officialDecision, approval, execution),
+    controlIntegrity: projectControlIntegrity(
+      input,
+      officialDecision,
+      approval,
+      enforcement,
+      execution,
+    ),
     contentIngressSummary: projectContentIngress(input),
   };
 }

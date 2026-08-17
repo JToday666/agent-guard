@@ -716,6 +716,13 @@ function approvalBasisAvailability(
   return "partial";
 }
 
+function enforcementEvidenceAvailability(steps: readonly ExecutionStepViewModel[]): Availability {
+  const values = steps.map((step) => step.supervision.enforcement.availability);
+  if (values.some((value) => value === "partial")) return "partial";
+  if (values.some((value) => value === "recorded")) return "recorded";
+  return "unavailable";
+}
+
 function buildApprovalBasisById(
   input: RuntimeSupervisionProjectionInput,
   execution: ExecutionTraceViewModel,
@@ -897,6 +904,7 @@ export function buildRuntimeSupervisionViewModel(
         ? "recorded"
         : "unavailable";
   const provenanceTruncated = truncationReasons.includes("PROVENANCE_WINDOW_TRUNCATED");
+  const enforcementAvailability = enforcementEvidenceAvailability(execution.steps);
   return {
     schemaVersion: "runtime-supervision/0.1",
     traceId: input.traceId,
@@ -920,7 +928,7 @@ export function buildRuntimeSupervisionViewModel(
       facts: ctProjection.factAvailability,
       contextManifest: "unavailable",
       approvalBasis: approvalBasis.availability,
-      enforcementEvidence: "unavailable",
+      enforcementEvidence: enforcementAvailability,
       runtimeReceipts: receiptAvailability,
       traceCompare: "unavailable",
     },
