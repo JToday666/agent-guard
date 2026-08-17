@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-060CB84559AF",
+  "kind": "commit",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-17T02:08:49Z",
+  "ref": "1a2e94a85ac9e62fb2da9db3987ed16b102eb3c3",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Roadmap control plane and fast-gate policy merged into origin/dev via PR #163"
+}

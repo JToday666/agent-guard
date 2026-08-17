@@ -178,8 +178,9 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "CT05",
     ):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05", "RM-00"):
+    for node_id in ("R05",):
         assert nodes[node_id]["effective_status"] == "in_progress"
+    assert nodes["RM-00"]["effective_status"] == "completed"
     for node_id in ("FE06", "CT03R", "RSC-CTPROV"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True

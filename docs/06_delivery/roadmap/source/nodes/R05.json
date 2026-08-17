@@ -6,6 +6,14 @@
     "runtime-binding-activation"
   ],
   "evidence_refs": [
+    "evidence/R05/EV-R05-051F0C471046.json",
+    "evidence/R05/EV-R05-4F03D70F224F.json",
+    "evidence/R05/EV-R05-842F9478027F.json",
+    "evidence/R05/EV-R05-8ADDBD90353A.json",
+    "evidence/R05/EV-R05-99791578FCD8.json",
+    "evidence/R05/EV-R05-99ED0E7567EE.json",
+    "evidence/R05/EV-R05-DB949069BBCD.json",
+    "evidence/R05/EV-R05-DD1CA08320ED.json",
     "evidence/R05/EV-R05-WORKTREE.json"
   ],
   "exact_title": "PR-RTE-05 — Strong Approval Binding",
@@ -15,12 +23,12 @@
   "lane": "rte",
   "lifecycle": "in_progress",
   "notes": [
-    "Active dirty worktree proves implementation has started, not that RTE-05 Integration or Gate B has passed.",
-    "Its exclusive activation surfaces overlap I01 and require serialized integration.",
+    "Implementation plus verified local, hosted CI, and Memory/PostgreSQL live evidence merged or landed on origin/dev through 54c6836; this proves code integration, not CF-13/C3 host closure or Gate B.",
+    "The active claim remains open only for upstream host-capability verification and continues to reserve evaluation, Guard API production wiring, and runtime-binding activation surfaces.",
     "BLOCKED: openclaw@2026.7.1-2 lacks atomic replace-and-seal and an authoritative invocation-start hook; CF-13/C3 cannot be verified without an upstream host capability"
   ],
   "optional": false,
-  "revision": 2,
+  "revision": 3,
   "roles": [
     "task"
   ],
