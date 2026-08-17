@@ -1,32 +1,39 @@
 {
-  "schema_version": "1.0.0",
-  "id": "CT04",
-  "exact_title": "CT-PR-04 — Context Builder",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "ct",
-  "lifecycle": "not_started",
-  "revision": 1,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "guard-api-production-wiring",
     "core-evaluation-activation",
     "langgraph-runtime-integration"
   ],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md",
-      "heading": "# 7. CT-PR-04 — Context Builder",
-      "line_hint": 232
-    }
-  ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "CT-PR-04 — Context Builder",
+  "hold": false,
+  "id": "CT04",
+  "kind": "task",
+  "lane": "ct",
+  "lifecycle": "in_progress",
   "notes": [
     "Gate A is complete. Decision D-OPERATIONAL-MVP-LANGGRAPH-SCOPE records that CT04 owns the shared frozen models, Guard API builder, and LangGraph reference-runtime enforcement required for one real Context Builder slice."
-  ]
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "# 7. CT-PR-04 — Context Builder",
+      "line_hint": 232,
+      "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md"
+    }
+  ],
+  "work": {
+    "base_sha": "4323ef5d03ad2631f130ed832758bf1934583ec1",
+    "branch": "codex/ct04-context-builder",
+    "owner": "codex",
+    "started_at": "2026-08-17T04:54:08Z",
+    "substate": "active",
+    "worktree_slug": "CT04"
+  }
 }
