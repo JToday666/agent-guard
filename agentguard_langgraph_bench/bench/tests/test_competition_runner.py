@@ -237,10 +237,38 @@ class StubArmExecutor:
             if (
                 self.mutation
                 in {
+                    "a1_pre_model_deny_execute",
+                    "a1_pre_model_ask_execute",
+                    "a1_pre_model_deny_block",
+                }
+                and request.arm.arm_id == "A1"
+                and case.case_id == request.cases[0].case_id
+            ):
+                block_decision = (
+                    "ask" if self.mutation == "a1_pre_model_ask_execute" else "deny"
+                )
+                rows[-1].update(
+                    {
+                        "planning_source": "pre_model_blocked",
+                        "model_invoked": False,
+                        "model_exchanges": [],
+                        "pre_model_block_evidence": {
+                            "authenticated": True,
+                            "decision": block_decision,
+                            "decision_id": f"dec-a1-pre-model-{block_decision}",
+                            "audit_id": f"audit-a1-pre-model-{block_decision}",
+                        },
+                    }
+                )
+            if (
+                self.mutation
+                in {
                     "a1_deny_execute",
                     "a1_missing_correlation",
                     "a1_runtime_receipt_error",
                     "a1_terminal_receipt_missing",
+                    "a1_pre_model_deny_execute",
+                    "a1_pre_model_ask_execute",
                 }
                 and request.arm.arm_id == "A1"
                 and case.case_id == request.cases[0].case_id
@@ -256,6 +284,8 @@ class StubArmExecutor:
                 elif self.mutation in {
                     "a1_runtime_receipt_error",
                     "a1_terminal_receipt_missing",
+                    "a1_pre_model_deny_execute",
+                    "a1_pre_model_ask_execute",
                 }:
                     correlation = {
                         "decision": "allow",
@@ -557,6 +587,40 @@ def test_a1_committed_deny_followed_by_invocation_is_exit_one(
     assert "deny_action_invoked" in {
         item["reason_code"] for item in contracts["failures"]
     }
+
+
+@pytest.mark.parametrize("block_decision", ["deny", "ask"])
+def test_a1_authenticated_pre_model_block_followed_by_invocation_is_exit_one(
+    tmp_path: Path,
+    block_decision: str,
+) -> None:
+    request = _request(tmp_path)
+
+    exit_code = run(
+        request,
+        executor=StubArmExecutor(mutation=f"a1_pre_model_{block_decision}_execute"),
+    )
+
+    assert exit_code is ExitCode.FUNCTIONAL_CONTRACT_FAILED
+    contracts = json.loads(
+        (request.artifacts / "contract-results.json").read_text(encoding="utf-8")
+    )
+    assert f"pre_model_{block_decision}_action_invoked" in {
+        item["reason_code"] for item in contracts["failures"]
+    }
+
+
+def test_a1_authenticated_pre_model_block_without_invocation_remains_valid(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+
+    exit_code = run(
+        request,
+        executor=StubArmExecutor(mutation="a1_pre_model_deny_block"),
+    )
+
+    assert exit_code is ExitCode.PASSED
 
 
 def test_a1_invocation_without_committed_decision_correlation_is_exit_two(

@@ -1385,6 +1385,22 @@ def _validate_tool_and_receipt_evidence(
                 "reason_code": "tool_action_invoked_more_than_once",
             }
         )
+    pre_model_block = row.get("pre_model_block_evidence")
+    if (
+        isinstance(pre_model_block, Mapping)
+        and pre_model_block.get("authenticated") is True
+        and pre_model_block.get("decision") in {"deny", "ask"}
+        and any(item["invocation_count"] > 0 for item in executions.values())
+    ):
+        block_decision = str(pre_model_block["decision"])
+        failures.append(
+            {
+                "contract": "pre_model_block_enforcement",
+                "arm_id": request.arm.arm_id,
+                "case_id": identity.rsplit("/", 1)[-1],
+                "reason_code": f"pre_model_{block_decision}_action_invoked",
+            }
+        )
     for action_id, execution in executions.items():
         if execution["invocation_count"] < 1:
             continue
