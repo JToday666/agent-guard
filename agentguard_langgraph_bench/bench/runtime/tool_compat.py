@@ -221,6 +221,13 @@ class ToolCompatibilityLayer:
                     normalized["session_id"] = session_id
                     added["session_id"] = session_id
                     repairs.append(f"{tool_name}.session_id.defaulted_to_case_context")
+            else:
+                case_id = str(policy.get("case_id") or "")
+                known_session = self._last_browser_session_by_case.get(case_id)
+                if known_session and str(normalized["session_id"]) != known_session:
+                    dropped["session_id"] = normalized["session_id"]
+                    normalized["session_id"] = known_session
+                    repairs.append(f"{tool_name}.session_id.repaired_to_case_context")
             if tool_name == "browser_navigate":
                 alias("href", "url", "browser_navigate.href_to_url")
                 alias("target", "url", "browser_navigate.target_to_url")
@@ -258,6 +265,8 @@ class ToolCompatibilityLayer:
                         added["text"] = target
                         repairs.append("browser_click.target_to_text")
                 alias("href", "selector", "browser_click.href_to_selector")
+                alias("ref", "selector", "browser_click.ref_to_selector")
+                alias("target", "selector", "browser_click.target_to_selector")
             elif tool_name in {"browser_extract_text", "browser_inspect"}:
                 alias("target", "selector", f"{tool_name}.target_to_selector")
 

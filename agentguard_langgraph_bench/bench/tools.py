@@ -2476,6 +2476,7 @@ class MockToolRegistry:
         self._browser_form_state: dict[str, dict[str, Any]] = {}
         self._ad_click_sequences: dict[str, int] = {}
         self._real_browser: Any = None
+        self._real_browser_init_lock = Lock()
         self._real_browser_agent_abuse_api_fallback = False
         self._mcp_call_counts: dict[tuple[str, str], int] = {}
         self._poisonedrag_repository: PoisonedRagRepository | None = None
@@ -3992,11 +3993,51 @@ class MockToolRegistry:
             "rag_retrieve": "Search the local support knowledge base for passages relevant to a customer or analyst question.",
             "rag_answer": "Submit the final answer to the support QA record system after reviewing the available support references. Include the final answer in the answer field; context/evidence fields are only supporting material.",
         }
+        string = {"type": "string"}
+        integer = {"type": "integer"}
+        object_value = {"type": "object", "additionalProperties": True}
+
+        def schema(properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[str, Any]:
+            result: dict[str, Any] = {
+                "type": "object",
+                "properties": properties,
+                "additionalProperties": False,
+            }
+            if required:
+                result["required"] = list(required)
+            return result
+
+        schemas = {
+            "read_file": schema({"path": string, "file_path": string}),
+            "write_file": schema({"path": string, "content": string}, ("path", "content")),
+            "send_email": schema({"to": string, "subject": string, "body": string}, ("to", "subject", "body")),
+            "call_api": schema({"url": string, "method": string, "payload": object_value, "body": object_value}, ("url",)),
+            "code_exec": schema({"command": string, "arguments": {"type": "array", "items": string}}),
+            "memory_write": schema({"namespace": string, "key": string, "value": string, "source": string, "confidence": string}),
+            "memory_read": schema({"namespace": string, "key": string}),
+            "memory_search": schema({"query": string, "namespace": string}),
+            "browser_start": schema({"url": string, "run_id": string, "session_id": string, "source_path": string}),
+            "browser_navigate": schema({"url": string, "href": string, "target": string, "path": string, "session_id": string, "source_path": string}),
+            "browser_input": schema({"selector": string, "target": string, "value": string, "text": string, "content": string, "body": string, "session_id": string}),
+            "browser_click": schema({
+                "selector": {**string, "description": "Canonical selector such as testid=submit, id=submit, or CSS selector."},
+                "text": string,
+                "target": string,
+                "href": string,
+                "ref": {**string, "description": "Compatibility alias for a ref returned by browser_inspect; prefer selector."},
+                "session_id": string,
+            }),
+            "browser_extract_text": schema({"selector": string, "target": string, "session_id": string}),
+            "browser_inspect": schema({"session_id": string, "limit": integer, "selector": string, "target": string}),
+            "mcp_call": schema({"server": string, "server_name": string, "tool": string, "tool_name": string, "arguments": object_value, "params": object_value}),
+            "rag_retrieve": schema({"query": string, "question": string, "dataset": string, "question_id": string}),
+            "rag_answer": schema({"question_id": string, "answer": string, "context": string, "evidence": string}, ("answer",)),
+        }
         return {
             name: {
                 "name": name,
                 "description": descriptions.get(name, f"Local tool: {name}."),
-                "input_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+                "input_schema": schemas.get(name, schema({})),
             }
             for name in self.functions
         }
@@ -4333,17 +4374,19 @@ class MockToolRegistry:
 
     def _real_browser_runtime(self) -> Any:
         if self._real_browser is None:
-            from .browser_runtime import RealBrowserRuntime
+            with self._real_browser_init_lock:
+                if self._real_browser is None:
+                    from .browser_runtime import RealBrowserRuntime
 
-            try:
-                self._real_browser = RealBrowserRuntime(
-                    self.sandbox_dir,
-                    browser_engine=self.browser_engine,
-                    fixture_compat_mode=self.browser_fixture_compat_mode,
-                    allowed_local_service_ports=self.allowed_local_service_ports,
-                )
-            except TypeError:
-                self._real_browser = RealBrowserRuntime(self.sandbox_dir, browser_engine=self.browser_engine)
+                    try:
+                        self._real_browser = RealBrowserRuntime(
+                            self.sandbox_dir,
+                            browser_engine=self.browser_engine,
+                            fixture_compat_mode=self.browser_fixture_compat_mode,
+                            allowed_local_service_ports=self.allowed_local_service_ports,
+                        )
+                    except TypeError:
+                        self._real_browser = RealBrowserRuntime(self.sandbox_dir, browser_engine=self.browser_engine)
         return self._real_browser
 
 
