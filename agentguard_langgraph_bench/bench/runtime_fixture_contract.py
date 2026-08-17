@@ -149,7 +149,7 @@ def build_runtime_fixture_snapshot(
             for root_id, path in sorted(source_roots.items())
         )
 
-    entries = list(
+    materialized_entries = list(
         _collect_root(
             _SourceRoot(
                 "materialized_sandbox",
@@ -158,8 +158,24 @@ def build_runtime_fixture_snapshot(
             )
         )
     )
+    entries = list(materialized_entries)
+    materialized_paths = {
+        item.relative_path for item in materialized_entries
+    }
     for source in sources:
-        entries.extend(_collect_root(source))
+        source_entries = _collect_root(source)
+        if source.sandbox_prefix is not None:
+            # The live resolver prefers the arm-local materialized sandbox.
+            # Hash only shared fallback files that are not already shadowed by
+            # that canonical snapshot; ignored/generated copies in the
+            # repository must not make an otherwise identical run drift.
+            source_entries = [
+                item
+                for item in source_entries
+                if "/".join((source.sandbox_prefix, item.relative_path))
+                not in materialized_paths
+            ]
+        entries.extend(source_entries)
     entries.sort(key=lambda item: (item.root_id, item.relative_path))
 
     roots: list[RuntimeFixtureRootSummary] = []

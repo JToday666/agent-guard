@@ -14,7 +14,7 @@
     "dataset_id": "agentguard-attackbench",
     "dataset_version": "2026.08.1",
     "dataset_digest": "sha256:1c1d83868995b47e91765f9840b2972bc1a14fdc044caf28207b991f7c296024",
-    "runtime_fixture_bundle_digest": "sha256:062a41f1532507533e94b5bd206d861f35eeb63436dbd30adbdc585b9fc56225",
+    "runtime_fixture_bundle_digest": "sha256:7d894300702c7ae1a21c48a9d9193e14b15c3a90899208a4217dedc4fb956581",
     "case_count": 70
   },
   "planner": {
