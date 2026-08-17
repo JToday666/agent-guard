@@ -1,0 +1,99 @@
+{
+  "schema_version": "competition-langgraph-profile/1.0",
+  "profile_id": "competition-langgraph-v2",
+  "runtime": "langgraph",
+  "agent_adapter": "langgraph-demo",
+  "identity": {
+    "principal_id": "competition-langgraph-runner",
+    "agent_id": "competition-langgraph-agent",
+    "runtime_binding_id": "competition-langgraph-v2"
+  },
+  "dataset": {
+    "path": "agentguard_langgraph_bench/bench/datasets/attack_cases",
+    "manifest": "agentguard_langgraph_bench/bench/datasets/attack_cases/dataset_manifest.json",
+    "dataset_id": "agentguard-attackbench",
+    "dataset_version": "2026.08.1",
+    "dataset_digest": "sha256:1c1d83868995b47e91765f9840b2972bc1a14fdc044caf28207b991f7c296024",
+    "case_count": 70
+  },
+  "planner": {
+    "execution_mode": "autonomous_llm",
+    "protocol": "openai_chat_completions",
+    "provider_id": "openai-compatible",
+    "model": "",
+    "base_url": "",
+    "api_key_env": "AGENTGUARD_LLM_API_KEY",
+    "temperature": 0.0,
+    "request_timeout": 60.0,
+    "max_retries": 0,
+    "max_tool_rounds": 6,
+    "fallback_allowed": false
+  },
+  "suite": "product",
+  "full_corpus": true,
+  "v21_rollout_mode": "active",
+  "repeats": 1,
+  "seed": 0,
+  "arms": [
+    {
+      "arm_id": "A0",
+      "guard_enabled": false,
+      "current_core_enabled": false,
+      "official_decision_source": "none",
+      "v21_enabled": false,
+      "v21_rollout_mode": null,
+      "ct_projection_enabled": false,
+      "context_mode": "off",
+      "rte_mode": "off",
+      "detector_mode": "off"
+    },
+    {
+      "arm_id": "A1",
+      "guard_enabled": true,
+      "current_core_enabled": true,
+      "official_decision_source": "current",
+      "v21_enabled": false,
+      "v21_rollout_mode": null,
+      "ct_projection_enabled": false,
+      "context_mode": "off",
+      "rte_mode": "enforce",
+      "detector_mode": "on"
+    },
+    {
+      "arm_id": "A2",
+      "guard_enabled": true,
+      "current_core_enabled": true,
+      "official_decision_source": "current",
+      "v21_enabled": true,
+      "v21_rollout_mode": "shadow",
+      "ct_projection_enabled": true,
+      "context_mode": "observe",
+      "rte_mode": "enforce",
+      "detector_mode": "on"
+    },
+    {
+      "arm_id": "A3",
+      "guard_enabled": true,
+      "current_core_enabled": true,
+      "official_decision_source": "v21",
+      "v21_enabled": true,
+      "v21_rollout_mode": "active",
+      "ct_projection_enabled": true,
+      "context_mode": "observe",
+      "rte_mode": "enforce",
+      "detector_mode": "on"
+    },
+    {
+      "arm_id": "A4",
+      "guard_enabled": true,
+      "current_core_enabled": true,
+      "official_decision_source": "v21",
+      "v21_enabled": true,
+      "v21_rollout_mode": "active",
+      "ct_projection_enabled": true,
+      "context_mode": "required",
+      "rte_mode": "enforce",
+      "detector_mode": "on"
+    }
+  ]
+}
