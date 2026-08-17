@@ -62,6 +62,7 @@ DEFAULT_REBUILD_LIMIT = 1000
 #: envelope 的 typed 容器被 unwired fail-closed 机制强制为空，重投影
 #: 无安全内容损失。
 LEGACY_PROJECTOR_VERSION = "v21-04.projector.1"
+PREVIOUS_PROJECTOR_VERSION = "v21-07.projector.2"
 
 _SourceRecordType = Literal[
     "policy_evaluation",
@@ -102,9 +103,9 @@ def rebuild_locked(
     effective_limit = max(1, min(limit, MAX_REBUILD_INPUT_LIMIT))
     inputs = store.list_rebuild_inputs(scope_digest, limit=effective_limit)
     truncated = len(inputs) >= effective_limit
-    committed = [_committed_from_projection(row) for row in inputs]
 
     try:
+        committed = [_committed_from_projection(row) for row in inputs]
         rebuilt = rebuild_state(committed, PROJECTOR_VERSION)
     except PROJECTION_FAILURE_EXCEPTIONS as exc:
         # F7：捕获共享异常元组（与 projector.py 同一来源）：接线后
@@ -202,8 +203,16 @@ def _committed_from_projection(row: ProjectionIdentityRecord) -> CommittedRecord
     delta = SecurityStateDeltaV21.model_validate(row.delta_payload)
     projector_version = row.projector_version
     if projector_version == LEGACY_PROJECTOR_VERSION:
-        delta = _decode_legacy_delta(delta)
+        delta = _decode_legacy_delta(delta, require_empty_typed=True)
         projector_version = PROJECTOR_VERSION
+    elif projector_version == PREVIOUS_PROJECTOR_VERSION:
+        delta = _decode_legacy_delta(delta, require_empty_typed=False)
+        projector_version = PROJECTOR_VERSION
+    elif projector_version != PROJECTOR_VERSION:
+        raise ProjectionError(
+            "v21-04:unsupported_projector_version",
+            f"projection row uses unsupported projector version {projector_version!r}",
+        )
     return CommittedRecord(
         record_id=(
             "projection:"
@@ -221,7 +230,9 @@ def _committed_from_projection(row: ProjectionIdentityRecord) -> CommittedRecord
     )
 
 
-def _decode_legacy_delta(delta: SecurityStateDeltaV21) -> SecurityStateDeltaV21:
+def _decode_legacy_delta(
+    delta: SecurityStateDeltaV21, *, require_empty_typed: bool = True
+) -> SecurityStateDeltaV21:
     """懒 legacy decoder 纯函数（D2/C7）：旧版本 delta 重投影到新版本。
 
     关键事实（10_决策记录 D2）：``LEGACY_PROJECTOR_VERSION`` 时期全部
@@ -240,14 +251,19 @@ def _decode_legacy_delta(delta: SecurityStateDeltaV21) -> SecurityStateDeltaV21:
     non_empty = sorted(
         container for container in CONTAINER_OWNERSHIP if getattr(delta, container)
     )
-    if non_empty:
+    if require_empty_typed and non_empty:
         raise ProjectionError(
             "v21-04:legacy_delta_typed_content",
             "legacy projector envelope carries non-empty typed upsert "
             f"containers, which must be impossible for "
             f"{LEGACY_PROJECTOR_VERSION!r}: {non_empty}",
         )
-    if delta.projector_version != LEGACY_PROJECTOR_VERSION:
+    supported_version = (
+        LEGACY_PROJECTOR_VERSION
+        if require_empty_typed
+        else PREVIOUS_PROJECTOR_VERSION
+    )
+    if delta.projector_version != supported_version:
         raise ProjectionError(
             "v21-04:legacy_envelope_version_inconsistent",
             "legacy projection row version does not match its delta "

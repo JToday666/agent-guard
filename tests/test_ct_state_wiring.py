@@ -26,6 +26,7 @@ import base64
 import copy
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 from agentguard_core import AuditEvent, GuardEvent, utc_now_iso
@@ -39,6 +40,7 @@ from agentguard_core.decisions.evidence import RequiredCheckPlan
 from agentguard_core.events.payloads import (
     MemoryEventPayload,
     MemoryRecord,
+    ModelCallPayload,
     SecurityContext,
     ToolCallPayload,
     ToolDescriptor,
@@ -65,6 +67,7 @@ from guard_api.services import (
     AuditService,
     CtProjectionService,
     EvaluationService,
+    MemoryGuardService,
     PolicyService,
     TaskIngressService,
     V21PipelineService,
@@ -117,10 +120,16 @@ def _stack(
     ct_service = CtProjectionService(
         settings=settings, store=store, state_service=state_service
     )
+    memory_service = MemoryGuardService(
+        store=store,
+        audit_service=AuditService(store=store),
+        projection_service=ct_service,
+    )
     evaluation = EvaluationService(
         policy_service=policy_service,
         audit_service=AuditService(store=store),
         approval_service=ApprovalService(store=store, settings=settings),
+        memory_guard_service=memory_service,
         v21_shadow_service=shadow,
         v21_pipeline=pipeline,
         ct_projection_service=ct_service,
@@ -161,6 +170,7 @@ def _ct_event(
     event_type: str,
     task_id: str | None = None,
     call_id: str | None = None,
+    memory_source_trust: str = "trusted",
 ) -> GuardEvent:
     metadata: dict[str, object] = {}
     if task_id is not None:
@@ -180,11 +190,13 @@ def _ct_event(
                 namespace="notes",
                 key="summary",
                 operation="write",
-                source_trust="trusted",
+                source_trust=memory_source_trust,
             ),
             will_persist=True,
             requires_approval=False,
         )
+    elif event_type == "model_input_prepared":
+        payload = ModelCallPayload(phase="input")
     else:
         payload = ToolCallPayload(tool=ToolDescriptor(**tool_kwargs))  # type: ignore[arg-type]
     return GuardEvent(
@@ -474,6 +486,200 @@ def test_dod_real_shapes_populate_state_indices() -> None:
     assert state.source_index, "source_index should be non-empty"
     assert state.relevant_flows, "relevant_flows should be non-empty"
     assert state.memory_index, "memory_index should be non-empty"
+    memory_audit = store.get_policy_evaluation_by_event_id("evt_ct_memory_1")
+    assert memory_audit is not None
+    change_id = memory_audit.links["memory_change_id"]
+    memory_projection = access.get_projection(
+        scope_digest,
+        "memory_transition",
+        change_id,
+        1,
+        PROJECTOR_VERSION,
+    )
+    assert memory_projection is not None
+    projected_memory = next(
+        fact for fact in state.memory_index if fact.change_id == change_id
+    )
+    assert projected_memory.change_status == "proposed"
+    assert projected_memory.last_write_sequence is not None
+    assert projected_memory.last_write_sequence.value == 1
+
+
+def test_memory_lifecycle_rebuild_survives_service_restart() -> None:
+    store = MemoryControlPlaneStore()
+    settings = _settings()
+    task_id, scope_digest = _ingress_task(store, settings=settings)
+    evaluation, _state_service, _ = _stack(store, settings=settings)
+    evaluation.evaluate(
+        _ct_event(
+            event_id="evt_ct_memory_restart_source",
+            event_type="tool_result_produced",
+            task_id=task_id,
+            call_id="call_ct_memory_restart_source",
+        ),
+        requesting_principal_id="cred_adapter_main",
+    )
+    event = _ct_event(
+        event_id="evt_ct_memory_restart",
+        event_type="memory_write_proposed",
+        task_id=task_id,
+        memory_source_trust="untrusted",
+    )
+    evaluation.evaluate(event, requesting_principal_id="cred_adapter_main")
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    change_id = audit.links["memory_change_id"]
+    memory_service = evaluation.memory_guard_service
+    assert memory_service is not None
+
+    committed = memory_service.commit(change_id, operator_id="operator-1")
+    assert committed.status == "committed"
+    # 同态重放必须补投影但不重复 transition audit。
+    assert memory_service.commit(change_id, operator_id="operator-1").status == (
+        "committed"
+    )
+    rolled_back = memory_service.rollback(change_id, operator_id="operator-1")
+    assert rolled_back.status == "rolled_back"
+
+    for revision in (1, 2, 3):
+        assert (
+            store.get_projection(
+                scope_digest,
+                "memory_transition",
+                change_id,
+                revision,
+                PROJECTOR_VERSION,
+            )
+            is not None
+        )
+    transitions = [
+        item
+        for item in store.list_audit_events()
+        if item.event_type == "memory_change_transition"
+        and item.links.get("memory_change_id") == change_id
+    ]
+    assert len(transitions) == 2
+
+    # 模拟 projection-record/CAS crash 后服务重启：online state 丢失，
+    # 新服务必须从 projection rows bounded rebuild，不能初始化为空态。
+    with store.security_state_lock:
+        store.security_states.pop(scope_digest, None)
+    restarted = SecurityStateService(store)
+    rebuilt = restarted.ensure_ready(scope_digest)
+    fact = next(item for item in rebuilt.memory_index if item.change_id == change_id)
+    assert fact.change_status == "rolled_back"
+    assert fact.last_write_sequence is not None
+    assert fact.last_write_sequence.value == 3
+    assert "PERSISTENT_UNTRUSTED" in fact.taints
+
+    memory_ref = f"memory:{fact.memory_id}"
+    loaded_event = _ct_event(
+        event_id="evt_ct_memory_loaded_after_restart",
+        event_type="model_input_prepared",
+        task_id=task_id,
+    ).model_copy(
+        update={
+            "security_context": SecurityContext(
+                agent_id="main",
+                user_task="ct wiring fixture",
+                visible_source_refs=(memory_ref,),
+            )
+        }
+    )
+    evaluation.evaluate(loaded_event, requesting_principal_id="cred_adapter_main")
+    loaded_audit = store.get_policy_evaluation_by_event_id(loaded_event.event_id)
+    assert loaded_audit is not None
+    loaded_bundle = TransientSecurityFacts.model_validate(
+        loaded_audit.evidence["ct_transient_facts"]["payload"]["bundle"]
+    )
+    loaded_flow = next(
+        item for item in loaded_bundle.flow_facts if item.source_ref == memory_ref
+    )
+    assert loaded_flow.relation == "loaded_from_memory"
+    assert "PERSISTENT_UNTRUSTED" in loaded_flow.taints
+
+
+def test_memory_reject_and_concurrent_commit_project_once() -> None:
+    settings = _settings()
+
+    reject_store = MemoryControlPlaneStore()
+    reject_task, reject_scope = _ingress_task(reject_store, settings=settings)
+    reject_evaluation, _, _ = _stack(reject_store, settings=settings)
+    reject_event = _ct_event(
+        event_id="evt_ct_memory_reject",
+        event_type="memory_write_proposed",
+        task_id=reject_task,
+    )
+    reject_evaluation.evaluate(
+        reject_event, requesting_principal_id="cred_adapter_main"
+    )
+    reject_audit = reject_store.get_policy_evaluation_by_event_id(
+        reject_event.event_id
+    )
+    assert reject_audit is not None
+    reject_change_id = reject_audit.links["memory_change_id"]
+    reject_service = reject_evaluation.memory_guard_service
+    assert reject_service is not None
+    assert (
+        reject_service.reject(reject_change_id, operator_id="operator-1").status
+        == "rejected"
+    )
+    rejected_state = SecurityStateService(reject_store).ensure_ready(reject_scope)
+    rejected = next(
+        item
+        for item in rejected_state.memory_index
+        if item.change_id == reject_change_id
+    )
+    assert rejected.change_status == "rejected"
+    assert rejected.last_write_sequence is not None
+    assert rejected.last_write_sequence.value == 2
+
+    commit_store = MemoryControlPlaneStore()
+    commit_task, commit_scope = _ingress_task(commit_store, settings=settings)
+    commit_evaluation, _, _ = _stack(commit_store, settings=settings)
+    commit_event = _ct_event(
+        event_id="evt_ct_memory_concurrent_commit",
+        event_type="memory_write_proposed",
+        task_id=commit_task,
+    )
+    commit_evaluation.evaluate(
+        commit_event, requesting_principal_id="cred_adapter_main"
+    )
+    commit_audit = commit_store.get_policy_evaluation_by_event_id(
+        commit_event.event_id
+    )
+    assert commit_audit is not None
+    commit_change_id = commit_audit.links["memory_change_id"]
+    commit_service = commit_evaluation.memory_guard_service
+    assert commit_service is not None
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        statuses = list(
+            executor.map(
+                lambda _: commit_service.commit(
+                    commit_change_id, operator_id="operator-1"
+                ).status,
+                range(8),
+            )
+        )
+    assert statuses == ["committed"] * 8
+    transitions = [
+        item
+        for item in commit_store.list_audit_events()
+        if item.event_type == "memory_change_transition"
+        and item.links.get("memory_change_id") == commit_change_id
+    ]
+    assert len(transitions) == 1
+    assert (
+        commit_store.get_projection(
+            commit_scope,
+            "memory_transition",
+            commit_change_id,
+            2,
+            PROJECTOR_VERSION,
+        )
+        is not None
+    )
 
 
 # ---------------------------------------------------------------------------

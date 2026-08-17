@@ -126,6 +126,14 @@ class SecurityStateProjector:
                 committed_record.projector_version,
             )
             current_record = self._store.get_security_state(scope_digest)
+            if (
+                current_record is not None
+                and current_record.projector_version != PROJECTOR_VERSION
+            ):
+                _rebuilt, rebuild_alert = rebuild_locked(self._store, scope_digest)
+                if rebuild_alert is not None:
+                    raise SecurityStateProjectError(rebuild_alert)
+                current_record = self._store.get_security_state(scope_digest)
             current_version = (
                 current_record.state_version if current_record is not None else 0
             )

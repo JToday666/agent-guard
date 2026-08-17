@@ -149,6 +149,14 @@ class SecurityStateService:
         with self._access.scope_lock(scope_digest):
             record = self._access.get_security_state(scope_digest)
             if record is None:
+                # Crash window: a projection envelope may have committed before
+                # the online-state CAS. Missing state is therefore not proof of
+                # an empty history; rebuild when any bounded input exists.
+                if self._access.list_rebuild_inputs(scope_digest, limit=1):
+                    state, _alert = rebuild_locked(
+                        self._access, scope_digest, limit=rebuild_limit
+                    )
+                    return state
                 empty = empty_online_state()
                 try:
                     self._access.cas_security_state(
@@ -172,7 +180,7 @@ class SecurityStateService:
                         return state_from_record(reread)
                     raise
                 return empty
-            if record.dirty:
+            if record.dirty or record.projector_version != PROJECTOR_VERSION:
                 state, _alert = rebuild_locked(
                     self._access, scope_digest, limit=rebuild_limit
                 )

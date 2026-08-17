@@ -83,9 +83,14 @@ test("searches and filters nodes while preserving the derived Ready Queue", asyn
 
   const readyQueue = page.getByTestId("ready-queue");
   await expect(readyQueue).toBeVisible();
-  for (const nodeId of ["RSC-CTPROV", "FE06", "CT05", "CT03R"]) {
-    await expect(readyQueue.locator(`[data-node-ref="${nodeId}"]`)).toBeVisible();
-  }
+  const graphReadyIds = await page
+    .locator('.roadmap-node[data-status="ready"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-node-id")).sort());
+  const queueReadyIds = await readyQueue
+    .locator("[data-node-ref]")
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-node-ref")).sort());
+  expect(queueReadyIds).toEqual(graphReadyIds);
+  expect(queueReadyIds).toContain("CT03R");
   for (const nodeId of ["RSC-CT01", "FE04"]) {
     await expect(readyQueue.locator(`[data-node-ref="${nodeId}"]`)).toHaveCount(0);
   }
