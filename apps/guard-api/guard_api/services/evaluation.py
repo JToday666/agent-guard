@@ -679,10 +679,20 @@ class EvaluationService:
                     # （仅 revalidate valid 且非降级路径；stale/降级/
                     # flag off 时键集逐字节不变）。
                     assert outcome.final_decision_digest is not None
-                    finalize_metadata = {
-                        "v21_final_decision_id": outcome.final_decision_id,
-                        "v21_final_decision_digest": (outcome.final_decision_digest),
-                    }
+                    if authority is not None and authority.source == "v21":
+                        finalize_metadata = {
+                            "v21_final_decision_id": decision.decision_id,
+                            "v21_final_decision_digest": canonical_sha256(
+                                decision.model_dump(mode="json")
+                            ),
+                        }
+                    else:
+                        finalize_metadata = {
+                            "v21_final_decision_id": outcome.final_decision_id,
+                            "v21_final_decision_digest": (
+                                outcome.final_decision_digest
+                            ),
+                        }
         if (
             self.competition_activation is not None
             and self.v21_pipeline is not None

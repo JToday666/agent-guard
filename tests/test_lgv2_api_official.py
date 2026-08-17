@@ -136,6 +136,10 @@ def test_active_selected_decision_authority_is_committed_and_replayed() -> None:
     assert audit.evidence["decision_v21"]["payload"]["final_decision"] == (
         first.decision.decision
     )
+    assert audit.metadata["v21_final_decision_id"] == first.decision.decision_id
+    assert audit.metadata["v21_final_decision_digest"] == canonical_sha256(
+        first.decision.model_dump(mode="json")
+    )
 
     # Replay is rebuilt solely from committed audit data.  A live mode change
     # cannot reselect the historical decision or authority.
