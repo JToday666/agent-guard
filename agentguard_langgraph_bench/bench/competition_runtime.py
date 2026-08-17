@@ -750,8 +750,12 @@ def _normalize_case_row(
                 "case neither invoked the model nor has an authenticated pre-model block",
             )
 
-    tool_executions = _tool_execution_evidence(raw)
     terminal_receipts = _terminal_receipt_evidence(trace)
+    tool_executions = _tool_execution_evidence(
+        raw,
+        trace=trace,
+        arm=request.arm,
+    )
     receipt_covered = _receipt_coverage(
         raw,
         tool_executions=tool_executions,
@@ -922,13 +926,21 @@ def _pre_model_block_evidence(
     return None
 
 
-def _tool_execution_evidence(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _tool_execution_evidence(
+    raw: Mapping[str, Any],
+    *,
+    trace: Mapping[str, Any] | None,
+    arm: ArmSpec,
+) -> list[dict[str, Any]]:
     """Project tool results to display-safe invocation evidence.
 
     Arguments, results, errors and model text intentionally remain in the
     executor's temporary scratch directory.  A repeated action identifier is
     rejected rather than collapsed because it would make an exact-once claim
-    ambiguous.
+    ambiguous.  Guarded execution authority is reconstructed only from
+    committed start/terminal receipts and their exact policy parent.  The raw
+    tool-result ``decision`` is deliberately ignored: a post-execution result
+    quarantine may legitimately replace it with deny after the tool ran.
     """
 
     raw_calls = raw.get("tool_calls") or []
@@ -936,6 +948,32 @@ def _tool_execution_evidence(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
         raise InvalidCompetitionRun(
             "tool_execution_evidence_invalid", "tool calls must be a list"
         )
+    audit_events = [
+        item
+        for item in (trace or {}).get("audit_events", [])
+        if isinstance(item, Mapping)
+    ]
+    policy_events: dict[str, list[Mapping[str, Any]]] = {}
+    starts_by_action: dict[str, list[Mapping[str, Any]]] = {}
+    terminals_by_action: dict[str, list[Mapping[str, Any]]] = {}
+    for event in audit_events:
+        audit_id = event.get("audit_id")
+        if event.get("record_type") == "policy_evaluation" and isinstance(
+            audit_id, str
+        ):
+            policy_events.setdefault(audit_id, []).append(event)
+        links = event.get("links")
+        action_id = links.get("action_id") if isinstance(links, Mapping) else None
+        if not isinstance(action_id, str) or not action_id:
+            continue
+        if (
+            event.get("record_type") == "runtime_observation"
+            and event.get("event_type") == "tool_call_started"
+        ):
+            starts_by_action.setdefault(action_id, []).append(event)
+        elif event.get("record_type") == "runtime_outcome":
+            terminals_by_action.setdefault(action_id, []).append(event)
+
     executions: list[dict[str, Any]] = []
     seen_action_ids: set[str] = set()
     for item in raw_calls:
@@ -961,15 +999,161 @@ def _tool_execution_evidence(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "tool call evidence repeats an action identifier",
             )
         seen_action_ids.add(action_id)
+        raw_invoked = item.get("executed") is True
+        correlation_required = arm.guard_enabled and arm.rte_mode is not RteMode.OFF
+        starts = starts_by_action.get(action_id, [])
+        terminals = terminals_by_action.get(action_id, [])
+        if correlation_required:
+            # A committed start receipt is the invocation boundary and is the
+            # only reliable way to distinguish a failed invocation from a
+            # pre-execution block.  When no invocation occurred, the terminal
+            # not-invoked receipt identifies the governing policy instead.
+            invocation_count = len(starts) if starts else int(raw_invoked)
+            governing_receipts = (
+                starts if starts else ([] if raw_invoked else terminals)
+            )
+            correlation = _consistent_execution_correlation(
+                governing_receipts,
+                policy_events=policy_events,
+                arm=arm,
+            )
+        else:
+            invocation_count = int(raw_invoked)
+            correlation = _empty_execution_correlation()
         executions.append(
             {
                 "action_id": action_id,
                 "tool_name": tool_name,
                 "status": status,
-                "invocation_count": int(item.get("executed") is True),
+                "invocation_count": invocation_count,
+                **correlation,
             }
         )
     return executions
+
+
+def _consistent_execution_correlation(
+    receipts: Sequence[Mapping[str, Any]],
+    *,
+    policy_events: Mapping[str, Sequence[Mapping[str, Any]]],
+    arm: ArmSpec,
+) -> dict[str, str | None]:
+    correlations = [
+        _execution_correlation_from_receipt(
+            receipt,
+            policy_events=policy_events,
+            arm=arm,
+        )
+        for receipt in receipts
+    ]
+    if not correlations or any(
+        value is None for correlation in correlations for value in correlation.values()
+    ):
+        return _empty_execution_correlation()
+    first = correlations[0]
+    if any(correlation != first for correlation in correlations[1:]):
+        return _empty_execution_correlation()
+    return first
+
+
+def _execution_correlation_from_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    policy_events: Mapping[str, Sequence[Mapping[str, Any]]],
+    arm: ArmSpec,
+) -> dict[str, str | None]:
+    links = receipt.get("links")
+    if not isinstance(links, Mapping):
+        return _empty_execution_correlation()
+    action_id = links.get("action_id")
+    event_id = links.get("event_id")
+    decision_id = links.get("decision_id")
+    policy_audit_id = links.get("policy_audit_id")
+    if not all(
+        isinstance(value, str) and value
+        for value in (action_id, event_id, decision_id, policy_audit_id)
+    ):
+        return _empty_execution_correlation()
+    assert isinstance(policy_audit_id, str)
+    candidates = policy_events.get(policy_audit_id, ())
+    if len(candidates) != 1:
+        return _empty_execution_correlation()
+    policy = candidates[0]
+    policy_links = policy.get("links")
+    guard_decision = (
+        policy.get("evidence", {}).get("guard_decision")
+        if isinstance(policy.get("evidence"), Mapping)
+        else None
+    )
+    decision = policy.get("decision")
+    if (
+        policy.get("record_type") != "policy_evaluation"
+        or policy.get("event_type")
+        not in {
+            "tool_call_proposed",
+            "memory_write_proposed",
+            "message_send_proposed",
+        }
+        or decision not in {"allow", "ask", "deny"}
+        or not isinstance(policy_links, Mapping)
+        or policy_links.get("action_id") != action_id
+        or policy_links.get("event_id") != event_id
+        or policy_links.get("decision_id") != decision_id
+        or not isinstance(guard_decision, Mapping)
+        or guard_decision.get("decision") != decision
+        or guard_decision.get("decision_id") != decision_id
+    ):
+        return _empty_execution_correlation()
+    receipt_decision = receipt.get("decision")
+    if receipt_decision is not None and receipt_decision != decision:
+        return _empty_execution_correlation()
+
+    authority = policy.get("decision_authority")
+    if isinstance(authority, Mapping):
+        if authority.get("source") != arm.official_decision_source.value:
+            return _empty_execution_correlation()
+        approval_release = authority.get("approval_release")
+    elif (
+        decision != "ask"
+        or arm.official_decision_source is OfficialDecisionSource.CURRENT
+    ):
+        approval_release = "not_applicable"
+    else:
+        approval_release = None
+    if approval_release not in {
+        "not_applicable",
+        "strong_binding_required",
+        "forbidden",
+    }:
+        return _empty_execution_correlation()
+    if decision != "ask" and approval_release != "not_applicable":
+        return _empty_execution_correlation()
+    if (
+        arm.official_decision_source is OfficialDecisionSource.CURRENT
+        and approval_release != "not_applicable"
+    ):
+        return _empty_execution_correlation()
+    if (
+        arm.official_decision_source is OfficialDecisionSource.V21
+        and decision == "ask"
+        and approval_release not in {"strong_binding_required", "forbidden"}
+    ):
+        return _empty_execution_correlation()
+    return {
+        "decision": str(decision),
+        "decision_id": str(decision_id),
+        "policy_audit_id": policy_audit_id,
+        "approval_release": str(approval_release),
+    }
+
+
+def _empty_execution_correlation() -> dict[str, str | None]:
+    return {
+        "decision": None,
+        "decision_id": None,
+        "policy_audit_id": None,
+        "approval_release": None,
+    }
 
 
 def _terminal_receipt_evidence(

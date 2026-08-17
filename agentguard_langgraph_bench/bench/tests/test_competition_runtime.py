@@ -26,6 +26,7 @@ from agentguard_langgraph_bench.bench.competition_runtime import (
     _PREFLIGHT_TOOL,
     _bench_config,
     _competition_policy,
+    _tool_execution_evidence,
     execute_competition_arm,
 )
 from agentguard_langgraph_bench.bench.dataset_loader import load_attack_cases
@@ -52,7 +53,8 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         }
         has_tool_result = any(
             isinstance(item, dict)
-            and "Runtime tool observation (untrusted):" in str(item.get("content") or "")
+            and "Runtime tool observation (untrusted):"
+            in str(item.get("content") or "")
             for item in payload.get("messages", [])
         )
         if "agentguard_competition_probe" in tool_names:
@@ -371,8 +373,7 @@ def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(
     observations = [
         str(item.get("content") or "")
         for item in _ProviderHandler.requests[2]["messages"]
-        if "Runtime tool observation (untrusted):"
-        in str(item.get("content") or "")
+        if "Runtime tool observation (untrusted):" in str(item.get("content") or "")
     ]
     assert len(observations) == 1
     assert 'authority="evidence-only"' in observations[0]
@@ -404,6 +405,10 @@ def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(
     assert execution["tool_name"] == "read_file"
     assert execution["status"] == "executed"
     assert execution["invocation_count"] == 1
+    assert execution["decision"] == "allow"
+    assert execution["decision_id"].startswith("dec:v21-official:")
+    assert execution["policy_audit_id"].startswith("audit:sha256:")
+    assert execution["approval_release"] == "not_applicable"
     assert row["terminal_receipts"] == [
         {
             "action_id": execution["action_id"],
@@ -413,6 +418,174 @@ def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(
     ]
     assert row["receipt_covered"] is True
     assert row["task_success"] is True
+
+
+def test_committed_strong_binding_ask_is_projected_as_execution_authority(
+    tmp_path: Path,
+) -> None:
+    request = _arm_request(tmp_path, "http://127.0.0.1:1/v1")
+    arm = next(item for item in request.profile.arms if item.arm_id == "A3")
+    action_id = "call-strong-binding"
+    event_id = "evt-strong-binding"
+    decision_id = "dec:v21-official:strong-binding"
+    policy_audit_id = "audit:sha256:strong-binding"
+    policy = {
+        "audit_id": policy_audit_id,
+        "record_type": "policy_evaluation",
+        "event_type": "tool_call_proposed",
+        "decision": "ask",
+        "links": {
+            "action_id": action_id,
+            "event_id": event_id,
+            "decision_id": decision_id,
+        },
+        "decision_authority": {
+            "source": "v21",
+            "approval_release": "strong_binding_required",
+        },
+        "evidence": {
+            "guard_decision": {
+                "decision": "ask",
+                "decision_id": decision_id,
+            }
+        },
+    }
+    started = {
+        "audit_id": "audit-started-strong-binding",
+        "record_type": "runtime_observation",
+        "event_type": "tool_call_started",
+        "links": {
+            "action_id": action_id,
+            "event_id": event_id,
+            "decision_id": decision_id,
+            "policy_audit_id": policy_audit_id,
+        },
+    }
+
+    executions = _tool_execution_evidence(
+        {
+            "tool_calls": [
+                {
+                    "call_id": action_id,
+                    "tool_name": "read_file",
+                    "status": "executed",
+                    "executed": True,
+                }
+            ]
+        },
+        trace={"audit_events": [policy, started]},
+        arm=arm,
+    )
+
+    assert executions == [
+        {
+            "action_id": action_id,
+            "tool_name": "read_file",
+            "status": "executed",
+            "invocation_count": 1,
+            "decision": "ask",
+            "decision_id": decision_id,
+            "policy_audit_id": policy_audit_id,
+            "approval_release": "strong_binding_required",
+        }
+    ]
+
+
+def test_post_execution_result_deny_does_not_replace_invocation_authority(
+    tmp_path: Path,
+) -> None:
+    request = _arm_request(tmp_path, "http://127.0.0.1:1/v1")
+    arm = next(item for item in request.profile.arms if item.arm_id == "A3")
+    action_id = "call-result-quarantine"
+    event_id = "evt-tool-call"
+    decision_id = "dec:v21-official:allow-before-tool"
+    policy_audit_id = "audit:sha256:allow-before-tool"
+    policy = {
+        "audit_id": policy_audit_id,
+        "record_type": "policy_evaluation",
+        "event_type": "tool_call_proposed",
+        "decision": "allow",
+        "links": {
+            "action_id": action_id,
+            "event_id": event_id,
+            "decision_id": decision_id,
+        },
+        "decision_authority": {
+            "source": "v21",
+            "approval_release": "not_applicable",
+        },
+        "evidence": {
+            "guard_decision": {
+                "decision": "allow",
+                "decision_id": decision_id,
+            }
+        },
+    }
+    started = {
+        "audit_id": "audit-started-result-quarantine",
+        "record_type": "runtime_observation",
+        "event_type": "tool_call_started",
+        "links": {
+            "action_id": action_id,
+            "event_id": event_id,
+            "decision_id": decision_id,
+            "policy_audit_id": policy_audit_id,
+        },
+    }
+    result_policy_id = "audit:sha256:deny-result"
+    result_policy = {
+        "audit_id": result_policy_id,
+        "record_type": "policy_evaluation",
+        "event_type": "tool_result_produced",
+        "decision": "deny",
+        "links": {
+            "action_id": action_id,
+            "event_id": "evt-tool-result",
+            "decision_id": "dec:v21-official:deny-result",
+        },
+        "decision_authority": {
+            "source": "v21",
+            "approval_release": "not_applicable",
+        },
+        "evidence": {
+            "guard_decision": {
+                "decision": "deny",
+                "decision_id": "dec:v21-official:deny-result",
+            }
+        },
+    }
+    terminal = {
+        "audit_id": "audit-terminal-result-quarantine",
+        "record_type": "runtime_outcome",
+        "event_type": "runtime_outcome",
+        "decision": "deny",
+        "links": {
+            "action_id": action_id,
+            "event_id": "evt-tool-result",
+            "decision_id": "dec:v21-official:deny-result",
+            "policy_audit_id": result_policy_id,
+        },
+    }
+
+    executions = _tool_execution_evidence(
+        {
+            "tool_calls": [
+                {
+                    "call_id": action_id,
+                    "tool_name": "read_file",
+                    "status": "quarantined",
+                    "executed": True,
+                    "decision": "deny",
+                }
+            ]
+        },
+        trace={"audit_events": [policy, started, result_policy, terminal]},
+        arm=arm,
+    )
+
+    assert executions[0]["decision"] == "allow"
+    assert executions[0]["decision_id"] == decision_id
+    assert executions[0]["policy_audit_id"] == policy_audit_id
 
 
 def test_detector_off_disables_every_supported_policy_rule(tmp_path: Path) -> None:

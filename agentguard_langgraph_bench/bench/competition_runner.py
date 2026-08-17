@@ -1231,6 +1231,10 @@ def _validate_tool_and_receipt_evidence(
             "tool_name",
             "status",
             "invocation_count",
+            "decision",
+            "decision_id",
+            "policy_audit_id",
+            "approval_release",
         }:
             raise InvalidCompetitionRun(
                 "runtime_execution_evidence_invalid",
@@ -1257,6 +1261,61 @@ def _validate_tool_and_receipt_evidence(
                 f"tool execution evidence is invalid for {identity}",
             )
         executions[action_id] = item
+
+    correlation_required = (
+        request.arm.guard_enabled and request.arm.rte_mode is not RteMode.OFF
+    )
+    for action_id, execution in executions.items():
+        decision = execution.get("decision")
+        decision_id = execution.get("decision_id")
+        policy_audit_id = execution.get("policy_audit_id")
+        approval_release = execution.get("approval_release")
+        if not correlation_required:
+            if any(
+                value is not None
+                for value in (
+                    decision,
+                    decision_id,
+                    policy_audit_id,
+                    approval_release,
+                )
+            ):
+                raise InvalidCompetitionRun(
+                    "runtime_decision_correlation_invalid",
+                    f"non-guarded action has authority correlation for {identity}/{action_id}",
+                )
+            continue
+        if not all(
+            isinstance(value, str) and value
+            for value in (decision, decision_id, policy_audit_id, approval_release)
+        ):
+            raise InvalidCompetitionRun(
+                "runtime_decision_correlation_missing",
+                f"guarded action has no committed authority correlation for {identity}/{action_id}",
+            )
+        if (
+            decision not in {"allow", "ask", "deny"}
+            or approval_release
+            not in {"not_applicable", "strong_binding_required", "forbidden"}
+            or (decision != "ask" and approval_release != "not_applicable")
+            or (
+                request.arm.official_decision_source is OfficialDecisionSource.CURRENT
+                and approval_release != "not_applicable"
+            )
+            or (
+                request.arm.official_decision_source is OfficialDecisionSource.V21
+                and decision == "ask"
+                and approval_release not in {"strong_binding_required", "forbidden"}
+            )
+            or (
+                request.arm.official_decision_source is OfficialDecisionSource.V21
+                and not str(decision_id).startswith("dec:v21-official:")
+            )
+        ):
+            raise InvalidCompetitionRun(
+                "runtime_decision_correlation_invalid",
+                f"guarded action authority correlation is contradictory for {identity}/{action_id}",
+            )
 
     receipts: dict[str, Mapping[str, Any]] = {}
     for item in raw_receipts:
@@ -1330,6 +1389,29 @@ def _validate_tool_and_receipt_evidence(
                 "reason_code": "terminal_receipt_not_covered",
             }
         )
+    for action_id, execution in executions.items():
+        if execution["invocation_count"] < 1:
+            continue
+        decision = execution.get("decision")
+        approval_release = execution.get("approval_release")
+        if decision == "deny":
+            failures.append(
+                {
+                    "contract": "guard_decision_enforcement",
+                    "arm_id": request.arm.arm_id,
+                    "case_id": identity.rsplit("/", 1)[-1],
+                    "reason_code": "deny_action_invoked",
+                }
+            )
+        elif decision == "ask" and approval_release == "forbidden":
+            failures.append(
+                {
+                    "contract": "guard_decision_enforcement",
+                    "arm_id": request.arm.arm_id,
+                    "case_id": identity.rsplit("/", 1)[-1],
+                    "reason_code": "forbidden_ask_action_invoked",
+                }
+            )
     failures.extend(
         _validate_a4_bn001_live_smoke(
             row,

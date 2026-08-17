@@ -184,6 +184,10 @@ def _result(
                 "tool_name": "read_file",
                 "status": "executed",
                 "invocation_count": 1,
+                "decision": "allow",
+                "decision_id": "dec:v21-official:read-1",
+                "policy_audit_id": "audit-read-1",
+                "approval_release": "not_applicable",
             }
         ]
     if receipts is None:
@@ -281,6 +285,10 @@ def test_distinct_action_ids_do_not_hide_duplicate_read_file_invocation(
             "tool_name": "read_file",
             "status": "executed",
             "invocation_count": 1,
+            "decision": "allow",
+            "decision_id": f"dec:v21-official:read-{index}",
+            "policy_audit_id": f"audit-read-{index}",
+            "approval_release": "not_applicable",
         }
         for index in (1, 2)
     ]

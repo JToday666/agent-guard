@@ -26,6 +26,7 @@ from agentguard_langgraph_bench.bench.competition_runner import (
     _expected_case_runs,
     _load_frozen_cases,
     _qualification_eligible,
+    _validate_tool_and_receipt_evidence,
     build_parser,
     main,
     resolve_run_request,
@@ -233,6 +234,36 @@ class StubArmExecutor:
                     ),
                 }
             )
+            if (
+                self.mutation in {"a1_deny_execute", "a1_missing_correlation"}
+                and request.arm.arm_id == "A1"
+                and case.case_id == request.cases[0].case_id
+            ):
+                correlation = {
+                    "decision": "deny",
+                    "decision_id": "dec-a1-deny",
+                    "policy_audit_id": "audit-a1-deny",
+                    "approval_release": "not_applicable",
+                }
+                if self.mutation == "a1_missing_correlation":
+                    correlation = {key: None for key in correlation}
+                rows[-1]["tool_executions"] = [
+                    {
+                        "action_id": "call-a1-denied",
+                        "tool_name": "read_file",
+                        "status": "executed",
+                        "invocation_count": 1,
+                        **correlation,
+                    }
+                ]
+                rows[-1]["terminal_receipts"] = [
+                    {
+                        "action_id": "call-a1-denied",
+                        "status": "executed",
+                        "receipt_count": 1,
+                    }
+                ]
+                rows[-1]["receipt_covered"] = True
         return ArmRunResult(
             rows=tuple(rows),
             contracts={
@@ -491,6 +522,206 @@ def test_valid_matrix_with_observed_authority_mismatch_is_exit_one(
     assert contracts["failures"][0]["reason_code"] == "observed_arm_mismatch"
 
 
+def test_a1_committed_deny_followed_by_invocation_is_exit_one(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+
+    exit_code = run(request, executor=StubArmExecutor(mutation="a1_deny_execute"))
+
+    assert exit_code is ExitCode.FUNCTIONAL_CONTRACT_FAILED
+    contracts = json.loads(
+        (request.artifacts / "contract-results.json").read_text(encoding="utf-8")
+    )
+    assert "deny_action_invoked" in {
+        item["reason_code"] for item in contracts["failures"]
+    }
+
+
+def test_a1_invocation_without_committed_decision_correlation_is_exit_two(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+
+    exit_code = run(
+        request, executor=StubArmExecutor(mutation="a1_missing_correlation")
+    )
+
+    assert exit_code is ExitCode.INVALID_RUN
+    report = json.loads((request.artifacts / "result.json").read_text(encoding="utf-8"))
+    assert report["reason_code"] == "runtime_decision_correlation_missing"
+
+
+@pytest.mark.parametrize(
+    ("arm_id", "decision", "approval_release"),
+    [
+        ("A1", "allow", "not_applicable"),
+        ("A3", "ask", "strong_binding_required"),
+    ],
+)
+def test_correlated_allow_and_reviewable_ask_execution_remain_valid(
+    tmp_path: Path,
+    arm_id: str,
+    decision: str,
+    approval_release: str,
+) -> None:
+    run_request = _request(tmp_path)
+    case = _load_frozen_cases(run_request.profile)[0]
+    arm = next(item for item in run_request.profile.arms if item.arm_id == arm_id)
+    request = ArmRunRequest(
+        profile=run_request.profile,
+        arm=arm,
+        repeat_index=0,
+        seed=run_request.profile.seed,
+        cases=(case,),
+        provider=run_request.provider,
+        artifact_directory=tmp_path / arm_id,
+        suite=run_request.profile.suite,
+        qualification_eligible=False,
+    )
+    row = {
+        "tool_executions": [
+            {
+                "action_id": "call-correlated",
+                "tool_name": "read_file",
+                "status": "executed",
+                "invocation_count": 1,
+                "decision": decision,
+                "decision_id": (
+                    f"dec:v21-official:{decision}"
+                    if arm_id == "A3"
+                    else f"dec-{decision}"
+                ),
+                "policy_audit_id": f"audit-{decision}",
+                "approval_release": approval_release,
+            }
+        ],
+        "terminal_receipts": [
+            {
+                "action_id": "call-correlated",
+                "status": "executed",
+                "receipt_count": 1,
+            }
+        ],
+        "receipt_covered": True,
+    }
+
+    failures = _validate_tool_and_receipt_evidence(
+        row,
+        request=request,
+        case=case,
+        exchanges=(),
+        identity=f"{arm_id}/r0/{case.case_id}",
+    )
+
+    assert failures == []
+
+
+def test_forbidden_v2_ask_followed_by_invocation_is_functional_failure(
+    tmp_path: Path,
+) -> None:
+    run_request = _request(tmp_path)
+    case = _load_frozen_cases(run_request.profile)[0]
+    arm = next(item for item in run_request.profile.arms if item.arm_id == "A3")
+    request = ArmRunRequest(
+        profile=run_request.profile,
+        arm=arm,
+        repeat_index=0,
+        seed=run_request.profile.seed,
+        cases=(case,),
+        provider=run_request.provider,
+        artifact_directory=tmp_path / "A3",
+        suite=run_request.profile.suite,
+        qualification_eligible=False,
+    )
+    row = {
+        "tool_executions": [
+            {
+                "action_id": "call-forbidden",
+                "tool_name": "read_file",
+                "status": "executed",
+                "invocation_count": 1,
+                "decision": "ask",
+                "decision_id": "dec:v21-official:forbidden",
+                "policy_audit_id": "audit-forbidden",
+                "approval_release": "forbidden",
+            }
+        ],
+        "terminal_receipts": [
+            {
+                "action_id": "call-forbidden",
+                "status": "executed",
+                "receipt_count": 1,
+            }
+        ],
+        "receipt_covered": True,
+    }
+
+    failures = _validate_tool_and_receipt_evidence(
+        row,
+        request=request,
+        case=case,
+        exchanges=(),
+        identity=f"A3/r0/{case.case_id}",
+    )
+
+    assert [item["reason_code"] for item in failures] == [
+        "forbidden_ask_action_invoked"
+    ]
+
+
+def test_contradictory_v2_decision_release_correlation_is_invalid(
+    tmp_path: Path,
+) -> None:
+    run_request = _request(tmp_path)
+    case = _load_frozen_cases(run_request.profile)[0]
+    arm = next(item for item in run_request.profile.arms if item.arm_id == "A3")
+    request = ArmRunRequest(
+        profile=run_request.profile,
+        arm=arm,
+        repeat_index=0,
+        seed=run_request.profile.seed,
+        cases=(case,),
+        provider=run_request.provider,
+        artifact_directory=tmp_path / "A3-invalid",
+        suite=run_request.profile.suite,
+        qualification_eligible=False,
+    )
+    row = {
+        "tool_executions": [
+            {
+                "action_id": "call-contradictory",
+                "tool_name": "read_file",
+                "status": "executed",
+                "invocation_count": 1,
+                "decision": "allow",
+                "decision_id": "dec:v21-official:contradictory",
+                "policy_audit_id": "audit-contradictory",
+                "approval_release": "forbidden",
+            }
+        ],
+        "terminal_receipts": [
+            {
+                "action_id": "call-contradictory",
+                "status": "executed",
+                "receipt_count": 1,
+            }
+        ],
+        "receipt_covered": True,
+    }
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        _validate_tool_and_receipt_evidence(
+            row,
+            request=request,
+            case=case,
+            exchanges=(),
+            identity=f"A3/r0/{case.case_id}",
+        )
+
+    assert caught.value.reason_code == "runtime_decision_correlation_invalid"
+
+
 @pytest.mark.parametrize("mutation", ["missing_exchange", "source_drift"])
 def test_non_interpretable_matrix_is_exit_two_with_explicit_invalid_report(
     tmp_path: Path, mutation: str
@@ -641,9 +872,7 @@ def test_main_suite_rejects_axis_overrides(suite: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("source", ["cli", "config"])
-def test_main_suite_rejects_repeat_override(
-    source: str, tmp_path: Path
-) -> None:
+def test_main_suite_rejects_repeat_override(source: str, tmp_path: Path) -> None:
     config_args: list[str] = []
     cli_args: list[str] = []
     if source == "config":
