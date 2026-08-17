@@ -77,6 +77,7 @@ from agentguard_core.signals.models import SequenceRef
 
 from guard_api.security_state.rebuild import (
     LEGACY_PROJECTOR_VERSION,
+    PREVIOUS_PROJECTOR_VERSION,
     _decode_legacy_delta,
     rebuild_locked,
 )
@@ -681,6 +682,21 @@ def test_legacy_decoder_rejects_version_inconsistency() -> None:
         excinfo.value.reason_code
         == "v21-04:legacy_envelope_version_inconsistent"
     )
+
+
+def test_previous_projector_decoder_preserves_typed_content() -> None:
+    delta = make_delta().model_copy(
+        update={
+            "projector_version": PREVIOUS_PROJECTOR_VERSION,
+            "source_upserts": [make_source_fact()],
+        }
+    )
+    delta = delta.model_copy(
+        update={"delta_digest": canonical_sha256(delta_digest_projection(delta))}
+    )
+    decoded = _decode_legacy_delta(delta, require_empty_typed=False)
+    assert decoded.projector_version == PROJECTOR_VERSION
+    assert decoded.source_upserts == delta.source_upserts
 
 
 def test_reprojection_of_legacy_envelopes_is_deterministic() -> None:

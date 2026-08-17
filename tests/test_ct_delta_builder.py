@@ -24,7 +24,12 @@ from agentguard_core.security_context import (
     delta_digest_projection,
     projection_identity_key,
 )
-from agentguard_core.security_context.facts import DeclassificationFact, fact_digest
+from agentguard_core.security_context.facts import (
+    DeclassificationFact,
+    MemoryFact,
+    fact_digest,
+)
+from agentguard_core.signals.models import SequenceRef
 from guard_api.security_state import delta_builder
 from guard_api.security_state.delta_builder import (
     CT_DELTA_BUILDER_VERSION,
@@ -385,6 +390,67 @@ def test_module_has_no_uuid_or_random_imports() -> None:
 
 def test_module_version_and_dispatch_registry() -> None:
     assert CT_DELTA_BUILDER_VERSION == "ct-delta-1"
-    # 分派表当前仅 runtime_observation；CT-PR-05 memory_transition
-    # 挂载时本断言须同步更新（扩展点留痕）。
-    assert tuple(delta_builder._FACT_DELTA_BUILDERS) == ("runtime_observation",)
+    assert tuple(delta_builder._FACT_DELTA_BUILDERS) == (
+        "runtime_observation",
+        "memory_transition",
+    )
+
+
+def _memory_transition_fact(status: str, revision: int) -> MemoryFact:
+    return MemoryFact(
+        memory_id="memory:notes:summary",
+        change_id="memchg_ct05",
+        change_status=status,  # type: ignore[arg-type]
+        trust_state="tainted",
+        taints=["UNTRUSTED", "PERSISTENT_UNTRUSTED"],
+        source_refs=["source:web:1"],
+        last_write_sequence=SequenceRef(
+            domain="memory",
+            producer_binding_id="memchg_ct05",
+            value=revision,
+        ),
+        last_read_sequence=None,
+        evidence_refs=[],
+    )
+
+
+def test_memory_transition_revision_identity_is_deterministic() -> None:
+    fact = _memory_transition_fact("committed", 2)
+    first = build_ct_facts_delta(
+        scope_digest=SCOPE,
+        source_record_type="memory_transition",
+        source_record_id="memchg_ct05",
+        source_revision=2,
+        base_state_version=7,
+        memory_fact=fact,
+    )
+    second = build_ct_facts_delta(
+        scope_digest=SCOPE,
+        source_record_type="memory_transition",
+        source_record_id="memchg_ct05",
+        source_revision=2,
+        base_state_version=7,
+        memory_fact=fact,
+    )
+    assert first is not None and first == second
+    assert first.source.source_record_type == "memory_transition"
+    assert first.source.source_record_id == "memchg_ct05"
+    assert first.source.source_revision == 2
+    assert first.memory_upserts == [fact]
+    assert not first.source_upserts and not first.flow_upserts
+
+
+def test_memory_transition_rejects_status_revision_or_identity_mismatch() -> None:
+    fact = _memory_transition_fact("committed", 2)
+    for source_id, revision in (("other", 2), ("memchg_ct05", 1)):
+        assert (
+            build_ct_facts_delta(
+                scope_digest=SCOPE,
+                source_record_type="memory_transition",
+                source_record_id=source_id,
+                source_revision=revision,
+                base_state_version=7,
+                memory_fact=fact,
+            )
+            is None
+        )

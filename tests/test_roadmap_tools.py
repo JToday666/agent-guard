@@ -196,6 +196,8 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "CT05",
         "RSC-CTPROV",
         "C10",
+        "CT05",
+        "RSC-CTPROV",
     }.isdisjoint(ready_ids)
 
 

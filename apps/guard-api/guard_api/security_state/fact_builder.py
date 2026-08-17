@@ -342,7 +342,11 @@ def _handle_model_input_prepared(
             index=index,
             source_ref=ref,
             target_ref=f"model_input:{event.event_id}",
-            relation="assembled_into",
+            relation=(
+                "loaded_from_memory"
+                if ref in inputs.upstream_memory_facts
+                else "assembled_into"
+            ),
             strength="exact",
             origin="observed",
             taints=_visible_ref_taints(inputs, ref),

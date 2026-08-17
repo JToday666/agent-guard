@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT05-6C99542E4040",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "CT05",
+  "recorded_at": "2026-08-16T17:30:40Z",
+  "ref": "flag:AGENTGUARD_CT_FACT_PROJECTION_ENABLED",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "default-off rollback verified; projector.3 rows require derived-row rebuild before binary downgrade"
+}
