@@ -1,30 +1,37 @@
 {
-  "schema_version": "1.0.0",
-  "id": "RSC-CTPROV",
-  "exact_title": "INT-RSC-CT-PROV — Typed Provenance writer",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "integration",
-  "lifecycle": "not_started",
-  "revision": 1,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "audit-schema-and-storage"
   ],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
-      "heading": "## 14. 后端/集成 PR 建议",
-      "line_hint": 707
-    }
-  ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "INT-RSC-CT-PROV — Typed Provenance writer",
+  "hold": false,
+  "id": "RSC-CTPROV",
+  "kind": "task",
+  "lane": "integration",
+  "lifecycle": "in_progress",
   "notes": [
     "Observed implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
-  ]
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "## 14. 后端/集成 PR 建议",
+      "line_hint": 707,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+    }
+  ],
+  "work": {
+    "base_sha": "6193dc48d98b6890ee3a760891ac37ebf47849c8",
+    "branch": "codex/rsc-ctprov-reconcile",
+    "owner": "codex",
+    "started_at": "2026-08-17T10:03:43Z",
+    "substate": "active",
+    "worktree_slug": "RSC-CTPROV-reconcile"
+  }
 }
