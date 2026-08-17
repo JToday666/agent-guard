@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentguard_langgraph_adapter.config import (
@@ -198,6 +198,9 @@ class BenchConfig:
     tool_server_port: int = 18090
     core_api_mode: ApiMode = DEFAULT_API_MODE
     context_isolation_mode: ContextIsolationMode = "off"
+    # Populated only after the reference runner creates authoritative TaskFacts.
+    trusted_task_ids_by_case: dict[str, str] = field(default_factory=dict)
+    trusted_trace_ids_by_case: dict[str, str] = field(default_factory=dict)
     strict_runtime_targets: bool = False
     agent_visible_payload_mode: str = DEFAULT_AGENT_VISIBLE_PAYLOAD_MODE
     closure_on_partial: bool = False

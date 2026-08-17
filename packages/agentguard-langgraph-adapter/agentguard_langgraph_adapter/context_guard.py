@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SCOPE_DIGEST = re.compile(r"^(?:sha256|hmac-sha256):[0-9a-f]{64}$")
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$")
 _INCLUDED_STATES = frozenset({"preserved", "annotated"})
 _EXCLUDED_STATES = frozenset({"quarantined", "excluded"})
@@ -176,7 +177,7 @@ def validate_and_prepare_context(
     context_ref = _require_identity(
         plan, "context_ref", "context-plan:context_ref"
     )
-    scope_digest = _require_digest(
+    scope_digest = _require_scope_digest(
         plan.get("scope_digest"), "context-plan:scope_digest"
     )
     expected_plan_digest = _require_digest(
@@ -466,6 +467,12 @@ def _require_identity(value: Mapping[str, Any], key: str, code: str) -> str:
 
 def _require_digest(value: Any, code: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise ContextPlanValidationError(code)
+    return value
+
+
+def _require_scope_digest(value: Any, code: str) -> str:
+    if not isinstance(value, str) or _SCOPE_DIGEST.fullmatch(value) is None:
         raise ContextPlanValidationError(code)
     return value
 

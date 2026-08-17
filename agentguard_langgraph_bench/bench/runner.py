@@ -2498,7 +2498,7 @@ def build_case_context(
     tool_gateway: GuardedToolGateway,
     tool_server: BenchmarkToolServer | None = None,
 ) -> CaseContext:
-    trace_id = new_id("trace")
+    trace_id = config.trusted_trace_ids_by_case.get(case.case_id) or new_id("trace")
     security = {
         "case_id": case.case_id,
         "trace_id": trace_id,
@@ -2512,6 +2512,9 @@ def build_case_context(
         "agent_id": agent_adapter.name,
         "runtime": agent_adapter.runtime,
     }
+    trusted_task_id = config.trusted_task_ids_by_case.get(case.case_id)
+    if trusted_task_id:
+        security["task_id"] = trusted_task_id
     return CaseContext(
         case=case,
         trace_id=trace_id,
