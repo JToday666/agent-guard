@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import json
 import shutil
 import subprocess
@@ -249,8 +250,29 @@ def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
     assert "runtime-binding-activation" not in nodes["CT04"]["change_surfaces"]
     assert "langgraph-runtime-integration" in nodes["I02A"]["change_surfaces"]
     assert "runtime-binding-activation" not in nodes["I02A"]["change_surfaces"]
-    assert all("openclaw" not in pattern for pattern in surfaces["langgraph-runtime-integration"])
-    assert any("openclaw" in pattern for pattern in surfaces["openclaw-host-capability"])
+    residual_paths = (
+        "packages/agentguard-openclaw-plugin/src/index.ts",
+        "packages/agentguard-openclaw-bench-tools/src/index.ts",
+        "scripts/openclaw-rte05-host-chain.mjs",
+        "tests/runtime_conformance/contract_cases.json",
+        "tests/test_openclaw_plugin_contract.py",
+        "tests/test_rte05_openclaw_live.py",
+        "docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md",
+    )
+    residual_patterns = surfaces["openclaw-host-capability"]
+    for path in residual_paths:
+        assert any(fnmatch.fnmatchcase(path, pattern) for pattern in residual_patterns)
+
+    for node_id in ("CT04", "I02A"):
+        authorized_patterns = [
+            pattern
+            for surface_id in nodes[node_id]["change_surfaces"]
+            for pattern in surfaces[surface_id]
+        ]
+        for path in residual_paths:
+            assert not any(
+                fnmatch.fnmatchcase(path, pattern) for pattern in authorized_patterns
+            ), f"{node_id} unexpectedly authorizes residual R05 path {path}"
 
 
 def test_active_exclusive_surface_conflict_removes_otherwise_ready_node(
