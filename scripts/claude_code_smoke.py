@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default=os.getenv("ANTHROPIC_MODEL", "qwen3.7-plus"))
     parser.add_argument("--report-dir", default="reports/claude-code-baseline")
     parser.add_argument("--browser-engine", choices=("chromium", "firefox", "webkit"), default="chromium")
-    parser.add_argument("--timeout", type=float, default=float(os.getenv("AGENTGUARD_CLAUDE_CODE_TIMEOUT", "180")))
+    parser.add_argument("--timeout", type=float, default=float(os.getenv("AGENTGUARD_CLAUDE_CODE_TIMEOUT", "600")))
     parser.add_argument("--retain-artifacts", action="store_true")
     parser.add_argument("--case-id", action="append", choices=CASE_IDS, default=[])
     return parser

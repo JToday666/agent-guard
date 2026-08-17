@@ -10,11 +10,13 @@ from agentguard_langgraph_bench.bench.tools import MockToolRegistry
 
 
 def test_claude_code_adapter_defaults_allow_longer_cases(monkeypatch) -> None:
+    monkeypatch.delenv("AGENTGUARD_CLAUDE_CODE_TIMEOUT", raising=False)
     monkeypatch.delenv("AGENTGUARD_CLAUDE_CODE_MAX_TURNS", raising=False)
     monkeypatch.delenv("AGENTGUARD_CLAUDE_CODE_MAX_BUDGET_USD", raising=False)
 
     adapter = ClaudeCodeAdapter(object())
 
+    assert adapter.timeout_seconds == 600
     assert adapter.max_turns == 48
     assert adapter.max_budget_usd == 2
 
