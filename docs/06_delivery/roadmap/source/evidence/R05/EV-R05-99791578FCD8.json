@@ -1,0 +1,11 @@
+{
+  "id": "EV-R05-99791578FCD8",
+  "kind": "ci",
+  "metadata": {},
+  "node_id": "R05",
+  "recorded_at": "2026-08-17T02:07:52Z",
+  "ref": "github:actions/31962457264",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR #162 CI verified Python 3.12/PostgreSQL 16, Node 24, and OpenClaw runtime smoke on Linux/Windows for 2026.6.6 and 2026.7.1-2."
+}
