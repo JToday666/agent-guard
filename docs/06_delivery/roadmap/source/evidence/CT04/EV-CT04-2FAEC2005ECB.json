@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04-2FAEC2005ECB",
+  "kind": "e2e",
+  "metadata": {},
+  "node_id": "CT04",
+  "recorded_at": "2026-08-17T05:53:17Z",
+  "ref": "local:actual-llm-input-capture",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Captured actual planner invocation proves plan-rebuilt normal task and annotated benign evidence enter the model while malicious, sensitive, and invalid-plan paths never invoke it"
+}
