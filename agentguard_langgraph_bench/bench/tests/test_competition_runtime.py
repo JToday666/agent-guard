@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterator
 
+import pytest
 from langchain_openai import ChatOpenAI
 from agentguard_core import GuardEngine, GuardEvent, SUPPORTED_POLICY_RULE_IDS
 from agentguard_langgraph_adapter.context_guard import REFERENCE_RUNTIME_FACT
@@ -20,8 +21,10 @@ from agentguard_langgraph_bench.bench.competition_models import (
 )
 from agentguard_langgraph_bench.bench.competition_runner import (
     ArmRunRequest,
+    InvalidCompetitionRun,
     ProviderRuntimeConfig,
 )
+from agentguard_langgraph_bench.bench import competition_runtime
 from agentguard_langgraph_bench.bench.competition_runtime import (
     _PREFLIGHT_TOOL,
     _bench_config,
@@ -350,7 +353,60 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
     )
     assert result.contracts["provider_tool_call_preflight"]["status"] == "passed"
     assert result.contracts["competition_activation"]["status"] == "passed"
+    fixture_contract = result.contracts["runtime_fixture_bundle"]
+    assert fixture_contract["status"] == "passed"
+    assert fixture_contract["reason_code"] == "runtime_fixture_bundle_verified"
+    assert fixture_contract["schema_version"] == "competition-runtime-fixtures/1.0"
+    assert fixture_contract["bundle_digest"] == (
+        load_competition_profile().dataset.runtime_fixture_bundle_digest
+    )
+    assert fixture_contract["file_count"] > 0
+    assert fixture_contract["byte_count"] > 0
+    assert [item["root_id"] for item in fixture_contract["roots"]] == [
+        "environment_manifest",
+        "instrumentation",
+        "materialized_sandbox",
+        "mcpsafety",
+        "poisonedrag",
+        "shared_sandbox_files",
+        "shared_sandbox_mcp",
+    ]
     assert _PROVIDER_KEY not in repr(result)
+
+
+def test_runtime_fixture_drift_fails_before_any_provider_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _arm_request(tmp_path, "http://127.0.0.1:9/v1")
+    drifted_profile = replace(
+        request.profile,
+        dataset=replace(
+            request.profile.dataset,
+            runtime_fixture_bundle_digest="sha256:" + "f" * 64,
+        ),
+    )
+    provider_called = False
+
+    def forbidden_provider_call(_request: ArmRunRequest):
+        nonlocal provider_called
+        provider_called = True
+        raise AssertionError("provider must not be called after fixture drift")
+
+    monkeypatch.setattr(
+        competition_runtime,
+        "_provider_tool_call_preflight",
+        forbidden_provider_call,
+    )
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        execute_competition_arm(
+            replace(request, profile=drifted_profile),
+            case_runner=lambda *args, **kwargs: [],
+        )
+
+    assert caught.value.reason_code == "runtime_fixture_identity_mismatch"
+    assert provider_called is False
 
 
 def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(

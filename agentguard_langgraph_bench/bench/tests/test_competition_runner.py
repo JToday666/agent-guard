@@ -26,6 +26,7 @@ from agentguard_langgraph_bench.bench.competition_runner import (
     _expected_case_runs,
     _load_frozen_cases,
     _qualification_eligible,
+    _validate_runtime_fixture_observations,
     _validate_tool_and_receipt_evidence,
     build_parser,
     main,
@@ -353,6 +354,21 @@ def test_full_stub_matrix_is_complete_but_never_competition_qualified(
     assert preflight["competition_qualification_eligible"] is False
     completeness = json.loads((root / "completeness.json").read_text(encoding="utf-8"))
     assert completeness["competition_qualification_eligible"] is False
+    runtime_fixtures = json.loads(
+        (root / "runtime-fixtures.json").read_text(encoding="utf-8")
+    )
+    assert runtime_fixtures == {
+        "schema_version": "competition-runtime-fixture-run/1.0",
+        "status": "not_applicable",
+        "expected_bundle_digest": (
+            request.profile.dataset.runtime_fixture_bundle_digest
+        ),
+        "observed_bundle_digest": None,
+        "expected_observations": 5,
+        "verified_observations": 0,
+        "roots": [],
+        "observations": [],
+    }
     assert report["expected_case_runs"] == 350
     assert report["attempted_case_runs"] == 350
     assert report["invalid_case_runs"] == 0
@@ -439,6 +455,52 @@ def test_full_stub_matrix_is_complete_but_never_competition_qualified(
         content = (root / item["relative_path"]).read_bytes()
         assert item["sha256"] == "sha256:" + hashlib.sha256(content).hexdigest()
         assert _SECRET.encode() not in content
+
+
+def test_runtime_fixture_cross_arm_summary_mismatch_is_invalid(
+    tmp_path: Path,
+) -> None:
+    profile = _request(tmp_path).profile
+    fixture = {
+        "schema_version": "competition-runtime-fixtures/1.0",
+        "bundle_digest": profile.dataset.runtime_fixture_bundle_digest,
+        "file_count": 1,
+        "byte_count": 7,
+        "roots": [
+            {
+                "root_id": "materialized_sandbox",
+                "file_count": 1,
+                "byte_count": 7,
+                "root_digest": "sha256:" + "a" * 64,
+            }
+        ],
+    }
+    observations = [
+        {"arm_id": "A0", "repeat_index": 0, "fixture": fixture},
+        {
+            "arm_id": "A1",
+            "repeat_index": 0,
+            "fixture": {
+                **fixture,
+                "roots": [
+                    {
+                        **fixture["roots"][0],
+                        "root_digest": "sha256:" + "b" * 64,
+                    }
+                ],
+            },
+        },
+    ]
+
+    with pytest.raises(InvalidCompetitionRun) as caught:
+        _validate_runtime_fixture_observations(
+            profile,
+            observations=observations,
+            expected_observations=2,
+            required=True,
+        )
+
+    assert caught.value.reason_code == "runtime_fixture_cross_arm_mismatch"
 
 
 @pytest.mark.parametrize(

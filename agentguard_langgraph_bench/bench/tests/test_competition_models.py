@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -40,11 +41,25 @@ def test_packaged_competition_profile_freezes_five_distinct_arms() -> None:
     assert a4.official_decision_source is OfficialDecisionSource.V21
     assert a4.context_mode.value == "required"
     assert profile.dataset.case_count == 70
+    assert profile.dataset.runtime_fixture_bundle_digest.startswith("sha256:")
     assert profile.identity.runtime_binding_id == (
         f"binding:{profile.identity.principal_id}"
     )
     assert profile.identity.agent_id == profile.agent_adapter == "langgraph-demo"
     assert profile.effective_digest.startswith("sha256:")
+
+
+def test_runtime_fixture_identity_is_bound_into_effective_profile_digest() -> None:
+    profile = load_competition_profile()
+    changed = replace(
+        profile,
+        dataset=replace(
+            profile.dataset,
+            runtime_fixture_bundle_digest="sha256:" + "f" * 64,
+        ),
+    )
+
+    assert changed.effective_digest != profile.effective_digest
 
 
 @pytest.mark.parametrize(

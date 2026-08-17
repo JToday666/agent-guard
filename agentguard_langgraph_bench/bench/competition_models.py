@@ -94,6 +94,7 @@ class DatasetSpec:
     dataset_id: str
     dataset_version: str
     dataset_digest: str
+    runtime_fixture_bundle_digest: str
     case_count: int
 
     def public_dump(self) -> dict[str, Any]:
@@ -103,6 +104,7 @@ class DatasetSpec:
             "dataset_id": self.dataset_id,
             "dataset_version": self.dataset_version,
             "dataset_digest": self.dataset_digest,
+            "runtime_fixture_bundle_digest": self.runtime_fixture_bundle_digest,
             "case_count": self.case_count,
         }
 
@@ -323,6 +325,10 @@ class CompetitionProfile:
             )
         if not _SHA256.fullmatch(self.dataset.dataset_digest):
             raise CompetitionConfigurationError("dataset_digest must be sha256")
+        if not _SHA256.fullmatch(self.dataset.runtime_fixture_bundle_digest):
+            raise CompetitionConfigurationError(
+                "runtime_fixture_bundle_digest must be sha256"
+            )
         if not _SHA256.fullmatch(self.source_digest):
             raise CompetitionConfigurationError("profile source digest must be sha256")
         _validate_frozen_roster(self.arms, self.v21_rollout_mode)
@@ -477,6 +483,7 @@ def parse_competition_profile(
             "dataset_id",
             "dataset_version",
             "dataset_digest",
+            "runtime_fixture_bundle_digest",
             "case_count",
         },
         "dataset",
@@ -526,6 +533,9 @@ def parse_competition_profile(
             dataset_id=_required_str(dataset_raw, "dataset_id"),
             dataset_version=_required_str(dataset_raw, "dataset_version"),
             dataset_digest=_required_str(dataset_raw, "dataset_digest"),
+            runtime_fixture_bundle_digest=_required_str(
+                dataset_raw, "runtime_fixture_bundle_digest"
+            ),
             case_count=_required_int(dataset_raw, "case_count"),
         ),
         planner=PlannerSpec(

@@ -54,6 +54,12 @@ from .model_exchange import (
     resolve_api_key,
 )
 from .models import AttackCase
+from .runtime_fixture_contract import (
+    RUNTIME_FIXTURE_CONTRACT_NAME,
+    RUNTIME_FIXTURE_ROOT_IDS,
+    RUNTIME_FIXTURE_RUN_SCHEMA_VERSION,
+    RUNTIME_FIXTURE_SCHEMA_VERSION,
+)
 
 
 COMPETITION_RESULT_SCHEMA_VERSION = "competition-report/1.0"
@@ -679,7 +685,8 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
     # Only the built-in live executor establishes the trusted runtime boundary.
     # The injection seam is intentionally useful for contract tests, but its
     # caller-controlled rows can never support an official qualification claim.
-    qualification_eligible = executor is None and _qualification_eligible(
+    live_executor = executor is None
+    qualification_eligible = live_executor and _qualification_eligible(
         request, cases, arms
     )
     selected_executor = executor or _live_executor
@@ -691,6 +698,8 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
     run_at = _utc_now()
     all_rows: list[dict[str, Any]] = []
     contract_failures: list[dict[str, str]] = []
+    runtime_fixture_observations: list[dict[str, Any]] = []
+    expected_fixture_observations = request.profile.repeats * len(arms)
     try:
         artifacts.write_json("profile.json", request.profile.public_dump())
         artifacts.write_json(
@@ -716,6 +725,15 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
         )
         artifacts.write_json("arms.json", [arm.public_dump() for arm in arms])
         artifacts.write_json("schedule.json", _schedule(request, cases, arms))
+        artifacts.write_json(
+            "runtime-fixtures.json",
+            _runtime_fixture_artifact(
+                request.profile,
+                observations=runtime_fixture_observations,
+                expected_observations=expected_fixture_observations,
+                status="pending",
+            ),
+        )
 
         for repeat_index in range(request.profile.repeats):
             for arm in arms:
@@ -740,6 +758,22 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
                         "arm_executor_failed",
                         "competition arm executor failed",
                     ) from exc
+                fixture_observation = _runtime_fixture_observation(
+                    result.contracts,
+                    request=arm_request,
+                    required=live_executor,
+                )
+                if fixture_observation is not None:
+                    runtime_fixture_observations.append(fixture_observation)
+                    artifacts.write_json(
+                        "runtime-fixtures.json",
+                        _runtime_fixture_artifact(
+                            request.profile,
+                            observations=runtime_fixture_observations,
+                            expected_observations=expected_fixture_observations,
+                            status="collecting",
+                        ),
+                    )
                 rows, failures = _admit_arm_result(
                     result,
                     request=arm_request,
@@ -754,6 +788,15 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
                     contracts=result.contracts,
                 )
 
+        artifacts.write_json(
+            "runtime-fixtures.json",
+            _validate_runtime_fixture_observations(
+                request.profile,
+                observations=runtime_fixture_observations,
+                expected_observations=expected_fixture_observations,
+                required=live_executor,
+            ),
+        )
         completeness = _validate_matrix(
             request,
             cases,
@@ -1757,6 +1800,230 @@ def _validate_pre_model_block(
             "pre_model_block_evidence_invalid",
             f"zero-request block evidence is invalid for {identity}",
         )
+
+
+def _runtime_fixture_observation(
+    contracts: Mapping[str, Mapping[str, Any]],
+    *,
+    request: ArmRunRequest,
+    required: bool,
+) -> dict[str, Any] | None:
+    """Admit one display-safe runtime fixture contract from an arm executor."""
+
+    if not isinstance(contracts, Mapping):
+        raise InvalidCompetitionRun(
+            "executor_contracts_invalid", "executor contracts must be an object"
+        )
+    payload = contracts.get(RUNTIME_FIXTURE_CONTRACT_NAME)
+    if payload is None and not required:
+        return None
+    if not isinstance(payload, Mapping):
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_missing",
+            "live executor omitted runtime fixture evidence",
+        )
+    expected_keys = {
+        "status",
+        "reason_code",
+        "schema_version",
+        "bundle_digest",
+        "file_count",
+        "byte_count",
+        "roots",
+    }
+    if set(payload) != expected_keys:
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture contract has an invalid shape",
+        )
+    if (
+        payload.get("status") != "passed"
+        or payload.get("reason_code") != "runtime_fixture_bundle_verified"
+        or payload.get("schema_version") != RUNTIME_FIXTURE_SCHEMA_VERSION
+    ):
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture contract did not establish a verified bundle",
+        )
+    bundle_digest = payload.get("bundle_digest")
+    if not _is_sha256(bundle_digest):
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture contract bundle digest is invalid",
+        )
+    if bundle_digest != request.profile.dataset.runtime_fixture_bundle_digest:
+        raise InvalidCompetitionRun(
+            "runtime_fixture_identity_mismatch",
+            "runtime fixture contract differs from the packaged profile",
+        )
+    file_count = _runtime_fixture_count(payload.get("file_count"))
+    byte_count = _runtime_fixture_count(payload.get("byte_count"))
+    raw_roots = payload.get("roots")
+    if not isinstance(raw_roots, list):
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture root summaries are invalid",
+        )
+    roots: list[dict[str, Any]] = []
+    for raw_root in raw_roots:
+        if not isinstance(raw_root, Mapping) or set(raw_root) != {
+            "root_id",
+            "file_count",
+            "byte_count",
+            "root_digest",
+        }:
+            raise InvalidCompetitionRun(
+                "runtime_fixture_evidence_invalid",
+                "runtime fixture root summary has an invalid shape",
+            )
+        root_id = raw_root.get("root_id")
+        root_digest = raw_root.get("root_digest")
+        if not isinstance(root_id, str) or not root_id or not _is_sha256(root_digest):
+            raise InvalidCompetitionRun(
+                "runtime_fixture_evidence_invalid",
+                "runtime fixture root summary is invalid",
+            )
+        roots.append(
+            {
+                "root_id": root_id,
+                "file_count": _runtime_fixture_count(raw_root.get("file_count")),
+                "byte_count": _runtime_fixture_count(raw_root.get("byte_count")),
+                "root_digest": root_digest,
+            }
+        )
+    if tuple(root["root_id"] for root in roots) != RUNTIME_FIXTURE_ROOT_IDS:
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture root roster differs from the frozen contract",
+        )
+    if (
+        sum(int(root["file_count"]) for root in roots) != file_count
+        or sum(int(root["byte_count"]) for root in roots) != byte_count
+    ):
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture aggregate counts contradict its root summaries",
+        )
+    return {
+        "arm_id": request.arm.arm_id,
+        "repeat_index": request.repeat_index,
+        "fixture": {
+            "schema_version": RUNTIME_FIXTURE_SCHEMA_VERSION,
+            "bundle_digest": bundle_digest,
+            "file_count": file_count,
+            "byte_count": byte_count,
+            "roots": roots,
+        },
+    }
+
+
+def _runtime_fixture_count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_invalid",
+            "runtime fixture count is invalid",
+        )
+    return value
+
+
+def _validate_runtime_fixture_observations(
+    profile: CompetitionProfile,
+    *,
+    observations: Sequence[Mapping[str, Any]],
+    expected_observations: int,
+    required: bool,
+) -> dict[str, Any]:
+    if not observations and not required:
+        return _runtime_fixture_artifact(
+            profile,
+            observations=observations,
+            expected_observations=expected_observations,
+            status="not_applicable",
+        )
+    if len(observations) != expected_observations:
+        raise InvalidCompetitionRun(
+            "runtime_fixture_evidence_missing",
+            "runtime fixture evidence is not complete for every arm and repeat",
+        )
+    return _runtime_fixture_artifact(
+        profile,
+        observations=observations,
+        expected_observations=expected_observations,
+        status="verified",
+    )
+
+
+def _runtime_fixture_artifact(
+    profile: CompetitionProfile,
+    *,
+    observations: Sequence[Mapping[str, Any]],
+    expected_observations: int,
+    status: str,
+) -> dict[str, Any]:
+    expected_digest = profile.dataset.runtime_fixture_bundle_digest
+    identities: set[tuple[int, str]] = set()
+    reference_fixture: Mapping[str, Any] | None = None
+    public_observations: list[dict[str, Any]] = []
+    for observation in observations:
+        arm_id = observation.get("arm_id")
+        repeat_index = observation.get("repeat_index")
+        fixture = observation.get("fixture")
+        if (
+            not isinstance(arm_id, str)
+            or not arm_id
+            or isinstance(repeat_index, bool)
+            or not isinstance(repeat_index, int)
+            or repeat_index < 0
+            or not isinstance(fixture, Mapping)
+        ):
+            raise InvalidCompetitionRun(
+                "runtime_fixture_evidence_invalid",
+                "runtime fixture observation is invalid",
+            )
+        identity = (repeat_index, arm_id)
+        if identity in identities:
+            raise InvalidCompetitionRun(
+                "runtime_fixture_evidence_invalid",
+                "runtime fixture observation identity is duplicated",
+            )
+        identities.add(identity)
+        if fixture.get("bundle_digest") != expected_digest:
+            raise InvalidCompetitionRun(
+                "runtime_fixture_identity_mismatch",
+                "runtime fixture observation differs from the packaged profile",
+            )
+        if reference_fixture is None:
+            reference_fixture = fixture
+        elif dict(fixture) != dict(reference_fixture):
+            raise InvalidCompetitionRun(
+                "runtime_fixture_cross_arm_mismatch",
+                "runtime fixture evidence differs across arms or repeats",
+            )
+        public_observations.append(
+            {
+                "arm_id": arm_id,
+                "repeat_index": repeat_index,
+                "bundle_digest": fixture["bundle_digest"],
+            }
+        )
+    return {
+        "schema_version": RUNTIME_FIXTURE_RUN_SCHEMA_VERSION,
+        "status": status,
+        "expected_bundle_digest": expected_digest,
+        "observed_bundle_digest": (
+            reference_fixture.get("bundle_digest")
+            if reference_fixture is not None
+            else None
+        ),
+        "expected_observations": expected_observations,
+        "verified_observations": len(observations),
+        "roots": (
+            list(reference_fixture.get("roots") or ())
+            if reference_fixture is not None
+            else []
+        ),
+        "observations": public_observations,
+    }
 
 
 def _validate_executor_contracts(

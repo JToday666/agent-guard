@@ -58,10 +58,16 @@ from .competition_runner import (
     InvalidCompetitionRun,
 )
 from .config import BenchConfig
+from .environment import restore_initial_sandbox
 from .model_exchange import (
     ModelExchangeEvidence,
     ModelExchangeInvocationError,
     invoke_with_model_exchange,
+)
+from .runtime_fixture_contract import (
+    RUNTIME_FIXTURE_CONTRACT_NAME,
+    RuntimeFixtureContractError,
+    validate_runtime_fixture_bundle,
 )
 from .runner import run_cases
 
@@ -107,6 +113,23 @@ def execute_competition_arm(
         prefix=f"agentguard-competition-{request.arm.arm_id.lower()}-"
     ) as raw_scratch:
         scratch = Path(raw_scratch)
+        sandbox_dir = scratch / "sandbox"
+        try:
+            restore_initial_sandbox(sandbox_dir)
+            runtime_fixtures = validate_runtime_fixture_bundle(
+                sandbox_dir,
+                expected_digest=(request.profile.dataset.runtime_fixture_bundle_digest),
+            )
+        except RuntimeFixtureContractError as exc:
+            raise InvalidCompetitionRun(
+                exc.reason_code,
+                "competition runtime fixture qualification failed",
+            ) from exc
+        except (OSError, ValueError) as exc:
+            raise InvalidCompetitionRun(
+                "runtime_fixture_unreadable",
+                "competition runtime fixture qualification failed",
+            ) from exc
         activation_path, activation_digest = _write_activation_manifest(
             request,
             scratch=scratch,
@@ -196,6 +219,10 @@ def execute_competition_arm(
             "provider_tool_call_preflight": {
                 **_passed("provider_tool_call_preflight_passed"),
                 "exchange": preflight.public_dump(),
+            },
+            RUNTIME_FIXTURE_CONTRACT_NAME: {
+                **_passed("runtime_fixture_bundle_verified"),
+                **runtime_fixtures.public_dump(),
             },
             "task_ingress_identity": _passed(
                 "task_ingress_not_applicable"
