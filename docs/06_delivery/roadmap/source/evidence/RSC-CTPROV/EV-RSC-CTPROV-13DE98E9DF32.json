@@ -1,0 +1,11 @@
+{
+  "id": "EV-RSC-CTPROV-13DE98E9DF32",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "RSC-CTPROV",
+  "recorded_at": "2026-08-17T10:09:02Z",
+  "ref": "local:pr159-ct-provenance-writer-and-storage-parity",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Typed node/edge identity, replay conflict, flag-off parity, Memory/PostgreSQL readback and cross-store semantic parity tests passed"
+}
