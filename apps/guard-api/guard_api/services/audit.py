@@ -23,6 +23,13 @@ from .audit_checkpoint import (
     AuditCheckpointService,
     disabled_audit_anchor_status,
 )
+from .context_manifest import (
+    ContextManifestPrepared,
+    context_manifest_audit_event,
+    is_context_manifest_reserved_payload,
+    records_have_same_content,
+    validate_context_manifest_audit_event,
+)
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
 from .redaction import sanitize_audit_event
@@ -38,6 +45,10 @@ class PolicyEvaluationWriteForbiddenError(ValueError):
     policy_evaluation；该记录只能由 POST /v1/guard/evaluate 内部唯一写入（§10）。
     record_type=None 的 0.3 兼容记录不受影响。
     """
+
+
+class ContextManifestWriteForbiddenError(ValueError):
+    """Raised when an external Audit producer claims a reserved Manifest marker."""
 
 
 class RuntimeOutcomeReceiptError(ValueError):
@@ -68,17 +79,25 @@ class AuditService:
     ) -> AuditEvent:
         """Apply the strict producer contract before authorization/persistence."""
 
-        if event.record_type != "runtime_outcome":
-            return event
         candidate = (
             raw_payload if raw_payload is not None else event.model_dump(mode="json")
         )
+        if is_context_manifest_reserved_payload(candidate) or (
+            raw_payload is not None and is_context_manifest_reserved_payload(event)
+        ):
+            raise ContextManifestWriteForbiddenError(event.audit_id)
+        if event.record_type != "runtime_outcome":
+            return event
         try:
             return RuntimeOutcomeReceipt.model_validate(candidate)
         except ValidationError:
             raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID") from None
 
     def submit(self, event: AuditEvent) -> dict[str, str | bool]:
+        # Defense in depth for callers that bypass prepare_submission().  The
+        # only authorized path is record_context_manifest() below.
+        if is_context_manifest_reserved_payload(event):
+            raise ContextManifestWriteForbiddenError(event.audit_id)
         # §12.1 守卫：仅拒显式声明 policy_evaluation 的入站记录。
         if event.record_type == "policy_evaluation":
             raise PolicyEvaluationWriteForbiddenError(event.audit_id)
@@ -124,6 +143,27 @@ class AuditService:
             "created": is_new,
             "idempotent_replay": not is_new,
         }
+
+    def record_context_manifest(self, prepared: ContextManifestPrepared) -> AuditEvent:
+        """Persist and read back one internal strict Manifest in the caller txn.
+
+        EvaluationService invokes this only after the anchored policy Audit has
+        been written inside ``evaluation_transaction``.  Any validation,
+        persistence or readback failure escapes so the surrounding
+        transaction rolls back and no unverified plan can reach the runtime.
+        """
+
+        candidate = context_manifest_audit_event(prepared.audit_record)
+        candidate = sanitize_audit_event(candidate)
+        validate_context_manifest_audit_event(candidate)
+        self.store.add_audit_event(candidate)
+        persisted = self.store.get_audit_event(candidate.audit_id)
+        if persisted is None:
+            raise RuntimeError("context manifest readback is unavailable")
+        validate_context_manifest_audit_event(persisted)
+        if not records_have_same_content(persisted, prepared.audit_record):
+            raise RuntimeError("context manifest readback conflicts with prepared data")
+        return persisted
 
     def _validate_runtime_outcome_parent(
         self, receipt: RuntimeOutcomeReceipt

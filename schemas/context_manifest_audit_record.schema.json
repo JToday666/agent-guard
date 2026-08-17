@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContextManifestAuditRecord",
+  "type": "object",
+  "required": [
+    "audit_id", "schema_version", "record_type", "trace_id", "case_id",
+    "runtime", "timestamp", "stage", "event_type", "attack_type",
+    "is_malicious", "summary", "decision", "risk_score", "severity",
+    "blocked", "resource_targets", "rule_hits", "reason", "links",
+    "latency_ms", "metadata", "evidence"
+  ],
+  "properties": {
+    "audit_id": { "type": "string", "pattern": "^audit_context_manifest_[0-9a-f]{64}$" },
+    "schema_version": { "const": "0.4" },
+    "record_type": { "const": "runtime_observation" },
+    "trace_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "case_id": { "type": ["string", "null"] },
+    "runtime": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "stage": { "const": "context_build" },
+    "event_type": { "const": "context_manifest_recorded" },
+    "attack_type": { "type": "null" },
+    "is_malicious": { "type": "null" },
+    "summary": { "const": "Bounded context manifest recorded" },
+    "decision": { "type": "null" },
+    "risk_score": { "type": "null" },
+    "severity": { "type": "null" },
+    "blocked": { "type": "null" },
+    "resource_targets": { "type": "array", "maxItems": 0 },
+    "rule_hits": { "type": "array", "maxItems": 0 },
+    "reason": { "const": "context_manifest_projection" },
+    "links": {
+      "type": "object",
+      "required": ["event_id", "plan_id", "context_ref"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/nonEmpty" },
+        "plan_id": { "$ref": "#/$defs/nonEmpty" },
+        "context_ref": { "$ref": "#/$defs/nonEmpty" }
+      },
+      "additionalProperties": false
+    },
+    "latency_ms": { "type": "null" },
+    "metadata": {
+      "type": "object",
+      "required": ["contract", "producer", "producer_binding_id"],
+      "properties": {
+        "contract": { "const": "context-manifest-audit/1.0" },
+        "producer": { "const": "guard_api_context_builder" },
+        "producer_binding_id": { "const": "guard-api:context-builder:1" }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["context_manifest"],
+      "properties": {
+        "context_manifest": {
+          "oneOf": [
+            { "$ref": "#/$defs/fullManifest" },
+            { "$ref": "#/$defs/budgetDroppedRef" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "integrity": { "$ref": "#/$defs/integrity" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonEmpty": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "scopeDigest": {
+      "type": "string",
+      "pattern": "^(sha256|hmac-sha256):[0-9a-f]{64}$"
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["sequence", "prev_hash", "event_hash", "canonicalization"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "prev_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "event_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "canonicalization": { "const": "jcs:rfc8785" }
+      },
+      "additionalProperties": false
+    },
+    "sequence": {
+      "type": "object",
+      "required": ["domain", "producer_binding_id", "value"],
+      "properties": {
+        "domain": { "enum": ["audit", "runtime", "memory", "receipt", "policy"] },
+        "producer_binding_id": { "type": "string", "minLength": 1 },
+        "value": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "evidenceRef": {
+      "type": "object",
+      "required": [
+        "ref_id", "kind", "record_type", "record_id", "json_pointer",
+        "digest", "redaction_state"
+      ],
+      "properties": {
+        "ref_id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": [
+            "guard_event", "audit_event", "task_fact", "source_fact",
+            "flow_fact", "memory_fact", "capability_grant", "recent_action",
+            "policy_rule", "runtime_receipt", "semantic_judgment",
+            "declassification", "degradation"
+          ]
+        },
+        "record_type": { "type": "string", "minLength": 1 },
+        "record_id": { "type": "string", "minLength": 1 },
+        "json_pointer": { "type": ["string", "null"] },
+        "digest": { "$ref": "#/$defs/sha256" },
+        "redaction_state": { "enum": ["none", "redacted", "summary_only"] }
+      },
+      "additionalProperties": false
+    },
+    "chunk": {
+      "type": "object",
+      "required": [
+        "schema_version", "chunk_id", "scope_digest", "context_ref",
+        "source_ref", "source_type", "compartment", "trust",
+        "fact_authority", "taints", "content_digest", "content_preview",
+        "instruction_like", "sensitive", "transform_state", "sequence",
+        "evidence_refs"
+      ],
+      "properties": {
+        "schema_version": { "const": "1.0" },
+        "chunk_id": { "$ref": "#/$defs/nonEmpty" },
+        "scope_digest": { "$ref": "#/$defs/scopeDigest" },
+        "context_ref": { "$ref": "#/$defs/nonEmpty" },
+        "source_ref": { "$ref": "#/$defs/nonEmpty" },
+        "source_type": { "$ref": "#/$defs/nonEmpty" },
+        "compartment": {
+          "enum": [
+            "authority", "authenticated_task", "trusted_runtime_fact",
+            "untrusted_evidence", "memory_context", "model_derived"
+          ]
+        },
+        "trust": { "enum": ["trusted", "untrusted", "unknown"] },
+        "fact_authority": {
+          "enum": ["authoritative", "trusted_claim", "untrusted_claim", "model_judgment"]
+        },
+        "taints": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "UNTRUSTED", "EXTERNAL_INSTRUCTION", "SENSITIVE",
+              "CREDENTIAL", "PERSISTENT_UNTRUSTED"
+            ]
+          }
+        },
+        "content_digest": { "$ref": "#/$defs/sha256" },
+        "content_preview": {
+          "type": ["string", "null"],
+          "maxLength": 240
+        },
+        "instruction_like": { "type": "boolean" },
+        "sensitive": { "type": "boolean" },
+        "transform_state": {
+          "enum": ["preserved", "annotated", "quarantined", "excluded"]
+        },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/evidenceRef" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "transformation": {
+      "type": "object",
+      "required": [
+        "transformation_id", "chunk_id", "action", "input_digest",
+        "output_digest", "mechanism_id", "mechanism_version",
+        "declassification_id", "reason_codes", "evidence_refs"
+      ],
+      "properties": {
+        "transformation_id": { "$ref": "#/$defs/nonEmpty" },
+        "chunk_id": { "$ref": "#/$defs/nonEmpty" },
+        "action": { "enum": ["annotate", "quarantine", "exclude"] },
+        "input_digest": { "$ref": "#/$defs/sha256" },
+        "output_digest": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "mechanism_id": { "$ref": "#/$defs/nonEmpty" },
+        "mechanism_version": { "$ref": "#/$defs/nonEmpty" },
+        "declassification_id": { "type": "null" },
+        "reason_codes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/evidenceRef" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "total", "returned", "included", "excluded", "quarantined",
+        "sensitive", "untrusted", "by_source_type"
+      ],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "returned": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "included": { "type": "integer", "minimum": 0 },
+        "excluded": { "type": "integer", "minimum": 0 },
+        "quarantined": { "type": "integer", "minimum": 0 },
+        "sensitive": { "type": "integer", "minimum": 0 },
+        "untrusted": { "type": "integer", "minimum": 0 },
+        "by_source_type": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "completeness": {
+      "type": "object",
+      "required": ["status", "truncated", "omitted_digest"],
+      "properties": {
+        "status": { "enum": ["complete", "partial"] },
+        "truncated": { "type": "boolean" },
+        "omitted_digest": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "fullManifest": {
+      "type": "object",
+      "required": [
+        "schema_version", "plan_id", "event_id", "scope_digest", "runtime",
+        "context_ref", "plan_digest", "manifest_digest", "counts", "chunks",
+        "transformations", "excluded_chunk_ids", "reason_codes",
+        "evidence_refs", "completeness"
+      ],
+      "properties": {
+        "schema_version": { "const": "1.0" },
+        "plan_id": { "$ref": "#/$defs/nonEmpty" },
+        "event_id": { "$ref": "#/$defs/nonEmpty" },
+        "scope_digest": { "$ref": "#/$defs/scopeDigest" },
+        "runtime": { "$ref": "#/$defs/nonEmpty" },
+        "context_ref": { "$ref": "#/$defs/nonEmpty" },
+        "plan_digest": { "$ref": "#/$defs/sha256" },
+        "manifest_digest": { "$ref": "#/$defs/sha256" },
+        "counts": { "$ref": "#/$defs/counts" },
+        "chunks": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/chunk" }
+        },
+        "transformations": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/transformation" }
+        },
+        "excluded_chunk_ids": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reason_codes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/evidenceRef" }
+        },
+        "completeness": { "$ref": "#/$defs/completeness" }
+      },
+      "additionalProperties": false
+    },
+    "budgetDroppedRef": {
+      "type": "object",
+      "required": ["_budget_dropped", "_manifest_sha256", "reason"],
+      "properties": {
+        "_budget_dropped": { "const": true },
+        "_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "reason": { "const": "audit_evidence_budget" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

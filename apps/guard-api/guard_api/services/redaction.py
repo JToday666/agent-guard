@@ -213,6 +213,22 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
     same security boundary.
     """
 
+    # CT-PR-04-M: the bounded Context Manifest is a strict typed channel.
+    # Generic redaction would turn ``sensitive: bool`` into a string, truncate
+    # arrays without updating global counts, and crush SequenceRef/EvidenceRef
+    # containers at the generic nesting limit.  Import lazily to avoid the
+    # context-manifest module's dependency on the frozen budget helpers here.
+    if event.event_type == "context_manifest_recorded" or (
+        isinstance(event.evidence, dict) and "context_manifest" in event.evidence
+    ):
+        from .context_manifest import (
+            context_manifest_audit_event,
+            validate_context_manifest_audit_event,
+        )
+
+        strict = validate_context_manifest_audit_event(event)
+        return context_manifest_audit_event(strict)
+
     raw_metadata = redact_structure(event.metadata)
     metadata: dict[str, object]
     if isinstance(raw_metadata, dict):

@@ -8,6 +8,7 @@ from agentguard_core import AuditEvent, RuntimeOutcomeReceipt
 
 from guard_api.auth import ApiAuthError
 from guard_api.services.audit import (
+    ContextManifestWriteForbiddenError,
     PolicyEvaluationWriteForbiddenError,
     RuntimeOutcomeReceiptError,
 )
@@ -60,6 +61,10 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 payload,
                 raw_payload=await request.json(),
             )
+        except ContextManifestWriteForbiddenError:
+            raise ApiAuthError(
+                "CONTEXT_MANIFEST_WRITE_FORBIDDEN", status_code=422
+            ) from None
         except RuntimeOutcomeReceiptError as exc:
             raise ApiAuthError(exc.code, status_code=422) from None
         metadata_agent_id = (
@@ -79,6 +84,10 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         )
         try:
             return audit_service.submit(prepared)
+        except ContextManifestWriteForbiddenError:
+            raise ApiAuthError(
+                "CONTEXT_MANIFEST_WRITE_FORBIDDEN", status_code=422
+            ) from None
         except PolicyEvaluationWriteForbiddenError:
             # §12.1：policy_evaluation 只能由 POST /v1/guard/evaluate 写入。
             raise ApiAuthError(

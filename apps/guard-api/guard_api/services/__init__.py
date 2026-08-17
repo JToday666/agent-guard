@@ -6,6 +6,13 @@ from .audit_checkpoint import AuditCheckpointService
 from .audit_window import AuditWindowRequestError, AuditWindowService
 from .config_audit import ConfigAuditService
 from .context_builder import ContextBuilderService
+from .context_manifest import (
+    ContextManifestAuditRecord,
+    ContextManifestBudgetDroppedRef,
+    ContextManifestEnvelope,
+    ContextManifestPrepared,
+    prepare_context_manifest,
+)
 from .ct_projection import CtProjectionService
 from .evaluation import EvaluationService
 from .evidence import EventDescription, build_audit_event, describe_guard_event
@@ -26,6 +33,10 @@ __all__ = [
     "AuditWindowService",
     "ConfigAuditService",
     "ContextBuilderService",
+    "ContextManifestAuditRecord",
+    "ContextManifestBudgetDroppedRef",
+    "ContextManifestEnvelope",
+    "ContextManifestPrepared",
     "CtProjectionService",
     "EvaluationService",
     "EventDescription",
@@ -42,4 +53,5 @@ __all__ = [
     "V21ShadowService",
     "build_audit_event",
     "describe_guard_event",
+    "prepare_context_manifest",
 ]

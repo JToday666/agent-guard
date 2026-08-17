@@ -34,6 +34,14 @@ from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
 from .audit import AuditService
+from .context_manifest import (
+    ContextManifestPrepared,
+    context_manifest_anchor_from_policy,
+    context_manifest_record_digest,
+    prepare_context_manifest,
+    records_have_same_content,
+    validate_context_manifest_audit_event,
+)
 from .memory import MemoryGuardService
 from .policy import PolicyService
 
@@ -370,6 +378,20 @@ class EvaluationService:
                 "skipping its audit commit and projection",
                 event.event_id,
             )
+        # CT-PR-04-M preparation is outside the write transaction and consumes
+        # only the already-verified ephemeral plan plus this exact request.  A
+        # preparation failure removes the plan from the response but does not
+        # change the legacy/current official decision.
+        context_manifest: ContextManifestPrepared | None = None
+        if context_plan is not None:
+            try:
+                context_manifest = prepare_context_manifest(event, context_plan)
+            except Exception as exc:  # noqa: BLE001 - plan disclosure fails closed.
+                logger.warning(
+                    "context_manifest_prepare_failed event_id=%s error_type=%s",
+                    event.event_id,
+                    type(exc).__name__,
+                )
         # 审批、memory change、审计与 provenance 是一次评估的原子结果。
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         backfill_audit: AuditEvent | None = None
@@ -384,9 +406,13 @@ class EvaluationService:
                 event.event_id,
             )
             if replayed is not None:
-                response = replayed.model_copy(
-                    update={"context_plan": context_plan}
+                assert existing is not None
+                replay_plan = self._context_plan_for_replay(
+                    existing,
+                    context_manifest,
+                    context_requested=context_requested,
                 )
+                response = replayed.model_copy(update={"context_plan": replay_plan})
                 backfill_audit = existing
                 ct_plan = None  # replay：无新 commit，走 D9 同构 backfill。
             else:
@@ -396,7 +422,7 @@ class EvaluationService:
                     requesting_principal_id=requesting_principal_id,
                     materials=materials,
                     ct_plan=ct_plan,
-                    context_plan=context_plan,
+                    context_manifest=context_manifest,
                 )
         # D4 commit → project：投影在事务提交**之后**执行，绝不影响
         # 已 commit 的审计记录与已确定的响应；两者互斥：新评估走
@@ -422,7 +448,7 @@ class EvaluationService:
         requesting_principal_id: str,
         materials: "V21PipelineMaterials | None" = None,
         ct_plan: "CtCommitPlan | None" = None,
-        context_plan: "ContextAssemblyPlan | None" = None,
+        context_manifest: ContextManifestPrepared | None = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """事务内单次评估；返回（响应, 已落盘审计记录, Phase C 计划）。
 
@@ -436,7 +462,7 @@ class EvaluationService:
                 requesting_principal_id=requesting_principal_id,
                 materials=materials,
                 ct_plan=ct_plan,
-                context_plan=context_plan,
+                context_manifest=context_manifest,
             )
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
@@ -490,16 +516,20 @@ class EvaluationService:
             extra_metadata={
                 "request_digest": request_digest,
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+                **self._context_manifest_metadata(context_manifest),
             },
             decision_dump=decision.model_dump(mode="json"),
             v21_evidence=v21_evidence,
+        )
+        committed_context_plan = self._record_context_manifest(
+            audit_event, context_manifest
         )
         return (
             GuardEvaluationResponse(
                 decision=decision,
                 approval=self._approval_summary(approval),
                 policy_audit_id=audit_event.audit_id,
-                context_plan=context_plan,
+                context_plan=committed_context_plan,
             ),
             None,
             None,
@@ -513,7 +543,7 @@ class EvaluationService:
         requesting_principal_id: str,
         materials: "V21PipelineMaterials",
         ct_plan: "CtCommitPlan | None" = None,
-        context_plan: "ContextAssemblyPlan | None" = None,
+        context_manifest: ContextManifestPrepared | None = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
 
@@ -589,6 +619,7 @@ class EvaluationService:
                 "request_digest": request_digest,
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
                 **finalize_metadata,
+                **self._context_manifest_metadata(context_manifest),
             },
             decision_dump=decision.model_dump(mode="json"),
             v21_evidence=v21_evidence,
@@ -598,6 +629,9 @@ class EvaluationService:
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
             audit_id=(phase_c_plan.audit_id if phase_c_plan is not None else None),
+        )
+        committed_context_plan = self._record_context_manifest(
+            audit_event, context_manifest
         )
         binding = self._save_enforcement_binding(
             event,
@@ -613,11 +647,91 @@ class EvaluationService:
                 approval=self._approval_summary(approval),
                 policy_audit_id=audit_event.audit_id,
                 enforcement_binding=binding,
-                context_plan=context_plan,
+                context_plan=committed_context_plan,
             ),
             audit_event,
             phase_c_plan,
         )
+
+    @staticmethod
+    def _context_manifest_metadata(
+        prepared: ContextManifestPrepared | None,
+    ) -> dict[str, object]:
+        if prepared is None:
+            return {}
+        return {"context_manifest_anchor": prepared.anchor.model_dump(mode="json")}
+
+    def _record_context_manifest(
+        self,
+        policy_audit: AuditEvent,
+        prepared: ContextManifestPrepared | None,
+    ) -> "ContextAssemblyPlan | None":
+        """Write/readback the Manifest before exposing its transient plan."""
+
+        if prepared is None:
+            return None
+        anchor = context_manifest_anchor_from_policy(policy_audit)
+        if anchor is None or anchor != prepared.anchor:
+            raise RuntimeError("policy audit context manifest anchor mismatch")
+        persisted = self.audit_service.record_context_manifest(prepared)
+        strict = validate_context_manifest_audit_event(persisted)
+        if (
+            strict.audit_id != anchor.audit_id
+            or strict.trace_id != policy_audit.trace_id
+            or strict.links.event_id != anchor.event_id
+            or strict.links.plan_id != anchor.plan_id
+            or strict.links.context_ref != anchor.context_ref
+            or context_manifest_record_digest(strict) != anchor.manifest_digest
+            or not records_have_same_content(persisted, prepared.audit_record)
+        ):
+            raise RuntimeError("context manifest readback does not match its anchor")
+        return prepared.plan
+
+    def _context_plan_for_replay(
+        self,
+        policy_audit: AuditEvent,
+        prepared: ContextManifestPrepared | None,
+        *,
+        context_requested: bool,
+    ) -> "ContextAssemblyPlan | None":
+        """Return a plan only when policy anchor, record and candidate agree.
+
+        Evaluations written before CT04M deliberately remain plan-less on
+        replay.  They are immutable and must not be backfilled from a newly
+        reconstructed plan.  Once an anchor exists, any missing or drifting
+        part is a same-event conflict rather than an availability downgrade.
+        """
+
+        if not context_requested:
+            return None
+        try:
+            anchor = context_manifest_anchor_from_policy(policy_audit)
+        except Exception as exc:  # noqa: BLE001 - malformed anchor is conflict.
+            raise EvaluationConflictError(
+                policy_audit.links.get("event_id", "")
+            ) from exc
+        if anchor is None:
+            return None
+        if prepared is None or anchor != prepared.anchor:
+            raise EvaluationConflictError(anchor.event_id)
+        persisted = self.audit_service.store.get_audit_event(anchor.audit_id)
+        if persisted is None:
+            raise EvaluationConflictError(anchor.event_id)
+        try:
+            strict = validate_context_manifest_audit_event(persisted)
+            matches = bool(
+                strict.trace_id == policy_audit.trace_id
+                and strict.links.event_id == anchor.event_id
+                and strict.links.plan_id == anchor.plan_id
+                and strict.links.context_ref == anchor.context_ref
+                and context_manifest_record_digest(strict) == anchor.manifest_digest
+                and records_have_same_content(persisted, prepared.audit_record)
+            )
+        except Exception as exc:  # noqa: BLE001 - malformed immutable record.
+            raise EvaluationConflictError(anchor.event_id) from exc
+        if not matches:
+            raise EvaluationConflictError(anchor.event_id)
+        return prepared.plan
 
     def _replay_or_conflict(
         self,
