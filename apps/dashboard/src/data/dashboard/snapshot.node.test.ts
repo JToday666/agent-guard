@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { ApprovalRequest, AuditEventRow, EvaluationRun } from "../../types/dashboard.ts";
 import { isCompatiblePendingApprovalSnapshot } from "../approvals/approval-snapshot.ts";
+import { projectPreEnableReport } from "../evaluation/pre-enable-report.ts";
 import { createAuditWindow } from "./metrics.ts";
 import {
   hasSameAuditWindow,
@@ -163,12 +164,23 @@ test("compares evaluation runs without inheriting audit metrics", () => {
         traceId: "trace_1",
       },
     ],
+    preEnableReport: projectPreEnableReport(null),
   };
   assert.equal(hasSameEvaluationRun(evaluation, { ...evaluation }), true);
   assert.equal(
     hasSameEvaluationRun(evaluation, {
       ...evaluation,
       perAttack: [{ ...evaluation.perAttack[0]!, asrAfter: 0.2 }],
+    }),
+    false,
+  );
+  assert.equal(
+    hasSameEvaluationRun(evaluation, {
+      ...evaluation,
+      preEnableReport: {
+        ...evaluation.preEnableReport,
+        missingReasons: ["PRE_ENABLE_REPORT_CHANGED"],
+      },
     }),
     false,
   );

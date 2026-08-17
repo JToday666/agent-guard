@@ -119,6 +119,8 @@
         message="评测结果写入后将在这里展示攻击成功率、防护效果和样本结果。"
       />
 
+      <PreEnableReportPanel v-if="hasRunData" :report="store.evaluationRun.preEnableReport" />
+
       <section class="window-section section-divider" aria-labelledby="window-title">
         <header class="section-header">
           <div>
@@ -329,6 +331,7 @@ import EmptyState from "../components/common/EmptyState.vue";
 import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
+import PreEnableReportPanel from "../components/evaluation/PreEnableReportPanel.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";

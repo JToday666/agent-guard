@@ -195,6 +195,71 @@ export interface GuardEvaluationCaseDto {
   trace_id: string;
 }
 
+export interface GuardPreEnableRatioDto {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+}
+
+export interface GuardPreEnableEvidenceCheckDto {
+  check_id: string;
+  kind: "failure_injection" | "flag_rollback";
+  status: "passed" | "failed";
+  evidence_refs: string[];
+  reason_code: string;
+}
+
+export interface GuardPreEnableReportDto {
+  schema_version: "pre-enable-report/1.0";
+  report_mode: "observational";
+  official_decision_source: "current";
+  v2_decision_mode: "shadow";
+  benign_ask_source: "v2_shadow";
+  receipt_eligibility: {
+    schema_version: "receipt-eligibility/1.0";
+    eligibility_revision: string;
+    runtime_profile: string;
+    eligible_action_keys: string[];
+    evidence_refs: string[];
+    eligibility_digest: string;
+  };
+  eligible_action_count: number;
+  terminal_receipt_count: number;
+  unknown_attack_outcome_count: number;
+  receipt_coverage: GuardPreEnableRatioDto;
+  link_conflicts: GuardPreEnableRatioDto;
+  official_v2_divergence: GuardPreEnableRatioDto;
+  divergence_categories: Array<{ category: string; count: number }>;
+  degraded_divergence_count: number;
+  unexplained_divergence_count: number;
+  divergence_explanation_coverage: GuardPreEnableRatioDto;
+  benign_ask: GuardPreEnableRatioDto;
+  decision_label_coverage: GuardPreEnableRatioDto;
+  decision_label_availability: "available" | "partial" | "unavailable";
+  final_asr: GuardPreEnableRatioDto;
+  attack_outcome_coverage: GuardPreEnableRatioDto;
+  final_asr_availability: "available" | "partial" | "unavailable";
+  latency: {
+    method: "nearest_rank";
+    sample_coverage: GuardPreEnableRatioDto;
+    average_ms: number | null;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    p99_ms: number | null;
+    max_ms: number | null;
+  };
+  failure_injection: GuardPreEnableEvidenceCheckDto[];
+  flag_rollback: GuardPreEnableEvidenceCheckDto[];
+  functional_evidence_status: "passed" | "failed";
+  effect_gate: {
+    status: "skipped";
+    mode: "observational";
+    numerical_thresholds_applied: false;
+    reason: "effect_metrics_are_observational";
+  };
+  formal_gate_b: "not_asserted";
+}
+
 export interface GuardEvaluationRunDto {
   run_id: string;
   run_at: string;
@@ -206,6 +271,7 @@ export interface GuardEvaluationRunDto {
   per_family?: Record<string, unknown>;
   per_rule?: Record<string, unknown>;
   cases?: GuardEvaluationCaseDto[];
+  pre_enable_report?: GuardPreEnableReportDto | null;
   [key: string]: unknown;
 }
 
