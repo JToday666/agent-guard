@@ -12,8 +12,16 @@ from agentguard_langgraph_bench.bench.profile_corpus import (
     ProfileCorpusError,
     run_profile_corpus,
 )
-from agentguard_langgraph_bench.bench.profile_runner import RunRequest, load_profile
-from agentguard_langgraph_bench.bench.profile_runtime import _corpus_summary
+from agentguard_langgraph_bench.bench.profile_runner import (
+    InvalidProfileRun,
+    RunRequest,
+    load_profile,
+)
+from agentguard_langgraph_bench.bench.profile_runtime import (
+    _corpus_case_selection,
+    _corpus_selection_mode,
+    _corpus_summary,
+)
 
 
 DATASET = Path("agentguard_langgraph_bench/bench/datasets/attack_cases")
@@ -168,13 +176,17 @@ def test_profile_corpus_runs_two_case_real_pair_and_returns_json_artifacts(
             profile=load_profile("reference-langgraph"),
             artifacts=tmp_path,
             storage="memory",
-            full_corpus=True,
+            full_corpus=False,
+            corpus_case_ids=("PI-001", "BN-001"),
             llm_observation=False,
         ),
         result,
     )
     assert summary["run_valid"] is True
-    assert set(summary["executed_dataset_case_ids"]) == {"BN-001", "PI-001"}
+    assert summary["selection_mode"] == "selected"
+    assert summary["requested_case_ids"] == ["PI-001", "BN-001"]
+    assert summary["executed_dataset_case_ids"] == ["BN-001", "PI-001"]
+    assert summary["executed_case_count"] == 2
     assert summary["paired_report"]["dataset"]["case_count"] == 2
     assert summary["effect_metrics"]["gate_exit_status"] is False
     assert summary["artifact_integrity"]["ok"] is True
@@ -242,3 +254,64 @@ def test_profile_corpus_effect_values_never_gate_a_valid_pair(tmp_path: Path) ->
     assert result.effect_metrics["fpr"]["value"] == 1.0
     assert result.effect_metrics["recall"]["value"] == 0.0
     assert result.effect_metrics["gate_exit_status"] is False
+
+
+def test_runtime_forwards_selected_cases_and_keeps_full_at_frozen_70() -> None:
+    profile = load_profile("reference-langgraph")
+    selected = RunRequest(
+        profile=profile,
+        artifacts=Path("selected-artifacts"),
+        storage="memory",
+        full_corpus=False,
+        corpus_case_ids=("PI-001", "BN-001"),
+        llm_observation=False,
+    )
+    full = RunRequest(
+        profile=profile,
+        artifacts=Path("full-artifacts"),
+        storage="memory",
+        full_corpus=True,
+        corpus_case_ids=(),
+        llm_observation=False,
+    )
+
+    assert _corpus_selection_mode(selected) == "selected"
+    assert _corpus_case_selection(selected) == ("PI-001", "BN-001")
+    assert _corpus_selection_mode(full) == "full"
+    assert _corpus_case_selection(full) is None
+    assert full.profile.dataset.full_case_count == 70
+
+
+def test_corpus_summary_marks_default_profile_as_not_requested() -> None:
+    request = RunRequest(
+        profile=load_profile("reference-langgraph"),
+        artifacts=Path("default-artifacts"),
+        storage="memory",
+        full_corpus=False,
+        corpus_case_ids=(),
+        llm_observation=False,
+    )
+
+    summary = _corpus_summary(request, None)
+
+    assert summary["selection_mode"] == "not_requested"
+    assert summary["requested"] is False
+    assert summary["requested_case_ids"] == []
+    assert summary["status"] == "not_requested"
+    assert summary["executed_case_count"] == 2
+
+
+def test_corpus_summary_rejects_missing_selected_result() -> None:
+    request = RunRequest(
+        profile=load_profile("reference-langgraph"),
+        artifacts=Path("selected-artifacts"),
+        storage="memory",
+        full_corpus=False,
+        corpus_case_ids=("PI-001", "BN-001"),
+        llm_observation=False,
+    )
+
+    with pytest.raises(
+        InvalidProfileRun, match="requested corpus result is unavailable"
+    ):
+        _corpus_summary(request, None)
