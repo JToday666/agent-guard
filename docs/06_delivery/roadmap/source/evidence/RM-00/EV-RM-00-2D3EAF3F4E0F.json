@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-2D3EAF3F4E0F",
+  "kind": "commit",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-17T01:33:11Z",
+  "ref": "7eb503c",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "CI fast gate excludes PostgreSQL-named tests while retaining memory variants; pending merge into origin/dev"
+}
