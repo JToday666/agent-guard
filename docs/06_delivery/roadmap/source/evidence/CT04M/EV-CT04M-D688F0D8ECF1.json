@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04M-D688F0D8ECF1",
+  "kind": "ci",
+  "metadata": {},
+  "node_id": "CT04M",
+  "recorded_at": "2026-08-17T07:08:01Z",
+  "ref": "github:pr-178-node-fast-release-success",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR 178 Node fast gate and release artifact verification completed successfully; no CI remediation was performed."
+}

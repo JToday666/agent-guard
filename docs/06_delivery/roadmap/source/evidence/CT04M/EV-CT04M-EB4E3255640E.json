@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04M-EB4E3255640E",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "CT04M",
+  "recorded_at": "2026-08-17T07:08:13Z",
+  "ref": "local:ct04m-functional-boundary-review",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Functional review verified Audit/Trace-only bounded Manifest persistence, fail-closed plan release, no new Context API/table, and fixed preview disclosure cases."
+}
