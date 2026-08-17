@@ -2,6 +2,7 @@ import csv
 import json
 from pathlib import Path
 
+from agentguard_langgraph_bench.bench.evidence import artifact_integrity
 from agentguard_langgraph_bench.bench.evidence.artifact_integrity import build_artifact_integrity_manifest, check_case_artifacts
 from agentguard_langgraph_bench.bench.metrics import calculate_metrics
 from agentguard_langgraph_bench.bench.config import BenchConfig
@@ -297,6 +298,43 @@ def test_artifact_integrity_indexes_generic_tool_hijacking_case(tmp_path):
     assert manifest["case_count"] == 1
     assert manifest["ok"] is True
     assert manifest["cases"]["MCP-020"]["case_scoped_mcp_logs"] is True
+
+
+def test_artifact_integrity_indexes_mixed_replay_and_generic_cases_once(
+    tmp_path, monkeypatch
+):
+    run_dir = tmp_path / "run"
+    replay_case = run_dir / "cases" / "PI-001"
+    generic_case = run_dir / "cases" / "BN-001"
+    (replay_case / "browser_replay").mkdir(parents=True)
+    generic_case.mkdir(parents=True)
+    (replay_case / "case_result.json").write_text("{}", encoding="utf-8")
+    (generic_case / "case_result.json").write_text("{}", encoding="utf-8")
+    replay_checked = []
+    generic_checked = []
+
+    def check_replay(case_dir, *, root):
+        replay_checked.append(case_dir.parent.name)
+        return {"case_id": case_dir.parent.name, "kind": "replay", "ok": True}
+
+    def check_generic(case_dir, *, root):
+        generic_checked.append(case_dir.name)
+        return {"case_id": case_dir.name, "kind": "generic", "ok": True}
+
+    monkeypatch.setattr(artifact_integrity, "check_case_artifacts", check_replay)
+    monkeypatch.setattr(
+        artifact_integrity, "check_generic_case_artifacts", check_generic
+    )
+
+    manifest = build_artifact_integrity_manifest(run_dir)
+
+    assert manifest["ok"] is True
+    assert manifest["case_count"] == 2
+    assert set(manifest["cases"]) == {"BN-001", "PI-001"}
+    assert manifest["cases"]["PI-001"]["kind"] == "replay"
+    assert manifest["cases"]["BN-001"]["kind"] == "generic"
+    assert replay_checked == ["PI-001"]
+    assert generic_checked == ["BN-001"]
 
 
 

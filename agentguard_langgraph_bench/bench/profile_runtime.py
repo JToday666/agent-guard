@@ -200,7 +200,7 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
                     (cases["JB-003"], denied),
                 ),
             )
-            if request.full_corpus:
+            if request.full_corpus or request.corpus_case_ids:
                 try:
                     corpus = run_profile_corpus(
                         core_base_url=base_url,
@@ -220,15 +220,15 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
                             case=case,
                             trace_id=trace_id,
                         ),
-                        selected_case_ids=None,
+                        selected_case_ids=_corpus_case_selection(request),
                         adapter_name=_AGENT_ID,
                     )
                 except ProfileCorpusError as exc:
                     raise InvalidProfileRun(str(exc)) from exc
                 if not corpus.run_valid:
-                    raise InvalidProfileRun("full corpus paired run is invalid")
+                    raise InvalidProfileRun("corpus paired run is invalid")
                 if corpus.artifact_integrity.get("ok") is not True:
-                    raise InvalidProfileRun("full corpus artifact integrity failed")
+                    raise InvalidProfileRun("corpus artifact integrity failed")
             context_policy_audit_id = next(
                 (
                     str(event["audit_id"])
@@ -1481,18 +1481,24 @@ def _paired_report(
 def _corpus_summary(
     request: RunRequest, corpus: CorpusRunResult | None
 ) -> dict[str, Any]:
+    selection_mode = _corpus_selection_mode(request)
     summary: dict[str, Any] = {
         "schema_version": "reference-profile-corpus/1.0",
-        "requested": request.full_corpus,
+        "requested": selection_mode != "not_requested",
+        "selection_mode": selection_mode,
+        "requested_case_ids": list(request.corpus_case_ids),
         "full_case_count": request.profile.dataset.full_case_count,
         "contract_probe_case_ids": [_ASK_CASE_ID, _DRIFT_CASE_ID],
         "effect_metrics_gate_exit_status": False,
     }
     if corpus is None:
+        if selection_mode != "not_requested":
+            raise InvalidProfileRun("requested corpus result is unavailable")
         return {
             **summary,
             "status": "not_requested",
             "executed_dataset_case_ids": ["BN-001", "JB-003"],
+            "executed_case_count": 2,
         }
 
     paired = corpus.paired_report
@@ -1525,6 +1531,7 @@ def _corpus_summary(
         "status": "passed",
         "run_valid": corpus.run_valid,
         "executed_dataset_case_ids": executed_case_ids,
+        "executed_case_count": len(executed_case_ids),
         "paired_report": paired_summary,
         "effect_metrics": _sanitize_value(dict(corpus.effect_metrics)),
         "artifact_integrity": _sanitize_value(dict(corpus.artifact_integrity)),
@@ -1534,6 +1541,18 @@ def _corpus_summary(
             "sha256_manifest": f"paired/{corpus.artifact_paths['sha256_manifest']}",
         },
     }
+
+
+def _corpus_selection_mode(request: RunRequest) -> str:
+    if request.full_corpus:
+        return "full"
+    if request.corpus_case_ids:
+        return "selected"
+    return "not_requested"
+
+
+def _corpus_case_selection(request: RunRequest) -> tuple[str, ...] | None:
+    return None if request.full_corpus else request.corpus_case_ids
 
 
 def _artifacts(
@@ -1559,6 +1578,8 @@ def _artifacts(
             "dataset_version": request.profile.dataset.dataset_version,
             "dataset_digest": request.profile.dataset.dataset_digest,
             "selected_dataset_cases": list(request.profile.dataset.default_case_ids),
+            "corpus_selection_mode": _corpus_selection_mode(request),
+            "corpus_requested_case_ids": list(request.corpus_case_ids),
             "synthetic_contract_probes": [_ASK_CASE_ID, _DRIFT_CASE_ID],
             "eligible_action_keys": list(_ELIGIBLE_ACTION_KEYS),
             "storage": request.storage,

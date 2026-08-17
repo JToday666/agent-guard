@@ -19,6 +19,9 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from .dataset_contract import DatasetContractError, validate_dataset_source
+from .dataset_loader import load_attack_cases
+
 
 PROFILE_SCHEMA_VERSION = "reference-profile/1.0"
 ARTIFACT_MANIFEST_SCHEMA_VERSION = "profile-artifact-manifest/1.0"
@@ -134,6 +137,7 @@ class RunRequest:
     artifacts: Path
     storage: str
     full_corpus: bool
+    corpus_case_ids: tuple[str, ...]
     llm_observation: bool
 
 
@@ -285,6 +289,7 @@ def run(request: RunRequest, *, executor: Executor | None = None) -> ExitCode:
                 "profile_id": request.profile.profile_id,
                 "storage": request.storage,
                 "full_corpus": request.full_corpus,
+                "corpus_case_ids": list(request.corpus_case_ids),
                 "llm_observation": request.llm_observation,
                 "status": "passed" if exit_code == ExitCode.PASSED else "failed",
                 "exit_code": int(exit_code),
@@ -322,6 +327,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--artifacts", required=True, type=Path)
     run_parser.add_argument("--storage", choices=sorted(SUPPORTED_STORAGE), default=None)
     run_parser.add_argument("--full-corpus", action="store_true")
+    run_parser.add_argument(
+        "--corpus-case-id",
+        action="append",
+        default=[],
+        help="Run a paired corpus for this AttackCase id; can be repeated",
+    )
     run_parser.add_argument("--llm-observation", action="store_true")
     return parser
 
@@ -335,6 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             artifacts=args.artifacts,
             storage=args.storage or profile.storage_default,
             full_corpus=bool(args.full_corpus),
+            corpus_case_ids=tuple(args.corpus_case_id),
             llm_observation=bool(args.llm_observation),
         )
         return int(run(request))
@@ -498,6 +510,7 @@ def _parse_profile(raw: Mapping[str, Any], *, source_path: Path) -> ReferencePro
 def _validate_run_request(request: RunRequest) -> None:
     if request.storage not in SUPPORTED_STORAGE:
         raise InvalidProfileRun(f"unsupported storage backend: {request.storage}")
+    _validate_corpus_selector_shape(request)
     if request.artifacts.exists():
         raise InvalidProfileRun(
             f"artifact directory must not already exist: {request.artifacts.resolve()}"
@@ -507,9 +520,42 @@ def _validate_run_request(request: RunRequest) -> None:
     if not request.profile.dataset.manifest.is_file():
         raise InvalidProfileRun("profile dataset manifest is unavailable")
     _validate_dataset_manifest(request.profile)
+    try:
+        validate_dataset_source(request.profile.dataset.path)
+    except DatasetContractError as exc:
+        raise InvalidProfileRun("profile dataset source is invalid") from exc
+    _validate_corpus_case_ids(request)
     if request.storage == "postgres" and not _postgres_url():
         raise InvalidProfileRun(
             "--storage postgres requires AGENTGUARD_TEST_DATABASE_URL or AGENTGUARD_DATABASE_URL"
+        )
+
+
+def _validate_corpus_selector_shape(request: RunRequest) -> None:
+    case_ids = request.corpus_case_ids
+    if request.full_corpus and case_ids:
+        raise InvalidProfileRun(
+            "--full-corpus and --corpus-case-id are mutually exclusive"
+        )
+    if any(not isinstance(case_id, str) or not case_id for case_id in case_ids):
+        raise InvalidProfileRun("corpus case ids must be non-empty strings")
+    if len(case_ids) != len(set(case_ids)):
+        raise InvalidProfileRun("corpus case ids must be unique")
+
+
+def _validate_corpus_case_ids(request: RunRequest) -> None:
+    if not request.corpus_case_ids:
+        return
+    try:
+        available = {
+            case.case_id for case in load_attack_cases(request.profile.dataset.path)
+        }
+    except DatasetContractError as exc:
+        raise InvalidProfileRun("profile dataset source is invalid") from exc
+    unknown = sorted(set(request.corpus_case_ids) - available)
+    if unknown:
+        raise InvalidProfileRun(
+            "unknown corpus case ids: " + ", ".join(unknown)
         )
 
 
