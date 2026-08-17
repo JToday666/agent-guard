@@ -187,6 +187,10 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
                 base_url=base_url,
                 request=request,
                 report=report.model_dump(mode="json"),
+                case_runs=(
+                    (cases["BN-001"], benign),
+                    (cases["JB-003"], denied),
+                ),
             )
 
         contracts = _contract_results(context, denied, asked, drift)
@@ -1276,6 +1280,7 @@ def _import_evaluation_run(
     base_url: str,
     request: RunRequest,
     report: Mapping[str, Any],
+    case_runs: Sequence[tuple[AttackCase, Mapping[str, Any]]],
 ) -> dict[str, Any]:
     suffix = hashlib.sha256(
         f"{request.profile.digest}:{time.time_ns()}".encode("utf-8")
@@ -1286,9 +1291,14 @@ def _import_evaluation_run(
         "dataset_id": request.profile.dataset.dataset_id,
         "dataset_version": request.profile.dataset.dataset_version,
         "dataset_digest": request.profile.dataset.dataset_digest,
-        "dataset_locked": False,
+        "dataset_locked": True,
+        "regression_gate": {"status": "skipped"},
+        "asr_after": report.get("final_asr", {}).get("value"),
         "pre_enable_report": dict(report),
-        "cases": [],
+        "cases": [
+            _evaluation_case(request=request, case=case, run=run)
+            for case, run in case_runs
+        ],
     }
     headers = {"Authorization": f"Bearer {_CONTROL_TOKEN}"}
     with httpx.Client(base_url=base_url, headers=headers, timeout=5.0) as client:
@@ -1299,6 +1309,37 @@ def _import_evaluation_run(
     if created.json() != readback.json():
         raise RuntimeError("EvaluationRun API readback differs from imported run")
     return readback.json()
+
+
+def _evaluation_case(
+    *, request: RunRequest, case: AttackCase, run: Mapping[str, Any]
+) -> dict[str, Any]:
+    calls = [
+        item
+        for item in run.get("row", {}).get("tool_calls", [])
+        if isinstance(item, dict)
+    ]
+    decision_rank = {"allow": 0, "ask": 1, "deny": 2}
+    actual = max(
+        (str(item.get("decision") or "allow") for item in calls),
+        key=lambda item: decision_rank.get(item, -1),
+        default="allow",
+    )
+    metadata = case.metadata
+    return {
+        "case_id": case.case_id,
+        "attack_type": case.attack_type,
+        "runtime": "langgraph",
+        "dataset_id": request.profile.dataset.dataset_id,
+        "dataset_version": request.profile.dataset.dataset_version,
+        "case_digest": metadata.get("case_digest"),
+        "provenance": metadata.get("provenance"),
+        "expected_decision": case.expected_decision,
+        "actual_decision": actual,
+        "blocked": any(item.get("blocked") is True for item in calls),
+        "attack_success": bool(run.get("row", {}).get("attack_success")),
+        "trace_id": run.get("trace_id"),
+    }
 
 
 def _observational_metrics(
@@ -1447,7 +1488,7 @@ def _artifacts(
             "schema_version": "reference-profile-corpus/1.0",
             "requested": request.full_corpus,
             "full_case_count": request.profile.dataset.full_case_count,
-            "executed_dataset_case_ids": list(request.profile.dataset.default_case_ids),
+            "executed_dataset_case_ids": ["BN-001", "JB-003"],
             "contract_probe_case_ids": [_ASK_CASE_ID, _DRIFT_CASE_ID],
             "effect_metrics_gate_exit_status": False,
         },
