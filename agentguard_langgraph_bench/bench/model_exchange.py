@@ -443,8 +443,9 @@ def _jsonable_message(value: Any) -> dict[str, Any]:
         return {"role": str(value[0]), "content": _jsonable(value[1])}
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
-    if hasattr(value, "model_dump"):
-        dumped = value.model_dump(mode="json")
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
         if isinstance(dumped, Mapping):
             return {str(key): _jsonable(item) for key, item in dumped.items()}
     return {
