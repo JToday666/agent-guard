@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE06-37537786D072",
+  "kind": "commit",
+  "metadata": {},
+  "node_id": "FE06",
+  "recorded_at": "2026-08-17T10:08:56Z",
+  "ref": "b814a67531879cc6d505f71f3fcba58b1b5c7c14",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR #159 CT fact and Provenance compatibility mapper is merged and reachable from origin/dev"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE06-E7AB8D669858",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "FE06",
+  "recorded_at": "2026-08-17T10:09:15Z",
+  "ref": "https://github.com/JToday666/agent-guard/pull/159",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR #159 compatibility DTO and mapper boundaries were reviewed before merge"
+}

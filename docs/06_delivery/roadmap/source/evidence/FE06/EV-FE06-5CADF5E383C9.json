@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE06-5CADF5E383C9",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "FE06",
+  "recorded_at": "2026-08-17T10:09:02Z",
+  "ref": "https://github.com/JToday666/agent-guard/actions/runs/31958860645/job/95193647483",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR #159 Node 24 and pnpm 11 hosted tests passed the version validation and legacy compatibility mapper coverage"
+}

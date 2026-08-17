@@ -1,0 +1,11 @@
+{
+  "id": "EV-RSC-CTPROV-085520F86A1C",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "RSC-CTPROV",
+  "recorded_at": "2026-08-17T10:09:21Z",
+  "ref": "revert:b814a67531879cc6d505f71f3fcba58b1b5c7c14",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Disabling or reverting the additive Provenance writer stops new projection while preserving committed CT history and current official evaluation behavior"
+}

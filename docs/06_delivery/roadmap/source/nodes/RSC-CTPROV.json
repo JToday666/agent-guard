@@ -3,18 +3,24 @@
   "change_surfaces": [
     "audit-schema-and-storage"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/RSC-CTPROV/EV-RSC-CTPROV-07D0187D7ED4.json",
+    "evidence/RSC-CTPROV/EV-RSC-CTPROV-085520F86A1C.json",
+    "evidence/RSC-CTPROV/EV-RSC-CTPROV-13DE98E9DF32.json",
+    "evidence/RSC-CTPROV/EV-RSC-CTPROV-762F2E2E3634.json",
+    "evidence/RSC-CTPROV/EV-RSC-CTPROV-E410EE39702C.json"
+  ],
   "exact_title": "INT-RSC-CT-PROV — Typed Provenance writer",
   "hold": false,
   "id": "RSC-CTPROV",
   "kind": "task",
   "lane": "integration",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [
     "Observed implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
   ],
   "optional": false,
-  "revision": 2,
+  "revision": 3,
   "roles": [
     "task"
   ],
@@ -29,9 +35,10 @@
   "work": {
     "base_sha": "6193dc48d98b6890ee3a760891ac37ebf47849c8",
     "branch": "codex/rsc-ctprov-reconcile",
+    "completed_commit": "b814a67531879cc6d505f71f3fcba58b1b5c7c14",
     "owner": "codex",
     "started_at": "2026-08-17T10:03:43Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "RSC-CTPROV-reconcile"
   }
 }

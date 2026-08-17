@@ -1,30 +1,37 @@
 {
-  "schema_version": "1.0.0",
-  "id": "FE07",
-  "exact_title": "FE-RSC-07 — Source/Flow presentation and Provenance deep links",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "fe",
-  "lifecycle": "not_started",
-  "revision": 1,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "dashboard-types-mappers-store"
   ],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
-      "heading": "## 13. 前端 PR 拆分",
-      "line_hint": 663
-    }
-  ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "FE-RSC-07 — Source/Flow presentation and Provenance deep links",
+  "hold": false,
+  "id": "FE07",
+  "kind": "task",
+  "lane": "fe",
+  "lifecycle": "in_progress",
   "notes": [
     "Observed Source/Flow presentation and Provenance deep-link implementation landed in origin/dev at b814a67 via PR #159; formal lifecycle remains blocked on closing RSC-CTPROV and FE06."
-  ]
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "## 13. 前端 PR 拆分",
+      "line_hint": 663,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+    }
+  ],
+  "work": {
+    "base_sha": "c026922a4e082a46536044d793c058f4f621e6fc",
+    "branch": "codex/fe07-reconcile",
+    "owner": "codex",
+    "started_at": "2026-08-17T10:12:46Z",
+    "substate": "active",
+    "worktree_slug": "FE07-reconcile"
+  }
 }

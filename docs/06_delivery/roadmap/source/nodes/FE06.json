@@ -3,18 +3,24 @@
   "change_surfaces": [
     "dashboard-types-mappers-store"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/FE06/EV-FE06-37537786D072.json",
+    "evidence/FE06/EV-FE06-5CADF5E383C9.json",
+    "evidence/FE06/EV-FE06-6920F9AC5E94.json",
+    "evidence/FE06/EV-FE06-7CA1C5E65930.json",
+    "evidence/FE06/EV-FE06-E7AB8D669858.json"
+  ],
   "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
   "hold": false,
   "id": "FE06",
   "kind": "task",
   "lane": "fe",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [
     "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
   ],
   "optional": false,
-  "revision": 2,
+  "revision": 3,
   "roles": [
     "task"
   ],
@@ -29,9 +35,10 @@
   "work": {
     "base_sha": "6193dc48d98b6890ee3a760891ac37ebf47849c8",
     "branch": "codex/fe06-reconcile",
+    "completed_commit": "b814a67531879cc6d505f71f3fcba58b1b5c7c14",
     "owner": "codex",
     "started_at": "2026-08-17T10:03:59Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "FE06-reconcile"
   }
 }
