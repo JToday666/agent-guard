@@ -231,6 +231,53 @@ class EvaluationRegressionGate(BaseModel):
     failed_case_ids: list[str] = Field(default_factory=list)
 
 
+CompetitionArmId = Literal["A0", "A1", "A2", "A3", "A4"]
+_COMPETITION_ARM_IDS = frozenset({"A0", "A1", "A2", "A3", "A4"})
+
+
+class CompetitionArmReport(BaseModel):
+    """Strict metrics carrier for one frozen competition matrix arm."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    arm_id: CompetitionArmId
+    attempted: int = Field(ge=0)
+    evaluable: int = Field(ge=0)
+    invalid: int = Field(ge=0)
+    asr: float | None = Field(ge=0, le=1)
+    fpr: float | None = Field(ge=0, le=1)
+    benign_success: float | None = Field(ge=0, le=1)
+    v21_selection_rate: float | None = Field(ge=0, le=1)
+    legacy_floor_rate: float | None = Field(ge=0, le=1)
+    receipt_coverage: float | None = Field(ge=0, le=1)
+
+
+class CompetitionReport(BaseModel):
+    """Strict dashboard carrier for the LangGraph-only A0-A4 result."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal["competition-report/1.0"]
+    profile_id: Literal["competition-langgraph-v2"]
+    status: Literal["passed", "functional_contract_failed", "invalid"]
+    competition_qualified: bool
+    expected_case_runs: int = Field(ge=0)
+    attempted_case_runs: int = Field(ge=0)
+    invalid_case_runs: int = Field(ge=0)
+    provider_id: str | None = None
+    model: str | None = None
+    arms: list[CompetitionArmReport] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_frozen_arm_roster(self) -> Self:
+        arm_ids = [arm.arm_id for arm in self.arms]
+        if len(set(arm_ids)) != len(arm_ids) or set(arm_ids) != _COMPETITION_ARM_IDS:
+            raise ValueError(
+                "competition report must contain A0 through A4 exactly once"
+            )
+        return self
+
+
 class EvaluationRun(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -251,6 +298,13 @@ class EvaluationRun(BaseModel):
     # explicit prevents an untyped ``extra`` payload from bypassing the frozen
     # report contract while preserving the legacy wire shape when omitted.
     pre_enable_report: PreEnableReport | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # LangGraph competition results are an explicit strict carrier rather than
+    # an unvalidated ``extra`` payload.  The field remains optional for all
+    # non-competition EvaluationRuns.
+    competition_report: CompetitionReport | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

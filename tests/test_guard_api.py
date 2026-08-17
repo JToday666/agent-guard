@@ -3207,6 +3207,115 @@ def test_policy_validate_diff_and_rollback_are_additive_browser_control_plane_en
     assert current_response.json()["allowed_email_domains"] == ["first.example"]
 
 
+def _competition_report_payload() -> dict:
+    return {
+        "schema_version": "competition-report/1.0",
+        "profile_id": "competition-langgraph-v2",
+        "status": "passed",
+        "competition_qualified": True,
+        "expected_case_runs": 350,
+        "attempted_case_runs": 350,
+        "invalid_case_runs": 0,
+        "provider_id": "openai-compatible",
+        "model": "competition-model",
+        "arms": [
+            {
+                "arm_id": arm_id,
+                "attempted": 70,
+                "evaluable": 70,
+                "invalid": 0,
+                "asr": 0.1,
+                "fpr": 0.02,
+                "benign_success": 0.98,
+                "v21_selection_rate": 1.0 if arm_id in {"A3", "A4"} else 0.0,
+                "legacy_floor_rate": 0.01,
+                "receipt_coverage": None if arm_id == "A0" else 1.0,
+            }
+            for arm_id in ("A0", "A1", "A2", "A3", "A4")
+        ],
+    }
+
+
+def test_competition_report_round_trips_through_api_and_store() -> None:
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=settings))
+    headers = {"Authorization": "Bearer control-secret"}
+    report = _competition_report_payload()
+    payload = {
+        "run_id": "eval_competition_typed_report",
+        "run_at": "2026-08-17T00:00:00+00:00",
+        "competition_report": report,
+    }
+
+    created = client.post("/v1/evaluations", headers=headers, json=payload)
+    stored = store.get_evaluation_run(payload["run_id"])
+    fetched = client.get(
+        f"/v1/evaluations/{payload['run_id']}",
+        headers=headers,
+    )
+
+    assert created.status_code == 200
+    assert stored is not None
+    assert fetched.status_code == 200
+    assert created.json()["competition_report"] == report
+    assert stored["competition_report"] == report
+    assert fetched.json()["competition_report"] == report
+
+
+@pytest.mark.parametrize(
+    "invalid_case",
+    [
+        "schema",
+        "profile",
+        "status",
+        "arm_roster",
+        "metric",
+        "report_count",
+        "arm_count",
+        "extra_field",
+        "arm_extra_field",
+    ],
+)
+def test_competition_report_rejects_invalid_payloads(invalid_case: str) -> None:
+    report = _competition_report_payload()
+    if invalid_case == "schema":
+        report["schema_version"] = "competition-report/2.0"
+    elif invalid_case == "profile":
+        report["profile_id"] = "reference-langgraph"
+    elif invalid_case == "status":
+        report["status"] = "partial"
+    elif invalid_case == "arm_roster":
+        report["arms"][-1]["arm_id"] = "A3"
+    elif invalid_case == "metric":
+        report["arms"][0]["asr"] = 1.01
+    elif invalid_case == "report_count":
+        report["invalid_case_runs"] = -1
+    elif invalid_case == "arm_count":
+        report["arms"][0]["attempted"] = -1
+    elif invalid_case == "arm_extra_field":
+        report["arms"][0]["unexpected"] = True
+    else:
+        report["unexpected"] = True
+
+    settings = GuardApiSettings(control_token="control-secret")
+    store = memory_store_with_adapter()
+    client = TestClient(create_app(store=store, settings=settings))
+    run_id = f"eval_competition_invalid_{invalid_case}"
+    response = client.post(
+        "/v1/evaluations",
+        headers={"Authorization": "Bearer control-secret"},
+        json={
+            "run_id": run_id,
+            "run_at": "2026-08-17T00:00:00+00:00",
+            "competition_report": report,
+        },
+    )
+
+    assert response.status_code == 422
+    assert store.get_evaluation_run(run_id) is None
+
+
 def test_evaluation_runs_can_be_queried_by_id_and_dataset_filters() -> None:
     settings = GuardApiSettings(control_token="control-secret")
     app = create_app(store=memory_store_with_adapter(), settings=settings)
