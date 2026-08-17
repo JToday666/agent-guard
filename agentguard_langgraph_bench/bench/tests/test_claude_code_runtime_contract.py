@@ -1,11 +1,22 @@
 from pathlib import Path
 
+from agentguard_langgraph_bench.adapters.claude_code.adapter import ClaudeCodeAdapter
 from agentguard_langgraph_bench.bench.browser_runtime import (
     _RealBrowserRuntimeCore,
     resolve_local_source,
 )
 from agentguard_langgraph_bench.bench.runtime.tool_compat import ToolCompatibilityLayer
 from agentguard_langgraph_bench.bench.tools import MockToolRegistry
+
+
+def test_claude_code_adapter_defaults_allow_longer_cases(monkeypatch) -> None:
+    monkeypatch.delenv("AGENTGUARD_CLAUDE_CODE_MAX_TURNS", raising=False)
+    monkeypatch.delenv("AGENTGUARD_CLAUDE_CODE_MAX_BUDGET_USD", raising=False)
+
+    adapter = ClaudeCodeAdapter(object())
+
+    assert adapter.max_turns == 48
+    assert adapter.max_budget_usd == 2
 
 
 def test_local_browser_source_aliases_resolve_to_contained_fixture() -> None:
