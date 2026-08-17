@@ -34,6 +34,7 @@ from guard_api.services import (
     ContextBuilderService,
     CtProjectionService,
     EvaluationService,
+    load_frozen_competition_activation,
     MemoryGuardService,
     MetricService,
     PolicyService,
@@ -42,6 +43,7 @@ from guard_api.services import (
     TaskIngressService,
     TraceService,
     V21PipelineService,
+    V21OfficialEvaluationUnavailableError,
     V21ShadowService,
 )
 from guard_api.settings import GuardApiSettings
@@ -69,6 +71,7 @@ def create_app(
     llm_approval_reviewer: LlmApprovalReviewer | None = None,
 ) -> FastAPI:
     settings = settings or GuardApiSettings()
+    competition_activation = load_frozen_competition_activation(settings)
     if store is None:
         if settings.storage_backend == "memory":
             store = MemoryControlPlaneStore()
@@ -171,6 +174,7 @@ def create_app(
         v21_pipeline=v21_pipeline_service,
         ct_projection_service=ct_projection_service,
         context_builder_service=context_builder_service,
+        competition_activation=competition_activation,
     )
     task_ingress_service = TaskIngressService(store=store, settings=settings)
 
@@ -215,6 +219,12 @@ def create_app(
         _: Request, exc: AuditWindowRequestError
     ) -> JSONResponse:
         return error_response(exc.code, status_code=exc.status_code)
+
+    @app.exception_handler(V21OfficialEvaluationUnavailableError)
+    async def v21_official_unavailable_handler(
+        _: Request, exc: V21OfficialEvaluationUnavailableError
+    ) -> JSONResponse:
+        return error_response(exc.code, status_code=503)
 
     @app.exception_handler(ProvenanceConflictError)
     async def provenance_conflict_handler(

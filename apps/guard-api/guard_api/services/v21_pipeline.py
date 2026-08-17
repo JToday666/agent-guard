@@ -94,6 +94,7 @@ from agentguard_core.security_context import (
 )
 
 from guard_api.security_state import SecurityStateService
+from guard_api.auth import AuthContext
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
@@ -118,6 +119,7 @@ __all__ = [
     "V21PhaseAPrepared",
     "V21PipelineMaterials",
     "V21PipelineService",
+    "V21OfficialEvaluationUnavailableError",
     "build_evaluation_delta",
 ]
 
@@ -152,6 +154,14 @@ _EVALUATION_SOURCE_REVISION = 1
 #: 只能由 V21-10 离线对账（audit 信封 × projection_records 差集）
 #: 承接；计数器供运维观测该窗口发生频率。
 PHASE_C_BASE_DRIFT_SKIPS: dict[str, int] = {"count": 0}
+
+
+class V21OfficialEvaluationUnavailableError(RuntimeError):
+    """An active competition evaluation could not produce trusted authority."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 def _pipeline_snapshot_plan() -> RequiredCheckPlan:
@@ -195,6 +205,7 @@ class V21PhaseAPrepared:
     task_id: str | None
     scope_digest: str | None
     degraded_kind: PhaseADegradedKind | None
+    auth_context: AuthContext | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +238,7 @@ class V21PipelineMaterials:
     # Exact Core acknowledgement for Gate A. ``None`` forbids committing the
     # candidate CT bundle even when shadow safely converged to DEFER.
     consumed_overlay_digest: str | None
+    auth_context: AuthContext | None = None
 
 
 @dataclass(frozen=True)
@@ -359,7 +371,8 @@ class V21PipelineService:
         # V21-13 预留钩子：位置在 assess 后、revalidate 前（天然事务外）。
         # V21-09 恒 None，零开销。
         self._semantic_provider = semantic_provider
-        self._enabled = bool(settings.v21_shadow_enabled)
+        self._mode = settings.effective_v21_mode()
+        self._enabled = self._mode != "off"
         self._server_secret = self._load_server_secret(settings)
 
     def _load_server_secret(self, settings: GuardApiSettings) -> bytes | None:
@@ -390,13 +403,35 @@ class V21PipelineService:
     def enabled(self) -> bool:
         """flag 且 secret 均已就绪（调用方诊断/编排切换判定）。"""
 
-        return self._enabled and self._server_secret is not None
+        # Active mode must enter the pipeline even when a direct service caller
+        # bypasses startup validation; the phase boundary then raises a safe
+        # 503-mapped error instead of silently taking the current-decision path.
+        return self._enabled and (
+            self._server_secret is not None or self._mode == "active"
+        )
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def active(self) -> bool:
+        return self._mode == "active"
+
+    def _raise_if_active(self, code: str, exc: Exception) -> None:
+        if self.active:
+            raise V21OfficialEvaluationUnavailableError(code) from exc
 
     # ------------------------------------------------------------------
     # Phase A：事务外只读
     # ------------------------------------------------------------------
 
-    def run_phase_a(self, event: GuardEvent) -> V21PipelineMaterials | None:
+    def run_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PipelineMaterials | None:
         """Phase A（D4：evaluation_transaction **之前**执行）。
 
         返回 None 的语义：flag/secret 门控未就绪，或 Phase A 不可恢复
@@ -407,8 +442,9 @@ class V21PipelineService:
         if not self.enabled:
             return None
         try:
-            return self._run_phase_a(event)
-        except Exception:  # noqa: BLE001 - 旁路故障必须收敛，绝不上抛。
+            return self._run_phase_a(event, auth_context=auth_context)
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_A_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase A failed for event %s; falling back "
                 "to V21-08 shadow path",
@@ -417,11 +453,21 @@ class V21PipelineService:
             )
             return None
 
-    def _run_phase_a(self, event: GuardEvent) -> V21PipelineMaterials | None:
-        prepared = self._prepare_phase_a(event)
+    def _run_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PipelineMaterials | None:
+        prepared = self._prepare_phase_a(event, auth_context=auth_context)
         return self._finish_phase_a(event, prepared, transient_facts=None)
 
-    def prepare_phase_a(self, event: GuardEvent) -> V21PhaseAPrepared | None:
+    def prepare_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PhaseAPrepared | None:
         """读取 legacy/policy/Snapshot，但暂不执行 shadow assessment。
 
         Gate A 生产编排使用这个边界在同一历史 Snapshot 上构造当前事件
@@ -431,8 +477,9 @@ class V21PipelineService:
         if not self.enabled:
             return None
         try:
-            return self._prepare_phase_a(event)
-        except Exception:  # noqa: BLE001 - shadow 旁路不得影响 legacy。
+            return self._prepare_phase_a(event, auth_context=auth_context)
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_A_PREPARE_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase A preparation failed for event %s; "
                 "falling back to V21-08 shadow path",
@@ -447,6 +494,7 @@ class V21PipelineService:
         prepared: V21PhaseAPrepared,
         *,
         transient_facts: "AssessmentTransientFacts | None" = None,
+        auth_context: AuthContext | None = None,
     ) -> V21PipelineMaterials | None:
         """以历史 Snapshot + 当前 transient overlay 完成 shadow assessment。"""
 
@@ -457,8 +505,10 @@ class V21PipelineService:
                 event,
                 prepared,
                 transient_facts=transient_facts,
+                auth_context=auth_context,
             )
-        except Exception:  # noqa: BLE001 - shadow 旁路不得影响 legacy。
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_A_ASSESS_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase A assessment failed for event %s; "
                 "falling back to V21-08 shadow path",
@@ -467,7 +517,12 @@ class V21PipelineService:
             )
             return None
 
-    def _prepare_phase_a(self, event: GuardEvent) -> V21PhaseAPrepared:
+    def _prepare_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PhaseAPrepared:
         assert self._server_secret is not None
 
         # 策略解析与 legacy 单跑（detection 不双跑：decision 与
@@ -507,6 +562,7 @@ class V21PipelineService:
                 task_id=_task_claim(event),
                 scope_digest=None,
                 degraded_kind="component_failure",
+                auth_context=auth_context,
             )
 
         snapshot, revoked_grant_ids, task_id, scope_digest = resolved
@@ -523,6 +579,7 @@ class V21PipelineService:
             task_id=task_id,
             scope_digest=scope_digest,
             degraded_kind=(None if snapshot is not None else "snapshot_absent"),
+            auth_context=auth_context,
         )
 
     def _finish_phase_a(
@@ -531,10 +588,13 @@ class V21PipelineService:
         prepared: V21PhaseAPrepared,
         *,
         transient_facts: "AssessmentTransientFacts | None",
+        auth_context: AuthContext | None = None,
     ) -> V21PipelineMaterials:
         assert self._server_secret is not None
         if prepared.event_id != event.event_id:
             raise ValueError("phase A prepared materials do not match event_id")
+        if auth_context is not None and prepared.auth_context != auth_context:
+            raise ValueError("phase A AuthContext changed between prepare and finish")
 
         assess_kwargs: dict[str, Any] = {
             "server_secret": self._server_secret,
@@ -580,6 +640,7 @@ class V21PipelineService:
             scope_digest=prepared.scope_digest,
             degraded_kind=prepared.degraded_kind,
             consumed_overlay_digest=outcome.consumed_overlay_digest,
+            auth_context=prepared.auth_context,
         )
 
     def _resolve_snapshot_v(
@@ -643,7 +704,8 @@ class V21PipelineService:
 
         try:
             return self._build_phase_b(event, materials)
-        except Exception:  # noqa: BLE001 - 旁路故障必须收敛，绝不上抛。
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_B_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase B failed for event %s; v21 evidence "
                 "omitted, legacy chain unaffected",

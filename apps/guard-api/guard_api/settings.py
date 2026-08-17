@@ -22,6 +22,7 @@ DEFAULT_STORAGE_BACKEND = "postgres"
 DEFAULT_LLM_APPROVAL_BASE_URL = "https://api.openai.com/v1"
 SUPPORTED_STORAGE_BACKENDS = {"postgres", "memory"}
 SUPPORTED_ENVIRONMENTS = {"development", "test", "production"}
+SUPPORTED_V21_MODES = {"off", "shadow", "limited_enable", "active"}
 DEFAULT_MAX_REQUEST_BODY_BYTES = 1024 * 1024
 MAX_CONFIGURABLE_REQUEST_BODY_BYTES = 8 * 1024 * 1024
 DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS = 300
@@ -130,6 +131,23 @@ class GuardApiSettings:
             "AGENTGUARD_V21_SHADOW_ENABLED", default=False
         )
     )
+    # Unified V2.1 authority mode.  The legacy shadow boolean remains accepted
+    # for existing reference-profile callers, but new deployments should set
+    # this value explicitly.  ``effective_v21_mode`` provides the single
+    # compatibility boundary used by services.
+    v21_mode: str = field(
+        default_factory=lambda: (
+            os.getenv("AGENTGUARD_V21_MODE", "off").strip().lower()
+        )
+    )
+    # A competition activation is immutable process input.  It is loaded once
+    # during application construction and is never exposed through a mutation
+    # endpoint.
+    v21_competition_activation_path: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH"
+        )
+    )
     # shadow ActionIR 指纹专用 server secret（base64url，≥32 字节）。
     # 与 task scope keyring / audit checkpoint key 域隔离，不复用其他密钥。
     # flag on 而未配置时 shadow 禁用（编排器返回 None），不得硬编码兜底。
@@ -187,11 +205,10 @@ class GuardApiSettings:
     ) -> ReceiptEligibilityExpectation | None:
         """Return the configured C10 anchor, or ``None`` for legacy-only mode."""
 
-        values = (
-            self.evaluation_receipt_eligibility_revision,
-            self.evaluation_receipt_runtime_profile,
-            self.evaluation_receipt_eligibility_digest,
-        )
+        eligibility_revision = self.evaluation_receipt_eligibility_revision
+        runtime_profile = self.evaluation_receipt_runtime_profile
+        eligibility_digest = self.evaluation_receipt_eligibility_digest
+        values = (eligibility_revision, runtime_profile, eligibility_digest)
         if not any(values):
             return None
         if not all(values):
@@ -201,11 +218,14 @@ class GuardApiSettings:
                 "AGENTGUARD_EVALUATION_RECEIPT_ELIGIBILITY_DIGEST must be "
                 "configured together"
             )
+        assert eligibility_revision is not None
+        assert runtime_profile is not None
+        assert eligibility_digest is not None
         try:
             return ReceiptEligibilityExpectation(
-                eligibility_revision=self.evaluation_receipt_eligibility_revision,
-                runtime_profile=self.evaluation_receipt_runtime_profile,
-                eligibility_digest=self.evaluation_receipt_eligibility_digest,
+                eligibility_revision=eligibility_revision,
+                runtime_profile=runtime_profile,
+                eligibility_digest=eligibility_digest,
             )
         except ValueError as exc:
             raise GuardApiConfigurationError(
@@ -289,6 +309,17 @@ class GuardApiSettings:
             label="AGENTGUARD_V21_SHADOW_SERVER_SECRET",
         )
 
+    def effective_v21_mode(self) -> str:
+        """Return the normalized V2.1 mode with legacy-shadow compatibility."""
+
+        mode = self.v21_mode.strip().lower()
+        if mode != "off":
+            return mode
+        return "shadow" if self.v21_shadow_enabled else "off"
+
+    def v21_enabled(self) -> bool:
+        return self.effective_v21_mode() != "off"
+
     def audit_checkpoint_configured(self) -> bool:
         return bool(
             self.audit_checkpoint_path
@@ -312,6 +343,11 @@ class GuardApiSettings:
             supported = ", ".join(sorted(SUPPORTED_STORAGE_BACKENDS))
             raise GuardApiConfigurationError(
                 f"AGENTGUARD_STORAGE_BACKEND must be one of: {supported}"
+            )
+        if self.v21_mode.strip().lower() not in SUPPORTED_V21_MODES:
+            supported = ", ".join(sorted(SUPPORTED_V21_MODES))
+            raise GuardApiConfigurationError(
+                f"AGENTGUARD_V21_MODE must be one of: {supported}"
             )
         if not self.control_token.strip():
             raise GuardApiConfigurationError("AGENTGUARD_CONTROL_TOKEN cannot be empty")
@@ -382,11 +418,43 @@ class GuardApiSettings:
         # existing EvaluationRun producers.
         self.evaluation_receipt_eligibility_expectation()
 
+        effective_v21_mode = self.effective_v21_mode()
+        if effective_v21_mode in {"limited_enable", "active"}:
+            activation_path = self.v21_competition_activation_path
+            if activation_path is None:
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH is required for "
+                    f"V2.1 mode {effective_v21_mode}"
+                )
+            if not Path(activation_path).is_absolute():
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH must be an "
+                    "absolute path"
+                )
+            if self.v21_shadow_server_secret_bytes() is None:
+                raise GuardApiConfigurationError(
+                    "V2.1 official modes require "
+                    "AGENTGUARD_V21_SHADOW_SERVER_SECRET"
+                )
+            if not self.task_scope_configured():
+                raise GuardApiConfigurationError(
+                    "V2.1 official modes require AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID "
+                    "and AGENTGUARD_TASK_SCOPE_KEYS"
+                )
+            if (
+                effective_v21_mode == "active"
+                and not self.rte05_strong_binding_enabled
+            ):
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_MODE=active requires "
+                    "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED=true"
+                )
+
         if self.rte05_strong_binding_enabled:
-            if not self.v21_shadow_enabled:
+            if effective_v21_mode == "off":
                 raise GuardApiConfigurationError(
                     "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED requires "
-                    "AGENTGUARD_V21_SHADOW_ENABLED=true"
+                    "AGENTGUARD_V21_MODE != off (or the legacy shadow flag)"
                 )
             if self.v21_shadow_server_secret_bytes() is None:
                 raise GuardApiConfigurationError(

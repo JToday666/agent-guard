@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import (
     ConfigAuditFinding,
+    DecisionAuthority,
     GuardDecision,
     PreEnableReport,
     new_id,
@@ -190,6 +191,13 @@ class GuardEvaluationResponse(BaseModel):
     # CT-PR-04 ephemeral plan.  It is returned only for a successfully built
     # context_assembled event; flag-off and unavailable paths omit the key.
     context_plan: ContextAssemblyPlan | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # Typed to Core's strict DecisionAuthority once the LGV2-C primitive is
+    # integrated.  The optional wire key preserves every pre-competition
+    # response shape when no committed authority evidence exists.
+    decision_authority: DecisionAuthority | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

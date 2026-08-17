@@ -35,7 +35,8 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         )
         try:
             response = evaluation_service.evaluate(
-                payload, requesting_principal_id=context.principal_id
+                payload,
+                auth_context=context,
             )
         except EvaluationConflictError:
             raise ApiAuthError("EVALUATION_CONFLICT", status_code=409) from None
@@ -46,4 +47,6 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             dumped.pop("enforcement_binding", None)
         if response.context_plan is None:
             dumped.pop("context_plan", None)
+        if response.decision_authority is None:
+            dumped.pop("decision_authority", None)
         return dumped

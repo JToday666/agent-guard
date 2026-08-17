@@ -5,6 +5,10 @@ from .audit import AuditService
 from .audit_checkpoint import AuditCheckpointService
 from .audit_window import AuditWindowRequestError, AuditWindowService
 from .config_audit import ConfigAuditService
+from .competition import (
+    FrozenCompetitionActivation,
+    load_frozen_competition_activation,
+)
 from .context_builder import ContextBuilderService
 from .context_manifest import (
     ContextManifestAuditRecord,
@@ -22,7 +26,12 @@ from .policy import PolicyService, PolicyValidationError
 from .provenance import ProvenanceWriter
 from .task_ingress import TaskIngressService
 from .trace import TraceService
-from .v21_pipeline import V21PhaseBOutcome, V21PipelineMaterials, V21PipelineService
+from .v21_pipeline import (
+    V21OfficialEvaluationUnavailableError,
+    V21PhaseBOutcome,
+    V21PipelineMaterials,
+    V21PipelineService,
+)
 from .v21_shadow import V21ShadowService
 
 __all__ = [
@@ -32,6 +41,7 @@ __all__ = [
     "AuditWindowRequestError",
     "AuditWindowService",
     "ConfigAuditService",
+    "FrozenCompetitionActivation",
     "ContextBuilderService",
     "ContextManifestAuditRecord",
     "ContextManifestBudgetDroppedRef",
@@ -48,10 +58,12 @@ __all__ = [
     "TaskIngressService",
     "TraceService",
     "V21PhaseBOutcome",
+    "V21OfficialEvaluationUnavailableError",
     "V21PipelineMaterials",
     "V21PipelineService",
     "V21ShadowService",
     "build_audit_event",
     "describe_guard_event",
     "prepare_context_manifest",
+    "load_frozen_competition_activation",
 ]

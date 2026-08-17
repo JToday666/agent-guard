@@ -25,6 +25,7 @@ from guard_api.models import (
     EvaluationApproval,
     GuardEvaluationResponse,
 )
+from guard_api.auth import AuthContext
 from guard_api.storage.base import (
     EnforcementBindingConflictError,
     EnforcementBindingRecord,
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
         V21PipelineService,
     )
     from .v21_shadow import V21ShadowService
+    from .competition import FrozenCompetitionActivation
 
 
 logger = logging.getLogger(__name__)
@@ -207,6 +209,7 @@ class EvaluationService:
         v21_pipeline: "V21PipelineService | None" = None,
         ct_projection_service: "CtProjectionService | None" = None,
         context_builder_service: "ContextBuilderService | None" = None,
+        competition_activation: "FrozenCompetitionActivation | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -226,10 +229,32 @@ class EvaluationService:
         # 材料就绪时生效；事务外构建 → 事务内信封 → 事务后投影）。
         self.ct_projection_service = ct_projection_service
         self.context_builder_service = context_builder_service
+        self.competition_activation = competition_activation
 
     def evaluate(
-        self, event: GuardEvent, *, requesting_principal_id: str
+        self,
+        event: GuardEvent,
+        *,
+        requesting_principal_id: str | None = None,
+        auth_context: AuthContext | None = None,
     ) -> GuardEvaluationResponse:
+        """Evaluate with the router-authenticated identity when available.
+
+        ``requesting_principal_id`` remains as a compatibility boundary for
+        direct service tests and internal pre-V2 callers.  Production routing
+        passes the complete immutable ``AuthContext`` so authority selection
+        can bind principal, runtime, agent and credential provenance together.
+        """
+
+        if auth_context is not None:
+            if (
+                requesting_principal_id is not None
+                and requesting_principal_id != auth_context.principal_id
+            ):
+                raise ValueError("requesting principal conflicts with AuthContext")
+            requesting_principal_id = auth_context.principal_id
+        if requesting_principal_id is None:
+            raise ValueError("requesting principal is required")
         # Validate temporal identity before detectors or any approval/memory side
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
@@ -269,7 +294,10 @@ class EvaluationService:
                     and self.ct_projection_service.fact_building_enabled
                 ):
                     prepared: "V21PhaseAPrepared | None" = (
-                        self.v21_pipeline.prepare_phase_a(event)
+                        self.v21_pipeline.prepare_phase_a(
+                            event,
+                            auth_context=auth_context,
+                        )
                     )
                     if prepared is not None:
                         ct_bundle = self.ct_projection_service.build_transient_bundle(
@@ -335,11 +363,15 @@ class EvaluationService:
                             event,
                             prepared,
                             transient_facts=transient_facts,
+                            auth_context=auth_context,
                         )
                 else:
                     # Compatibility path: no new keyword/call boundary when CT
                     # is disabled, preserving V21-09 byte-for-byte behavior.
-                    materials = self.v21_pipeline.run_phase_a(event)
+                    materials = self.v21_pipeline.run_phase_a(
+                        event,
+                        auth_context=auth_context,
+                    )
         # Context isolation has its own flag and must not require V2 shadow.
         # With V2 enabled, the branch above already built and filtered the one
         # shared Gate A bundle.  Only the V2-off path performs one context-only

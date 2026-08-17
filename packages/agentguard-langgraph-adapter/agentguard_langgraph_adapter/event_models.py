@@ -179,6 +179,22 @@ class RuleHit(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class DecisionAuthority(BaseModel):
+    """Display-safe server authority projection carried to the runtime gate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source: Literal["current", "v21"]
+    mode: Literal["shadow", "limited_enable", "active"]
+    selection_basis: Literal["current", "path_allowlist", "profile_all"]
+    matched_path_ids: list[str] = Field(default_factory=list)
+    legacy_floor_applied: bool
+    activation_ref_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    approval_release: Literal[
+        "not_applicable", "strong_binding_required", "forbidden"
+    ]
+
+
 class PolicyDecision(BaseModel):
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
@@ -199,6 +215,14 @@ class PolicyDecision(BaseModel):
     # CT-PR-04 plan material is runtime-consumption input, never receipt/audit
     # evidence.  It is intentionally transient just like strong binding data.
     context_plan: Any | None = Field(default=None, exclude=True, repr=False)
+    # The server-owned authority projection controls ASK release semantics.  It
+    # remains transient on generic decision dumps; receipt builders copy it
+    # explicitly when their strict schema supports the field.
+    decision_authority: DecisionAuthority | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+    )
 
     @property
     def blocked(self) -> bool:

@@ -188,7 +188,7 @@ class V21ShadowService:
     ) -> None:
         self._store = store
         self._state_service = state_service
-        self._enabled = bool(settings.v21_shadow_enabled)
+        self._enabled = settings.v21_enabled()
         self._server_secret = self._load_server_secret(settings)
 
     def _load_server_secret(self, settings: GuardApiSettings) -> bytes | None:

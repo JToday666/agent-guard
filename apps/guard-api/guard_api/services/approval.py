@@ -119,6 +119,7 @@ class ApprovalService:
         decision: GuardDecision,
         *,
         requesting_principal_id: str,
+        decision_authority: Any | None = None,
     ) -> ApprovalRequest | None:
         if decision.decision != "ask" or decision.approval_intent is None:
             return None
@@ -130,6 +131,16 @@ class ApprovalService:
         safe_action_name = truncate_text(
             scrub_text(description.action_name), SUMMARY_TEXT_LIMIT
         )
+        approval_evidence = _approval_evidence(event, decision, description)
+        if decision_authority is not None:
+            raw_authority = (
+                decision_authority.model_dump(mode="json")
+                if hasattr(decision_authority, "model_dump")
+                else decision_authority
+            )
+            if not isinstance(raw_authority, dict):
+                raise ValueError("decision authority must be a typed projection")
+            approval_evidence["decision_authority"] = dict(raw_authority)
         approval = ApprovalRequest(
             trace_id=event.trace_id,
             subject_id=description.subject_id,
@@ -143,7 +154,7 @@ class ApprovalService:
             reason=truncate_text(scrub_text(decision.reason), SUMMARY_TEXT_LIMIT),
             risk_score=decision.risk_score,
             severity=decision.severity,
-            evidence=_approval_evidence(event, decision, description),
+            evidence=approval_evidence,
             decision_options=decision.approval_intent.options,
             expires_at=(
                 datetime.now(timezone.utc)
@@ -189,7 +200,7 @@ class ApprovalService:
             )
         # D4/D5：V2 flag 开启时 LLM Reviewer 只能 deny 或保持 pending。
         if review.decision == "allow_once" and _llm_can_allow_once(
-            approval, v2_enabled=self.settings.v21_shadow_enabled
+            approval, v2_enabled=self.settings.v21_enabled()
         ):
             return self.resolve_approval(
                 approval.approval_id,
@@ -252,7 +263,7 @@ class ApprovalService:
         （fail-closed：不投影，不伪造 grant）。
         """
 
-        if not self.settings.v21_shadow_enabled:
+        if not self.settings.v21_enabled():
             return
         if approval.decision != "allow_once" or approval.resolution_source != "human":
             return

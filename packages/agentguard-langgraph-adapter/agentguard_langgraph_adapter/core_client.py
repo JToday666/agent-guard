@@ -295,6 +295,8 @@ def _decision_with_top_level_approval(
     # exclude it by construction.
     if "context_plan" in response:
         enriched["context_plan"] = response.get("context_plan")
+    if "decision_authority" in response:
+        enriched["decision_authority"] = response.get("decision_authority")
     return enriched
 
 

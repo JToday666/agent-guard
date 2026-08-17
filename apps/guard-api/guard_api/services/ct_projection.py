@@ -481,7 +481,7 @@ class CtProjectionService:
             settings.ct_fact_projection_enabled
             or (
                 settings.context_builder_enabled
-                and settings.v21_shadow_enabled
+                and settings.v21_enabled()
             )
         )
         self._server_secret = self._load_server_secret(settings)
