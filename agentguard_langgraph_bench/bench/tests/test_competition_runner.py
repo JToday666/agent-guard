@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import pytest
+from guard_api.models import EvaluationRun
 
 from agentguard_langgraph_bench.bench.competition_models import (
     COMPETITION_CONFIG_SCHEMA_VERSION,
@@ -273,6 +274,70 @@ def test_full_stub_matrix_is_complete_but_never_competition_qualified(
     assert all(arm["attempted"] == 70 for arm in report["arms"])
     assert report["arms"][3]["v21_selection_rate"] == 1.0
     assert report["arms"][0]["receipt_coverage"] is None
+    dashboard_path = root / "dashboard-evaluation-run.json"
+    dashboard_payload = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    parsed_dashboard = EvaluationRun.model_validate(dashboard_payload).model_dump(
+        mode="json"
+    )
+    dashboard_report = parsed_dashboard["competition_report"]
+    assert set(dashboard_payload) == {
+        "run_id",
+        "run_at",
+        "dataset_id",
+        "dataset_version",
+        "dataset_digest",
+        "dataset_locked",
+        "asr_before",
+        "asr_after",
+        "competition_report",
+    }
+    assert set(dashboard_report) == {
+        "schema_version",
+        "profile_id",
+        "status",
+        "competition_qualified",
+        "expected_case_runs",
+        "attempted_case_runs",
+        "invalid_case_runs",
+        "provider_id",
+        "model",
+        "arms",
+    }
+    allowed_arm_keys = {
+        "arm_id",
+        "attempted",
+        "evaluable",
+        "invalid",
+        "asr",
+        "fpr",
+        "benign_success",
+        "v21_selection_rate",
+        "legacy_floor_rate",
+        "receipt_coverage",
+    }
+    assert all(set(arm) == allowed_arm_keys for arm in dashboard_report["arms"])
+    assert all("counts" not in arm for arm in dashboard_report["arms"])
+    assert dashboard_payload["asr_before"] == dashboard_report["arms"][0]["asr"]
+    assert dashboard_payload["asr_after"] == dashboard_report["arms"][4]["asr"]
+    assert dashboard_payload["dataset_id"] == request.profile.dataset.dataset_id
+    assert dashboard_payload["dataset_version"] == request.profile.dataset.dataset_version
+    assert dashboard_payload["dataset_digest"] == request.profile.dataset.dataset_digest
+    assert dashboard_payload["dataset_locked"] is False
+    assert dashboard_payload["run_at"].endswith("Z")
+    effective_config = json.loads(
+        (root / "effective-config.json").read_text(encoding="utf-8")
+    )
+    expected_identity = canonical_sha256(
+        {
+            "run_at": dashboard_payload["run_at"],
+            "effective_config_digest": effective_config["effective_config_digest"],
+            "competition_report": dashboard_report,
+        }
+    )
+    assert dashboard_payload["run_id"] == (
+        f"competition-{expected_identity.removeprefix('sha256:')}"
+    )
+    assert _SECRET not in dashboard_path.read_text(encoding="utf-8")
     manifest = json.loads((root / "sha256-manifest.json").read_text(encoding="utf-8"))
     assert manifest["secret_scan"]["status"] == "passed"
     assert manifest["secret_scan"]["files_scanned"] == manifest["artifact_count"]
@@ -376,6 +441,17 @@ def test_runner_invalidates_secret_bearing_executor_output_without_persisting_it
     report = json.loads((request.artifacts / "result.json").read_text())
     assert report["reason_code"] == "artifact_secret_detected"
     assert report["competition_qualified"] is False
+    dashboard_payload = json.loads(
+        (request.artifacts / "dashboard-evaluation-run.json").read_text()
+    )
+    parsed_dashboard = EvaluationRun.model_validate(dashboard_payload).model_dump(
+        mode="json"
+    )
+    assert parsed_dashboard["competition_report"]["status"] == "invalid"
+    assert (
+        parsed_dashboard["competition_report"]["competition_qualified"]
+        is False
+    )
     variants = {
         _SECRET.encode(),
         f"Bearer {_SECRET}".encode(),
@@ -402,6 +478,12 @@ def test_valid_matrix_with_observed_authority_mismatch_is_exit_one(
     report = json.loads((request.artifacts / "result.json").read_text(encoding="utf-8"))
     assert report["status"] == "functional_contract_failed"
     assert report["competition_qualified"] is False
+    dashboard = EvaluationRun.model_validate_json(
+        (request.artifacts / "dashboard-evaluation-run.json").read_text()
+    ).model_dump(mode="json")
+    assert (
+        dashboard["competition_report"]["status"] == "functional_contract_failed"
+    )
     contracts = json.loads(
         (request.artifacts / "contract-results.json").read_text(encoding="utf-8")
     )
@@ -424,6 +506,12 @@ def test_non_interpretable_matrix_is_exit_two_with_explicit_invalid_report(
         "baseline_model_not_invoked",
         "cross_arm_canonical_input_mismatch",
     }
+    dashboard = EvaluationRun.model_validate_json(
+        (request.artifacts / "dashboard-evaluation-run.json").read_text()
+    ).model_dump(mode="json")
+    assert dashboard["competition_report"]["status"] == "invalid"
+    assert dashboard["competition_report"]["competition_qualified"] is False
+    assert dashboard["competition_report"]["invalid_case_runs"] >= 1
     manifest = json.loads(
         (request.artifacts / "sha256-manifest.json").read_text(encoding="utf-8")
     )

@@ -15,6 +15,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -57,6 +58,30 @@ COMPETITION_ADMISSION_SCHEMA_VERSION = "competition-admission/1.0"
 COMPETITION_ARTIFACT_MANIFEST_SCHEMA_VERSION = "competition-artifact-manifest/1.0"
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ARM_IDS = ("A0", "A1", "A2", "A3", "A4")
+_DASHBOARD_COMPETITION_REPORT_KEYS = (
+    "schema_version",
+    "profile_id",
+    "status",
+    "competition_qualified",
+    "expected_case_runs",
+    "attempted_case_runs",
+    "invalid_case_runs",
+    "provider_id",
+    "model",
+    "arms",
+)
+_DASHBOARD_COMPETITION_ARM_KEYS = (
+    "arm_id",
+    "attempted",
+    "evaluable",
+    "invalid",
+    "asr",
+    "fpr",
+    "benign_success",
+    "v21_selection_rate",
+    "legacy_floor_rate",
+    "receipt_coverage",
+)
 _PUBLIC_CASE_KEYS = (
     "arm_id",
     "repeat_index",
@@ -638,6 +663,7 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
         forbidden_secrets=(request.provider.api_key,),
     )
     artifacts.create()
+    run_at = _utc_now()
     all_rows: list[dict[str, Any]] = []
     contract_failures: list[dict[str, str]] = []
     try:
@@ -753,6 +779,12 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
         )
         artifacts.write_json("observational-metrics.json", report["arms"])
         artifacts.write_json("result.json", report)
+        _write_dashboard_evaluation_run(
+            artifacts,
+            request=request,
+            report=report,
+            run_at=run_at,
+        )
         artifacts.finalize_manifest(status=status)
         return exit_code
     except InvalidCompetitionRun as exc:
@@ -761,6 +793,7 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
             request=request,
             rows=all_rows,
             reason_code=exc.reason_code,
+            run_at=run_at,
         )
         return ExitCode.INVALID_RUN
 
@@ -1468,6 +1501,7 @@ def _write_invalid_artifacts(
     request: RunRequest,
     rows: Sequence[Mapping[str, Any]],
     reason_code: str,
+    run_at: str,
 ) -> None:
     reason_code = artifacts.safe_reason_code(reason_code)
     report = _competition_report(
@@ -1481,6 +1515,11 @@ def _write_invalid_artifacts(
     # provider labels happened to contain the provider credential.
     report["provider_id"] = None
     report["model"] = None
+    report["invalid_case_runs"] = max(
+        1,
+        int(report["invalid_case_runs"]),
+        int(report["expected_case_runs"]) - int(report["attempted_case_runs"]),
+    )
     report["reason_code"] = reason_code
     artifacts.write_json(
         "admission.json",
@@ -1495,7 +1534,77 @@ def _write_invalid_artifacts(
         },
     )
     artifacts.write_json("result.json", report)
+    _write_dashboard_evaluation_run(
+        artifacts,
+        request=request,
+        report=report,
+        run_at=run_at,
+    )
     artifacts.finalize_manifest(status="invalid")
+
+
+def _write_dashboard_evaluation_run(
+    artifacts: ArtifactDirectory,
+    *,
+    request: RunRequest,
+    report: Mapping[str, Any],
+    run_at: str,
+) -> None:
+    arm_ids = tuple(
+        str(arm.get("arm_id") or "")
+        for arm in report.get("arms", ())
+        if isinstance(arm, Mapping)
+    )
+    # The Dashboard contract is the frozen A0-A4 competition report.  Debug
+    # contracts/demo variants use V0 and intentionally have no import carrier.
+    if arm_ids != _ARM_IDS:
+        return
+    dashboard_report = _dashboard_competition_report(report)
+    identity_digest = canonical_sha256(
+        {
+            "run_at": run_at,
+            "effective_config_digest": _effective_config_digest(request),
+            "competition_report": dashboard_report,
+        }
+    )
+    arms_by_id = {
+        str(arm["arm_id"]): arm
+        for arm in dashboard_report["arms"]
+        if isinstance(arm, Mapping)
+    }
+    artifacts.write_json(
+        "dashboard-evaluation-run.json",
+        {
+            "run_id": f"competition-{identity_digest.removeprefix('sha256:')}",
+            "run_at": run_at,
+            "dataset_id": request.profile.dataset.dataset_id,
+            "dataset_version": request.profile.dataset.dataset_version,
+            "dataset_digest": request.profile.dataset.dataset_digest,
+            # The carrier intentionally has no legacy EvaluationCase projection;
+            # do not claim the EvaluationRun's per-case lock contract.
+            "dataset_locked": False,
+            "asr_before": arms_by_id["A0"]["asr"],
+            "asr_after": arms_by_id["A4"]["asr"],
+            "competition_report": dashboard_report,
+        },
+    )
+
+
+def _dashboard_competition_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    narrowed = {
+        key: _json_safe(report.get(key))
+        for key in _DASHBOARD_COMPETITION_REPORT_KEYS
+        if key != "arms"
+    }
+    narrowed["arms"] = [
+        {
+            key: _json_safe(arm.get(key))
+            for key in _DASHBOARD_COMPETITION_ARM_KEYS
+        }
+        for arm in report.get("arms", ())
+        if isinstance(arm, Mapping)
+    ]
+    return narrowed
 
 
 def _competition_report(
@@ -1635,6 +1744,10 @@ def _secret_patterns(values: Sequence[str]) -> tuple[bytes, ...]:
         }
         patterns.update(item.encode("utf-8") for item in encoded_values if item)
     return tuple(sorted(patterns))
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _file_sha256(path: Path) -> str:
