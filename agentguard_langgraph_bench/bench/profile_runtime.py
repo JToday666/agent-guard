@@ -58,6 +58,7 @@ from ..demo_agent.graph import _pre_model_capture, initial_state_from_case
 from .config import BenchConfig, ensure_sandbox
 from .dataset_loader import load_attack_cases
 from .models import AttackCase
+from .profile_dashboard import run_dashboard_chromium_probe
 from .profile_runner import (
     ExecutionResult,
     InvalidProfileRun,
@@ -192,6 +193,12 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
                     (cases["JB-003"], denied),
                 ),
             )
+            dashboard = run_dashboard_chromium_probe(
+                base_url,
+                _CONTROL_TOKEN,
+                str(asked["trace_id"]),
+                request.artifacts,
+            )
 
         contracts = _contract_results(context, denied, asked, drift)
         metrics = _observational_metrics(benign, denied, asked, drift, report)
@@ -204,6 +211,7 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
             runs=(context, benign, denied, asked, drift),
             paired=paired,
             evaluation_run=evaluation_run,
+            dashboard=dashboard,
             contracts=contracts,
             metrics=metrics,
         )
@@ -1426,6 +1434,7 @@ def _artifacts(
     runs: Sequence[Mapping[str, Any]],
     paired: Mapping[str, Any],
     evaluation_run: Mapping[str, Any],
+    dashboard: Mapping[str, Any],
     contracts: Mapping[str, Mapping[str, Any]],
     metrics: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -1476,14 +1485,7 @@ def _artifacts(
         },
         "paired-report.json": dict(paired),
         "evaluation-run.json": _sanitize_value(dict(evaluation_run)),
-        "dashboard/acceptance.json": {
-            "schema_version": "reference-profile-dashboard-hook/1.0",
-            "status": "hook_ready",
-            "chromium_executed": False,
-            "routes": list(request.profile.dashboard.routes),
-            "evaluation_run_id": evaluation_run.get("run_id"),
-            "reason_code": "chromium_hook_deferred",
-        },
+        "dashboard/acceptance.json": dict(dashboard),
         "corpus/summary.json": {
             "schema_version": "reference-profile-corpus/1.0",
             "requested": request.full_corpus,
