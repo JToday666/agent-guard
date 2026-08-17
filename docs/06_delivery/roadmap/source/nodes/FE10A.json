@@ -3,16 +3,22 @@
   "change_surfaces": [
     "dashboard-types-mappers-store"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/FE10A/EV-FE10A-093DEC2F1477.json",
+    "evidence/FE10A/EV-FE10A-4CE2824198D2.json",
+    "evidence/FE10A/EV-FE10A-5A61E893F111.json",
+    "evidence/FE10A/EV-FE10A-912E191E05A9.json",
+    "evidence/FE10A/EV-FE10A-9E5EC2C54A43.json"
+  ],
   "exact_title": "FE-RSC-10A — Bounded Context Manifest UI",
   "hold": false,
   "id": "FE10A",
   "kind": "task",
   "lane": "fe",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [],
   "optional": false,
-  "revision": 1,
+  "revision": 2,
   "roles": [
     "task"
   ],
@@ -27,9 +33,10 @@
   "work": {
     "base_sha": "254f8f6a73e352b3f70c14f8ca7a073e360a9cc4",
     "branch": "codex/fe10a-manifest-c10-ui",
+    "completed_commit": "41b577e0e245b6045e6d97a59199a1f455f30f67",
     "owner": "codex",
     "started_at": "2026-08-17T07:12:14Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "FE10A"
   }
 }

@@ -1,0 +1,11 @@
+{
+  "id": "EV-I02A-2FA5413D0788",
+  "kind": "e2e",
+  "metadata": {},
+  "node_id": "I02A",
+  "recorded_at": "2026-08-17T10:00:28Z",
+  "ref": "local:reference-langgraph-selected-BN-001+PI-001-exit0",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Real Memory profile run exited 0 with 5/5 contracts, paired BN-001 and PI-001 off/on execution, run_valid and artifact integrity true, three LIVE Dashboard panels and complete SHA-256 manifests"
+}

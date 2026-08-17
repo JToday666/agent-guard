@@ -1,0 +1,11 @@
+{
+  "id": "EV-I02A-7A5FE4355F62",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "I02A",
+  "recorded_at": "2026-08-17T10:00:37Z",
+  "ref": "revert:6193dc48d98b6890ee3a760891ac37ebf47849c8",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Reverting the additive profile stabilization preserves current official evaluation, context-builder default-off behavior and existing LangGraph runtime paths"
+}
