@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
+from agentguard_core.actions import ActionConstraint
 from agentguard_core.authority import TaskFact, task_digest_projection
 
 from agentguard_langgraph_bench.bench.competition_models import (
     COMPETITION_PROFILE_ID,
+    COMPETITION_ACTION_TYPES,
     CompetitionConfigurationError,
     CompetitionSuite,
     OfficialDecisionSource,
@@ -115,7 +117,9 @@ def test_competition_task_digest_matches_authoritative_taskfact_projection() -> 
         task_digest="sha256:" + "0" * 64,
         revision=1,
         status="active",
-        action_constraints=[],
+        action_constraints=[
+            ActionConstraint(action_types=list(COMPETITION_ACTION_TYPES))
+        ],
         resource_constraints=[],
         destination_constraints=[],
         producer="guard_api_task_ingress",

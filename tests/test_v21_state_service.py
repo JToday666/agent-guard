@@ -16,6 +16,7 @@ import sys
 
 import pytest
 
+from agentguard_core.actions import ActionConstraint
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority.models import EvaluationClock, TaskFact
 from agentguard_core.decisions.evidence import RequiredCheckPlan
@@ -49,7 +50,11 @@ def _clock() -> EvaluationClock:
     )
 
 
-def _task_fact(revision: int = 3) -> TaskFact:
+def _task_fact(
+    revision: int = 3,
+    *,
+    action_types: list[str] | None = None,
+) -> TaskFact:
     return TaskFact(
         task_id="task_state_service",
         scope_digest=SCOPE,
@@ -59,7 +64,11 @@ def _task_fact(revision: int = 3) -> TaskFact:
         task_digest="sha256:" + "ab" * 32,
         revision=revision,
         status="active",
-        action_constraints=[],
+        action_constraints=(
+            [ActionConstraint(action_types=action_types)]
+            if action_types is not None
+            else []
+        ),
         resource_constraints=[],
         destination_constraints=[],
         created_sequence=None,
@@ -503,6 +512,67 @@ def test_snapshot_without_task_head_is_unknown() -> None:
     assert snapshot.task is None
     assert snapshot.coverage.task.status == "unknown"
     assert "v21-04:no_authoritative_task" in snapshot.coverage.task.reason_codes
+
+
+def test_snapshot_compiles_current_task_head_to_transient_capability_grant() -> None:
+    service = _service()
+    head = _task_fact(action_types=["tool_call", "context_build"])
+
+    snapshot = service.read_snapshot(SCOPE, **_snapshot_kwargs(task_fact_head=head))
+
+    assert len(snapshot.grants) == 1
+    grant = snapshot.grants[0]
+    assert grant.source_type == "task_compiler"
+    assert grant.task_id == head.task_id
+    assert grant.action_types == ["context_build", "tool_call"]
+    # Derived capability state is snapshot-only and remains rebuildable.
+    stored = service.store_access.get_security_state(SCOPE)
+    assert stored is not None
+    assert OnlineSecurityState.model_validate(stored.canonical_payload).active_grants == []
+
+
+def test_snapshot_task_revision_replaces_older_transient_grant() -> None:
+    service = _service()
+    older = service.read_snapshot(
+        SCOPE,
+        **_snapshot_kwargs(
+            task_fact_head=_task_fact(revision=3, action_types=["tool_call"])
+        ),
+    )
+    current = service.read_snapshot(
+        SCOPE,
+        **_snapshot_kwargs(
+            task_fact_head=_task_fact(revision=4, action_types=["context_build"])
+        ),
+    )
+
+    assert older.grants[0].source_ref.endswith(":rev:3")
+    assert current.grants[0].source_ref.endswith(":rev:4")
+    assert current.grants[0].action_types == ["context_build"]
+    assert older.grants[0].grant_id != current.grants[0].grant_id
+
+
+def test_snapshot_task_without_action_constraints_compiles_no_grant() -> None:
+    service = _service()
+
+    snapshot = service.read_snapshot(
+        SCOPE, **_snapshot_kwargs(task_fact_head=_task_fact())
+    )
+
+    assert snapshot.grants == []
+
+
+def test_snapshot_rejects_cross_scope_task_before_grant_compilation() -> None:
+    service = _service()
+    foreign = _task_fact(action_types=["context_build"]).model_copy(
+        update={"scope_digest": "hmac-sha256:foreign_scope"}
+    )
+
+    with pytest.raises(ValueError, match="cross-scope snapshot"):
+        service.read_snapshot(
+            SCOPE,
+            **_snapshot_kwargs(task_fact_head=foreign),
+        )
 
 
 def _stored_state(service: SecurityStateService) -> OnlineSecurityState:

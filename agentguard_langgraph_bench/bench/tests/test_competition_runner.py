@@ -237,7 +237,7 @@ class StubArmExecutor:
         )
 
 
-def test_full_stub_matrix_writes_qualified_competition_report_and_manifest(
+def test_full_stub_matrix_is_complete_but_never_competition_qualified(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
@@ -259,7 +259,13 @@ def test_full_stub_matrix_writes_qualified_competition_report_and_manifest(
     assert report["suite"] == "product"
     assert report["full_corpus"] is True
     assert report["status"] == "passed"
-    assert report["competition_qualified"] is True
+    assert report["competition_qualified"] is False
+    preflight = json.loads((root / "preflight.json").read_text(encoding="utf-8"))
+    assert preflight["competition_qualification_eligible"] is False
+    completeness = json.loads(
+        (root / "completeness.json").read_text(encoding="utf-8")
+    )
+    assert completeness["competition_qualification_eligible"] is False
     assert report["expected_case_runs"] == 350
     assert report["attempted_case_runs"] == 350
     assert report["invalid_case_runs"] == 0
@@ -586,7 +592,7 @@ def test_variant_json_then_cli_precedence(tmp_path: Path) -> None:
     assert request.value_sources["context_mode"] == "cli"
 
 
-def test_cli_entrypoint_returns_two_when_live_executor_is_unavailable(
+def test_cli_entrypoint_returns_two_when_live_provider_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AGENTGUARD_LLM_API_KEY", _SECRET)
@@ -610,7 +616,10 @@ def test_cli_entrypoint_returns_two_when_live_executor_is_unavailable(
 
     assert exit_code == 2
     report = json.loads((artifacts / "result.json").read_text())
-    assert report["reason_code"] == "live_executor_unavailable"
+    assert report["reason_code"] in {
+        "provider_preflight_failed",
+        "provider_transport_unavailable",
+    }
     assert report["competition_qualified"] is False
 
 

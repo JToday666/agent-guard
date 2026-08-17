@@ -626,8 +626,13 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
         )
     cases = _select_cases(_load_frozen_cases(request.profile), request)
     arms = _execution_arms(request)
-    qualification_eligible = _qualification_eligible(request, cases, arms)
-    selected_executor = executor or _live_executor_unavailable
+    # Only the built-in live executor establishes the trusted runtime boundary.
+    # The injection seam is intentionally useful for contract tests, but its
+    # caller-controlled rows can never support an official qualification claim.
+    qualification_eligible = (
+        executor is None and _qualification_eligible(request, cases, arms)
+    )
+    selected_executor = executor or _live_executor
     artifacts = ArtifactDirectory(
         request.artifacts,
         forbidden_secrets=(request.provider.api_key,),
@@ -651,7 +656,12 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
         )
         artifacts.write_json(
             "preflight.json",
-            _preflight_payload(request, cases, arms),
+            _preflight_payload(
+                request,
+                cases,
+                arms,
+                qualification_eligible=qualification_eligible,
+            ),
         )
         artifacts.write_json("arms.json", [arm.public_dump() for arm in arms])
         artifacts.write_json("schedule.json", _schedule(request, cases, arms))
@@ -693,7 +703,13 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
                     contracts=result.contracts,
                 )
 
-        completeness = _validate_matrix(request, cases, arms, all_rows)
+        completeness = _validate_matrix(
+            request,
+            cases,
+            arms,
+            all_rows,
+            qualification_eligible=qualification_eligible,
+        )
         expected_case_runs = _expected_case_runs(request)
         if len(all_rows) != expected_case_runs:
             raise InvalidCompetitionRun(
@@ -934,6 +950,8 @@ def _preflight_payload(
     request: RunRequest,
     cases: Sequence[AttackCase],
     arms: Sequence[ArmSpec],
+    *,
+    qualification_eligible: bool,
 ) -> dict[str, Any]:
     return {
         "schema_version": "competition-preflight/1.0",
@@ -943,9 +961,7 @@ def _preflight_payload(
         "effective_config_digest": _effective_config_digest(request),
         "suite": request.profile.suite.value,
         "full_corpus": request.profile.full_corpus,
-        "competition_qualification_eligible": _qualification_eligible(
-            request, cases, arms
-        ),
+        "competition_qualification_eligible": qualification_eligible,
         "dataset": request.profile.dataset.public_dump(),
         "case_count": len(cases),
         "case_ids": [case.case_id for case in cases],
@@ -1301,6 +1317,8 @@ def _validate_matrix(
     cases: Sequence[AttackCase],
     arms: Sequence[ArmSpec],
     rows: Sequence[Mapping[str, Any]],
+    *,
+    qualification_eligible: bool,
 ) -> dict[str, Any]:
     arm_ids = tuple(arm.arm_id for arm in arms)
     expected_keys = {
@@ -1396,9 +1414,7 @@ def _validate_matrix(
         "profile_id": request.profile.profile_id,
         "suite": request.profile.suite.value,
         "full_corpus": request.profile.full_corpus,
-        "competition_qualification_eligible": _qualification_eligible(
-            request, cases, arms
-        ),
+        "competition_qualification_eligible": qualification_eligible,
         "expected_case_runs": _expected_case_runs(request),
         "attempted_case_runs": len(rows),
         "invalid_case_runs": 0,
@@ -1564,11 +1580,12 @@ def _bool_ratio(rows: Sequence[Mapping[str, Any]], key: str) -> float | None:
     return sum(value is True for value in values) / len(values)
 
 
-def _live_executor_unavailable(_: ArmRunRequest) -> ArmRunResult:
-    raise InvalidCompetitionRun(
-        "live_executor_unavailable",
-        "live competition execution requires the LGV2-I integration",
-    )
+def _live_executor(request: ArmRunRequest) -> ArmRunResult:
+    # Lazy import keeps the strict config/artifact contract independently
+    # importable in environments that only inspect profiles.
+    from .competition_runtime import execute_competition_arm
+
+    return execute_competition_arm(request)
 
 
 def _expected_case_runs(request: RunRequest) -> int:

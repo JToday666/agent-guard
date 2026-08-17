@@ -26,6 +26,14 @@ _PROFILE_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ARM_IDS = ("A0", "A1", "A2", "A3", "A4")
+COMPETITION_ACTION_TYPES = (
+    "context_build",
+    "memory_write",
+    "message_send",
+    "model_call",
+    "tool_call",
+    "tool_result",
+)
 
 
 class CompetitionConfigurationError(ValueError):
@@ -385,13 +393,18 @@ def canonical_sha256(value: Any) -> str:
 
 
 def authoritative_task_digest(task_text: str) -> str:
-    """Mirror the frozen TaskFact content projection for unconstrained cases."""
+    """Mirror the frozen TaskFact projection used by the live competition runner."""
 
     return canonical_sha256(
         {
             "schema_version": "2.1",
             "task_summary": task_text,
-            "action_constraints": [],
+            "action_constraints": [
+                {
+                    "action_types": list(COMPETITION_ACTION_TYPES),
+                    "op": "in",
+                }
+            ],
             "resource_constraints": [],
             "destination_constraints": [],
         }
