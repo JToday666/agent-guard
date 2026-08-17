@@ -875,6 +875,10 @@ class EvaluationService:
             task_fact_present=bool(
                 materials.task_id is not None and materials.snapshot is not None
             ),
+            approval_binding_eligible=bool(
+                event.pre_execution is True
+                and event.event_type in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
+            ),
         )
         snapshot_id = (
             materials.snapshot.snapshot_id

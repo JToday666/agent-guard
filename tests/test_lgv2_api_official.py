@@ -12,9 +12,14 @@ from fastapi.testclient import TestClient
 
 from agentguard_core import (
     ApprovalIntent,
+    ContextBuildPayload,
+    ContextSource,
     DecisionAuthority,
+    GuardEvent,
+    SecurityContext,
     V21SelectionResult,
     build_competition_activation_manifest,
+    select_v21_authority as core_select_v21_authority,
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
 
@@ -252,6 +257,62 @@ def test_active_required_state_absence_is_unreleasable_v2_ask() -> None:
     assert response.approval is None
     assert response.enforcement_binding is None
     assert store.list_pending_approvals() == []
+
+
+def test_active_context_assembled_ask_is_unreleasable_without_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evaluation, store = _stack(with_task=True)
+    observed_binding_eligibility: list[bool] = []
+
+    def capture_eligibility(**kwargs: Any) -> V21SelectionResult:
+        eligibility = kwargs["eligibility"]
+        observed_binding_eligibility.append(eligibility.approval_binding_eligible)
+        return core_select_v21_authority(**kwargs)
+
+    monkeypatch.setattr(
+        "guard_api.services.evaluation.select_v21_authority",
+        capture_eligibility,
+    )
+    event = GuardEvent(
+        event_id="evt_lgv2_context_ask",
+        event_type="context_assembled",
+        runtime="langgraph",
+        trace_id="trace_pipeline_1",
+        timestamp="2026-08-15T00:00:00+00:00",
+        pre_execution=True,
+        security_context=SecurityContext(
+            user_task="pipeline fixture",
+            agent_id="main",
+        ),
+        payload=ContextBuildPayload(
+            sources=[
+                ContextSource(
+                    source_id="source_lgv2_context_ask",
+                    source_type="user",
+                    source_trust="trusted",
+                    summary="pipeline fixture",
+                    content_digest=canonical_sha256("pipeline fixture"),
+                    role="user",
+                    sequence_index=0,
+                )
+            ]
+        ),
+        metadata={"task_id": _TASK_ID},
+    )
+
+    response = evaluation.evaluate(event, auth_context=_auth())
+
+    assert observed_binding_eligibility == [False]
+    assert response.decision.decision == "ask"
+    assert response.decision.approval_intent is None
+    assert response.decision_authority is not None
+    assert response.decision_authority.approval_release == "forbidden"
+    assert response.approval is None
+    assert response.enforcement_binding is None
+    assert response.policy_audit_id is not None
+    assert store.list_pending_approvals() == []
+    assert store.enforcement_bindings == {}
 
 
 def test_active_cross_principal_task_fact_returns_503_with_zero_evaluation_state(

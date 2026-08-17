@@ -208,6 +208,7 @@ def _eligibility(**overrides: bool) -> V21SelectionEligibility:
         "ownership_valid": True,
         "action_ir_complete": True,
         "task_fact_present": True,
+        "approval_binding_eligible": True,
     }
     values.update(overrides)
     return V21SelectionEligibility(**values)
@@ -528,6 +529,35 @@ def test_reviewable_and_unreleasable_ask_are_distinct() -> None:
         eligibility=_eligibility(task_fact_present=False),
     )
     assert missing_task.authority.approval_release == "forbidden"
+
+
+@pytest.mark.parametrize(
+    ("approval_binding_eligible", "action_ir_complete", "task_fact_present"),
+    product((False, True), repeat=3),
+)
+def test_ask_approval_binding_eligibility_truth_table(
+    approval_binding_eligible: bool,
+    action_ir_complete: bool,
+    task_fact_present: bool,
+) -> None:
+    result = _select(
+        mode="active",
+        current="allow",
+        raw="ask",
+        eligibility=_eligibility(
+            approval_binding_eligible=approval_binding_eligible,
+            action_ir_complete=action_ir_complete,
+            task_fact_present=task_fact_present,
+        ),
+    )
+    reviewable = all(
+        (approval_binding_eligible, action_ir_complete, task_fact_present)
+    )
+
+    assert result.authority.approval_release == (
+        "strong_binding_required" if reviewable else "forbidden"
+    )
+    assert (result.selected_decision.approval_intent is not None) is reviewable
 
 
 def test_decision_authority_evidence_is_strict_complete_and_critical() -> None:

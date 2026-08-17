@@ -260,6 +260,7 @@ class V21SelectionEligibility(BaseModel):
     ownership_valid: bool
     action_ir_complete: bool
     task_fact_present: bool
+    approval_binding_eligible: bool
 
     @property
     def active_authority_valid(self) -> bool:
@@ -708,6 +709,7 @@ def _approval_release(
     )
     reviewable = all(
         (
+            eligibility.approval_binding_eligible,
             eligibility.action_ir_complete,
             eligibility.task_fact_present,
             fingerprints_complete,
