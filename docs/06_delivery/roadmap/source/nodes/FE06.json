@@ -1,30 +1,37 @@
 {
-  "schema_version": "1.0.0",
-  "id": "FE06",
-  "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "fe",
-  "lifecycle": "not_started",
-  "revision": 1,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "dashboard-types-mappers-store"
   ],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
-      "heading": "## 13. 前端 PR 拆分",
-      "line_hint": 662
-    }
-  ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "FE-RSC-06 — CT fact and Provenance compatibility mapper",
+  "hold": false,
+  "id": "FE06",
+  "kind": "task",
+  "lane": "fe",
+  "lifecycle": "in_progress",
   "notes": [
     "Observed compatibility-mapper implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
-  ]
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "## 13. 前端 PR 拆分",
+      "line_hint": 662,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
+    }
+  ],
+  "work": {
+    "base_sha": "6193dc48d98b6890ee3a760891ac37ebf47849c8",
+    "branch": "codex/fe06-reconcile",
+    "owner": "codex",
+    "started_at": "2026-08-17T10:03:59Z",
+    "substate": "active",
+    "worktree_slug": "FE06-reconcile"
+  }
 }
