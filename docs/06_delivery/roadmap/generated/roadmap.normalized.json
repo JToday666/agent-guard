@@ -9230,62 +9230,6 @@
       "blocked_reasons": [],
       "can_activate": true,
       "can_exit": true,
-      "can_start": false,
-      "change_surfaces": [
-        "audit-schema-and-storage"
-      ],
-      "effective_status": "in_progress",
-      "evidence_gap": true,
-      "evidence_items": [],
-      "evidence_refs": [],
-      "exact_title": "CT-PR-05 — Memory Bridge",
-      "exit_blockers": [],
-      "hold": false,
-      "id": "CT05",
-      "incoming_edges": [
-        "E-025-CT03B-CT05",
-        "E-153-S1-CT05"
-      ],
-      "kind": "task",
-      "lane": "ct",
-      "lifecycle": "in_progress",
-      "notes": [],
-      "optional": false,
-      "outgoing_edges": [
-        "E-031-CT05-CT06",
-        "E-064-CT05-I03",
-        "E-155-CT05-G-A"
-      ],
-      "resource_conflicts": [],
-      "revision": 1,
-      "roles": [
-        "task"
-      ],
-      "schema_version": "1.0.0",
-      "source_refs": [
-        {
-          "heading": "# 8. CT-PR-05 — Memory Bridge",
-          "line_hint": 268,
-          "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md"
-        }
-      ],
-      "topological_rank": 6,
-      "unmet_dependencies": [],
-      "work": {
-        "base_sha": "5b4430b0fa5e5b36cb4be97d1966bb66ad184147",
-        "branch": "codex/ct05-memory-bridge",
-        "owner": "implementation-owner",
-        "started_at": "2026-08-16T15:57:50Z",
-        "substate": "active",
-        "worktree_slug": "CT05"
-      }
-    },
-    {
-      "activation_blockers": [],
-      "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
       "can_start": true,
       "change_surfaces": [],
       "effective_status": "ready",
@@ -9327,6 +9271,149 @@
       "topological_rank": 6,
       "unmet_dependencies": [],
       "work": null
+    },
+    {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "audit-schema-and-storage"
+      ],
+      "effective_status": "completed",
+      "evidence_gap": false,
+      "evidence_items": [
+        {
+          "id": "EV-CT05-2E6B35F9BB2B",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-16T17:30:35Z",
+          "ref": "self-review:4ea9e8a",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "reviewed lifecycle authority binding, monotonic trust, idempotency, and legacy rebuild paths"
+        },
+        {
+          "id": "EV-CT05-3FCF3100EE76",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-16T17:30:22Z",
+          "ref": "4ea9e8a",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "CT05 Memory Bridge implementation commit"
+        },
+        {
+          "id": "EV-CT05-6C99542E4040",
+          "kind": "rollback",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-16T17:30:40Z",
+          "ref": "flag:AGENTGUARD_CT_FACT_PROJECTION_ENABLED",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "default-off rollback verified; projector.3 rows require derived-row rebuild before binary downgrade"
+        },
+        {
+          "id": "EV-CT05-718A2F92D931",
+          "kind": "test",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-16T17:30:27Z",
+          "ref": "local:pytest-ct05-141",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "141 focused lifecycle, replay, restart, provenance, and delta tests passed"
+        },
+        {
+          "id": "EV-CT05-9AE547A4229C",
+          "kind": "e2e",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-16T17:30:31Z",
+          "ref": "local:memory-restart-loaded-from-memory",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "service restart rebuild preserves PERSISTENT_UNTRUSTED on loaded_from_memory flow"
+        },
+        {
+          "id": "EV-CT05-AF9C26AACFB0",
+          "kind": "commit",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-17T01:49:16Z",
+          "ref": "348cf7b98eb5232cf4d206bd1714c8ab69b6cd33",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "PR #164 merged CT05 implementation into origin/dev"
+        },
+        {
+          "id": "EV-CT05-BB01DD16586C",
+          "kind": "ci",
+          "metadata": {},
+          "node_id": "CT05",
+          "recorded_at": "2026-08-17T01:49:21Z",
+          "ref": "github-actions:31985587787",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "PR #164 all 15 CI checks passed, including Python/PostgreSQL and Dashboard E2E"
+        }
+      ],
+      "evidence_refs": [
+        "evidence/CT05/EV-CT05-2E6B35F9BB2B.json",
+        "evidence/CT05/EV-CT05-3FCF3100EE76.json",
+        "evidence/CT05/EV-CT05-6C99542E4040.json",
+        "evidence/CT05/EV-CT05-718A2F92D931.json",
+        "evidence/CT05/EV-CT05-9AE547A4229C.json",
+        "evidence/CT05/EV-CT05-AF9C26AACFB0.json",
+        "evidence/CT05/EV-CT05-BB01DD16586C.json"
+      ],
+      "exact_title": "CT-PR-05 — Memory Bridge",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "CT05",
+      "incoming_edges": [
+        "E-025-CT03B-CT05",
+        "E-153-S1-CT05"
+      ],
+      "kind": "task",
+      "lane": "ct",
+      "lifecycle": "completed",
+      "notes": [],
+      "optional": false,
+      "outgoing_edges": [
+        "E-031-CT05-CT06",
+        "E-064-CT05-I03",
+        "E-155-CT05-G-A"
+      ],
+      "resource_conflicts": [],
+      "revision": 2,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "# 8. CT-PR-05 — Memory Bridge",
+          "line_hint": 268,
+          "path": "docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/08_实施拆PR与三轨并行计划.md"
+        }
+      ],
+      "topological_rank": 6,
+      "unmet_dependencies": [],
+      "work": {
+        "base_sha": "5b4430b0fa5e5b36cb4be97d1966bb66ad184147",
+        "branch": "codex/ct05-memory-bridge",
+        "completed_commit": "348cf7b98eb5232cf4d206bd1714c8ab69b6cd33",
+        "owner": "implementation-owner",
+        "started_at": "2026-08-16T15:57:50Z",
+        "substate": "closed",
+        "worktree_slug": "CT05"
+      }
     },
     {
       "activation_blockers": [],
@@ -9468,12 +9555,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: guard-api-production-wiring"
@@ -9510,12 +9591,6 @@
       ],
       "resource_conflicts": [
         {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        },
-        {
           "node_id": "R05",
           "surfaces": [
             "guard-api-production-wiring"
@@ -9542,8 +9617,7 @@
     },
     {
       "activation_blockers": [
-        "E-030-CT04-CT06",
-        "E-031-CT05-CT06"
+        "E-030-CT04-CT06"
       ],
       "blocked": false,
       "blocked_reasons": [
@@ -9552,18 +9626,6 @@
           "from": "CT04",
           "id": "E-030-CT04-CT06",
           "rationale": "CT06 requires CT04."
-        },
-        {
-          "constraint": "start",
-          "from": "CT05",
-          "id": "E-031-CT05-CT06",
-          "rationale": "CT06 requires CT05."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
         },
         {
           "constraint": "start/activate/exit",
@@ -9585,8 +9647,7 @@
       "evidence_refs": [],
       "exact_title": "CT-PR-06 — Declassification Evidence",
       "exit_blockers": [
-        "E-030-CT04-CT06",
-        "E-031-CT05-CT06"
+        "E-030-CT04-CT06"
       ],
       "hold": false,
       "id": "CT06",
@@ -9606,12 +9667,6 @@
         "E-156-CT06-G-A"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -9633,8 +9688,7 @@
       ],
       "topological_rank": 11,
       "unmet_dependencies": [
-        "E-030-CT04-CT06",
-        "E-031-CT05-CT06"
+        "E-030-CT04-CT06"
       ],
       "work": null
     },
@@ -10446,21 +10500,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        }
-      ],
-      "can_activate": false,
-      "can_exit": false,
-      "can_start": false,
+      "blocked_reasons": [],
+      "can_activate": true,
+      "can_exit": true,
+      "can_start": true,
       "change_surfaces": [
         "audit-schema-and-storage"
       ],
-      "effective_status": "not_ready",
+      "effective_status": "ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
@@ -10480,14 +10527,7 @@
         "E-105-RSC-CTPROV-FE07",
         "E-107-RSC-CTPROV-S2"
       ],
-      "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        }
-      ],
+      "resource_conflicts": [],
       "revision": 0,
       "roles": [
         "task"
@@ -10763,7 +10803,6 @@
     {
       "activation_blockers": [
         "E-063-CT04-I03",
-        "E-064-CT05-I03",
         "E-065-G-B-I03"
       ],
       "blocked": false,
@@ -10776,21 +10815,9 @@
         },
         {
           "constraint": "start",
-          "from": "CT05",
-          "id": "E-064-CT05-I03",
-          "rationale": "I03 requires CT05."
-        },
-        {
-          "constraint": "start",
           "from": "G-B",
           "id": "E-065-G-B-I03",
           "rationale": "I03 requires G-B."
-        },
-        {
-          "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
         },
         {
           "constraint": "start/activate/exit",
@@ -10813,7 +10840,6 @@
       "exact_title": "INT-PR-03 — Cross-session Memory E2E",
       "exit_blockers": [
         "E-063-CT04-I03",
-        "E-064-CT05-I03",
         "E-065-G-B-I03"
       ],
       "hold": false,
@@ -10834,12 +10860,6 @@
         "E-144-I03-MASTER-FINAL"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -10862,7 +10882,6 @@
       "topological_rank": 13,
       "unmet_dependencies": [
         "E-063-CT04-I03",
-        "E-064-CT05-I03",
         "E-065-G-B-I03"
       ],
       "work": null
@@ -11076,12 +11095,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
@@ -11117,12 +11130,6 @@
         "E-077-C12-R-G-SR"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11170,12 +11177,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
@@ -11216,12 +11217,6 @@
         "E-131-ROL1-S5O"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -11270,12 +11265,6 @@
         },
         {
           "constraint": "start/activate/exit",
-          "from": "CT05",
-          "id": "resource:CT05",
-          "rationale": "exclusive surface conflict: audit-schema-and-storage"
-        },
-        {
-          "constraint": "start/activate/exit",
           "from": "R05",
           "id": "resource:R05",
           "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
@@ -11313,12 +11302,6 @@
         "E-078-I03-R-G-SR"
       ],
       "resource_conflicts": [
-        {
-          "node_id": "CT05",
-          "surfaces": [
-            "audit-schema-and-storage"
-          ]
-        },
         {
           "node_id": "R05",
           "surfaces": [
@@ -26785,9 +26768,10 @@
   ],
   "ready_queue": [
     "CT03R",
+    "RSC-CTPROV",
     "FE06"
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "e43102fd32b23d5cb94a4c190fb84e0f5f8595abba62b4e35e37a02594bde451"
+  "source_digest": "385b691bd89b7c25c2c9d363541129f9461f67a5ecf85d5e0ad812d0acce4fc8"
 }
