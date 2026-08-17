@@ -60,6 +60,7 @@ from agentguard_core import (
     PolicyBundle,
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.actions.models import ActionIR
 from agentguard_core.authority.models import EvaluationClock, SecurityStateScope
 from agentguard_core.decisions.evidence import (
     CoverageMap,
@@ -216,6 +217,9 @@ class V21PipelineMaterials:
     revoked_grant_ids: list[str]
     assessment: FastAssessment
     coverage: CoverageMap
+    # Exact ActionIR consumed by Core.  It stays transient and is used by the
+    # competition selector to distinguish strongly-bindable from forbidden ASK.
+    action_ir: ActionIR | None
     clock: EvaluationClock
     task_id: str | None
     scope_digest: str | None
@@ -234,8 +238,10 @@ class V21PhaseBOutcome:
     经 ``prepare_phase_c`` 产出 Phase C 投影计划与 state_delta_v21
     引用信封。
 
-    D11 finalize 确定性引用（仅 revalidate valid 且非降级路径产出；
-    stale/降级路径恒 None）：``final_decision_id`` =
+    D11 finalize 确定性产物（revalidate valid 时产出，包括预期 required-
+    state 缺态所形成的不可释放 ASK；stale 恒 None）：
+    ``raw_v21_decision`` 保存完整 ``GuardDecision``，既有
+    ``final_decision_id`` =
     ``derive_final_decision_id(assessment)``；``final_decision_digest``
     = finalize 产物 dump 的 canonical sha256。完整 GuardDecision 不落
     审计（shadow 期官方决策者恒 legacy，归 V21-11 再裁决）；引用经
@@ -245,6 +251,7 @@ class V21PhaseBOutcome:
     envelope: dict[str, Any]
     revalidation: RevalidationResult
     materials: V21PipelineMaterials
+    raw_v21_decision: GuardDecision | None = None
     final_decision_id: str | None = None
     final_decision_digest: str | None = None
 
@@ -567,6 +574,7 @@ class V21PipelineService:
             revoked_grant_ids=list(prepared.revoked_grant_ids),
             assessment=assessment,
             coverage=outcome.coverage,
+            action_ir=outcome.action_ir,
             clock=prepared.clock,
             task_id=prepared.task_id,
             scope_digest=prepared.scope_digest,
@@ -658,10 +666,17 @@ class V21PipelineService:
                 state_version=0,
                 coverage=materials.coverage,
             )
+            raw_v21_decision = GuardEngine().finalize(materials.assessment)
+            raw_v21_decision_digest = canonical_sha256(
+                raw_v21_decision.model_dump(mode="json")
+            )
             return V21PhaseBOutcome(
                 envelope=decision_evidence_v21_envelope(evidence),
                 revalidation=RevalidationResult(status="valid"),
                 materials=materials,
+                raw_v21_decision=raw_v21_decision,
+                final_decision_id=raw_v21_decision.decision_id,
+                final_decision_digest=raw_v21_decision_digest,
             )
 
         assert materials.scope_digest is not None
@@ -710,6 +725,7 @@ class V21PipelineService:
             coverage=materials.coverage,
             revalidation_stale_reason_codes=stale_codes,
         )
+        raw_v21_decision: GuardDecision | None = None
         final_decision_id: str | None = None
         final_decision_digest: str | None = None
         if revalidation.status == "valid":
@@ -718,15 +734,16 @@ class V21PipelineService:
             # （GuardEngine.finalize 内部同口径，禁 uuid）；产物以
             # 确定性引用留存审计 metadata，完整 GuardDecision 不落
             # 审计。stale/降级路径不产引用（恒 None）。
-            final_decision = GuardEngine().finalize(materials.assessment)
-            final_decision_id = final_decision.decision_id
+            raw_v21_decision = GuardEngine().finalize(materials.assessment)
+            final_decision_id = raw_v21_decision.decision_id
             final_decision_digest = canonical_sha256(
-                final_decision.model_dump(mode="json")
+                raw_v21_decision.model_dump(mode="json")
             )
         return V21PhaseBOutcome(
             envelope=decision_evidence_v21_envelope(evidence),
             revalidation=revalidation,
             materials=materials,
+            raw_v21_decision=raw_v21_decision,
             final_decision_id=final_decision_id,
             final_decision_digest=final_decision_digest,
         )

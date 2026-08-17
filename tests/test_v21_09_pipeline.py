@@ -676,6 +676,7 @@ def test_pipeline_phase_b_stale_task_digest() -> None:
     outcome = pipeline.build_phase_b(event, materials)
     assert outcome is not None
     assert outcome.revalidation.status == "stale"
+    assert outcome.raw_v21_decision is None
     assert "v21-09:stale_task_digest" in outcome.revalidation.reason_codes
     assert (
         _envelope_payload(outcome.envelope)["divergence_category"]
@@ -684,7 +685,7 @@ def test_pipeline_phase_b_stale_task_digest() -> None:
 
 
 # ---------------------------------------------------------------------------
-# D11：finalize 确定性引用（valid 分支产出；stale/降级/flag off 不产）
+# D11：finalize 确定性完整产物（valid 分支产出；stale/flag off 不产）
 # ---------------------------------------------------------------------------
 
 _FINALIZE_REFERENCE_KEYS = (
@@ -702,7 +703,7 @@ def _finalize_references(metadata: dict) -> dict:
 
 
 def test_pipeline_phase_b_finalize_reference_valid_only() -> None:
-    """D11：valid 分支产确定性引用（同输入同值）；降级路径恒 None。"""
+    """D11/LGV2-C：valid 分支产完整 raw decision 与确定性引用。"""
 
     pipeline, store = _pipeline_service()
     _commit_task_fact(store)
@@ -722,21 +723,31 @@ def test_pipeline_phase_b_finalize_reference_valid_only() -> None:
         .model_dump(mode="json")
     )
     assert outcome.final_decision_digest == expected_digest
+    assert outcome.raw_v21_decision == GuardEngine().finalize(materials.assessment)
     # 确定性：同输入重复调用同值。
     repeat = pipeline.build_phase_b(event, materials)
     assert repeat is not None
     assert repeat.final_decision_id == outcome.final_decision_id
     assert repeat.final_decision_digest == outcome.final_decision_digest
+    assert repeat.raw_v21_decision == outcome.raw_v21_decision
 
-    # snapshot 缺态降级路径：不产引用。
+    # 预期 required-state 缺态是可审计的 raw V2 ASK；selector 再将其标为
+    # forbidden（不可审批/释放），而不是伪造 Snapshot 或回落 allow。
     degraded = pipeline.run_phase_a(_event(event_id="evt_phase_b_notask"))
     assert degraded is not None and degraded.snapshot is None
     degraded_outcome = pipeline.build_phase_b(
         _event(event_id="evt_phase_b_notask"), degraded
     )
     assert degraded_outcome is not None
-    assert degraded_outcome.final_decision_id is None
-    assert degraded_outcome.final_decision_digest is None
+    assert degraded_outcome.raw_v21_decision is not None
+    assert degraded_outcome.raw_v21_decision.decision == "ask"
+    assert (
+        degraded_outcome.final_decision_id
+        == degraded_outcome.raw_v21_decision.decision_id
+    )
+    assert degraded_outcome.final_decision_digest == canonical_sha256(
+        degraded_outcome.raw_v21_decision.model_dump(mode="json")
+    )
 
 
 def test_pipeline_e2e_valid_finalize_reference_deterministic() -> None:

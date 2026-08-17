@@ -28,8 +28,9 @@ refs 上限与截断（``11_决策记录_V21-08前置.md`` D4，IMPLEMENTATION �
   ``failure_kind="stale"`` 降级并把 ``divergence_category`` 归受控
   类目 ``degraded_stale_judgment``（``12_决策记录_V21-09前置.md``
   D8；01 §22 枚举已含 ``"stale"``，无新增枚举值）；
-- ``final_decision = legacy_decision``（04 §1-§2：shadow 期 legacy 是
-  唯一官方决策者）；
+- ``final_decision`` 默认等于 ``legacy_decision``（04 §1-§2：shadow
+  期 legacy 是唯一官方决策者）；competition selector 可显式传入其
+  authoritative selected result，默认路径仍逐字节不变；
 - ``semantic_judgment_id`` / ``semantic_digest`` 恒 ``None``（V21-13
   预留）；
 - envelope 复用既有 ``decision_v21_envelope()``（不改）。
@@ -135,6 +136,7 @@ def build_decision_evidence_v21(
     state_version: int,
     coverage: CoverageMap,
     mode: EvidenceMode = "shadow",
+    selected_decision: Decision | None = None,
     revalidation_stale_reason_codes: Sequence[str] = (),
 ) -> DecisionEvidenceV21:
     """组装 shadow 期 ``DecisionEvidenceV21``（§14 九项逐项落字段）。
@@ -153,8 +155,11 @@ def build_decision_evidence_v21(
       全集），默认 ``"shadow"``（``12_决策记录_V21-09前置.md`` D1：
       V21-09 阶段 mode 恒 shadow，调用方只传默认值）。传入
       ``"limited_enable"`` / ``"active"`` 属 V21-11 启用范畴，仅解除
-      硬编码预留传值通道；无论何种 mode，``final_decision`` 恒取
-      ``legacy_decision``（shadow 期官方决策者是 legacy）；
+      硬编码预留传值通道；
+    - ``selected_decision``：authoritative selector 已选择的真实结果。
+      缺省 ``None`` 时仍取 ``legacy_decision``，保证既有 shadow 调用的
+      序列化输出逐字节不变；competition limited/active 调用方必须显式
+      传入同一个 selected ``GuardDecision.decision``；
     - ``revalidation_stale_reason_codes``：Phase B revalidate 返回
       stale 时的漂移 reason codes（``v21-09:stale_*``）；缺省空表 →
       行为与 V21-08 逐字节一致。非空时登记 ``failure_kind="stale"``
@@ -266,7 +271,9 @@ def build_decision_evidence_v21(
         semantic_digest=None,  # V21-13 预留。
         legacy_decision=legacy_decision,
         v21_fast_disposition=assessment.disposition,
-        final_decision=legacy_decision,  # shadow 期官方决策者是 legacy。
+        final_decision=(
+            legacy_decision if selected_decision is None else selected_decision
+        ),
         mode=mode,
         divergence_category=divergence_category,
         evidence_refs=[],

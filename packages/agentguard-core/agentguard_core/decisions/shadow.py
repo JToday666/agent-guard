@@ -148,6 +148,11 @@ class ShadowOutcome:
 
     assessment: FastAssessment
     coverage: CoverageMap
+    # Exact transient ActionIR consumed by authority/flow/fusion.  It is not
+    # part of the frozen FastAssessment or persisted evidence schema; the
+    # competition selector uses presence of this object to decide whether an
+    # ASK can be strongly bound and released by a human approval.
+    action_ir: ActionIR | None
     # Exact digest of the transient overlay that reached every Core component.
     # ``None`` means no overlay was supplied or assessment degraded before the
     # overlay was fully consumed; callers must not commit/project that bundle.
@@ -652,6 +657,7 @@ def _assess_kernel(
     return ShadowOutcome(
         assessment=finalized,
         coverage=coverage,
+        action_ir=action_ir,
         consumed_overlay_digest=consumed_overlay_digest,
     )
 

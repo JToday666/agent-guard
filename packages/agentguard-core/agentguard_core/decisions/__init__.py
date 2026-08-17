@@ -34,6 +34,12 @@ __all__ = [
     "FusionMemoryRule",
     "FastAssessment",
     "GuardDecision",
+    "CompetitionActivationManifestV1",
+    "DecisionAuthority",
+    "DecisionAuthorityEvidenceV1",
+    "V21AuthoritySelectionError",
+    "V21SelectionEligibility",
+    "V21SelectionResult",
     "RuntimeBindingCheckStatus",
     "RuntimeEnforcementEvidence",
     "RuntimeEnforcementGateState",
@@ -46,6 +52,13 @@ __all__ = [
     "dedupe_evidence_groups",
     "evaluate_fusion",
     "load_fusion_matrix",
+    "build_competition_activation_manifest",
+    "build_decision_authority_evidence",
+    "build_v21_official_decision",
+    "decision_authority_envelope",
+    "match_limited_paths",
+    "select_v21_authority",
+    "verify_competition_activation_manifest",
 ]
 
 # V21-08 fusion 求值器（纯新增导出）。必须放在本文件末尾：fusion 依赖
@@ -64,3 +77,18 @@ from .fusion import (  # noqa: E402
     load_fusion_matrix,
 )
 from .evidence import FastAssessment  # noqa: E402
+from .competition import (  # noqa: E402
+    CompetitionActivationManifestV1,
+    DecisionAuthority,
+    DecisionAuthorityEvidenceV1,
+    V21AuthoritySelectionError,
+    V21SelectionEligibility,
+    V21SelectionResult,
+    build_competition_activation_manifest,
+    build_decision_authority_evidence,
+    build_v21_official_decision,
+    decision_authority_envelope,
+    match_limited_paths,
+    select_v21_authority,
+    verify_competition_activation_manifest,
+)
