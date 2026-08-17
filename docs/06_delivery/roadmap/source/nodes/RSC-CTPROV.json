@@ -17,7 +17,7 @@
   "lane": "integration",
   "lifecycle": "completed",
   "notes": [
-    "Observed implementation landed in origin/dev at b814a67 via PR #159 before this node completed the formal claim lifecycle; keep ready until a dedicated reconciliation claim records ownership and exit evidence."
+    "Implementation landed in origin/dev at b814a67 via PR #159 before the formal claim; the dedicated reconciliation lifecycle is now complete with verified exit evidence."
   ],
   "optional": false,
   "revision": 3,
