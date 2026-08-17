@@ -10,6 +10,7 @@ import pytest
 from agentguard_langgraph_bench.bench.competition_models import (
     COMPETITION_CONFIG_SCHEMA_VERSION,
     CompetitionSuite,
+    authoritative_task_digest,
     canonical_sha256,
 )
 from agentguard_langgraph_bench.bench.competition_runner import (
@@ -174,7 +175,9 @@ class StubArmExecutor:
                     "status": "provisioned",
                     "task_id": f"task-{request.arm.arm_id}-{request.repeat_index}-{case.case_id}",
                     "trace_id": f"trace-{request.arm.arm_id}-{request.repeat_index}-{case.case_id}",
-                    "task_digest": canonical_sha256(case.input.payload),
+                            "task_digest": authoritative_task_digest(
+                                case.input.payload
+                            ),
                     "principal_id": request.profile.identity.principal_id,
                     "agent_id": request.profile.identity.agent_id,
                     "runtime_binding_id": request.profile.identity.runtime_binding_id,

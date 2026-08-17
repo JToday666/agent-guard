@@ -34,6 +34,7 @@ from .competition_models import (
     RteMode,
     V21Mode,
     V21RolloutMode,
+    authoritative_task_digest,
     canonical_sha256,
     load_competition_profile,
 )
@@ -1099,7 +1100,7 @@ def _validate_task_fact(
         )
     expected = {
         "status": "provisioned",
-        "task_digest": canonical_sha256(case.input.payload),
+        "task_digest": authoritative_task_digest(case.input.payload),
         "principal_id": request.profile.identity.principal_id,
         "agent_id": request.profile.identity.agent_id,
         "runtime_binding_id": request.profile.identity.runtime_binding_id,

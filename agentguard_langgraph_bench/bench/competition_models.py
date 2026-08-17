@@ -380,6 +380,20 @@ def canonical_sha256(value: Any) -> str:
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
+def authoritative_task_digest(task_text: str) -> str:
+    """Mirror the frozen TaskFact content projection for unconstrained cases."""
+
+    return canonical_sha256(
+        {
+            "schema_version": "2.1",
+            "task_summary": task_text,
+            "action_constraints": [],
+            "resource_constraints": [],
+            "destination_constraints": [],
+        }
+    )
+
+
 def load_competition_profile(
     profile: str = COMPETITION_PROFILE_ID,
     *,

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from agentguard_core.authority import TaskFact, task_digest_projection
 
 from agentguard_langgraph_bench.bench.competition_models import (
     COMPETITION_PROFILE_ID,
@@ -11,6 +12,7 @@ from agentguard_langgraph_bench.bench.competition_models import (
     CompetitionSuite,
     OfficialDecisionSource,
     V21RolloutMode,
+    authoritative_task_digest,
     load_competition_profile,
     parse_competition_profile,
 )
@@ -99,3 +101,23 @@ def test_profile_json_is_in_package_data() -> None:
 
     assert '"profiles/*.json"' in packaging
     assert "agentguard-langgraph-competition" in packaging
+
+
+def test_competition_task_digest_matches_authoritative_taskfact_projection() -> None:
+    fact = TaskFact(
+        task_id="task:test",
+        scope_digest="hmac-sha256:" + "a" * 64,
+        scope_key_id="competition-key",
+        principal_id="competition-langgraph-runner",
+        task_summary="summarize the public report",
+        task_digest="sha256:" + "0" * 64,
+        revision=1,
+        status="active",
+        action_constraints=[],
+        resource_constraints=[],
+        destination_constraints=[],
+        producer="guard_api_task_ingress",
+        evidence_refs=[],
+    )
+
+    assert authoritative_task_digest(fact.task_summary) == task_digest_projection(fact)
