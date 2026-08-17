@@ -411,13 +411,25 @@ function projectCompetitionAuthority(
   const activationRefDigest = stringValue(authority.activation_ref_digest);
   const selectedDecisionId = stringValue(selectedDecision.decision_id);
   const selectedDecisionValue = decisionValue(selectedDecision.decision);
-  const matchedPathIds = stringArray(authority.matched_path_ids);
-  const pathsValid = matchedPathIds.every((pathId) => COMPETITION_PATH_IDS.has(pathId));
+  const rawMatchedPathIds = authority.matched_path_ids;
+  const matchedPathIds = stringArray(rawMatchedPathIds);
+  const pathsValid =
+    Array.isArray(rawMatchedPathIds) &&
+    matchedPathIds.length === rawMatchedPathIds.length &&
+    matchedPathIds.every((pathId) => COMPETITION_PATH_IDS.has(pathId)) &&
+    matchedPathIds.length === new Set(matchedPathIds).size &&
+    matchedPathIds.every((pathId, index) => index === 0 || matchedPathIds[index - 1]! < pathId);
   const semanticsValid =
     (source === "current" && selectionBasis === "current" && legacyFloorApplied === false) ||
     (source === "v21" &&
       ((mode === "limited_enable" && selectionBasis === "path_allowlist") ||
         (mode === "active" && selectionBasis === "profile_all")));
+  const approvalReleaseValid =
+    source === "current"
+      ? approvalRelease === "not_applicable"
+      : selectedDecisionValue === "ask"
+        ? approvalRelease === "strong_binding_required" || approvalRelease === "forbidden"
+        : approvalRelease === "not_applicable";
   if (
     payload.profile_id !== "competition-langgraph-v2" ||
     (source !== "current" && source !== "v21") ||
@@ -433,6 +445,7 @@ function projectCompetitionAuthority(
     !/^sha256:[0-9a-f]{64}$/.test(activationRefDigest) ||
     !pathsValid ||
     !semanticsValid ||
+    !approvalReleaseValid ||
     selectedDecisionId === null ||
     selectedDecisionValue === null ||
     selectedDecisionId !== primary.decisionId ||

@@ -7,6 +7,10 @@ const evaluationPageSource = readFileSync(
   new URL("../../pages/EvaluationPage.vue", import.meta.url),
   "utf8",
 );
+const executionInspectorSource = readFileSync(
+  new URL("../evidence/ExecutionStepInspector.vue", import.meta.url),
+  "utf8",
+);
 
 test("renders the competition report as a read-only competition-specific panel", () => {
   assert.match(evaluationPageSource, /<CompetitionReportPanel/);
@@ -16,4 +20,19 @@ test("renders the competition report as a read-only competition-specific panel",
   assert.match(panelSource, /V2 selected/);
   assert.match(panelSource, /Legacy floor/);
   assert.doesNotMatch(panelSource, /@click|<(?:button|select|input)\b/);
+});
+
+test("renders competition profile and matched paths in the read-only authority panel", () => {
+  const authorityPanel = executionInspectorSource.slice(
+    executionInspectorSource.indexOf('data-testid="competition-authority"'),
+    executionInspectorSource.indexOf('data-testid="context-manifest-panel"'),
+  );
+
+  assert.match(authorityPanel, /competitionAuthority\.profileId/);
+  assert.match(authorityPanel, /competitionAuthority\.source/);
+  assert.match(authorityPanel, /competitionAuthority\.mode/);
+  assert.match(authorityPanel, /competitionAuthority\.matchedPathIds/);
+  assert.match(authorityPanel, /competitionAuthority\.approvalRelease/);
+  assert.match(authorityPanel, /Matched paths/);
+  assert.doesNotMatch(authorityPanel, /@click|<(?:button|select|input)\b/);
 });

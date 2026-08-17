@@ -1789,9 +1789,9 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         },
     )
     context_event["runtime"] = "openclaw"
-    context_event["security_context"][
-        "user_task"
-    ] = "Summarize external documentation safely"
+    context_event["security_context"]["user_task"] = (
+        "Summarize external documentation safely"
+    )
     context_event["security_context"]["derived_paths"] = [
         "https://docs.example.test/context"
     ]
@@ -1833,9 +1833,9 @@ def test_openclaw_audit_evidence_contract_uses_security_context_and_real_targets
         },
     )
     result_event["runtime"] = "openclaw"
-    result_event["security_context"][
-        "user_task"
-    ] = "Summarize external documentation safely"
+    result_event["security_context"]["user_task"] = (
+        "Summarize external documentation safely"
+    )
     result_event["metadata"] = {
         "openclaw_hook": "tool_result_persist",
         "source_type": "",
@@ -3273,6 +3273,17 @@ def test_competition_report_round_trips_through_api_and_store() -> None:
         "metric",
         "report_count",
         "arm_count",
+        "arm_arithmetic",
+        "attempted_total",
+        "invalid_total",
+        "invalid_status_count",
+        "attempted_over_expected",
+        "incomplete_non_invalid_status",
+        "qualified_status",
+        "qualified_provider",
+        "provider_model_pair",
+        "blank_provider",
+        "qualified_matrix",
         "extra_field",
         "arm_extra_field",
     ],
@@ -3293,6 +3304,37 @@ def test_competition_report_rejects_invalid_payloads(invalid_case: str) -> None:
         report["invalid_case_runs"] = -1
     elif invalid_case == "arm_count":
         report["arms"][0]["attempted"] = -1
+    elif invalid_case == "arm_arithmetic":
+        report["arms"][0]["evaluable"] = 69
+    elif invalid_case == "attempted_total":
+        report["attempted_case_runs"] = 349
+    elif invalid_case == "invalid_total":
+        report["invalid_case_runs"] = 1
+    elif invalid_case == "invalid_status_count":
+        report["status"] = "invalid"
+        report["competition_qualified"] = False
+        report["invalid_case_runs"] = 2
+    elif invalid_case == "attempted_over_expected":
+        report["expected_case_runs"] = 349
+    elif invalid_case == "incomplete_non_invalid_status":
+        report["competition_qualified"] = False
+        report["expected_case_runs"] = 351
+    elif invalid_case == "qualified_status":
+        report["status"] = "functional_contract_failed"
+    elif invalid_case == "qualified_provider":
+        report["provider_id"] = None
+        report["model"] = None
+    elif invalid_case == "provider_model_pair":
+        report["competition_qualified"] = False
+        report["model"] = None
+    elif invalid_case == "blank_provider":
+        report["competition_qualified"] = False
+        report["provider_id"] = " "
+    elif invalid_case == "qualified_matrix":
+        report["arms"][0]["attempted"] = 69
+        report["arms"][0]["evaluable"] = 69
+        report["arms"][1]["attempted"] = 71
+        report["arms"][1]["evaluable"] = 71
     elif invalid_case == "arm_extra_field":
         report["arms"][0]["unexpected"] = True
     else:

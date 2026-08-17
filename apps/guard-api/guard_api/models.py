@@ -269,12 +269,73 @@ class CompetitionReport(BaseModel):
     arms: list[CompetitionArmReport] = Field(min_length=5, max_length=5)
 
     @model_validator(mode="after")
-    def validate_frozen_arm_roster(self) -> Self:
+    def validate_competition_contract(self) -> Self:
         arm_ids = [arm.arm_id for arm in self.arms]
         if len(set(arm_ids)) != len(arm_ids) or set(arm_ids) != _COMPETITION_ARM_IDS:
             raise ValueError(
                 "competition report must contain A0 through A4 exactly once"
             )
+
+        for arm in self.arms:
+            if arm.evaluable + arm.invalid != arm.attempted:
+                raise ValueError(
+                    f"competition arm {arm.arm_id} requires "
+                    "evaluable + invalid == attempted"
+                )
+
+        attempted_total = sum(arm.attempted for arm in self.arms)
+        invalid_total = sum(arm.invalid for arm in self.arms)
+        if attempted_total != self.attempted_case_runs:
+            raise ValueError(
+                "competition arm attempted counts must equal attempted_case_runs"
+            )
+        if self.attempted_case_runs > self.expected_case_runs:
+            raise ValueError("attempted_case_runs cannot exceed expected_case_runs")
+        expected_invalid_total = (
+            max(
+                1,
+                invalid_total,
+                self.expected_case_runs - self.attempted_case_runs,
+            )
+            if self.status == "invalid"
+            else invalid_total
+        )
+        if self.invalid_case_runs != expected_invalid_total:
+            raise ValueError(
+                "invalid_case_runs must match invalid rows and incomplete matrix slots"
+            )
+
+        provider_present = bool(self.provider_id and self.provider_id.strip())
+        model_present = bool(self.model and self.model.strip())
+        if provider_present != model_present:
+            raise ValueError("provider_id and model must be recorded together")
+        if self.provider_id is not None and not provider_present:
+            raise ValueError("provider_id cannot be blank")
+        if self.model is not None and not model_present:
+            raise ValueError("model cannot be blank")
+
+        if self.status != "invalid" and (
+            self.attempted_case_runs != self.expected_case_runs
+            or self.invalid_case_runs != 0
+        ):
+            raise ValueError(
+                "passed and functional_contract_failed reports require a complete, "
+                "evaluable matrix"
+            )
+        if self.competition_qualified:
+            if self.status != "passed":
+                raise ValueError("competition qualification requires status=passed")
+            if not provider_present or not model_present:
+                raise ValueError(
+                    "competition qualification requires provider_id and model"
+                )
+            if self.expected_case_runs != 350 or any(
+                arm.attempted != 70 or arm.evaluable != 70 or arm.invalid != 0
+                for arm in self.arms
+            ):
+                raise ValueError(
+                    "competition qualification requires the frozen 70x5 matrix"
+                )
         return self
 
 

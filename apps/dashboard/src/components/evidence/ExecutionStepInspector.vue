@@ -69,6 +69,14 @@
           data-testid="competition-authority"
         >
           <div>
+            <dt>Profile</dt>
+            <dd>
+              <code translate="no">{{
+                step.supervision.v21Assessment.competitionAuthority.profileId
+              }}</code>
+            </dd>
+          </div>
+          <div>
             <dt>Authority</dt>
             <dd>{{ step.supervision.v21Assessment.competitionAuthority.source }}</dd>
           </div>
@@ -92,6 +100,19 @@
           <div>
             <dt>ASK release</dt>
             <dd>{{ step.supervision.v21Assessment.competitionAuthority.approvalRelease }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>Matched paths</dt>
+            <dd>
+              <code
+                v-if="step.supervision.v21Assessment.competitionAuthority.matchedPathIds.length"
+                translate="no"
+                >{{
+                  step.supervision.v21Assessment.competitionAuthority.matchedPathIds.join(" · ")
+                }}</code
+              >
+              <span v-else>none</span>
+            </dd>
           </div>
           <div class="is-wide">
             <dt>Activation ref</dt>
