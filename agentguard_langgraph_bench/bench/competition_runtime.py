@@ -40,6 +40,7 @@ from guard_api.models import (
 from guard_api.services.task_ingress import TaskIngressService
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
+from pydantic import SecretStr
 
 from .competition_models import (
     ArmSpec,
@@ -498,7 +499,7 @@ def _provider_tool_call_preflight(request: ArmRunRequest) -> ModelExchangeEviden
         ) from exc
     llm = ChatOpenAI(
         model=provider.model,
-        api_key=provider.api_key,
+        api_key=SecretStr(provider.api_key),
         base_url=provider.base_url,
         temperature=0,
         timeout=provider.request_timeout,

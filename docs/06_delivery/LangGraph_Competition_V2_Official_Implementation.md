@@ -109,3 +109,34 @@ artifact 不可信。没有可用的 OpenAI-compatible provider 凭据时，只�
 receipt；恶意上下文经 Context Manifest 隔离后 deny/ask 且零副作用；
 reviewable ASK 经人工 allow-once、lease、start、单次调用和 terminal receipt。
 不使用 Mock、replay 或伪造外部 SaaS 副作用。
+
+## 6. 运行与制品导入
+
+正式五臂测评要求一个支持 Chat Completions 与 tool calling 的
+OpenAI-compatible endpoint。密钥只通过指定环境变量读取；命令行和 JSON
+配置都不接受明文密钥。输出目录必须是全新目录：
+
+```bash
+export COMPETITION_LLM_KEY='<provider key>'
+
+uv run python -m agentguard_langgraph_bench.bench.competition_runner run \
+  --profile competition-langgraph-v2 \
+  --suite product \
+  --full-corpus \
+  --artifacts /tmp/agentguard-competition-product \
+  --llm-provider-id <provider-id> \
+  --llm-model <model> \
+  --llm-base-url <https://provider.example/v1> \
+  --llm-api-key-env COMPETITION_LLM_KEY
+```
+
+退出码 `0`、`1`、`2` 分别表示完整通过、证据有效但功能契约失败、运行或
+证据无效。效果指标不决定退出码。成功或失败后均可查看 `result.json`；仅
+完整 A0–A4 运行会额外生成 `dashboard-evaluation-run.json`，其内容可直接
+作为 `POST /v1/evaluations` 的请求体导入 Dashboard。最终
+`sha256-manifest.json` 覆盖公开制品，临时 sandbox、原始 prompt/response 和
+provider 密钥不会复制进制品目录。
+
+在没有真实 provider 凭据时，可用 `contracts` 或 `demo` suite 配合单个
+`--case-id` 做开发诊断；这类结果始终标记为
+`competition_qualified=false`，不能替代 70×5 正式测评。
