@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from ipaddress import ip_address
 from pathlib import Path
 
+from agentguard_core import ReceiptEligibilityExpectation
+
 DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:123456@127.0.0.1:5432/agent_guard"
 DEFAULT_CONTROL_TOKEN = "demo-control-token"
 DEFAULT_ENVIRONMENT = "development"
@@ -158,9 +160,57 @@ class GuardApiSettings:
             "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED", default=False
         )
     )
+    # C10 profile-owned receipt population anchor.  A service may continue to
+    # accept legacy EvaluationRuns with all three values unset, but a typed
+    # pre-enable report is accepted only when the complete anchor is present.
+    evaluation_receipt_eligibility_revision: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_EVALUATION_RECEIPT_ELIGIBILITY_REVISION"
+        )
+    )
+    evaluation_receipt_runtime_profile: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_EVALUATION_RECEIPT_RUNTIME_PROFILE"
+        )
+    )
+    evaluation_receipt_eligibility_digest: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_EVALUATION_RECEIPT_ELIGIBILITY_DIGEST"
+        )
+    )
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
+
+    def evaluation_receipt_eligibility_expectation(
+        self,
+    ) -> ReceiptEligibilityExpectation | None:
+        """Return the configured C10 anchor, or ``None`` for legacy-only mode."""
+
+        values = (
+            self.evaluation_receipt_eligibility_revision,
+            self.evaluation_receipt_runtime_profile,
+            self.evaluation_receipt_eligibility_digest,
+        )
+        if not any(values):
+            return None
+        if not all(values):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_EVALUATION_RECEIPT_ELIGIBILITY_REVISION, "
+                "AGENTGUARD_EVALUATION_RECEIPT_RUNTIME_PROFILE and "
+                "AGENTGUARD_EVALUATION_RECEIPT_ELIGIBILITY_DIGEST must be "
+                "configured together"
+            )
+        try:
+            return ReceiptEligibilityExpectation(
+                eligibility_revision=self.evaluation_receipt_eligibility_revision,
+                runtime_profile=self.evaluation_receipt_runtime_profile,
+                eligibility_digest=self.evaluation_receipt_eligibility_digest,
+            )
+        except ValueError as exc:
+            raise GuardApiConfigurationError(
+                "AgentGuard evaluation receipt eligibility anchor is invalid"
+            ) from exc
 
     def audit_cursor_signing_key(self) -> bytes:
         """从控制令牌域隔离派生 cursor HMAC 密钥，不暴露原始令牌。"""
@@ -327,6 +377,10 @@ class GuardApiSettings:
             )
         if self.task_scope_configured():
             self.task_scope_signing_key()
+
+        # Validate an optional C10 anchor at startup without requiring it for
+        # existing EvaluationRun producers.
+        self.evaluation_receipt_eligibility_expectation()
 
         if self.rte05_strong_binding_enabled:
             if not self.v21_shadow_enabled:
