@@ -628,8 +628,9 @@ class V21PipelineService:
         ):
             # Competition-only contract B: model output is an inbound
             # observation, not a new outbound action. Detectors, signals and
-            # taint still run; only source/dataflow/memory coverage is N/A for
-            # this already server-attested event.
+            # taint still run. Source/dataflow are N/A for this already
+            # server-attested event; memory remains governed by its independent
+            # persistence/resource/lineage safeguards.
             assess_kwargs["source_dataflow_not_required_actions"] = frozenset(
                 {"model_call"}
             )

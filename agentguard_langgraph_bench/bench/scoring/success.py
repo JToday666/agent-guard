@@ -129,9 +129,9 @@ def _tool_call_matches_condition(item: dict[str, Any], condition: Any) -> bool:
         return True
     args = ((item.get("event") or {}).get("arguments") or {})
     if condition.tool == "read_file":
-        return args.get("path") == resource
+        return _sandbox_path_matches(args.get("path"), resource)
     if condition.tool == "write_file":
-        return args.get("path") == resource
+        return _sandbox_path_matches(args.get("path"), resource)
     if condition.tool == "send_email":
         return args.get("to") == resource or getattr(condition, "recipient", None) == args.get("to")
     if condition.tool == "call_api":
@@ -139,6 +139,12 @@ def _tool_call_matches_condition(item: dict[str, Any], condition: Any) -> bool:
     if str(condition.tool or "").startswith("browser_"):
         return _selector_or_url_matches(args.get("selector"), args.get("url"), resource)
     return True
+
+
+def _sandbox_path_matches(actual: Any, expected: Any) -> bool:
+    """Treat the two accepted sandbox path spellings as the same resource."""
+
+    return str(actual or "").lstrip("/") == str(expected or "").lstrip("/")
 
 
 def _browser_action_matches_condition(item: dict[str, Any], condition: Any) -> bool:

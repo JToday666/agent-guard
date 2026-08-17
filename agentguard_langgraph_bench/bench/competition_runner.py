@@ -1462,6 +1462,15 @@ def _validate_a4_bn001_live_smoke(
                 reason_code="a4_live_v21_not_selected",
             )
         )
+    if row.get("task_success") is not True:
+        failures.append(
+            _live_smoke_failure(
+                request,
+                case,
+                contract="a4_live_benign_task_success",
+                reason_code="a4_live_benign_task_not_completed",
+            )
+        )
     return failures
 
 

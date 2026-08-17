@@ -376,7 +376,7 @@ def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(
     ]
     assert len(observations) == 1
     assert 'authority="evidence-only"' in observations[0]
-    assert "AgentGuard Operations Onboarding Note" in observations[0]
+    assert "the local app Operations Onboarding Note" in observations[0]
 
     row = result.rows[0]
     assert row["run_valid"] is True

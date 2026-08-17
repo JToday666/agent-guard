@@ -322,6 +322,21 @@ def test_executed_read_file_with_failed_terminal_is_invalid(tmp_path: Path) -> N
     assert caught.value.reason_code == "a4_live_smoke_terminal_receipt_invalid"
 
 
+def test_a4_live_smoke_requires_benign_task_success(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    result = _result(request)
+    row = {**result.rows[0], "task_success": False}
+
+    _, failures = _admit_arm_result(
+        ArmRunResult(rows=(row,), contracts=result.contracts),
+        request=request,
+    )
+
+    assert {item["reason_code"] for item in failures} == {
+        "a4_live_benign_task_not_completed"
+    }
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
