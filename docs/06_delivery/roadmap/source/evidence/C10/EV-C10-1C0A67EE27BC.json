@@ -1,0 +1,11 @@
+{
+  "id": "EV-C10-1C0A67EE27BC",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "C10",
+  "recorded_at": "2026-08-17T06:51:38Z",
+  "ref": "local:c10-blocking-review-remediation-2026-08-17",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Blocking review remediated selective denominators, non-finite JSON loss, unknown ASR, unclassified divergence, caller-selected benign ASK, unstable ordering, sensitive refs, and documented the remaining untyped Guard field consumer gap"
+}

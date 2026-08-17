@@ -1,0 +1,11 @@
+{
+  "id": "EV-C10-15C528EA1EE5",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "C10",
+  "recorded_at": "2026-08-17T06:51:32Z",
+  "ref": "local:c10-core-correctness-237-passed",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "C10 trusted eligibility anchor, finite latency, divergence categories, ASR and label availability, canonical ordering, display-safe evidence, typed extension and known Guard extra gap: 237 focused Core regressions passed"
+}
