@@ -4,6 +4,7 @@ from math import inf, nan
 from typing import cast
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from agentguard_core import (
@@ -19,6 +20,8 @@ from agentguard_core import (
     validate_pre_enable_report,
 )
 from guard_api.models import EvaluationRun
+from guard_api.main import create_app
+from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from tests.support.auth import memory_store_with_adapter
 
 
@@ -531,24 +534,21 @@ def test_typed_evaluation_run_extension_rejects_forged_gate_claim() -> None:
         EvaluationRunPreEnableExtension.model_validate({"pre_enable_report": report})
 
 
-def test_current_guard_evaluation_run_extra_is_a_known_untyped_gap() -> None:
+def test_guard_evaluation_run_explicit_field_rejects_forged_gate_claim() -> None:
     report = _build_report().model_dump(mode="json")
     report["formal_gate_b"] = "passed"
-    run = EvaluationRun.model_validate(
-        {
-            "run_id": "eval-c10-known-untyped-gap",
-            "run_at": "2026-08-17T00:00:00+00:00",
-            "pre_enable_report": report,
-        }
-    )
 
-    # Known blocker until Guard API may add an explicit typed field after CT04M.
-    assert run.model_dump(mode="json")["pre_enable_report"]["formal_gate_b"] == "passed"
     with pytest.raises(ValidationError):
-        EvaluationRunPreEnableExtension.model_validate({"pre_enable_report": report})
+        EvaluationRun.model_validate(
+            {
+                "run_id": "eval-c10-typed-report",
+                "run_at": "2026-08-17T00:00:00+00:00",
+                "pre_enable_report": report,
+            }
+        )
 
 
-def test_pre_enable_report_roundtrips_through_untyped_extra_and_store() -> None:
+def test_pre_enable_report_roundtrips_through_typed_field_and_store() -> None:
     report = _build_report()
     expected = _expectation()
     report_payload = report.model_dump(mode="json")
@@ -580,6 +580,135 @@ def test_pre_enable_report_roundtrips_through_untyped_extra_and_store() -> None:
         )
         == report
     )
+
+
+def _api_settings(
+    descriptor: ReceiptEligibilityDescriptor | None = None,
+) -> GuardApiSettings:
+    eligibility = descriptor or _eligibility()
+    return GuardApiSettings(
+        control_token="control-secret",
+        storage_backend="memory",
+        evaluation_receipt_eligibility_revision=eligibility.eligibility_revision,
+        evaluation_receipt_runtime_profile=eligibility.runtime_profile,
+        evaluation_receipt_eligibility_digest=eligibility.eligibility_digest,
+    )
+
+
+def _run_payload(
+    report: PreEnableReport | dict[str, object],
+    *,
+    run_id: str = "eval-c10-api",
+) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "run_at": "2026-08-17T00:00:00+00:00",
+        "dataset_id": "reference-langgraph",
+        "dataset_version": "c10",
+        "pre_enable_report": (
+            report.model_dump(mode="json")
+            if isinstance(report, PreEnableReport)
+            else report
+        ),
+        "cases": [],
+    }
+
+
+def test_evaluation_api_typed_report_memory_readback_and_legacy_wire_compatibility() -> (
+    None
+):
+    client = TestClient(
+        create_app(store=memory_store_with_adapter(), settings=_api_settings())
+    )
+    headers = {"Authorization": "Bearer control-secret"}
+    report = _build_report()
+
+    created = client.post("/v1/evaluations", headers=headers, json=_run_payload(report))
+    readback = client.get("/v1/evaluations/eval-c10-api", headers=headers)
+    legacy = client.post(
+        "/v1/evaluations",
+        headers=headers,
+        json={
+            "run_id": "eval-c10-legacy",
+            "run_at": "2026-08-17T00:01:00+00:00",
+            "cases": [],
+        },
+    )
+
+    assert created.status_code == 200
+    assert readback.status_code == 200
+    assert readback.json()["pre_enable_report"] == report.model_dump(mode="json")
+    assert legacy.status_code == 200
+    assert "pre_enable_report" not in legacy.json()
+
+
+def test_evaluation_api_rejects_unconfigured_or_shrunk_receipt_population() -> None:
+    headers = {"Authorization": "Bearer control-secret"}
+    report = _build_report()
+    unconfigured = TestClient(
+        create_app(
+            store=memory_store_with_adapter(),
+            settings=GuardApiSettings(
+                control_token="control-secret", storage_backend="memory"
+            ),
+        )
+    ).post("/v1/evaluations", headers=headers, json=_run_payload(report))
+
+    smaller = _eligibility(("action-1", "action-2"))
+    smaller_report = _build_report(
+        _report_payload(smaller), expected=_expectation(smaller)
+    )
+    configured = TestClient(
+        create_app(store=memory_store_with_adapter(), settings=_api_settings())
+    )
+    shrunk = configured.post(
+        "/v1/evaluations",
+        headers=headers,
+        json=_run_payload(smaller_report, run_id="eval-c10-shrunk"),
+    )
+
+    assert unconfigured.status_code == 422
+    assert unconfigured.json()["error"]["code"] == (
+        "EVALUATION_RECEIPT_ELIGIBILITY_NOT_CONFIGURED"
+    )
+    assert shrunk.status_code == 422
+    assert shrunk.json()["error"]["code"] == ("EVALUATION_RECEIPT_ELIGIBILITY_MISMATCH")
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda report: report.update(formal_gate_b="passed"),
+        lambda report: report["failure_injection"][0].update(
+            reason_code="sk-proj-1234567890abcdef"
+        ),
+    ],
+)
+def test_evaluation_api_rejects_malformed_or_credential_report(mutation) -> None:
+    report = _build_report().model_dump(mode="json")
+    mutation(report)
+    client = TestClient(
+        create_app(store=memory_store_with_adapter(), settings=_api_settings())
+    )
+
+    response = client.post(
+        "/v1/evaluations",
+        headers={"Authorization": "Bearer control-secret"},
+        json=_run_payload(report, run_id="eval-c10-malformed"),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_evaluation_receipt_anchor_settings_are_all_or_none() -> None:
+    settings = GuardApiSettings(
+        storage_backend="memory",
+        evaluation_receipt_eligibility_revision="c10-revision-1",
+    )
+
+    with pytest.raises(GuardApiConfigurationError, match="configured together"):
+        settings.validate_for_startup()
 
 
 def test_evaluation_run_extension_has_one_fixed_json_safe_key() -> None:

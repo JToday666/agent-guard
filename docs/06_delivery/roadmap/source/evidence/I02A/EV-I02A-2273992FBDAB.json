@@ -1,0 +1,11 @@
+{
+  "id": "EV-I02A-2273992FBDAB",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "I02A",
+  "recorded_at": "2026-08-17T08:32:31Z",
+  "ref": "revert:i02a-reference-profile-extension",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Reverting I02A additive runner and typed Evaluation fields leaves current official evaluation, existing LangGraph behavior with context mode off, and existing Dashboard routes intact"
+}

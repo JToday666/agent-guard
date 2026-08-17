@@ -7,7 +7,13 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agentguard_core import ConfigAuditFinding, GuardDecision, new_id, utc_now_iso
+from agentguard_core import (
+    ConfigAuditFinding,
+    GuardDecision,
+    PreEnableReport,
+    new_id,
+    utc_now_iso,
+)
 from agentguard_core.actions.models import (
     ActionConstraint,
     DestinationConstraint,
@@ -233,6 +239,13 @@ class EvaluationRun(BaseModel):
     per_family: dict[str, Any] = Field(default_factory=dict)
     per_rule: dict[str, Any] = Field(default_factory=dict)
     cases: list[EvaluationCase] = Field(default_factory=list)
+    # C10 is an additive, observational extension.  Keeping the optional field
+    # explicit prevents an untyped ``extra`` payload from bypassing the frozen
+    # report contract while preserving the legacy wire shape when omitted.
+    pre_enable_report: PreEnableReport | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def fill_case_dataset_metadata(self) -> Self:

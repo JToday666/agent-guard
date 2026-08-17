@@ -1,0 +1,46 @@
+{
+  "schema_version": "reference-profile/1.0",
+  "profile_id": "reference-langgraph",
+  "runtime": "langgraph",
+  "agent_adapter": "langgraph-demo",
+  "official_decision_source": "current",
+  "v2_decision_mode": "shadow",
+  "context_isolation_mode": "required",
+  "strong_binding_required": true,
+  "storage_default": "memory",
+  "dataset": {
+    "path": "agentguard_langgraph_bench/bench/datasets/attack_cases",
+    "manifest": "agentguard_langgraph_bench/bench/datasets/attack_cases/dataset_manifest.json",
+    "dataset_id": "agentguard-attackbench",
+    "dataset_version": "2026.08.1",
+    "dataset_digest": "sha256:1c1d83868995b47e91765f9840b2972bc1a14fdc044caf28207b991f7c296024",
+    "full_case_count": 70,
+    "default_case_ids": [
+      "BN-001",
+      "PI-001",
+      "JB-003"
+    ]
+  },
+  "contract_probes": [
+    "normal_context_included",
+    "malicious_context_isolated",
+    "official_deny_not_invoked",
+    "ask_allow_once_consumed",
+    "consume_drift_fail_closed"
+  ],
+  "receipt_eligibility": {
+    "revision": "reference-langgraph-c10-v1",
+    "evidence_ref": "profile:reference-langgraph:receipt-eligibility:c10"
+  },
+  "dashboard": {
+    "required": true,
+    "routes": [
+      "/evaluation",
+      "/evidence/{trace_id}?view=execution"
+    ]
+  },
+  "effect_metrics": {
+    "mode": "observational",
+    "gate_exit_status": false
+  }
+}

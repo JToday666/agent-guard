@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import Cookie, FastAPI, Header
 
+from agentguard_core import validate_pre_enable_report
 from guard_api.auth import ApiAuthError
 from guard_api.models import EvaluationRun
 
@@ -89,6 +90,23 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         auth.verify_bearer(authorization, "evaluation:write")
+        if payload.pre_enable_report is not None:
+            expectation = context.settings.evaluation_receipt_eligibility_expectation()
+            if expectation is None:
+                raise ApiAuthError(
+                    "EVALUATION_RECEIPT_ELIGIBILITY_NOT_CONFIGURED",
+                    status_code=422,
+                )
+            try:
+                validate_pre_enable_report(
+                    payload.pre_enable_report,
+                    expected_receipt_eligibility=expectation,
+                )
+            except ValueError:
+                raise ApiAuthError(
+                    "EVALUATION_RECEIPT_ELIGIBILITY_MISMATCH",
+                    status_code=422,
+                ) from None
         return store.save_evaluation_run(payload)
 
     @app.get("/v1/evaluations")
