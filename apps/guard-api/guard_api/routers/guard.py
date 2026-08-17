@@ -44,4 +44,6 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         # releases that do not honor Field(exclude_if=...).
         if response.enforcement_binding is None:
             dumped.pop("enforcement_binding", None)
+        if response.context_plan is None:
+            dumped.pop("context_plan", None)
         return dumped

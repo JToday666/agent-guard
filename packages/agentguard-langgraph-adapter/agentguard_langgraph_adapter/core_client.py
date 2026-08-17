@@ -290,6 +290,11 @@ def _decision_with_top_level_approval(
     # runtime state through a generic model_dump().
     if "enforcement_binding" in response:
         enriched["enforcement_binding"] = response.get("enforcement_binding")
+    # ContextAssemblyPlan is returned beside the official decision.  Preserve
+    # it only on the transient PolicyDecision field; model_dump/audit/receipts
+    # exclude it by construction.
+    if "context_plan" in response:
+        enriched["context_plan"] = response.get("context_plan")
     return enriched
 
 

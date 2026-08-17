@@ -196,6 +196,9 @@ class PolicyDecision(BaseModel):
     # the untrusted raw shape for strict gateway validation, while excluding it
     # from repr/model_dump so it cannot leak through receipts or runtime state.
     enforcement_binding: Any | None = Field(default=None, exclude=True, repr=False)
+    # CT-PR-04 plan material is runtime-consumption input, never receipt/audit
+    # evidence.  It is intentionally transient just like strong binding data.
+    context_plan: Any | None = Field(default=None, exclude=True, repr=False)
 
     @property
     def blocked(self) -> bool:

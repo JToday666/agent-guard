@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04-B78F166C1CAD",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "CT04",
+  "recorded_at": "2026-08-17T05:43:35Z",
+  "ref": "local:ct04-focused-50+backend-236",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Context Builder, independent flag, authority/taint, plan binding, actual LLM input, fail-closed, and adapter regressions passed; pyright and ruff passed"
+}

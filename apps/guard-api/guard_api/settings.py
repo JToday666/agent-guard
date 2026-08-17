@@ -144,6 +144,13 @@ class GuardApiSettings:
             "AGENTGUARD_CT_FACT_PROJECTION_ENABLED", default=False
         )
     )
+    # CT-PR-04 logical/physical context isolation.  Independent and default
+    # off: no plan is built and the evaluate wire shape remains unchanged.
+    context_builder_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_CONTEXT_BUILDER_ENABLED", default=False
+        )
+    )
     # RTE-05 strong approval binding rollout gate.  Default-off preserves the
     # frozen C1 evaluate/wait behavior and performs no binding/lease writes.
     rte05_strong_binding_enabled: bool = field(

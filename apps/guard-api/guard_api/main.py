@@ -31,6 +31,7 @@ from guard_api.services import (
     AuditWindowRequestError,
     AuditWindowService,
     ConfigAuditService,
+    ContextBuilderService,
     CtProjectionService,
     EvaluationService,
     MemoryGuardService,
@@ -150,6 +151,12 @@ def create_app(
         store=store,
         state_service=security_state_service,
     )
+    context_builder_service = ContextBuilderService(
+        settings=settings,
+        store=store,
+        state_service=security_state_service,
+        policy_service=policy_service,
+    )
     memory_guard_service = MemoryGuardService(
         store=store,
         audit_service=audit_service,
@@ -163,6 +170,7 @@ def create_app(
         v21_shadow_service=v21_shadow_service,
         v21_pipeline=v21_pipeline_service,
         ct_projection_service=ct_projection_service,
+        context_builder_service=context_builder_service,
     )
     task_ingress_service = TaskIngressService(store=store, settings=settings)
 

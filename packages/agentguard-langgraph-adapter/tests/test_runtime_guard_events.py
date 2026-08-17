@@ -778,6 +778,9 @@ def test_legacy_audit_projection_keeps_checkpoints_separate_from_actions() -> No
             "source_type": "conversation",
             "source_trust": "untrusted",
             "summary": "external context",
+            "content_digest": "sha256:4f65281251384d39f2848fb7b3e53ce037a2c9ea65cec8e8dd2ba954c46f9fc0",
+            "role": "user",
+            "sequence_index": 0,
             "contains_instruction_like_text": False,
             "contains_sensitive_data": False,
         }

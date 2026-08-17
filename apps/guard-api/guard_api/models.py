@@ -14,6 +14,7 @@ from agentguard_core.actions.models import (
     ResourceConstraint,
 )
 from agentguard_core.decisions import ApprovalResolution
+from agentguard_core.security_context import ContextAssemblyPlan
 
 ADAPTER_CREDENTIAL_SCOPES = (
     "event:evaluate",
@@ -177,6 +178,12 @@ class GuardEvaluationResponse(BaseModel):
     # RTE-05 强绑定仅对 eligible/non-degraded ASK 动作产生。
     # ``exclude_if`` 保证 flag off / C1 响应键集与现有 wire 逐字节一致。
     enforcement_binding: EnforcementBinding | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # CT-PR-04 ephemeral plan.  It is returned only for a successfully built
+    # context_assembled event; flag-off and unavailable paths omit the key.
+    context_plan: ContextAssemblyPlan | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

@@ -277,6 +277,45 @@ def test_guard_evaluate_requires_adapter_token() -> None:
     assert payload["error"]["details"] == []
 
 
+def test_context_builder_flag_off_omits_context_plan_from_evaluate_wire() -> None:
+    app = create_app(
+        store=memory_store_with_adapter(),
+        settings=GuardApiSettings(context_builder_enabled=False),
+    )
+    client = TestClient(app)
+    payload = {
+        "event_id": "evt_context_flag_off",
+        "event_type": "context_assembled",
+        "runtime": "langgraph",
+        "trace_id": "trace_context_flag_off",
+        "timestamp": "2026-08-17T00:00:00+00:00",
+        "security_context": {"agent_id": "main"},
+        "payload": {
+            "sources": [
+                {
+                    "source_id": "source-web-1",
+                    "source_type": "web",
+                    "source_trust": "untrusted",
+                    "summary": "legacy evidence",
+                    "contains_instruction_like_text": False,
+                    "contains_sensitive_data": False,
+                }
+            ],
+            "will_enter_context": True,
+            "sanitized": False,
+        },
+    }
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert "context_plan" not in response.json()
+
+
 def test_guard_evaluate_rejects_wrong_schema_version() -> None:
     app = create_app(
         store=memory_store_with_adapter(),

@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from .config import AgentGuardLangGraphConfig
+from .context_guard import (
+    ContextPlanValidationError,
+    PreparedContext,
+    REFERENCE_RUNTIME_FACT,
+    context_content_digest,
+    context_plan_digest,
+    validate_and_prepare_context,
+)
 from .core_client import (
     AgentGuardCoreClient,
     CoreClientError,
@@ -45,6 +53,9 @@ from .tool_compat import (
 __all__ = [
     "AgentGuardCoreClient",
     "AgentGuardLangGraphConfig",
+    "ContextPlanValidationError",
+    "PreparedContext",
+    "REFERENCE_RUNTIME_FACT",
     "AuditEvent",
     "CoreClientError",
     "CoreClientProtocol",
@@ -73,4 +84,7 @@ __all__ = [
     "ToolCompatibilityResult",
     "tool_result_with_compatibility",
     "create_guarded_tool_node",
+    "context_content_digest",
+    "context_plan_digest",
+    "validate_and_prepare_context",
 ]
