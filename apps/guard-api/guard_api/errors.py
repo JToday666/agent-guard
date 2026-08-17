@@ -53,6 +53,9 @@ _ERROR_MESSAGES = {
     "POLICY_EVALUATION_WRITE_FORBIDDEN": (
         "policy_evaluation records can only be written by POST /v1/guard/evaluate."
     ),
+    "CONTEXT_MANIFEST_WRITE_FORBIDDEN": (
+        "Context Manifest records can only be written by the Guard API Context Builder."
+    ),
     "RUNTIME_OUTCOME_INVALID": "Runtime outcome receipt failed strict validation.",
     "RUNTIME_OUTCOME_PARENT_NOT_FOUND": (
         "Runtime outcome receipt does not reference a policy evaluation."
