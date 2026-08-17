@@ -1,0 +1,11 @@
+{
+  "id": "EV-CT04-7257FC0F23E0",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "CT04",
+  "recorded_at": "2026-08-17T05:43:44Z",
+  "ref": "self-review:ct04-authority-boundary",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "Independent review found and implementation fixed untrusted system-role injection, provider credential leakage, and accidental V21 shadow flag coupling"
+}

@@ -475,6 +475,15 @@ class CtProjectionService:
         self._store = store
         self._state_service = state_service
         self._enabled = bool(settings.ct_fact_projection_enabled)
+        # CT-PR-04 shares this service's FactBuildInputs/Fact Authority path.
+        # It may build ephemeral facts without enabling post-commit projection.
+        self._fact_building_requested = bool(
+            settings.ct_fact_projection_enabled
+            or (
+                settings.context_builder_enabled
+                and settings.v21_shadow_enabled
+            )
+        )
         self._server_secret = self._load_server_secret(settings)
 
     def _load_server_secret(self, settings: GuardApiSettings) -> bytes | None:
@@ -484,7 +493,7 @@ class CtProjectionService:
         硬编码兜底密钥；flag off 时不读取任何密钥配置。
         """
 
-        if not self._enabled:
+        if not self._fact_building_requested:
             return None
         try:
             secret = settings.v21_shadow_server_secret_bytes()
@@ -506,6 +515,12 @@ class CtProjectionService:
         """flag 且 secret 均已就绪（调用方诊断/编排切换判定）。"""
 
         return self._enabled and self._server_secret is not None
+
+    @property
+    def fact_building_enabled(self) -> bool:
+        """Whether Gate A/Context Builder can share one transient bundle."""
+
+        return self._fact_building_requested and self._server_secret is not None
 
     # ------------------------------------------------------------------
     # 事务外：bundle 构建与 commit 信封装配
@@ -539,7 +554,7 @@ class CtProjectionService:
         ``build_commit_plan`` 会拒绝把半截事实投影成历史。
         """
 
-        if not self.enabled:
+        if not self.fact_building_enabled:
             return None
         try:
             return self._build_transient_bundle(event, materials)

@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from agentguard_langgraph_adapter.tool_gateway import adapter_submits_policy_audit
+from agentguard_langgraph_adapter.context_guard import (
+    ContextPlanValidationError,
+    REFERENCE_RUNTIME_FACT,
+    validate_and_prepare_context,
+)
 
 from ..adapter import LangGraphAdapter, create_guarded_tool_node
 from ..adapter.event_models import new_id
@@ -1679,6 +1684,7 @@ def build_tool_plan_with_llm(
     tools: MockToolRegistry,
     tool_results: list[dict[str, Any]] | None = None,
     round_index: int = 1,
+    model_messages: list[dict[str, Any]] | None = None,
 ) -> PlannerOutput:
     llm = _build_llm(config)
     use_json_planner = config.instrumentation_plan_mode == "autonomous" and (
@@ -1688,12 +1694,18 @@ def build_tool_plan_with_llm(
     lc_tools = [] if use_json_planner else _llm_visible_langchain_tools(case, tools)
     if not use_json_planner and not lc_tools:
         raise RuntimeError("No LangChain tools are available for LLM binding")
-    messages = _llm_messages_for_case(
-        case,
-        config,
-        tool_results=tool_results,
-        round_index=round_index,
-    )
+    messages: list[tuple[str, str]] | list[dict[str, Any]]
+    if model_messages is not None:
+        # Context isolation has already rebuilt the only model-authorized
+        # message list. Never regenerate a prompt from AttackCase here.
+        messages = [dict(message) for message in model_messages]
+    else:
+        messages = _llm_messages_for_case(
+            case,
+            config,
+            tool_results=tool_results,
+            round_index=round_index,
+        )
     contamination = check_agent_visible_prompt(messages) if config.prompt_contamination_check else {"found": False, "findings": []}
     llm_for_request = llm if use_json_planner else llm.bind_tools(lc_tools)
     message, diagnostics = _invoke_llm_with_diagnostics(
@@ -1767,7 +1779,7 @@ def _message_content(message: Any) -> str:
 
 def _invoke_llm_with_diagnostics(
     llm: Any,
-    messages: list[tuple[str, str]],
+    messages: list[tuple[str, str]] | list[dict[str, Any]],
     *,
     case: AttackCase,
     round_index: int,
@@ -1816,13 +1828,23 @@ def _invoke_llm_with_diagnostics(
     return message, diagnostics
 
 
-def _invoke_llm_with_wall_clock_timeout(llm: Any, messages: list[tuple[str, str]], *, timeout_seconds: float) -> Any:
+def _invoke_llm_with_wall_clock_timeout(
+    llm: Any,
+    messages: list[tuple[str, str]] | list[dict[str, Any]],
+    *,
+    timeout_seconds: float,
+) -> Any:
     if timeout_seconds <= 0:
         return llm.invoke(messages)
     return _invoke_llm_in_daemon_thread(llm, messages, timeout_seconds=timeout_seconds)
 
 
-def _invoke_llm_in_daemon_thread(llm: Any, messages: list[tuple[str, str]], *, timeout_seconds: float) -> Any:
+def _invoke_llm_in_daemon_thread(
+    llm: Any,
+    messages: list[tuple[str, str]] | list[dict[str, Any]],
+    *,
+    timeout_seconds: float,
+) -> Any:
     results: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
 
     def _target() -> None:
@@ -1843,7 +1865,7 @@ def _invoke_llm_in_daemon_thread(llm: Any, messages: list[tuple[str, str]], *, t
 
 
 def _llm_diagnostics_base(
-    messages: list[tuple[str, str]],
+    messages: list[tuple[str, str]] | list[dict[str, Any]],
     *,
     case: AttackCase,
     round_index: int,
@@ -1851,7 +1873,7 @@ def _llm_diagnostics_base(
     tool_schema_count: int,
     observation_count: int,
 ) -> dict[str, Any]:
-    prompt_chars = sum(len(str(content or "")) for _, content in messages)
+    prompt_chars = sum(len(str(_planner_message_content(item) or "")) for item in messages)
     return {
         "case_id": case.case_id,
         "round_index": round_index,
@@ -1864,6 +1886,12 @@ def _llm_diagnostics_base(
         "observation_count": observation_count,
         "tool_schema_count": tool_schema_count,
     }
+
+
+def _planner_message_content(item: tuple[str, str] | dict[str, Any]) -> Any:
+    if isinstance(item, tuple):
+        return item[1]
+    return item.get("content", "")
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:
@@ -2071,6 +2099,15 @@ def _max_tool_rounds_for_state(state: DemoState, config: BenchConfig) -> int:
     return max_rounds
 
 
+def _context_isolation_required(config: Any) -> bool:
+    return (
+        str(getattr(config, "context_isolation_mode", "off") or "off")
+        .strip()
+        .lower()
+        == "required"
+    )
+
+
 def plan_tools_for_case(case: AttackCase, config: BenchConfig, tools: MockToolRegistry) -> list[dict[str, Any]]:
     if _should_refuse_case(case, config):
         return []
@@ -2110,13 +2147,27 @@ def plan_tools_for_state(state: DemoState, config: BenchConfig, tools: MockToolR
     if not config.llm_enabled:
         return PlannerOutput(build_tool_plan_from_case(case) if round_index == 1 else [])
     tool_results = state.get("tool_results") or []
+    model_messages = (
+        [dict(item) for item in state.get("messages") or []]
+        if _context_isolation_required(config)
+        else None
+    )
     guided = _is_guided_instrumentation_case(case, config) or _should_use_guided_case_plan(case, config)
     if guided and _next_guided_plan_call(case, tool_results) is None:
         return PlannerOutput([])
     try:
-        output = _coerce_planner_output(build_tool_plan_with_llm(case, config, tools, tool_results=tool_results, round_index=round_index))
+        output = _coerce_planner_output(
+            build_tool_plan_with_llm(
+                case,
+                config,
+                tools,
+                tool_results=tool_results,
+                round_index=round_index,
+                model_messages=model_messages,
+            )
+        )
         calls = output.tool_calls
-        if _should_retry_memory_poisoning_protocol_miss(case, config, tool_results, calls, output.content):
+        if not _context_isolation_required(config) and _should_retry_memory_poisoning_protocol_miss(case, config, tool_results, calls, output.content):
             retry_results = [
                 {
                     "tool_name": "planner_protocol",
@@ -2139,7 +2190,7 @@ def plan_tools_for_state(state: DemoState, config: BenchConfig, tools: MockToolR
             diagnostics["unparseable_content"] = output.content
             output = PlannerOutput(retry_output.tool_calls, content=retry_output.content, diagnostics=diagnostics)
             calls = output.tool_calls
-        if _should_retry_prompt_injection_premature_null(case, config, tool_results, calls, output.content):
+        if not _context_isolation_required(config) and _should_retry_prompt_injection_premature_null(case, config, tool_results, calls, output.content):
             retry_results = [
                 *tool_results,
                 {
@@ -2163,7 +2214,7 @@ def plan_tools_for_state(state: DemoState, config: BenchConfig, tools: MockToolR
             diagnostics["premature_null_content"] = output.content
             output = PlannerOutput(retry_output.tool_calls, content=retry_output.content, diagnostics=diagnostics)
             calls = output.tool_calls
-        if _should_retry_memory_poisoning_premature_null(case, config, tool_results, calls, output.content):
+        if not _context_isolation_required(config) and _should_retry_memory_poisoning_premature_null(case, config, tool_results, calls, output.content):
             retry_results = [
                 *tool_results,
                 {
@@ -2188,7 +2239,11 @@ def plan_tools_for_state(state: DemoState, config: BenchConfig, tools: MockToolR
             output = PlannerOutput(retry_output.tool_calls, content=retry_output.content, diagnostics=diagnostics)
             calls = output.tool_calls
     except Exception:
-        if config.instrumentation_plan_mode == "autonomous" and config.autonomous_planner_recovery_retry:
+        if (
+            not _context_isolation_required(config)
+            and config.instrumentation_plan_mode == "autonomous"
+            and config.autonomous_planner_recovery_retry
+        ):
             try:
                 max_observations = max(1, int(config.autonomous_planner_recovery_max_observations))
                 recovery_output = _coerce_planner_output(
@@ -2420,6 +2475,10 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_ga
                 case_for_terminal = _case_from_state(state)
                 if _terminal_reason_from_tool_results(state.get("last_tool_results") or [], adapter.config, case_for_terminal) or not _should_continue_tool_loop(state, adapter.config):
                     break
+                if _context_isolation_required(adapter.config):
+                    state = _pre_model_capture(state, adapter)
+                    if state.get("stop_reason"):
+                        break
             state = _post_tool_capture(state, adapter.config)
             return _finalize_capture(state)
 
@@ -2449,7 +2508,11 @@ def build_demo_graph(adapter: LangGraphAdapter, tools: MockToolRegistry, tool_ga
     graph.add_conditional_edges(
         "guarded_tools",
         lambda state: _route_after_tools(state, adapter.config),
-        {"plan_tool": "plan_tool", "post_tool": "post_tool"},
+        {
+            "pre_model": "pre_model",
+            "plan_tool": "plan_tool",
+            "post_tool": "post_tool",
+        },
     )
     graph.add_edge("post_tool", "finalize")
     graph.add_edge("finalize", END)
@@ -2467,7 +2530,9 @@ def _route_after_pre_model(state: DemoState) -> str:
 def _route_after_tools(state: DemoState, config: BenchConfig) -> str:
     if _terminal_reason_from_tool_results(state.get("last_tool_results") or [], config, _case_from_state(state)):
         return "post_tool"
-    return "plan_tool" if _should_continue_tool_loop(state, config) else "post_tool"
+    if not _should_continue_tool_loop(state, config):
+        return "post_tool"
+    return "pre_model" if _context_isolation_required(config) else "plan_tool"
 
 
 def _should_continue_tool_loop(state: DemoState, config: BenchConfig) -> bool:
@@ -2577,6 +2642,19 @@ def _evaluate_runtime_guard(
     stage: str,
 ) -> DemoState:
     event, decision = evaluator()
+    return _apply_runtime_guard_result(
+        state, adapter, event=event, decision=decision, stage=stage
+    )
+
+
+def _apply_runtime_guard_result(
+    state: DemoState,
+    adapter: LangGraphAdapter,
+    *,
+    event: Any,
+    decision: Any,
+    stage: str,
+) -> DemoState:
     if adapter_submits_policy_audit(adapter):
         audit_event = adapter.build_audit_event(event, decision)
         adapter.submit_audit_event(audit_event)
@@ -2637,7 +2715,12 @@ def _event_type(event: Any) -> str:
 
 def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState:
     security = state.get("security") or {}
-    messages = state.get("messages") or []
+    messages = (
+        _planner_context_sources(state)
+        if _context_isolation_required(adapter.config)
+        else state.get("messages") or []
+    )
+    trace_id = state.get("trace_id") or security.get("trace_id") or new_id("trace")
     state = _append_lifecycle(
         state,
         "context_assembled",
@@ -2650,20 +2733,72 @@ def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState
             "contains_untrusted_context": security.get("source_trust") == "untrusted",
         },
     )
-    state = _evaluate_runtime_guard(
+    context_event, context_decision = adapter.evaluate_context(
+        sources=messages,
+        security=security,
+        trace_id=trace_id,
+        will_enter_context=True,
+        sanitized=False,
+    )
+    state = _apply_runtime_guard_result(
         state,
         adapter,
-        lambda: adapter.evaluate_context(
-            sources=messages,
-            security=security,
-            trace_id=state.get("trace_id") or security.get("trace_id") or new_id("trace"),
-            will_enter_context=True,
-            sanitized=False,
-        ),
+        event=context_event,
+        decision=context_decision,
         stage="pre_model_hook",
     )
     if state.get("stop_reason"):
         return state
+
+    plan_identity: dict[str, Any] = {}
+    isolation_mode = str(
+        getattr(adapter.config, "context_isolation_mode", "off") or "off"
+    ).strip().lower()
+    if isolation_mode not in {"off", "required"}:
+        return _context_isolation_block(
+            state, "context-plan:configuration_invalid"
+        )
+    if isolation_mode == "required":
+        event_payload = getattr(context_event, "payload", None)
+        event_sources = (
+            event_payload.get("sources") if isinstance(event_payload, dict) else None
+        )
+        if not isinstance(event_sources, list):
+            return _context_isolation_block(
+                state, "context-plan:event_sources_missing"
+            )
+        try:
+            prepared = validate_and_prepare_context(
+                event_id=str(getattr(context_event, "event_id", "") or ""),
+                runtime=str(getattr(context_event, "runtime", "") or ""),
+                sources=messages,
+                event_sources=event_sources,
+                context_plan=getattr(context_decision, "context_plan", None),
+            )
+        except ContextPlanValidationError as exc:
+            return _context_isolation_block(state, exc.code)
+        messages = [dict(message) for message in prepared.messages]
+        security = {
+            **security,
+            "visible_source_refs": list(prepared.visible_source_refs),
+        }
+        plan_identity = {
+            "context_plan_id": prepared.plan_id,
+            "context_plan_digest": prepared.plan_digest,
+            "context_ref": prepared.context_ref,
+            "visible_source_refs": list(prepared.visible_source_refs),
+        }
+        runtime_context = dict(state.get("runtime_context") or {})
+        runtime_context["context_isolation"] = {
+            "mode": "required",
+            **plan_identity,
+        }
+        state = {
+            **state,
+            "messages": messages,
+            "security": security,
+            "runtime_context": runtime_context,
+        }
     state = _append_lifecycle(
         state,
         "model_input_prepared",
@@ -2672,6 +2807,7 @@ def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState
         {
             "message_count": len(messages),
             "security_keys": sorted(security.keys()),
+            **plan_identity,
         },
     )
     return _evaluate_runtime_guard(
@@ -2680,13 +2816,86 @@ def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState
         lambda: adapter.evaluate_model_input(
             content=messages,
             security=security,
-            trace_id=state.get("trace_id") or security.get("trace_id") or new_id("trace"),
+            trace_id=trace_id,
             provider=getattr(adapter.config, "llm_provider", None),
             model=getattr(adapter.config, "llm_model", None),
             sanitized=False,
+            **plan_identity,
         ),
         stage="pre_model_hook",
     )
+
+
+def _context_isolation_block(state: DemoState, reason_code: str) -> DemoState:
+    runtime_context = dict(state.get("runtime_context") or {})
+    runtime_context["context_isolation"] = {
+        "mode": "required",
+        "status": "blocked",
+        "reason_code": reason_code,
+    }
+    blocked = {
+        **state,
+        "runtime_context": runtime_context,
+        "tool_calls": [],
+        "last_tool_results": [],
+        "stop_reason": "blocked",
+        "task_terminal": True,
+        "task_terminal_reason": "context_isolation_failed",
+        "completed_round_index": state.get("round_index"),
+    }
+    return _append_lifecycle(
+        blocked,
+        "policy_decided",
+        "pre_model_hook",
+        "Context isolation failed closed before model invocation.",
+        {
+            "guard_event_type": "context_assembled",
+            "decision": "deny",
+            "reason": "ContextAssemblyPlan validation failed.",
+            "reason_code": reason_code,
+            "rule_ids": ["AGENTGUARD_CONTEXT_PLAN_REQUIRED"],
+        },
+    )
+
+
+def _planner_context_sources(state: DemoState) -> list[dict[str, Any]]:
+    """Build the exact local sources evaluated for the next LLM request."""
+
+    case = AttackCase.model_validate(state["attack_case"])
+    sources: list[dict[str, Any]] = [
+        {
+            "source_id": "langgraph:runtime:planner-system",
+            "source_type": "runtime",
+            "source_trust": "trusted",
+            "role": "system",
+            # Server-verifiable fixed fact; changing either identity or bytes
+            # makes the Guard API exclude it instead of granting authority.
+            "content": REFERENCE_RUNTIME_FACT,
+        },
+        {
+            "source_id": f"langgraph:task:{case.case_id}",
+            "source_type": "user",
+            "source_trust": "trusted",
+            "role": "user",
+            # The server-issued TaskFact must match this content exactly.
+            "content": case.input.payload,
+        },
+    ]
+    recent_results = (state.get("tool_results") or [])[-MAX_PLANNER_OBSERVATIONS:]
+    for index, item in enumerate(recent_results):
+        observation = _deidentify_agent_visible_payload(
+            json.dumps(_tool_observation(item), ensure_ascii=False, sort_keys=True)
+        )
+        sources.append(
+            {
+                "source_id": f"langgraph:tool-result:{index}",
+                "source_type": "tool_result",
+                "source_trust": "untrusted",
+                "role": "tool",
+                "content": observation,
+            }
+        )
+    return sources
 
 
 def _plan_tool_capture(

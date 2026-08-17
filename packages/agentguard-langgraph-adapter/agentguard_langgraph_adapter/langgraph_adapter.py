@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from .config import AgentGuardLangGraphConfig
+from .context_guard import (
+    REFERENCE_RUNTIME_FACT,
+    context_content_digest,
+    source_content,
+    source_role,
+)
 from .core_client import (
     AgentGuardCoreClient,
     CoreClientError,
@@ -47,6 +54,27 @@ TOOL_METADATA = {
     "rag_answer": ("rag", "rag_answer", "answer"),
 }
 TRUSTED_SOURCE_TRUST = {"trusted", "verified", "sanitized", "clean"}
+_SENSITIVE_NAME_PATTERN = (
+    r"[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*"
+)
+_SENSITIVE_WORD_PATTERN = r"(?:api[_-]?key|token|secret|password|credential)"
+_CREDENTIAL_ASSIGNMENT_RE = re.compile(
+    rf"\b(?P<key>{_SENSITIVE_NAME_PATTERN}|{_SENSITIVE_WORD_PATTERN})"
+    r"(?P<sep>\s*[:=]\s*)"
+    r"(?P<quote>[\"']?)"
+    r"(?P<value>[^\s\"'`]+)"
+    r"(?P=quote)",
+    re.IGNORECASE,
+)
+_PROVIDER_KEY_RE = re.compile(
+    r"\b(?:"
+    r"sk-[A-Za-z0-9][A-Za-z0-9._-]{8,}"
+    r"|gh[pousr]_[A-Za-z0-9]{8,}"
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|AIza[0-9A-Za-z_-]{35}"
+    r")\b"
+)
 
 
 @dataclass(slots=True)
@@ -174,6 +202,10 @@ class LangGraphAdapter:
         model: str | None = None,
         sanitized: bool = False,
         tool_plan: list[dict[str, Any]] | None = None,
+        context_plan_id: str | None = None,
+        context_plan_digest: str | None = None,
+        context_ref: str | None = None,
+        visible_source_refs: list[str] | tuple[str, ...] | None = None,
     ) -> tuple[RuntimeGuardEvent, PolicyDecision]:
         event = self.build_model_event(
             phase="input",
@@ -184,6 +216,10 @@ class LangGraphAdapter:
             model=model,
             sanitized=sanitized,
             tool_plan=tool_plan,
+            context_plan_id=context_plan_id,
+            context_plan_digest=context_plan_digest,
+            context_ref=context_ref,
+            visible_source_refs=visible_source_refs,
         )
         return event, self.evaluate_guard_event(event)
 
@@ -374,6 +410,10 @@ class LangGraphAdapter:
         model: str | None = None,
         sanitized: bool = False,
         tool_plan: list[dict[str, Any]] | None = None,
+        context_plan_id: str | None = None,
+        context_plan_digest: str | None = None,
+        context_ref: str | None = None,
+        visible_source_refs: list[str] | tuple[str, ...] | None = None,
     ) -> RuntimeGuardEvent:
         normalized_phase = "output" if phase == "output" else "input"
         current_step = (
@@ -388,6 +428,35 @@ class LangGraphAdapter:
             agent_id=_config_agent_id(self.config),
         )
         preview = _preview(content)
+        payload: dict[str, Any] = {
+            "phase": normalized_phase,
+            "content_preview": preview,
+            "provider": provider,
+            "model": model,
+            "contains_instruction_like_text": _contains_instruction_like_text(
+                preview
+            ),
+            "contains_sensitive_data": _contains_sensitive_text(preview),
+            "sanitized": sanitized,
+            "tool_plan": tool_plan or [],
+        }
+        plan_identity = (
+            context_plan_id,
+            context_plan_digest,
+            context_ref,
+            visible_source_refs,
+        )
+        if any(item is not None for item in plan_identity):
+            if not all(item is not None for item in plan_identity):
+                raise ValueError("context plan model-input identity must be complete")
+            payload.update(
+                {
+                    "context_plan_id": context_plan_id,
+                    "context_plan_digest": context_plan_digest,
+                    "context_ref": context_ref,
+                    "visible_source_refs": list(visible_source_refs or ()),
+                }
+            )
         return RuntimeGuardEvent(
             event_type=current_step,
             runtime=self.config.runtime,
@@ -397,18 +466,7 @@ class LangGraphAdapter:
             is_malicious=security.get("is_malicious"),
             pre_execution=normalized_phase == "input",
             security_context=context,
-            payload={
-                "phase": normalized_phase,
-                "content_preview": preview,
-                "provider": provider,
-                "model": model,
-                "contains_instruction_like_text": _contains_instruction_like_text(
-                    preview
-                ),
-                "contains_sensitive_data": _contains_sensitive_text(preview),
-                "sanitized": sanitized,
-                "tool_plan": tool_plan or [],
-            },
+            payload=payload,
             metadata=_trusted_event_metadata(
                 security, adapter="agentguard_langgraph_adapter", hook=current_step
             ),
@@ -838,6 +896,8 @@ def _security_context(
 def _context_source_payload(
     source: Any, index: int, context: SecurityContext
 ) -> dict[str, Any]:
+    content = source_content(source)
+    full_content = _preview(content, limit=2_147_483_647)
     if isinstance(source, dict):
         summary = _preview(
             source.get("summary")
@@ -857,13 +917,24 @@ def _context_source_payload(
         source_id = f"langgraph:context:{index + 1}"
         source_type = context.source_type
         source_trust = context.source_trust
+    role = source_role(source)
+    instruction_like = _contains_instruction_like_text(full_content)
+    sensitive = _contains_sensitive_text(full_content)
+    # Arbitrary system prompts and detected secrets are never preview
+    # material. The one exception is the public, frozen reference-runtime fact
+    # whose exact bytes are required for server-side identity verification.
+    if sensitive or (role == "system" and full_content != REFERENCE_RUNTIME_FACT):
+        summary = ""
     return {
         "source_id": source_id,
         "source_type": source_type,
         "source_trust": source_trust,
         "summary": summary,
-        "contains_instruction_like_text": _contains_instruction_like_text(summary),
-        "contains_sensitive_data": _contains_sensitive_text(summary),
+        "content_digest": context_content_digest(content),
+        "role": role,
+        "sequence_index": index,
+        "contains_instruction_like_text": instruction_like,
+        "contains_sensitive_data": sensitive,
     }
 
 
@@ -1175,6 +1246,8 @@ def _contains_instruction_like_text(value: str) -> bool:
 
 
 def _contains_sensitive_text(value: str) -> bool:
+    if _PROVIDER_KEY_RE.search(value) or _CREDENTIAL_ASSIGNMENT_RE.search(value):
+        return True
     lowered = value.lower()
     return any(
         marker in lowered

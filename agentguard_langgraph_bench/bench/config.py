@@ -8,8 +8,10 @@ from pathlib import Path
 
 from agentguard_langgraph_adapter.config import (
     ApiMode,
+    ContextIsolationMode,
     DEFAULT_API_MODE,
     validate_api_mode,
+    validate_context_isolation_mode,
     warn_if_legacy_api_mode,
 )
 
@@ -195,6 +197,7 @@ class BenchConfig:
     tool_server_host: str = "127.0.0.1"
     tool_server_port: int = 18090
     core_api_mode: ApiMode = DEFAULT_API_MODE
+    context_isolation_mode: ContextIsolationMode = "off"
     strict_runtime_targets: bool = False
     agent_visible_payload_mode: str = DEFAULT_AGENT_VISIBLE_PAYLOAD_MODE
     closure_on_partial: bool = False
@@ -207,6 +210,9 @@ class BenchConfig:
 
     def __post_init__(self) -> None:
         self.core_api_mode = validate_api_mode(self.core_api_mode)
+        self.context_isolation_mode = validate_context_isolation_mode(
+            self.context_isolation_mode
+        )
         warn_if_legacy_api_mode(self.core_api_mode)
 
     @classmethod
@@ -255,6 +261,7 @@ class BenchConfig:
         tool_server_host: str | None = None,
         tool_server_port: int | None = None,
         core_api_mode: str | None = None,
+        context_isolation_mode: str | None = None,
         strict_runtime_targets: bool | None = None,
         agent_visible_payload_mode: str | None = None,
         closure_on_partial: bool | None = None,
@@ -391,6 +398,11 @@ class BenchConfig:
                 core_api_mode
                 or os.getenv("AGENTGUARD_CORE_API_MODE")
                 or DEFAULT_API_MODE
+            ),
+            context_isolation_mode=validate_context_isolation_mode(
+                context_isolation_mode
+                or os.getenv("AGENTGUARD_CONTEXT_ISOLATION_MODE")
+                or "off"
             ),
             strict_runtime_targets=(
                 _env_bool("AGENTGUARD_BENCH_STRICT_RUNTIME_TARGETS", False)

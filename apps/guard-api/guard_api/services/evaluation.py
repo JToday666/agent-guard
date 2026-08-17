@@ -38,6 +38,9 @@ from .memory import MemoryGuardService
 from .policy import PolicyService
 
 if TYPE_CHECKING:
+    from agentguard_core.security_context import ContextAssemblyPlan
+
+    from .context_builder import ContextBuilderService
     from .ct_projection import CtCommitPlan, CtProjectionService
     from guard_api.security_state.transient import TransientSecurityFacts
 
@@ -95,7 +98,18 @@ _SESSION_IDENTITY_FIELDS: tuple[str, ...] = (
     "visible_source_refs",
 )
 # payload 契约扩展时增补的可选字段（见 MemoryEventPayload.action_id）。
-_PAYLOAD_EXTENSION_FIELDS: tuple[str, ...] = ("action_id",)
+_PAYLOAD_EXTENSION_FIELDS: tuple[str, ...] = (
+    "action_id",
+    "context_plan_id",
+    "context_plan_digest",
+    "context_ref",
+    "visible_source_refs",
+)
+_CONTEXT_SOURCE_EXTENSION_FIELDS: tuple[str, ...] = (
+    "content_digest",
+    "role",
+    "sequence_index",
+)
 
 _ACTION_TYPE_BY_EVENT: dict[str, str] = {
     "tool_call_proposed": "tool_call",
@@ -142,6 +156,16 @@ def canonical_request_dump(event: GuardEvent) -> dict[str, Any]:
         for field_name in _PAYLOAD_EXTENSION_FIELDS:
             if field_name not in payload_fields_set:
                 payload_dump.pop(field_name, None)
+        raw_sources = getattr(event.payload, "sources", None)
+        dumped_sources = payload_dump.get("sources")
+        if isinstance(raw_sources, list) and isinstance(dumped_sources, list):
+            for source, source_dump in zip(raw_sources, dumped_sources, strict=False):
+                if not isinstance(source_dump, dict):
+                    continue
+                fields_set = getattr(source, "model_fields_set", set())
+                for field_name in _CONTEXT_SOURCE_EXTENSION_FIELDS:
+                    if field_name not in fields_set:
+                        source_dump.pop(field_name, None)
     return dump
 
 
@@ -174,6 +198,7 @@ class EvaluationService:
         v21_shadow_service: V21ShadowService | None = None,
         v21_pipeline: "V21PipelineService | None" = None,
         ct_projection_service: "CtProjectionService | None" = None,
+        context_builder_service: "ContextBuilderService | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -192,6 +217,7 @@ class EvaluationService:
         # CT-PR-03b CT 事实投影编排器（D2/D3：独立 flag，仅 pipeline
         # 材料就绪时生效；事务外构建 → 事务内信封 → 事务后投影）。
         self.ct_projection_service = ct_projection_service
+        self.context_builder_service = context_builder_service
 
     def evaluate(
         self, event: GuardEvent, *, requesting_principal_id: str
@@ -205,11 +231,17 @@ class EvaluationService:
         # 时直接走事务内 replay 检查，不跑 Phase A。
         materials: "V21PipelineMaterials | None" = None
         ct_bundle: "TransientSecurityFacts | None" = None
+        context_plan: "ContextAssemblyPlan | None" = None
+        context_requested = bool(
+            self.context_builder_service is not None
+            and self.context_builder_service.enabled
+            and event.event_type == "context_assembled"
+        )
         if self.v21_pipeline is not None and self.v21_pipeline.enabled:
             existing = self.audit_service.store.get_policy_evaluation_by_event_id(
                 event.event_id
             )
-            if existing is not None:
+            if existing is not None and not context_requested:
                 replayed = self._replay_or_conflict(
                     existing, request_digest, event.event_id
                 )
@@ -226,7 +258,7 @@ class EvaluationService:
                 # 参与当前 V2 shadow assessment；历史 Snapshot 不变。
                 if (
                     self.ct_projection_service is not None
-                    and self.ct_projection_service.enabled
+                    and self.ct_projection_service.fact_building_enabled
                 ):
                     prepared: "V21PhaseAPrepared | None" = (
                         self.v21_pipeline.prepare_phase_a(event)
@@ -236,6 +268,24 @@ class EvaluationService:
                             event,
                             prepared,
                         )
+                        if (
+                            context_requested
+                            and ct_bundle is not None
+                            and prepared.snapshot is not None
+                            and self.context_builder_service is not None
+                        ):
+                            context_result = self.context_builder_service.build(
+                                event,
+                                bundle=ct_bundle,
+                                snapshot=prepared.snapshot,
+                            )
+                            if context_result is None:
+                                # A context-enabled failure is not allowed to
+                                # fall back to the unfiltered transient bundle.
+                                ct_bundle = None
+                            else:
+                                ct_bundle = context_result.bundle
+                                context_plan = context_result.plan
                         transient_facts = None
                         overlay_scope = (
                             prepared.scope_digest
@@ -282,6 +332,24 @@ class EvaluationService:
                     # Compatibility path: no new keyword/call boundary when CT
                     # is disabled, preserving V21-09 byte-for-byte behavior.
                     materials = self.v21_pipeline.run_phase_a(event)
+        # Context isolation has its own flag and must not require V2 shadow.
+        # With V2 enabled, the branch above already built and filtered the one
+        # shared Gate A bundle.  Only the V2-off path performs one context-only
+        # authoritative Snapshot + Fact Authority build; official legacy/V2
+        # decision selection is unchanged.
+        if (
+            context_requested
+            and context_plan is None
+            and not (
+                self.v21_pipeline is not None and self.v21_pipeline.enabled
+            )
+            and self.context_builder_service is not None
+        ):
+            context_result = (
+                self.context_builder_service.build_from_authoritative_state(event)
+            )
+            if context_result is not None:
+                context_plan = context_result.plan
         # CT Gate A：从 assessment 使用过的同一 bundle 准备 commit 计划，
         # 禁止为了投影再次运行 fact builder。
         ct_plan: "CtCommitPlan | None" = None
@@ -316,7 +384,9 @@ class EvaluationService:
                 event.event_id,
             )
             if replayed is not None:
-                response = replayed
+                response = replayed.model_copy(
+                    update={"context_plan": context_plan}
+                )
                 backfill_audit = existing
                 ct_plan = None  # replay：无新 commit，走 D9 同构 backfill。
             else:
@@ -326,6 +396,7 @@ class EvaluationService:
                     requesting_principal_id=requesting_principal_id,
                     materials=materials,
                     ct_plan=ct_plan,
+                    context_plan=context_plan,
                 )
         # D4 commit → project：投影在事务提交**之后**执行，绝不影响
         # 已 commit 的审计记录与已确定的响应；两者互斥：新评估走
@@ -351,6 +422,7 @@ class EvaluationService:
         requesting_principal_id: str,
         materials: "V21PipelineMaterials | None" = None,
         ct_plan: "CtCommitPlan | None" = None,
+        context_plan: "ContextAssemblyPlan | None" = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """事务内单次评估；返回（响应, 已落盘审计记录, Phase C 计划）。
 
@@ -364,6 +436,7 @@ class EvaluationService:
                 requesting_principal_id=requesting_principal_id,
                 materials=materials,
                 ct_plan=ct_plan,
+                context_plan=context_plan,
             )
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
@@ -426,6 +499,7 @@ class EvaluationService:
                 decision=decision,
                 approval=self._approval_summary(approval),
                 policy_audit_id=audit_event.audit_id,
+                context_plan=context_plan,
             ),
             None,
             None,
@@ -439,6 +513,7 @@ class EvaluationService:
         requesting_principal_id: str,
         materials: "V21PipelineMaterials",
         ct_plan: "CtCommitPlan | None" = None,
+        context_plan: "ContextAssemblyPlan | None" = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
 
@@ -538,6 +613,7 @@ class EvaluationService:
                 approval=self._approval_summary(approval),
                 policy_audit_id=audit_event.audit_id,
                 enforcement_binding=binding,
+                context_plan=context_plan,
             ),
             audit_event,
             phase_c_plan,

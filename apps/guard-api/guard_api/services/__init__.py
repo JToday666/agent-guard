@@ -5,6 +5,7 @@ from .audit import AuditService
 from .audit_checkpoint import AuditCheckpointService
 from .audit_window import AuditWindowRequestError, AuditWindowService
 from .config_audit import ConfigAuditService
+from .context_builder import ContextBuilderService
 from .ct_projection import CtProjectionService
 from .evaluation import EvaluationService
 from .evidence import EventDescription, build_audit_event, describe_guard_event
@@ -24,6 +25,7 @@ __all__ = [
     "AuditWindowRequestError",
     "AuditWindowService",
     "ConfigAuditService",
+    "ContextBuilderService",
     "CtProjectionService",
     "EvaluationService",
     "EventDescription",

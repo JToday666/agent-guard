@@ -3197,6 +3197,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="guard-api-v0.3",
         help="Guard API protocol; legacy is an explicit compatibility mode.",
     )
+    parser.add_argument(
+        "--context-isolation-mode",
+        choices=["off", "required"],
+        default=None,
+        help="Require a validated Guard API ContextAssemblyPlan before model invocation.",
+    )
     parser.add_argument("--strict-runtime-targets", action="store_true")
     return parser
 
@@ -3245,6 +3251,7 @@ def main(argv: list[str] | None = None) -> int:
         tool_server_host=args.tool_server_host,
         tool_server_port=args.tool_server_port,
         core_api_mode=args.core_api_mode,
+        context_isolation_mode=args.context_isolation_mode,
         strict_runtime_targets=args.strict_runtime_targets,
         agent_visible_payload_mode=args.agent_visible_payload_mode,
         closure_on_partial=args.closure_on_partial,

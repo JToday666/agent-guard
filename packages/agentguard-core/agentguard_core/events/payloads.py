@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -10,6 +10,7 @@ from pydantic import (
     Field,
     SerializerFunctionWrapHandler,
     model_serializer,
+    model_validator,
 )
 
 from ..ids import new_id
@@ -93,6 +94,14 @@ class ContextSource(BaseModel):
     summary: str = ""
     contains_instruction_like_text: bool = False
     contains_sensitive_data: bool = False
+    # CT-PR-04 additive binding fields.  They remain optional so legacy
+    # producers retain their canonical request shape; when isolation is
+    # required the server accepts a source only if all bindings are present.
+    content_digest: str | None = Field(
+        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
+    )
+    role: str | None = Field(default=None, min_length=1, max_length=32)
+    sequence_index: int | None = Field(default=None, ge=0)
 
 
 class ContextBuildPayload(BaseModel):
@@ -114,6 +123,34 @@ class ModelCallPayload(BaseModel):
     contains_sensitive_data: bool = False
     sanitized: bool = False
     tool_plan: list[dict[str, Any]] = Field(default_factory=list)
+    # CT-PR-04 runtime receipt of the exact plan used to rebuild this input.
+    # All-or-none validation is performed by the LangGraph adapter before the
+    # event is emitted; optional defaults preserve legacy producers.
+    context_plan_id: str | None = Field(default=None, min_length=1, max_length=256)
+    context_plan_digest: str | None = Field(
+        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
+    )
+    context_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    visible_source_refs: tuple[str, ...] | None = None
+
+    @model_validator(mode="after")
+    def validate_context_plan_identity(self) -> Self:
+        identity = (
+            self.context_plan_id,
+            self.context_plan_digest,
+            self.context_ref,
+            self.visible_source_refs,
+        )
+        if any(value is not None for value in identity) and not all(
+            value is not None for value in identity
+        ):
+            raise ValueError("context plan model-input identity must be complete")
+        if self.visible_source_refs is not None:
+            if any(not ref or len(ref) > 512 for ref in self.visible_source_refs):
+                raise ValueError("visible_source_refs must contain bounded non-empty refs")
+            if len(self.visible_source_refs) != len(set(self.visible_source_refs)):
+                raise ValueError("visible_source_refs must be unique")
+        return self
 
 
 class ToolResult(BaseModel):
