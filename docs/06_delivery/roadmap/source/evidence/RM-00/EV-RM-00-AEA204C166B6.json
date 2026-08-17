@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-AEA204C166B6",
+  "kind": "commit",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-16T17:45:09Z",
+  "ref": "f2cb6b2cd3f5a3dd9a2f2674269fe683d7a0dc28",
+  "schema_version": "1.0.0",
+  "status": "pending",
+  "summary": "CI simplification implementation committed on codex/roadmap-control; pending merge into origin/dev"
+}

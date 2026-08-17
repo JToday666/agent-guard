@@ -1,0 +1,11 @@
+{
+  "id": "EV-RM-00-494B694B6465",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "RM-00",
+  "recorded_at": "2026-08-17T01:33:07Z",
+  "ref": "local://pytest-fast-no-postgres-2026-08-17",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Python fast gate excludes PostgreSQL variants: 1861 passed, 16 skipped, 124 deselected in 230.74s"
+}

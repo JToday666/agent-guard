@@ -68,7 +68,11 @@ def get_snapshot_with_revoked(
 
     with store.scope_lock(scope_digest):
         record = store.get_security_state(scope_digest)
-        if record is None or record.dirty:
+        if (
+            record is None
+            or record.dirty
+            or record.projector_version != PROJECTOR_VERSION
+        ):
             state, _alert = rebuild_locked(store, scope_digest)
         else:
             state = state_from_record(record)

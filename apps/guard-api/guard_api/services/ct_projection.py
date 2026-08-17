@@ -18,8 +18,9 @@ CT-PR-03 实施计划裁决 D1-D6）：
   ``evidence.ct_transient_facts`` typed-bound 通道（仿
   ``state_delta_v21`` 先例含 64 KiB 预算降级序，CT 先降 → digest
   引用留痕）；零新表、零迁移；
-- **D5 PROJECTOR_VERSION 不 bump**：只向已全接线的 typed 容器
-  （``v21-07.projector.2``）灌入真实 CT 内容，apply 语义零变化。
+- **CT05 Memory Bridge**：提交后的 MemoryGuard lifecycle 以
+  ``memory_transition`` revision 1/2/3 投影；projector 升级为
+  ``ct-05.projector.3``，旧版本由 bounded rebuild 懒解码。
 
 四段时序（commit-before-project，02 §3）：
 
@@ -59,16 +60,24 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from agentguard_core import AuditEvent, GuardEvent
+from agentguard_core import AuditEvent, GuardEvent, MemoryGuardChange
 from agentguard_core.actions.builder import build_action_ir
+from agentguard_core.actions.canonical_resources import (
+    ResourceNormalizationInput,
+    normalize_memory_resource,
+)
 from agentguard_core.security_context import (
     PROJECTOR_VERSION,
     CommittedRecord,
+    MemoryFact,
+    SecurityStateDeltaV21,
 )
+from agentguard_core.signals.models import SequenceRef
 
 from guard_api.security_state import SecurityStateService
 from guard_api.security_state.delta_builder import (
     CT_DELTA_BUILDER_VERSION,
+    MEMORY_TRANSITION_REVISIONS,
     build_ct_facts_delta,
 )
 from guard_api.security_state.fact_authority import (
@@ -90,6 +99,7 @@ from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .v21_pipeline import V21PhaseAPrepared, V21PipelineMaterials
+from .evidence import _should_quarantine_memory_change
 
 logger = logging.getLogger(__name__)
 
@@ -651,12 +661,13 @@ class CtProjectionService:
     ) -> tuple[str, ...] | None:
         """Validate Runtime refs against the same-scope historical Snapshot.
 
-        Accepted inputs are either canonical ``SourceFact.source_id`` values,
-        or ``action:<prior_call_id>`` aliases that have exactly one same-scope
-        ``returned_by`` edge to a Snapshot source.  Any invalid, ambiguous, or
-        over-budget member rejects the whole set; no partially trusted set is
-        returned. ``None`` and an explicit empty tuple retain distinct wire
-        semantics.
+        Accepted inputs are canonical ``SourceFact.source_id`` values,
+        canonical ``memory:<MemoryFact.memory_id>`` values from the same
+        Snapshot, or ``action:<prior_call_id>`` aliases that have exactly one
+        same-scope ``returned_by`` edge to a Snapshot source.  Any invalid,
+        ambiguous, or over-budget member rejects the whole set; no partially
+        trusted set is returned. ``None`` and an explicit empty tuple retain
+        distinct wire semantics.
         """
 
         requested = event.security_context.visible_source_refs
@@ -678,6 +689,9 @@ class CtProjectionService:
             if fact.scope_digest != scope_digest:
                 continue
             sources_by_id.setdefault(fact.source_id, []).append(fact)
+        memory_by_id: dict[str, list[Any]] = {}
+        for fact in getattr(snapshot, "memory_facts", ()):
+            memory_by_id.setdefault(f"memory:{fact.memory_id}", []).append(fact)
 
         returned_by: dict[str, list[str]] = {}
         traversed_nodes = 0
@@ -707,6 +721,10 @@ class CtProjectionService:
             elif len(direct) > 1:
                 # Duplicate canonical identities are ambiguous even when the
                 # payloads happen to be equal.
+                return None
+            elif len(memory_by_id.get(ref, [])) == 1:
+                canonical = ref
+            elif len(memory_by_id.get(ref, [])) > 1:
                 return None
             elif ref.startswith("action:"):
                 # Today this is a one-hop traversal (<= frozen max depth 4).
@@ -877,24 +895,28 @@ class CtProjectionService:
         幂等补投影 ``backfill`` 承接）。**绝不外抛**。
         """
 
-        if plan is None or not plan.projectable or not self.enabled:
+        if plan is None or not self.enabled:
             return
-        try:
-            self._project_ct_facts(
-                plan.scope_digest,
-                plan.source_record_id,
-                plan.bundle,
-                commit_base_state_version=plan.base_state_version,
-                fact_builder_version=FACT_BUILDER_VERSION,
-            )
-        except Exception:  # noqa: BLE001 - 投影故障必须收敛，绝不上抛。
-            logger.warning(
-                "ct fact projection failed for %s; response and audit "
-                "record are unaffected (fail-closed, no retry; replay "
-                "backfill owns recovery)",
-                plan.source_record_id,
-                exc_info=True,
-            )
+        if plan.projectable:
+            try:
+                self._project_ct_facts(
+                    plan.scope_digest,
+                    plan.source_record_id,
+                    plan.bundle,
+                    commit_base_state_version=plan.base_state_version,
+                    fact_builder_version=FACT_BUILDER_VERSION,
+                )
+            except Exception:  # noqa: BLE001 - 投影故障必须收敛，绝不上抛。
+                logger.warning(
+                    "ct fact projection failed for %s; response and audit "
+                    "record are unaffected (fail-closed, no retry; replay "
+                    "backfill owns recovery)",
+                    plan.source_record_id,
+                    exc_info=True,
+                )
+        audit = self._store.get_policy_evaluation_by_event_id(plan.bundle.event_id)
+        if audit is not None:
+            self.project_memory_from_audit(audit)
 
     def _project_ct_facts(
         self,
@@ -1041,6 +1063,192 @@ class CtProjectionService:
         )
 
     # ------------------------------------------------------------------
+    # CT05：MemoryGuardChange → deterministic memory_transition
+    # ------------------------------------------------------------------
+
+    def project_memory_transition(self, change: MemoryGuardChange) -> None:
+        """生命周期 API 的提交后入口；失败置 memory dirty 且绝不外抛。"""
+
+        if not self.enabled:
+            return
+        event_id = change.metadata.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            # 直接 propose 没有权威 evaluation/scope 绑定，禁止猜 scope。
+            return
+        audit = self._store.get_policy_evaluation_by_event_id(event_id)
+        if audit is None:
+            return
+        self._project_memory_lifecycle_safe(audit, change)
+
+    def project_memory_from_audit(self, audit: AuditEvent) -> None:
+        """evaluation commit/backfill 入口：按 audit 的精确 change 绑定投影。"""
+
+        if not self.enabled:
+            return
+        change_id = audit.links.get("memory_change_id")
+        if not isinstance(change_id, str) or not change_id:
+            return
+        change = self._store.get_memory_change(change_id)
+        if change is None:
+            return
+        self._project_memory_lifecycle_safe(audit, change)
+
+    def _project_memory_lifecycle_safe(
+        self, audit: AuditEvent, change: MemoryGuardChange
+    ) -> None:
+        binding = self._memory_binding_from_audit(audit, change)
+        if binding is None:
+            return
+        scope_digest, canonical_fact = binding
+        try:
+            self._project_memory_lifecycle(
+                audit, change, scope_digest, canonical_fact
+            )
+        except Exception:  # noqa: BLE001 - authority 已提交，投影失败只置脏。
+            self._state_service.store_access.mark_security_state_dirty(
+                scope_digest, ["memory"]
+            )
+            logger.warning(
+                "memory transition projection failed for %s; authoritative "
+                "lifecycle remains committed and memory state is dirty",
+                change.change_id,
+                exc_info=True,
+            )
+
+    def _memory_binding_from_audit(
+        self, audit: AuditEvent, change: MemoryGuardChange
+    ) -> tuple[str, MemoryFact] | None:
+        """从已提交 policy audit + CT envelope 恢复唯一 canonical fact。"""
+
+        event_id = change.metadata.get("event_id")
+        if (
+            audit.record_type != "policy_evaluation"
+            or audit.links.get("memory_change_id") != change.change_id
+            or not isinstance(event_id, str)
+            or audit.links.get("event_id") != event_id
+        ):
+            return None
+        decoded = decode_ct_transient_facts(audit)
+        if decoded.kind != "full" or decoded.bundle is None:
+            return None
+        canonical = normalize_memory_resource(
+            ResourceNormalizationInput(
+                resource_id="",
+                target=change.key,
+                memory_namespace=change.namespace,
+            )
+        ).canonical_id
+        matches = [
+            fact
+            for fact in decoded.bundle.memory_facts
+            if fact.memory_id == canonical
+        ]
+        if len(matches) != 1:
+            return None
+        return decoded.bundle.scope_digest, matches[0]
+
+    def _project_memory_lifecycle(
+        self,
+        audit: AuditEvent,
+        change: MemoryGuardChange,
+        scope_digest: str,
+        canonical_fact: MemoryFact,
+    ) -> None:
+        initial_status = (
+            "quarantined"
+            if _should_quarantine_memory_change(change)
+            else "proposed"
+        )
+        statuses = [initial_status]
+        if change.status in {"committed", "rejected"}:
+            statuses.append(change.status)
+        elif change.status == "rolled_back":
+            statuses.extend(["committed", "rolled_back"])
+        elif change.status != initial_status:
+            # 存储状态与可重建初态不一致，fail-closed 不伪造生命周期。
+            raise ValueError("memory lifecycle head does not match its proposal")
+
+        for status in statuses:
+            revision = MEMORY_TRANSITION_REVISIONS[status]
+            trust_state = canonical_fact.trust_state
+            if initial_status == "quarantined":
+                trust_state = "quarantined"
+            fact = canonical_fact.model_copy(
+                update={
+                    "change_id": change.change_id,
+                    "change_status": status,
+                    "trust_state": trust_state,
+                    "last_write_sequence": SequenceRef(
+                        domain="memory",
+                        producer_binding_id=change.change_id,
+                        value=revision,
+                    ),
+                }
+            )
+            self._project_memory_fact(
+                audit, change, scope_digest, fact, revision=revision
+            )
+
+    def _project_memory_fact(
+        self,
+        audit: AuditEvent,
+        change: MemoryGuardChange,
+        scope_digest: str,
+        fact: MemoryFact,
+        *,
+        revision: int,
+    ) -> None:
+        with self._state_service.store_access.scope_lock(scope_digest):
+            self._state_service.ensure_ready(scope_digest)
+            existing = self._state_service.store_access.get_projection(
+                scope_digest,
+                "memory_transition",
+                change.change_id,
+                revision,
+                PROJECTOR_VERSION,
+            )
+            if existing is not None:
+                # Reuse the registered envelope byte-for-byte. Rebuilding the
+                # same identity at a later CAS base would change delta_digest
+                # and turn a legitimate replay into a false conflict.
+                delta = SecurityStateDeltaV21.model_validate(existing.delta_payload)
+            else:
+                current = self._state_service.store_access.get_security_state(
+                    scope_digest
+                )
+                base_state_version = current.state_version if current is not None else 0
+                delta = build_ct_facts_delta(
+                    scope_digest=scope_digest,
+                    source_record_type="memory_transition",
+                    source_record_id=change.change_id,
+                    source_revision=revision,
+                    base_state_version=base_state_version,
+                    memory_fact=fact,
+                )
+                if delta is None:
+                    raise ValueError(
+                        "memory transition delta builder refused authority"
+                    )
+            committed = CommittedRecord(
+                record_id=f"memory-transition:{change.change_id}:{revision}",
+                committed=True,
+                source_record_type="memory_transition",
+                source_record_id=change.change_id,
+                source_revision=revision,
+                scope_digest=scope_digest,
+                projector_version=PROJECTOR_VERSION,
+                delta=delta,
+            )
+            self._state_service.project_committed(
+                committed,
+                scope_digest=scope_digest,
+                verify_source_committed=(
+                    lambda _record: self._memory_binding_from_audit(audit, change)
+                    is not None
+                ),
+            )
+
+    # ------------------------------------------------------------------
     # replay：D9 同构幂等补投影
     # ------------------------------------------------------------------
 
@@ -1068,6 +1276,7 @@ class CtProjectionService:
                 audit.audit_id,
                 exc_info=True,
             )
+        self.project_memory_from_audit(audit)
 
     def _backfill(self, audit: AuditEvent) -> None:
         decoded = decode_ct_transient_facts(audit)
