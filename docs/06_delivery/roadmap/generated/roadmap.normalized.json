@@ -7922,12 +7922,12 @@
       "blocked_reasons": [],
       "can_activate": true,
       "can_exit": true,
-      "can_start": true,
+      "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation"
       ],
-      "effective_status": "ready",
-      "evidence_gap": false,
+      "effective_status": "in_progress",
+      "evidence_gap": true,
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "LGV2-C — Core selector, three modes and official evidence",
@@ -7937,7 +7937,7 @@
       "incoming_edges": [],
       "kind": "task",
       "lane": "core",
-      "lifecycle": "not_started",
+      "lifecycle": "in_progress",
       "notes": [
         "Competition-only V2 authority extension; it does not complete formal C11, Gate B or S5-O."
       ],
@@ -7947,7 +7947,7 @@
         "E-LGV2-C-I"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -7961,12 +7961,26 @@
       ],
       "topological_rank": 0,
       "unmet_dependencies": [],
-      "work": null
+      "work": {
+        "base_sha": "aee332d81e92cab29566618c38c1eea9a5989a4e",
+        "branch": "codex/LGV2-C-core",
+        "owner": "codex-root",
+        "started_at": "2026-08-17T14:11:53Z",
+        "substate": "active",
+        "worktree_slug": "LGV2-C"
+      }
     },
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8007,7 +8021,14 @@
       "outgoing_edges": [
         "E-001-C00-C01"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8027,7 +8048,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8070,7 +8098,14 @@
       "outgoing_edges": [
         "E-002-C01-C02"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8090,7 +8125,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8133,7 +8175,14 @@
       "outgoing_edges": [
         "E-003-C02-C03"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8153,7 +8202,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8196,7 +8252,14 @@
       "outgoing_edges": [
         "E-004-C03-C04"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8216,7 +8279,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8261,7 +8331,14 @@
         "E-006-C04-C06",
         "E-007-C04-C07"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8281,7 +8358,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8324,7 +8408,14 @@
       "outgoing_edges": [
         "E-008-C05-C08"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8344,7 +8435,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8387,7 +8485,14 @@
       "outgoing_edges": [
         "E-009-C06-C08"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8407,7 +8512,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8450,7 +8562,14 @@
       "outgoing_edges": [
         "E-010-C07-C08"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8470,7 +8589,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8515,7 +8641,14 @@
       "outgoing_edges": [
         "E-011-C08-C09"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8535,7 +8668,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8581,7 +8721,14 @@
         "E-038-C09-G-A",
         "E-047-C09-R05P"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -8601,7 +8748,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -8709,7 +8863,14 @@
         "E-059-C10-G-SL",
         "E-115-C10-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task",
@@ -8738,14 +8899,21 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation"
       ],
-      "effective_status": "ready",
+      "effective_status": "not_ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
@@ -8764,7 +8932,14 @@
       "outgoing_edges": [
         "E-016-C13-G-SEM"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8792,6 +8967,12 @@
           "from": "G-SEM",
           "id": "E-017-G-SEM-C14",
           "rationale": "Semantic upgrade-only starts only after its admission evidence passes."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8825,7 +9006,14 @@
         "E-142-C14-MASTER-FINAL",
         "E-160-C14-S6"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8862,6 +9050,12 @@
           "from": "G-B",
           "id": "E-062-G-B-C11",
           "rationale": "C11 requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8899,7 +9093,14 @@
         "E-126-C11-FE10B",
         "E-128-C11-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -8930,6 +9131,12 @@
           "from": "C11",
           "id": "E-014-C11-C12",
           "rationale": "C12 requires C11."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8963,7 +9170,14 @@
         "E-083-C12-G-ENG",
         "E-141-C12-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -9545,7 +9759,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -9656,7 +9877,14 @@
         "E-122-CT04-S5C",
         "E-125-CT04-FE10B"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -10207,7 +10435,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -10274,7 +10509,14 @@
       "outgoing_edges": [
         "E-048-R05P-R05"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -10727,12 +10969,12 @@
       ],
       "can_activate": false,
       "can_exit": false,
-      "can_start": true,
+      "can_start": false,
       "change_surfaces": [
         "competition-langgraph-bench-runner"
       ],
-      "effective_status": "ready",
-      "evidence_gap": false,
+      "effective_status": "in_progress",
+      "evidence_gap": true,
       "evidence_items": [],
       "evidence_refs": [],
       "exact_title": "LGV2-B — Real LLM runner, experiment matrix and artifacts",
@@ -10748,7 +10990,7 @@
       ],
       "kind": "task",
       "lane": "integration",
-      "lifecycle": "not_started",
+      "lifecycle": "in_progress",
       "notes": [
         "May be developed before Core/API integration; product activation and closure remain dependency-gated.",
         "A missing real OpenAI-compatible provider credential prevents live 70x5 qualification but not offline contract implementation."
@@ -10758,7 +11000,7 @@
         "E-LGV2-B-FE"
       ],
       "resource_conflicts": [],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -10772,7 +11014,14 @@
       ],
       "topological_rank": 2,
       "unmet_dependencies": [],
-      "work": null
+      "work": {
+        "base_sha": "aee332d81e92cab29566618c38c1eea9a5989a4e",
+        "branch": "codex/LGV2-B-runner",
+        "owner": "codex-root",
+        "started_at": "2026-08-17T14:12:21Z",
+        "substate": "active",
+        "worktree_slug": "LGV2-B"
+      }
     },
     {
       "activation_blockers": [],
@@ -11017,7 +11266,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11143,7 +11399,14 @@
       "outgoing_edges": [
         "E-036-I01-G-A"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -11171,7 +11434,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11301,7 +11571,14 @@
         "E-056-I02A-G-B",
         "E-117-I02A-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -11408,6 +11685,12 @@
           "from": "G-B",
           "id": "E-071-G-B-I02B",
           "rationale": "I02B requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -11443,7 +11726,14 @@
         "E-073-I02B-ROL1",
         "E-130-I02B-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -11481,6 +11771,12 @@
           "from": "G-B",
           "id": "E-068-G-B-I04",
           "rationale": "I04 requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -11517,7 +11813,14 @@
         "E-129-I04-S5O",
         "E-145-I04-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -11548,6 +11851,12 @@
           "from": "C12",
           "id": "E-074-C12-C12-R",
           "rationale": "C12-R requires C12."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -11579,7 +11888,14 @@
       "outgoing_edges": [
         "E-077-C12-R-G-SR"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -11616,6 +11932,12 @@
           "from": "I02B",
           "id": "E-073-I02B-ROL1",
           "rationale": "ROL1 requires I02B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -11652,7 +11974,14 @@
         "E-123-ROL1-FE10B",
         "E-131-ROL1-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -11690,6 +12019,12 @@
           "from": "ROL1",
           "id": "E-076-ROL1-I03-R",
           "rationale": "I03-R requires ROL1."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -11723,7 +12058,14 @@
       "outgoing_edges": [
         "E-078-I03-R-G-SR"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -27398,14 +27740,11 @@
     }
   ],
   "ready_queue": [
-    "LGV2-C",
-    "LGV2-B",
     "CT03R",
-    "C13",
     "CT-O1",
     "CT06"
   ],
   "resource_conflicts": [],
   "schema_version": "1.0.0",
-  "source_digest": "70a415049d367de2fc53789e44a32a5f72d459c2e9a1aa4e488c317dc467d33e"
+  "source_digest": "fb5cc4386e8166a3eac8252ec561be319c441b1df72a1d5fb4e497e55b39549e"
 }
