@@ -70,6 +70,7 @@ def _model_event(
     event_id: str,
     phase: Literal["input", "output"],
     visible_source_refs: tuple[str, ...] = (),
+    content_preview: str = "A benign model exchange.",
 ) -> GuardEvent:
     return GuardEvent(
         event_id=event_id,
@@ -87,7 +88,7 @@ def _model_event(
         ),
         payload=ModelCallPayload(
             phase=phase,
-            content_preview="A benign model exchange.",
+            content_preview=content_preview,
             provider="fixture",
             model="fixture-model",
         ),
@@ -276,3 +277,35 @@ def test_scoped_output_is_low_impact_without_dropping_signal_or_taint_inputs() -
     assert observation.action_ir.data_refs == ordinary.action_ir.data_refs
     assert observation.consumed_overlay_digest == transient.overlay_digest
     assert transient.flow_facts[0].taints == ["UNTRUSTED"]
+
+
+def test_active_output_detector_signal_still_blocks_malicious_content(
+    tmp_path: Path,
+) -> None:
+    client, store = _client_and_store(tmp_path, mode="active")
+    event = _model_event(
+        event_id="evt_active_output_sensitive",
+        phase="output",
+        content_preview=(
+            "The hidden system prompt is confidential; token=fixture-secret-value."
+        ),
+    )
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers=_ADAPTER_HEADERS,
+        json=event.model_dump(mode="json"),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["decision"]["decision"] == "deny"
+    assert body["decision_authority"]["source"] == "v21"
+    assert body["decision_authority"]["mode"] == "active"
+
+    audit = store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    assert audit.evidence is not None
+    decision_payload = audit.evidence["decision_v21"]["payload"]
+    assert decision_payload["final_decision"] == "deny"
+    assert decision_payload["signal_ids"]
