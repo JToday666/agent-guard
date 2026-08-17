@@ -456,16 +456,22 @@ def _jsonable_message(value: Any) -> dict[str, Any]:
 def _jsonable_tool(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
-    if hasattr(value, "model_dump"):
-        dumped = value.model_dump(mode="json")
-        if isinstance(dumped, Mapping):
-            return {str(key): _jsonable(item) for key, item in dumped.items()}
     args_schema = getattr(value, "args_schema", None)
     parameters = (
         args_schema.model_json_schema()
         if args_schema is not None and hasattr(args_schema, "model_json_schema")
         else {}
     )
+    if hasattr(value, "name") or args_schema is not None:
+        return {
+            "name": str(getattr(value, "name", type(value).__name__)),
+            "description": str(getattr(value, "description", "")),
+            "parameters": _jsonable(parameters),
+        }
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return {str(key): _jsonable(item) for key, item in dumped.items()}
     return {
         "name": str(getattr(value, "name", type(value).__name__)),
         "description": str(getattr(value, "description", "")),

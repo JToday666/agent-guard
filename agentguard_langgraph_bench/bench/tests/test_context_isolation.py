@@ -12,10 +12,17 @@ from agentguard_langgraph_adapter.context_guard import (
 from agentguard_langgraph_bench.adapter import LangGraphAdapter
 from agentguard_langgraph_bench.bench.config import BenchConfig
 from agentguard_langgraph_bench.bench.models import AttackCase
+from agentguard_langgraph_bench.bench.runtime.agent_protocol import CaseRunResult
+from agentguard_langgraph_bench.bench.runtime.row_normalizer import (
+    normalize_case_result,
+)
 from agentguard_langgraph_bench.bench.tools import MockToolRegistry
 from agentguard_langgraph_bench.demo_agent.graph import (
     REFERENCE_RUNTIME_FACT,
+    _plan_tool_capture,
+    _planner_context_sources,
     _pre_model_capture,
+    _route_after_tools,
     initial_state_from_case,
     plan_tools_for_state,
     run_demo_case,
@@ -370,3 +377,272 @@ def test_invalid_or_missing_plan_blocks_before_any_planner_call(
             "context_assembled"
         ]
     assert calls == 0
+
+
+def _competition_config(tmp_path, mode: str) -> BenchConfig:
+    return BenchConfig(
+        defense_enabled=True,
+        context_isolation_mode="off",
+        competition_mode=True,
+        competition_arm_id={
+            "off": "A0",
+            "observe": "A3",
+            "required": "A4",
+        }[mode],
+        competition_repeat_index=0,
+        competition_context_mode=mode,
+        runtime_binding_id="binding:competition-langgraph-runner",
+        trusted_task_ids_by_case={"CT-LIVE-001": "task:CT-LIVE-001"},
+        trusted_trace_ids_by_case={"CT-LIVE-001": "trace:CT-LIVE-001"},
+        llm_enabled=True,
+        llm_provider="other-compatible",
+        llm_model="stub-model",
+        llm_api_key="test-key",
+        llm_base_url="http://127.0.0.1:43122/v1",
+        llm_request_timeout=1,
+        llm_max_retries=0,
+        instrumentation_plan_mode="autonomous",
+        llm_fallback_to_case_plan=False,
+        autonomous_planner_recovery_retry=False,
+        sandbox_dir=tmp_path,
+    )
+
+
+def test_competition_context_config_accepts_three_modes_and_requires_arm() -> None:
+    for mode in ("off", "observe", "required"):
+        config = BenchConfig(
+            competition_mode=True,
+            competition_arm_id="A4",
+            competition_context_mode=mode,
+            llm_enabled=True,
+            llm_provider="test",
+            llm_model="test-model",
+            llm_api_key="test-key",
+            llm_max_retries=0,
+            instrumentation_plan_mode="autonomous",
+        )
+        assert config.competition_context_mode == mode
+
+    with pytest.raises(ValueError, match="competition_arm_id is required"):
+        BenchConfig(competition_mode=True)
+    with pytest.raises(ValueError, match="competition_context_mode"):
+        BenchConfig(competition_context_mode="optional")  # type: ignore[arg-type]
+
+
+def test_competition_canonical_sources_keep_fixed_system_task_and_page_evidence(
+    monkeypatch, tmp_path
+) -> None:
+    case = _case()
+    case.metadata["web_entry_source_path"] = "Instrumentation/public/index.html"
+    state = initial_state_from_case(case)
+    monkeypatch.setattr(
+        "agentguard_langgraph_bench.demo_agent.graph.agent_visible_url_for_source",
+        lambda source_path: "http://127.0.0.1:18080/local-pages/public/index.html",
+    )
+
+    sources = _planner_context_sources(
+        state,
+        config=_competition_config(tmp_path, "off"),
+    )
+
+    assert sources[0]["source_id"] == "langgraph:runtime:planner-system"
+    assert sources[0]["content"] == REFERENCE_RUNTIME_FACT
+    assert sources[1]["source_id"] == f"langgraph:task:{case.case_id}"
+    assert sources[1]["content"] == case.input.payload
+    assert sources[2]["source_type"] == "tool_result"
+    assert "http://127.0.0.1:18080/local-pages/public/index.html" in sources[2][
+        "content"
+    ]
+
+
+def test_competition_context_modes_share_sources_and_tools_but_only_required_transforms(
+    monkeypatch, tmp_path
+) -> None:
+    captured_messages: dict[str, list[dict[str, Any]]] = {}
+
+    class _CapturingLlm:
+        def __init__(self, mode: str) -> None:
+            self.mode = mode
+
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            captured_messages[self.mode] = [dict(item) for item in messages]
+            return SimpleNamespace(
+                id=f"response-{self.mode}",
+                content="done",
+                tool_calls=[],
+                response_metadata={"request_id": f"request-{self.mode}"},
+            )
+
+    outputs = {}
+    prepared_states = {}
+    for mode in ("off", "observe", "required"):
+        state = initial_state_from_case(_case())
+        state["tool_results"] = [
+            {
+                "tool_name": "rag_retrieve",
+                "status": "executed",
+                "executed": True,
+                "result": {"contexts": ["Public release 4.2 shipped Tuesday."]},
+            }
+        ]
+        config = _competition_config(tmp_path, mode)
+        prepared = _pre_model_capture(
+            state,
+            LangGraphAdapter(config=config, core_client=_PlanCore()),
+        )
+        monkeypatch.setattr(
+            "agentguard_langgraph_bench.demo_agent.graph._build_llm",
+            lambda config, selected=mode: _CapturingLlm(selected),
+        )
+        output = plan_tools_for_state(
+            prepared,
+            config,
+            MockToolRegistry(tmp_path / mode),
+            round_index=1,
+        )
+        prepared_states[mode] = prepared
+        outputs[mode] = output
+
+    evidence = {
+        mode: outputs[mode].model_exchanges[0]
+        for mode in ("off", "observe", "required")
+    }
+    assert len({item["source_set_digest"] for item in evidence.values()}) == 1
+    assert len({item["tool_schema_digest"] for item in evidence.values()}) == 1
+    assert (
+        evidence["off"]["model_input_digest"]
+        == evidence["observe"]["model_input_digest"]
+    )
+    assert (
+        evidence["required"]["model_input_digest"]
+        != evidence["observe"]["model_input_digest"]
+    )
+    assert captured_messages["off"] == captured_messages["observe"]
+    assert captured_messages["required"] != captured_messages["observe"]
+    assert evidence["off"]["context_plan_digest"] is None
+    assert evidence["observe"]["context_plan_digest"].startswith("sha256:")
+    assert evidence["required"]["context_plan_digest"].startswith("sha256:")
+    assert evidence["off"]["transform_applied"] is False
+    assert evidence["observe"]["transform_applied"] is False
+    assert evidence["required"]["transform_applied"] is True
+    assert prepared_states["observe"]["runtime_context"]["context_isolation"][
+        "status"
+    ] == "validated"
+
+
+def test_competition_model_exchange_is_state_and_row_truth_source(
+    monkeypatch, tmp_path
+) -> None:
+    case = _case()
+    config = _competition_config(tmp_path, "off")
+    adapter = LangGraphAdapter(config=config, core_client=_PlanCore())
+    prepared = _pre_model_capture(initial_state_from_case(case), adapter)
+
+    class _NoToolLlm:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            return SimpleNamespace(
+                id="response-row",
+                content="done",
+                tool_calls=[],
+                response_metadata={"request_id": "request-row"},
+            )
+
+    monkeypatch.setattr(
+        "agentguard_langgraph_bench.demo_agent.graph._build_llm",
+        lambda config: _NoToolLlm(),
+    )
+    planned = _plan_tool_capture(
+        prepared,
+        config,
+        MockToolRegistry(tmp_path),
+    )
+    result = CaseRunResult(
+        case_id=case.case_id,
+        trace_id=str(planned["trace_id"]),
+        runtime="langgraph",
+        adapter_name="langgraph-demo",
+        raw_state=planned,
+        behavior_events=list(planned.get("behavior_events") or []),
+    )
+
+    row = normalize_case_result(case, result, config, SimpleNamespace())
+
+    assert len(planned["model_exchanges"]) == 1
+    assert len(row["model_exchanges"]) == 1
+    assert row["model_invoked"] is True
+    assert row["successful_model_request_count"] == 1
+    assert row["llm_request_count"] == 1
+    assert row["round_1_source_set_digest"].startswith("sha256:")
+    assert row["round_1_model_input_digest"].startswith("sha256:")
+    assert row["tool_schema_digest"].startswith("sha256:")
+
+
+def test_competition_failed_model_attempt_is_recorded_but_never_claimed_as_invoked(
+    monkeypatch, tmp_path
+) -> None:
+    case = _case()
+    config = _competition_config(tmp_path, "off")
+    prepared = _pre_model_capture(
+        initial_state_from_case(case),
+        LangGraphAdapter(config=config, core_client=_PlanCore()),
+    )
+
+    class _TimeoutLlm:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            raise TimeoutError("provider request timed out")
+
+    monkeypatch.setattr(
+        "agentguard_langgraph_bench.demo_agent.graph._build_llm",
+        lambda config: _TimeoutLlm(),
+    )
+    planned = _plan_tool_capture(
+        prepared,
+        config,
+        MockToolRegistry(tmp_path),
+    )
+    result = CaseRunResult(
+        case_id=case.case_id,
+        trace_id=str(planned["trace_id"]),
+        runtime="langgraph",
+        adapter_name="langgraph-demo",
+        raw_state=planned,
+        behavior_events=list(planned.get("behavior_events") or []),
+    )
+
+    row = normalize_case_result(case, result, config, SimpleNamespace())
+
+    assert len(row["model_exchanges"]) == 1
+    assert row["model_exchanges"][0]["outcome"] == "timeout"
+    assert row["model_exchanges"][0]["request_observed"] is True
+    assert row["model_exchanges"][0]["response_observed"] is False
+    assert row["model_invoked"] is False
+    assert row["successful_model_request_count"] == 0
+    assert row["llm_request_count"] == 1
+    assert row["run_valid"] is False
+
+
+@pytest.mark.parametrize("mode", ["off", "observe", "required"])
+def test_competition_tool_loop_always_returns_through_pre_model(
+    mode: str, tmp_path
+) -> None:
+    state = initial_state_from_case(_case())
+    state["round_index"] = 1
+    state["last_tool_results"] = [
+        {
+            "tool_name": "memory_search",
+            "status": "executed",
+            "executed": True,
+            "result": {"items": []},
+        }
+    ]
+
+    assert _route_after_tools(state, _competition_config(tmp_path, mode)) == "pre_model"

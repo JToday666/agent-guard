@@ -714,6 +714,12 @@ def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benc
         "guided_plan_applied": False,
         "fallback_applied": False,
         "llm_planning_evidence": [],
+        "model_exchanges": [],
+        "model_invoked": False,
+        "successful_model_request_count": 0,
+        "round_1_source_set_digest": None,
+        "round_1_model_input_digest": None,
+        "tool_schema_digest": None,
         "llm_request_diagnostics": [],
         "task_terminal": False,
         "task_terminal_reason": "",
@@ -858,6 +864,10 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     _write_case_jsonl(case_result_dir / "policy_decisions.jsonl", [_decision_record(item, row) for item in row.get("tool_calls") or []])
     _write_case_jsonl(case_result_dir / "audit_events.jsonl", [item.get("audit_event") for item in row.get("tool_calls") or [] if item.get("audit_event")])
     _write_case_jsonl(case_result_dir / "tool_results.jsonl", row.get("tool_calls") or [])
+    _write_case_jsonl(
+        case_result_dir / "model-exchanges.jsonl",
+        row.get("model_exchanges") or [],
+    )
     _write_tool_hijacking_llm_artifacts(case_result_dir, row)
     _write_memory_poisoning_llm_artifacts(case_result_dir, row)
     (case_result_dir / "browser_action_summary.json").write_text(
@@ -2039,6 +2049,7 @@ def _build_evidence_index(row: dict[str, Any], case_result_dir: Path) -> dict[st
             "tool_call_events": "tool_call_events.jsonl",
             "audit_events": "audit_events.jsonl",
             "policy_decisions": "policy_decisions.jsonl",
+            "model_exchanges": "model-exchanges.jsonl",
             "sandbox_diff": "sandbox_diff.json",
             "agent_visible_prompt_contamination": "agent_visible_prompt_contamination.json",
         },
@@ -2048,6 +2059,7 @@ def _build_evidence_index(row: dict[str, Any], case_result_dir: Path) -> dict[st
         "policy_decisions.jsonl",
         "audit_events.jsonl",
         "tool_results.jsonl",
+        "model-exchanges.jsonl",
         "sandbox_diff.json",
         "llm_prompts/round_1_redacted.json",
         "llm_responses/round_1_redacted.json",

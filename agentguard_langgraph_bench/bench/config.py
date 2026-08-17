@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from agentguard_langgraph_adapter.config import (
     ApiMode,
@@ -33,6 +34,22 @@ DEFAULT_APPROVAL_MODE = "fail-closed"
 DEFAULT_APPROVAL_TIMEOUT = 60.0
 DEFAULT_LANGGRAPH_RECURSION_LIMIT = 100
 LLM_ENV_KEY_PREFIXES = ("AGENTGUARD_LLM_", "DEEPSEEK_", "OPENAI_")
+CompetitionContextMode = Literal["off", "observe", "required"]
+SUPPORTED_COMPETITION_CONTEXT_MODES: tuple[CompetitionContextMode, ...] = (
+    "off",
+    "observe",
+    "required",
+)
+
+
+def validate_competition_context_mode(value: object) -> CompetitionContextMode:
+    mode = str(value).strip().lower()
+    if mode not in SUPPORTED_COMPETITION_CONTEXT_MODES:
+        supported = ", ".join(SUPPORTED_COMPETITION_CONTEXT_MODES)
+        raise ValueError(
+            f"competition_context_mode must be one of: {supported}; got {value!r}"
+        )
+    return mode  # type: ignore[return-value]
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -198,6 +215,12 @@ class BenchConfig:
     tool_server_port: int = 18090
     core_api_mode: ApiMode = DEFAULT_API_MODE
     context_isolation_mode: ContextIsolationMode = "off"
+    # Competition-only planner provenance. These fields do not change the
+    # adapter's public off|required compatibility contract.
+    competition_mode: bool = False
+    competition_arm_id: str = ""
+    competition_repeat_index: int = 0
+    competition_context_mode: CompetitionContextMode = "off"
     # Populated only after the reference runner creates authoritative TaskFacts.
     trusted_task_ids_by_case: dict[str, str] = field(default_factory=dict)
     trusted_trace_ids_by_case: dict[str, str] = field(default_factory=dict)
@@ -216,6 +239,28 @@ class BenchConfig:
         self.context_isolation_mode = validate_context_isolation_mode(
             self.context_isolation_mode
         )
+        self.competition_context_mode = validate_competition_context_mode(
+            self.competition_context_mode
+        )
+        if self.competition_repeat_index < 0:
+            raise ValueError("competition_repeat_index must be non-negative")
+        if self.competition_mode and not self.competition_arm_id.strip():
+            raise ValueError("competition_arm_id is required in competition mode")
+        if self.competition_mode:
+            if not self.llm_enabled:
+                raise ValueError("competition mode requires llm_enabled=true")
+            if self.instrumentation_plan_mode != "autonomous":
+                raise ValueError(
+                    "competition mode requires instrumentation_plan_mode=autonomous"
+                )
+            if self.llm_fallback_to_case_plan:
+                raise ValueError("competition mode forbids case-plan fallback")
+            if self.llm_temperature != 0:
+                raise ValueError("competition mode requires llm_temperature=0")
+            if self.llm_max_retries != 0:
+                raise ValueError(
+                    "competition mode requires llm_max_retries=0 so every request is observable"
+                )
         warn_if_legacy_api_mode(self.core_api_mode)
 
     @classmethod
@@ -265,6 +310,10 @@ class BenchConfig:
         tool_server_port: int | None = None,
         core_api_mode: str | None = None,
         context_isolation_mode: str | None = None,
+        competition_mode: bool | None = None,
+        competition_arm_id: str | None = None,
+        competition_repeat_index: int | None = None,
+        competition_context_mode: str | None = None,
         strict_runtime_targets: bool | None = None,
         agent_visible_payload_mode: str | None = None,
         closure_on_partial: bool | None = None,
@@ -405,6 +454,26 @@ class BenchConfig:
             context_isolation_mode=validate_context_isolation_mode(
                 context_isolation_mode
                 or os.getenv("AGENTGUARD_CONTEXT_ISOLATION_MODE")
+                or "off"
+            ),
+            competition_mode=(
+                _env_bool("AGENTGUARD_COMPETITION_MODE", False)
+                if competition_mode is None
+                else competition_mode
+            ),
+            competition_arm_id=(
+                competition_arm_id
+                or os.getenv("AGENTGUARD_COMPETITION_ARM_ID")
+                or ""
+            ).strip(),
+            competition_repeat_index=(
+                _env_int("AGENTGUARD_COMPETITION_REPEAT_INDEX", 0)
+                if competition_repeat_index is None
+                else competition_repeat_index
+            ),
+            competition_context_mode=validate_competition_context_mode(
+                competition_context_mode
+                or os.getenv("AGENTGUARD_COMPETITION_CONTEXT_MODE")
                 or "off"
             ),
             strict_runtime_targets=(

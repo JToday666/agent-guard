@@ -164,9 +164,9 @@ class PlannerSpec:
             raise CompetitionConfigurationError(
                 "planner request_timeout must be greater than zero"
             )
-        if self.max_retries < 0:
+        if self.max_retries != 0:
             raise CompetitionConfigurationError(
-                "planner max_retries must be greater than or equal to zero"
+                "competition planner max_retries must be zero so every request is observable"
             )
         if self.max_tool_rounds <= 0:
             raise CompetitionConfigurationError(

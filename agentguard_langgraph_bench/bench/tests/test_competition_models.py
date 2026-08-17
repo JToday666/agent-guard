@@ -11,6 +11,7 @@ from agentguard_langgraph_bench.bench.competition_models import (
     CompetitionConfigurationError,
     CompetitionSuite,
     OfficialDecisionSource,
+    PlannerSpec,
     V21RolloutMode,
     authoritative_task_digest,
     load_competition_profile,
@@ -40,7 +41,7 @@ def test_packaged_competition_profile_freezes_five_distinct_arms() -> None:
     assert profile.identity.runtime_binding_id == (
         f"binding:{profile.identity.principal_id}"
     )
-    assert profile.identity.agent_id == profile.agent_adapter
+    assert profile.identity.agent_id == profile.agent_adapter == "langgraph-demo"
     assert profile.effective_digest.startswith("sha256:")
 
 
@@ -122,3 +123,8 @@ def test_competition_task_digest_matches_authoritative_taskfact_projection() -> 
     )
 
     assert authoritative_task_digest(fact.task_summary) == task_digest_projection(fact)
+
+
+def test_competition_planner_rejects_unobservable_internal_retries() -> None:
+    with pytest.raises(CompetitionConfigurationError, match="every request"):
+        PlannerSpec(max_retries=1)
