@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, TypedDict
+from typing import Any, Mapping, Sequence, TypedDict
 
 from agentguard_langgraph_adapter.tool_gateway import adapter_submits_policy_audit
 from agentguard_langgraph_adapter.context_guard import (
@@ -1921,7 +1921,7 @@ def _model_exchanges_from_diagnostics(
 
 def _invoke_llm_with_wall_clock_timeout(
     llm: Any,
-    messages: list[tuple[str, str]] | list[dict[str, Any]],
+    messages: Sequence[Any],
     *,
     timeout_seconds: float,
 ) -> Any:
@@ -1932,7 +1932,7 @@ def _invoke_llm_with_wall_clock_timeout(
 
 def _invoke_llm_in_daemon_thread(
     llm: Any,
-    messages: list[tuple[str, str]] | list[dict[str, Any]],
+    messages: Sequence[Any],
     *,
     timeout_seconds: float,
 ) -> Any:
