@@ -1,6 +1,6 @@
 # AgentGuard 全轨实施路线图
 
-> Source digest: `0ffe2794e878a221fc2f8e093070a5d8706b1d336dde5dcf841324513d7a6649`
+> Source digest: `c27772e5fa02023db6a81d86d78f6e6d904b20b2435f0b54a3b49ef7bcee534d`
 
 状态：🟢 已完成 · 🟠 正在实施 · 🔵 可启动 · ⚪ 未实施且不可启动。
 
@@ -37,8 +37,8 @@ flowchart LR
     N_CT03R["CT03R · CT-PR-03R — Offline Replay Artifact Exporter"]
     N_CT05["CT05 · CT-PR-05 — Memory Bridge"]
     N_CT04["CT04 · CT-PR-04 — Context Builder"]
-    N_CT_O1["CT-O1 · logical isolation"]
     N_CT04M["CT04M · CT-PR-04-M/INT — Bounded Manifest Producer"]
+    N_CT_O1["CT-O1 · logical isolation"]
     N_CT06["CT06 · CT-PR-06 — Declassification Evidence"]
     N_CT_O2["CT-O2 · actual context rewrite"]
   end
@@ -280,9 +280,9 @@ flowchart LR
   N_C14 -. "none · non_blocking" .-> N_S6
   N_G_A == "start · hard_dependency" ==> N_C10
   class N_B0,N_RM_00,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_CT05,N_CT04,N_R01,N_R02,N_R03,N_R04,N_R05P,N_RSC_CT01,N_I01,N_FE00,N_FE08,N_FE01,N_FE02,N_FE03,N_FE04,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD,N_G_CTACT,N_G_A completed
-  class N_R05 inProgress
-  class N_C10,N_CT03R,N_CT_O1,N_CT04M,N_CT06,N_RSC_CTPROV,N_FE06 ready
-  class N_C13,N_C14,N_C11,N_C12,N_CT_O2,N_R06,N_R07,N_I02A,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE07,N_FE09,N_FE10A,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
+  class N_C10,N_CT04M,N_R05 inProgress
+  class N_CT03R,N_CT_O1,N_FE06 ready
+  class N_C13,N_C14,N_C11,N_C12,N_CT06,N_CT_O2,N_R06,N_R07,N_RSC_CTPROV,N_I02A,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_FE05,N_FE07,N_FE09,N_FE10A,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
   classDef completed fill:#1F9D63,color:#fff,stroke:#126540
   classDef inProgress fill:#D99000,color:#111,stroke:#8a5900
   classDef ready fill:#2774D8,color:#fff,stroke:#174985
@@ -292,12 +292,8 @@ flowchart LR
 ## Ready Queue
 
 - `CT03R`
-- `RSC-CTPROV`
 - `FE06`
-- `C10`
 - `CT-O1`
-- `CT04M`
-- `CT06`
 
 ## 完整节点表
 
@@ -315,7 +311,7 @@ flowchart LR
 | `C07` | core | task | completed | 否 | V21-07 — Behavior / Sequence |
 | `C08` | core | task | completed | 否 | V21-08 — Fusion Shadow + Early Audit Evidence |
 | `C09` | core | task | completed | 否 | V21-09 — assess/finalize + CAS Revalidation |
-| `C10` | core | task | ready | 是 | V21-10 — Receipt / Evaluation Pre-enable Gate |
+| `C10` | core | task | in_progress | 否 | V21-10 — Receipt / Evaluation Pre-enable Gate |
 | `C13` | core | task | not_ready | 否 | V21-13 — Semantic Shadow |
 | `C14` | core | task | not_ready | 否 | V21-14 — Optional Semantic Upgrade-only |
 | `C11` | core | task | not_ready | 否 | V21-11 — Limited Enable |
@@ -329,9 +325,9 @@ flowchart LR
 | `CT03R` | ct | task | ready | 是 | CT-PR-03R — Offline Replay Artifact Exporter |
 | `CT05` | ct | task | completed | 否 | CT-PR-05 — Memory Bridge |
 | `CT04` | ct | task | completed | 否 | CT-PR-04 — Context Builder |
+| `CT04M` | ct | task | in_progress | 否 | CT-PR-04-M/INT — Bounded Manifest Producer |
 | `CT-O1` | ct | task | ready | 是 | logical isolation |
-| `CT04M` | ct | task | ready | 是 | CT-PR-04-M/INT — Bounded Manifest Producer |
-| `CT06` | ct | task | ready | 是 | CT-PR-06 — Declassification Evidence |
+| `CT06` | ct | task | not_ready | 否 | CT-PR-06 — Declassification Evidence |
 | `CT-O2` | ct | task | not_ready | 否 | actual context rewrite |
 | `R01` | rte | task | completed | 否 | PR-RTE-01 — Contract & Field Freeze |
 | `R02` | rte | task | completed | 否 | PR-RTE-02 — OpenClaw after_tool_call SDK Spike |
@@ -342,7 +338,7 @@ flowchart LR
 | `R06` | rte | task | not_ready | 否 | PR-RTE-06 — Result Evidence Hardening |
 | `R07` | rte | task | not_ready | 否 | PR-RTE-07 — Reliability Evidence |
 | `RSC-CT01` | integration | task | completed | 否 | INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback |
-| `RSC-CTPROV` | integration | task | ready | 是 | INT-RSC-CT-PROV — Typed Provenance writer |
+| `RSC-CTPROV` | integration | task | not_ready | 否 | INT-RSC-CT-PROV — Typed Provenance writer |
 | `I01` | integration | task | completed | 否 | INT-PR-01 — Fact → Snapshot → Shadow Fusion |
 | `I02A` | integration | task | not_ready | 否 | INT-PR-02A — Current official decision → RTE |
 | `I03` | integration | task | not_ready | 否 | INT-PR-03 — Cross-session Memory E2E |

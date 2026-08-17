@@ -1,26 +1,38 @@
 {
-  "schema_version": "1.0.0",
-  "id": "C10",
-  "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
-  "kind": "task",
-  "roles": ["task", "gate"],
-  "lane": "core",
-  "lifecycle": "not_started",
-  "revision": 1,
-  "optional": false,
   "blocked": false,
-  "hold": false,
-  "change_surfaces": ["core-evaluation-activation"],
-  "source_refs": [
-    {
-      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md",
-      "heading": "## V21-10 — Receipt / Evaluation Pre-enable Gate",
-      "line_hint": 420
-    }
+  "change_surfaces": [
+    "core-evaluation-activation"
   ],
   "evidence_refs": [],
-  "work": null,
+  "exact_title": "V21-10 — Receipt / Evaluation Pre-enable Gate",
+  "hold": false,
+  "id": "C10",
+  "kind": "task",
+  "lane": "core",
+  "lifecycle": "in_progress",
   "notes": [
     "Gate A is complete. This node is claimable implementation work with both task and gate roles; its report is evidence for Gate B but does not itself assert a numerical effect threshold or formal Gate B completion."
-  ]
+  ],
+  "optional": false,
+  "revision": 2,
+  "roles": [
+    "task",
+    "gate"
+  ],
+  "schema_version": "1.0.0",
+  "source_refs": [
+    {
+      "heading": "## V21-10 — Receipt / Evaluation Pre-enable Gate",
+      "line_hint": 420,
+      "path": "docs/AgentGuard_Core_V2.1_Final_Contract_Freeze/04_兼容迁移与实施计划.md"
+    }
+  ],
+  "work": {
+    "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
+    "branch": "codex/c10-pre-enable-report",
+    "owner": "codex",
+    "started_at": "2026-08-17T06:06:29Z",
+    "substate": "active",
+    "worktree_slug": "C10"
+  }
 }

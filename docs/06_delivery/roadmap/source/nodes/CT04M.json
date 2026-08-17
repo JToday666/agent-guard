@@ -1,29 +1,36 @@
 {
-  "schema_version": "1.0.0",
-  "id": "CT04M",
-  "exact_title": "CT-PR-04-M/INT — Bounded Manifest Producer",
-  "kind": "task",
-  "roles": [
-    "task"
-  ],
-  "lane": "ct",
-  "lifecycle": "not_started",
-  "revision": 0,
-  "optional": false,
   "blocked": false,
-  "hold": false,
   "change_surfaces": [
     "guard-api-production-wiring",
     "audit-schema-and-storage"
   ],
+  "evidence_refs": [],
+  "exact_title": "CT-PR-04-M/INT — Bounded Manifest Producer",
+  "hold": false,
+  "id": "CT04M",
+  "kind": "task",
+  "lane": "ct",
+  "lifecycle": "in_progress",
+  "notes": [],
+  "optional": false,
+  "revision": 1,
+  "roles": [
+    "task"
+  ],
+  "schema_version": "1.0.0",
   "source_refs": [
     {
-      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md",
       "heading": "## 14. 后端/集成 PR 建议",
-      "line_hint": 713
+      "line_hint": 713,
+      "path": "docs/AgentGuard_Runtime_Supervision_Console_Design/04_三线阶段实施_PR拆分与验收.md"
     }
   ],
-  "evidence_refs": [],
-  "work": null,
-  "notes": []
+  "work": {
+    "base_sha": "885bc83d696cb4f072550ded3fdbca863d1b36e0",
+    "branch": "codex/ct04m-manifest",
+    "owner": "codex",
+    "started_at": "2026-08-17T06:05:42Z",
+    "substate": "active",
+    "worktree_slug": "CT04M"
+  }
 }
