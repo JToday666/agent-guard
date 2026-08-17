@@ -168,14 +168,22 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     document = build_normalized(roadmap_root)
     nodes = normalized_nodes(document)
 
-    for node_id in ("FE04", "S1", "R05P", "RSC-CT01", "I01", "G-A"):
+    for node_id in (
+        "FE04",
+        "S1",
+        "R05P",
+        "RSC-CT01",
+        "I01",
+        "G-A",
+        "CT05",
+    ):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05", "RM-00", "CT05"):
+    for node_id in ("R05", "RM-00"):
         assert nodes[node_id]["effective_status"] == "in_progress"
-    for node_id in ("FE06", "CT03R"):
+    for node_id in ("FE06", "CT03R", "RSC-CTPROV"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
-    for node_id in ("C10", "RSC-CTPROV"):
+    for node_id in ("C10",):
         assert nodes[node_id]["effective_status"] == "not_ready"
 
     result = run_tool(roadmap_root, "ready", "--json")
@@ -183,7 +191,7 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"FE06", "CT03R"} <= ready_ids
+    assert {"FE06", "CT03R", "RSC-CTPROV"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -193,11 +201,8 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "R05P",
         "R05",
         "RM-00",
-        "CT05",
-        "RSC-CTPROV",
         "C10",
         "CT05",
-        "RSC-CTPROV",
     }.isdisjoint(ready_ids)
 
 

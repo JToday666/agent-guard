@@ -3,16 +3,24 @@
   "change_surfaces": [
     "audit-schema-and-storage"
   ],
-  "evidence_refs": [],
+  "evidence_refs": [
+    "evidence/CT05/EV-CT05-2E6B35F9BB2B.json",
+    "evidence/CT05/EV-CT05-3FCF3100EE76.json",
+    "evidence/CT05/EV-CT05-6C99542E4040.json",
+    "evidence/CT05/EV-CT05-718A2F92D931.json",
+    "evidence/CT05/EV-CT05-9AE547A4229C.json",
+    "evidence/CT05/EV-CT05-AF9C26AACFB0.json",
+    "evidence/CT05/EV-CT05-BB01DD16586C.json"
+  ],
   "exact_title": "CT-PR-05 — Memory Bridge",
   "hold": false,
   "id": "CT05",
   "kind": "task",
   "lane": "ct",
-  "lifecycle": "in_progress",
+  "lifecycle": "completed",
   "notes": [],
   "optional": false,
-  "revision": 1,
+  "revision": 2,
   "roles": [
     "task"
   ],
@@ -27,9 +35,10 @@
   "work": {
     "base_sha": "5b4430b0fa5e5b36cb4be97d1966bb66ad184147",
     "branch": "codex/ct05-memory-bridge",
+    "completed_commit": "348cf7b98eb5232cf4d206bd1714c8ab69b6cd33",
     "owner": "implementation-owner",
     "started_at": "2026-08-16T15:57:50Z",
-    "substate": "active",
+    "substate": "closed",
     "worktree_slug": "CT05"
   }
 }
