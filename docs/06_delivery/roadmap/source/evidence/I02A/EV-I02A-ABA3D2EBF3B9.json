@@ -1,0 +1,11 @@
+{
+  "id": "EV-I02A-ABA3D2EBF3B9",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "I02A",
+  "recorded_at": "2026-08-17T08:32:01Z",
+  "ref": "local:i02a-focused-runtime-dashboard-corpus",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Focused runtime, Context, C10 API, profile runner, Dashboard Chromium and corpus tests passed; latest groups 73, 17 and 15 passed with only documented PostgreSQL skips"
+}
