@@ -179,9 +179,7 @@ class StubArmExecutor:
                     "status": "provisioned",
                     "task_id": f"task-{request.arm.arm_id}-{request.repeat_index}-{case.case_id}",
                     "trace_id": f"trace-{request.arm.arm_id}-{request.repeat_index}-{case.case_id}",
-                            "task_digest": authoritative_task_digest(
-                                case.input.payload
-                            ),
+                    "task_digest": authoritative_task_digest(case.input.payload),
                     "principal_id": request.profile.identity.principal_id,
                     "agent_id": request.profile.identity.agent_id,
                     "runtime_binding_id": request.profile.identity.runtime_binding_id,
@@ -211,6 +209,10 @@ class StubArmExecutor:
                     "observed_arm": observed,
                     "task_fact": task_fact,
                     "model_exchanges": exchanges,
+                    # Stub executors are never competition-qualified and do
+                    # not manufacture runtime execution or receipt evidence.
+                    "tool_executions": [],
+                    "terminal_receipts": [],
                     "attack_success": False,
                     "overblocked": False,
                     "task_success": True,
@@ -223,7 +225,7 @@ class StubArmExecutor:
                         False if request.arm.v21_enabled else None
                     ),
                     "receipt_covered": (
-                        True if request.arm.rte_mode.value == "enforce" else None
+                        False if request.arm.rte_mode.value == "enforce" else None
                     ),
                 }
             )
@@ -263,9 +265,7 @@ def test_full_stub_matrix_is_complete_but_never_competition_qualified(
     assert report["competition_qualified"] is False
     preflight = json.loads((root / "preflight.json").read_text(encoding="utf-8"))
     assert preflight["competition_qualification_eligible"] is False
-    completeness = json.loads(
-        (root / "completeness.json").read_text(encoding="utf-8")
-    )
+    completeness = json.loads((root / "completeness.json").read_text(encoding="utf-8"))
     assert completeness["competition_qualification_eligible"] is False
     assert report["expected_case_runs"] == 350
     assert report["attempted_case_runs"] == 350
@@ -320,7 +320,9 @@ def test_full_stub_matrix_is_complete_but_never_competition_qualified(
     assert dashboard_payload["asr_before"] == dashboard_report["arms"][0]["asr"]
     assert dashboard_payload["asr_after"] == dashboard_report["arms"][4]["asr"]
     assert dashboard_payload["dataset_id"] == request.profile.dataset.dataset_id
-    assert dashboard_payload["dataset_version"] == request.profile.dataset.dataset_version
+    assert (
+        dashboard_payload["dataset_version"] == request.profile.dataset.dataset_version
+    )
     assert dashboard_payload["dataset_digest"] == request.profile.dataset.dataset_digest
     assert dashboard_payload["dataset_locked"] is False
     assert dashboard_payload["run_at"].endswith("Z")
@@ -448,10 +450,7 @@ def test_runner_invalidates_secret_bearing_executor_output_without_persisting_it
         mode="json"
     )
     assert parsed_dashboard["competition_report"]["status"] == "invalid"
-    assert (
-        parsed_dashboard["competition_report"]["competition_qualified"]
-        is False
-    )
+    assert parsed_dashboard["competition_report"]["competition_qualified"] is False
     variants = {
         _SECRET.encode(),
         f"Bearer {_SECRET}".encode(),
@@ -481,9 +480,7 @@ def test_valid_matrix_with_observed_authority_mismatch_is_exit_one(
     dashboard = EvaluationRun.model_validate_json(
         (request.artifacts / "dashboard-evaluation-run.json").read_text()
     ).model_dump(mode="json")
-    assert (
-        dashboard["competition_report"]["status"] == "functional_contract_failed"
-    )
+    assert dashboard["competition_report"]["status"] == "functional_contract_failed"
     contracts = json.loads(
         (request.artifacts / "contract-results.json").read_text(encoding="utf-8")
     )

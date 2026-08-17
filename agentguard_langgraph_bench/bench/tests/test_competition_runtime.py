@@ -45,6 +45,54 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length).decode("utf-8"))
         type(self).requests.append(payload)
         type(self).authorization.append(self.headers.get("Authorization", ""))
+        tool_names = {
+            str(item.get("function", {}).get("name") or "")
+            for item in payload.get("tools", [])
+            if isinstance(item, dict) and isinstance(item.get("function"), dict)
+        }
+        has_tool_result = any(
+            isinstance(item, dict) and item.get("role") == "tool"
+            for item in payload.get("messages", [])
+        )
+        if "agentguard_competition_probe" in tool_names:
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-competition-probe",
+                        "type": "function",
+                        "function": {
+                            "name": "agentguard_competition_probe",
+                            "arguments": '{"probe":"ready"}',
+                        },
+                    }
+                ],
+            }
+            finish_reason = "tool_calls"
+        elif has_tool_result:
+            message = {
+                "role": "assistant",
+                "content": "The public document was read successfully.",
+            }
+            finish_reason = "stop"
+        else:
+            assert "read_file" in tool_names
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-competition-read-file",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path":"/docs/public.txt"}',
+                        },
+                    }
+                ],
+            }
+            finish_reason = "tool_calls"
         response = {
             "id": f"chatcmpl-competition-{len(type(self).requests)}",
             "object": "chat.completion",
@@ -53,21 +101,8 @@ class _ProviderHandler(BaseHTTPRequestHandler):
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [
-                            {
-                                "id": "call-competition-probe",
-                                "type": "function",
-                                "function": {
-                                    "name": "agentguard_competition_probe",
-                                    "arguments": '{"probe":"ready"}',
-                                },
-                            }
-                        ],
-                    },
-                    "finish_reason": "tool_calls",
+                    "message": message,
+                    "finish_reason": finish_reason,
                 }
             ],
             "usage": {
@@ -157,11 +192,14 @@ def test_bench_config_propagates_each_competition_rte_mode(tmp_path: Path) -> No
         )
 
         assert config.competition_rte_mode == rte_mode.value
-        assert GuardConfig.from_bench_config(
-            config,
-            runtime="langgraph",
-            agent_id="langgraph-demo",
-        ).competition_rte_mode == rte_mode.value
+        assert (
+            GuardConfig.from_bench_config(
+                config,
+                runtime="langgraph",
+                agent_id="langgraph-demo",
+            ).competition_rte_mode
+            == rte_mode.value
+        )
 
 
 def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
@@ -298,7 +336,9 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
     assert row["model_invoked"] is True
     assert row["observed_arm"]["official_decision_source"] == "v21"
     assert row["v21_selected"] is True
-    assert row["receipt_covered"] is True
+    assert row["tool_executions"] == []
+    assert row["terminal_receipts"] == []
+    assert row["receipt_covered"] is False
     assert row["task_fact"]["status"] == "provisioned"
     assert row["task_fact"]["principal_id"] == "competition-langgraph-runner"
     assert row["task_fact"]["agent_id"] == "langgraph-demo"
@@ -308,6 +348,64 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
     assert result.contracts["provider_tool_call_preflight"]["status"] == "passed"
     assert result.contracts["competition_activation"]["status"] == "passed"
     assert _PROVIDER_KEY not in repr(result)
+
+
+def test_a4_default_graph_executes_read_file_once_with_terminal_receipt(
+    tmp_path: Path,
+) -> None:
+    request = _arm_request(tmp_path, "http://127.0.0.1:1/v1")
+    a4 = next(item for item in request.profile.arms if item.arm_id == "A4")
+
+    with _provider_server() as base_url:
+        result = execute_competition_arm(
+            replace(
+                request,
+                arm=a4,
+                provider=replace(request.provider, base_url=base_url),
+            )
+        )
+
+    assert len(_ProviderHandler.requests) == 3
+    assert _ProviderHandler.authorization == [f"Bearer {_PROVIDER_KEY}"] * 3
+    assert any(
+        item.get("role") == "tool" for item in _ProviderHandler.requests[2]["messages"]
+    )
+
+    row = result.rows[0]
+    assert row["run_valid"] is True
+    assert row["run_status"] == "completed"
+    assert row["instrumentation_plan_mode"] == "autonomous"
+    assert row["planning_source"] == "llm_autonomous"
+    assert row["guided_plan_applied"] is False
+    assert row["fallback_applied"] is False
+    assert row["model_invoked"] is True
+    assert len(row["model_exchanges"]) == 2
+    assert all(
+        item["outcome"] == "success"
+        and item["request_observed"] is True
+        and item["response_observed"] is True
+        for item in row["model_exchanges"]
+    )
+    assert row["model_exchanges"][0]["tool_names"] == ["read_file"]
+    assert row["model_exchanges"][1]["tool_call_count"] == 0
+    assert row["observed_arm"]["official_decision_source"] == "v21"
+    assert row["observed_arm"]["context_mode"] == "required"
+    assert row["v21_selected"] is True
+
+    assert len(row["tool_executions"]) == 1
+    execution = row["tool_executions"][0]
+    assert execution["tool_name"] == "read_file"
+    assert execution["status"] == "executed"
+    assert execution["invocation_count"] == 1
+    assert row["terminal_receipts"] == [
+        {
+            "action_id": execution["action_id"],
+            "status": "executed",
+            "receipt_count": 1,
+        }
+    ]
+    assert row["receipt_covered"] is True
+    assert row["task_success"] is True
 
 
 def test_detector_off_disables_every_supported_policy_rule(tmp_path: Path) -> None:
@@ -338,12 +436,8 @@ def test_detector_off_disables_every_supported_policy_rule(tmp_path: Path) -> No
     )
     engine = GuardEngine()
     _, baseline = engine.evaluate_with_results(sensitive_read)
-    disabled_decision, disabled = engine.evaluate_with_results(
-        sensitive_read, policy
-    )
+    disabled_decision, disabled = engine.evaluate_with_results(sensitive_read, policy)
 
-    assert "P001_sensitive_file_access" in {
-        item.rule_hit.rule_id for item in baseline
-    }
+    assert "P001_sensitive_file_access" in {item.rule_hit.rule_id for item in baseline}
     assert disabled == []
     assert disabled_decision.decision == "allow"

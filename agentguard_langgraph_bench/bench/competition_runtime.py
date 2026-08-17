@@ -597,9 +597,7 @@ def _bench_config(
         "agent_adapter": request.profile.agent_adapter,
         "core_api_mode": "guard-api-v0.3",
         "context_isolation_mode": (
-            "required"
-            if request.arm.context_mode is ContextMode.REQUIRED
-            else "off"
+            "required" if request.arm.context_mode is ContextMode.REQUIRED else "off"
         ),
         "trusted_task_ids_by_case": dict(task_ids),
         "trusted_trace_ids_by_case": dict(trace_ids),
@@ -685,9 +683,7 @@ def _deny_approval_fixture(
             ) from fixture.error
 
 
-def _fetch_trace(
-    base_url: str, *, control_token: str, trace_id: str
-) -> dict[str, Any]:
+def _fetch_trace(base_url: str, *, control_token: str, trace_id: str) -> dict[str, Any]:
     try:
         with httpx.Client(
             base_url=base_url,
@@ -754,7 +750,14 @@ def _normalize_case_row(
                 "case neither invoked the model nor has an authenticated pre-model block",
             )
 
-    receipt_covered = _receipt_coverage(raw, trace, request.arm)
+    tool_executions = _tool_execution_evidence(raw)
+    terminal_receipts = _terminal_receipt_evidence(trace)
+    receipt_covered = _receipt_coverage(
+        raw,
+        tool_executions=tool_executions,
+        terminal_receipts=terminal_receipts,
+        arm=request.arm,
+    )
     observed_arm = _observed_arm(request.arm, trace)
     row = {
         "arm_id": request.arm.arm_id,
@@ -767,9 +770,7 @@ def _normalize_case_row(
         "run_status": raw.get("run_status") or "completed",
         "instrumentation_plan_mode": "autonomous",
         "llm_enabled": True,
-        "planning_source": (
-            "llm_autonomous" if model_invoked else "pre_model_blocked"
-        ),
+        "planning_source": ("llm_autonomous" if model_invoked else "pre_model_blocked"),
         "guided_plan_applied": bool(raw.get("guided_plan_applied")),
         "fallback_applied": bool(raw.get("fallback_applied")),
         "model_invoked": model_invoked,
@@ -782,6 +783,8 @@ def _normalize_case_row(
         "task_fact": dict(task_fact),
         "pre_model_block_evidence": pre_model,
         "model_exchanges": [item.public_dump() for item in exchanges],
+        "tool_executions": tool_executions,
+        "terminal_receipts": terminal_receipts,
         "attack_success": raw.get("attack_success"),
         "overblocked": raw.get("overblocked"),
         "task_success": raw.get("task_success"),
@@ -835,7 +838,10 @@ def _decision_authorities(
         return []
     authorities: list[dict[str, Any]] = []
     for event in trace.get("audit_events", []):
-        if not isinstance(event, Mapping) or event.get("record_type") != "policy_evaluation":
+        if (
+            not isinstance(event, Mapping)
+            or event.get("record_type") != "policy_evaluation"
+        ):
             continue
         authority = event.get("decision_authority")
         if isinstance(authority, Mapping):
@@ -843,19 +849,23 @@ def _decision_authorities(
     return authorities
 
 
-def _observed_arm(
-    expected: ArmSpec, trace: Mapping[str, Any] | None
-) -> dict[str, Any]:
+def _observed_arm(expected: ArmSpec, trace: Mapping[str, Any] | None) -> dict[str, Any]:
     if not expected.guard_enabled:
         return expected.public_dump()
     audits = [
         event
         for event in (trace or {}).get("audit_events", [])
-        if isinstance(event, Mapping) and event.get("record_type") == "policy_evaluation"
+        if isinstance(event, Mapping)
+        and event.get("record_type") == "policy_evaluation"
     ]
     authorities = _decision_authorities(trace)
     v21_modes = {
-        str(event.get("evidence", {}).get("decision_v21", {}).get("payload", {}).get("mode"))
+        str(
+            event.get("evidence", {})
+            .get("decision_v21", {})
+            .get("payload", {})
+            .get("mode")
+        )
         for event in audits
         if isinstance(event.get("evidence"), Mapping)
         and isinstance(event.get("evidence", {}).get("decision_v21"), Mapping)
@@ -864,7 +874,10 @@ def _observed_arm(
     if expected.v21_enabled and not audits:
         observed["v21_enabled"] = False
         observed["v21_rollout_mode"] = None
-    elif expected.v21_rollout_mode is not None and expected.v21_rollout_mode.value not in v21_modes:
+    elif (
+        expected.v21_rollout_mode is not None
+        and expected.v21_rollout_mode.value not in v21_modes
+    ):
         observed["v21_rollout_mode"] = next(iter(sorted(v21_modes)), None)
     if expected.official_decision_source is OfficialDecisionSource.V21:
         if not authorities or any(item.get("source") != "v21" for item in authorities):
@@ -881,7 +894,10 @@ def _pre_model_block_evidence(
     if trace is None:
         return None
     for event in trace.get("audit_events", []):
-        if not isinstance(event, Mapping) or event.get("record_type") != "policy_evaluation":
+        if (
+            not isinstance(event, Mapping)
+            or event.get("record_type") != "policy_evaluation"
+        ):
             continue
         guard_decision = event.get("evidence", {}).get("guard_decision")
         if not isinstance(guard_decision, Mapping):
@@ -891,7 +907,12 @@ def _pre_model_block_evidence(
             continue
         decision_id = guard_decision.get("decision_id")
         audit_id = event.get("audit_id")
-        if isinstance(decision_id, str) and decision_id and isinstance(audit_id, str) and audit_id:
+        if (
+            isinstance(decision_id, str)
+            and decision_id
+            and isinstance(audit_id, str)
+            and audit_id
+        ):
             return {
                 "authenticated": True,
                 "decision": decision,
@@ -901,32 +922,131 @@ def _pre_model_block_evidence(
     return None
 
 
+def _tool_execution_evidence(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Project tool results to display-safe invocation evidence.
+
+    Arguments, results, errors and model text intentionally remain in the
+    executor's temporary scratch directory.  A repeated action identifier is
+    rejected rather than collapsed because it would make an exact-once claim
+    ambiguous.
+    """
+
+    raw_calls = raw.get("tool_calls") or []
+    if not isinstance(raw_calls, list):
+        raise InvalidCompetitionRun(
+            "tool_execution_evidence_invalid", "tool calls must be a list"
+        )
+    executions: list[dict[str, Any]] = []
+    seen_action_ids: set[str] = set()
+    for item in raw_calls:
+        if not isinstance(item, Mapping):
+            raise InvalidCompetitionRun(
+                "tool_execution_evidence_invalid",
+                "tool call evidence must be an object",
+            )
+        action_id = item.get("call_id")
+        tool_name = item.get("tool_name")
+        status = item.get("status")
+        if not all(
+            isinstance(value, str) and value for value in (action_id, tool_name, status)
+        ):
+            raise InvalidCompetitionRun(
+                "tool_execution_evidence_invalid",
+                "tool call evidence is missing its display-safe identity",
+            )
+        assert isinstance(action_id, str)
+        if action_id in seen_action_ids:
+            raise InvalidCompetitionRun(
+                "tool_execution_evidence_invalid",
+                "tool call evidence repeats an action identifier",
+            )
+        seen_action_ids.add(action_id)
+        executions.append(
+            {
+                "action_id": action_id,
+                "tool_name": tool_name,
+                "status": status,
+                "invocation_count": int(item.get("executed") is True),
+            }
+        )
+    return executions
+
+
+def _terminal_receipt_evidence(
+    trace: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Project committed terminal receipts without result or payload text."""
+
+    grouped: dict[str, list[str]] = {}
+    for event in (trace or {}).get("audit_events", []):
+        if (
+            not isinstance(event, Mapping)
+            or event.get("record_type") != "runtime_outcome"
+        ):
+            continue
+        links = event.get("links")
+        evidence = event.get("evidence")
+        execution = evidence.get("execution") if isinstance(evidence, Mapping) else None
+        action_id = links.get("action_id") if isinstance(links, Mapping) else None
+        status = execution.get("status") if isinstance(execution, Mapping) else None
+        if not isinstance(action_id, str) or not action_id:
+            raise InvalidCompetitionRun(
+                "terminal_receipt_evidence_invalid",
+                "terminal receipt is missing its action identity",
+            )
+        if not isinstance(status, str) or not status:
+            raise InvalidCompetitionRun(
+                "terminal_receipt_evidence_invalid",
+                "terminal receipt is missing its execution status",
+            )
+        grouped.setdefault(action_id, []).append(status)
+
+    receipts: list[dict[str, Any]] = []
+    for action_id in sorted(grouped):
+        statuses = grouped[action_id]
+        receipts.append(
+            {
+                "action_id": action_id,
+                "status": statuses[0] if len(set(statuses)) == 1 else "conflicting",
+                "receipt_count": len(statuses),
+            }
+        )
+    return receipts
+
+
 def _receipt_coverage(
     raw: Mapping[str, Any],
-    trace: Mapping[str, Any] | None,
+    *,
+    tool_executions: Sequence[Mapping[str, Any]],
+    terminal_receipts: Sequence[Mapping[str, Any]],
     arm: ArmSpec,
 ) -> bool | None:
     if arm.rte_mode is not RteMode.ENFORCE:
         return None
+    # An empty set cannot prove receipt coverage.  Pre-model blocks remain
+    # valid cases, but they do not contribute a positive receipt claim.
+    if not tool_executions:
+        return False
     calls = [item for item in raw.get("tool_calls", []) if isinstance(item, Mapping)]
-    action_ids = {str(item.get("call_id")) for item in calls if item.get("call_id")}
     if any(item.get("runtime_receipt_error") for item in calls):
         return False
-    terminals = {
-        str(event.get("links", {}).get("action_id"))
-        for event in (trace or {}).get("audit_events", [])
-        if isinstance(event, Mapping)
-        and event.get("record_type") == "runtime_outcome"
-        and isinstance(event.get("links"), Mapping)
-        and event.get("links", {}).get("action_id")
+    action_ids = {str(item["action_id"]) for item in tool_executions}
+    receipt_counts = {
+        str(item["action_id"]): item.get("receipt_count") for item in terminal_receipts
     }
-    return action_ids <= terminals
+    return action_ids == set(receipt_counts) and all(
+        receipt_counts[action_id] == 1 for action_id in action_ids
+    )
 
 
-def _v21_selected(arm: ArmSpec, authorities: Sequence[Mapping[str, Any]]) -> bool | None:
+def _v21_selected(
+    arm: ArmSpec, authorities: Sequence[Mapping[str, Any]]
+) -> bool | None:
     if not arm.v21_enabled:
         return None
-    return bool(authorities) and all(item.get("source") == "v21" for item in authorities)
+    return bool(authorities) and all(
+        item.get("source") == "v21" for item in authorities
+    )
 
 
 def _legacy_floor(
@@ -945,7 +1065,9 @@ def _is_sha256(value: Any) -> bool:
     if not isinstance(value, str) or not value.startswith("sha256:"):
         return False
     digest = value.removeprefix("sha256:")
-    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+    return len(digest) == 64 and all(
+        character in "0123456789abcdef" for character in digest
+    )
 
 
 __all__ = ["execute_competition_arm"]

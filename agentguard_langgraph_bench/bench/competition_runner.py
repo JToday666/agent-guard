@@ -106,6 +106,8 @@ _PUBLIC_CASE_KEYS = (
     "task_fact",
     "pre_model_block_evidence",
     "model_exchanges",
+    "tool_executions",
+    "terminal_receipts",
     "attack_success",
     "overblocked",
     "task_success",
@@ -320,9 +322,7 @@ class ArtifactDirectory:
                 "secret_scan": {
                     "status": "passed",
                     "files_scanned": len(entries),
-                    "credential_variants_checked": len(
-                        self._forbidden_secret_patterns
-                    ),
+                    "credential_variants_checked": len(self._forbidden_secret_patterns),
                 },
                 "artifact_count": len(entries),
                 "artifacts": entries,
@@ -654,8 +654,8 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
     # Only the built-in live executor establishes the trusted runtime boundary.
     # The injection seam is intentionally useful for contract tests, but its
     # caller-controlled rows can never support an official qualification claim.
-    qualification_eligible = (
-        executor is None and _qualification_eligible(request, cases, arms)
+    qualification_eligible = executor is None and _qualification_eligible(
+        request, cases, arms
     )
     selected_executor = executor or _live_executor
     artifacts = ArtifactDirectory(
@@ -1171,9 +1171,138 @@ def _admit_case_row(
             )
         _validate_pre_model_block(row, request=request, identity=identity)
 
+    failures.extend(
+        _validate_tool_and_receipt_evidence(row, request=request, identity=identity)
+    )
+
     public = {key: _json_safe(row.get(key)) for key in _PUBLIC_CASE_KEYS if key in row}
     public["model_exchanges"] = [item.public_dump() for item in exchanges]
     return public, failures
+
+
+def _validate_tool_and_receipt_evidence(
+    row: Mapping[str, Any],
+    *,
+    request: ArmRunRequest,
+    identity: str,
+) -> list[dict[str, str]]:
+    """Validate display-safe exact-once and terminal correlation claims."""
+
+    raw_executions = row.get("tool_executions")
+    raw_receipts = row.get("terminal_receipts")
+    if not isinstance(raw_executions, list) or not isinstance(raw_receipts, list):
+        raise InvalidCompetitionRun(
+            "runtime_execution_evidence_missing",
+            f"tool or terminal receipt evidence is missing for {identity}",
+        )
+
+    executions: dict[str, Mapping[str, Any]] = {}
+    for item in raw_executions:
+        if not isinstance(item, Mapping) or set(item) != {
+            "action_id",
+            "tool_name",
+            "status",
+            "invocation_count",
+        }:
+            raise InvalidCompetitionRun(
+                "runtime_execution_evidence_invalid",
+                f"tool execution evidence is invalid for {identity}",
+            )
+        action_id = item.get("action_id")
+        tool_name = item.get("tool_name")
+        status = item.get("status")
+        invocation_count = item.get("invocation_count")
+        if (
+            not isinstance(action_id, str)
+            or not action_id
+            or not isinstance(tool_name, str)
+            or not tool_name
+            or not isinstance(status, str)
+            or not status
+            or isinstance(invocation_count, bool)
+            or not isinstance(invocation_count, int)
+            or invocation_count < 0
+            or action_id in executions
+        ):
+            raise InvalidCompetitionRun(
+                "runtime_execution_evidence_invalid",
+                f"tool execution evidence is invalid for {identity}",
+            )
+        executions[action_id] = item
+
+    receipts: dict[str, Mapping[str, Any]] = {}
+    for item in raw_receipts:
+        if not isinstance(item, Mapping) or set(item) != {
+            "action_id",
+            "status",
+            "receipt_count",
+        }:
+            raise InvalidCompetitionRun(
+                "runtime_receipt_evidence_invalid",
+                f"terminal receipt evidence is invalid for {identity}",
+            )
+        action_id = item.get("action_id")
+        status = item.get("status")
+        receipt_count = item.get("receipt_count")
+        if (
+            not isinstance(action_id, str)
+            or not action_id
+            or not isinstance(status, str)
+            or not status
+            or isinstance(receipt_count, bool)
+            or not isinstance(receipt_count, int)
+            or receipt_count < 1
+            or action_id in receipts
+        ):
+            raise InvalidCompetitionRun(
+                "runtime_receipt_evidence_invalid",
+                f"terminal receipt evidence is invalid for {identity}",
+            )
+        receipts[action_id] = item
+
+    receipt_covered = row.get("receipt_covered")
+    if request.arm.rte_mode is RteMode.ENFORCE:
+        if not isinstance(receipt_covered, bool):
+            raise InvalidCompetitionRun(
+                "runtime_receipt_claim_invalid",
+                f"receipt coverage claim is invalid for {identity}",
+            )
+        exact_receipts = (
+            bool(executions)
+            and set(executions) == set(receipts)
+            and all(item["receipt_count"] == 1 for item in receipts.values())
+        )
+        if receipt_covered and not exact_receipts:
+            raise InvalidCompetitionRun(
+                "runtime_receipt_claim_mismatch",
+                f"receipt coverage is not supported by evidence for {identity}",
+            )
+    elif receipt_covered is not None:
+        raise InvalidCompetitionRun(
+            "runtime_receipt_claim_invalid",
+            f"receipt coverage must be not applicable for {identity}",
+        )
+
+    failures: list[dict[str, str]] = []
+    if any(item["invocation_count"] > 1 for item in executions.values()):
+        failures.append(
+            {
+                "contract": "tool_action_invoked_at_most_once",
+                "arm_id": request.arm.arm_id,
+                "case_id": identity.rsplit("/", 1)[-1],
+                "reason_code": "tool_action_invoked_more_than_once",
+            }
+        )
+    if executions and request.arm.rte_mode is RteMode.ENFORCE and not receipt_covered:
+        failures.append(
+            {
+                "contract": "terminal_receipt_coverage",
+                "arm_id": request.arm.arm_id,
+                "case_id": identity.rsplit("/", 1)[-1],
+                "reason_code": "terminal_receipt_not_covered",
+            }
+        )
+    return failures
 
 
 def _validate_task_fact(
@@ -1597,10 +1726,7 @@ def _dashboard_competition_report(report: Mapping[str, Any]) -> dict[str, Any]:
         if key != "arms"
     }
     narrowed["arms"] = [
-        {
-            key: _json_safe(arm.get(key))
-            for key in _DASHBOARD_COMPETITION_ARM_KEYS
-        }
+        {key: _json_safe(arm.get(key)) for key in _DASHBOARD_COMPETITION_ARM_KEYS}
         for arm in report.get("arms", ())
         if isinstance(arm, Mapping)
     ]
