@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -25,11 +26,15 @@ def roadmap_root(tmp_path: Path) -> Path:
 
 
 def run_tool(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment.pop("GITHUB_HEAD_REF", None)
+    environment.pop("GITHUB_EVENT_NAME", None)
     return subprocess.run(
         [sys.executable, str(ROADMAP_TOOL), "--root", str(root), *arguments],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,
+        env=environment,
         text=True,
     )
 
