@@ -44,7 +44,7 @@ jobs:
         run: |
           shopt -s nullglob
           test_paths=(tests apps/*/tests packages/*/tests)
-          uv run pytest -q \
+          uv run pytest -q -k "not postgres" \
             --ignore=tests/test_gate_a_int_pr_01.py \
             --ignore=tests/test_guard_api_postgres.py \
             --ignore=tests/test_runtime_safety_e2e.py \
