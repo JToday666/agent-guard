@@ -24,7 +24,11 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import httpx
 import uvicorn
-from agentguard_core import PolicyBundle, build_competition_activation_manifest
+from agentguard_core import (
+    SUPPORTED_POLICY_RULE_IDS,
+    PolicyBundle,
+    build_competition_activation_manifest,
+)
 from agentguard_core.actions import ActionConstraint
 from guard_api.auth import AuthContext
 from guard_api.main import create_app
@@ -61,17 +65,7 @@ from .model_exchange import (
 from .runner import run_cases
 
 
-_ALL_RULE_IDS = [f"P{number:03d}_{name}" for number, name in (
-    (101, "prompt_injection"),
-    (102, "jailbreak"),
-    (103, "code_execution_abuse"),
-    (104, "memory_poisoning"),
-    (105, "environment_poisoning"),
-    (106, "credential_exposure"),
-    (107, "file_exfiltration"),
-    (108, "agent_abuse"),
-    (109, "mcp_tool_hijacking"),
-)]
+_ALL_RULE_IDS = tuple(sorted(SUPPORTED_POLICY_RULE_IDS))
 _PREFLIGHT_TOOL = {
     "type": "function",
     "function": {

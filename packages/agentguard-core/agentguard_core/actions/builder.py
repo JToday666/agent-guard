@@ -513,6 +513,8 @@ def build_action_ir(
     destinations = [item for item in produced if item.kind in _DESTINATION_KINDS]
 
     data_refs = [f"event:{event.event_id}", f"trace:{event.trace_id}"]
+    if event.security_context.visible_source_refs is not None:
+        data_refs.extend(sorted(set(event.security_context.visible_source_refs)))
     data_refs.extend(f"v21-02:{code}" for code in reason_codes)
 
     metadata = event.metadata

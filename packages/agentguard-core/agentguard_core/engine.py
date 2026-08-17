@@ -141,6 +141,7 @@ class GuardEngine:
         detection_results: Sequence[DetectionResult] = (),
         revoked_grant_ids: Sequence[str] = (),
         transient_facts: "AssessmentTransientFacts | None" = None,
+        memory_not_required_actions: frozenset[str] = frozenset(),
     ) -> "FastAssessment":
         """V21-09 正式 ``assess(event, policies, snapshot) -> FastAssessment``。
 
@@ -160,6 +161,7 @@ class GuardEngine:
             detection_results=detection_results,
             revoked_grant_ids=revoked_grant_ids,
             transient_facts=transient_facts,
+            memory_not_required_actions=memory_not_required_actions,
         )
 
     def finalize(

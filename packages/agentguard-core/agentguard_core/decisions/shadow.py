@@ -326,6 +326,12 @@ def _overlay_lookup_targets(action_ir: ActionIR) -> tuple[str, ...]:
         f"action:{action_ir.action_id}",
         action_ir.event_id,
         f"event:{action_ir.event_id}",
+        # Gate-A read-path handlers use typed event sinks rather than the
+        # pre-execution ``action:`` sink used by tool calls.  Keep them as
+        # lookup roots so exact current-event assembly flows reach coverage.
+        f"context:{action_ir.event_id}",
+        f"model_input:{action_ir.event_id}",
+        f"model_output:{action_ir.event_id}",
         *(resource.canonical_id for resource in action_ir.resources),
         *(destination.canonical_id for destination in action_ir.destinations),
     }
@@ -392,6 +398,7 @@ def _assess_kernel(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
     """V21-08 shadow 与 V21-09 正式 assess 的**唯一**编排主体。
 
@@ -473,6 +480,7 @@ def _assess_kernel(
                 PolicyProfile(
                     policy_revision=snapshot.policy_revision,
                     policy_digest=snapshot.policy_digest,
+                    memory_not_required_actions=memory_not_required_actions,
                 ),
             )
             state = _state_from_snapshot(snapshot, revoked_grant_ids=revoked_grant_ids)
@@ -523,11 +531,22 @@ def _assess_kernel(
                 )
                 state = overlay.state
                 incomplete_reasons = _overlay_incomplete_reasons(transient_facts)
+                source_ids = {source.source_id for source in state.source_index}
+                stable_source_refs = frozenset(
+                    {
+                        *overlay.stable_source_refs,
+                        *(
+                            ref
+                            for ref in action_ir.data_refs
+                            if ref in source_ids
+                        ),
+                    }
+                )
                 context = default_coverage_context(state, plan).model_copy(
                     update={
                         "gap_context": GapContext(
                             parent_event_ids=frozenset(action_ir.parent_event_ids),
-                            stable_refs=frozenset(overlay.stable_source_refs),
+                            stable_refs=stable_source_refs,
                         ),
                         "truncated": (("dataflow",) if overlay.truncated else ()),
                         "provider_available": (
@@ -671,6 +690,7 @@ def assess(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
     """V21-09 正式 Core API（完整方案 §15，L3181-3198）。
 
@@ -699,6 +719,7 @@ def assess(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        memory_not_required_actions=memory_not_required_actions,
     ).assessment
 
 
@@ -711,6 +732,7 @@ def shadow_assess_with_coverage(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
     """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
 
@@ -725,6 +747,7 @@ def shadow_assess_with_coverage(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        memory_not_required_actions=memory_not_required_actions,
     )
 
 
@@ -737,6 +760,7 @@ def shadow_assess(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
     """V21-08 shadow 快路径评估（纯函数；同输入必同输出）。
 
@@ -768,6 +792,7 @@ def shadow_assess(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        memory_not_required_actions=memory_not_required_actions,
     ).assessment
 
 

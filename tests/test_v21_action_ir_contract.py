@@ -574,6 +574,32 @@ def test_authorization_fingerprint_is_stable_across_event_ids() -> None:
     assert first_ir.audit_fingerprint != second_ir.audit_fingerprint
 
 
+def test_model_input_action_ir_carries_canonical_visible_source_refs() -> None:
+    event = _model_input_event("evt_m4_visible_refs")
+    event = event.model_copy(
+        update={
+            "security_context": event.security_context.model_copy(
+                update={
+                    "visible_source_refs": (
+                        "source:user:evt_context:1",
+                        "source:runtime:evt_context:0",
+                        "source:user:evt_context:1",
+                    )
+                }
+            )
+        }
+    )
+
+    action_ir = build_action_ir(event, server_secret=SECRET)
+
+    assert action_ir.data_refs[:4] == [
+        "event:evt_m4_visible_refs",
+        "trace:trace_m4",
+        "source:runtime:evt_context:0",
+        "source:user:evt_context:1",
+    ]
+
+
 def test_truncated_arguments_keep_full_value_identity_commitment() -> None:
     prefix = "x" * 4096
     first = normalize_arguments({"content": prefix + "a"})

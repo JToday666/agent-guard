@@ -2988,6 +2988,9 @@ def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState
             **plan_identity,
         },
     )
+    applied_plan_identity = (
+        plan_identity if isolation_mode == "required" else {}
+    )
     return _evaluate_runtime_guard(
         state,
         adapter,
@@ -2998,7 +3001,7 @@ def _pre_model_capture(state: DemoState, adapter: LangGraphAdapter) -> DemoState
             provider=getattr(adapter.config, "llm_provider", None),
             model=getattr(adapter.config, "llm_model", None),
             sanitized=False,
-            **plan_identity,
+            **applied_plan_identity,
         ),
         stage="pre_model_hook",
     )

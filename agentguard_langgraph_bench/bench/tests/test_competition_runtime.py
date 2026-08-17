@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from langchain_openai import ChatOpenAI
+from agentguard_core import GuardEngine, GuardEvent, SUPPORTED_POLICY_RULE_IDS
 from agentguard_langgraph_adapter.context_guard import REFERENCE_RUNTIME_FACT
 
 from agentguard_langgraph_bench.bench.competition_models import (
     CompetitionSuite,
+    DetectorMode,
     RteMode,
     load_competition_profile,
 )
@@ -23,6 +25,7 @@ from agentguard_langgraph_bench.bench.competition_runner import (
 from agentguard_langgraph_bench.bench.competition_runtime import (
     _PREFLIGHT_TOOL,
     _bench_config,
+    _competition_policy,
     execute_competition_arm,
 )
 from agentguard_langgraph_bench.bench.dataset_loader import load_attack_cases
@@ -222,7 +225,6 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
             security=security,
             trace_id=observed_config["trace_id"],
         )
-        print(json.dumps(decision.model_dump(mode="json"), ensure_ascii=False))
         assert decision.decision == "allow", decision.model_dump(mode="json")
         assert decision.decision_authority is not None
         assert decision.decision_authority.source == "v21"
@@ -306,3 +308,42 @@ def test_active_arm_uses_live_api_task_ingress_and_real_provider_stub(
     assert result.contracts["provider_tool_call_preflight"]["status"] == "passed"
     assert result.contracts["competition_activation"]["status"] == "passed"
     assert _PROVIDER_KEY not in repr(result)
+
+
+def test_detector_off_disables_every_supported_policy_rule(tmp_path: Path) -> None:
+    request = _arm_request(tmp_path, "http://127.0.0.1:1/v1")
+    detector_off_arm = replace(request.arm, detector_mode=DetectorMode.OFF)
+
+    policy = _competition_policy(detector_off_arm)
+
+    assert set(policy.disabled_rules) == set(SUPPORTED_POLICY_RULE_IDS)
+    assert policy.disabled_rules == sorted(SUPPORTED_POLICY_RULE_IDS)
+    assert len(policy.disabled_rules) == 15
+
+    sensitive_read = GuardEvent.model_validate(
+        {
+            "event_type": "tool_call_proposed",
+            "trace_id": "trace-detector-off",
+            "runtime": "langgraph",
+            "security_context": {
+                "agent_id": "langgraph-demo",
+                "user_task": "Read the public operations note.",
+            },
+            "payload": {
+                "tool": {"name": "read_file"},
+                "arguments": {"path": "/private/.env"},
+                "derived_resources": [],
+            },
+        }
+    )
+    engine = GuardEngine()
+    _, baseline = engine.evaluate_with_results(sensitive_read)
+    disabled_decision, disabled = engine.evaluate_with_results(
+        sensitive_read, policy
+    )
+
+    assert "P001_sensitive_file_access" in {
+        item.rule_hit.rule_id for item in baseline
+    }
+    assert disabled == []
+    assert disabled_decision.decision == "allow"

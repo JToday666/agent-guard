@@ -146,6 +146,12 @@ def create_app(
         store=store,
         state_service=security_state_service,
         policy_service=policy_service,
+        memory_not_required_actions=(
+            frozenset({"model_call"})
+            if competition_activation is not None
+            and settings.effective_v21_mode() == "active"
+            else frozenset()
+        ),
     )
     # CT-PR-03b：CT 事实投影编排器（D2/D3：独立 flag，默认关闭；
     # 仅 pipeline 材料就绪时生效）。构造无 I/O；flag off 时全部入口

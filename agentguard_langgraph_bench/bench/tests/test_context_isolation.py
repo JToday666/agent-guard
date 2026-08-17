@@ -459,6 +459,7 @@ def test_competition_context_modes_share_sources_and_tools_but_only_required_tra
     monkeypatch, tmp_path
 ) -> None:
     captured_messages: dict[str, list[dict[str, Any]]] = {}
+    captured_cores: dict[str, _PlanCore] = {}
 
     class _CapturingLlm:
         def __init__(self, mode: str) -> None:
@@ -489,9 +490,11 @@ def test_competition_context_modes_share_sources_and_tools_but_only_required_tra
             }
         ]
         config = _competition_config(tmp_path, mode)
+        core = _PlanCore()
+        captured_cores[mode] = core
         prepared = _pre_model_capture(
             state,
-            LangGraphAdapter(config=config, core_client=_PlanCore()),
+            LangGraphAdapter(config=config, core_client=core),
         )
         monkeypatch.setattr(
             "agentguard_langgraph_bench.demo_agent.graph._build_llm",
@@ -531,6 +534,21 @@ def test_competition_context_modes_share_sources_and_tools_but_only_required_tra
     assert prepared_states["observe"]["runtime_context"]["context_isolation"][
         "status"
     ] == "validated"
+    observe_model_event = captured_cores["observe"].guard_events[-1]
+    required_model_event = captured_cores["required"].guard_events[-1]
+    assert "context_plan_id" not in observe_model_event["payload"]
+    assert "visible_source_refs" not in observe_model_event["payload"]
+    assert "visible_source_refs" not in observe_model_event["security_context"]
+    assert required_model_event["payload"]["context_plan_id"] == (
+        prepared_states["required"]["runtime_context"]["context_isolation"][
+            "context_plan_id"
+        ]
+    )
+    assert required_model_event["security_context"]["visible_source_refs"] == (
+        prepared_states["required"]["runtime_context"]["context_isolation"][
+            "visible_source_refs"
+        ]
+    )
 
 
 def test_competition_model_exchange_is_state_and_row_truth_source(

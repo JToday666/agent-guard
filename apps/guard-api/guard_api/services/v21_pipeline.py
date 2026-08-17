@@ -364,6 +364,7 @@ class V21PipelineService:
         semantic_provider: (
             Callable[[GuardEvent, FastAssessment], "SemanticJudgment | None"] | None
         ) = None,
+        memory_not_required_actions: frozenset[str] = frozenset(),
     ) -> None:
         self._store = store
         self._state_service = state_service
@@ -371,6 +372,7 @@ class V21PipelineService:
         # V21-13 预留钩子：位置在 assess 后、revalidate 前（天然事务外）。
         # V21-09 恒 None，零开销。
         self._semantic_provider = semantic_provider
+        self._memory_not_required_actions = memory_not_required_actions
         self._mode = settings.effective_v21_mode()
         self._enabled = self._mode != "off"
         self._server_secret = self._load_server_secret(settings)
@@ -611,6 +613,10 @@ class V21PipelineService:
         # overlay exercises the exact pre-Gate-A Core path.
         if transient_facts is not None:
             assess_kwargs["transient_facts"] = transient_facts
+        if self._memory_not_required_actions:
+            assess_kwargs["memory_not_required_actions"] = (
+                self._memory_not_required_actions
+            )
         outcome = shadow_assess_with_coverage(
             event,
             prepared.bundle,
