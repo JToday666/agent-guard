@@ -193,11 +193,27 @@ def execute_reference_profile(request: RunRequest) -> ExecutionResult:
                     (cases["JB-003"], denied),
                 ),
             )
+            context_policy_audit_id = next(
+                (
+                    str(event["audit_id"])
+                    for event in context["trace"].get("audit_events", [])
+                    if event.get("record_type") == "policy_evaluation"
+                    and event.get("event_type") == "context_assembled"
+                    and event.get("audit_id")
+                ),
+                "",
+            )
+            if not context_policy_audit_id:
+                raise InvalidProfileRun(
+                    "context probe did not produce a policy audit"
+                )
             dashboard = run_dashboard_chromium_probe(
                 base_url,
                 _CONTROL_TOKEN,
                 str(asked["trace_id"]),
                 request.artifacts,
+                context_trace_id=str(context["trace_id"]),
+                context_policy_audit_id=context_policy_audit_id,
             )
 
         contracts = _contract_results(context, denied, asked, drift)

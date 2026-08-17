@@ -72,6 +72,8 @@ def test_probe_returns_display_safe_routes_and_cleans_up(tmp_path: Path) -> None
         "control-secret-must-not-be-returned",
         "trace/live 001",
         tmp_path,
+        context_trace_id="trace/context 001",
+        context_policy_audit_id="audit:sha256:context 001",
         launcher=launcher,
         browser=browser,
         timeout_seconds=2,
@@ -95,10 +97,26 @@ def test_probe_returns_display_safe_routes_and_cleans_up(tmp_path: Path) -> None
                 "status": "rendered",
                 "screenshot": "dashboard/evidence-execution.png",
             },
+            {
+                "route": (
+                    "/evidence/trace%2Fcontext%20001?view=execution"
+                    "&event_id=audit%3Asha256%3Acontext%20001"
+                ),
+                "status": "rendered",
+                "screenshot": "dashboard/evidence-context-manifest.png",
+            },
         ],
     }
+    assert [route.ready_selector for route in browser.routes] == [
+        ".pre-enable-report",
+        ".execution-trace",
+        '[data-testid="context-manifest-panel"]',
+    ]
     assert "control-secret" not in repr(result)
     assert (tmp_path / "dashboard/evaluation.png").read_bytes() == b"fake-png"
+    assert (
+        tmp_path / "dashboard/evidence-context-manifest.png"
+    ).read_bytes() == b"fake-png"
 
 
 def test_probe_always_stops_vite_when_browser_fails(tmp_path: Path) -> None:
@@ -110,6 +128,8 @@ def test_probe_always_stops_vite_when_browser_fails(tmp_path: Path) -> None:
             "control-secret",
             "trace-001",
             tmp_path,
+            context_trace_id="trace-context-001",
+            context_policy_audit_id="audit-context-001",
             launcher=launcher,
             browser=FakeBrowser(fail=True),
             timeout_seconds=2,
@@ -120,15 +140,22 @@ def test_probe_always_stops_vite_when_browser_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("base_url", "token", "trace_id"),
+    ("base_url", "token", "trace_id", "context_trace_id", "context_audit_id"),
     [
-        ("file:///tmp/guard", "control", "trace"),
-        ("http://127.0.0.1:8088", "", "trace"),
-        ("http://127.0.0.1:8088", "control", ""),
+        ("file:///tmp/guard", "control", "trace", "context", "audit"),
+        ("http://127.0.0.1:8088", "", "trace", "context", "audit"),
+        ("http://127.0.0.1:8088", "control", "", "context", "audit"),
+        ("http://127.0.0.1:8088", "control", "trace", "", "audit"),
+        ("http://127.0.0.1:8088", "control", "trace", "context", ""),
     ],
 )
 def test_probe_rejects_invalid_inputs_before_launch(
-    tmp_path: Path, base_url: str, token: str, trace_id: str
+    tmp_path: Path,
+    base_url: str,
+    token: str,
+    trace_id: str,
+    context_trace_id: str,
+    context_audit_id: str,
 ) -> None:
     launcher = FakeLauncher()
 
@@ -138,6 +165,8 @@ def test_probe_rejects_invalid_inputs_before_launch(
             token,
             trace_id,
             tmp_path,
+            context_trace_id=context_trace_id,
+            context_policy_audit_id=context_audit_id,
             launcher=launcher,
             browser=FakeBrowser(),
             timeout_seconds=2,

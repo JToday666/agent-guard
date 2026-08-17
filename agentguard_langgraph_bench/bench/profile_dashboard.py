@@ -103,7 +103,7 @@ class ViteDashboardLauncher:
 
 
 class PlaywrightChromiumBrowser:
-    """Authenticate and capture the two live routes with Python Playwright."""
+    """Authenticate and capture the live profile routes with Python Playwright."""
 
     def capture(
         self,
@@ -216,6 +216,8 @@ def run_dashboard_chromium_probe(
     trace_id: str,
     artifact_directory: str | Path,
     *,
+    context_trace_id: str,
+    context_policy_audit_id: str,
     launcher: DashboardLauncher | None = None,
     browser: DashboardBrowser | None = None,
     timeout_seconds: float = 30.0,
@@ -227,6 +229,10 @@ def run_dashboard_chromium_probe(
         raise DashboardProbeError("control token is required")
     if not isinstance(trace_id, str) or not trace_id:
         raise DashboardProbeError("trace id is required")
+    if not isinstance(context_trace_id, str) or not context_trace_id:
+        raise DashboardProbeError("context trace id is required")
+    if not isinstance(context_policy_audit_id, str) or not context_policy_audit_id:
+        raise DashboardProbeError("context policy audit id is required")
     if timeout_seconds <= 0:
         raise DashboardProbeError("timeout must be positive")
 
@@ -235,10 +241,12 @@ def run_dashboard_chromium_probe(
     screenshot_root = artifact_root / "dashboard"
     screenshot_root.mkdir(parents=True, exist_ok=True)
     encoded_trace_id = quote(trace_id, safe="")
+    encoded_context_trace_id = quote(context_trace_id, safe="")
+    encoded_context_policy_audit_id = quote(context_policy_audit_id, safe="")
     routes = (
         _RouteSpec(
             route="/evaluation",
-            ready_selector=".evaluation-page",
+            ready_selector=".pre-enable-report",
             live_api_path="/api/v1/evaluations/latest",
             screenshot="dashboard/evaluation.png",
         ),
@@ -247,6 +255,15 @@ def run_dashboard_chromium_probe(
             ready_selector=".execution-trace",
             live_api_path=f"/api/v1/traces/{encoded_trace_id}",
             screenshot="dashboard/evidence-execution.png",
+        ),
+        _RouteSpec(
+            route=(
+                f"/evidence/{encoded_context_trace_id}?view=execution"
+                f"&event_id={encoded_context_policy_audit_id}"
+            ),
+            ready_selector='[data-testid="context-manifest-panel"]',
+            live_api_path=f"/api/v1/traces/{encoded_context_trace_id}",
+            screenshot="dashboard/evidence-context-manifest.png",
         ),
     )
     selected_launcher = launcher or ViteDashboardLauncher()
