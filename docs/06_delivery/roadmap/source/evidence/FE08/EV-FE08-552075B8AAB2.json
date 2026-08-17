@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE08-552075B8AAB2",
+  "kind": "test",
+  "metadata": {},
+  "node_id": "FE08",
+  "recorded_at": "2026-08-17T05:36:55Z",
+  "ref": "local:dashboard-188+vue-tsc",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "188 Dashboard unit tests and vue-tsc passed after final capability aggregation and ID markup review"
+}

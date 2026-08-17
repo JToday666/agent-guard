@@ -1,0 +1,11 @@
+{
+  "id": "EV-FE08-E39DEC86453C",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "FE08",
+  "recorded_at": "2026-08-17T05:37:21Z",
+  "ref": "revert:b2287382b7501759b9eb36e9afe65fef92c1bd1b",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Read-only Dashboard projection adds no storage schema or authority writes; reverting the merge restores enforcement evidence to unavailable without backend mutation"
+}
