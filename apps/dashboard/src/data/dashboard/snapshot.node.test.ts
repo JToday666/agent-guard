@@ -165,6 +165,7 @@ test("compares evaluation runs without inheriting audit metrics", () => {
       },
     ],
     preEnableReport: projectPreEnableReport(null),
+    competitionReport: null,
   };
   assert.equal(hasSameEvaluationRun(evaluation, { ...evaluation }), true);
   assert.equal(

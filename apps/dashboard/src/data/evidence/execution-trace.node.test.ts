@@ -1007,6 +1007,66 @@ test("does not verify shadow evidence that disagrees with the official decision"
   assert.equal(step.supervision.v21Assessment.authorityVerification, "conflicted");
 });
 
+test("projects a committed competition authority as V2 official without formal rollout claims", () => {
+  const base = normalizedEvents()[0]!;
+  const raw = base.raw as Record<string, unknown>;
+  const decisionId = "dec_v21_competition_001";
+  const digest = `sha256:${"a".repeat(64)}`;
+  const active = evidence(base, {
+    actionId: "mock_action_v21_active",
+    auditId: "audit_v21_active",
+    decision: "deny",
+    decisionId,
+    eventId: "event_v21_active",
+    eventType: "tool_call_proposed",
+    raw: {
+      ...raw,
+      evidence: {
+        ...((raw.evidence ?? {}) as Record<string, unknown>),
+        decision_v21: {
+          schema_version: "2.1",
+          payload: {
+            assessment_id: "assessment_active_001",
+            coverage: completeV21Coverage(),
+            degradation_ids: [],
+            divergence_category: "legacy_allow_v21_deny",
+            final_decision: "deny",
+            legacy_decision: "allow",
+            mode: "active",
+            v21_fast_disposition: "CLEAR_DENY",
+          },
+        },
+        decision_authority: {
+          schema_version: "1.0",
+          payload: {
+            profile_id: "competition-langgraph-v2",
+            selected_decision: { decision_id: decisionId, decision: "deny" },
+            decision_authority: {
+              source: "v21",
+              mode: "active",
+              selection_basis: "profile_all",
+              matched_path_ids: [],
+              legacy_floor_applied: true,
+              activation_ref_digest: digest,
+              approval_release: "not_applicable",
+            },
+          },
+        },
+      },
+    },
+    toolName: "call_api",
+  });
+
+  const step = buildTrace([active]).steps[0]!;
+
+  assert.equal(step.supervision.v21Assessment.decisionAuthority, "official");
+  assert.equal(step.supervision.v21Assessment.authorityVerification, "verified");
+  assert.equal(step.supervision.v21Assessment.competitionAuthority?.source, "v21");
+  assert.equal(step.supervision.v21Assessment.competitionAuthority?.selectionBasis, "profile_all");
+  assert.equal(step.supervision.v21Assessment.competitionAuthority?.legacyFloorApplied, true);
+  assert.equal(step.supervision.v21Assessment.rollout.availability, "unavailable");
+});
+
 test("builds a deterministic supervision wrapper without a second action projection", () => {
   const events = normalizedEvents();
   const approvals = currentApproval();

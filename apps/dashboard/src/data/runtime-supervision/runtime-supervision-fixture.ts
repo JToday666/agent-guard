@@ -350,6 +350,7 @@ function unavailableV21Assessment(): V21AssessmentPresentation {
     coverage: {},
     degradationIds: [],
     divergenceCategory: null,
+    competitionAuthority: null,
     rollout: {
       availability: "unavailable",
       rolloutId: null,

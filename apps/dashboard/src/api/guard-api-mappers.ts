@@ -25,6 +25,8 @@ import type {
   AuditRecordType,
   AuditWindow,
   ConfigAuditFindingRecord,
+  CompetitionArmId,
+  CompetitionReportPresentation,
   EvaluationAttackMetric,
   EvaluationCase,
   EvaluationRun,
@@ -468,6 +470,81 @@ function evaluationDatasetLabel(datasetId: string | null, datasetVersion: string
   return datasetId ?? datasetVersion ?? "未提供";
 }
 
+const competitionArmIds = new Set<CompetitionArmId>(["A0", "A1", "A2", "A3", "A4"]);
+
+function readCompetitionArmId(value: unknown): CompetitionArmId | null {
+  return typeof value === "string" && competitionArmIds.has(value as CompetitionArmId)
+    ? (value as CompetitionArmId)
+    : null;
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function readRatio(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : null;
+}
+
+export function mapCompetitionReport(value: unknown): CompetitionReportPresentation | null {
+  const root = readRecord(value);
+  if (
+    root.schema_version !== "competition-report/1.0" ||
+    root.profile_id !== "competition-langgraph-v2" ||
+    (root.status !== "passed" &&
+      root.status !== "functional_contract_failed" &&
+      root.status !== "invalid") ||
+    typeof root.competition_qualified !== "boolean"
+  ) {
+    return null;
+  }
+  const expectedCaseRuns = readNonNegativeInteger(root.expected_case_runs);
+  const attemptedCaseRuns = readNonNegativeInteger(root.attempted_case_runs);
+  const invalidCaseRuns = readNonNegativeInteger(root.invalid_case_runs);
+  if (expectedCaseRuns === null || attemptedCaseRuns === null || invalidCaseRuns === null) {
+    return null;
+  }
+  const arms = readArray(root.arms).flatMap((value) => {
+    const arm = readRecord(value);
+    const armId = readCompetitionArmId(arm.arm_id);
+    const attempted = readNonNegativeInteger(arm.attempted);
+    const evaluable = readNonNegativeInteger(arm.evaluable);
+    const invalid = readNonNegativeInteger(arm.invalid);
+    if (armId === null || attempted === null || evaluable === null || invalid === null) return [];
+    return [
+      {
+        armId,
+        attempted,
+        evaluable,
+        invalid,
+        asr: readRatio(arm.asr),
+        fpr: readRatio(arm.fpr),
+        benignSuccess: readRatio(arm.benign_success),
+        v21SelectionRate: readRatio(arm.v21_selection_rate),
+        legacyFloorRate: readRatio(arm.legacy_floor_rate),
+        receiptCoverage: readRatio(arm.receipt_coverage),
+      },
+    ];
+  });
+  const uniqueArmIds = new Set(arms.map((arm) => arm.armId));
+  if (arms.length !== 5 || uniqueArmIds.size !== 5) return null;
+  arms.sort((left, right) => left.armId.localeCompare(right.armId));
+  return {
+    schemaVersion: "competition-report/1.0",
+    profileId: "competition-langgraph-v2",
+    status: root.status,
+    competitionQualified: root.competition_qualified,
+    expectedCaseRuns,
+    attemptedCaseRuns,
+    invalidCaseRuns,
+    providerId: readString(root.provider_id),
+    model: readString(root.model),
+    arms,
+  };
+}
+
 export function emptyEvaluationRun(): EvaluationRun {
   return {
     runId: null,
@@ -480,6 +557,7 @@ export function emptyEvaluationRun(): EvaluationRun {
     perAttack: [],
     cases: [],
     preEnableReport: projectPreEnableReport(null),
+    competitionReport: null,
   };
 }
 
@@ -526,6 +604,7 @@ export function mapEvaluationRun(dto: GuardEvaluationRunDto): EvaluationRun {
     perAttack,
     cases,
     preEnableReport: projectPreEnableReport(dto.pre_enable_report),
+    competitionReport: mapCompetitionReport(dto.competition_report),
   };
 }
 

@@ -482,6 +482,35 @@ export interface EvaluationRun {
   perAttack: EvaluationAttackMetric[];
   cases: EvaluationCase[];
   preEnableReport: PreEnableReportPresentation;
+  competitionReport: CompetitionReportPresentation | null;
+}
+
+export type CompetitionArmId = "A0" | "A1" | "A2" | "A3" | "A4";
+
+export interface CompetitionArmReportPresentation {
+  armId: CompetitionArmId;
+  attempted: number;
+  evaluable: number;
+  invalid: number;
+  asr: number | null;
+  fpr: number | null;
+  benignSuccess: number | null;
+  v21SelectionRate: number | null;
+  legacyFloorRate: number | null;
+  receiptCoverage: number | null;
+}
+
+export interface CompetitionReportPresentation {
+  schemaVersion: "competition-report/1.0";
+  profileId: "competition-langgraph-v2";
+  status: "passed" | "functional_contract_failed" | "invalid";
+  competitionQualified: boolean;
+  expectedCaseRuns: number;
+  attemptedCaseRuns: number;
+  invalidCaseRuns: number;
+  providerId: string | null;
+  model: string | null;
+  arms: CompetitionArmReportPresentation[];
 }
 
 export type PreEnableReportAvailability = "recorded" | "partial" | "unavailable";

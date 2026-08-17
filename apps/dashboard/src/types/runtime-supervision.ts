@@ -189,8 +189,22 @@ export interface V21AssessmentPresentation {
   coverage: Record<string, string>;
   degradationIds: string[];
   divergenceCategory: string | null;
+  competitionAuthority: CompetitionAuthorityPresentation | null;
   rollout: V21RolloutScopePresentation;
   sourceRefs: EvidenceLocator[];
+}
+
+export interface CompetitionAuthorityPresentation {
+  availability: "recorded" | "partial";
+  profileId: "competition-langgraph-v2";
+  source: "current" | "v21";
+  mode: V21RolloutMode;
+  selectionBasis: "current" | "path_allowlist" | "profile_all";
+  matchedPathIds: EnabledV21PathId[];
+  legacyFloorApplied: boolean;
+  activationRefDigest: string;
+  approvalRelease: "not_applicable" | "strong_binding_required" | "forbidden";
+  selectedDecisionId: string | null;
 }
 
 export interface ApprovalPresentation {

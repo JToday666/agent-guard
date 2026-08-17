@@ -12,6 +12,7 @@ import {
   mapAuditIntegrity,
   mapAuditWindow,
   mapConfigAuditFindingRecord,
+  mapCompetitionReport,
   mapEvaluationRun,
   mapHealth,
   mapPolicyHistory,
@@ -812,4 +813,52 @@ test("maps explicit Provenance truncation without inventing a continuation curso
     returnedEdgeCount: 0,
     returnedNodeCount: 0,
   });
+});
+
+test("maps only complete typed competition-langgraph-v2 reports", () => {
+  const report = mapCompetitionReport({
+    schema_version: "competition-report/1.0",
+    profile_id: "competition-langgraph-v2",
+    status: "passed",
+    competition_qualified: true,
+    expected_case_runs: 350,
+    attempted_case_runs: 350,
+    invalid_case_runs: 0,
+    provider_id: "compatible-local",
+    model: "guard-eval-model",
+    arms: ["A4", "A2", "A0", "A3", "A1"].map((arm_id, index) => ({
+      arm_id,
+      attempted: 70,
+      evaluable: 70,
+      invalid: 0,
+      asr: index / 10,
+      fpr: 0,
+      benign_success: 1,
+      v21_selection_rate: arm_id === "A3" || arm_id === "A4" ? 1 : 0,
+      legacy_floor_rate: 0.1,
+      receipt_coverage: arm_id === "A0" ? null : 1,
+    })),
+  });
+
+  assert.equal(report?.profileId, "competition-langgraph-v2");
+  assert.equal(report?.competitionQualified, true);
+  assert.deepEqual(
+    report?.arms.map((arm) => arm.armId),
+    ["A0", "A1", "A2", "A3", "A4"],
+  );
+  assert.equal(report?.arms[4]?.v21SelectionRate, 1);
+
+  assert.equal(
+    mapCompetitionReport({
+      schema_version: "competition-report/1.0",
+      profile_id: "competition-langgraph-v2",
+      status: "passed",
+      competition_qualified: true,
+      expected_case_runs: 350,
+      attempted_case_runs: 350,
+      invalid_case_runs: 0,
+      arms: [],
+    }),
+    null,
+  );
 });

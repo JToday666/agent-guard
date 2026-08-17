@@ -42,7 +42,7 @@
       </dl>
 
       <section class="execution-inspector__section">
-        <h5>正式决策 / V2 Shadow</h5>
+        <h5>正式决策 / {{ v21RailLabel(step) }}</h5>
         <div class="execution-inspector__comparison">
           <article>
             <span>OFFICIAL</span>
@@ -54,7 +54,7 @@
             </small>
           </article>
           <article class="is-shadow">
-            <span>V2 SHADOW</span>
+            <span>{{ v21RailLabel(step).toUpperCase() }}</span>
             <strong>{{ v21Disposition(step) }}</strong>
             <p>{{ v21Summary(step) }}</p>
             <small>
@@ -63,6 +63,45 @@
             </small>
           </article>
         </div>
+        <dl
+          v-if="step.supervision.v21Assessment.competitionAuthority"
+          class="execution-inspector__detail-grid competition-authority"
+          data-testid="competition-authority"
+        >
+          <div>
+            <dt>Authority</dt>
+            <dd>{{ step.supervision.v21Assessment.competitionAuthority.source }}</dd>
+          </div>
+          <div>
+            <dt>Mode / Scope</dt>
+            <dd>
+              {{ step.supervision.v21Assessment.competitionAuthority.mode }} /
+              {{ step.supervision.v21Assessment.competitionAuthority.selectionBasis }}
+            </dd>
+          </div>
+          <div>
+            <dt>Legacy floor</dt>
+            <dd>
+              {{
+                step.supervision.v21Assessment.competitionAuthority.legacyFloorApplied
+                  ? "applied"
+                  : "not applied"
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>ASK release</dt>
+            <dd>{{ step.supervision.v21Assessment.competitionAuthority.approvalRelease }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>Activation ref</dt>
+            <dd>
+              <code translate="no">{{
+                step.supervision.v21Assessment.competitionAuthority.activationRefDigest
+              }}</code>
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section
@@ -681,6 +720,17 @@ function v21Disposition(step: ExecutionStepViewModel): string {
   return step.supervision.v21Assessment.fastDisposition ?? "不可用";
 }
 
+function v21RailLabel(step: ExecutionStepViewModel): string {
+  const assessment = step.supervision.v21Assessment;
+  if (assessment.competitionAuthority?.source === "v21") {
+    return "V2 Competition Official";
+  }
+  if (assessment.competitionAuthority) {
+    return `V2 ${assessment.competitionAuthority.mode}`;
+  }
+  return "V2 Shadow";
+}
+
 function v21Summary(step: ExecutionStepViewModel): string {
   const assessment = step.supervision.v21Assessment;
   if (assessment.availability === "unavailable") {
@@ -688,6 +738,15 @@ function v21Summary(step: ExecutionStepViewModel): string {
   }
   if (assessment.authorityVerification === "conflicted") {
     return "影子证据不完整或与正式判定冲突，不提升其权威。";
+  }
+  if (assessment.competitionAuthority?.source === "v21") {
+    const floor = assessment.competitionAuthority.legacyFloorApplied
+      ? "；current 安全下界已应用"
+      : "";
+    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；该结果是 Competition profile official${floor}。`;
+  }
+  if (assessment.competitionAuthority?.source === "current") {
+    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；本次仍由 current official，V2 仅保留计算证据。`;
   }
   return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；仅作影子解释，不改变正式决策。`;
 }

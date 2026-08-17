@@ -80,6 +80,7 @@ const emptyEvaluationRun: EvaluationRun = {
   perAttack: [],
   cases: [],
   preEnableReport: projectPreEnableReport(null),
+  competitionReport: null,
 };
 
 const unknownOpenClawStatus: AdapterStatus = {
