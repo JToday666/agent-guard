@@ -5,7 +5,7 @@
   "agent_adapter": "langgraph-demo",
   "identity": {
     "principal_id": "competition-langgraph-runner",
-    "agent_id": "competition-langgraph-agent",
+    "agent_id": "langgraph-demo",
     "runtime_binding_id": "binding:competition-langgraph-runner"
   },
   "dataset": {

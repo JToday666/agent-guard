@@ -40,6 +40,7 @@ def test_packaged_competition_profile_freezes_five_distinct_arms() -> None:
     assert profile.identity.runtime_binding_id == (
         f"binding:{profile.identity.principal_id}"
     )
+    assert profile.identity.agent_id == profile.agent_adapter
     assert profile.effective_digest.startswith("sha256:")
 
 

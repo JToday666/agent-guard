@@ -303,6 +303,10 @@ class CompetitionProfile:
             raise CompetitionConfigurationError(
                 "competition profile is LangGraph demo-adapter only"
             )
+        if self.identity.agent_id != self.agent_adapter:
+            raise CompetitionConfigurationError(
+                "competition identity agent_id must match the executing adapter"
+            )
         if self.repeats <= 0:
             raise CompetitionConfigurationError("profile repeats must be positive")
         if self.dataset.case_count != 70:
