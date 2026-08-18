@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ DEFAULT_CONTROL_TOKEN = "demo-control-token"
 DEFAULT_ENVIRONMENT = "development"
 DEFAULT_STORAGE_BACKEND = "postgres"
 DEFAULT_LLM_APPROVAL_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_V21_SEMANTIC_BASE_URL = "https://api.openai.com/v1"
 SUPPORTED_STORAGE_BACKENDS = {"postgres", "memory"}
 SUPPORTED_ENVIRONMENTS = {"development", "test", "production"}
 SUPPORTED_V21_MODES = {"off", "shadow", "limited_enable", "active"}
@@ -99,6 +101,40 @@ class GuardApiSettings:
     llm_approval_timeout_seconds: float = field(
         default_factory=lambda: _env_float(
             "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0
+        )
+    )
+    # V21-13 Stage 1 shadow semantic judgment（独立命名空间，与
+    # llm_approval 解耦）：默认关闭；产物只供证据/评测，不改决策。
+    v21_semantic_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_V21_SEMANTIC_ENABLED", default=False
+        )
+    )
+    v21_semantic_base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_V21_SEMANTIC_BASE_URL", DEFAULT_V21_SEMANTIC_BASE_URL
+        )
+    )
+    v21_semantic_api_key: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_V21_SEMANTIC_API_KEY"),
+        repr=False,
+    )
+    v21_semantic_model: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_V21_SEMANTIC_MODEL")
+    )
+    v21_semantic_timeout_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS", default=3.0
+        )
+    )
+    v21_semantic_ttl_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_V21_SEMANTIC_TTL_SECONDS", default=300.0
+        )
+    )
+    v21_semantic_sample_rate: float = field(
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE", default=1.0
         )
     )
     audit_checkpoint_path: str | None = field(
@@ -190,6 +226,15 @@ class GuardApiSettings:
 
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
+
+    def v21_semantic_configured(self) -> bool:
+        """V21-13 semantic shadow 就绪：enabled 且 api_key 与 model 齐备。"""
+
+        return bool(
+            self.v21_semantic_enabled
+            and self.v21_semantic_api_key
+            and self.v21_semantic_model
+        )
 
     def evaluation_receipt_eligibility_expectation(
         self,
@@ -356,6 +401,35 @@ class GuardApiSettings:
         if self.llm_approval_timeout_seconds <= 0:
             raise GuardApiConfigurationError(
                 "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS must be greater than zero"
+            )
+        # isfinite 前置校验（评审 M1）：NaN 比较恒 False、inf 通过
+        # ``> 0``——不加有限性校验则 timeout=inf 使 hard deadline 静默
+        # 失效、ttl=inf 使 expires_at 永不落地、sample_rate=nan 使采样
+        # 门控恒 False。
+        if not math.isfinite(self.v21_semantic_timeout_seconds):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS must be a finite "
+                "number"
+            )
+        if self.v21_semantic_timeout_seconds <= 0:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS must be greater than zero"
+            )
+        if not math.isfinite(self.v21_semantic_ttl_seconds):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TTL_SECONDS must be a finite number"
+            )
+        if self.v21_semantic_ttl_seconds <= 0:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TTL_SECONDS must be greater than zero"
+            )
+        if not math.isfinite(self.v21_semantic_sample_rate):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE must be a finite number"
+            )
+        if not 0.0 <= self.v21_semantic_sample_rate <= 1.0:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE must be between 0.0 and 1.0"
             )
         if (
             not 1

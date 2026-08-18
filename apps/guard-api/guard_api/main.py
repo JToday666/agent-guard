@@ -47,6 +47,7 @@ from guard_api.services import (
     V21OfficialEvaluationUnavailableError,
     V21ShadowService,
 )
+from guard_api.services.semantic import semantic_provider_from_settings
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import (
     AuditCanonicalizationError,
@@ -149,11 +150,19 @@ def create_app(
         and competition_activation.manifest.runtime == "langgraph"
         and competition_activation.manifest.selection_basis == "profile_all"
     )
+    # V21-13 Stage 1 shadow：semantic provider（flag 关/未 configured/
+    # mode off 时恒 None，零开销）；在场时产物只供证据/评测，不改变
+    # 官方决策。局部保留引用以便 lifespan shutdown 关闭共享
+    # httpx.Client（评审 M2）。
+    semantic_provider = semantic_provider_from_settings(settings)
     v21_pipeline_service = V21PipelineService(
         settings=settings,
         store=store,
         state_service=security_state_service,
         policy_service=policy_service,
+        # V21-13 Stage 1 shadow：flag 关/未 configured 时恒 None（零
+        # 开销）；在场时产物只供证据/评测，不改变官方决策。
+        semantic_provider=semantic_provider,
         memory_not_required_actions=(
             frozenset({"model_call"})
             if competition_active
@@ -218,6 +227,11 @@ def create_app(
                     await asyncio.to_thread(audit_checkpoint_service.checkpoint)
                 except Exception:  # pragma: no cover - shutdown diagnostic path
                     logger.exception("final audit checkpoint failed")
+            if semantic_provider is not None:
+                # 评审 M2：shutdown 关闭共享 httpx.Client 连接池；
+                # close() 内部仅在 owns client（未注入外部 client）时
+                # 执行关闭，注入式测试 client 不受影响。
+                semantic_provider.close()
 
     app = FastAPI(title="AgentGuard Guard API", version=__version__, lifespan=lifespan)
     app.add_middleware(

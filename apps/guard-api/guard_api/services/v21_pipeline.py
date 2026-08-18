@@ -76,6 +76,7 @@ from agentguard_core.decisions.evidence_builder import (
 from agentguard_core.decisions.revalidation import (
     RevalidationResult,
     revalidate_assessment,
+    validate_semantic_binding,
 )
 from agentguard_core.decisions.results import DetectionResult
 from agentguard_core.decisions.shadow import (
@@ -239,6 +240,10 @@ class V21PipelineMaterials:
     # candidate CT bundle even when shadow safely converged to DEFER.
     consumed_overlay_digest: str | None
     auth_context: AuthContext | None = None
+    # V21-13 Stage 1 shadow：Phase A 事务外 semantic judgment 产物
+    # （provider 缺席/门控未过/异常收敛时为 None）。只供 Phase B
+    # 证据/评测消费，绝不改变决策。
+    semantic_judgment: "SemanticJudgment | None" = None
 
 
 @dataclass(frozen=True)
@@ -266,6 +271,10 @@ class V21PhaseBOutcome:
     raw_v21_decision: GuardDecision | None = None
     final_decision_id: str | None = None
     final_decision_digest: str | None = None
+    # V21-13 Stage 1 shadow：Phase B 对 materials.semantic_judgment 的
+    # 五 digest binding 裁决结论（``validate_semantic_binding``）；
+    # judgment 缺席时恒 None。供审计 metadata 承载，避免重复计算。
+    semantic_binding_valid: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -370,8 +379,8 @@ class V21PipelineService:
         self._store = store
         self._state_service = state_service
         self._policy_service = policy_service
-        # V21-13 预留钩子：位置在 assess 后、revalidate 前（天然事务外）。
-        # V21-09 恒 None，零开销。
+        # V21-13 Stage 1 shadow 钩子：位置在 assess 后、revalidate 前
+        # （天然事务外，03 §12）。provider 缺席时恒 None，零开销。
         self._semantic_provider = semantic_provider
         self._memory_not_required_actions = memory_not_required_actions
         self._competition_model_output_observation = (
@@ -646,10 +655,22 @@ class V21PipelineService:
                 assessment,
                 reason_code=REASON_SNAPSHOT_READ_FAILED,
             )
+        semantic_judgment: "SemanticJudgment | None" = None
         if self._semantic_provider is not None and prepared.snapshot is not None:
-            # V21-09 恒 None 分支；钩子在 assess 后 revalidate 前，
-            # 天然事务外（03 §12）。产物 V21-09 不消费，仅预留。
-            self._semantic_provider(event, assessment)
+            # V21-13 Stage 1 shadow：钩子在 assess 后 revalidate 前，
+            # 天然事务外（03 §12）。产物只供证据/评测消费，绝不改变
+            # 决策；provider 异常一律收敛为 None（fail-closed，shadow
+            # 旁路不影响 Phase A 主链）。
+            try:
+                semantic_judgment = self._semantic_provider(event, assessment)
+            except Exception:  # noqa: BLE001 - shadow boundary never raises.
+                logger.warning(
+                    "v21-13 semantic provider raised for event %s; "
+                    "judgment discarded (fail-closed)",
+                    event.event_id,
+                    exc_info=True,
+                )
+                semantic_judgment = None
         return V21PipelineMaterials(
             event_id=prepared.event_id,
             bundle=prepared.bundle,
@@ -668,6 +689,7 @@ class V21PipelineService:
             degraded_kind=prepared.degraded_kind,
             consumed_overlay_digest=outcome.consumed_overlay_digest,
             auth_context=prepared.auth_context,
+            semantic_judgment=semantic_judgment,
         )
 
     def _resolve_snapshot_v(
@@ -806,6 +828,31 @@ class V21PipelineService:
         stale_codes = (
             list(revalidation.reason_codes) if revalidation.status == "stale" else []
         )
+        # V21-13 Stage 1 shadow 双门禁（fail-closed）：judgment 在场时
+        # 先经 core 纯函数 ``validate_semantic_binding`` 五 digest 比对
+        # （reference_time 取 materials.clock.evaluated_at——权威时钟
+        # 锚点，禁 wall-clock）；仅当 binding 有效且 revalidation valid
+        # 时才把 judgment 身份/摘要填进证据槽（03 §14：binding
+        # invalid/stale → 保守 ASK，证据面同样不登记）。
+        semantic_binding_valid: bool | None = None
+        semantic_for_evidence: "SemanticJudgment | None" = None
+        if materials.semantic_judgment is not None:
+            semantic_binding_valid = validate_semantic_binding(
+                materials.assessment,
+                materials.semantic_judgment,
+                reference_time=materials.clock.evaluated_at,
+            )
+            if semantic_binding_valid and revalidation.status == "valid":
+                semantic_for_evidence = materials.semantic_judgment
+            else:
+                logger.info(
+                    "v21-13 semantic judgment not consumed for event %s "
+                    "(binding_valid=%s, revalidation=%s); shadow evidence "
+                    "slots stay empty (fail-closed)",
+                    event.event_id,
+                    semantic_binding_valid,
+                    revalidation.status,
+                )
         evidence = build_decision_evidence_v21(
             materials.assessment,
             legacy_decision=materials.decision.decision,
@@ -813,6 +860,7 @@ class V21PipelineService:
             state_version=materials.state_version,
             coverage=materials.coverage,
             revalidation_stale_reason_codes=stale_codes,
+            semantic=semantic_for_evidence,
         )
         raw_v21_decision: GuardDecision | None = None
         final_decision_id: str | None = None
@@ -835,6 +883,7 @@ class V21PipelineService:
             raw_v21_decision=raw_v21_decision,
             final_decision_id=final_decision_id,
             final_decision_digest=final_decision_digest,
+            semantic_binding_valid=semantic_binding_valid,
         )
 
     # ------------------------------------------------------------------

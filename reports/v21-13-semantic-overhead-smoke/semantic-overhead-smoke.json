@@ -1,0 +1,79 @@
+{
+  "profile": "functional_smoke",
+  "task": "V21-13 Stage 1 shadow semantic 接入开销 smoke（04 §21）",
+  "backend": "memory",
+  "pipeline_mode": "shadow（四档恒定，栈构造同 test_v21_09_pipeline）",
+  "sample_rate": 1.0,
+  "workload": "code_execution 类 DEFER fixture（shell exec 形状 tool_call_proposed + 权威 TaskFact 在场，事件 metadata 携带 task_id trusted claim；每次迭代新 event_id，全链路 Phase A → Phase B → 审计提交）",
+  "tiers": {
+    "a_off": "semantic flag off → provider=None（基线）",
+    "b_flag_on_unconfigured": "flag on 缺 api_key/model → provider=None（配置门控）",
+    "c_fake_provider": "确定性 in-process fake provider 直接注入（纯进程内净增量）",
+    "d_unreachable_endpoint": "真实 HttpSemanticJudge 指向 http://127.0.0.1:9（timeout 3.0s，连接快速拒绝 fail-closed 上界）"
+  },
+  "percentile_method": "nearest-rank P50/P95/P99/max，单调纳秒样本（time.perf_counter_ns），不剔除异常值",
+  "environment": {
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3"
+  },
+  "latency": {
+    "a_off": {
+      "p50_ms": 28.123855,
+      "p95_ms": 85.970452,
+      "p99_ms": 93.206906,
+      "max_ms": 96.98504,
+      "mean_ms": 33.064153940000004,
+      "samples": 100
+    },
+    "b_flag_on_unconfigured": {
+      "p50_ms": 29.12744,
+      "p95_ms": 84.787498,
+      "p99_ms": 94.467828,
+      "max_ms": 99.930267,
+      "mean_ms": 32.54737498,
+      "samples": 100
+    },
+    "c_fake_provider": {
+      "p50_ms": 29.690033,
+      "p95_ms": 83.172151,
+      "p99_ms": 98.1361,
+      "max_ms": 98.339479,
+      "mean_ms": 33.001881829999995,
+      "samples": 100,
+      "provider_calls": 111
+    },
+    "d_unreachable_endpoint": {
+      "p50_ms": 13.519091,
+      "p95_ms": 19.617271,
+      "p99_ms": 60.137728,
+      "max_ms": 60.137728,
+      "mean_ms": 15.441202,
+      "samples": 30,
+      "provider_calls": 34
+    }
+  },
+  "overhead": {
+    "b_vs_a": {
+      "delta_p50_ms": 1.003585000000001,
+      "delta_p95_ms": -1.1829539999999952,
+      "delta_p99_ms": 1.2609219999999937,
+      "delta_max_ms": 2.9452270000000027,
+      "delta_mean_ms": -0.5167789600000035
+    },
+    "c_vs_a": {
+      "delta_p50_ms": 1.5661780000000007,
+      "delta_p95_ms": -2.798300999999995,
+      "delta_p99_ms": 4.929193999999995,
+      "delta_max_ms": 1.3544389999999993,
+      "delta_mean_ms": -0.062272110000009206
+    },
+    "d_vs_a": {
+      "delta_p50_ms": -14.604764,
+      "delta_p95_ms": -66.35318099999999,
+      "delta_p99_ms": -33.069178,
+      "delta_max_ms": -36.847311999999995,
+      "delta_mean_ms": -17.622951940000004
+    }
+  },
+  "notes": "D 档为缩减口径（预热 3 测 30，A/B/C 预热 10 测 100）：样本量与档内 store 累积深度（审计/投影行数）不对称，d_vs_a 百分位增量不可读作性能增益，仅 fail-closed 行为证据；每请求 HTTP往返为连接快速拒绝（loopback connection refused），未触及 timeout 3.0s hard deadline。"
+}

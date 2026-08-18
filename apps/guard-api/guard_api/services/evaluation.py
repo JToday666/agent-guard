@@ -617,6 +617,9 @@ class EvaluationService:
         phase_c_plan: "V21PhaseCPlan | None" = None
         phase_b_outcome: "V21PhaseBOutcome | None" = None
         finalize_metadata: dict[str, str] = {}
+        # V21-13 Stage 1 shadow：judgment 缺席时恒空表（metadata 键集
+        # 逐字节不变）；在场时条件性追加五个确定性引用键。
+        semantic_metadata: dict[str, object] = {}
         if self.v21_pipeline is not None:
             outcome = self.v21_pipeline.build_phase_b(event, materials)
             if outcome is not None:
@@ -654,6 +657,10 @@ class EvaluationService:
                         if outcome.revalidation.status == "stale"
                         else []
                     )
+                    # competition selection 重建信封有意不携带 semantic
+                    # 槽（评审 W2，shadow 纪律）：重建路径不复算
+                    # binding，宁缺勿滥、fail-closed；judgment 引用仍经
+                    # 审计 metadata 五个引用键在场。
                     selected_evidence = build_decision_evidence_v21(
                         materials.assessment,
                         legacy_decision=materials.decision.decision,
@@ -693,6 +700,30 @@ class EvaluationService:
                                 outcome.final_decision_digest
                             ),
                         }
+                semantic_judgment = outcome.materials.semantic_judgment
+                if semantic_judgment is not None:
+                    # V21-13 shadow 产物只走审计 metadata 承载（wire
+                    # schema 无 semantic 字段，不改 schemas/）；binding
+                    # 结论复用 Phase B 已判定值（outcome 内部字段，
+                    # 不重复计算）。只落五个确定性引用键（D11 口径）：
+                    # judgment 全文会被 sanitize_audit_event 的 redaction
+                    # 改写（authorization_fingerprint 命中敏感 marker 被
+                    # REDACTED、reason_codes 超限被截断），落盘全文会与
+                    # v21_semantic_digest 永久失配，违反「禁静默丢失」
+                    # 纪律（评审 M3）。judgment 全文的审计承载归后续
+                    # typed bound 证据通道（仿 ct_transient_facts 先例），
+                    # shadow 初版只落确定性引用。
+                    semantic_metadata = {
+                        "v21_semantic_judgment_id": (
+                            semantic_judgment.judgment_id
+                        ),
+                        "v21_semantic_digest": semantic_judgment.semantic_digest,
+                        "v21_semantic_verdict": semantic_judgment.verdict,
+                        "v21_semantic_degraded": semantic_judgment.degraded,
+                        "v21_semantic_binding_valid": (
+                            outcome.semantic_binding_valid
+                        ),
+                    }
         if (
             self.competition_activation is not None
             and self.v21_pipeline is not None
@@ -737,6 +768,7 @@ class EvaluationService:
                 "request_digest": request_digest,
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
                 **finalize_metadata,
+                **semantic_metadata,
                 **self._context_manifest_metadata(context_manifest),
             },
             decision_dump=decision.model_dump(mode="json"),
