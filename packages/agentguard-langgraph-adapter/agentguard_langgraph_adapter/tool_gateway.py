@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -677,7 +678,10 @@ def _evaluate_message_send_gate(
         approval_resolution = strong_release.approval_resolution
     else:
         approval_blocked, approval_resolution = _resolve_approval(
-            guard_adapter, decision
+            guard_adapter,
+            decision,
+            timeout_seconds=approval_timeout,
+            poll_interval_seconds=approval_poll_interval,
         )
     if decision.decision != "deny" and not approval_blocked:
         return (
@@ -913,8 +917,24 @@ def _block_semantics(decision: Any) -> str:
 
 
 def _resolve_approval(
-    guard_adapter: Any, decision: Any
+    guard_adapter: Any,
+    decision: Any,
+    *,
+    timeout_seconds: float | None = None,
+    poll_interval_seconds: float = 0.5,
 ) -> tuple[bool, dict[str, Any] | None]:
+    """Resolve an ASK decision via the adapter's approval wait endpoint.
+
+    Trade-off note (intentional design): only the message-send gate
+    (``_evaluate_message_send_gate``) passes ``timeout_seconds`` /
+    ``poll_interval_seconds``, enabling bounded polling so a human
+    resolution arriving after the first non-blocking /wait probe still
+    releases the action.  The other three call sites -- the primary tool
+    gate, the memory-write gate, and the post-execution result recheck --
+    deliberately keep ``timeout_seconds=None``: the first ``pending``
+    response returns immediately as not-approved, preserving fail-closed
+    semantics without stalling the agent loop on those paths.
+    """
     if getattr(decision, "decision", None) != "ask":
         return False, None
     release = _v21_approval_release(decision)
@@ -944,22 +964,38 @@ def _resolve_approval(
             "decision": None,
             "approval_id": approval_id,
         }
-    resolution = guard_adapter.wait_for_approval(approval_id)
-    if not isinstance(resolution, dict):
-        return True, {
-            "status": "error",
-            "decision": None,
-            "approval_id": approval_id,
-        }
-    try:
-        resolution = normalize_approval_resolution(resolution)
-    except ApprovalResolutionValidationError:
-        return True, {
-            "status": "error",
-            "decision": "deny",
-            "approval_id": approval_id,
-            "reason": "approval_resolution_invalid",
-        }
+    # The Guard API /wait endpoint is non-blocking: a still-pending approval is
+    # reported immediately.  Poll within the configured budget so a human
+    # resolution arriving later still releases the action, mirroring the
+    # primary tool-call wait loop.
+    deadline = (
+        time.monotonic() + timeout_seconds if timeout_seconds else None
+    )
+    poll_interval = max(0.1, min(poll_interval_seconds, 5.0))
+    resolution: Any = None
+    while True:
+        resolution = guard_adapter.wait_for_approval(approval_id)
+        if not isinstance(resolution, dict):
+            return True, {
+                "status": "error",
+                "decision": None,
+                "approval_id": approval_id,
+            }
+        try:
+            resolution = normalize_approval_resolution(resolution)
+        except ApprovalResolutionValidationError:
+            return True, {
+                "status": "error",
+                "decision": "deny",
+                "approval_id": approval_id,
+                "reason": "approval_resolution_invalid",
+            }
+        status = str(resolution.get("status") or "").strip().lower()
+        if status != "pending":
+            break
+        if deadline is None or time.monotonic() >= deadline:
+            break
+        time.sleep(min(poll_interval, max(deadline - time.monotonic(), 0.0)))
     approved = resolution.get("status") == "resolved" and str(
         resolution.get("decision") or ""
     ).lower() in {

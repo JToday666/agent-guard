@@ -75,8 +75,89 @@ def test_gateway_executes_ask_tool_call_after_allow_once_approval() -> None:
     assert result.decision == "ask"
 
 
+def test_message_gate_polls_until_late_allow_once_approval() -> None:
+    """Regression: the message gate must keep polling within its budget.
+
+    A single pending probe followed by a resolved allow_once must release
+    the send_email call (executed=True), reproducing the fixed bounded
+    polling path in ``_resolve_approval``.
+    """
+    guard = _MessageSendApprovingGuardAdapter(
+        main_decision="allow",
+        approval_sequence=[
+            {"status": "pending"},
+            {"status": "resolved", "decision": "allow_once"},
+        ],
+    )
+    runtime = _Runtime()
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=runtime,
+        approval_timeout=2.0,
+        approval_poll_interval=0.1,
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "owner@example.test", "body": "status update"},
+        security={"user_task": "Send my status update."},
+        trace_id="trace_message_approval",
+        call_id="call_message_approval",
+    )
+
+    assert guard.wait_calls == ["app_message", "app_message"]
+    assert result.executed is True
+    assert result.blocked is False
+    assert runtime.calls == [
+        ("send_email", {"to": "owner@example.test", "body": "status update"})
+    ]
+
+
+def test_message_gate_fails_closed_when_approval_stays_pending() -> None:
+    """Regression: an unresolved approval within the budget stays blocked."""
+    guard = _MessageSendApprovingGuardAdapter(
+        main_decision="allow",
+        approval_sequence=[{"status": "pending"}],
+    )
+    runtime = _Runtime()
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=runtime,
+        approval_timeout=0.2,
+        approval_poll_interval=0.1,
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "owner@example.test", "body": "status update"},
+        security={"user_task": "Send my status update."},
+        trace_id="trace_message_pending",
+        call_id="call_message_pending",
+    )
+
+    assert guard.wait_calls  # polled at least once within the budget
+    assert result.executed is False
+    assert result.blocked is True
+    assert result.decision == "ask"
+    assert result.block_semantics == "approval_block"
+    assert runtime.calls == []
+
+
 class _ApprovingGuardAdapter:
-    waited_for: str | None = None
+    def __init__(
+        self,
+        *,
+        main_decision: str = "ask",
+        approval_sequence: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.main_decision = main_decision
+        # Consumed in order by ``wait_for_approval``; the final entry is
+        # repeated once the sequence is exhausted.
+        self.approval_sequence = list(
+            approval_sequence or [{"status": "resolved", "decision": "allow_once"}]
+        )
+        self.waited_for: str | None = None
+        self.wait_calls: list[str] = []
 
     def evaluate_before_tool(
         self,
@@ -94,13 +175,17 @@ class _ApprovingGuardAdapter:
         )
         decision = PolicyDecision(
             decision_id="dec_ask",
-            decision="ask",
+            decision=self.main_decision,
             risk_score=55,
             severity="medium",
             rule_hits=[],
             reason="human review required",
             safe_message="Approval required.",
-            approval={"approval_id": "app_allow", "required": True},
+            approval=(
+                {"approval_id": "app_allow", "required": True}
+                if self.main_decision == "ask"
+                else None
+            ),
         )
         return event, decision
 
@@ -120,7 +205,39 @@ class _ApprovingGuardAdapter:
 
     def wait_for_approval(self, approval_id: str) -> dict[str, Any]:
         self.waited_for = approval_id
-        return {"status": "resolved", "decision": "allow_once"}
+        self.wait_calls.append(approval_id)
+        if len(self.approval_sequence) > 1:
+            return self.approval_sequence.pop(0)
+        return self.approval_sequence[0]
+
+
+class _MessageSendApprovingGuardAdapter(_ApprovingGuardAdapter):
+    """Approving adapter whose message-send gate issues an ASK decision."""
+
+    def evaluate_message_send(
+        self,
+        *,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+    ) -> tuple[ToolCallEvent, PolicyDecision]:
+        event = ToolCallEvent(
+            trace_id=trace_id,
+            tool=ToolDescriptor(name="send_email", category="message", kind="send_email", call_id=call_id or "call"),
+            arguments=arguments,
+        )
+        decision = PolicyDecision(
+            decision_id="dec_ask_message",
+            decision="ask",
+            risk_score=55,
+            severity="medium",
+            rule_hits=[],
+            reason="human review required",
+            safe_message="Approval required.",
+            approval={"approval_id": "app_message", "required": True},
+        )
+        return event, decision
 
 
 class _Runtime:
