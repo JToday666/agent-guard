@@ -361,7 +361,10 @@ node .openclaw-dev/demo-live-chain-verify.mjs ask
 # Step 4: 外发上传（DENY）
 echo "=== Step 4: Deny ==="
 node .openclaw-dev/demo-live-chain-verify.mjs deny
-# 预期: {"block": true, "blockReason": "This tool call was blocked by AgentGuard Core."}
+# 预期: {"block": true, "blockReason": "<safe_message> <阻断引导语>"}
+# 其中 blockReason 以原句 "This tool call was blocked by AgentGuard Core." 为前缀，
+# 其后追加 LLM 引导语（常量见 packages/agentguard-openclaw-plugin/src/guard-api-client.ts 的 BLOCKED_ACTION_GUIDANCE）：
+# "This action was blocked by AgentGuard and was NOT executed. Do not retry the same blocked action. If the task cannot be completed without this action, clearly tell the user that the task was blocked/denied by AgentGuard."
 
 # Step 5: 审计核验
 echo "=== Step 5: Audit ==="

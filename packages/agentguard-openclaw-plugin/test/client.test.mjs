@@ -29,6 +29,13 @@ const askDecision = {
   },
 };
 
+const BLOCKED_ACTION_GUIDANCE =
+  "This action was blocked by AgentGuard and was NOT executed. Do not retry the same blocked action. If the task cannot be completed without this action, clearly tell the user that the task was blocked/denied by AgentGuard.";
+const REVIEW_DENIED_GUIDANCE =
+  "This action was denied by AgentGuard review and was NOT executed. Do not retry the same denied action. If the task cannot be completed without this action, clearly tell the user that the task was denied by AgentGuard.";
+const APPROVAL_EXPIRED_GUIDANCE =
+  "Approval timed out or expired before this action could run; the action was NOT executed (blocked by AgentGuard). Do not retry the same action. If the task cannot be completed without this action, clearly tell the user that the task was blocked by AgentGuard because approval expired.";
+
 function runtimeOutcomeReceipt(
   eventId = "evt_001",
   outcomeKind = "pre_execution_deny",
@@ -292,13 +299,13 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
   assert.equal(await decisionToToolResult(allowDecision, {}), undefined);
   assert.deepEqual(await decisionToToolResult(denyDecision, {}), {
     block: true,
-    blockReason: "no",
+    blockReason: `no ${BLOCKED_ACTION_GUIDANCE}`,
   });
 
   assert.equal(await decisionToMessageResult(allowDecision, {}), undefined);
   assert.deepEqual(await decisionToMessageResult(denyDecision, {}), {
     cancel: true,
-    cancelReason: "no",
+    cancelReason: `no ${BLOCKED_ACTION_GUIDANCE}`,
   });
 
   assert.equal(
@@ -310,18 +317,58 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
     }),
     undefined,
   );
+  // Human rejection surfaces a "denied by review" message, not the ask prompt.
   assert.deepEqual(
     await decisionToMessageResult(askDecision, {
-      waitForApproval: async () => ({ status: "resolved", decision: "deny" }),
+      waitForApproval: async () => ({
+        status: "resolved",
+        decision: "deny",
+        resolution_source: "human",
+      }),
     }),
-    { cancel: true, cancelReason: "needs review (approval_id=app_001)" },
+    {
+      cancel: true,
+      cancelReason: `${REVIEW_DENIED_GUIDANCE} (approval_id=app_001)`,
+    },
+  );
+  // LLM rejection uses the same denial wording.
+  assert.deepEqual(
+    await decisionToMessageResult(askDecision, {
+      waitForApproval: async () => ({
+        status: "resolved",
+        decision: "deny",
+        resolution_source: "llm",
+      }),
+    }),
+    {
+      cancel: true,
+      cancelReason: `${REVIEW_DENIED_GUIDANCE} (approval_id=app_001)`,
+    },
+  );
+
+  // Approval timeout surfaces an expiry message instead of the ask prompt.
+  assert.deepEqual(
+    await decisionToToolResult(askDecision, {
+      waitForApproval: async () => ({
+        status: "timeout",
+        decision: "deny",
+        resolution_source: null,
+      }),
+    }),
+    {
+      block: true,
+      blockReason: `${APPROVAL_EXPIRED_GUIDANCE} (approval_id=app_001)`,
+    },
   );
 
   assert.deepEqual(
     await decisionToToolResult(askDecision, {
       waitForApproval: async () => ({ status: "pending", decision: null }),
     }),
-    { block: true, blockReason: "needs review (approval_id=app_001)" },
+    {
+      block: true,
+      blockReason: `${REVIEW_DENIED_GUIDANCE} (approval_id=app_001)`,
+    },
   );
 });
 

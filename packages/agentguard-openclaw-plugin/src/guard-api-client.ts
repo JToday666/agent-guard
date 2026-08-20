@@ -822,7 +822,7 @@ export async function decisionToToolResult(
   }
   if (response.decision.decision === "deny") {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
-    return { block: true, blockReason: safeDecisionMessage(response) };
+    return { block: true, blockReason: blockedDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
@@ -851,7 +851,7 @@ export async function decisionToToolResult(
   });
   return {
     block: true,
-    blockReason: safeDecisionMessage(response, response.approval.approval_id),
+    blockReason: approvalOutcomeMessage(response.approval.approval_id, approval),
   };
 }
 
@@ -865,7 +865,7 @@ export async function decisionToMessageResult(
   }
   if (response.decision.decision === "deny") {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
-    return { cancel: true, cancelReason: safeDecisionMessage(response) };
+    return { cancel: true, cancelReason: blockedDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
@@ -894,7 +894,10 @@ export async function decisionToMessageResult(
   });
   return {
     cancel: true,
-    cancelReason: safeDecisionMessage(response, response.approval.approval_id),
+    cancelReason: approvalOutcomeMessage(
+      response.approval.approval_id,
+      approval,
+    ),
   };
 }
 
@@ -946,6 +949,35 @@ function safeDecisionMessage(
     response.decision.reason ||
     "Blocked by AgentGuard policy.";
   return approvalId ? `${message} (approval_id=${approvalId})` : message;
+}
+
+/** LLM 引导语：动作未执行、禁止重试、任务受阻时向用户报告。 */
+const BLOCKED_ACTION_GUIDANCE =
+  "This action was blocked by AgentGuard and was NOT executed. Do not retry the same blocked action. If the task cannot be completed without this action, clearly tell the user that the task was blocked/denied by AgentGuard.";
+
+const REVIEW_DENIED_GUIDANCE =
+  "This action was denied by AgentGuard review and was NOT executed. Do not retry the same denied action. If the task cannot be completed without this action, clearly tell the user that the task was denied by AgentGuard.";
+
+const APPROVAL_EXPIRED_GUIDANCE =
+  "Approval timed out or expired before this action could run; the action was NOT executed (blocked by AgentGuard). Do not retry the same action. If the task cannot be completed without this action, clearly tell the user that the task was blocked by AgentGuard because approval expired.";
+
+/** Core 直接 deny：保留原 safe_message（"blocked by AgentGuard" 语义）并追加引导语。 */
+function blockedDecisionMessage(response: GuardEvaluationResponse): string {
+  return `${safeDecisionMessage(response)} ${BLOCKED_ACTION_GUIDANCE}`;
+}
+
+/**
+ * ask 等待后未放行：按审批等待响应区分人工/LLM 拒绝与超时过期，
+ * 明确告知 LLM 动作未执行且不要重试。
+ */
+function approvalOutcomeMessage(
+  approvalId: string,
+  approval: ApprovalWaitResponse,
+): string {
+  if (approval.status === "timeout" || approval.status === "expired") {
+    return `${APPROVAL_EXPIRED_GUIDANCE} (approval_id=${approvalId})`;
+  }
+  return `${REVIEW_DENIED_GUIDANCE} (approval_id=${approvalId})`;
 }
 
 function nonEmptyString(value: unknown, fallback: string): string {
