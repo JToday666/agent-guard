@@ -102,7 +102,8 @@ const unknownOpenClawStatus: AdapterStatus = {
   failClosedStages: [],
 };
 
-const POLL_INTERVAL_MS = 10_000;
+// 列表/总览页全局轮询间隔（trace 详情单独使用 TRACE_POLL_INTERVAL_MS）
+const POLL_INTERVAL_MS = 2_000;
 const TRACE_CACHE_MAX_ENTRIES = 8;
 const TRACE_DETAIL_TTL_MS = 60_000;
 const TRACE_PROVENANCE_TTL_MS = 120_000;

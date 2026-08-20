@@ -304,7 +304,9 @@ async function expectRuntimeLayers(
       .filter({ hasText: "Approval Resolution" });
     await expect(resolution).toContainText("单次放行");
     await expect(inspector.getByText("V2 SHADOW", { exact: true })).toBeVisible();
-    await expect(inspector).toContainText("不可用");
+    // 三态文案改造后，影子评估缺失不再渲染模糊的「不可用」；
+    // V2.1 shadow 未随 live trace 返回时，影子轨可用性渲染新文案。
+    await expect(inspector).toContainText("后端未返回（未实现或未启用）");
 
     await inspector.getByRole("button", { name: "查看审计记录" }).click();
     await expect(page).toHaveURL(new RegExp(`view=audit.*event_id=${policyAuditId}`));

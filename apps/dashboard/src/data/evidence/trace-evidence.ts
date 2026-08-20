@@ -27,6 +27,7 @@ import type {
   TraceAuditWindow,
 } from "../../types/dashboard";
 import { maskSensitiveText, redactSensitiveData } from "../../utils/data-redaction.ts";
+import { awaitingReceipt, noDataNeeded } from "../../utils/missing-data-display.ts";
 import {
   getResourceOperationLabel,
   getResourceSensitivityLabel,
@@ -593,9 +594,7 @@ const INTERVENTION_SEVERITY: Record<InterventionType, number> = {
   unknown: -1,
 };
 
-function pickPrimaryIntervention(
-  events: readonly NormalizedAuditEvidence[],
-): InterventionType {
+function pickPrimaryIntervention(events: readonly NormalizedAuditEvidence[]): InterventionType {
   let primary: InterventionType = "unknown";
   for (const event of events) {
     const intervention = event.intervention;
@@ -741,11 +740,28 @@ export function getInterventionLabel(intervention: InterventionType): string {
   return labels[intervention];
 }
 
-export function getExecutionStatusLabel(status: ExecutionStatus): string {
+/** 执行回执的判定上下文：用于区分「等待回执 / 观察类不适用 / 真缺失」。 */
+export interface ExecutionReceiptContext {
+  decision?: DecisionStatus;
+  intervention?: InterventionType;
+}
+
+export function getExecutionStatusLabel(
+  status: ExecutionStatus,
+  context?: ExecutionReceiptContext,
+): string {
   if (status === "not_invoked") return "未调用工具";
   if (status === "executed") return "已执行";
   if (status === "failed") return "执行失败";
-  return "暂无执行回执";
+  // 观察类记录不产生执行回执（①正常无数据）。
+  if (context?.intervention === "audit_observation") {
+    return noDataNeeded("执行回执", "观察类记录不产生执行回执");
+  }
+  // deny/ask 后回执尚未返回：过渡态，不可按未调用处理。
+  if (context && (context.decision === "deny" || context.decision === "ask")) {
+    return awaitingReceipt("deny/ask 动作的执行结果尚未返回");
+  }
+  return "执行回执未记录";
 }
 
 export function getResultDispositionLabel(disposition: ResultDisposition): string {
@@ -755,7 +771,7 @@ export function getResultDispositionLabel(disposition: ResultDisposition): strin
     not_applicable: "不适用",
     passed_through: "已透传",
     quarantined: "已隔离",
-    unknown: "未记录",
+    unknown: "结果处置未记录（等待运行时回执）",
   };
   return labels[disposition];
 }
@@ -763,7 +779,9 @@ export function getResultDispositionLabel(disposition: ResultDisposition): strin
 export function getSideEffectLabel(sideEffects: SideEffectEvidence): string {
   if (sideEffects.measurementStatus === "not_applicable") return "不适用";
   if (sideEffects.measurementStatus === "not_measured") return "未测量";
-  if (sideEffects.measurementStatus !== "measured") return "未记录";
+  if (sideEffects.measurementStatus !== "measured") {
+    return "副作用未测量（等待运行时测量回执，不可按 0 处理）";
+  }
   return sideEffects.count === null ? "已测量，数量未记录" : `${sideEffects.count} 个`;
 }
 
@@ -949,7 +967,7 @@ function buildFacts(
             : execution.status === "executed"
               ? "success"
               : "neutral",
-      value: getExecutionStatusLabel(execution.status),
+      value: getExecutionStatusLabel(execution.status, { decision, intervention }),
     },
     {
       availability: availability(
@@ -990,8 +1008,18 @@ function buildFacts(
   ];
 }
 
-function valueOrMissing(value: string | null): string {
-  return value ?? "未记录";
+// 按字段契约区分缺失成因：originalTask / modelIntent 允许为空（①）；
+// policy digest 应存在，缺失属数据异常（②）。
+function originalTaskValue(value: string | null): string {
+  return value ?? noDataNeeded("原始任务", "本事件未携带用户任务");
+}
+
+function modelIntentValue(value: string | null): string {
+  return value ?? noDataNeeded("模型意图", "该字段允许为空");
+}
+
+function toolValue(value: string | null): string {
+  return value ?? noDataNeeded("工具信息", "本记录非工具调用");
 }
 
 function sourceValue(source: EvidenceSource): string {
@@ -1040,13 +1068,13 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           eventId: primary?.auditId ?? null,
           id: "original-task",
           label: "原始任务",
-          value: valueOrMissing(primary?.originalTask ?? null),
+          value: originalTaskValue(primary?.originalTask ?? null),
         },
         {
           availability: availability(Boolean(source.type || source.label)),
           detail: source.trustLevel
             ? `信任等级：${getTrustLevelLabel(source.trustLevel)}`
-            : "信任等级未记录",
+            : "信任等级缺失（来源证据应包含信任等级，属数据异常）",
           eventId: primary?.auditId ?? null,
           id: "source",
           label: "来源与信任",
@@ -1074,7 +1102,7 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           eventId: primary?.auditId ?? null,
           id: "model-intent",
           label: "模型意图",
-          value: valueOrMissing(primary?.modelIntent ?? null),
+          value: modelIntentValue(primary?.modelIntent ?? null),
         },
       ],
       title: "上下文与模型意图",
@@ -1090,7 +1118,7 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           eventId: primary?.auditId ?? null,
           id: "tool",
           label: "工具与参数",
-          value: valueOrMissing(primary?.toolName ?? null),
+          value: toolValue(primary?.toolName ?? null),
         },
         {
           availability: availability(resources.length > 0),
@@ -1141,7 +1169,9 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           availability: availability(
             Boolean(policy.bundleId || policy.version || policy.revision !== null || policy.digest),
           ),
-          detail: policy.digest ? `规范摘要 ${policy.digest}` : "规范摘要未记录",
+          detail: policy.digest
+            ? `规范摘要 ${policy.digest}`
+            : "规范摘要缺失（策略引用应包含 digest，属数据异常）",
           eventId: primary?.auditId ?? null,
           id: "policy",
           label: "当时生效的策略",
@@ -1187,7 +1217,10 @@ function buildStages(primary: NormalizedAuditEvidence | null): EvidenceStage[] {
           eventId: primary?.auditId ?? null,
           id: "execution",
           label: "实际执行",
-          value: getExecutionStatusLabel(execution.status),
+          value: getExecutionStatusLabel(execution.status, {
+            decision: primary?.decision,
+            intervention: primary?.intervention,
+          }),
         },
         {
           availability: availability(
@@ -1268,7 +1301,10 @@ function buildConclusion(primary: NormalizedAuditEvidence | null): TraceEvidence
     return {
       confidence: primary.approval.status === "allowed" ? "confirmed" : "partial",
       outcome: primary.execution.receiptRecorded
-        ? `审批释放后：${getExecutionStatusLabel(primary.execution.status)}`
+        ? `审批释放后：${getExecutionStatusLabel(primary.execution.status, {
+            decision: primary.decision,
+            intervention: primary.intervention,
+          })}`
         : "审批已放行一次；是否实际执行仍待运行时回执",
       reason,
       title: "审批后放行",

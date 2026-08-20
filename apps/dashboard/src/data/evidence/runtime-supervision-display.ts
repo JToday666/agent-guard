@@ -29,7 +29,9 @@ export interface SupervisionLayerDisplay {
 const AVAILABILITY_LABELS: Record<Availability, string> = {
   recorded: "已记录",
   partial: "部分可用",
-  unavailable: "不可用",
+  // ③三态语义：unavailable 统一解释为后端未返回该层证据（未实现或未启用），
+  // 不再使用模糊的「不可用」。
+  unavailable: "后端未返回（未实现或未启用）",
   not_applicable: "不适用",
 };
 
@@ -88,8 +90,8 @@ function decisionLayer(step: ExecutionStepViewModel): SupervisionLayerDisplay {
     return {
       key: "decision",
       label: "Decision",
-      value: "不可用",
-      detail: "未找到正式判定证据",
+      value: "未返回",
+      detail: "后端未返回该层证据（未实现或未启用），未找到正式判定证据",
       tone: "neutral",
       availability: presentation.availability,
     };
@@ -138,8 +140,8 @@ function approvalLayer(step: ExecutionStepViewModel): SupervisionLayerDisplay {
     return {
       key: "approval",
       label: "Approval",
-      value: "不可用",
-      detail: "未记录审批状态",
+      value: "未返回",
+      detail: "后端未返回该层证据（未实现或未启用），审批状态未记录",
       tone: "neutral",
       availability: presentation.availability,
     };
@@ -175,8 +177,8 @@ function enforcementLayer(step: ExecutionStepViewModel): SupervisionLayerDisplay
     return {
       key: "enforcement",
       label: "Enforcement",
-      value: "证据不可用",
-      detail: "强绑定门控证据尚未随 Trace 返回",
+      value: "证据未返回",
+      detail: "后端未返回该层证据（强绑定门控未实现或未启用）；不推断连线故障",
       tone: "neutral",
       availability: presentation.availability,
     };
@@ -245,8 +247,8 @@ function executionLayer(step: ExecutionStepViewModel): SupervisionLayerDisplay {
     return {
       key: "execution",
       label: "Execution",
-      value: "收据不可用",
-      detail: "不能从判定推断是否调用",
+      value: "收据未返回",
+      detail: "后端未返回该层证据（未实现或未启用）；不能从判定推断是否调用",
       tone: "neutral",
       availability: presentation.availability,
     };

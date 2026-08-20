@@ -111,7 +111,14 @@ test("does not infer execution or zero side effects from deny and blocked", () =
     evidence.facts.find((fact) => fact.id === "execution")?.availability,
     "not_recorded",
   );
-  assert.equal(evidence.facts.find((fact) => fact.id === "side_effects")?.value, "未记录");
+  assert.equal(
+    evidence.facts.find((fact) => fact.id === "side_effects")?.value,
+    "副作用未测量（等待运行时测量回执，不可按 0 处理）",
+  );
+  assert.equal(
+    evidence.facts.find((fact) => fact.id === "execution")?.value,
+    "等待运行时回执（deny/ask 动作的执行结果尚未返回）",
+  );
   assert.equal(evidence.conclusion.title, "策略决定：拒绝");
 });
 
