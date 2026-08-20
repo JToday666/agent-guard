@@ -22,7 +22,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { getSupervisionLayerDisplays } from "../../data/evidence/runtime-supervision-display.ts";
+import {
+  getSupervisionLayerDisplays,
+  SHOW_ENFORCEMENT_PANEL,
+} from "../../data/evidence/runtime-supervision-display.ts";
 import type { ExecutionStepViewModel } from "../../types/dashboard.ts";
 
 defineOptions({ name: "ExecutionSupervisionCapsules" });
@@ -35,7 +38,13 @@ const props = withDefaults(
   { density: "node" },
 );
 
-const layers = computed(() => getSupervisionLayerDisplays(props.step));
+// RTE-05 强绑定未具备事件级下发资格时，Enforcement 胶囊常驻“证据不可用”空态，
+// 随面板一并隐藏；SHOW_ENFORCEMENT_PANEL 置回 true 即恢复四层展示。
+const layers = computed(() =>
+  getSupervisionLayerDisplays(props.step).filter(
+    (layer) => SHOW_ENFORCEMENT_PANEL || layer.key !== "enforcement",
+  ),
+);
 </script>
 
 <style scoped lang="scss">

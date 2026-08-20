@@ -145,6 +145,10 @@
             <dt>规范化方法</dt>
             <dd>JCS（RFC 8785）</dd>
           </div>
+          <div>
+            <dt>外部检查点</dt>
+            <dd>{{ store.auditIntegrity.anchor.enabled ? "已启用" : "未启用" }}</dd>
+          </div>
           <div v-if="store.auditIntegrity.anchor.checkpointSequence !== null">
             <dt>外部检查点序号</dt>
             <dd>{{ store.auditIntegrity.anchor.checkpointSequence }}</dd>
@@ -164,6 +168,12 @@
           <div v-if="store.auditIntegrity.anchor.keyId">
             <dt>签名密钥标识</dt>
             <dd>{{ store.auditIntegrity.anchor.keyId }}</dd>
+          </div>
+          <div v-if="store.auditIntegrity.anchor.errorCode">
+            <dt>锚点错误码</dt>
+            <dd>
+              <code translate="no">{{ store.auditIntegrity.anchor.errorCode }}</code>
+            </dd>
           </div>
           <div v-if="store.auditIntegrity.firstBrokenAuditId">
             <dt>首个异常审计</dt>
@@ -443,7 +453,9 @@ const auditAnchorPresentation = computed<{
     };
   }
   return {
-    detail: "检查点文件暂不可验证",
+    detail: anchor.errorCode
+      ? `${anchor.errorCode}：检查点文件暂不可验证`
+      : "检查点文件暂不可验证",
     label: "外部锚点不可用",
     tone: "danger",
   };

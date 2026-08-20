@@ -574,6 +574,37 @@ test("shows every supported GuardEvent once while grouping one action lifecycle"
   );
 });
 
+test("marks checkpoint steps without receipts as not_applicable while tool steps stay unknown", () => {
+  const base = normalizedEvents()[0]!;
+  const checkpoint = evidence(base, {
+    auditId: "audit_context_integrity",
+    decisionId: "decision_context_integrity",
+    eventId: "event_context_integrity",
+    eventType: "context_assembled",
+  });
+  const trace = buildTrace([checkpoint]);
+  const step = trace.steps[0]!;
+  assert.equal(step.kind, "checkpoint");
+  assert.equal(step.category, "context");
+  assert.equal(step.supervision.controlIntegrity.status, "not_applicable");
+  assert.deepEqual(step.supervision.controlIntegrity.reasonCodes, []);
+
+  const action = evidence(base, {
+    actionId: "action_missing_receipt",
+    auditId: "audit_missing_receipt",
+    decisionId: "decision_missing_receipt",
+    eventId: "event_missing_receipt",
+    eventType: "tool_call_proposed",
+    toolName: "read_file",
+  });
+  const actionStep = buildTrace([action]).steps[0]!;
+  assert.equal(actionStep.kind, "action");
+  assert.equal(actionStep.supervision.controlIntegrity.status, "unknown");
+  assert.deepEqual(actionStep.supervision.controlIntegrity.reasonCodes, [
+    "RUNTIME_EVIDENCE_UNAVAILABLE",
+  ]);
+});
+
 test("uses a stable checkpoint fallback for a future policy event", () => {
   const base = normalizedEvents()[0]!;
   const future = evidence(base, {

@@ -122,6 +122,24 @@ function readStrings(value: unknown): string[] {
     .filter((value, index, values) => values.indexOf(value) === index);
 }
 
+function contextSourceLabel(item: unknown): string | null {
+  if (typeof item === "string") return readMaskedString(item);
+  const record = asRecord(item);
+  const sourceId = readString(record.source_id ?? record.id);
+  const sourceType = readString(record.source_type ?? record.type);
+  if (sourceType && sourceId) return `${sourceType}:${sourceId}`;
+  return sourceId ?? sourceType;
+}
+
+function readContextSources(value: unknown): string[] {
+  return asArray(value)
+    .flatMap((item) => {
+      const label = contextSourceLabel(item);
+      return label ? [label] : [];
+    })
+    .filter((value, index, values) => values.indexOf(value) === index);
+}
+
 function readDecision(value: unknown): DecisionStatus {
   return value === "allow" || value === "ask" || value === "deny" ? value : "unknown";
 }
@@ -502,8 +520,8 @@ function normalizeAuditEvent(
     auditId: event.id,
     chainIndex: readInteger(auditIntegrity.sequence),
     contextSources: [
-      ...readStrings(guardEvent.context_sources),
-      ...readStrings(metadata.context_sources),
+      ...readContextSources(guardEvent.context_sources),
+      ...readContextSources(metadata.context_sources),
     ].filter((value, index, values) => values.indexOf(value) === index),
     decision,
     decisionId: firstString(links.decision_id),
@@ -562,6 +580,34 @@ function pickArray<T>(
       return value.length ? value : null;
     }) ?? []
   );
+}
+
+// 严重度优先：deny 后跟随观察事件时，轨迹摘要仍以最高严重度干预选取，同级取最末事件。
+const INTERVENTION_SEVERITY: Record<InterventionType, number> = {
+  pre_execution_deny: 5,
+  tool_result_quarantine: 4,
+  model_output_revision: 3,
+  approval_release: 2,
+  audit_observation: 1,
+  none: 0,
+  unknown: -1,
+};
+
+function pickPrimaryIntervention(
+  events: readonly NormalizedAuditEvidence[],
+): InterventionType {
+  let primary: InterventionType = "unknown";
+  for (const event of events) {
+    const intervention = event.intervention;
+    if (intervention === "unknown") continue;
+    if (
+      primary === "unknown" ||
+      INTERVENTION_SEVERITY[intervention] >= INTERVENTION_SEVERITY[primary]
+    ) {
+      primary = intervention;
+    }
+  }
+  return primary;
 }
 
 function combineTraceEvidence(
@@ -632,10 +678,7 @@ function combineTraceEvidence(
       decisionRecord?.decisionReason ?? pickLatest(events, (event) => event.decisionReason),
     eventId: decisionRecord?.eventId ?? outcomeRecord?.eventId ?? base.eventId,
     execution: latestExecution,
-    intervention:
-      pickLatest(events, (event) =>
-        event.intervention !== "unknown" ? event.intervention : null,
-      ) ?? "unknown",
+    intervention: pickPrimaryIntervention(events),
     modelIntent: pickLatest(events, (event) => event.modelIntent),
     originalTask: pickLatest(events, (event) => event.originalTask),
     policy: latestPolicy,

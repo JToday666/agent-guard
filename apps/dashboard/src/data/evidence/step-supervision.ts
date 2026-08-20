@@ -101,6 +101,14 @@ const COMPETITION_PATH_IDS = new Set([
   "forged_authority_or_allow_once_mismatch",
 ]);
 
+// 与 execution-trace.ts 的 CHECKPOINT_CATEGORIES 保持一致：检查点步骤不产生运行时回执。
+const CHECKPOINT_STEP_CATEGORIES = new Set<ExecutionStepCategory>([
+  "context",
+  "model_input",
+  "model_output",
+  "tool_result",
+]);
+
 type EnforcementGateState = EnforcementPresentation["gateState"];
 type BindingCheckStatus = EnforcementPresentation["bindingCheckStatus"];
 type LeaseConsumeOutcome = EnforcementPresentation["leaseConsumeOutcome"];
@@ -899,6 +907,11 @@ function projectControlIntegrity(
   }
   if (execution.receiptRecorded) {
     return { status: "no_violation_observed", reasonCodes: [], sourceRefs: allRefs };
+  }
+  if (CHECKPOINT_STEP_CATEGORIES.has(input.category) && !input.outcome) {
+    // 检查点步骤（上下文组装/模型输入/模型输出/工具结果检查）本就不产生运行时回执，
+    // 缺失回执属正常语义，不应与工具步骤的真实证据缺失（RUNTIME_EVIDENCE_UNAVAILABLE）混淆。
+    return { status: "not_applicable", reasonCodes: [], sourceRefs: allRefs };
   }
   return {
     status: "unknown",

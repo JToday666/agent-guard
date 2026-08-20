@@ -62,6 +62,7 @@ export interface ControlIntegrityPresentation {
     | "suspected"
     | "confirmed_violation"
     | "correlation_conflict"
+    | "not_applicable"
     | "unknown";
   reasonCodes: string[];
   sourceRefs: EvidenceLocator[];

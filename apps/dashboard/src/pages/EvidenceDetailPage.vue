@@ -191,7 +191,15 @@
               {{ provenanceSyncMessage }}
             </p>
             <InlineNotice
-              v-if="runtimeSupervision.provenancePresentation.contractKind !== 'ct-provenance/1.0'"
+              v-if="runtimeSupervision.provenancePresentation.contractKind === 'mixed'"
+              title="内容溯源证据待完善"
+              tone="info"
+            >
+              图中同时包含 legacy 溯源节点与 CT typed 节点；仅校验通过的 typed
+              节点参与信任、污染与确定性展示。
+            </InlineNotice>
+            <InlineNotice
+              v-else-if="runtimeSupervision.provenancePresentation.contractKind !== 'ct-provenance/1.0'"
               title="内容溯源证据不完整"
               tone="warning"
             >

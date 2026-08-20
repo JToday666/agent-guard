@@ -548,6 +548,7 @@ function parseControlIntegrity(value: unknown, path: string): ControlIntegrityPr
         "suspected",
         "confirmed_violation",
         "correlation_conflict",
+        "not_applicable",
         "unknown",
       ] as const,
       `${path}.status`,

@@ -289,7 +289,10 @@
 
       <section class="execution-inspector__section">
         <h5>Approval Basis</h5>
-        <dl class="execution-inspector__detail-grid">
+        <p v-if="isApprovalNotApplicable(step, approvalBasis)" class="execution-inspector__notice">
+          无需审批（该步骤未触发 ask 决策），本步骤不产生审批依据。
+        </p>
+        <dl v-else class="execution-inspector__detail-grid">
           <div>
             <dt>审批状态</dt>
             <dd>{{ layerValue(step, "approval") }}</dd>
@@ -336,7 +339,10 @@
 
       <section class="execution-inspector__section">
         <h5>Approval Resolution</h5>
-        <dl class="execution-inspector__detail-grid">
+        <p v-if="isApprovalNotApplicable(step, approvalBasis)" class="execution-inspector__notice">
+          无需审批（该步骤未触发 ask 决策），未产生审批决议。
+        </p>
+        <dl v-else class="execution-inspector__detail-grid">
           <div>
             <dt>终态</dt>
             <dd>{{ approvalBasis?.resolution.status ?? "不可用" }}</dd>
@@ -360,7 +366,9 @@
         </dl>
       </section>
 
-      <section class="execution-inspector__section">
+      <!-- RTE-05 强绑定未具备事件级下发资格，面板常驻空态易误读；
+           置 SHOW_ENFORCEMENT_PANEL=true 可恢复（见 runtime-supervision-display.ts） -->
+      <section v-if="SHOW_ENFORCEMENT_PANEL" class="execution-inspector__section">
         <h5>Enforcement</h5>
         <dl class="execution-inspector__detail-grid">
           <div>
@@ -450,8 +458,15 @@
           <div class="is-wide">
             <dt>Control Integrity</dt>
             <dd>
-              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }} ·
-              {{ step.supervision.controlIntegrity.reasonCodes.join(" · ") || "未发现违例原因" }}
+              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }}<template
+                v-if="step.supervision.controlIntegrity.reasonCodes.length"
+              >
+                · {{ step.supervision.controlIntegrity.reasonCodes.join(" · ") }}</template
+              ><template
+                v-else-if="step.supervision.controlIntegrity.status !== 'not_applicable'"
+              >
+                · 未发现违例原因</template
+              >
             </dd>
           </div>
         </dl>
@@ -558,6 +573,7 @@ import {
   getSemanticsSummary,
   getSourceModeLabel,
   getSupervisionLayerDisplays,
+  SHOW_ENFORCEMENT_PANEL,
   type SupervisionLayerKey,
 } from "../../data/evidence/runtime-supervision-display.ts";
 import { getExecutionCategoryLabel } from "../../data/evidence/execution-trace";
@@ -674,6 +690,16 @@ function approvalBasisSummary(basis: ApprovalBasisViewModel | undefined): string
     return "关键身份或原始审批证据不可用；该依据仅供只读调查。";
   }
   return "当前证据窗口或请求事实不完整；该依据仅供只读调查。";
+}
+
+function isApprovalNotApplicable(
+  step: ExecutionStepViewModel,
+  basis: ApprovalBasisViewModel | undefined,
+): boolean {
+  // 真实错误优先：basis 存在但完整性校验失败且携带具体缺失原因时，仍需展示错误码。
+  if (basis && basis.missingReasons.length > 0) return false;
+  if (step.supervision.approval.availability === "not_applicable") return true;
+  return !basis && !step.approvalId;
 }
 
 function approvalMissingReasons(basis: ApprovalBasisViewModel | undefined): string {
@@ -944,13 +970,20 @@ function approvalRoute(step: ExecutionStepViewModel) {
 }
 
 .context-manifest__header p,
-.context-manifest__notice {
+.context-manifest__notice,
+.execution-inspector__notice {
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
   line-height: 1.5;
 }
 
-.context-manifest__notice {
+.execution-inspector__notice {
+  border-left-color: var(--color-border-strong);
+  margin: 0;
+}
+
+.context-manifest__notice,
+.execution-inspector__notice {
   background: var(--color-surface-muted);
   border-left: 2px solid var(--color-warning);
   padding: var(--space-2);

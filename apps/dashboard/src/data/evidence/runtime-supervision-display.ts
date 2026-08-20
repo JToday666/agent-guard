@@ -11,6 +11,12 @@ import { getDecisionLabel } from "../../utils/dashboard-formatters.ts";
 export type SupervisionLayerKey = "decision" | "approval" | "enforcement" | "execution";
 export type SupervisionTone = "neutral" | "info" | "success" | "warning" | "danger";
 
+// RTE-05 强绑定当前不具备事件级下发资格（缺 V2.1 snapshot/revalidation 材料，
+// 服务端不下发 enforcement_binding），Enforcement 面板常驻空态（门控未知/绑定未执行/
+// Lease 未产生）易被误读为连线故障，故展示层整体隐藏。数据层 projectEnforcement
+// 投影与类型保持不变；强绑定资格链就绪后置回 true 即可恢复。
+export const SHOW_ENFORCEMENT_PANEL = false;
+
 export interface SupervisionLayerDisplay {
   key: SupervisionLayerKey;
   label: string;
@@ -283,6 +289,7 @@ export function getControlIntegrityLabel(
     suspected: "疑似控制违例",
     confirmed_violation: "已确认控制违例",
     correlation_conflict: "证据关联冲突",
+    not_applicable: "不适用（检查点步骤无运行时回执）",
     unknown: "控制完整性未知",
   } as const;
   return labels[value];

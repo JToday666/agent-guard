@@ -115,6 +115,82 @@ test("does not infer execution or zero side effects from deny and blocked", () =
   assert.equal(evidence.conclusion.title, "策略决定：拒绝");
 });
 
+test("keeps pre_execution_deny as the primary intervention when an observation follows the deny", () => {
+  const denyRow: AuditEventRow = {
+    actionId: "action_deny_then_observe",
+    agentAction: "read_file('/sensitive')",
+    auditSequence: 1,
+    attackType: "prompt_injection",
+    blocked: true,
+    caseId: "PI-DENY-OBSERVE",
+    decision: "deny",
+    decisionId: "decision_deny_then_observe",
+    eventId: "event_deny_then_observe",
+    eventType: "tool_call_proposed",
+    id: "audit_deny_then_observe_policy",
+    isMalicious: true,
+    occurredAt: "2026-06-07T12:10:00+08:00",
+    reason: "策略拒绝",
+    resource: "/sensitive",
+    resourceTargets: ["/sensitive"],
+    riskScore: 90,
+    ruleHits: ["P001_sensitive_file_access"],
+    runtime: "langgraph",
+    severity: "high",
+    stage: "before_tool_call",
+    time: "12:10",
+    tool: "read_file",
+    traceId: "trace_deny_then_observe",
+    userTask: "总结文档",
+    raw: {
+      audit_id: "audit_deny_then_observe_policy",
+      evidence: {
+        guard_decision: { decision: "deny", reason: "策略拒绝", risk_score: 90 },
+        intervention: { type: "pre_execution_deny" },
+      },
+      links: { decision_id: "decision_deny_then_observe", event_id: "event_deny_then_observe" },
+      record_type: "policy_evaluation",
+    },
+    recordType: "policy_evaluation",
+  };
+  const observationRow: AuditEventRow = {
+    ...denyRow,
+    auditSequence: 2,
+    blocked: false,
+    decision: "unknown",
+    id: "audit_deny_then_observe_observation",
+    occurredAt: "2026-06-07T12:10:05+08:00",
+    eventType: "tool_call_completed",
+    reason: "",
+    riskScore: 0,
+    ruleHits: [],
+    stage: "after_tool_call",
+    time: "12:10",
+    raw: {
+      audit_id: "audit_deny_then_observe_observation",
+      evidence: {
+        intervention: { type: "audit_observation" },
+        execution: { receipt_recorded: true, status: "not_invoked" },
+        side_effects: { count: 0, measurement_status: "measured" },
+      },
+      links: { decision_id: "decision_deny_then_observe", event_id: "event_deny_then_observe" },
+      record_type: "runtime_observation",
+    },
+    recordType: "runtime_observation",
+  };
+
+  const evidence = buildTraceEvidenceViewModel(
+    "trace_deny_then_observe",
+    [denyRow, observationRow],
+    [],
+    null,
+  );
+  assert.equal(evidence.primary?.intervention, "pre_execution_deny");
+  assert.equal(evidence.facts.find((fact) => fact.id === "intervention")?.value, "执行前拒绝");
+  assert.equal(evidence.conclusion.title, "执行前拒绝已确认");
+  assert.equal(evidence.conclusion.confidence, "confirmed");
+});
+
 test("merges duplicate policy evaluations logically while retaining raw audit rows", () => {
   const original = auditEvents.find(
     (event) =>
@@ -136,6 +212,68 @@ test("merges duplicate policy evaluations logically while retaining raw audit ro
   assert.equal(evidence.logicalAuditCount, 2);
   assert.equal(evidence.duplicatePolicyAuditCount, 1);
   assert.equal(evidence.events.length, 3);
+});
+
+test("projects context_sources object arrays, mixed arrays and empty payloads", () => {
+  const baseRow = auditEvents.find((event) => event.traceId === "trace_001")!;
+
+  const objectRaw = structuredClone(baseRow.raw) as Record<string, unknown>;
+  const objectEvidence = objectRaw.evidence as Record<string, unknown>;
+  objectEvidence.guard_event = {
+    context_sources: [
+      {
+        source_id: "ct-task-001",
+        source_trust: "trusted",
+        source_type: "user_task",
+        summary: "任务描述",
+      },
+      {
+        source_id: "tool_result_9",
+        source_trust: "untrusted",
+        source_type: "tool_result",
+        summary: "网页内容",
+      },
+      { source_id: "memory-7", source_type: "memory" },
+    ],
+  };
+  objectRaw.metadata = {
+    context_sources: [
+      "legacy_source",
+      { source_id: "notes.md", source_type: "file" },
+      { unrelated: true },
+    ],
+  };
+  const objectNormalized = buildTraceEvidenceViewModel(
+    baseRow.traceId,
+    [{ ...baseRow, raw: objectRaw }],
+    [],
+    integrity,
+  );
+  assert.deepEqual(objectNormalized.events[0]?.contextSources, [
+    "user_task:ct-task-001",
+    "tool_result:tool_result_9",
+    "memory:memory-7",
+    "legacy_source",
+    "file:notes.md",
+  ]);
+  const contextItem = objectNormalized.stages
+    .find((stage) => stage.id === "context_intent")
+    ?.items.find((item) => item.id === "context");
+  assert.equal(contextItem?.availability, "recorded");
+  assert.equal(contextItem?.value, "5 个上下文来源");
+
+  const emptyRaw = structuredClone(baseRow.raw) as Record<string, unknown>;
+  const emptyEvidence = emptyRaw.evidence as Record<string, unknown>;
+  emptyEvidence.guard_event = { context_sources: [] };
+  emptyRaw.metadata = { context_sources: [] };
+  delete emptyRaw.context_sources;
+  const emptyNormalized = buildTraceEvidenceViewModel(
+    baseRow.traceId,
+    [{ ...baseRow, raw: emptyRaw }],
+    [],
+    integrity,
+  );
+  assert.deepEqual(emptyNormalized.events[0]?.contextSources, []);
 });
 
 test("reads only the canonical AuditEvent integrity metadata", () => {

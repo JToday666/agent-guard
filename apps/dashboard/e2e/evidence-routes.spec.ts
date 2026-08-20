@@ -120,9 +120,8 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   await expect(action).toHaveClass(/execution-node--ask/);
   await expect(action.locator('[data-supervision-layer="decision"]')).toContainText("需审批");
   await expect(action.locator('[data-supervision-layer="approval"]')).toContainText("单次放行");
-  await expect(action.locator('[data-supervision-layer="enforcement"]')).toContainText(
-    "证据不可用",
-  );
+  // Enforcement 层因 RTE-05 资格链未就绪而隐藏（SHOW_ENFORCEMENT_PANEL=false）
+  await expect(action.locator('[data-supervision-layer="enforcement"]')).toHaveCount(0);
   await expect(action.locator('[data-supervision-layer="execution"]')).toContainText("已执行");
   await expect(action).not.toContainText("当前");
 
@@ -130,7 +129,7 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   const inspector = page.locator(".execution-inspector");
   await expect(inspector).toContainText("单次放行");
   await expect(inspector).toContainText("正式决策 / V2 Shadow");
-  await expect(inspector).toContainText("强绑定门控证据尚未随 Trace 返回");
+  await expect(inspector).not.toContainText("强绑定门控证据尚未随 Trace 返回");
   await expect(inspector.getByRole("link", { name: "查看审批依据（只读）" })).toHaveAttribute(
     "href",
     /readonly=1/,
@@ -157,7 +156,7 @@ test("execution trace keeps decision, approval and runtime facts distinct", asyn
   await expect(page.locator(".prov-node--selected")).toContainText("send_email");
 });
 
-test("graph and list reuse the same four-layer supervision presentation", async ({ page }) => {
+test("graph and list reuse the same supervision presentation", async ({ page }) => {
   await page.goto("/evidence/trace_002");
 
   const graphAction = page.locator(".execution-node").filter({ hasText: "发送邮件" });
@@ -174,7 +173,8 @@ test("graph and list reuse the same four-layer supervision presentation", async 
     .evaluateAll((nodes) => nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim()));
 
   expect(listValues).toEqual(graphValues);
-  expect(graphValues).toHaveLength(4);
+  // Enforcement 层隐藏后仅展示 decision/approval/execution 三层
+  expect(graphValues).toHaveLength(3);
 });
 
 test("multi-step preview shows ordered checkpoints and exact action outcomes", async ({ page }) => {
@@ -200,13 +200,13 @@ test("multi-step preview shows ordered checkpoints and exact action outcomes", a
   const fetch = graphNodes.filter({ hasText: "获取网页内容" });
   await expect(fetch.locator('[data-supervision-layer="decision"]')).toContainText("允许");
   await expect(fetch.locator('[data-supervision-layer="approval"]')).toContainText("无需审批");
-  await expect(fetch.locator('[data-supervision-layer="enforcement"]')).toContainText("证据不可用");
+  await expect(fetch.locator('[data-supervision-layer="enforcement"]')).toHaveCount(0);
   await expect(fetch.locator('[data-supervision-layer="execution"]')).toContainText("已执行");
 
   const exec = graphNodes.filter({ hasText: "执行代码" });
   await expect(exec.locator('[data-supervision-layer="decision"]')).toContainText("拒绝");
   await expect(exec.locator('[data-supervision-layer="approval"]')).toContainText("无需审批");
-  await expect(exec.locator('[data-supervision-layer="enforcement"]')).toContainText("证据不可用");
+  await expect(exec.locator('[data-supervision-layer="enforcement"]')).toHaveCount(0);
   await expect(exec.locator('[data-supervision-layer="execution"]')).toContainText("未调用");
   await exec.click();
   await expect(page.locator(".execution-inspector")).toContainText("运行时收据");
