@@ -287,9 +287,13 @@ class BenchConfig:
         if self.competition_mode:
             if not self.llm_enabled:
                 raise ValueError("competition mode requires llm_enabled=true")
-            if self.instrumentation_plan_mode != "autonomous":
+            if self.instrumentation_plan_mode not in {"autonomous", "replay"}:
+                # replay 仅限 effect/ablation 分析用途（零 LLM 确定性回放），
+                # 禁止 qualification；竞赛资格仍要求 autonomous。
                 raise ValueError(
-                    "competition mode requires instrumentation_plan_mode=autonomous"
+                    "competition mode requires instrumentation_plan_mode=autonomous "
+                    "(replay is effect/ablation-analysis only and never "
+                    "qualification-eligible)"
                 )
             if self.llm_fallback_to_case_plan:
                 raise ValueError("competition mode forbids case-plan fallback")

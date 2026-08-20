@@ -28,6 +28,7 @@ BROWSER_SESSION_TOOLS = {
 @dataclass(slots=True)
 class SecureToolNode:
     gateway: Any
+    instrumentation_plan_mode: str | None = None
     _compatibility_layer: ToolCompatibilityLayer = field(init=False, repr=False)
 
     def __init__(
@@ -36,6 +37,7 @@ class SecureToolNode:
         *,
         adapter: LangGraphAdapter | None = None,
         tool_registry: Any | None = None,
+        instrumentation_plan_mode: str | None = None,
     ) -> None:
         if gateway is None:
             if adapter is None or tool_registry is None:
@@ -48,6 +50,9 @@ class SecureToolNode:
                 guard_adapter=adapter, tool_runtime=tool_registry
             )
         self.gateway = gateway
+        # replay 门控信号：仅影响 _skipped_rag_answer 的状态串归一；
+        # None/非 replay 时行为逐字节不变（autonomous 官方链路不受影响）。
+        self.instrumentation_plan_mode = instrumentation_plan_mode
         self._compatibility_layer = ToolCompatibilityLayer(
             getattr(getattr(gateway, "tool_runtime", None), "sandbox_dir", None)
         )
@@ -120,7 +125,9 @@ class SecureToolNode:
                 if key in blocked_rag_retrievals:
                     results.append(
                         _skipped_rag_answer(
-                            tool_name, call.get("id") or new_id("call")
+                            tool_name,
+                            call.get("id") or new_id("call"),
+                            replay=self.instrumentation_plan_mode == "replay",
                         ).model_dump()
                     )
                     continue
@@ -632,14 +639,20 @@ def _extract_sperm_location_answer(question: str, contexts: list[str]) -> str:
     return ""
 
 
-def _skipped_rag_answer(tool_name: str, call_id: str) -> ToolExecutionResult:
+def _skipped_rag_answer(
+    tool_name: str, call_id: str, *, replay: bool = False
+) -> ToolExecutionResult:
+    # replay 门控下的状态归一：blocked/decision 本就是 blocked/deny，仅
+    # 状态串不一致（skipped_dependency）；归一为 "blocked" 后可达 scoring
+    # oracle 既有的 rag_answer_blocked 豁免路径。非 replay 保持原状态串，
+    # autonomous 官方链路行为逐字节不变。
     return ToolExecutionResult(
         tool_name=tool_name,
         call_id=call_id,
         executed=False,
         blocked=True,
         decision="deny",
-        status="skipped_dependency",
+        status="blocked" if replay else "skipped_dependency",
         result=None,
         safe_message="rag_answer was skipped because rag_retrieve was blocked.",
         side_effects=[],

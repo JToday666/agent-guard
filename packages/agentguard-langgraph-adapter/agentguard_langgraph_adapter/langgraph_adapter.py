@@ -1512,7 +1512,17 @@ def create_guarded_tool_node(
 ) -> Any:
     from .secure_tool_node import SecureToolNode
 
-    return SecureToolNode(gateway=gateway, adapter=adapter, tool_registry=tool_registry)
+    # 从 adapter.config 鸭子类型取计划模式（replay 门控信号）；拿不到时
+    # 为 None，SecureToolNode 行为与历史逐字节一致。
+    plan_mode = getattr(
+        getattr(adapter, "config", None), "instrumentation_plan_mode", None
+    )
+    return SecureToolNode(
+        gateway=gateway,
+        adapter=adapter,
+        tool_registry=tool_registry,
+        instrumentation_plan_mode=plan_mode,
+    )
 
 
 def blocked_result(

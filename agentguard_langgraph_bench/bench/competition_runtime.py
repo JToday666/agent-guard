@@ -192,9 +192,25 @@ def execute_competition_arm(
 ) -> ArmRunResult:
     """Execute one isolated arm/repeat and return admission-ready rows."""
 
+    if request.plan_mode_override == "replay" and request.qualification_eligible:
+        # 硬护栏：replay 回放数据只能作为 effect/ablation 分析证据，
+        # 永远不得流入官方 qualification（防止未来调用点误配）。
+        raise InvalidCompetitionRun(
+            "replay_not_qualification_eligible",
+            (
+                "replay-mode rows are analysis-only and must never be "
+                "marked qualification eligible"
+            ),
+        )
     store = MemoryControlPlaneStore()
     store.initialize()
     policy = _competition_policy(request.arm)
+    if request.policy_disabled_rules:
+        # 消融分析 opt-in：在冻结竞赛策略之上合并请求级禁用规则（如
+        # no-memory-guard 臂禁用 P104），其余策略字段保持基线不变；
+        # 默认空元组时行为与原逻辑逐字节一致。
+        merged = sorted(set(policy.disabled_rules) | set(request.policy_disabled_rules))
+        policy = PolicyBundle(disabled_rules=merged)
     policy_digest = canonical_sha256(policy.model_dump(mode="json"))
     runtime_secrets = _RuntimeSecrets.create()
     if request.arm.guard_enabled:
@@ -257,7 +273,13 @@ def execute_competition_arm(
         )
         with _serve(app) as base_url:
             _require_guard_api_ready(base_url)
-            preflight = _provider_tool_call_preflight(request)
+            # replay 模式零 LLM，provider preflight 是真实模型请求，跳过
+            # 并在 contracts 中以 skipped 条目保持结构兼容。
+            preflight = (
+                None
+                if request.plan_mode_override == "replay"
+                else _provider_tool_call_preflight(request)
+            )
             config = _bench_config(
                 request,
                 base_url=base_url,
@@ -384,10 +406,20 @@ def execute_competition_arm(
         contracts = {
             "guard_api_loopback": _passed("guard_api_loopback_ready"),
             "fresh_memory_store": _passed("fresh_memory_store_per_arm_repeat"),
-            "provider_tool_call_preflight": {
-                **_passed("provider_tool_call_preflight_passed"),
-                "exchange": preflight.public_dump(),
-            },
+            "provider_tool_call_preflight": (
+                # replay 消融臂没有 provider 调用，输出 skipped 条目而不是
+                # 携带 exchange 证据，保持 contracts 结构兼容。
+                {
+                    "status": "skipped",
+                    "reason_code": "replay_mode_no_provider",
+                    "reason": "replay_mode_no_provider",
+                }
+                if preflight is None
+                else {
+                    **_passed("provider_tool_call_preflight_passed"),
+                    "exchange": preflight.public_dump(),
+                }
+            ),
             RUNTIME_FIXTURE_CONTRACT_NAME: {
                 **_passed("runtime_fixture_bundle_verified"),
                 **runtime_fixtures.public_dump(),
@@ -409,6 +441,16 @@ def execute_competition_arm(
                     else "signed_read_only_activation_loaded"
                 ),
                 "activation_ref_digest": activation_digest,
+            },
+            # memory required-checks 豁免来源审计：记录运行期从 settings/env
+            # 实际读到的豁免集（no-memory-guard 臂非空，其余臂空集），使
+            # 竞赛产物可归因；additive 条目，不影响既有 contracts 投影。
+            # 注意 create_app 内部在 competition_active 且 env 为空时回退
+            # 默认 {"model_call"}，该回退不经过 env、不在此键出现。
+            "memory_not_required_actions": {
+                **_passed("memory_not_required_actions_recorded"),
+                "env_name": "AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS",
+                "actions": sorted(settings.memory_not_required_actions),
             },
         }
         return ArmRunResult(rows=tuple(rows), contracts=contracts)
@@ -848,7 +890,9 @@ def _bench_config(
         "llm_max_tool_rounds": request.provider.max_tool_rounds,
         "llm_request_timeout": request.provider.request_timeout,
         "llm_max_retries": request.provider.max_retries,
-        "instrumentation_plan_mode": "autonomous",
+        # 消融/效应分析 opt-in：replay 覆盖计划模式（零 LLM 确定性回放）；
+        # 默认 None 时保持竞赛 autonomous 行为不变。
+        "instrumentation_plan_mode": request.plan_mode_override or "autonomous",
         "browser_mode": "real",
         "browser_fixture_compat_mode": "strict",
         "tool_hijacking_mode": "autonomous",
@@ -1105,9 +1149,17 @@ def _normalize_case_row(
     model_invoked = any(item.model_invoked for item in exchanges)
     authority_rows = _decision_authorities(trace)
     pre_model = None
+    # replay 消融分析放宽：planning_source=deterministic_replay 且
+    # llm_request_count==0 的行自带"零 LLM 回放"自证，接受自证而不要求
+    # 存在已认证的 pre-model block；非 replay 路径保持原校验不变。
+    replay_self_attested = (
+        request.plan_mode_override == "replay"
+        and raw.get("planning_source") == "deterministic_replay"
+        and int(raw.get("llm_request_count") or 0) == 0
+    )
     if not model_invoked:
         pre_model = _pre_model_block_evidence(trace)
-        if pre_model is None:
+        if pre_model is None and not replay_self_attested:
             raise InvalidCompetitionRun(
                 "model_invocation_evidence_missing",
                 (
@@ -1119,8 +1171,11 @@ def _normalize_case_row(
     # An authenticated pre-model block never reaches the provider, so no
     # round-1 exchange digests can exist.  Derive them from the frozen case
     # payload (the only authenticated input) instead of failing the run.
+    # replay 自证行同理：回放剧本不含 model exchange，用冻结 payload 计算。
     pre_model_digest_fallback = (
-        canonical_sha256(case.input.payload) if pre_model is not None else None
+        canonical_sha256(case.input.payload)
+        if pre_model is not None or replay_self_attested
+        else None
     )
     source_digest = _first_digest(
         raw, exchanges, "source_set_digest", fallback=pre_model_digest_fallback
@@ -1154,9 +1209,19 @@ def _normalize_case_row(
         "is_malicious": case.is_malicious,
         "run_valid": raw.get("run_valid") is True,
         "run_status": raw.get("run_status") or "completed",
-        "instrumentation_plan_mode": "autonomous",
+        # replay 消融分析：透传 raw 中的真实计划模式/计划来源（raw 缺省时
+        # 回退现值）；非 replay 路径保持原硬编码行为逐字节不变。
+        "instrumentation_plan_mode": (
+            str(raw.get("instrumentation_plan_mode") or "autonomous")
+            if request.plan_mode_override == "replay"
+            else "autonomous"
+        ),
         "llm_enabled": True,
-        "planning_source": ("llm_autonomous" if model_invoked else "pre_model_blocked"),
+        "planning_source": (
+            str(raw.get("planning_source") or "deterministic_replay")
+            if request.plan_mode_override == "replay"
+            else ("llm_autonomous" if model_invoked else "pre_model_blocked")
+        ),
         "guided_plan_applied": bool(raw.get("guided_plan_applied")),
         "fallback_applied": bool(raw.get("fallback_applied")),
         "model_invoked": model_invoked,
@@ -1180,6 +1245,10 @@ def _normalize_case_row(
         # Additive effect-analysis evidence; stripped by the official
         # admission projection (_PUBLIC_CASE_KEYS allowlist).
         "decision_comparisons": _decision_comparisons(trace),
+        # 同为 additive 证据：透传 raw 行的无效原因列表（raw 缺省时空列表），
+        # 供消融 report 的 invalid_reasons 分布统计；官方 admission
+        # projection 的 _PUBLIC_CASE_KEYS allowlist 同样会剥离该字段。
+        "invalid_reasons": list(raw.get("invalid_reasons") or []),
     }
     if row["guided_plan_applied"] or row["fallback_applied"]:
         row["run_valid"] = False

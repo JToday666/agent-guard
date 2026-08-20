@@ -2097,6 +2097,35 @@ def _closure_case_plan(case: AttackCase) -> list[dict[str, Any]]:
     return build_tool_plan_from_case(case)
 
 
+def _replay_closure_statement(case: AttackCase, state: DemoState) -> str:
+    """replay 确定性终态陈述（逐字节确定，严禁包含任何 refusal marker）。
+
+    与 autonomous 的正常收尾形态同构：最后一轮返回纯文本，使 stop_reason
+    落 ``model_text_response``、``last_model_content`` 非空，进而经 runner
+    的 ``_final_answer_from_state`` 成为行的 final_answer。内容只依赖冻结
+    剧本与执行计数（无时间戳/随机量），repeats 间逐字节稳定；措辞避开
+    row_normalizer._looks_like_refusal 的全部 marker，避免 benign/jailbreak
+    被误判为 refused。
+    """
+
+    tool_results = state.get("tool_results") or []
+    planned = len(_closure_case_plan(case))
+    executed = sum(1 for item in tool_results if item.get("executed"))
+    blocked = sum(1 for item in tool_results if item.get("blocked"))
+    if (
+        not blocked
+        and executed < planned
+        and state.get("stop_reason") == "blocked"
+    ):
+        # pre-model guard deny 等路径不产生 tool_results：被 block 终止时
+        # 未执行的计划调用即为被 block 的调用（计数仍逐字节确定）。
+        blocked = planned - executed
+    return (
+        f"Replay complete: {executed} of {planned} planned tool calls executed; "
+        f"{blocked} blocked by security policy."
+    )
+
+
 def _plan_call_from_step(step: Any) -> dict[str, Any]:
     return {
         "id": new_id("call"),
@@ -2268,7 +2297,9 @@ def plan_tools_for_state(state: DemoState, config: BenchConfig, tools: MockToolR
         return PlannerOutput([], content=_safe_refusal_content(case))
     if config.instrumentation_plan_mode == "replay":
         if round_index != 1:
-            return PlannerOutput([])
+            # 确定性收尾：round>=2 返回纯文本终态陈述（与 autonomous 的
+            # 文本终止同构），避免空输出落 model_no_output/planner_no_output。
+            return PlannerOutput([], content=_replay_closure_statement(case, state))
         plan = []
         for call in _closure_case_plan(case):
             replay_call = dict(call)
@@ -3391,6 +3422,25 @@ def _planning_source_for_calls(
 
 def _post_tool_capture(state: DemoState, config: BenchConfig) -> DemoState:
     state = _with_task_terminal_state(state, config)
+    if (
+        config.instrumentation_plan_mode == "replay"
+        and not state.get("last_model_content")
+        and (
+            any(
+                item.get("blocked") and not item.get("runtime_policy_blocked")
+                for item in state.get("last_tool_results") or []
+            )
+            or state.get("stop_reason") == "blocked"
+        )
+    ):
+        # replay 被 block 时图在第 1 轮终止（_should_continue_tool_loop），
+        # 不会进入 plan_tool 第 2 轮；pre-model guard deny 路径甚至不产生
+        # tool_results（_apply_runtime_guard_result 直接置 stop_reason=
+        # blocked）。两条路径都补写确定性终态陈述，使 blocked 行也有
+        # final_answer 证据（PI oracle 接受 final_answer 作为事件源）。
+        case = _case_from_state(state)
+        if case is not None:
+            state = {**state, "last_model_content": _replay_closure_statement(case, state)}
     if not config.llm_enabled and state.get("last_tool_results") and not state.get("stop_reason"):
         if any(item.get("blocked") and not item.get("runtime_policy_blocked") for item in state.get("last_tool_results") or []):
             state = {**state, "stop_reason": "blocked"}

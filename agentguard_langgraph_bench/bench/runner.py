@@ -30,6 +30,10 @@ from .models import AttackCase, ToolPlanStep, supports_runtime
 from .mcpsafety import build_descriptor_diff, descriptor_hash, evaluate_differential_run
 from .mcpsafety_evaluator import build_mcpsafety_evaluation_report, should_evaluate_mcpsafety
 from .poisonedrag_metrics import calculate_poisonedrag_metrics
+from .replay_blocked_browser import (
+    maybe_supplement_replay_blocked_rag_answer,
+    maybe_supplement_replay_blocked_recordings,
+)
 from .runtime.adapter_loader import load_agent_adapter
 from .runtime.agent_protocol import AgentAdapterProtocol, CaseContext
 from .runtime.row_normalizer import normalize_case_result
@@ -356,6 +360,27 @@ def _run_single_case(
             if terminal_error:
                 runtime_observation_errors.append(terminal_error)
             row = normalize_case_result(case, result, config, tools)
+            # replay blocked-session 录制补写（replay 门控，autonomous 为
+            # no-op）：必须在 oracle 评分前执行，oracle 读的是
+            # row["browser_recordings"]。补写失败不应把本有效的案例整体
+            # 打成 invalid：不补写、不外抛，让 oracle 按原有 missing_*
+            # 语义自然落分，原因记入 runtime_observation_errors。
+            try:
+                maybe_supplement_replay_blocked_recordings(case, row, config, case_result_dir)
+            except Exception as supplement_exc:
+                runtime_observation_errors.append(
+                    f"replay_blocked_recordings_supplement_failed: {supplement_exc}"
+                )
+            # replay blocked rag_answer 补写（同样 replay 门控）：pre-model
+            # deny 路径工具未下发时，为冻结剧本含 rag_answer 的 MP 案例
+            # 补一条确定性 blocked 记录，使其可达 oracle 既有的
+            # rag_answer_blocked 豁免路径（oracle 读 row["tool_calls"]）。
+            try:
+                maybe_supplement_replay_blocked_rag_answer(case, row, config)
+            except Exception as supplement_exc:
+                runtime_observation_errors.append(
+                    f"replay_blocked_rag_answer_supplement_failed: {supplement_exc}"
+                )
         except Exception as exc:
             if context is not None:
                 terminal_error = tool_gateway.record_trace_lifecycle(

@@ -248,6 +248,13 @@ class ArmRunRequest:
     artifact_directory: Path
     suite: CompetitionSuite
     qualification_eligible: bool
+    # 消融/效应分析专用 opt-in 覆盖（默认值保持竞赛行为逐字节不变）：
+    # plan_mode_override 将 instrumentation_plan_mode 覆盖为 "replay"
+    # （零 LLM 确定性回放，仅限 effect/ablation 用途）；
+    # policy_disabled_rules 在冻结竞赛策略之上追加禁用规则（如消融
+    # no-memory-guard 臂禁用 P104_memory_poisoning）。
+    plan_mode_override: str | None = None
+    policy_disabled_rules: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

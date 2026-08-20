@@ -737,11 +737,40 @@ def _is_benign_api_url(url: str) -> bool:
     )
 
 
+def _server_matches_port(server: "ThreadingHTTPServer | None", port: int) -> bool:
+    """单例本地服务是否已绑定到当前配置端口。
+
+    同进程内 serial repeats / 多 stream 会移位端口表
+    （competition_parallel.apply_stream_environment）；若复用仍绑在旧端口
+    的单例，被重写 case 的 URL 会 connection refused。端口变化时必须重绑。
+    """
+
+    return server is not None and server.server_address[1] == port
+
+
+def _shutdown_loopback_server(
+    server: "ThreadingHTTPServer | None", thread: "Thread | None"
+) -> None:
+    if server is not None:
+        # serve 线程已死时 shutdown() 会等待不存在的 serve_forever 循环，
+        # 极端情况下挂死；此时跳过 shutdown 只关 socket。
+        if thread is None or thread.is_alive():
+            server.shutdown()
+        server.server_close()
+    if thread is not None:
+        thread.join(timeout=2)
+
+
 def _ensure_benign_api_server() -> None:
     global _BENIGN_API_SERVER, _BENIGN_API_THREAD
-    if _BENIGN_API_SERVER is not None:
-        return
     port = int(os.getenv("AGENTGUARD_BENIGN_API_PORT", "18081"))
+    if _server_matches_port(_BENIGN_API_SERVER, port):
+        return
+    _shutdown_loopback_server(_BENIGN_API_SERVER, _BENIGN_API_THREAD)
+    # 新绑定前置 None：若 ThreadingHTTPServer 抛 OSError，全局不会指向已
+    # 关闭的旧实例（避免被 _server_matches_port 误判复用→静默拒连）。
+    _BENIGN_API_SERVER = None
+    _BENIGN_API_THREAD = None
     _BENIGN_API_SERVER = ThreadingHTTPServer(("127.0.0.1", port), _BenignApiHandler)
     _BENIGN_API_THREAD = Thread(target=_BENIGN_API_SERVER.serve_forever, daemon=True)
     _BENIGN_API_THREAD.start()
@@ -800,9 +829,12 @@ def _load_weather_forecast(city: str) -> dict[str, Any]:
 def _ensure_benign_mcp_server(forecast_path: Path) -> None:
     global _BENIGN_MCP_SERVER, _BENIGN_MCP_THREAD, _BENIGN_MCP_FORECAST_PATH
     _BENIGN_MCP_FORECAST_PATH = forecast_path
-    if _BENIGN_MCP_SERVER is not None:
-        return
     port = int(os.getenv("AGENTGUARD_BENIGN_MCP_PORT", "18084"))
+    if _server_matches_port(_BENIGN_MCP_SERVER, port):
+        return
+    _shutdown_loopback_server(_BENIGN_MCP_SERVER, _BENIGN_MCP_THREAD)
+    _BENIGN_MCP_SERVER = None
+    _BENIGN_MCP_THREAD = None
     _BENIGN_MCP_SERVER = ThreadingHTTPServer(("127.0.0.1", port), _BenignMcpHandler)
     _BENIGN_MCP_THREAD = Thread(target=_BENIGN_MCP_SERVER.serve_forever, daemon=True)
     _BENIGN_MCP_THREAD.start()
@@ -864,7 +896,12 @@ def _is_agent_abuse_api_url(url: str) -> bool:
 def _ensure_agent_abuse_api_server(sandbox_dir: Path) -> bool:
     global _AGENT_ABUSE_API_SERVER, _AGENT_ABUSE_API_THREAD, _AGENT_ABUSE_API_SANDBOX_DIR
     resolved_sandbox = sandbox_dir.resolve()
-    if _AGENT_ABUSE_API_SERVER is not None and _AGENT_ABUSE_API_SANDBOX_DIR == resolved_sandbox:
+    port = int(os.getenv("AGENTGUARD_AGENT_ABUSE_API_PORT", "18083"))
+    if (
+        _AGENT_ABUSE_API_SERVER is not None
+        and _AGENT_ABUSE_API_SANDBOX_DIR == resolved_sandbox
+        and _server_matches_port(_AGENT_ABUSE_API_SERVER, port)
+    ):
         return True
     if _AGENT_ABUSE_API_SERVER is not None:
         _AGENT_ABUSE_API_SERVER.shutdown()
@@ -874,7 +911,6 @@ def _ensure_agent_abuse_api_server(sandbox_dir: Path) -> bool:
         _AGENT_ABUSE_API_SERVER = None
         _AGENT_ABUSE_API_THREAD = None
     _AgentAbuseApiHandler.sandbox_dir = resolved_sandbox
-    port = int(os.getenv("AGENTGUARD_AGENT_ABUSE_API_PORT", "18083"))
     try:
         _AGENT_ABUSE_API_SERVER = ThreadingHTTPServer(("127.0.0.1", port), _AgentAbuseApiHandler)
     except OSError as exc:
@@ -922,9 +958,12 @@ def _is_prompt_injection_api_url(url: str) -> bool:
 def _ensure_exfiltration_collector_server(sandbox_dir: Path) -> None:
     global _EXFILTRATION_COLLECTOR_SERVER, _EXFILTRATION_COLLECTOR_THREAD
     _ExfiltrationCollectorHandler.sandbox_dir = sandbox_dir
-    if _EXFILTRATION_COLLECTOR_SERVER is not None:
-        return
     port = int(os.getenv("AGENTGUARD_EXFILTRATION_COLLECTOR_PORT", "18086"))
+    if _server_matches_port(_EXFILTRATION_COLLECTOR_SERVER, port):
+        return
+    _shutdown_loopback_server(_EXFILTRATION_COLLECTOR_SERVER, _EXFILTRATION_COLLECTOR_THREAD)
+    _EXFILTRATION_COLLECTOR_SERVER = None
+    _EXFILTRATION_COLLECTOR_THREAD = None
     _EXFILTRATION_COLLECTOR_SERVER = ThreadingHTTPServer(("127.0.0.1", port), _ExfiltrationCollectorHandler)
     _EXFILTRATION_COLLECTOR_THREAD = Thread(target=_EXFILTRATION_COLLECTOR_SERVER.serve_forever, daemon=True)
     _EXFILTRATION_COLLECTOR_THREAD.start()
@@ -933,9 +972,12 @@ def _ensure_exfiltration_collector_server(sandbox_dir: Path) -> None:
 def _ensure_prompt_injection_api_server(sandbox_dir: Path) -> None:
     global _PROMPT_INJECTION_API_SERVER, _PROMPT_INJECTION_API_THREAD
     _PromptInjectionApiHandler.sandbox_dir = sandbox_dir
-    if _PROMPT_INJECTION_API_SERVER is not None:
-        return
     port = int(os.getenv("AGENTGUARD_PROMPT_INJECTION_API_PORT", "18087"))
+    if _server_matches_port(_PROMPT_INJECTION_API_SERVER, port):
+        return
+    _shutdown_loopback_server(_PROMPT_INJECTION_API_SERVER, _PROMPT_INJECTION_API_THREAD)
+    _PROMPT_INJECTION_API_SERVER = None
+    _PROMPT_INJECTION_API_THREAD = None
     _PROMPT_INJECTION_API_SERVER = ThreadingHTTPServer(("127.0.0.1", port), _PromptInjectionApiHandler)
     _PROMPT_INJECTION_API_THREAD = Thread(target=_PROMPT_INJECTION_API_SERVER.serve_forever, daemon=True)
     _PROMPT_INJECTION_API_THREAD.start()
@@ -1453,9 +1495,12 @@ def _tool_hijacking_site_path(sandbox_dir: Path, request_path: str) -> Path | No
 def _ensure_tool_hijacking_mcp_server(sandbox_dir: Path) -> None:
     global _TOOL_HIJACKING_MCP_SERVER, _TOOL_HIJACKING_MCP_THREAD
     _ToolHijackingMcpHandler.sandbox_dir = sandbox_dir
-    if _TOOL_HIJACKING_MCP_SERVER is not None:
-        return
     port = int(os.getenv("AGENTGUARD_TOOL_HIJACKING_MCP_PORT", "18085"))
+    if _server_matches_port(_TOOL_HIJACKING_MCP_SERVER, port):
+        return
+    _shutdown_loopback_server(_TOOL_HIJACKING_MCP_SERVER, _TOOL_HIJACKING_MCP_THREAD)
+    _TOOL_HIJACKING_MCP_SERVER = None
+    _TOOL_HIJACKING_MCP_THREAD = None
     _TOOL_HIJACKING_MCP_SERVER = ThreadingHTTPServer(("127.0.0.1", port), _ToolHijackingMcpHandler)
     _TOOL_HIJACKING_MCP_THREAD = Thread(target=_TOOL_HIJACKING_MCP_SERVER.serve_forever, daemon=True)
     _TOOL_HIJACKING_MCP_THREAD.start()
