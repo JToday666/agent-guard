@@ -63,6 +63,14 @@ from guard_api.storage.postgres import PostgresControlPlaneStore
 
 logger = logging.getLogger(__name__)
 
+# ④ 最小日志装配：无外部配置时使 guard_api 的 INFO/WARNING 可见
+# （如启动 warmup 结果），不覆盖已存在的 root handler。
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
 
 def create_app(
     *,
@@ -108,11 +116,13 @@ def create_app(
     # 提前创建以便 ApprovalService 承接 human allow_once → grant 投影（T6），
     # 且与 V21ShadowService 共用同一实例，不重复注册。
     security_state_service = SecurityStateService(store)
+    resolved_llm_reviewer = llm_approval_reviewer or HttpLlmApprovalReviewer.from_settings(
+        settings
+    )
     approval_service = ApprovalService(
         store=store,
         settings=settings,
-        llm_reviewer=llm_approval_reviewer
-        or HttpLlmApprovalReviewer.from_settings(settings),
+        llm_reviewer=resolved_llm_reviewer,
         provenance_writer=provenance_writer,
         state_service=security_state_service,
     )
@@ -206,6 +216,14 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         settings.validate_for_startup()
         store.initialize()
+        warmup_task: asyncio.Task[None] | None = None
+        if isinstance(resolved_llm_reviewer, HttpLlmApprovalReviewer):
+            # ④ 启动预热：fire-and-forget、best-effort；warmup 内部任何
+            # 异常只记日志，不阻塞启动，不影响首条请求路径。
+            warmup_task = asyncio.create_task(
+                asyncio.to_thread(resolved_llm_reviewer.warmup),
+                name="agentguard-llm-approval-warmup",
+            )
         checkpoint_task: asyncio.Task[None] | None = None
         if audit_checkpoint_service is not None:
             audit_checkpoint_service.initialize()
@@ -219,6 +237,10 @@ def create_app(
         try:
             yield
         finally:
+            if warmup_task is not None:
+                warmup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await warmup_task
             if checkpoint_task is not None and audit_checkpoint_service is not None:
                 checkpoint_task.cancel()
                 with suppress(asyncio.CancelledError):
