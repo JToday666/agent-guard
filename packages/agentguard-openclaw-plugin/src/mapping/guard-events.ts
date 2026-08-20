@@ -1,4 +1,5 @@
 import type { GuardEvent, JsonObject } from "../types.js";
+import { redactSensitiveCredentials } from "../security.js";
 import {
   RuntimeSecurityFields,
   RuntimeSecurityOptions,
@@ -74,7 +75,10 @@ export function buildToolCallGuardEvent(
   const runId = event.runId ?? context.runId ?? null;
   const callId =
     event.toolCallId ?? context.toolCallId ?? createLocalId("call");
-  const security = runtimeSecurityFields(event, context);
+  // ⑥ hook 语境映射：工具调用由 agent 运行时发起。
+  const security = runtimeSecurityFields(event, context, {
+    sourceTypeFallback: "runtime_agent",
+  });
   const toolArgs = toolArguments(event, context);
   const derivedResources = derivedResourcesForTool(event, context, toolArgs);
   const derivedPaths = derivedPathTargets(event, context, derivedResources);
@@ -147,7 +151,10 @@ export function buildMessageSendGuardEvent(
     context.messageId,
     String(event.threadId ?? ""),
   );
-  const security = runtimeSecurityFields(event, context);
+  // ⑥ hook 语境映射：外发消息内容由 agent 运行时产出。
+  const security = runtimeSecurityFields(event, context, {
+    sourceTypeFallback: "runtime_agent",
+  });
   const taskId = stringMaybe(context.taskId ?? context.task_id);
   const derivedResources = derivedResourcesForMessage(event, context);
 
@@ -212,7 +219,10 @@ export function buildToolResultGuardEvent(
   const toolName = event.toolName ?? context.toolName ?? "unknown";
   const rawResultPreview = resultContentPreview(event.result ?? event.message);
   const resultPreview = truncate(rawResultPreview, PREVIEW_LIMIT);
-  const security = runtimeSecurityFields(event, context);
+  // ⑥ hook 语境映射：工具执行结果属非受信外部内容。
+  const security = runtimeSecurityFields(event, context, {
+    sourceTypeFallback: "tool_result",
+  });
   const derivedResources = derivedResourcesForToolResult(
     event,
     context,
@@ -292,7 +302,12 @@ export function buildContextGuardEvent(
   const runId = context.runId ?? null;
   const security = runtimeSecurityFields(event, context, {
     promptFallback: true,
+    // ⑥ hook 语境映射：上下文组装由运行时编排。
+    sourceTypeFallback: "runtime_context",
   });
+  // ⑨ CT 信封连线：trusted task claim 必须随事件上报，服务端据此
+  // 解析权威 TaskFact/Snapshot 构造 ct_transient_facts 信封。
+  const taskId = stringMaybe(context.taskId ?? context.task_id);
   const sourceSummaries = contextSourceSummaries(event);
   const sources =
     sourceSummaries.length > 0
@@ -345,6 +360,7 @@ export function buildContextGuardEvent(
     metadata: {
       openclaw_hook: hookName,
       session_key: context.sessionKey ?? null,
+      ...(taskId ? { task_id: taskId } : {}),
     },
   };
 }
@@ -357,11 +373,16 @@ export function buildModelGuardEvent(
   const runId = context.runId ?? null;
   const security = runtimeSecurityFields(event, context, {
     promptFallback: hookName !== "llm_output",
+    // ⑥ hook 语境映射：输入面属运行时上下文汇编，输出面属模型面。
+    sourceTypeFallback:
+      hookName === "llm_output" ? "runtime_model" : "runtime_context",
   });
   const phase = hookName === "llm_output" ? "output" : "input";
   const content = modelContentPreview(hookName, event);
   const provider = event.provider ?? context.provider ?? null;
   const model = event.model ?? context.model ?? null;
+  // ⑨ CT 信封连线：与 context/tool 事件同口径上报 trusted task claim。
+  const taskId = stringMaybe(context.taskId ?? context.task_id);
 
   return {
     schema_version: "0.3",
@@ -386,7 +407,9 @@ export function buildModelGuardEvent(
       run_id: runId,
       agent_id: context.agentId ?? "main",
       current_step: hookName,
-      model_intent: null,
+      // ⑦ 仅模型输出面上报意图摘要（脱敏 + ≤200 字符）。
+      model_intent:
+        phase === "output" ? buildModelIntentSummary(event, content) : null,
       context_sources: [],
       derived_paths: uniqueStrings(
         event.derivedPaths ?? context.derivedPaths ?? [],
@@ -408,6 +431,39 @@ export function buildModelGuardEvent(
     metadata: {
       openclaw_hook: hookName,
       session_key: context.sessionKey ?? null,
+      ...(taskId ? { task_id: taskId } : {}),
     },
   };
+}
+
+const MODEL_INTENT_LIMIT = 200;
+
+/**
+ * ⑦ model_output_produced 意图摘要：优先取计划中的 tool_calls 名称
+ * 列表，其次取输出文本预览；复用 redactSensitiveCredentials 做凭据
+ * 脱敏与长度截断（≤200 字符），无内容时返回 null（正常无数据）。
+ */
+function buildModelIntentSummary(
+  event: ModelHookEventInput,
+  content: string,
+): string | null {
+  const parts: string[] = [];
+  const toolNames = modelToolPlan(event)
+    .map((item) => stringValue(item.name ?? item.tool, ""))
+    .filter((name) => name.length > 0);
+  if (toolNames.length > 0) {
+    parts.push(`planned tool_calls: ${toolNames.join(", ")}`);
+  }
+  const textPreview = content.trim();
+  if (textPreview) {
+    parts.push(textPreview);
+  }
+  if (parts.length === 0) {
+    return null;
+  }
+  const intent = redactSensitiveCredentials(
+    parts.join(" | "),
+    MODEL_INTENT_LIMIT,
+  ).trim();
+  return intent.length > 0 ? intent : null;
 }

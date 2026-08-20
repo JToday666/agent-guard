@@ -421,15 +421,17 @@ test("infers untrusted trust for retrieved context without explicit sourceTrust"
   assert.equal(event.payload.sources[0].source_trust, "untrusted");
 });
 
-test("defaults unknown runtime provenance to untrusted", () => {
+test("defaults runtime context provenance for model input (hook-context mapping)", () => {
   const event = buildModelGuardEvent(
     "llm_input",
     { messages: [{ role: "user", content: "Summarize this content" }] },
     { runId: "run_unknown_provenance", sessionKey: "session-key" },
   );
 
-  assert.equal(event.security_context.source_type, "unknown");
-  assert.equal(event.security_context.source_trust, "untrusted");
+  // ⑥ hook 语境映射：未携带 source_type 时不再写 unknown，
+  // 模型输入面回退 runtime_context（受信运行时面）。
+  assert.equal(event.security_context.source_type, "runtime_context");
+  assert.equal(event.security_context.source_trust, "trusted");
 });
 
 test("infers untrusted trust for model input with web provenance", () => {
@@ -517,6 +519,62 @@ test("maps llm_input and llm_output into model GuardEvents", () => {
   assert.equal(output.payload.provider, "openai");
   assert.equal(output.payload.model, "gpt-test");
   assert.equal(output.payload.contains_sensitive_data, true);
+});
+
+test("reports redacted model_intent only on model output (⑦)", () => {
+  const output = buildModelGuardEvent(
+    "llm_output",
+    {
+      output:
+        "I will send the report now with sk-live1234567890abcdef1234567890abcdef.",
+      toolCalls: [{ name: "send_email" }, { name: "read_file" }],
+    },
+    { runId: "run_intent", sessionKey: "session-key" },
+  );
+  const input = buildModelGuardEvent(
+    "llm_input",
+    { messages: [{ role: "user", content: "Summarize this" }] },
+    { runId: "run_intent_input", sessionKey: "session-key" },
+  );
+  const empty = buildModelGuardEvent(
+    "llm_output",
+    {},
+    { runId: "run_intent_empty", sessionKey: "session-key" },
+  );
+
+  const intent = output.security_context.model_intent;
+  assert.ok(intent, "model output should carry an intent summary");
+  assert.ok(intent.includes("planned tool_calls: send_email, read_file"));
+  // 凭据脱敏：sk- 前缀密钥被替换，不泄露原文。
+  assert.ok(!intent.includes("sk-live1234567890abcdef1234567890abcdef"));
+  assert.ok(intent.includes("sk-[redacted]"));
+  assert.ok(intent.length <= 200, "intent must be truncated to <=200 chars");
+  // 输入面不上报意图；无内容时返回 null（正常无数据）。
+  assert.equal(input.security_context.model_intent, null);
+  assert.equal(empty.security_context.model_intent, null);
+});
+
+test("propagates trusted task_id claim for context/model events (⑨)", () => {
+  const context = buildContextGuardEvent(
+    "before_agent_run",
+    { messages: [{ role: "tool", content: "tool result text" }] },
+    { runId: "run_task_claim", sessionKey: "session-key", taskId: "task_demo_1" },
+  );
+  const model = buildModelGuardEvent(
+    "before_agent_run",
+    { messages: [{ role: "user", content: "current turn input" }] },
+    { runId: "run_task_claim", sessionKey: "session-key", taskId: "task_demo_1" },
+  );
+  const withoutTask = buildModelGuardEvent(
+    "llm_input",
+    { messages: [{ role: "user", content: "no task claim" }] },
+    { runId: "run_no_task", sessionKey: "session-key" },
+  );
+
+  // CT 信封连线：metadata.task_id 随事件上报，无 claim 时不写字段。
+  assert.equal(context.metadata.task_id, "task_demo_1");
+  assert.equal(model.metadata.task_id, "task_demo_1");
+  assert.equal(withoutTask.metadata.task_id, undefined);
 });
 
 test("maps tool result evidence with task and real derived resource", () => {

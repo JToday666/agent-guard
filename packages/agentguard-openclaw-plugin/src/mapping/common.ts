@@ -24,6 +24,12 @@ export type RuntimeSecurityFields = {
 export type RuntimeSecurityOptions = {
   promptFallback?: boolean;
   contentFallback?: boolean;
+  /**
+   * ⑥ hook 语境默认 source.type：event/context 均未携带 sourceType
+   * 时使用，避免全部写成 "unknown"。取值需避开服务端 user 源枚举
+   * （human/operator/user/user_request）以免污染 provenance 归因。
+   */
+  sourceTypeFallback?: string;
 };
 
 export type DerivedResourceInput = Partial<DerivedResource> & {
@@ -400,6 +406,7 @@ export function runtimeSecurityFields(
   const sourceType =
     stringMaybe(eventRecord.sourceType ?? eventRecord.source_type) ??
     stringMaybe(contextRecord.sourceType ?? contextRecord.source_type) ??
+    options.sourceTypeFallback ??
     "unknown";
   const explicitTrust =
     stringMaybe(eventRecord.sourceTrust ?? eventRecord.source_trust) ??
