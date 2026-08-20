@@ -52,3 +52,10 @@ pnpm-debug.log*
 
 # 本地临时工作区（review diff、uv 缓存副本等）
 .tmp/
+
+# 本地临时诊断/启动脚本（.diag_*.py、.fullrun-launch.sh 等）
+.diag_*.py
+.fullrun-launch.sh
+
+# 实验报告输出目录
+reports/
