@@ -42,7 +42,7 @@
       </dl>
 
       <section class="execution-inspector__section">
-        <h5>正式决策 / V2 Shadow</h5>
+        <h5>正式决策 / {{ v21RailLabel(step) }}</h5>
         <div class="execution-inspector__comparison">
           <article>
             <span>OFFICIAL</span>
@@ -54,7 +54,7 @@
             </small>
           </article>
           <article class="is-shadow">
-            <span>V2 SHADOW</span>
+            <span>{{ v21RailLabel(step).toUpperCase() }}</span>
             <strong>{{ v21Disposition(step) }}</strong>
             <p>{{ v21Summary(step) }}</p>
             <small>
@@ -63,6 +63,66 @@
             </small>
           </article>
         </div>
+        <dl
+          v-if="step.supervision.v21Assessment.competitionAuthority"
+          class="execution-inspector__detail-grid competition-authority"
+          data-testid="competition-authority"
+        >
+          <div>
+            <dt>Profile</dt>
+            <dd>
+              <code translate="no">{{
+                step.supervision.v21Assessment.competitionAuthority.profileId
+              }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>Authority</dt>
+            <dd>{{ step.supervision.v21Assessment.competitionAuthority.source }}</dd>
+          </div>
+          <div>
+            <dt>Mode / Scope</dt>
+            <dd>
+              {{ step.supervision.v21Assessment.competitionAuthority.mode }} /
+              {{ step.supervision.v21Assessment.competitionAuthority.selectionBasis }}
+            </dd>
+          </div>
+          <div>
+            <dt>Legacy floor</dt>
+            <dd>
+              {{
+                step.supervision.v21Assessment.competitionAuthority.legacyFloorApplied
+                  ? "applied"
+                  : "not applied"
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>ASK release</dt>
+            <dd>{{ step.supervision.v21Assessment.competitionAuthority.approvalRelease }}</dd>
+          </div>
+          <div class="is-wide">
+            <dt>Matched paths</dt>
+            <dd>
+              <code
+                v-if="step.supervision.v21Assessment.competitionAuthority.matchedPathIds.length"
+                translate="no"
+                >{{
+                  step.supervision.v21Assessment.competitionAuthority.matchedPathIds.join(" · ")
+                }}</code
+              >
+              <span v-else>none</span>
+            </dd>
+          </div>
+          <div class="is-wide">
+            <dt>Activation ref</dt>
+            <dd>
+              <code translate="no">{{
+                step.supervision.v21Assessment.competitionAuthority.activationRefDigest
+              }}</code>
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section
@@ -229,7 +289,10 @@
 
       <section class="execution-inspector__section">
         <h5>Approval Basis</h5>
-        <dl class="execution-inspector__detail-grid">
+        <p v-if="isApprovalNotApplicable(step, approvalBasis)" class="execution-inspector__notice">
+          无需审批（该步骤未触发 ask 决策），本步骤不产生审批依据。
+        </p>
+        <dl v-else class="execution-inspector__detail-grid">
           <div>
             <dt>审批状态</dt>
             <dd>{{ layerValue(step, "approval") }}</dd>
@@ -276,7 +339,10 @@
 
       <section class="execution-inspector__section">
         <h5>Approval Resolution</h5>
-        <dl class="execution-inspector__detail-grid">
+        <p v-if="isApprovalNotApplicable(step, approvalBasis)" class="execution-inspector__notice">
+          无需审批（该步骤未触发 ask 决策），未产生审批决议。
+        </p>
+        <dl v-else class="execution-inspector__detail-grid">
           <div>
             <dt>终态</dt>
             <dd>{{ approvalBasis?.resolution.status ?? "不可用" }}</dd>
@@ -300,7 +366,9 @@
         </dl>
       </section>
 
-      <section class="execution-inspector__section">
+      <!-- RTE-05 强绑定未具备事件级下发资格，面板常驻空态易误读；
+           置 SHOW_ENFORCEMENT_PANEL=true 可恢复（见 runtime-supervision-display.ts） -->
+      <section v-if="SHOW_ENFORCEMENT_PANEL" class="execution-inspector__section">
         <h5>Enforcement</h5>
         <dl class="execution-inspector__detail-grid">
           <div>
@@ -390,8 +458,15 @@
           <div class="is-wide">
             <dt>Control Integrity</dt>
             <dd>
-              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }} ·
-              {{ step.supervision.controlIntegrity.reasonCodes.join(" · ") || "未发现违例原因" }}
+              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }}<template
+                v-if="step.supervision.controlIntegrity.reasonCodes.length"
+              >
+                · {{ step.supervision.controlIntegrity.reasonCodes.join(" · ") }}</template
+              ><template
+                v-else-if="step.supervision.controlIntegrity.status !== 'not_applicable'"
+              >
+                · 未发现违例原因</template
+              >
             </dd>
           </div>
         </dl>
@@ -498,6 +573,7 @@ import {
   getSemanticsSummary,
   getSourceModeLabel,
   getSupervisionLayerDisplays,
+  SHOW_ENFORCEMENT_PANEL,
   type SupervisionLayerKey,
 } from "../../data/evidence/runtime-supervision-display.ts";
 import { getExecutionCategoryLabel } from "../../data/evidence/execution-trace";
@@ -616,6 +692,16 @@ function approvalBasisSummary(basis: ApprovalBasisViewModel | undefined): string
   return "当前证据窗口或请求事实不完整；该依据仅供只读调查。";
 }
 
+function isApprovalNotApplicable(
+  step: ExecutionStepViewModel,
+  basis: ApprovalBasisViewModel | undefined,
+): boolean {
+  // 真实错误优先：basis 存在但完整性校验失败且携带具体缺失原因时，仍需展示错误码。
+  if (basis && basis.missingReasons.length > 0) return false;
+  if (step.supervision.approval.availability === "not_applicable") return true;
+  return !basis && !step.approvalId;
+}
+
 function approvalMissingReasons(basis: ApprovalBasisViewModel | undefined): string {
   if (!basis) return "APPROVAL_BASIS_UNAVAILABLE";
   return basis.missingReasons.length ? basis.missingReasons.join(" · ") : "无";
@@ -681,6 +767,17 @@ function v21Disposition(step: ExecutionStepViewModel): string {
   return step.supervision.v21Assessment.fastDisposition ?? "不可用";
 }
 
+function v21RailLabel(step: ExecutionStepViewModel): string {
+  const assessment = step.supervision.v21Assessment;
+  if (assessment.competitionAuthority?.source === "v21") {
+    return "V2 Competition Official";
+  }
+  if (assessment.competitionAuthority) {
+    return `V2 ${assessment.competitionAuthority.mode}`;
+  }
+  return "V2 Shadow";
+}
+
 function v21Summary(step: ExecutionStepViewModel): string {
   const assessment = step.supervision.v21Assessment;
   if (assessment.availability === "unavailable") {
@@ -688,6 +785,15 @@ function v21Summary(step: ExecutionStepViewModel): string {
   }
   if (assessment.authorityVerification === "conflicted") {
     return "影子证据不完整或与正式判定冲突，不提升其权威。";
+  }
+  if (assessment.competitionAuthority?.source === "v21") {
+    const floor = assessment.competitionAuthority.legacyFloorApplied
+      ? "；current 安全下界已应用"
+      : "";
+    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；该结果是 Competition profile official${floor}。`;
+  }
+  if (assessment.competitionAuthority?.source === "current") {
+    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；本次仍由 current official，V2 仅保留计算证据。`;
   }
   return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；仅作影子解释，不改变正式决策。`;
 }
@@ -864,13 +970,20 @@ function approvalRoute(step: ExecutionStepViewModel) {
 }
 
 .context-manifest__header p,
-.context-manifest__notice {
+.context-manifest__notice,
+.execution-inspector__notice {
   color: var(--color-text-subtle);
   font-size: var(--font-size-11);
   line-height: 1.5;
 }
 
-.context-manifest__notice {
+.execution-inspector__notice {
+  border-left-color: var(--color-border-strong);
+  margin: 0;
+}
+
+.context-manifest__notice,
+.execution-inspector__notice {
   background: var(--color-surface-muted);
   border-left: 2px solid var(--color-warning);
   padding: var(--space-2);

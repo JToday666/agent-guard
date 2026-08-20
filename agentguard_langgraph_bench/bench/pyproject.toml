@@ -22,6 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
+[project.scripts]
+agentguard-langgraph-competition = "agentguard_langgraph_bench.bench.competition_runner:main"
+
 [tool.setuptools]
 package-dir = {"" = "../.."}
 include-package-data = true

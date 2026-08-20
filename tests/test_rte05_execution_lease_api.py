@@ -114,7 +114,7 @@ def _strong_settings(
     return GuardApiSettings(
         control_token=CONTROL_TOKEN,
         storage_backend=storage_backend,
-        v21_shadow_enabled=True,
+        v21_mode="shadow",
         v21_shadow_server_secret=V21_SECRET,
         task_scope_active_key_id=TASK_SCOPE_KEY_ID,
         task_scope_keys=json.dumps({TASK_SCOPE_KEY_ID: TASK_SCOPE_KEY}),

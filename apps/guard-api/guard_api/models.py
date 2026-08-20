@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import (
     ConfigAuditFinding,
+    DecisionAuthority,
     GuardDecision,
     PreEnableReport,
     new_id,
@@ -182,7 +183,7 @@ class GuardEvaluationResponse(BaseModel):
     # 供 Adapter / Plugin 回写 runtime_outcome 时建立关联；无审计写入时为 null。
     policy_audit_id: str | None = None
     # RTE-05 强绑定仅对 eligible/non-degraded ASK 动作产生。
-    # ``exclude_if`` 保证 flag off / C1 响应键集与现有 wire 逐字节一致。
+    # ``exclude_if`` 保证 V2 mode off / C1 响应键集与现有 wire 逐字节一致。
     enforcement_binding: EnforcementBinding | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -190,6 +191,13 @@ class GuardEvaluationResponse(BaseModel):
     # CT-PR-04 ephemeral plan.  It is returned only for a successfully built
     # context_assembled event; flag-off and unavailable paths omit the key.
     context_plan: ContextAssemblyPlan | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # Typed to Core's strict DecisionAuthority once the LGV2-C primitive is
+    # integrated.  The optional wire key preserves every pre-competition
+    # response shape when no committed authority evidence exists.
+    decision_authority: DecisionAuthority | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
@@ -223,6 +231,114 @@ class EvaluationRegressionGate(BaseModel):
     failed_case_ids: list[str] = Field(default_factory=list)
 
 
+CompetitionArmId = Literal["A0", "A1", "A2", "A3", "A4"]
+_COMPETITION_ARM_IDS = frozenset({"A0", "A1", "A2", "A3", "A4"})
+
+
+class CompetitionArmReport(BaseModel):
+    """Strict metrics carrier for one frozen competition matrix arm."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    arm_id: CompetitionArmId
+    attempted: int = Field(ge=0)
+    evaluable: int = Field(ge=0)
+    invalid: int = Field(ge=0)
+    asr: float | None = Field(ge=0, le=1)
+    fpr: float | None = Field(ge=0, le=1)
+    benign_success: float | None = Field(ge=0, le=1)
+    v21_selection_rate: float | None = Field(ge=0, le=1)
+    legacy_floor_rate: float | None = Field(ge=0, le=1)
+    receipt_coverage: float | None = Field(ge=0, le=1)
+
+
+class CompetitionReport(BaseModel):
+    """Strict dashboard carrier for the LangGraph-only A0-A4 result."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal["competition-report/1.0"]
+    profile_id: Literal["competition-langgraph-v2"]
+    status: Literal["passed", "functional_contract_failed", "invalid"]
+    competition_qualified: bool
+    expected_case_runs: int = Field(ge=0)
+    attempted_case_runs: int = Field(ge=0)
+    invalid_case_runs: int = Field(ge=0)
+    provider_id: str | None = None
+    model: str | None = None
+    arms: list[CompetitionArmReport] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_competition_contract(self) -> Self:
+        arm_ids = [arm.arm_id for arm in self.arms]
+        if len(set(arm_ids)) != len(arm_ids) or set(arm_ids) != _COMPETITION_ARM_IDS:
+            raise ValueError(
+                "competition report must contain A0 through A4 exactly once"
+            )
+
+        for arm in self.arms:
+            if arm.evaluable + arm.invalid != arm.attempted:
+                raise ValueError(
+                    f"competition arm {arm.arm_id} requires "
+                    "evaluable + invalid == attempted"
+                )
+
+        attempted_total = sum(arm.attempted for arm in self.arms)
+        invalid_total = sum(arm.invalid for arm in self.arms)
+        if attempted_total != self.attempted_case_runs:
+            raise ValueError(
+                "competition arm attempted counts must equal attempted_case_runs"
+            )
+        if self.attempted_case_runs > self.expected_case_runs:
+            raise ValueError("attempted_case_runs cannot exceed expected_case_runs")
+        expected_invalid_total = (
+            max(
+                1,
+                invalid_total,
+                self.expected_case_runs - self.attempted_case_runs,
+            )
+            if self.status == "invalid"
+            else invalid_total
+        )
+        if self.invalid_case_runs != expected_invalid_total:
+            raise ValueError(
+                "invalid_case_runs must match invalid rows and incomplete matrix slots"
+            )
+
+        provider_present = bool(self.provider_id and self.provider_id.strip())
+        model_present = bool(self.model and self.model.strip())
+        if provider_present != model_present:
+            raise ValueError("provider_id and model must be recorded together")
+        if self.provider_id is not None and not provider_present:
+            raise ValueError("provider_id cannot be blank")
+        if self.model is not None and not model_present:
+            raise ValueError("model cannot be blank")
+
+        if self.status != "invalid" and (
+            self.attempted_case_runs != self.expected_case_runs
+            or self.invalid_case_runs != 0
+        ):
+            raise ValueError(
+                "passed and functional_contract_failed reports require a complete, "
+                "evaluable matrix"
+            )
+        if self.competition_qualified:
+            if self.status != "passed":
+                raise ValueError("competition qualification requires status=passed")
+            if not provider_present or not model_present:
+                raise ValueError(
+                    "competition qualification requires provider_id and model"
+                )
+            if self.expected_case_runs != 350 or any(
+                arm.attempted != 70 or arm.evaluable != 70 or arm.invalid != 0
+                for arm in self.arms
+            ):
+                raise ValueError(
+                    "competition qualification requires the frozen 70x5 matrix"
+                )
+        return self
+
+
 class EvaluationRun(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -243,6 +359,13 @@ class EvaluationRun(BaseModel):
     # explicit prevents an untyped ``extra`` payload from bypassing the frozen
     # report contract while preserving the legacy wire shape when omitted.
     pre_enable_report: PreEnableReport | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # LangGraph competition results are an explicit strict carrier rather than
+    # an unvalidated ``extra`` payload.  The field remains optional for all
+    # non-competition EvaluationRuns.
+    competition_report: CompetitionReport | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

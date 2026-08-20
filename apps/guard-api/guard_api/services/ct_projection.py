@@ -11,7 +11,7 @@ CT-PR-03 实施计划裁决 D1-D6）：
   形状），经 ``evaluation.py`` 最小 additive 钩子接入；不深改
   ``v21_pipeline.py``；
 - **D3 独立 flag**：``AGENTGUARD_CT_FACT_PROJECTION_ENABLED``（默认
-  False），与 V21 shadow flag 解耦；且仅在 ``v21_pipeline`` 就绪
+  False），与 V2 authority mode 解耦；且仅在 ``v21_pipeline`` 就绪
   （pipeline 材料可用）时生效——无 task/scope 材料 → fail-closed
   跳过留痕，不伪造 scope（01 §25）；
 - **D4 commit 载体**：facts 信封寄生 policy_evaluation 审计记录的
@@ -481,7 +481,7 @@ class CtProjectionService:
             settings.ct_fact_projection_enabled
             or (
                 settings.context_builder_enabled
-                and settings.v21_shadow_enabled
+                and settings.v21_enabled()
             )
         )
         self._server_secret = self._load_server_secret(settings)

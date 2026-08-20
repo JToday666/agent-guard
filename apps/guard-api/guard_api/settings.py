@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -20,8 +21,10 @@ DEFAULT_CONTROL_TOKEN = "demo-control-token"
 DEFAULT_ENVIRONMENT = "development"
 DEFAULT_STORAGE_BACKEND = "postgres"
 DEFAULT_LLM_APPROVAL_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_V21_SEMANTIC_BASE_URL = "https://api.openai.com/v1"
 SUPPORTED_STORAGE_BACKENDS = {"postgres", "memory"}
 SUPPORTED_ENVIRONMENTS = {"development", "test", "production"}
+SUPPORTED_V21_MODES = {"off", "shadow", "limited_enable", "active"}
 DEFAULT_MAX_REQUEST_BODY_BYTES = 1024 * 1024
 MAX_CONFIGURABLE_REQUEST_BODY_BYTES = 8 * 1024 * 1024
 DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS = 300
@@ -100,6 +103,40 @@ class GuardApiSettings:
             "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS", default=3.0
         )
     )
+    # V21-13 Stage 1 shadow semantic judgment（独立命名空间，与
+    # llm_approval 解耦）：默认关闭；产物只供证据/评测，不改决策。
+    v21_semantic_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_V21_SEMANTIC_ENABLED", default=False
+        )
+    )
+    v21_semantic_base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "AGENTGUARD_V21_SEMANTIC_BASE_URL", DEFAULT_V21_SEMANTIC_BASE_URL
+        )
+    )
+    v21_semantic_api_key: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_V21_SEMANTIC_API_KEY"),
+        repr=False,
+    )
+    v21_semantic_model: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_V21_SEMANTIC_MODEL")
+    )
+    v21_semantic_timeout_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS", default=3.0
+        )
+    )
+    v21_semantic_ttl_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_V21_SEMANTIC_TTL_SECONDS", default=300.0
+        )
+    )
+    v21_semantic_sample_rate: float = field(
+        default_factory=lambda: _env_float(
+            "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE", default=1.0
+        )
+    )
     audit_checkpoint_path: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_PATH")
     )
@@ -123,22 +160,30 @@ class GuardApiSettings:
             default=DEFAULT_AUDIT_CHECKPOINT_INTERVAL_SECONDS,
         )
     )
-    # V21-08 shadow feature flag（11_决策记录_V21-08前置.md D3：默认
-    # false；flag off 时 shadow 全链路不执行，evaluate 行为逐字节不变）。
-    v21_shadow_enabled: bool = field(
-        default_factory=lambda: _env_bool(
-            "AGENTGUARD_V21_SHADOW_ENABLED", default=False
+    # Unified V2.1 authority mode.  ``off`` is the global default; reference
+    # and competition profiles must select their mode explicitly.
+    v21_mode: str = field(
+        default_factory=lambda: (
+            os.getenv("AGENTGUARD_V21_MODE", "off").strip().lower()
+        )
+    )
+    # A competition activation is immutable process input.  It is loaded once
+    # during application construction and is never exposed through a mutation
+    # endpoint.
+    v21_competition_activation_path: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH"
         )
     )
     # shadow ActionIR 指纹专用 server secret（base64url，≥32 字节）。
     # 与 task scope keyring / audit checkpoint key 域隔离，不复用其他密钥。
-    # flag on 而未配置时 shadow 禁用（编排器返回 None），不得硬编码兜底。
+    # mode enabled 而未配置时 V2 禁用（编排器返回 None），不得硬编码兜底。
     v21_shadow_server_secret: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_V21_SHADOW_SERVER_SECRET"),
         repr=False,
     )
     # CT-PR-03b CT 事实投影独立 flag（裁决 D3：默认 false，与 V21
-    # shadow flag 解耦；flag off 时 CT 全链路不执行，evaluate 行为
+    # V2 authority mode 解耦；CT flag off 时 CT 全链路不执行，evaluate 行为
     # 逐字节不变。生效另需 pipeline 材料就绪，server secret 复用
     # AGENTGUARD_V21_SHADOW_SERVER_SECRET）。
     ct_fact_projection_enabled: bool = field(
@@ -182,16 +227,24 @@ class GuardApiSettings:
     def llm_approval_configured(self) -> bool:
         return bool(self.llm_approval_api_key and self.llm_approval_model)
 
+    def v21_semantic_configured(self) -> bool:
+        """V21-13 semantic shadow 就绪：enabled 且 api_key 与 model 齐备。"""
+
+        return bool(
+            self.v21_semantic_enabled
+            and self.v21_semantic_api_key
+            and self.v21_semantic_model
+        )
+
     def evaluation_receipt_eligibility_expectation(
         self,
     ) -> ReceiptEligibilityExpectation | None:
         """Return the configured C10 anchor, or ``None`` for legacy-only mode."""
 
-        values = (
-            self.evaluation_receipt_eligibility_revision,
-            self.evaluation_receipt_runtime_profile,
-            self.evaluation_receipt_eligibility_digest,
-        )
+        eligibility_revision = self.evaluation_receipt_eligibility_revision
+        runtime_profile = self.evaluation_receipt_runtime_profile
+        eligibility_digest = self.evaluation_receipt_eligibility_digest
+        values = (eligibility_revision, runtime_profile, eligibility_digest)
         if not any(values):
             return None
         if not all(values):
@@ -201,11 +254,14 @@ class GuardApiSettings:
                 "AGENTGUARD_EVALUATION_RECEIPT_ELIGIBILITY_DIGEST must be "
                 "configured together"
             )
+        assert eligibility_revision is not None
+        assert runtime_profile is not None
+        assert eligibility_digest is not None
         try:
             return ReceiptEligibilityExpectation(
-                eligibility_revision=self.evaluation_receipt_eligibility_revision,
-                runtime_profile=self.evaluation_receipt_runtime_profile,
-                eligibility_digest=self.evaluation_receipt_eligibility_digest,
+                eligibility_revision=eligibility_revision,
+                runtime_profile=runtime_profile,
+                eligibility_digest=eligibility_digest,
             )
         except ValueError as exc:
             raise GuardApiConfigurationError(
@@ -289,6 +345,14 @@ class GuardApiSettings:
             label="AGENTGUARD_V21_SHADOW_SERVER_SECRET",
         )
 
+    def effective_v21_mode(self) -> str:
+        """Return the normalized V2.1 authority mode."""
+
+        return self.v21_mode.strip().lower()
+
+    def v21_enabled(self) -> bool:
+        return self.effective_v21_mode() != "off"
+
     def audit_checkpoint_configured(self) -> bool:
         return bool(
             self.audit_checkpoint_path
@@ -313,6 +377,11 @@ class GuardApiSettings:
             raise GuardApiConfigurationError(
                 f"AGENTGUARD_STORAGE_BACKEND must be one of: {supported}"
             )
+        if self.v21_mode.strip().lower() not in SUPPORTED_V21_MODES:
+            supported = ", ".join(sorted(SUPPORTED_V21_MODES))
+            raise GuardApiConfigurationError(
+                f"AGENTGUARD_V21_MODE must be one of: {supported}"
+            )
         if not self.control_token.strip():
             raise GuardApiConfigurationError("AGENTGUARD_CONTROL_TOKEN cannot be empty")
         if self.storage_backend == "postgres" and not self.database_url.strip():
@@ -332,6 +401,35 @@ class GuardApiSettings:
         if self.llm_approval_timeout_seconds <= 0:
             raise GuardApiConfigurationError(
                 "AGENTGUARD_LLM_APPROVAL_TIMEOUT_SECONDS must be greater than zero"
+            )
+        # isfinite 前置校验（评审 M1）：NaN 比较恒 False、inf 通过
+        # ``> 0``——不加有限性校验则 timeout=inf 使 hard deadline 静默
+        # 失效、ttl=inf 使 expires_at 永不落地、sample_rate=nan 使采样
+        # 门控恒 False。
+        if not math.isfinite(self.v21_semantic_timeout_seconds):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS must be a finite "
+                "number"
+            )
+        if self.v21_semantic_timeout_seconds <= 0:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS must be greater than zero"
+            )
+        if not math.isfinite(self.v21_semantic_ttl_seconds):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TTL_SECONDS must be a finite number"
+            )
+        if self.v21_semantic_ttl_seconds <= 0:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_TTL_SECONDS must be greater than zero"
+            )
+        if not math.isfinite(self.v21_semantic_sample_rate):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE must be a finite number"
+            )
+        if not 0.0 <= self.v21_semantic_sample_rate <= 1.0:
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE must be between 0.0 and 1.0"
             )
         if (
             not 1
@@ -382,11 +480,43 @@ class GuardApiSettings:
         # existing EvaluationRun producers.
         self.evaluation_receipt_eligibility_expectation()
 
+        effective_v21_mode = self.effective_v21_mode()
+        if effective_v21_mode in {"limited_enable", "active"}:
+            activation_path = self.v21_competition_activation_path
+            if activation_path is None:
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH is required for "
+                    f"V2.1 mode {effective_v21_mode}"
+                )
+            if not Path(activation_path).is_absolute():
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH must be an "
+                    "absolute path"
+                )
+            if self.v21_shadow_server_secret_bytes() is None:
+                raise GuardApiConfigurationError(
+                    "V2.1 official modes require "
+                    "AGENTGUARD_V21_SHADOW_SERVER_SECRET"
+                )
+            if not self.task_scope_configured():
+                raise GuardApiConfigurationError(
+                    "V2.1 official modes require AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID "
+                    "and AGENTGUARD_TASK_SCOPE_KEYS"
+                )
+            if (
+                effective_v21_mode == "active"
+                and not self.rte05_strong_binding_enabled
+            ):
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_MODE=active requires "
+                    "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED=true"
+                )
+
         if self.rte05_strong_binding_enabled:
-            if not self.v21_shadow_enabled:
+            if effective_v21_mode == "off":
                 raise GuardApiConfigurationError(
                     "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED requires "
-                    "AGENTGUARD_V21_SHADOW_ENABLED=true"
+                    "AGENTGUARD_V21_MODE != off"
                 )
             if self.v21_shadow_server_secret_bytes() is None:
                 raise GuardApiConfigurationError(

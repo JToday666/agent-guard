@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 #: plan 映射规则版本：任何表驱动规则变化必须升级，不得静默改变 plan_id。
-REQUIRED_CHECK_PLAN_VERSION = "v21-04-plan-1"
+REQUIRED_CHECK_PLAN_VERSION = "v21-04-plan-4"
 
 #: CoverageMap 固定域顺序（01 §17）；plan 列表按此序稳定排序。
 _DOMAIN_ORDER: tuple[CoverageDomain, ...] = (
@@ -69,6 +69,23 @@ class PolicyProfile(BaseModel):
     #: （02 §6.2/§6.5/§6.6 的 not_applicable 行）。
     not_applicable_actions: frozenset[str] = Field(default_factory=frozenset)
 
+    #: policy 仅声明不需要 source/dataflow 判定的观察类动作类型。
+    #: 该开关不影响 memory；memory 仍须经过下方独立、带 lineage
+    #: safeguard 的 ``memory_not_required_actions`` 判定。
+    source_dataflow_not_required_actions: frozenset[str] = Field(
+        default_factory=frozenset
+    )
+
+    #: Server-attested observation action types retain behavior inspection even
+    #: when their ActionIR impact is low.  Explicit memory lineage remains a
+    #: required domain for these observations.
+    observation_actions: frozenset[str] = Field(default_factory=frozenset)
+
+    #: policy 仅声明不需要 memory 判定的非持久动作类型。
+    #: ``effects.persistence`` 或显式 memory resource/source 始终优先，
+    #: 不允许被此集合豁免。
+    memory_not_required_actions: frozenset[str] = Field(default_factory=frozenset)
+
 
 def _impact_default_required(impact: ImpactClass) -> set[CoverageDomain]:
     """impact 基线必检域（表驱动，冻结于本版本）。"""
@@ -100,16 +117,24 @@ def build_required_check_plan(
     - ``effects.persistence`` → 追加 memory；
     - policy 声明 not_applicable 的动作类型把 source/dataflow/memory
       移出 required；policy 声明无需 capability 的低影响动作同理；
+    - policy 声明 ``source_dataflow_not_required_actions`` 时仅移出
+      source/dataflow，不影响 memory；
+    - policy 声明 ``observation_actions`` 时追加 behavior；若观察事件显式
+      引用 memory resource/source，同时追加 memory；
+    - policy 声明 ``memory_not_required_actions`` 时仅移出 memory，
+      且只对非持久、未显式引用 memory resource/source 的动作生效；
     - ``policy.requires_task_authority=False`` → task 移入 optional；
     - ``runtime_outcome`` 本期恒为 optional（pre-execution 判定不依赖
       历史执行终态，02 §6.7 not_applicable 语义由判定侧承担）；
     - 未进 required 的域一律进 optional（fail-closed 可见性）。
     """
     if isinstance(action, ActionIR):
+        action_ir: ActionIR | None = action
         impact: ImpactClass = action.impact
         effects = action.effects
         action_type = action.action_type
     else:
+        action_ir = None
         impact = action
         effects = ActionEffect()
         action_type = ""
@@ -130,6 +155,33 @@ def build_required_check_plan(
     if action_type in policy.not_applicable_actions:
         required -= policy_na_domains
         reason_codes.append("v21-04:policy_not_applicable_action")
+    if action_type in policy.source_dataflow_not_required_actions:
+        required -= {"source", "dataflow"}
+        reason_codes.append("v21-04:policy_source_dataflow_not_required")
+    if (
+        action_type in policy.memory_not_required_actions
+        and not effects.persistence
+        and action_ir is not None
+        and not any(resource.kind == "memory" for resource in action_ir.resources)
+        and not any(
+            ref.startswith(("memory:", "memory://", "source:memory:"))
+            for ref in action_ir.data_refs
+        )
+    ):
+        required.discard("memory")
+        reason_codes.append("v21-04:policy_memory_not_required")
+    if action_type in policy.observation_actions:
+        required.add("behavior")
+        reason_codes.append("v21-04:policy_observation_behavior_required")
+        if action_ir is not None and (
+            any(resource.kind == "memory" for resource in action_ir.resources)
+            or any(
+                ref.startswith(("memory:", "memory://", "source:memory:"))
+                for ref in action_ir.data_refs
+            )
+        ):
+            required.add("memory")
+            reason_codes.append("v21-04:policy_observation_memory_lineage")
     if action_type in policy.capability_not_required_actions:
         required.discard("capability")
         reason_codes.append("v21-04:policy_capability_not_required")

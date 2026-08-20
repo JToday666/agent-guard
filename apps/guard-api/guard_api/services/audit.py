@@ -8,12 +8,15 @@ from typing import NoReturn
 from agentguard_core import (
     ActionCriticReview,
     AuditEvent,
+    DecisionAuthority,
+    DecisionAuthorityEvidenceV1,
     GuardDecision,
     GuardEvent,
     PolicyBundle,
     RuntimeOutcomeReceipt,
 )
 from pydantic import ValidationError
+from agentguard_core.decisions.evidence import DecisionEvidenceV21
 
 from guard_api.models import ApprovalRequest
 from guard_api.storage.base import ControlPlaneStore
@@ -29,6 +32,10 @@ from .context_manifest import (
     is_context_manifest_reserved_payload,
     records_have_same_content,
     validate_context_manifest_audit_event,
+)
+from .competition import (
+    CriticalDecisionEvidenceError,
+    strict_decision_authority_envelope,
 )
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
@@ -540,6 +547,8 @@ class AuditService:
         v21_evidence: dict[str, object] | None = None,
         state_delta_evidence: dict[str, object] | None = None,
         ct_facts_evidence: dict[str, object] | None = None,
+        decision_authority_evidence: dict[str, object] | None = None,
+        decision_authority: DecisionAuthority | None = None,
         audit_id: str | None = None,
     ) -> AuditEvent:
         """写入 policy_evaluation 审计记录。
@@ -576,11 +585,21 @@ class AuditService:
             v21_evidence=v21_evidence,
             state_delta_evidence=state_delta_evidence,
             ct_facts_evidence=ct_facts_evidence,
+            decision_authority_evidence=decision_authority_evidence,
+            decision_authority=decision_authority,
             audit_id=audit_id,
         )
         audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)
         persisted = self.store.get_audit_event(audit_event.audit_id) or audit_event
+        if decision_authority_evidence is not None:
+            self._validate_decision_authority_commit(
+                persisted,
+                expected_envelope=decision_authority_evidence,
+                expected_decision=decision,
+                expected_authority=decision_authority,
+                expected_v21_evidence=v21_evidence,
+            )
         if critic_review is not None:
             self.store.add_action_critic_review(critic_review)
         approval = (
@@ -592,6 +611,94 @@ class AuditService:
             critic_review=critic_review,
         )
         return persisted
+
+    @staticmethod
+    def _validate_decision_authority_commit(
+        persisted: AuditEvent,
+        *,
+        expected_envelope: dict[str, object],
+        expected_decision: GuardDecision,
+        expected_authority: DecisionAuthority | None,
+        expected_v21_evidence: dict[str, object] | None,
+    ) -> None:
+        if expected_authority is None:
+            raise CriticalDecisionEvidenceError(
+                "critical authority evidence requires a top-level authority"
+            )
+        expected = strict_decision_authority_envelope(expected_envelope)
+        evidence = persisted.evidence
+        actual_raw = (
+            evidence.get("decision_authority")
+            if isinstance(evidence, dict)
+            else None
+        )
+        actual = strict_decision_authority_envelope(
+            {"decision_authority": actual_raw}
+        )
+        if actual != expected:
+            raise CriticalDecisionEvidenceError(
+                "persisted authority evidence differs from the selected result"
+            )
+        payload = DecisionAuthorityEvidenceV1.model_validate(
+            actual["decision_authority"]["payload"]  # type: ignore[index]
+        )
+        raw_top = (persisted.model_extra or {}).get("decision_authority")
+        try:
+            top = DecisionAuthority.model_validate(raw_top)
+        except ValueError as exc:
+            raise CriticalDecisionEvidenceError(
+                "persisted top-level decision authority is invalid"
+            ) from exc
+        decision_dump = expected_decision.model_dump(mode="json")
+        replay_dump = (
+            evidence.get("guard_decision") if isinstance(evidence, dict) else None
+        )
+        raw_v21 = evidence.get("decision_v21") if isinstance(evidence, dict) else None
+        if (
+            expected_v21_evidence is None
+            or not isinstance(raw_v21, dict)
+            or set(expected_v21_evidence) != {"decision_v21"}
+            or raw_v21 != expected_v21_evidence["decision_v21"]
+        ):
+            raise CriticalDecisionEvidenceError(
+                "persisted DecisionEvidenceV21 differs from the selected result"
+            )
+        try:
+            decision_evidence = DecisionEvidenceV21.model_validate(raw_v21["payload"])
+        except (KeyError, ValueError) as exc:
+            raise CriticalDecisionEvidenceError(
+                "persisted DecisionEvidenceV21 is invalid"
+            ) from exc
+        exact_policy_projection = {
+            "decision": persisted.decision,
+            "risk_score": persisted.risk_score,
+            "severity": persisted.severity,
+            "blocked": persisted.blocked,
+            "reason": persisted.reason,
+            "decision_id": persisted.links.get("decision_id"),
+        }
+        expected_policy_projection = {
+            "decision": expected_decision.decision,
+            "risk_score": expected_decision.risk_score,
+            "severity": expected_decision.severity,
+            "blocked": expected_decision.blocked,
+            "reason": expected_decision.reason,
+            "decision_id": expected_decision.decision_id,
+        }
+        if not all(
+            (
+                top == expected_authority,
+                payload.decision_authority == expected_authority,
+                payload.selected_decision == expected_decision,
+                decision_evidence.mode == expected_authority.mode,
+                decision_evidence.final_decision == expected_decision.decision,
+                replay_dump == decision_dump,
+                exact_policy_projection == expected_policy_projection,
+            )
+        ):
+            raise CriticalDecisionEvidenceError(
+                "selected decision, authority, and audit projections lack exact parity"
+            )
 
     def repair_provenance(self, event: AuditEvent) -> None:
         approval_id = event.links.get("approval_id")

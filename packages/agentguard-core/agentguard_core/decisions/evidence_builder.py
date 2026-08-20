@@ -28,10 +28,13 @@ refs 上限与截断（``11_决策记录_V21-08前置.md`` D4，IMPLEMENTATION �
   ``failure_kind="stale"`` 降级并把 ``divergence_category`` 归受控
   类目 ``degraded_stale_judgment``（``12_决策记录_V21-09前置.md``
   D8；01 §22 枚举已含 ``"stale"``，无新增枚举值）；
-- ``final_decision = legacy_decision``（04 §1-§2：shadow 期 legacy 是
-  唯一官方决策者）；
-- ``semantic_judgment_id`` / ``semantic_digest`` 恒 ``None``（V21-13
-  预留）；
+- ``final_decision`` 默认等于 ``legacy_decision``（04 §1-§2：shadow
+  期 legacy 是唯一官方决策者）；competition selector 可显式传入其
+  authoritative selected result，默认路径仍逐字节不变；
+- ``semantic_judgment_id`` / ``semantic_digest``：默认 ``None``（输出与
+  既有调用逐字节一致）；V21-13 Stage 1 shadow 调用方可显式传入
+  ``semantic`` judgment，仅登记其确定性身份/摘要供证据与评测消费，
+  不改变 ``final_decision``；
 - envelope 复用既有 ``decision_v21_envelope()``（不改）。
 
 本模块是纯函数：不读时钟、不生成 uuid、不触 IO，同输入必同输出。
@@ -41,6 +44,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Sequence
 
+from ..semantic.models import SemanticJudgment
 from ..signals.models import Decision, EvaluationDegradation
 from .divergence import SHADOW_COMPONENT_ID, classify_divergence
 from .evidence import (
@@ -135,7 +139,9 @@ def build_decision_evidence_v21(
     state_version: int,
     coverage: CoverageMap,
     mode: EvidenceMode = "shadow",
+    selected_decision: Decision | None = None,
     revalidation_stale_reason_codes: Sequence[str] = (),
+    semantic: SemanticJudgment | None = None,
 ) -> DecisionEvidenceV21:
     """组装 shadow 期 ``DecisionEvidenceV21``（§14 九项逐项落字段）。
 
@@ -153,14 +159,23 @@ def build_decision_evidence_v21(
       全集），默认 ``"shadow"``（``12_决策记录_V21-09前置.md`` D1：
       V21-09 阶段 mode 恒 shadow，调用方只传默认值）。传入
       ``"limited_enable"`` / ``"active"`` 属 V21-11 启用范畴，仅解除
-      硬编码预留传值通道；无论何种 mode，``final_decision`` 恒取
-      ``legacy_decision``（shadow 期官方决策者是 legacy）；
+      硬编码预留传值通道；
+    - ``selected_decision``：authoritative selector 已选择的真实结果。
+      缺省 ``None`` 时仍取 ``legacy_decision``，保证既有 shadow 调用的
+      序列化输出逐字节不变；competition limited/active 调用方必须显式
+      传入同一个 selected ``GuardDecision.decision``；
     - ``revalidation_stale_reason_codes``：Phase B revalidate 返回
       stale 时的漂移 reason codes（``v21-09:stale_*``）；缺省空表 →
       行为与 V21-08 逐字节一致。非空时登记 ``failure_kind="stale"``
       降级进 ``degradation_ids``，并把 ``divergence_category`` 归
       ``degraded_stale_judgment``（D8 降级优先序：shadow 组件降级
       之后、九宫格之前，见 ``classify_divergence``）。
+    - ``semantic``：V21-13 Stage 1 shadow 的 ``SemanticJudgment``（03 §11
+      shadow：只产证据不改决策）。缺省 ``None`` 时
+      ``semantic_judgment_id`` / ``semantic_digest`` 恒 ``None``，输出与
+      既有调用逐字节一致；非 None 时登记其 ``judgment_id`` /
+      ``semantic_digest``（binding 有效性与 stale 判定由调用方经
+      ``validate_semantic_binding`` 先行裁决，本函数不重复校验）。
 
     refs 只存 id 并按 D4 上限截断；截断降级登记进 ``degradation_ids``
     且参与 divergence 分类（降级优先）。``matched_grant_ids`` 不在 D4
@@ -262,11 +277,17 @@ def build_decision_evidence_v21(
         policy_violation_ids=policy_violation_ids,
         signal_ids=signal_ids,
         degradation_ids=degradation_ids,
-        semantic_judgment_id=None,  # V21-13 预留。
-        semantic_digest=None,  # V21-13 预留。
+        # V21-13 Stage 1 shadow：semantic 缺席时恒 None（逐字节不变）；
+        # 在场时只登记确定性身份/摘要，不影响 final_decision。
+        semantic_judgment_id=(
+            None if semantic is None else semantic.judgment_id
+        ),
+        semantic_digest=(None if semantic is None else semantic.semantic_digest),
         legacy_decision=legacy_decision,
         v21_fast_disposition=assessment.disposition,
-        final_decision=legacy_decision,  # shadow 期官方决策者是 legacy。
+        final_decision=(
+            legacy_decision if selected_decision is None else selected_decision
+        ),
         mode=mode,
         divergence_category=divergence_category,
         evidence_refs=[],

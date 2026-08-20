@@ -148,6 +148,11 @@ class ShadowOutcome:
 
     assessment: FastAssessment
     coverage: CoverageMap
+    # Exact transient ActionIR consumed by authority/flow/fusion.  It is not
+    # part of the frozen FastAssessment or persisted evidence schema; the
+    # competition selector uses presence of this object to decide whether an
+    # ASK can be strongly bound and released by a human approval.
+    action_ir: ActionIR | None
     # Exact digest of the transient overlay that reached every Core component.
     # ``None`` means no overlay was supplied or assessment degraded before the
     # overlay was fully consumed; callers must not commit/project that bundle.
@@ -321,10 +326,35 @@ def _overlay_lookup_targets(action_ir: ActionIR) -> tuple[str, ...]:
         f"action:{action_ir.action_id}",
         action_ir.event_id,
         f"event:{action_ir.event_id}",
+        # Gate-A read-path handlers use typed event sinks rather than the
+        # pre-execution ``action:`` sink used by tool calls.  Keep them as
+        # lookup roots so exact current-event assembly flows reach coverage.
+        f"context:{action_ir.event_id}",
+        f"model_input:{action_ir.event_id}",
+        f"model_output:{action_ir.event_id}",
         *(resource.canonical_id for resource in action_ir.resources),
         *(destination.canonical_id for destination in action_ir.destinations),
     }
     return tuple(sorted(refs))
+
+
+def _is_competition_model_output_observation(
+    event: GuardEvent,
+    source_dataflow_not_required_actions: frozenset[str],
+) -> bool:
+    """Recognize the server-scoped competition observation projection.
+
+    The Guard API supplies the policy marker only for a verified LangGraph
+    competition activation.  Core additionally pins the exact runtime and
+    event type so the shared ``model_call`` action type cannot affect model
+    input or shadow evaluations.
+    """
+
+    return (
+        event.runtime == "langgraph"
+        and event.event_type == "model_output_produced"
+        and "model_call" in source_dataflow_not_required_actions
+    )
 
 
 def _overlay_truncation_degradation(event_id: str) -> EvaluationDegradation:
@@ -387,6 +417,8 @@ def _assess_kernel(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
+    source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
     """V21-08 shadow 与 V21-09 正式 assess 的**唯一**编排主体。
 
@@ -404,6 +436,10 @@ def _assess_kernel(
         detection_results, event_id=event.event_id
     )
     consumed_overlay_digest: str | None = None
+    model_output_observation = _is_competition_model_output_observation(
+        event,
+        source_dataflow_not_required_actions,
+    )
 
     # 1) ActionIR 构建（失败 → 全降级路径，保守 impact high）。
     action_ir: ActionIR | None = None
@@ -419,9 +455,14 @@ def _assess_kernel(
                 scope_digest=scope.scope_digest,
                 principal_id=scope.principal_id,
                 runtime_binding_id=scope.runtime_binding_id,
+                model_output_observation=model_output_observation,
             )
         else:
-            action_ir = build_action_ir(event, server_secret=server_secret)
+            action_ir = build_action_ir(
+                event,
+                server_secret=server_secret,
+                model_output_observation=model_output_observation,
+            )
     except Exception:  # noqa: BLE001 - 旁路评估失败必须收敛，不外抛。
         action_ir = None
         action_ir_failed = True
@@ -468,6 +509,15 @@ def _assess_kernel(
                 PolicyProfile(
                     policy_revision=snapshot.policy_revision,
                     policy_digest=snapshot.policy_digest,
+                    source_dataflow_not_required_actions=(
+                        source_dataflow_not_required_actions
+                    ),
+                    memory_not_required_actions=memory_not_required_actions,
+                    observation_actions=(
+                        frozenset({"model_call"})
+                        if model_output_observation
+                        else frozenset()
+                    ),
                 ),
             )
             state = _state_from_snapshot(snapshot, revoked_grant_ids=revoked_grant_ids)
@@ -518,11 +568,22 @@ def _assess_kernel(
                 )
                 state = overlay.state
                 incomplete_reasons = _overlay_incomplete_reasons(transient_facts)
+                source_ids = {source.source_id for source in state.source_index}
+                stable_source_refs = frozenset(
+                    {
+                        *overlay.stable_source_refs,
+                        *(
+                            ref
+                            for ref in action_ir.data_refs
+                            if ref in source_ids
+                        ),
+                    }
+                )
                 context = default_coverage_context(state, plan).model_copy(
                     update={
                         "gap_context": GapContext(
                             parent_event_ids=frozenset(action_ir.parent_event_ids),
-                            stable_refs=frozenset(overlay.stable_source_refs),
+                            stable_refs=stable_source_refs,
                         ),
                         "truncated": (("dataflow",) if overlay.truncated else ()),
                         "provider_available": (
@@ -652,6 +713,7 @@ def _assess_kernel(
     return ShadowOutcome(
         assessment=finalized,
         coverage=coverage,
+        action_ir=action_ir,
         consumed_overlay_digest=consumed_overlay_digest,
     )
 
@@ -665,6 +727,8 @@ def assess(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
+    source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
     """V21-09 正式 Core API（完整方案 §15，L3181-3198）。
 
@@ -693,6 +757,10 @@ def assess(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        memory_not_required_actions=memory_not_required_actions,
+        source_dataflow_not_required_actions=(
+            source_dataflow_not_required_actions
+        ),
     ).assessment
 
 
@@ -705,6 +773,8 @@ def shadow_assess_with_coverage(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
+    source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
     """``shadow_assess`` 的完整产物版本（额外透出判定时使用的 coverage）。
 
@@ -719,6 +789,10 @@ def shadow_assess_with_coverage(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        memory_not_required_actions=memory_not_required_actions,
+        source_dataflow_not_required_actions=(
+            source_dataflow_not_required_actions
+        ),
     )
 
 
@@ -731,6 +805,8 @@ def shadow_assess(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    memory_not_required_actions: frozenset[str] = frozenset(),
+    source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
     """V21-08 shadow 快路径评估（纯函数；同输入必同输出）。
 
@@ -762,6 +838,10 @@ def shadow_assess(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        memory_not_required_actions=memory_not_required_actions,
+        source_dataflow_not_required_actions=(
+            source_dataflow_not_required_actions
+        ),
     ).assessment
 
 

@@ -10,6 +10,7 @@ import type {
   ActivityState,
   ApprovalPresentation,
   ControlIntegrityPresentation,
+  CompetitionAuthorityPresentation,
   DisplayEvidenceSemantics,
   ElementSourceMode,
   EnforcementPresentation,
@@ -91,6 +92,21 @@ const RUNTIME_LINK_KEYS = new Set([
   "parent_audit_id",
   "lease_id",
   "consumption_id",
+]);
+
+const COMPETITION_PATH_IDS = new Set([
+  "credential_unauthorized_external_egress",
+  "capability_scope_mismatch_high_impact",
+  "required_state_degradation",
+  "forged_authority_or_allow_once_mismatch",
+]);
+
+// 与 execution-trace.ts 的 CHECKPOINT_CATEGORIES 保持一致：检查点步骤不产生运行时回执。
+const CHECKPOINT_STEP_CATEGORIES = new Set<ExecutionStepCategory>([
+  "context",
+  "model_input",
+  "model_output",
+  "tool_result",
 ]);
 
 type EnforcementGateState = EnforcementPresentation["gateState"];
@@ -379,8 +395,83 @@ export function unavailableV21Assessment(
     coverage: {},
     degradationIds: [],
     divergenceCategory: null,
+    competitionAuthority: null,
     rollout: unavailableRollout(),
     sourceRefs,
+  };
+}
+
+function projectCompetitionAuthority(
+  evidence: JsonRecord,
+  primary: NormalizedAuditEvidence,
+): CompetitionAuthorityPresentation | null {
+  if (!("decision_authority" in evidence)) return null;
+  const envelope = asRecord(evidence.decision_authority);
+  if (envelope._budget_dropped === true || envelope.schema_version !== "1.0") return null;
+  const payload = asRecord(envelope.payload);
+  const authority = asRecord(payload.decision_authority);
+  const selectedDecision = asRecord(payload.selected_decision);
+  const source = authority.source;
+  const mode = authority.mode;
+  const selectionBasis = authority.selection_basis;
+  const legacyFloorApplied = authority.legacy_floor_applied;
+  const approvalRelease = authority.approval_release;
+  const activationRefDigest = stringValue(authority.activation_ref_digest);
+  const selectedDecisionId = stringValue(selectedDecision.decision_id);
+  const selectedDecisionValue = decisionValue(selectedDecision.decision);
+  const rawMatchedPathIds = authority.matched_path_ids;
+  const matchedPathIds = stringArray(rawMatchedPathIds);
+  const pathsValid =
+    Array.isArray(rawMatchedPathIds) &&
+    matchedPathIds.length === rawMatchedPathIds.length &&
+    matchedPathIds.every((pathId) => COMPETITION_PATH_IDS.has(pathId)) &&
+    matchedPathIds.length === new Set(matchedPathIds).size &&
+    matchedPathIds.every((pathId, index) => index === 0 || matchedPathIds[index - 1]! < pathId);
+  const semanticsValid =
+    (source === "current" && selectionBasis === "current" && legacyFloorApplied === false) ||
+    (source === "v21" &&
+      ((mode === "limited_enable" && selectionBasis === "path_allowlist") ||
+        (mode === "active" && selectionBasis === "profile_all")));
+  const approvalReleaseValid =
+    source === "current"
+      ? approvalRelease === "not_applicable"
+      : selectedDecisionValue === "ask"
+        ? approvalRelease === "strong_binding_required" || approvalRelease === "forbidden"
+        : approvalRelease === "not_applicable";
+  if (
+    payload.profile_id !== "competition-langgraph-v2" ||
+    (source !== "current" && source !== "v21") ||
+    (mode !== "shadow" && mode !== "limited_enable" && mode !== "active") ||
+    (selectionBasis !== "current" &&
+      selectionBasis !== "path_allowlist" &&
+      selectionBasis !== "profile_all") ||
+    typeof legacyFloorApplied !== "boolean" ||
+    (approvalRelease !== "not_applicable" &&
+      approvalRelease !== "strong_binding_required" &&
+      approvalRelease !== "forbidden") ||
+    activationRefDigest === null ||
+    !/^sha256:[0-9a-f]{64}$/.test(activationRefDigest) ||
+    !pathsValid ||
+    !semanticsValid ||
+    !approvalReleaseValid ||
+    selectedDecisionId === null ||
+    selectedDecisionValue === null ||
+    selectedDecisionId !== primary.decisionId ||
+    selectedDecisionValue !== primary.decision
+  ) {
+    return null;
+  }
+  return {
+    availability: "recorded",
+    profileId: "competition-langgraph-v2",
+    source,
+    mode,
+    selectionBasis,
+    matchedPathIds: matchedPathIds as CompetitionAuthorityPresentation["matchedPathIds"],
+    legacyFloorApplied,
+    activationRefDigest,
+    approvalRelease,
+    selectedDecisionId,
   };
 }
 
@@ -409,6 +500,7 @@ function projectV21Assessment(
   const fastDisposition = payload.v21_fast_disposition;
   const recordedFinalDecision = decisionValue(payload.final_decision);
   const legacyDecision = decisionValue(payload.legacy_decision);
+  const competitionAuthority = projectCompetitionAuthority(evidence, primary);
   if (
     (mode !== "shadow" && mode !== "limited_enable" && mode !== "active") ||
     (fastDisposition !== "CLEAR_ALLOW" &&
@@ -453,14 +545,19 @@ function projectV21Assessment(
     coverageValid &&
     recordedFinalDecision === legacyDecision &&
     recordedFinalDecision === primary.decision;
+  const officialV21Valid =
+    competitionAuthority?.source === "v21" &&
+    competitionAuthority.mode === mode &&
+    recordedFinalDecision === primary.decision;
   return {
     availability: "recorded",
-    decisionAuthority: shadowValid ? "shadow" : "none",
-    authorityVerification: shadowValid
-      ? "verified"
-      : mode === "shadow"
-        ? "conflicted"
-        : "unverified",
+    decisionAuthority: officialV21Valid ? "official" : shadowValid ? "shadow" : "none",
+    authorityVerification:
+      officialV21Valid || shadowValid
+        ? "verified"
+        : mode === "shadow"
+          ? "conflicted"
+          : "unverified",
     mode,
     assessmentId: stringValue(payload.assessment_id),
     fastDisposition,
@@ -469,6 +566,7 @@ function projectV21Assessment(
     coverage,
     degradationIds: stringArray(payload.degradation_ids),
     divergenceCategory: stringValue(payload.divergence_category),
+    competitionAuthority,
     rollout: unavailableRollout(),
     sourceRefs,
   };
@@ -809,6 +907,11 @@ function projectControlIntegrity(
   }
   if (execution.receiptRecorded) {
     return { status: "no_violation_observed", reasonCodes: [], sourceRefs: allRefs };
+  }
+  if (CHECKPOINT_STEP_CATEGORIES.has(input.category) && !input.outcome) {
+    // 检查点步骤（上下文组装/模型输入/模型输出/工具结果检查）本就不产生运行时回执，
+    // 缺失回执属正常语义，不应与工具步骤的真实证据缺失（RUNTIME_EVIDENCE_UNAVAILABLE）混淆。
+    return { status: "not_applicable", reasonCodes: [], sourceRefs: allRefs };
   }
   return {
     status: "unknown",

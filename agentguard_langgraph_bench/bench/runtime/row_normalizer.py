@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlparse
+
+from ..poisonedrag_service import poisonedrag_service_base_url
 
 
 def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any) -> dict[str, Any]:
@@ -25,6 +28,19 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
     provenance = _autonomous_provenance(tool_results, raw_state, config)
     validity = _run_validity(tool_results, raw_state, blocked, case, config, provenance=provenance)
     llm_request_diagnostics = _collect_llm_request_diagnostics(raw_state)
+    model_exchanges = [
+        dict(item)
+        for item in raw_state.get("model_exchanges") or []
+        if isinstance(item, dict)
+    ]
+    successful_model_exchanges = [
+        item
+        for item in model_exchanges
+        if item.get("outcome") == "success"
+        and item.get("request_observed") is True
+        and item.get("response_observed") is True
+    ]
+    first_exchange = model_exchanges[0] if model_exchanges else {}
     terminal_reason = raw_state.get("task_terminal_reason") or _terminal_reason_from_tools(tool_results)
     task_terminal = bool(raw_state.get("task_terminal")) or bool(terminal_reason)
 
@@ -63,8 +79,16 @@ def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any
         "autonomous_provenance_pollution_reasons": provenance["pollution_reasons"],
         "source_feature_counts": provenance["source_feature_counts"],
         "llm_planning_evidence": list(raw_state.get("llm_planning_evidence") or []),
+        "model_exchanges": model_exchanges,
+        "model_invoked": bool(successful_model_exchanges),
+        "successful_model_request_count": len(successful_model_exchanges),
+        "round_1_source_set_digest": first_exchange.get("source_set_digest"),
+        "round_1_model_input_digest": first_exchange.get("model_input_digest"),
+        "tool_schema_digest": first_exchange.get("tool_schema_digest"),
         "llm_request_diagnostics": llm_request_diagnostics,
-        "llm_request_count": len(llm_request_diagnostics),
+        "llm_request_count": (
+            len(model_exchanges) if model_exchanges else len(llm_request_diagnostics)
+        ),
         "llm_timeout_count": sum(1 for item in llm_request_diagnostics if item.get("outcome") == "timeout"),
         "llm_retry_count": sum(int(item.get("retry_count") or 0) for item in llm_request_diagnostics),
         "task_terminal": task_terminal,
@@ -174,12 +198,15 @@ def _run_validity(
     if stop_reason == "api_error" or raw_state.get("adapter_error"):
         invalid_reasons.append(str(raw_state.get("error_category") or "claude_code_api_error"))
     instrumentation_mode = str(raw_state.get("instrumentation_plan_mode") or getattr(config, "instrumentation_plan_mode", ""))
+    competition_mode = bool(getattr(config, "competition_mode", False))
     autonomous_planner_stop = instrumentation_mode == "autonomous" and stop_reason in {"llm_planning_error", "max_tool_rounds"}
     non_browser_misroute_terminal = stop_reason == "non_browser_tool_misroute"
     if _llm_diagnostics_have_configuration_error(raw_state):
         invalid_reasons.append("llm_configuration_error")
     if stop_reason == "llm_planning_error":
-        if autonomous_planner_stop:
+        if competition_mode:
+            invalid_reasons.append("llm_planning_error")
+        elif autonomous_planner_stop:
             pass
         elif _llm_diagnostics_have_fatal_error(raw_state):
             invalid_reasons.append("llm_planning_error")
@@ -191,7 +218,9 @@ def _run_validity(
         if not raw_state.get("last_model_content"):
             invalid_reasons.append("planner_no_output")
     if stop_reason == "max_tool_rounds":
-        if is_memory_poisoning:
+        if competition_mode:
+            invalid_reasons.append("max_tool_rounds_exhausted")
+        elif is_memory_poisoning:
             invalid_reasons.append("max_tool_rounds_exhausted")
         elif not invalid_reasons and not autonomous_planner_stop:
             invalid_reasons.append("max_tool_rounds")
@@ -364,8 +393,9 @@ def _is_memory_support_api_probe(item: dict[str, Any]) -> bool:
     if not url:
         return False
     lowered = url.lower()
+    service_port = urlparse(poisonedrag_service_base_url()).port
     return (
-        ("127.0.0.1:18082" in lowered or "localhost:18082" in lowered)
+        (f"127.0.0.1:{service_port}" in lowered or f"localhost:{service_port}" in lowered)
         and ("/support/" in lowered or "/poisonedrag/" in lowered)
     )
 

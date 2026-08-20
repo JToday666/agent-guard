@@ -26,9 +26,15 @@ class GuardConfig:
     schema_version: str = "0.3"
     event_type: str = "tool_call_proposed"
     api_mode: ApiMode = DEFAULT_API_MODE
+    competition_mode: bool = False
+    competition_rte_mode: str | None = None
 
     def __post_init__(self) -> None:
         self.api_mode = validate_api_mode(self.api_mode)
+        if self.competition_rte_mode not in {None, "off", "observe", "enforce"}:
+            raise ValueError(
+                "competition_rte_mode must be one of: off, observe, enforce"
+            )
         warn_if_legacy_api_mode(self.api_mode)
 
     @property
@@ -47,4 +53,6 @@ class GuardConfig:
             agent_id=agent_id,
             runtime_binding_id=getattr(config, "runtime_binding_id", None),
             api_mode=getattr(config, "core_api_mode", DEFAULT_API_MODE),
+            competition_mode=bool(getattr(config, "competition_mode", False)),
+            competition_rte_mode=getattr(config, "competition_rte_mode", None),
         )

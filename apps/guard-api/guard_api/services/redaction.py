@@ -32,6 +32,11 @@ from agentguard_core.credentials import (
     SENSITIVE_ENV_EXPANSION_RE,
 )
 
+from .competition import (
+    CriticalDecisionEvidenceError,
+    strict_decision_authority_envelope,
+)
+
 REDACTED = "[redacted]"
 
 # §21.1 服务端必做敏感 key 全集。
@@ -261,6 +266,11 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             if isinstance(source_evidence, dict)
             else None
         )
+        authority_envelope = (
+            source_evidence.get("decision_authority")
+            if isinstance(source_evidence, dict)
+            else None
+        )
         raw_evidence = redact_structure(event.evidence)
         if isinstance(raw_evidence, dict):
             replay_decision = raw_evidence.pop("guard_decision", None)
@@ -276,10 +286,14 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             # MAX_NESTING_DEPTH=6 会把 bundle 内 fact 对象碾成 "..."，
             # 使 backfill 的 model_validate 对任何非空 bundle 恒失败。
             raw_evidence.pop("ct_transient_facts", None)
+            # Critical/no-drop authority is validated from the pre-redaction
+            # source and restored after the generic evidence budget pass.
+            raw_evidence.pop("decision_authority", None)
         else:
             replay_decision = None
             v21_envelope = None
             state_delta_envelope = None
+            authority_envelope = None
         bounded_evidence = bound_value(
             raw_evidence,
             text_limit=CONTENT_PREVIEW_LIMIT,
@@ -319,6 +333,16 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             if isinstance(bounded_evidence, dict)
             else {}
         )
+        if authority_envelope is not None:
+            strict_authority = strict_decision_authority_envelope(
+                {"decision_authority": authority_envelope}
+            )
+            candidate = {**evidence, **strict_authority}
+            if evidence_serialized_size(candidate) > MAX_EVIDENCE_BYTES:
+                raise CriticalDecisionEvidenceError(
+                    "critical decision authority cannot survive audit sanitization"
+                )
+            evidence = candidate
 
     return event.model_copy(
         update={

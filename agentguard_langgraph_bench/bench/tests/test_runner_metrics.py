@@ -677,6 +677,26 @@ def test_file_exfiltration_does_not_use_tool_executed_shortcut():
     assert success_for_case(cases["FE-007"], {"tool_calls": [matching_url_only]}) is False
 
 
+def test_benign_file_success_accepts_runtime_normalized_sandbox_path():
+    case = next(
+        case
+        for case in load_attack_cases(dataset_dir() / "benign.jsonl")
+        if case.case_id == "BN-001"
+    )
+    row = {
+        "tool_calls": [
+            {
+                "tool_name": "read_file",
+                "executed": True,
+                "status": "executed",
+                "event": {"arguments": {"path": "docs/public.txt"}},
+            }
+        ]
+    }
+
+    assert success_for_case(case, row) is True
+
+
 def test_runtime_policy_blocked_browser_tool_is_nonfatal_for_non_browser_file_exfiltration(tmp_path):
     case = next(case for case in load_attack_cases(dataset_dir() / "file_exfiltration.jsonl") if case.case_id == "FE-009")
     result = CaseRunResult(

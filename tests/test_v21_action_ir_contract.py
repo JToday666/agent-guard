@@ -565,6 +565,68 @@ def _model_input_event(event_id: str) -> GuardEvent:
     )
 
 
+def _model_output_event(event_id: str) -> GuardEvent:
+    return GuardEvent.model_validate(
+        {
+            "event_type": "model_output_produced",
+            "event_id": event_id,
+            "trace_id": "trace_m4",
+            "runtime": "langgraph",
+            "pre_execution": False,
+            "security_context": {
+                "agent_id": "agent_a",
+                "user_task": "m4",
+                "visible_source_refs": ["source:user:evt_context:0"],
+            },
+            "payload": {
+                "phase": "output",
+                "content_preview": "hello",
+                "provider": "openai",
+                "model": "gpt-x",
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": False,
+                "sanitized": True,
+            },
+        }
+    )
+
+
+def test_scoped_model_output_observation_has_empty_effects_and_low_impact() -> None:
+    event = _model_output_event("evt_m4_output_observation")
+
+    ordinary = build_action_ir(event, server_secret=SECRET)
+    observation = build_action_ir(
+        event,
+        server_secret=SECRET,
+        model_output_observation=True,
+    )
+
+    assert ordinary.impact == "high"
+    assert ordinary.effects.external_communication is True
+    assert ordinary.effects.data_egress is True
+    assert ordinary.effects.network_access is True
+    assert ordinary.normalizer_version == NORMALIZER_VERSION
+    assert observation.effects == ActionEffect()
+    assert observation.impact == "low"
+    assert observation.normalizer_version == "v21-02-normalizer-3"
+    assert observation.data_refs == ordinary.data_refs
+    assert observation.resources == ordinary.resources
+    assert observation.authorization_fingerprint != ordinary.authorization_fingerprint
+    assert observation.audit_fingerprint != ordinary.audit_fingerprint
+
+
+def test_model_output_observation_flag_rejects_model_input() -> None:
+    with pytest.raises(
+        ValueError,
+        match="model_output_observation requires event_type=model_output_produced",
+    ):
+        build_action_ir(
+            _model_input_event("evt_m4_input_not_observation"),
+            server_secret=SECRET,
+            model_output_observation=True,
+        )
+
+
 def test_authorization_fingerprint_is_stable_across_event_ids() -> None:
     # 除 event_id 外完全相同的非 tool_call 事件：授权指纹必须相等。
     first_ir = build_action_ir(_model_input_event("evt_m4_1"), server_secret=SECRET)
@@ -572,6 +634,32 @@ def test_authorization_fingerprint_is_stable_across_event_ids() -> None:
     assert first_ir.authorization_fingerprint == second_ir.authorization_fingerprint
     # audit 指纹承担关联职责：event_id 变更必须改变 audit 指纹。
     assert first_ir.audit_fingerprint != second_ir.audit_fingerprint
+
+
+def test_model_input_action_ir_carries_canonical_visible_source_refs() -> None:
+    event = _model_input_event("evt_m4_visible_refs")
+    event = event.model_copy(
+        update={
+            "security_context": event.security_context.model_copy(
+                update={
+                    "visible_source_refs": (
+                        "source:user:evt_context:1",
+                        "source:runtime:evt_context:0",
+                        "source:user:evt_context:1",
+                    )
+                }
+            )
+        }
+    )
+
+    action_ir = build_action_ir(event, server_secret=SECRET)
+
+    assert action_ir.data_refs[:4] == [
+        "event:evt_m4_visible_refs",
+        "trace:trace_m4",
+        "source:runtime:evt_context:0",
+        "source:user:evt_context:1",
+    ]
 
 
 def test_truncated_arguments_keep_full_value_identity_commitment() -> None:

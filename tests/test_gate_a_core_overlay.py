@@ -9,6 +9,7 @@ from agentguard_core.actions.models import ActionEffect
 from agentguard_core.decisions.shadow import shadow_assess_with_coverage
 from agentguard_core.events.contracts import GuardEvent
 from agentguard_core.events.payloads import (
+    ModelCallPayload,
     SecurityContext,
     ToolCallPayload,
     ToolDescriptor,
@@ -48,6 +49,31 @@ def _event() -> GuardEvent:
         payload=ToolCallPayload(
             tool=ToolDescriptor(name="bash", call_id="call-current"),
             arguments={"command": "true"},
+        ),
+        metadata={},
+    )
+
+
+def _model_input_event(source_id: str) -> GuardEvent:
+    return GuardEvent(
+        event_id="evt-gate-a-model-input",
+        event_type="model_input_prepared",
+        runtime="langgraph",
+        trace_id="trace-1",
+        timestamp="2026-08-16T00:00:00+00:00",
+        security_context=SecurityContext(
+            agent_id="agent-1",
+            visible_source_refs=(source_id,),
+        ),
+        payload=ModelCallPayload(
+            phase="input",
+            content_preview="trusted model input",
+            provider="competition-provider",
+            model="competition-model",
+            context_plan_id="plan-1",
+            context_plan_digest="sha256:" + "3" * 64,
+            context_ref="context:evt-gate-a-context",
+            visible_source_refs=(source_id,),
         ),
         metadata={},
     )
@@ -387,3 +413,39 @@ def test_same_trace_unrelated_flow_is_not_current_action_evidence() -> None:
     assert not any(
         signal.category == "behavior:B1" for signal in outcome.assessment.signals
     )
+
+
+def test_model_input_canonical_refs_and_typed_sink_reach_coverage() -> None:
+    source = _source().model_copy(
+        update={"source_id": "source:user:evt-gate-a-context:0"}
+    )
+    event = _model_input_event(source.source_id)
+    transient = AssessmentTransientFacts.from_primitives(
+        event_id=event.event_id,
+        scope_digest=SCOPE,
+        flow_facts=[
+            _flow(
+                "flow-model-input",
+                source_ref=source.source_id,
+                target_ref=f"model_input:{event.event_id}",
+                relation="assembled_into",
+                taints=[],
+                strength="exact",
+            )
+        ],
+    )
+    snapshot = _snapshot().model_copy(update={"sources": [source]})
+
+    outcome = shadow_assess_with_coverage(
+        event,
+        PolicyBundle(),
+        snapshot,
+        server_secret=SERVER_SECRET,
+        transient_facts=transient,
+        memory_not_required_actions=frozenset({"model_call"}),
+    )
+
+    assert outcome.coverage.source.status == "complete"
+    assert outcome.coverage.dataflow.status == "complete"
+    assert "v21-05:source_complete" in outcome.coverage.source.reason_codes
+    assert "v21-05:dataflow_complete" in outcome.coverage.dataflow.reason_codes

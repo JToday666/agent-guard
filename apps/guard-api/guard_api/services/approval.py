@@ -2,9 +2,9 @@
 
 V21-08（``11_决策记录_V21-08前置.md`` D5，承接 ``10_决策记录`` D4）：
 
-1. **决策面收紧**：V2 flag（``settings.v21_shadow_enabled``）开启时
+1. **决策面收紧**：V2 mode（``settings.v21_enabled()``）开启时
    LLM Reviewer 只能 deny 或保持 pending，不得生成 allow（
-   ``_llm_can_allow_once`` 恒 False）；flag off 保持现状（legacy
+   ``_llm_can_allow_once`` 恒 False）；mode off 保持现状（current
    official）。投影层另有 fail-closed 双保险（capability.py
    ``compile_approval_to_grant`` 拒绝非 human 来源），接线侧不重复
    实现状态机。
@@ -119,6 +119,7 @@ class ApprovalService:
         decision: GuardDecision,
         *,
         requesting_principal_id: str,
+        decision_authority: Any | None = None,
     ) -> ApprovalRequest | None:
         if decision.decision != "ask" or decision.approval_intent is None:
             return None
@@ -130,6 +131,16 @@ class ApprovalService:
         safe_action_name = truncate_text(
             scrub_text(description.action_name), SUMMARY_TEXT_LIMIT
         )
+        approval_evidence = _approval_evidence(event, decision, description)
+        if decision_authority is not None:
+            raw_authority = (
+                decision_authority.model_dump(mode="json")
+                if hasattr(decision_authority, "model_dump")
+                else decision_authority
+            )
+            if not isinstance(raw_authority, dict):
+                raise ValueError("decision authority must be a typed projection")
+            approval_evidence["decision_authority"] = dict(raw_authority)
         approval = ApprovalRequest(
             trace_id=event.trace_id,
             subject_id=description.subject_id,
@@ -143,7 +154,7 @@ class ApprovalService:
             reason=truncate_text(scrub_text(decision.reason), SUMMARY_TEXT_LIMIT),
             risk_score=decision.risk_score,
             severity=decision.severity,
-            evidence=_approval_evidence(event, decision, description),
+            evidence=approval_evidence,
             decision_options=decision.approval_intent.options,
             expires_at=(
                 datetime.now(timezone.utc)
@@ -189,7 +200,7 @@ class ApprovalService:
             )
         # D4/D5：V2 flag 开启时 LLM Reviewer 只能 deny 或保持 pending。
         if review.decision == "allow_once" and _llm_can_allow_once(
-            approval, v2_enabled=self.settings.v21_shadow_enabled
+            approval, v2_enabled=self.settings.v21_enabled()
         ):
             return self.resolve_approval(
                 approval.approval_id,
@@ -246,13 +257,13 @@ class ApprovalService:
     def _maybe_project_allow_once_grant(self, approval: ApprovalRequest) -> None:
         """human ``allow_once`` 终态后的 grant 投影入口（绝不外抛）。
 
-        仅 V2 flag 开启时执行（flag off 与现状逐字节一致）；仅 human
+        仅 V2 mode 开启时执行（mode off 与现状逐字节一致）；仅 human
         ``allow_once`` 触发。**任何失败收敛为告警日志**：审批决议已在
         存储层生效并完成 provenance 写入，投影失败不得反向影响审批面
         （fail-closed：不投影，不伪造 grant）。
         """
 
-        if not self.settings.v21_shadow_enabled:
+        if not self.settings.v21_enabled():
             return
         if approval.decision != "allow_once" or approval.resolution_source != "human":
             return
@@ -634,9 +645,9 @@ class ApprovalService:
 def _llm_can_allow_once(approval: ApprovalRequest, *, v2_enabled: bool = False) -> bool:
     """LLM Reviewer 是否可自动 ``allow_once``。
 
-    D4/D5（``10_决策记录`` L116-134 / ``11_决策记录`` D5）：V2 flag
+    D4/D5（``10_决策记录`` L116-134 / ``11_决策记录`` D5）：V2 mode
     开启时恒 False——LLM Reviewer V2 路径只能 deny 或保持 pending，不得
-    生成 allow；flag off 保持现状（legacy official：low/medium 且选项含
+    生成 allow；mode off 保持现状（current official：low/medium 且选项含
     allow_once 时可自动批准）。
     """
 

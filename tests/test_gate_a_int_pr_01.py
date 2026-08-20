@@ -63,7 +63,7 @@ def _settings(
     return GuardApiSettings(
         control_token="control-secret",
         storage_backend="memory",
-        v21_shadow_enabled=shadow_enabled,
+        v21_mode="shadow" if shadow_enabled else "off",
         v21_shadow_server_secret=shadow_secret,
         ct_fact_projection_enabled=ct_enabled,
         task_scope_active_key_id=_SCOPE_KEY_ID,

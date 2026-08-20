@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agentguard_core import GuardEvent
@@ -11,6 +12,8 @@ from guard_api.auth import ApiAuthError
 from guard_api.services.evaluation import EvaluationConflictError
 
 from .context import ApiContext
+
+logger = logging.getLogger(__name__)
 
 
 def register_routes(app: FastAPI, context: ApiContext) -> None:
@@ -35,9 +38,17 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         )
         try:
             response = evaluation_service.evaluate(
-                payload, requesting_principal_id=context.principal_id
+                payload,
+                auth_context=context,
             )
-        except EvaluationConflictError:
+        except EvaluationConflictError as exc:
+            logger.warning(
+                "evaluation conflict for event %s (%s): %s",
+                payload.event_id,
+                payload.event_type,
+                exc,
+                exc_info=True,
+            )
             raise ApiAuthError("EVALUATION_CONFLICT", status_code=409) from None
         dumped = response.model_dump(mode="json")
         # Keep the frozen C1 wire keyset even on older supported Pydantic
@@ -46,4 +57,6 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             dumped.pop("enforcement_binding", None)
         if response.context_plan is None:
             dumped.pop("context_plan", None)
+        if response.decision_authority is None:
+            dumped.pop("decision_authority", None)
         return dumped

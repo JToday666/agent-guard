@@ -8,6 +8,7 @@ import csv
 import json
 import re
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -217,58 +218,7 @@ def _run_differential_cases(
 
 
 def _copy_config(config: BenchConfig, **updates: Any) -> BenchConfig:
-    data = {
-        "core_base_url": config.core_base_url,
-        "token": config.token,
-        "timeout": config.timeout,
-        "fail_closed": config.fail_closed,
-        "defense_enabled": config.defense_enabled,
-        "runtime": config.runtime,
-        "sandbox_dir": config.sandbox_dir,
-        "results_dir": config.results_dir,
-        "llm_enabled": config.llm_enabled,
-        "llm_provider": config.llm_provider,
-        "llm_model": config.llm_model,
-        "llm_api_key": config.llm_api_key,
-        "llm_base_url": config.llm_base_url,
-        "llm_temperature": config.llm_temperature,
-        "llm_fallback_to_case_plan": config.llm_fallback_to_case_plan,
-        "llm_max_tool_rounds": config.llm_max_tool_rounds,
-        "max_wall_clock_seconds": config.max_wall_clock_seconds,
-        "llm_request_timeout": config.llm_request_timeout,
-        "llm_max_retries": config.llm_max_retries,
-        "langgraph_recursion_limit": config.langgraph_recursion_limit,
-        "langgraph_graph_module": config.langgraph_graph_module,
-        "langgraph_graph_object": config.langgraph_graph_object,
-        "browser_action_timeout": config.browser_action_timeout,
-        "instrumentation_plan_mode": config.instrumentation_plan_mode,
-        "browser_mode": config.browser_mode,
-        "browser_engine": config.browser_engine,
-        "browser_fixture_compat_mode": config.browser_fixture_compat_mode,
-        "allowed_local_service_ports": config.allowed_local_service_ports,
-        "tool_hijacking_mode": config.tool_hijacking_mode,
-        "tool_catalog_view": config.tool_catalog_view,
-        "agent_adapter": config.agent_adapter,
-        "adapter_entrypoint": config.adapter_entrypoint,
-        "adapter_config": config.adapter_config,
-        "agent_endpoint": config.agent_endpoint,
-        "agent_command": config.agent_command,
-        "tool_server_mode": config.tool_server_mode,
-        "tool_server_host": config.tool_server_host,
-        "tool_server_port": config.tool_server_port,
-        "core_api_mode": config.core_api_mode,
-        "strict_runtime_targets": config.strict_runtime_targets,
-        "agent_visible_payload_mode": config.agent_visible_payload_mode,
-        "closure_on_partial": config.closure_on_partial,
-        "strict_business_validation": config.strict_business_validation,
-        "prompt_contamination_check": config.prompt_contamination_check,
-        "autonomous_planner_recovery_retry": config.autonomous_planner_recovery_retry,
-        "autonomous_planner_recovery_max_observations": config.autonomous_planner_recovery_max_observations,
-        "claude_code_retain_artifacts": config.claude_code_retain_artifacts,
-        "claude_code_model": config.claude_code_model,
-    }
-    data.update(updates)
-    return BenchConfig(**data)
+    return replace(config, **updates)
 
 
 def _clear_case_volatile_sandbox(sandbox_dir: Path) -> None:
@@ -509,7 +459,13 @@ def _run_single_case(
                     or mcpsafety_report.get("low_confidence_attack_observed")
                 )
     if case.attack_type not in {"agent_abuse", "file_exfiltration", "memory_poisoning", "prompt_injection"}:
-        row["attack_success"] = success_for_case(case, row)
+        oracle_success = success_for_case(case, row)
+        if case.attack_type == "benign":
+            row["task_success"] = oracle_success
+            row["safe_completion"] = oracle_success
+            row["attack_success"] = False
+        else:
+            row["attack_success"] = oracle_success
         report_payload = None
     else:
         report_payload = None
@@ -764,6 +720,12 @@ def _invalid_case_row(case: AttackCase, config: BenchConfig, error: str, *, benc
         "guided_plan_applied": False,
         "fallback_applied": False,
         "llm_planning_evidence": [],
+        "model_exchanges": [],
+        "model_invoked": False,
+        "successful_model_request_count": 0,
+        "round_1_source_set_digest": None,
+        "round_1_model_input_digest": None,
+        "tool_schema_digest": None,
         "llm_request_diagnostics": [],
         "task_terminal": False,
         "task_terminal_reason": "",
@@ -908,6 +870,10 @@ def _write_case_artifacts(case_result_dir: Path, row: dict[str, Any], report: di
     _write_case_jsonl(case_result_dir / "policy_decisions.jsonl", [_decision_record(item, row) for item in row.get("tool_calls") or []])
     _write_case_jsonl(case_result_dir / "audit_events.jsonl", [item.get("audit_event") for item in row.get("tool_calls") or [] if item.get("audit_event")])
     _write_case_jsonl(case_result_dir / "tool_results.jsonl", row.get("tool_calls") or [])
+    _write_case_jsonl(
+        case_result_dir / "model-exchanges.jsonl",
+        row.get("model_exchanges") or [],
+    )
     _write_tool_hijacking_llm_artifacts(case_result_dir, row)
     _write_memory_poisoning_llm_artifacts(case_result_dir, row)
     (case_result_dir / "browser_action_summary.json").write_text(
@@ -2089,6 +2055,7 @@ def _build_evidence_index(row: dict[str, Any], case_result_dir: Path) -> dict[st
             "tool_call_events": "tool_call_events.jsonl",
             "audit_events": "audit_events.jsonl",
             "policy_decisions": "policy_decisions.jsonl",
+            "model_exchanges": "model-exchanges.jsonl",
             "sandbox_diff": "sandbox_diff.json",
             "agent_visible_prompt_contamination": "agent_visible_prompt_contamination.json",
         },
@@ -2098,6 +2065,7 @@ def _build_evidence_index(row: dict[str, Any], case_result_dir: Path) -> dict[st
         "policy_decisions.jsonl",
         "audit_events.jsonl",
         "tool_results.jsonl",
+        "model-exchanges.jsonl",
         "sandbox_diff.json",
         "llm_prompts/round_1_redacted.json",
         "llm_responses/round_1_redacted.json",

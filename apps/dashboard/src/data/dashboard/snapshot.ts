@@ -111,6 +111,7 @@ export function hasSameEvaluationRun(left: EvaluationRun, right: EvaluationRun):
     left.asrBefore === right.asrBefore &&
     left.asrAfter === right.asrAfter &&
     JSON.stringify(left.preEnableReport) === JSON.stringify(right.preEnableReport) &&
+    JSON.stringify(left.competitionReport) === JSON.stringify(right.competitionReport) &&
     left.perAttack.length === right.perAttack.length &&
     left.perAttack.every((row, index) => {
       const other = right.perAttack[index];

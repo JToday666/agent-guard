@@ -350,6 +350,7 @@ function unavailableV21Assessment(): V21AssessmentPresentation {
     coverage: {},
     degradationIds: [],
     divergenceCategory: null,
+    competitionAuthority: null,
     rollout: {
       availability: "unavailable",
       rolloutId: null,
@@ -547,6 +548,7 @@ function parseControlIntegrity(value: unknown, path: string): ControlIntegrityPr
         "suspected",
         "confirmed_violation",
         "correlation_conflict",
+        "not_applicable",
         "unknown",
       ] as const,
       `${path}.status`,

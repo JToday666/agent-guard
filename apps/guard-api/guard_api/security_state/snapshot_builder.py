@@ -20,9 +20,14 @@ from agentguard_core.authority.models import (
 )
 from agentguard_core.decisions.evidence import RequiredCheckPlan
 from agentguard_core.security_context import (
+    OnlineSecurityState,
     PROJECTOR_VERSION,
     SecuritySnapshot,
     build_snapshot,
+)
+from agentguard_core.security_context.projection import (
+    GrantPolicyContext,
+    compile_task_to_grants,
 )
 
 from .rebuild import rebuild_locked, state_from_record
@@ -87,6 +92,12 @@ def get_snapshot_with_revoked(
         # 投影状态版本链）。
         if task_fact_head is not None and state.task is not task_fact_head:
             state = state.model_copy(update={"task": task_fact_head})
+        if task_fact_head is not None:
+            state = _with_compiled_task_grants(
+                state,
+                task_fact_head=task_fact_head,
+                policy_revision=policy_revision,
+            )
 
         snapshot_id = "v21-04-snapshot:" + canonical_sha256(
             {
@@ -109,6 +120,44 @@ def get_snapshot_with_revoked(
             authoritative_head_revision=authoritative_head_revision,
         )
     return snapshot, revoked_grant_ids
+
+
+def _with_compiled_task_grants(
+    state: OnlineSecurityState,
+    *,
+    task_fact_head: TaskFact,
+    policy_revision: str,
+) -> OnlineSecurityState:
+    """Inject rebuildable TaskFact grants into the snapshot-only state.
+
+    Task authority is authoritative input, while capability grants are a
+    deterministic projection. Recompile the current head inside the same scope
+    lock as snapshot construction, replace only older projections for that
+    task, and never write the derived grants back to storage.
+    """
+
+    compiled = compile_task_to_grants(
+        task_fact_head,
+        GrantPolicyContext(
+            policy_revision=policy_revision,
+            scope_digest=task_fact_head.scope_digest,
+            principal_id=task_fact_head.principal_id,
+        ),
+    )
+    retained = [
+        grant
+        for grant in state.active_grants
+        if not (
+            grant.source_type == "task_compiler"
+            and grant.task_id == task_fact_head.task_id
+        )
+    ]
+    merged = {grant.grant_id: grant for grant in (*retained, *compiled)}
+    return state.model_copy(
+        update={
+            "active_grants": [merged[grant_id] for grant_id in sorted(merged)]
+        }
+    )
 
 
 def get_snapshot(

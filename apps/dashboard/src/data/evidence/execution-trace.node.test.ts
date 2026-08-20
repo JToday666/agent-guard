@@ -136,6 +136,70 @@ function completeV21Coverage() {
   );
 }
 
+function competitionAuthorityEvent(options: {
+  approvalRelease: "not_applicable" | "strong_binding_required" | "forbidden";
+  decision: "allow" | "ask" | "deny";
+  matchedPathIds: string[];
+  mode: "shadow" | "limited_enable" | "active";
+  selectionBasis: "current" | "path_allowlist" | "profile_all";
+  source: "current" | "v21";
+}) {
+  const base = normalizedEvents()[0]!;
+  const raw = base.raw as Record<string, unknown>;
+  const suffix = `${options.mode}_${options.source}_${options.approvalRelease}`;
+  const decisionId = `decision_competition_${suffix}`;
+  const disposition =
+    options.decision === "allow"
+      ? "CLEAR_ALLOW"
+      : options.decision === "deny"
+        ? "CLEAR_DENY"
+        : "DEFER";
+  return evidence(base, {
+    actionId: `action_competition_${suffix}`,
+    auditId: `audit_competition_${suffix}`,
+    decision: options.decision,
+    decisionId,
+    eventId: `event_competition_${suffix}`,
+    eventType: "tool_call_proposed",
+    raw: {
+      ...raw,
+      evidence: {
+        ...((raw.evidence ?? {}) as Record<string, unknown>),
+        decision_v21: {
+          schema_version: "2.1",
+          payload: {
+            assessment_id: `assessment_competition_${suffix}`,
+            coverage: completeV21Coverage(),
+            degradation_ids: [],
+            divergence_category: null,
+            final_decision: options.decision,
+            legacy_decision: options.decision,
+            mode: options.mode,
+            v21_fast_disposition: disposition,
+          },
+        },
+        decision_authority: {
+          schema_version: "1.0",
+          payload: {
+            profile_id: "competition-langgraph-v2",
+            selected_decision: { decision_id: decisionId, decision: options.decision },
+            decision_authority: {
+              source: options.source,
+              mode: options.mode,
+              selection_basis: options.selectionBasis,
+              matched_path_ids: options.matchedPathIds,
+              legacy_floor_applied: false,
+              activation_ref_digest: `sha256:${"b".repeat(64)}`,
+              approval_release: options.approvalRelease,
+            },
+          },
+        },
+      },
+    },
+    toolName: "call_api",
+  });
+}
+
 const rteReasonCodes = {
   released: ["rte-05:binding_exact", "rte-05:lease_consumed"],
   preConsumeFailure: ["rte-05:binding_exact", "rte-05:approval_not_consumable"],
@@ -508,6 +572,37 @@ test("shows every supported GuardEvent once while grouping one action lifecycle"
     trace.steps.find((step) => step.category === "message")?.receiptExpectation,
     "required",
   );
+});
+
+test("marks checkpoint steps without receipts as not_applicable while tool steps stay unknown", () => {
+  const base = normalizedEvents()[0]!;
+  const checkpoint = evidence(base, {
+    auditId: "audit_context_integrity",
+    decisionId: "decision_context_integrity",
+    eventId: "event_context_integrity",
+    eventType: "context_assembled",
+  });
+  const trace = buildTrace([checkpoint]);
+  const step = trace.steps[0]!;
+  assert.equal(step.kind, "checkpoint");
+  assert.equal(step.category, "context");
+  assert.equal(step.supervision.controlIntegrity.status, "not_applicable");
+  assert.deepEqual(step.supervision.controlIntegrity.reasonCodes, []);
+
+  const action = evidence(base, {
+    actionId: "action_missing_receipt",
+    auditId: "audit_missing_receipt",
+    decisionId: "decision_missing_receipt",
+    eventId: "event_missing_receipt",
+    eventType: "tool_call_proposed",
+    toolName: "read_file",
+  });
+  const actionStep = buildTrace([action]).steps[0]!;
+  assert.equal(actionStep.kind, "action");
+  assert.equal(actionStep.supervision.controlIntegrity.status, "unknown");
+  assert.deepEqual(actionStep.supervision.controlIntegrity.reasonCodes, [
+    "RUNTIME_EVIDENCE_UNAVAILABLE",
+  ]);
 });
 
 test("uses a stable checkpoint fallback for a future policy event", () => {
@@ -1005,6 +1100,148 @@ test("does not verify shadow evidence that disagrees with the official decision"
   assert.equal(step.supervision.officialDecision.decision, "deny");
   assert.equal(step.supervision.v21Assessment.decisionAuthority, "none");
   assert.equal(step.supervision.v21Assessment.authorityVerification, "conflicted");
+});
+
+test("projects a committed competition authority as V2 official without formal rollout claims", () => {
+  const base = normalizedEvents()[0]!;
+  const raw = base.raw as Record<string, unknown>;
+  const decisionId = "dec_v21_competition_001";
+  const digest = `sha256:${"a".repeat(64)}`;
+  const active = evidence(base, {
+    actionId: "mock_action_v21_active",
+    auditId: "audit_v21_active",
+    decision: "deny",
+    decisionId,
+    eventId: "event_v21_active",
+    eventType: "tool_call_proposed",
+    raw: {
+      ...raw,
+      evidence: {
+        ...((raw.evidence ?? {}) as Record<string, unknown>),
+        decision_v21: {
+          schema_version: "2.1",
+          payload: {
+            assessment_id: "assessment_active_001",
+            coverage: completeV21Coverage(),
+            degradation_ids: [],
+            divergence_category: "legacy_allow_v21_deny",
+            final_decision: "deny",
+            legacy_decision: "allow",
+            mode: "active",
+            v21_fast_disposition: "CLEAR_DENY",
+          },
+        },
+        decision_authority: {
+          schema_version: "1.0",
+          payload: {
+            profile_id: "competition-langgraph-v2",
+            selected_decision: { decision_id: decisionId, decision: "deny" },
+            decision_authority: {
+              source: "v21",
+              mode: "active",
+              selection_basis: "profile_all",
+              matched_path_ids: [],
+              legacy_floor_applied: true,
+              activation_ref_digest: digest,
+              approval_release: "not_applicable",
+            },
+          },
+        },
+      },
+    },
+    toolName: "call_api",
+  });
+
+  const step = buildTrace([active]).steps[0]!;
+
+  assert.equal(step.supervision.v21Assessment.decisionAuthority, "official");
+  assert.equal(step.supervision.v21Assessment.authorityVerification, "verified");
+  assert.equal(step.supervision.v21Assessment.competitionAuthority?.source, "v21");
+  assert.equal(step.supervision.v21Assessment.competitionAuthority?.selectionBasis, "profile_all");
+  assert.equal(step.supervision.v21Assessment.competitionAuthority?.legacyFloorApplied, true);
+  assert.equal(step.supervision.v21Assessment.rollout.availability, "unavailable");
+});
+
+test("projects limited-enable current authority without promoting the V2 rail", () => {
+  const limitedCurrent = competitionAuthorityEvent({
+    approvalRelease: "not_applicable",
+    decision: "allow",
+    matchedPathIds: [],
+    mode: "limited_enable",
+    selectionBasis: "current",
+    source: "current",
+  });
+
+  const assessment = buildTrace([limitedCurrent]).steps[0]!.supervision.v21Assessment;
+
+  assert.equal(assessment.decisionAuthority, "none");
+  assert.equal(assessment.competitionAuthority?.profileId, "competition-langgraph-v2");
+  assert.equal(assessment.competitionAuthority?.source, "current");
+  assert.equal(assessment.competitionAuthority?.mode, "limited_enable");
+  assert.equal(assessment.competitionAuthority?.selectionBasis, "current");
+  assert.deepEqual(assessment.competitionAuthority?.matchedPathIds, []);
+  assert.equal(assessment.competitionAuthority?.approvalRelease, "not_applicable");
+});
+
+test("projects both reviewable and forbidden V2 ASK authority", () => {
+  const cases = [
+    {
+      approvalRelease: "strong_binding_required" as const,
+      matchedPathIds: ["capability_scope_mismatch_high_impact"],
+      mode: "limited_enable" as const,
+      selectionBasis: "path_allowlist" as const,
+    },
+    {
+      approvalRelease: "forbidden" as const,
+      matchedPathIds: ["required_state_degradation"],
+      mode: "active" as const,
+      selectionBasis: "profile_all" as const,
+    },
+  ];
+
+  for (const item of cases) {
+    const assessment = buildTrace([
+      competitionAuthorityEvent({
+        ...item,
+        decision: "ask",
+        source: "v21",
+      }),
+    ]).steps[0]!.supervision.v21Assessment;
+
+    assert.equal(assessment.decisionAuthority, "official");
+    assert.equal(assessment.competitionAuthority?.source, "v21");
+    assert.equal(assessment.competitionAuthority?.mode, item.mode);
+    assert.deepEqual(assessment.competitionAuthority?.matchedPathIds, item.matchedPathIds);
+    assert.equal(assessment.competitionAuthority?.approvalRelease, item.approvalRelease);
+  }
+});
+
+test("rejects competition authority with an impossible ASK release", () => {
+  const currentWithRelease = competitionAuthorityEvent({
+    approvalRelease: "strong_binding_required",
+    decision: "ask",
+    matchedPathIds: [],
+    mode: "limited_enable",
+    selectionBasis: "current",
+    source: "current",
+  });
+  const nonAskRelease = competitionAuthorityEvent({
+    approvalRelease: "forbidden",
+    decision: "deny",
+    matchedPathIds: ["required_state_degradation"],
+    mode: "active",
+    selectionBasis: "profile_all",
+    source: "v21",
+  });
+
+  assert.equal(
+    buildTrace([currentWithRelease]).steps[0]!.supervision.v21Assessment.competitionAuthority,
+    null,
+  );
+  assert.equal(
+    buildTrace([nonAskRelease]).steps[0]!.supervision.v21Assessment.competitionAuthority,
+    null,
+  );
 });
 
 test("builds a deterministic supervision wrapper without a second action projection", () => {

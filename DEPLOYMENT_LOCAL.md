@@ -24,6 +24,11 @@ pnpm install --frozen-lockfile
 adapter token 和 control token。`.env`、真实密码、token、launch code、CSRF token、
 approval nonce 和 browser session 均不得提交。
 
+可选：`AGENTGUARD_V21_SEMANTIC_*`（V21-13 Stage 1 shadow 语义评判，见
+`.env.example` 对应段落）默认关闭；开启后每个 DEFER 评估在请求线程上增加至多
+`AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS` 秒的同步 LLM 往返，仅建议 shadow
+评测环境开启。
+
 ## Guard API 与 CLI
 
 第一个终端启动 Guard API：

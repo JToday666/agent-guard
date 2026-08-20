@@ -84,7 +84,10 @@ export function buildBeforeInstallConfigAuditEvent(
   const hooks = asRecord(config.hooks ?? manifest.hooks);
   const permissions = asRecord(config.permissions ?? manifest.permissions);
   const findings = buildInstallFindings({ targetId, hooks, permissions });
-  const security = runtimeSecurityFields(eventRecord, contextRecord);
+  // ⑥ hook 语境映射：安装期配置审计由运行时钩子产生。
+  const security = runtimeSecurityFields(eventRecord, contextRecord, {
+    sourceTypeFallback: "runtime_hook",
+  });
   const runId = firstNonEmpty(
     stringMaybe(contextRecord.runId),
     stringMaybe(eventRecord.runId),
@@ -122,7 +125,10 @@ export function buildRuntimeObservationAuditEvent(
 ): AuditEvent {
   const eventRecord = asRecord(event);
   const contextRecord = asRecord(context);
-  const security = runtimeSecurityFields(eventRecord, contextRecord);
+  const security = runtimeSecurityFields(eventRecord, contextRecord, {
+    // ⑥ hook 语境映射：运行时观察事件由钩子产生。
+    sourceTypeFallback: "runtime_hook",
+  });
   const userTask = runtimeObservationUserTask(hookName, security.userTask);
   const resourceTargets = runtimeObservationResourceTargets(
     hookName,

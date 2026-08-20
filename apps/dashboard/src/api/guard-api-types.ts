@@ -272,7 +272,32 @@ export interface GuardEvaluationRunDto {
   per_rule?: Record<string, unknown>;
   cases?: GuardEvaluationCaseDto[];
   pre_enable_report?: GuardPreEnableReportDto | null;
+  competition_report?: GuardCompetitionReportDto | null;
   [key: string]: unknown;
+}
+
+export interface GuardCompetitionReportDto {
+  schema_version: "competition-report/1.0";
+  profile_id: "competition-langgraph-v2";
+  status: "passed" | "functional_contract_failed" | "invalid";
+  competition_qualified: boolean;
+  expected_case_runs: number;
+  attempted_case_runs: number;
+  invalid_case_runs: number;
+  provider_id?: string | null;
+  model?: string | null;
+  arms: Array<{
+    arm_id: "A0" | "A1" | "A2" | "A3" | "A4";
+    attempted: number;
+    evaluable: number;
+    invalid: number;
+    asr: number | null;
+    fpr: number | null;
+    benign_success: number | null;
+    v21_selection_rate: number | null;
+    legacy_floor_rate: number | null;
+    receipt_coverage: number | null;
+  }>;
 }
 
 export interface GuardApprovalResolutionDto {

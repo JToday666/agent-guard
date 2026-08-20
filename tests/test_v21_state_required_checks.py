@@ -25,6 +25,7 @@ from agentguard_core.actions import (
 from agentguard_core.security_context import (
     COVERAGE_DOMAINS,
     PolicyProfile,
+    REQUIRED_CHECK_PLAN_VERSION,
     build_required_check_plan,
 )
 
@@ -32,7 +33,11 @@ _ALL_DOMAINS = list(COVERAGE_DOMAINS)
 
 
 def make_action(
-    *, impact: str = "low", action_type: str = "file.read", **effects: bool
+    *,
+    impact: str = "low",
+    action_type: str = "file.read",
+    data_refs: list[str] | None = None,
+    **effects: bool,
 ) -> ActionIR:
     digest = "sha256:" + "00" * 32
     return ActionIR(
@@ -55,7 +60,7 @@ def make_action(
         impact=impact,  # pyright: ignore[reportArgumentType]
         resources=[],
         destinations=[],
-        data_refs=[],
+        data_refs=data_refs or [],
         canonical_arguments=CanonicalArguments(
             items=[],
             canonicalization_version=CANONICALIZATION_VERSION,
@@ -145,6 +150,115 @@ def test_persistence_effect_adds_memory() -> None:
     )
     assert set(plan.required_domains) == {"task", "capability", "memory"}
     assert "v21-04:effect_persistence" in plan.reason_codes
+
+
+def test_competition_policy_can_waive_only_memory_for_plain_model_call() -> None:
+    action = make_action(
+        impact="high",
+        action_type="model_call",
+        external_communication=True,
+        data_egress=True,
+        network_access=True,
+    )
+
+    default_plan = build_required_check_plan(action, make_policy())
+    competition_plan = build_required_check_plan(
+        action,
+        make_policy(memory_not_required_actions=frozenset({"model_call"})),
+    )
+
+    assert REQUIRED_CHECK_PLAN_VERSION == "v21-04-plan-4"
+    assert "memory" in default_plan.required_domains
+    assert set(competition_plan.required_domains) == {
+        "task",
+        "source",
+        "capability",
+        "behavior",
+        "dataflow",
+    }
+    assert "memory" in competition_plan.optional_domains
+    assert "v21-04:policy_memory_not_required" in competition_plan.reason_codes
+    assert competition_plan.plan_id != default_plan.plan_id
+
+
+def test_competition_output_observation_waives_source_dataflow_only() -> None:
+    action = make_action(
+        impact="low",
+        action_type="model_call",
+    )
+    plan = build_required_check_plan(
+        action,
+        make_policy(
+            source_dataflow_not_required_actions=frozenset({"model_call"}),
+            memory_not_required_actions=frozenset({"model_call"}),
+            observation_actions=frozenset({"model_call"}),
+        ),
+    )
+
+    assert set(plan.required_domains) == {"task", "capability", "behavior"}
+    assert {"source", "dataflow", "memory"} <= set(plan.optional_domains)
+    assert (
+        "v21-04:policy_source_dataflow_not_required" in plan.reason_codes
+    )
+    assert "v21-04:policy_memory_not_required" in plan.reason_codes
+    assert "v21-04:policy_observation_behavior_required" in plan.reason_codes
+
+
+def test_output_observation_source_dataflow_waiver_keeps_memory_lineage_required(
+) -> None:
+    action = make_action(
+        impact="low",
+        action_type="model_call",
+        data_refs=["source:memory:evt-context:0"],
+    )
+    plan = build_required_check_plan(
+        action,
+        make_policy(
+            source_dataflow_not_required_actions=frozenset({"model_call"}),
+            memory_not_required_actions=frozenset({"model_call"}),
+            observation_actions=frozenset({"model_call"}),
+        ),
+    )
+
+    assert "source" not in plan.required_domains
+    assert "dataflow" not in plan.required_domains
+    assert "memory" in plan.required_domains
+    assert "v21-04:policy_memory_not_required" not in plan.reason_codes
+    assert "v21-04:policy_observation_memory_lineage" in plan.reason_codes
+
+
+def test_competition_memory_waiver_cannot_override_persistence() -> None:
+    plan = build_required_check_plan(
+        make_action(
+            impact="high",
+            action_type="model_call",
+            external_communication=True,
+            data_egress=True,
+            network_access=True,
+            persistence=True,
+        ),
+        make_policy(memory_not_required_actions=frozenset({"model_call"})),
+    )
+
+    assert "memory" in plan.required_domains
+    assert "v21-04:policy_memory_not_required" not in plan.reason_codes
+
+
+def test_competition_memory_waiver_cannot_hide_explicit_memory_lineage() -> None:
+    plan = build_required_check_plan(
+        make_action(
+            impact="high",
+            action_type="model_call",
+            data_refs=["source:memory:evt-context:0"],
+            external_communication=True,
+            data_egress=True,
+            network_access=True,
+        ),
+        make_policy(memory_not_required_actions=frozenset({"model_call"})),
+    )
+
+    assert "memory" in plan.required_domains
+    assert "v21-04:policy_memory_not_required" not in plan.reason_codes
 
 
 # ---------------------------------------------------------------------------

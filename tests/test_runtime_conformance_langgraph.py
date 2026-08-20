@@ -19,6 +19,7 @@ import pytest
 
 from agentguard_langgraph_adapter.event_models import (
     AuditEvent,
+    DecisionAuthority,
     PolicyDecision,
     ToolCallEvent,
     ToolDescriptor,
@@ -52,6 +53,8 @@ class ConformanceGuardAdapter:
         evaluate_error: Exception | None = None,
         submit_error: str | None = None,
         api_mode: str = "guard-api-v0.3",
+        decision_authority: DecisionAuthority | None = None,
+        enforcement_binding: dict[str, Any] | None = None,
     ) -> None:
         self.config = SimpleNamespace(
             core_api_mode=api_mode, defense_enabled=True
@@ -62,6 +65,9 @@ class ConformanceGuardAdapter:
         self.policy_audit_id = policy_audit_id
         self.evaluate_error = evaluate_error
         self.submit_error = submit_error
+        self.decision_authority = decision_authority
+        self.enforcement_binding = enforcement_binding
+        self.wait_calls = 0
         self.submitted: list[Any] = []
 
     def evaluate_before_tool(
@@ -93,6 +99,8 @@ class ConformanceGuardAdapter:
             reason="fixed conformance decision",
             approval=self.approval,
             policy_audit_id=self.policy_audit_id,
+            decision_authority=self.decision_authority,
+            enforcement_binding=self.enforcement_binding,
         )
         return event, decision
 
@@ -116,6 +124,7 @@ class ConformanceGuardAdapter:
         return {"ok": True, "audit_id": getattr(audit_event, "audit_id", "")}
 
     def wait_for_approval(self, approval_id: str) -> dict[str, Any]:
+        self.wait_calls += 1
         assert self.approval_resolution is not None
         return dict(self.approval_resolution)
 
@@ -379,6 +388,69 @@ def test_cf_05_wait_timeout_blocks_and_late_approval_does_not_resurrect() -> Non
     # 新 attempt 用新事件 id 记录终态。
     assert receipts[1]["metadata"]["outcome_kind"] == "execution_completed"
     assert receipts[1]["links"]["event_id"] != original_event_id
+
+
+def _v21_authority(
+    approval_release: str,
+) -> DecisionAuthority:
+    return DecisionAuthority(
+        source="v21",
+        mode="active",
+        selection_basis="profile_all",
+        matched_path_ids=[],
+        legacy_floor_applied=False,
+        activation_ref_digest="sha256:" + "a" * 64,
+        approval_release=approval_release,  # type: ignore[arg-type]
+    )
+
+
+def test_v21_unreleasable_ask_never_enters_c1_wait_or_runtime() -> None:
+    guard = ConformanceGuardAdapter(
+        "ask",
+        approval={"approval_id": "appr_v21_forbidden", "required": True},
+        approval_resolution={"status": "resolved", "decision": "allow_once"},
+        decision_authority=_v21_authority("forbidden"),
+        # Even a malformed response that smuggles a binding cannot make an
+        # explicitly forbidden V2 ASK releasable.
+        enforcement_binding={"unexpected": "binding"},
+    )
+    runtime = ConformanceRuntime()
+
+    result = _gateway(guard, runtime).invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "/private/data.txt"},
+        security={"user_task": "read"},
+        trace_id="trace_v21_forbidden",
+        call_id="call_v21_forbidden",
+    )
+
+    assert result.blocked is True
+    assert result.executed is False
+    assert guard.wait_calls == 0
+    assert runtime.calls == []
+
+
+def test_v21_reviewable_ask_without_binding_never_falls_back_to_c1() -> None:
+    guard = ConformanceGuardAdapter(
+        "ask",
+        approval={"approval_id": "appr_v21_bound", "required": True},
+        approval_resolution={"status": "resolved", "decision": "allow_once"},
+        decision_authority=_v21_authority("strong_binding_required"),
+    )
+    runtime = ConformanceRuntime()
+
+    result = _gateway(guard, runtime).invoke_tool(
+        tool_name="read_file",
+        arguments={"path": "/private/data.txt"},
+        security={"user_task": "read"},
+        trace_id="trace_v21_missing_binding",
+        call_id="call_v21_missing_binding",
+    )
+
+    assert result.blocked is True
+    assert result.executed is False
+    assert guard.wait_calls == 0
+    assert runtime.calls == []
 
 
 def test_cf_06_evaluate_unavailable_fails_closed_without_policy_receipt() -> None:

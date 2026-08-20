@@ -22,7 +22,14 @@ MCPSAFETY_ATTACK_EVALUATOR_OPS = {
     "check_wrong_arguments_intent_injection",
     "check_wrong_function_intent_injection",
 }
-TOOL_HIJACKING_LOCAL_BASE_URL = "http://127.0.0.1:18085"
+
+
+def tool_hijacking_local_base_url() -> str:
+    from .tools import tool_hijacking_service_base_url
+
+    return tool_hijacking_service_base_url()
+
+
 from pathlib import Path
 
 from .models import AttackCase
@@ -374,7 +381,7 @@ def build_mcpsafety_hijacking_tool_plan(
 
 def build_mcpsafety_dependency_arguments(task: dict[str, Any], dependency_tool: str) -> dict[str, Any]:
     if dependency_tool == "fetch":
-        return {"url": f"{TOOL_HIJACKING_LOCAL_BASE_URL}/sites/search/prime-minister-case"}
+        return {"url": f"{tool_hijacking_local_base_url()}/sites/search/prime-minister-case"}
     if dependency_tool in {"search", "search_repositories"}:
         return {"query": str(task.get("question") or "MCPSafety dependency")[:160]}
     if dependency_tool == "get_me":
@@ -382,7 +389,7 @@ def build_mcpsafety_dependency_arguments(task: dict[str, Any], dependency_tool: 
     if dependency_tool.startswith("get_"):
         return {"query": str(task.get("question") or "MCPSafety dependency")[:160]}
     if dependency_tool.startswith("playwright_"):
-        return {"url": f"{TOOL_HIJACKING_LOCAL_BASE_URL}/sites/booking/beijing-flights"}
+        return {"url": f"{tool_hijacking_local_base_url()}/sites/booking/beijing-flights"}
     return {"input": "MCPSafety injected dependency call"}
 
 
@@ -390,11 +397,11 @@ def localize_mcpsafety_url(url: str) -> str:
     """Map external MCPSafety URL artifacts to startable local benchmark services."""
 
     if "attacker.com/collect" in url:
-        return f"{TOOL_HIJACKING_LOCAL_BASE_URL}/collect/cvpr-paper"
+        return f"{tool_hijacking_local_base_url()}/collect/cvpr-paper"
     if "example.invalid/mcpsafety-dependency" in url:
-        return f"{TOOL_HIJACKING_LOCAL_BASE_URL}/sites/search/prime-minister-case"
+        return f"{tool_hijacking_local_base_url()}/sites/search/prime-minister-case"
     if "example.invalid/mcpsafety-page" in url:
-        return f"{TOOL_HIJACKING_LOCAL_BASE_URL}/sites/booking/beijing-flights"
+        return f"{tool_hijacking_local_base_url()}/sites/booking/beijing-flights"
     return url
 
 

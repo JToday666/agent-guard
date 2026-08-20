@@ -67,8 +67,11 @@ test("real seven-event CT trace is readable in the live Dashboard", async ({ pag
   await page.goto(`/evidence/${evidence.trace_id}?view=provenance`);
   await expect(page.getByRole("tab", { name: "溯源关系" })).toBeVisible();
   await expect(page.locator(".prov-node").first()).toBeVisible();
-  await expect(page.getByText("内容溯源证据不完整")).toBeVisible();
-  await expect(page.getByText(/当前契约：mixed/)).toBeVisible();
+  // mixed 契约降级为 info 说明（非告警）：标题与正文按新文案断言
+  await expect(page.getByText("内容溯源证据待完善")).toBeVisible();
+  await expect(
+    page.getByText(/图中同时包含 legacy 溯源节点与 CT typed 节点/),
+  ).toBeVisible();
   const provenanceResponse = await page.request.get(
     `/api/v1/traces/${evidence.trace_id}/provenance`,
   );

@@ -487,8 +487,8 @@ def _pipeline_disabled() -> Iterator[None]:
     """tri 档 shadow-v2108 语义的基准专用开关（非生产配置）。
 
     临时将 ``V21PipelineService.enabled`` 钉死为 False：evaluate 编排回退
-    V21ShadowService（V21-08）逐字节路径；生产门控始终只有
-    AGENTGUARD_V21_SHADOW_ENABLED 单一 flag（12-D1）。
+    V21ShadowService（V21-08）逐字节路径；生产门控统一使用
+    ``AGENTGUARD_V21_MODE``（12-D1）。
     """
 
     from guard_api.services.v21_pipeline import V21PipelineService
@@ -520,7 +520,7 @@ def _run_api_benchmark(
 
     settings = GuardApiSettings(
         control_token="v21-baseline-control",
-        v21_shadow_enabled=shadow_enabled,
+        v21_mode="shadow" if shadow_enabled else "off",
         v21_shadow_server_secret=(SHADOW_BENCHMARK_SECRET if shadow_enabled else None),
     )
     sequence = itertools.count(1)
@@ -667,7 +667,7 @@ def build_shadow_overhead(off: dict[str, Any], on: dict[str, Any]) -> dict[str, 
 
     comparison = _latency_comparison(off, on)
     return {
-        "flag": "AGENTGUARD_V21_SHADOW_ENABLED",
+        "flag": "AGENTGUARD_V21_MODE",
         "backend": "memory",
         "audit_mode": "synchronous_request_path",
         "scenarios": {
@@ -698,7 +698,7 @@ def build_pipeline_overhead(
 
     task_ref = v2109.get("task_ref")
     return {
-        "flag": "AGENTGUARD_V21_SHADOW_ENABLED",
+        "flag": "AGENTGUARD_V21_MODE",
         "backend": "memory",
         "audit_mode": "synchronous_request_path",
         "tiers": {

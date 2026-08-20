@@ -99,7 +99,7 @@ class GuardedToolGateway:
                 )
 
         strong_release: StrongBindingRelease | None = None
-        if raw_enforcement_binding(decision) is not None:
+        if _should_attempt_strong_binding(decision):
             try:
                 strong_release = authorize_strong_approval(
                     self.guard_adapter,
@@ -524,7 +524,7 @@ def _evaluate_memory_write_gate(
                 None,
             )
     strong_release: StrongBindingRelease | None = None
-    if raw_enforcement_binding(decision) is not None:
+    if _should_attempt_strong_binding(decision):
         try:
             strong_release = authorize_strong_approval(
                 guard_adapter,
@@ -646,7 +646,7 @@ def _evaluate_message_send_gate(
                 None,
             )
     strong_release: StrongBindingRelease | None = None
-    if raw_enforcement_binding(decision) is not None:
+    if _should_attempt_strong_binding(decision):
         try:
             strong_release = authorize_strong_approval(
                 guard_adapter,
@@ -917,6 +917,26 @@ def _resolve_approval(
 ) -> tuple[bool, dict[str, Any] | None]:
     if getattr(decision, "decision", None) != "ask":
         return False, None
+    release = _v21_approval_release(decision)
+    if release == "forbidden":
+        # An unreleasable V2 ASK is a policy intervention, not a pending human
+        # workflow.  Waiting here would recreate the legacy C1 escape hatch.
+        return True, {
+            "status": "forbidden",
+            "decision": "deny",
+            "approval_id": None,
+            "reason": "v21_ask_release_forbidden",
+        }
+    if release == "strong_binding_required":
+        # A valid bound path is consumed before this helper is reached.  Getting
+        # here therefore means the binding was missing; never fall back to the
+        # unbound C1 approval wait path.
+        return True, {
+            "status": "unavailable",
+            "decision": "deny",
+            "approval_id": _approval_id(getattr(decision, "approval", None)),
+            "reason": "v21_strong_binding_missing",
+        }
     approval_id = _approval_id(getattr(decision, "approval", None))
     if not approval_id or not hasattr(guard_adapter, "wait_for_approval"):
         return True, {
@@ -948,6 +968,36 @@ def _resolve_approval(
         "allow_session",
     }
     return not approved, resolution
+
+
+def _v21_approval_release(decision: Any) -> str | None:
+    authority = getattr(decision, "decision_authority", None)
+    if authority is None:
+        return None
+    if hasattr(authority, "model_dump"):
+        authority = authority.model_dump(mode="json")
+    if not isinstance(authority, dict):
+        # A malformed server projection attached to an ASK is never allowed to
+        # weaken into the legacy approval path.
+        return "forbidden"
+    if authority.get("source") != "v21":
+        return None
+    release = authority.get("approval_release")
+    if release in {"strong_binding_required", "forbidden"}:
+        return str(release)
+    return "forbidden"
+
+
+def _should_attempt_strong_binding(decision: Any) -> bool:
+    release = _v21_approval_release(decision)
+    if release == "forbidden":
+        return False
+    binding_present = raw_enforcement_binding(decision) is not None
+    if release == "strong_binding_required":
+        return binding_present
+    # Legacy/current ASK behavior remains unchanged: a response that carries an
+    # RTE binding uses the existing strong path; otherwise C1 remains available.
+    return binding_present
 
 
 def _supports_runtime_outcome(guard_adapter: Any, decision: Any) -> bool:

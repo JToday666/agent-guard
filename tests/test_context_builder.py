@@ -383,7 +383,7 @@ def test_live_evaluation_returns_and_replays_transient_context_plan() -> None:
     secret = base64.urlsafe_b64encode(b"context-builder-live-secret-material-01").decode()
     settings = GuardApiSettings(
         storage_backend="memory",
-        v21_shadow_enabled=True,
+        v21_mode="shadow",
         v21_shadow_server_secret=secret,
         ct_fact_projection_enabled=True,
         context_builder_enabled=True,
@@ -489,7 +489,7 @@ def test_live_evaluation_returns_and_replays_transient_context_plan() -> None:
 def test_context_builder_flag_operates_without_v21_shadow() -> None:
     settings = GuardApiSettings(
         storage_backend="memory",
-        v21_shadow_enabled=False,
+        v21_mode="off",
         ct_fact_projection_enabled=False,
         context_builder_enabled=True,
         task_scope_active_key_id="context-only-key-1",
@@ -587,7 +587,7 @@ def test_context_builder_flag_operates_without_v21_shadow() -> None:
     )
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
 
-    assert settings.v21_shadow_enabled is False
+    assert settings.effective_v21_mode() == "off"
     assert settings.v21_shadow_server_secret is None
     assert response.context_plan is not None
     assert [chunk.transform_state for chunk in response.context_plan.chunks] == [

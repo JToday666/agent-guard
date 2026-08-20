@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentguard_core import (
     ActionCritic,
     AuditEvent,
+    DecisionAuthority,
     GuardDecision,
     GuardEngine,
     GuardEvent,
     MemoryEventPayload,
     MemoryGuardChange,
+    V21AuthoritySelectionError,
+    V21SelectionEligibility,
+    V21SelectionResult,
+    build_decision_authority_evidence,
+    decision_authority_envelope,
+    select_v21_authority,
 )
+from agentguard_core.decisions.evidence_builder import (
+    build_decision_evidence_v21,
+    decision_evidence_v21_envelope,
+)
+from agentguard_core.decisions.shadow import ABSENT_SNAPSHOT_ID
 from agentguard_core.security_context import (
     ASSESSMENT_OVERLAY_COMPONENT_ID,
     AssessmentTransientFacts,
@@ -25,6 +37,7 @@ from guard_api.models import (
     EvaluationApproval,
     GuardEvaluationResponse,
 )
+from guard_api.auth import AuthContext
 from guard_api.storage.base import (
     EnforcementBindingConflictError,
     EnforcementBindingRecord,
@@ -34,6 +47,7 @@ from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
 from .audit import AuditService
+from .competition import CriticalDecisionEvidenceError
 from .context_manifest import (
     ContextManifestPrepared,
     context_manifest_anchor_from_policy,
@@ -44,6 +58,7 @@ from .context_manifest import (
 )
 from .memory import MemoryGuardService
 from .policy import PolicyService
+from .v21_pipeline import V21OfficialEvaluationUnavailableError
 
 if TYPE_CHECKING:
     from agentguard_core.security_context import ContextAssemblyPlan
@@ -60,6 +75,7 @@ if TYPE_CHECKING:
         V21PipelineService,
     )
     from .v21_shadow import V21ShadowService
+    from .competition import FrozenCompetitionActivation
 
 
 logger = logging.getLogger(__name__)
@@ -207,13 +223,14 @@ class EvaluationService:
         v21_pipeline: "V21PipelineService | None" = None,
         ct_projection_service: "CtProjectionService | None" = None,
         context_builder_service: "ContextBuilderService | None" = None,
+        competition_activation: "FrozenCompetitionActivation | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
         self.approval_service = approval_service
         self.memory_guard_service = memory_guard_service
         self.action_critic = action_critic or ActionCritic()
-        # V21-08 shadow 旁路编排器（flag 默认关闭）。T5 在 audit 落盘前
+        # V21-08 shadow 旁路编排器（V2 mode 默认 off）。T5 在 audit 落盘前
         # 调用它旁路产出 decision_v21 信封；判定/审批主流程不使用它
         # （legacy = 唯一官方决策者，04 §1-§2）。V21-09 起它同时是
         # pipeline Phase A 彻底失败时的逐字节降级回退路径。
@@ -226,10 +243,32 @@ class EvaluationService:
         # 材料就绪时生效；事务外构建 → 事务内信封 → 事务后投影）。
         self.ct_projection_service = ct_projection_service
         self.context_builder_service = context_builder_service
+        self.competition_activation = competition_activation
 
     def evaluate(
-        self, event: GuardEvent, *, requesting_principal_id: str
+        self,
+        event: GuardEvent,
+        *,
+        requesting_principal_id: str | None = None,
+        auth_context: AuthContext | None = None,
     ) -> GuardEvaluationResponse:
+        """Evaluate with the router-authenticated identity when available.
+
+        ``requesting_principal_id`` remains as a compatibility boundary for
+        direct service tests and internal pre-V2 callers.  Production routing
+        passes the complete immutable ``AuthContext`` so authority selection
+        can bind principal, runtime, agent and credential provenance together.
+        """
+
+        if auth_context is not None:
+            if (
+                requesting_principal_id is not None
+                and requesting_principal_id != auth_context.principal_id
+            ):
+                raise ValueError("requesting principal conflicts with AuthContext")
+            requesting_principal_id = auth_context.principal_id
+        if requesting_principal_id is None:
+            raise ValueError("requesting principal is required")
         # Validate temporal identity before detectors or any approval/memory side
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
@@ -269,7 +308,10 @@ class EvaluationService:
                     and self.ct_projection_service.fact_building_enabled
                 ):
                     prepared: "V21PhaseAPrepared | None" = (
-                        self.v21_pipeline.prepare_phase_a(event)
+                        self.v21_pipeline.prepare_phase_a(
+                            event,
+                            auth_context=auth_context,
+                        )
                     )
                     if prepared is not None:
                         ct_bundle = self.ct_projection_service.build_transient_bundle(
@@ -335,11 +377,15 @@ class EvaluationService:
                             event,
                             prepared,
                             transient_facts=transient_facts,
+                            auth_context=auth_context,
                         )
                 else:
                     # Compatibility path: no new keyword/call boundary when CT
                     # is disabled, preserving V21-09 byte-for-byte behavior.
-                    materials = self.v21_pipeline.run_phase_a(event)
+                    materials = self.v21_pipeline.run_phase_a(
+                        event,
+                        auth_context=auth_context,
+                    )
         # Context isolation has its own flag and must not require V2 shadow.
         # With V2 enabled, the branch above already built and filtered the one
         # shared Gate A bundle.  Only the V2-off path performs one context-only
@@ -550,7 +596,7 @@ class EvaluationService:
         事务窗口内：legacy 链照常（decision/detections 直接消费 Phase A
         单跑结果，不双跑检测器）+ Phase B 短事务 revalidate 与证据构建；
         **无 snapshot/task/policy 全量 I/O**（S8 消除）。legacy 决策与
-        flag off 路径同源同实现（evaluate_with_results 同内核），官方
+        mode off 路径同源同实现（evaluate_with_results 同内核），官方
         响应不变。
 
         审计 policy_revision 直接用 ``materials.policy_revision``（Phase A
@@ -560,44 +606,147 @@ class EvaluationService:
         (bundle N)"矛盾组合（TOCTOU），故删除事务内 policy I/O。
         """
         bundle = materials.bundle
-        # Phase A 单跑的 legacy 官方决策（同源同实现，不双跑检测器）。
+        # Phase B and authoritative selection run before every mutating service.
+        # No critic, approval, memory, audit, binding or receipt can observe the
+        # current decision until the unique selected result is known.
         decision = materials.decision
-        critic_review = self.action_critic.review(event, decision)
-        approval = self.approval_service.create_for_decision(
-            event,
-            decision,
-            requesting_principal_id=requesting_principal_id,
-        )
-        approval = self.approval_service.auto_review_with_llm(approval)
-        memory_change = self._record_memory_change(
-            event, decision, requesting_principal_id=requesting_principal_id
-        )
-        # Phase B（事务内）：revalidate + 证据构建；失败收敛为 None，
-        # legacy 主链不受影响。valid 时同步确定性构造 Phase C 计划与
-        # state_delta_v21 引用信封（D2：信封随 audit commit 写入，
-        # delta_digest 冻结时刻即真实）；stale → 无 Phase C、无信封。
         v21_evidence = None
         state_delta_evidence = None
+        authority: DecisionAuthority | None = None
+        authority_evidence: dict[str, object] | None = None
         phase_c_plan: "V21PhaseCPlan | None" = None
         phase_b_outcome: "V21PhaseBOutcome | None" = None
         finalize_metadata: dict[str, str] = {}
+        # V21-13 Stage 1 shadow：judgment 缺席时恒空表（metadata 键集
+        # 逐字节不变）；在场时条件性追加五个确定性引用键。
+        semantic_metadata: dict[str, object] = {}
         if self.v21_pipeline is not None:
             outcome = self.v21_pipeline.build_phase_b(event, materials)
             if outcome is not None:
                 phase_b_outcome = outcome
                 v21_evidence = outcome.envelope
+                selection = self._select_competition_authority(
+                    event,
+                    materials=materials,
+                    outcome=outcome,
+                )
+                if selection is not None:
+                    decision = selection.selected_decision
+                    authority = selection.authority
+                    activation = self.competition_activation
+                    assert activation is not None
+                    snapshot_id = (
+                        materials.snapshot.snapshot_id
+                        if materials.snapshot is not None
+                        else ABSENT_SNAPSHOT_ID
+                    )
+                    evidence = build_decision_authority_evidence(
+                        result=selection,
+                        assessment=materials.assessment,
+                        activation=activation.manifest,
+                        snapshot_id=snapshot_id,
+                        state_version=(
+                            materials.state_version
+                            if materials.snapshot is not None
+                            else 0
+                        ),
+                    )
+                    authority_evidence = decision_authority_envelope(evidence)
+                    stale_codes = (
+                        list(outcome.revalidation.reason_codes)
+                        if outcome.revalidation.status == "stale"
+                        else []
+                    )
+                    # competition selection 重建信封有意不携带 semantic
+                    # 槽（评审 W2，shadow 纪律）：重建路径不复算
+                    # binding，宁缺勿滥、fail-closed；judgment 引用仍经
+                    # 审计 metadata 五个引用键在场。
+                    selected_evidence = build_decision_evidence_v21(
+                        materials.assessment,
+                        legacy_decision=materials.decision.decision,
+                        snapshot_id=snapshot_id,
+                        state_version=(
+                            materials.state_version
+                            if materials.snapshot is not None
+                            else 0
+                        ),
+                        coverage=materials.coverage,
+                        mode=authority.mode,
+                        selected_decision=decision.decision,
+                        revalidation_stale_reason_codes=stale_codes,
+                    )
+                    v21_evidence = decision_evidence_v21_envelope(
+                        selected_evidence
+                    )
                 phase_c_plan = self.v21_pipeline.prepare_phase_c(outcome)
                 if phase_c_plan is not None:
                     state_delta_evidence = phase_c_plan.envelope
                 if outcome.final_decision_id is not None:
                     # D11：finalize 产物确定性引用写审计 metadata
                     # （仅 revalidate valid 且非降级路径；stale/降级/
-                    # flag off 时键集逐字节不变）。
+                    # mode off 时键集逐字节不变）。
                     assert outcome.final_decision_digest is not None
-                    finalize_metadata = {
-                        "v21_final_decision_id": outcome.final_decision_id,
-                        "v21_final_decision_digest": (outcome.final_decision_digest),
+                    if authority is not None and authority.source == "v21":
+                        finalize_metadata = {
+                            "v21_final_decision_id": decision.decision_id,
+                            "v21_final_decision_digest": canonical_sha256(
+                                decision.model_dump(mode="json")
+                            ),
+                        }
+                    else:
+                        finalize_metadata = {
+                            "v21_final_decision_id": outcome.final_decision_id,
+                            "v21_final_decision_digest": (
+                                outcome.final_decision_digest
+                            ),
+                        }
+                semantic_judgment = outcome.materials.semantic_judgment
+                if semantic_judgment is not None:
+                    # V21-13 shadow 产物只走审计 metadata 承载（wire
+                    # schema 无 semantic 字段，不改 schemas/）；binding
+                    # 结论复用 Phase B 已判定值（outcome 内部字段，
+                    # 不重复计算）。只落五个确定性引用键（D11 口径）：
+                    # judgment 全文会被 sanitize_audit_event 的 redaction
+                    # 改写（authorization_fingerprint 命中敏感 marker 被
+                    # REDACTED、reason_codes 超限被截断），落盘全文会与
+                    # v21_semantic_digest 永久失配，违反「禁静默丢失」
+                    # 纪律（评审 M3）。judgment 全文的审计承载归后续
+                    # typed bound 证据通道（仿 ct_transient_facts 先例），
+                    # shadow 初版只落确定性引用。
+                    semantic_metadata = {
+                        "v21_semantic_judgment_id": (
+                            semantic_judgment.judgment_id
+                        ),
+                        "v21_semantic_digest": semantic_judgment.semantic_digest,
+                        "v21_semantic_verdict": semantic_judgment.verdict,
+                        "v21_semantic_degraded": semantic_judgment.degraded,
+                        "v21_semantic_binding_valid": (
+                            outcome.semantic_binding_valid
+                        ),
                     }
+        if (
+            self.competition_activation is not None
+            and self.v21_pipeline is not None
+            and self.v21_pipeline.active
+            and authority is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_OFFICIAL_SELECTOR_UNAVAILABLE"
+            )
+
+        # From this point forward every side effect consumes exactly the selected
+        # decision and its committed authority projection.
+        critic_review = self.action_critic.review(event, decision)
+        approval = self.approval_service.create_for_decision(
+            event,
+            decision,
+            requesting_principal_id=requesting_principal_id,
+            decision_authority=authority,
+        )
+        approval = self.approval_service.auto_review_with_llm(approval)
+        memory_change = self._record_memory_change(
+            event, decision, requesting_principal_id=requesting_principal_id
+        )
         audit_event = self.audit_service.record_evaluation(
             event,
             decision,
@@ -619,6 +768,7 @@ class EvaluationService:
                 "request_digest": request_digest,
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
                 **finalize_metadata,
+                **semantic_metadata,
                 **self._context_manifest_metadata(context_manifest),
             },
             decision_dump=decision.model_dump(mode="json"),
@@ -626,6 +776,8 @@ class EvaluationService:
             state_delta_evidence=state_delta_evidence,
             # CT-PR-03b D4：facts 信封随同一条审计记录原子提交。
             ct_facts_evidence=(ct_plan.envelope if ct_plan is not None else None),
+            decision_authority_evidence=authority_evidence,
+            decision_authority=authority,
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
             audit_id=(phase_c_plan.audit_id if phase_c_plan is not None else None),
@@ -640,6 +792,8 @@ class EvaluationService:
             materials=materials,
             phase_b_outcome=phase_b_outcome,
             requesting_principal_id=requesting_principal_id,
+            selected_decision=decision,
+            decision_authority=authority,
         )
         return (
             GuardEvaluationResponse(
@@ -648,10 +802,140 @@ class EvaluationService:
                 policy_audit_id=audit_event.audit_id,
                 enforcement_binding=binding,
                 context_plan=committed_context_plan,
+                decision_authority=authority,
             ),
             audit_event,
             phase_c_plan,
         )
+
+    def _select_competition_authority(
+        self,
+        event: GuardEvent,
+        *,
+        materials: "V21PipelineMaterials",
+        outcome: "V21PhaseBOutcome",
+    ) -> V21SelectionResult | None:
+        activation = self.competition_activation
+        if activation is None:
+            return None
+        if self.v21_pipeline is None:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_OFFICIAL_PIPELINE_UNAVAILABLE"
+            )
+        raw_mode = self.v21_pipeline.mode
+        if raw_mode not in {"shadow", "limited_enable", "active"}:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_OFFICIAL_MODE_INVALID"
+            )
+        mode = cast(
+            Literal["shadow", "limited_enable", "active"],
+            raw_mode,
+        )
+        manifest = activation.manifest
+        auth = materials.auth_context
+        expected_binding = (
+            f"binding:{auth.principal_id}" if auth is not None else None
+        )
+        scope = materials.snapshot.scope if materials.snapshot is not None else None
+        scope_identity_valid = bool(
+            scope is None
+            or (
+                scope.principal_id == manifest.principal_id
+                and scope.runtime == manifest.runtime
+                and scope.runtime_binding_id == manifest.runtime_binding_id
+            )
+        )
+        trusted_identity_valid = bool(
+            auth is not None
+            and auth.principal_id == manifest.principal_id
+            and auth.runtime == manifest.runtime == event.runtime
+            and auth.agent_id == manifest.agent_id
+            and auth.agent_id == event.security_context.agent_id
+            and expected_binding == manifest.runtime_binding_id
+            and scope_identity_valid
+        )
+        action_ir = materials.action_ir
+        action_ir_consistent = bool(
+            materials.snapshot is None
+            or action_ir is None
+            or (
+                action_ir.event_id == event.event_id
+                and action_ir.action_id == materials.assessment.action_id
+                and action_ir.authorization_fingerprint
+                == materials.assessment.authorization_fingerprint
+                and action_ir.audit_fingerprint
+                == materials.assessment.audit_fingerprint
+                and action_ir.principal_id == manifest.principal_id
+                and action_ir.runtime_binding_id == manifest.runtime_binding_id
+                and action_ir.agent_id == manifest.agent_id
+            )
+        )
+        action_ir_complete = bool(
+            materials.snapshot is not None
+            and action_ir is not None
+            and action_ir_consistent
+        )
+        ownership_valid = bool(
+            trusted_identity_valid
+            and scope is not None
+            and scope.principal_id == manifest.principal_id
+            and scope.runtime == manifest.runtime
+            and scope.runtime_binding_id == manifest.runtime_binding_id
+            and (
+                action_ir is None
+                or (
+                    action_ir.principal_id == scope.principal_id
+                    and action_ir.scope_digest == scope.scope_digest
+                )
+            )
+        )
+        eligibility = V21SelectionEligibility(
+            activation_valid=True,
+            trusted_identity_valid=trusted_identity_valid,
+            profile_valid=(
+                manifest.profile_id == "competition-langgraph-v2"
+                and manifest.runtime == "langgraph"
+            ),
+            revalidation_valid=outcome.revalidation.status == "valid",
+            pipeline_complete=(
+                outcome.raw_v21_decision is not None
+                and materials.degraded_kind != "component_failure"
+                and action_ir_consistent
+            ),
+            ownership_valid=ownership_valid,
+            action_ir_complete=action_ir_complete,
+            task_fact_present=bool(
+                materials.task_id is not None and materials.snapshot is not None
+            ),
+            approval_binding_eligible=bool(
+                event.pre_execution is True
+                and event.event_type in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
+            ),
+        )
+        snapshot_id = (
+            materials.snapshot.snapshot_id
+            if materials.snapshot is not None
+            else ABSENT_SNAPSHOT_ID
+        )
+        try:
+            return select_v21_authority(
+                event_id=event.event_id,
+                current_decision=materials.decision,
+                raw_v21_decision=outcome.raw_v21_decision,
+                assessment=materials.assessment,
+                coverage=materials.coverage,
+                mode=mode,
+                activation=manifest,
+                eligibility=eligibility,
+                snapshot_id=snapshot_id,
+                state_version=(
+                    materials.state_version
+                    if materials.snapshot is not None
+                    else 0
+                ),
+            )
+        except V21AuthoritySelectionError as exc:
+            raise V21OfficialEvaluationUnavailableError(exc.code) from exc
 
     @staticmethod
     def _context_manifest_metadata(
@@ -753,6 +1037,35 @@ class EvaluationService:
         if raw_decision is None:
             raise EvaluationConflictError(audit.links.get("event_id", ""))
         decision = GuardDecision.model_validate(raw_decision)
+        authority: DecisionAuthority | None = None
+        evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
+        raw_authority_envelope = evidence.get("decision_authority")
+        raw_top_authority = (audit.model_extra or {}).get("decision_authority")
+        if raw_authority_envelope is not None or raw_top_authority is not None:
+            if raw_authority_envelope is None or raw_top_authority is None:
+                raise CriticalDecisionEvidenceError(
+                    "historical authority carrier is incomplete"
+                )
+            try:
+                authority = DecisionAuthority.model_validate(raw_top_authority)
+                raw_v21 = evidence.get("decision_v21")
+                if not isinstance(raw_v21, dict):
+                    raise ValueError("historical DecisionEvidenceV21 is absent")
+                self.audit_service._validate_decision_authority_commit(
+                    audit,
+                    expected_envelope={
+                        "decision_authority": raw_authority_envelope,
+                    },
+                    expected_decision=decision,
+                    expected_authority=authority,
+                    expected_v21_evidence={"decision_v21": raw_v21},
+                )
+            except CriticalDecisionEvidenceError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - immutable carrier boundary.
+                raise CriticalDecisionEvidenceError(
+                    "historical decision authority cannot be reconstructed"
+                ) from exc
         approval: ApprovalRequest | None = None
         approval_id = audit.links.get("approval_id")
         if approval_id:
@@ -764,11 +1077,25 @@ class EvaluationService:
             )
             if stored_binding is not None:
                 binding = self._public_binding(stored_binding)
+        if authority is not None and authority.source == "v21":
+            if authority.approval_release == "strong_binding_required" and (
+                approval is None or binding is None
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "historical reviewable V2 ASK lacks approval or binding"
+                )
+            if authority.approval_release == "forbidden" and (
+                approval is not None or binding is not None
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "historical unreleasable V2 ASK carries release authority"
+                )
         return GuardEvaluationResponse(
             decision=decision,
             approval=self._approval_summary(approval),
             policy_audit_id=audit.audit_id,
             enforcement_binding=binding,
+            decision_authority=authority,
         )
 
     def _save_enforcement_binding(
@@ -780,27 +1107,52 @@ class EvaluationService:
         materials: "V21PipelineMaterials",
         phase_b_outcome: "V21PhaseBOutcome | None",
         requesting_principal_id: str,
+        selected_decision: GuardDecision,
+        decision_authority: DecisionAuthority | None,
     ) -> EnforcementBinding | None:
         """Persist an eligible ASK ActionIR binding inside the evaluation txn."""
 
-        if not self.approval_service.settings.rte05_strong_binding_enabled:
+        approval_release = (
+            decision_authority.approval_release
+            if decision_authority is not None
+            and decision_authority.source == "v21"
+            else None
+        )
+        if approval_release == "forbidden":
+            if approval is not None:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_FORBIDDEN_ASK_CREATED_APPROVAL"
+                )
             return None
-        if (
+        binding_required = approval_release == "strong_binding_required"
+        if not self.approval_service.settings.rte05_strong_binding_enabled:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_DISABLED"
+                )
+            return None
+        eligible = not (
             approval is None
             or event.pre_execution is not True
             or event.event_type not in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
-            or materials.decision.decision != "ask"
+            or selected_decision.decision != "ask"
             or "allow_once" not in approval.decision_options
             or phase_b_outcome is None
             or phase_b_outcome.revalidation.status != "valid"
             or materials.snapshot is None
             or materials.scope_digest is None
             or materials.degraded_kind is not None
-            or bool(materials.assessment.degradations)
-        ):
+        )
+        if not eligible:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_MATERIALS_INVALID"
+                )
             return None
 
+        assert approval is not None
         assessment = materials.assessment
+        assert materials.snapshot is not None
         scope = materials.snapshot.scope
         agent_id = event.security_context.agent_id
         if (
@@ -816,6 +1168,10 @@ class EvaluationService:
             or not agent_id
             or agent_id != approval.agent_id
         ):
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_IDENTITY_MISMATCH"
+                )
             return None
 
         record = EnforcementBindingRecord(
@@ -838,7 +1194,26 @@ class EvaluationService:
         try:
             stored = self.audit_service.store.save_enforcement_binding(record)
         except EnforcementBindingConflictError:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_CONFLICT"
+                ) from None
             raise EvaluationConflictError(event.event_id) from None
+        except Exception as exc:  # noqa: BLE001 - official write must be atomic.
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_SAVE_FAILED"
+                ) from exc
+            raise
+        readback = self.audit_service.store.get_enforcement_binding(
+            approval.approval_id
+        )
+        if readback != stored:
+            if binding_required:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_STRONG_BINDING_READBACK_FAILED"
+                )
+            raise EvaluationConflictError(event.event_id)
         return self._public_binding(stored)
 
     @staticmethod

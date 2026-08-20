@@ -584,7 +584,7 @@ def test_same_event_authoritative_plan_drift_returns_http_409() -> None:
     settings = GuardApiSettings(
         storage_backend="memory",
         context_builder_enabled=True,
-        v21_shadow_enabled=False,
+        v21_mode="off",
         ct_fact_projection_enabled=False,
         task_scope_active_key_id="manifest-key",
         task_scope_keys=json.dumps({"manifest-key": scope_key}),

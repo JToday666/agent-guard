@@ -120,6 +120,10 @@
       />
 
       <PreEnableReportPanel v-if="hasRunData" :report="store.evaluationRun.preEnableReport" />
+      <CompetitionReportPanel
+        v-if="store.evaluationRun.competitionReport"
+        :report="store.evaluationRun.competitionReport"
+      />
 
       <section class="window-section section-divider" aria-labelledby="window-title">
         <header class="section-header">
@@ -332,6 +336,7 @@ import InlineNotice from "../components/common/InlineNotice.vue";
 import MetricStrip from "../components/common/MetricStrip.vue";
 import StatusBadge from "../components/common/StatusBadge.vue";
 import PreEnableReportPanel from "../components/evaluation/PreEnableReportPanel.vue";
+import CompetitionReportPanel from "../components/evaluation/CompetitionReportPanel.vue";
 import ErrorState from "../components/states/ErrorState.vue";
 import LoadingState from "../components/states/LoadingState.vue";
 import { useDashboardStore } from "../stores/dashboardStore";

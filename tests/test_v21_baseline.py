@@ -289,7 +289,7 @@ def test_build_pipeline_overhead_computes_pairwise_deltas() -> None:
 
     overhead = baseline.build_pipeline_overhead(off, v2108, v2109)
 
-    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["flag"] == "AGENTGUARD_V21_MODE"
     assert overhead["task_ref"] == "task_v2109_bench"
     assert set(overhead) >= {"v2108_vs_off", "v2109_vs_off", "v2109_vs_v2108"}
     assert overhead["v2108_vs_off"]["scenarios"]["scenario_a"]["delta_ns"] == {
@@ -374,7 +374,7 @@ def test_shadow_tri_smoke_writes_pipeline_overhead_report(tmp_path: Path) -> Non
     assert memory_result["shadow_enabled"] is False
     assert memory_result["task_ref"] == baseline.BENCHMARK_TASK_REF_ID
     overhead = report["pipeline_overhead"]
-    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["flag"] == "AGENTGUARD_V21_MODE"
     assert set(overhead) >= {"v2108_vs_off", "v2109_vs_off", "v2109_vs_v2108"}
     for comparison in (
         overhead["v2108_vs_off"],
@@ -431,7 +431,7 @@ def test_build_shadow_overhead_computes_nearest_rank_deltas() -> None:
 
     overhead = baseline.build_shadow_overhead(off, on)
 
-    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["flag"] == "AGENTGUARD_V21_MODE"
     assert overhead["scenarios"]["scenario_a"]["delta_ns"] == {
         "p50_ns": 50,
         "p95_ns": 60,
@@ -559,7 +559,7 @@ def test_shadow_both_smoke_writes_overhead_report(tmp_path: Path) -> None:
     assert report["performance"]["shadow_mode"] == "both"
     assert report["performance"]["guard_api"]["memory"]["shadow_enabled"] is False
     overhead = report["shadow_overhead"]
-    assert overhead["flag"] == "AGENTGUARD_V21_SHADOW_ENABLED"
+    assert overhead["flag"] == "AGENTGUARD_V21_MODE"
     assert overhead["scenarios"]
     for entry in overhead["scenarios"].values():
         assert set(entry["delta_ns"]) == {"p50_ns", "p95_ns", "p99_ns", "max_ns"}

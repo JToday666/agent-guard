@@ -300,7 +300,7 @@ def _settings(request: RunRequest, eligibility_digest: str) -> GuardApiSettings:
         control_token=_CONTROL_TOKEN,
         host="127.0.0.1",
         environment="test",
-        v21_shadow_enabled=True,
+        v21_mode="shadow",
         v21_shadow_server_secret=_V21_SECRET,
         ct_fact_projection_enabled=True,
         context_builder_enabled=True,

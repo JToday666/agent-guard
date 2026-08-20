@@ -22,7 +22,7 @@ defineOptions({ name: "InlineNotice" });
 const props = withDefaults(
   defineProps<{
     title?: string;
-    tone?: "neutral" | "success" | "warning" | "danger" | "protective";
+    tone?: "neutral" | "info" | "success" | "warning" | "danger" | "protective";
   }>(),
   {
     title: "",
@@ -92,6 +92,17 @@ const noticeIcon = computed(() => {
   min-height: 2.25rem;
   padding: 0 var(--space-3);
   text-decoration: none;
+}
+
+// info 变体复用主色（active）色系，与监督胶囊 --info 的取色口径保持一致。
+.inline-notice--info {
+  background: var(--color-active-soft);
+  border-color: var(--color-active-border);
+  border-left-color: var(--color-active);
+
+  .inline-notice__icon {
+    color: var(--color-active);
+  }
 }
 
 .inline-notice--success {

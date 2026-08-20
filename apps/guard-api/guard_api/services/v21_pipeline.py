@@ -1,4 +1,4 @@
-"""V21-09 四段式编排 pipeline（shadow-only，flag 默认关闭）。
+"""V21-09 四段式编排 pipeline（shadow-only，V2 mode 默认 off）。
 
 契约依据：``12_决策记录_V21-09前置.md`` D3（revoked 来源：online state
 record 同源同锁只读）、D4（四段式事务边界 / S8 消除）、D5（clock 正式化：
@@ -23,7 +23,7 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
   ``degraded_stale_judgment``，legacy 主链不受影响；
 - **Phase C（事务提交后投影）**：``run_phase_c`` —— Phase B audit
   commit 成功且事务退出后（02 §3 commit→project 时序：投影在事务
-  外），flag on 且 revalidation valid 时 scope_lock 内
+  外），V2 mode enabled 且 revalidation valid 时 scope_lock 内
   ensure_ready → base 校验 → ``project_committed``（verify 钩子复核
   审计记录存在性，F0-8）；delta 在 Phase B 以 materials 的
   state_version 为 base 确定性构造（信封 delta_digest 冻结时刻即真实，
@@ -37,7 +37,7 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
 与 ``v21_shadow.py``（V21-08 编排器）的关系（T2 处置裁决）：pipeline
 吸收四段式编排主路径；``V21ShadowService`` 保留为 Phase A 彻底失败
 （``run_phase_a`` 返回 None）时的逐字节降级回退路径——其降级信封形状
-与 V21-08 完全一致，flag off 时两者均零行为变化。
+与 V21-08 完全一致，V2 mode off 时两者均零行为变化。
 
 降级收敛范式（V21-08 既有）：全链路异常不外抛、绝不影响 legacy
 decision / approval / audit 主链；Phase A 不可恢复异常 → 返回 None
@@ -60,6 +60,7 @@ from agentguard_core import (
     PolicyBundle,
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.actions.models import ActionIR
 from agentguard_core.authority.models import EvaluationClock, SecurityStateScope
 from agentguard_core.decisions.evidence import (
     CoverageMap,
@@ -75,6 +76,7 @@ from agentguard_core.decisions.evidence_builder import (
 from agentguard_core.decisions.revalidation import (
     RevalidationResult,
     revalidate_assessment,
+    validate_semantic_binding,
 )
 from agentguard_core.decisions.results import DetectionResult
 from agentguard_core.decisions.shadow import (
@@ -93,6 +95,7 @@ from agentguard_core.security_context import (
 )
 
 from guard_api.security_state import SecurityStateService
+from guard_api.auth import AuthContext
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
@@ -117,6 +120,7 @@ __all__ = [
     "V21PhaseAPrepared",
     "V21PipelineMaterials",
     "V21PipelineService",
+    "V21OfficialEvaluationUnavailableError",
     "build_evaluation_delta",
 ]
 
@@ -151,6 +155,14 @@ _EVALUATION_SOURCE_REVISION = 1
 #: 只能由 V21-10 离线对账（audit 信封 × projection_records 差集）
 #: 承接；计数器供运维观测该窗口发生频率。
 PHASE_C_BASE_DRIFT_SKIPS: dict[str, int] = {"count": 0}
+
+
+class V21OfficialEvaluationUnavailableError(RuntimeError):
+    """An active competition evaluation could not produce trusted authority."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 def _pipeline_snapshot_plan() -> RequiredCheckPlan:
@@ -194,6 +206,7 @@ class V21PhaseAPrepared:
     task_id: str | None
     scope_digest: str | None
     degraded_kind: PhaseADegradedKind | None
+    auth_context: AuthContext | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +229,9 @@ class V21PipelineMaterials:
     revoked_grant_ids: list[str]
     assessment: FastAssessment
     coverage: CoverageMap
+    # Exact ActionIR consumed by Core.  It stays transient and is used by the
+    # competition selector to distinguish strongly-bindable from forbidden ASK.
+    action_ir: ActionIR | None
     clock: EvaluationClock
     task_id: str | None
     scope_digest: str | None
@@ -223,6 +239,11 @@ class V21PipelineMaterials:
     # Exact Core acknowledgement for Gate A. ``None`` forbids committing the
     # candidate CT bundle even when shadow safely converged to DEFER.
     consumed_overlay_digest: str | None
+    auth_context: AuthContext | None = None
+    # V21-13 Stage 1 shadow：Phase A 事务外 semantic judgment 产物
+    # （provider 缺席/门控未过/异常收敛时为 None）。只供 Phase B
+    # 证据/评测消费，绝不改变决策。
+    semantic_judgment: "SemanticJudgment | None" = None
 
 
 @dataclass(frozen=True)
@@ -234,8 +255,10 @@ class V21PhaseBOutcome:
     经 ``prepare_phase_c`` 产出 Phase C 投影计划与 state_delta_v21
     引用信封。
 
-    D11 finalize 确定性引用（仅 revalidate valid 且非降级路径产出；
-    stale/降级路径恒 None）：``final_decision_id`` =
+    D11 finalize 确定性产物（revalidate valid 时产出，包括预期 required-
+    state 缺态所形成的不可释放 ASK；stale 恒 None）：
+    ``raw_v21_decision`` 保存完整 ``GuardDecision``，既有
+    ``final_decision_id`` =
     ``derive_final_decision_id(assessment)``；``final_decision_digest``
     = finalize 产物 dump 的 canonical sha256。完整 GuardDecision 不落
     审计（shadow 期官方决策者恒 legacy，归 V21-11 再裁决）；引用经
@@ -245,8 +268,13 @@ class V21PhaseBOutcome:
     envelope: dict[str, Any]
     revalidation: RevalidationResult
     materials: V21PipelineMaterials
+    raw_v21_decision: GuardDecision | None = None
     final_decision_id: str | None = None
     final_decision_digest: str | None = None
+    # V21-13 Stage 1 shadow：Phase B 对 materials.semantic_judgment 的
+    # 五 digest binding 裁决结论（``validate_semantic_binding``）；
+    # judgment 缺席时恒 None。供审计 metadata 承载，避免重复计算。
+    semantic_binding_valid: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -330,9 +358,9 @@ def build_evaluation_delta(
 class V21PipelineService:
     """V21-09 四段式编排器（shadow-only；只读旁路，绝不外抛）。
 
-    构造即完成 flag / secret 解析（与 V21ShadowService 同一门控口径：
-    复用 ``AGENTGUARD_V21_SHADOW_ENABLED`` 与 server secret 配置）；
-    flag off 时 ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。
+    构造即完成 mode / secret 解析（与 V21ShadowService 同一门控口径：
+    复用 ``AGENTGUARD_V21_MODE`` 与 server secret 配置）；mode off 时
+    ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。
     """
 
     def __init__(
@@ -345,20 +373,27 @@ class V21PipelineService:
         semantic_provider: (
             Callable[[GuardEvent, FastAssessment], "SemanticJudgment | None"] | None
         ) = None,
+        memory_not_required_actions: frozenset[str] = frozenset(),
+        competition_model_output_observation: bool = False,
     ) -> None:
         self._store = store
         self._state_service = state_service
         self._policy_service = policy_service
-        # V21-13 预留钩子：位置在 assess 后、revalidate 前（天然事务外）。
-        # V21-09 恒 None，零开销。
+        # V21-13 Stage 1 shadow 钩子：位置在 assess 后、revalidate 前
+        # （天然事务外，03 §12）。provider 缺席时恒 None，零开销。
         self._semantic_provider = semantic_provider
-        self._enabled = bool(settings.v21_shadow_enabled)
+        self._memory_not_required_actions = memory_not_required_actions
+        self._competition_model_output_observation = (
+            competition_model_output_observation
+        )
+        self._mode = settings.effective_v21_mode()
+        self._enabled = self._mode != "off"
         self._server_secret = self._load_server_secret(settings)
 
     def _load_server_secret(self, settings: GuardApiSettings) -> bytes | None:
-        """flag on 时解析 server secret；未配置/非法 → pipeline 禁用。
+        """V2 mode enabled 时解析 server secret；未配置/非法 → pipeline 禁用。
 
-        与 V21ShadowService 同一口径：绝不硬编码兜底密钥；flag off 时
+        与 V21ShadowService 同一口径：绝不硬编码兜底密钥；mode off 时
         不读取任何密钥配置。
         """
 
@@ -383,13 +418,35 @@ class V21PipelineService:
     def enabled(self) -> bool:
         """flag 且 secret 均已就绪（调用方诊断/编排切换判定）。"""
 
-        return self._enabled and self._server_secret is not None
+        # Active mode must enter the pipeline even when a direct service caller
+        # bypasses startup validation; the phase boundary then raises a safe
+        # 503-mapped error instead of silently taking the current-decision path.
+        return self._enabled and (
+            self._server_secret is not None or self._mode == "active"
+        )
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def active(self) -> bool:
+        return self._mode == "active"
+
+    def _raise_if_active(self, code: str, exc: Exception) -> None:
+        if self.active:
+            raise V21OfficialEvaluationUnavailableError(code) from exc
 
     # ------------------------------------------------------------------
     # Phase A：事务外只读
     # ------------------------------------------------------------------
 
-    def run_phase_a(self, event: GuardEvent) -> V21PipelineMaterials | None:
+    def run_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PipelineMaterials | None:
         """Phase A（D4：evaluation_transaction **之前**执行）。
 
         返回 None 的语义：flag/secret 门控未就绪，或 Phase A 不可恢复
@@ -400,8 +457,9 @@ class V21PipelineService:
         if not self.enabled:
             return None
         try:
-            return self._run_phase_a(event)
-        except Exception:  # noqa: BLE001 - 旁路故障必须收敛，绝不上抛。
+            return self._run_phase_a(event, auth_context=auth_context)
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_A_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase A failed for event %s; falling back "
                 "to V21-08 shadow path",
@@ -410,11 +468,21 @@ class V21PipelineService:
             )
             return None
 
-    def _run_phase_a(self, event: GuardEvent) -> V21PipelineMaterials | None:
-        prepared = self._prepare_phase_a(event)
+    def _run_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PipelineMaterials | None:
+        prepared = self._prepare_phase_a(event, auth_context=auth_context)
         return self._finish_phase_a(event, prepared, transient_facts=None)
 
-    def prepare_phase_a(self, event: GuardEvent) -> V21PhaseAPrepared | None:
+    def prepare_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PhaseAPrepared | None:
         """读取 legacy/policy/Snapshot，但暂不执行 shadow assessment。
 
         Gate A 生产编排使用这个边界在同一历史 Snapshot 上构造当前事件
@@ -424,8 +492,9 @@ class V21PipelineService:
         if not self.enabled:
             return None
         try:
-            return self._prepare_phase_a(event)
-        except Exception:  # noqa: BLE001 - shadow 旁路不得影响 legacy。
+            return self._prepare_phase_a(event, auth_context=auth_context)
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_A_PREPARE_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase A preparation failed for event %s; "
                 "falling back to V21-08 shadow path",
@@ -440,6 +509,7 @@ class V21PipelineService:
         prepared: V21PhaseAPrepared,
         *,
         transient_facts: "AssessmentTransientFacts | None" = None,
+        auth_context: AuthContext | None = None,
     ) -> V21PipelineMaterials | None:
         """以历史 Snapshot + 当前 transient overlay 完成 shadow assessment。"""
 
@@ -450,8 +520,10 @@ class V21PipelineService:
                 event,
                 prepared,
                 transient_facts=transient_facts,
+                auth_context=auth_context,
             )
-        except Exception:  # noqa: BLE001 - shadow 旁路不得影响 legacy。
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_A_ASSESS_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase A assessment failed for event %s; "
                 "falling back to V21-08 shadow path",
@@ -460,7 +532,12 @@ class V21PipelineService:
             )
             return None
 
-    def _prepare_phase_a(self, event: GuardEvent) -> V21PhaseAPrepared:
+    def _prepare_phase_a(
+        self,
+        event: GuardEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> V21PhaseAPrepared:
         assert self._server_secret is not None
 
         # 策略解析与 legacy 单跑（detection 不双跑：decision 与
@@ -481,7 +558,11 @@ class V21PipelineService:
 
         try:
             resolved = self._resolve_snapshot_v(event, bundle, clock, policy_revision)
-        except Exception:  # noqa: BLE001 - snapshot 读取失败 → 组件降级。
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            if self.active:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_OFFICIAL_SNAPSHOT_READ_FAILED"
+                ) from exc
             logger.warning(
                 "v21 pipeline phase A snapshot read failed for event %s",
                 event.event_id,
@@ -500,6 +581,7 @@ class V21PipelineService:
                 task_id=_task_claim(event),
                 scope_digest=None,
                 degraded_kind="component_failure",
+                auth_context=auth_context,
             )
 
         snapshot, revoked_grant_ids, task_id, scope_digest = resolved
@@ -516,6 +598,7 @@ class V21PipelineService:
             task_id=task_id,
             scope_digest=scope_digest,
             degraded_kind=(None if snapshot is not None else "snapshot_absent"),
+            auth_context=auth_context,
         )
 
     def _finish_phase_a(
@@ -524,10 +607,13 @@ class V21PipelineService:
         prepared: V21PhaseAPrepared,
         *,
         transient_facts: "AssessmentTransientFacts | None",
+        auth_context: AuthContext | None = None,
     ) -> V21PipelineMaterials:
         assert self._server_secret is not None
         if prepared.event_id != event.event_id:
             raise ValueError("phase A prepared materials do not match event_id")
+        if auth_context is not None and prepared.auth_context != auth_context:
+            raise ValueError("phase A AuthContext changed between prepare and finish")
 
         assess_kwargs: dict[str, Any] = {
             "server_secret": self._server_secret,
@@ -540,6 +626,23 @@ class V21PipelineService:
         # overlay exercises the exact pre-Gate-A Core path.
         if transient_facts is not None:
             assess_kwargs["transient_facts"] = transient_facts
+        if self._memory_not_required_actions:
+            assess_kwargs["memory_not_required_actions"] = (
+                self._memory_not_required_actions
+            )
+        if (
+            self._competition_model_output_observation
+            and self.active
+            and event.event_type == "model_output_produced"
+        ):
+            # Competition-only contract B: model output is an inbound
+            # observation, not a new outbound action. Detectors, signals and
+            # taint still run. Source/dataflow are N/A for this already
+            # server-attested event; memory remains governed by its independent
+            # persistence/resource/lineage safeguards.
+            assess_kwargs["source_dataflow_not_required_actions"] = frozenset(
+                {"model_call"}
+            )
         outcome = shadow_assess_with_coverage(
             event,
             prepared.bundle,
@@ -552,10 +655,22 @@ class V21PipelineService:
                 assessment,
                 reason_code=REASON_SNAPSHOT_READ_FAILED,
             )
+        semantic_judgment: "SemanticJudgment | None" = None
         if self._semantic_provider is not None and prepared.snapshot is not None:
-            # V21-09 恒 None 分支；钩子在 assess 后 revalidate 前，
-            # 天然事务外（03 §12）。产物 V21-09 不消费，仅预留。
-            self._semantic_provider(event, assessment)
+            # V21-13 Stage 1 shadow：钩子在 assess 后 revalidate 前，
+            # 天然事务外（03 §12）。产物只供证据/评测消费，绝不改变
+            # 决策；provider 异常一律收敛为 None（fail-closed，shadow
+            # 旁路不影响 Phase A 主链）。
+            try:
+                semantic_judgment = self._semantic_provider(event, assessment)
+            except Exception:  # noqa: BLE001 - shadow boundary never raises.
+                logger.warning(
+                    "v21-13 semantic provider raised for event %s; "
+                    "judgment discarded (fail-closed)",
+                    event.event_id,
+                    exc_info=True,
+                )
+                semantic_judgment = None
         return V21PipelineMaterials(
             event_id=prepared.event_id,
             bundle=prepared.bundle,
@@ -567,11 +682,14 @@ class V21PipelineService:
             revoked_grant_ids=list(prepared.revoked_grant_ids),
             assessment=assessment,
             coverage=outcome.coverage,
+            action_ir=outcome.action_ir,
             clock=prepared.clock,
             task_id=prepared.task_id,
             scope_digest=prepared.scope_digest,
             degraded_kind=prepared.degraded_kind,
             consumed_overlay_digest=outcome.consumed_overlay_digest,
+            auth_context=prepared.auth_context,
+            semantic_judgment=semantic_judgment,
         )
 
     def _resolve_snapshot_v(
@@ -635,7 +753,8 @@ class V21PipelineService:
 
         try:
             return self._build_phase_b(event, materials)
-        except Exception:  # noqa: BLE001 - 旁路故障必须收敛，绝不上抛。
+        except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
+            self._raise_if_active("V21_OFFICIAL_PHASE_B_FAILED", exc)
             logger.warning(
                 "v21 pipeline phase B failed for event %s; v21 evidence "
                 "omitted, legacy chain unaffected",
@@ -658,10 +777,17 @@ class V21PipelineService:
                 state_version=0,
                 coverage=materials.coverage,
             )
+            raw_v21_decision = GuardEngine().finalize(materials.assessment)
+            raw_v21_decision_digest = canonical_sha256(
+                raw_v21_decision.model_dump(mode="json")
+            )
             return V21PhaseBOutcome(
                 envelope=decision_evidence_v21_envelope(evidence),
                 revalidation=RevalidationResult(status="valid"),
                 materials=materials,
+                raw_v21_decision=raw_v21_decision,
+                final_decision_id=raw_v21_decision.decision_id,
+                final_decision_digest=raw_v21_decision_digest,
             )
 
         assert materials.scope_digest is not None
@@ -702,6 +828,31 @@ class V21PipelineService:
         stale_codes = (
             list(revalidation.reason_codes) if revalidation.status == "stale" else []
         )
+        # V21-13 Stage 1 shadow 双门禁（fail-closed）：judgment 在场时
+        # 先经 core 纯函数 ``validate_semantic_binding`` 五 digest 比对
+        # （reference_time 取 materials.clock.evaluated_at——权威时钟
+        # 锚点，禁 wall-clock）；仅当 binding 有效且 revalidation valid
+        # 时才把 judgment 身份/摘要填进证据槽（03 §14：binding
+        # invalid/stale → 保守 ASK，证据面同样不登记）。
+        semantic_binding_valid: bool | None = None
+        semantic_for_evidence: "SemanticJudgment | None" = None
+        if materials.semantic_judgment is not None:
+            semantic_binding_valid = validate_semantic_binding(
+                materials.assessment,
+                materials.semantic_judgment,
+                reference_time=materials.clock.evaluated_at,
+            )
+            if semantic_binding_valid and revalidation.status == "valid":
+                semantic_for_evidence = materials.semantic_judgment
+            else:
+                logger.info(
+                    "v21-13 semantic judgment not consumed for event %s "
+                    "(binding_valid=%s, revalidation=%s); shadow evidence "
+                    "slots stay empty (fail-closed)",
+                    event.event_id,
+                    semantic_binding_valid,
+                    revalidation.status,
+                )
         evidence = build_decision_evidence_v21(
             materials.assessment,
             legacy_decision=materials.decision.decision,
@@ -709,7 +860,9 @@ class V21PipelineService:
             state_version=materials.state_version,
             coverage=materials.coverage,
             revalidation_stale_reason_codes=stale_codes,
+            semantic=semantic_for_evidence,
         )
+        raw_v21_decision: GuardDecision | None = None
         final_decision_id: str | None = None
         final_decision_digest: str | None = None
         if revalidation.status == "valid":
@@ -718,17 +871,19 @@ class V21PipelineService:
             # （GuardEngine.finalize 内部同口径，禁 uuid）；产物以
             # 确定性引用留存审计 metadata，完整 GuardDecision 不落
             # 审计。stale/降级路径不产引用（恒 None）。
-            final_decision = GuardEngine().finalize(materials.assessment)
-            final_decision_id = final_decision.decision_id
+            raw_v21_decision = GuardEngine().finalize(materials.assessment)
+            final_decision_id = raw_v21_decision.decision_id
             final_decision_digest = canonical_sha256(
-                final_decision.model_dump(mode="json")
+                raw_v21_decision.model_dump(mode="json")
             )
         return V21PhaseBOutcome(
             envelope=decision_evidence_v21_envelope(evidence),
             revalidation=revalidation,
             materials=materials,
+            raw_v21_decision=raw_v21_decision,
             final_decision_id=final_decision_id,
             final_decision_digest=final_decision_digest,
+            semantic_binding_valid=semantic_binding_valid,
         )
 
     # ------------------------------------------------------------------
@@ -882,7 +1037,7 @@ class V21PipelineService:
 
         判定口径：审计 evidence 存在 ``state_delta_v21`` 信封即“当时
         revalidation valid 且 scope 在场”的直接标志（信封仅在
-        ``prepare_phase_c`` 成功时写入）；无信封（flag off 存量 /
+        ``prepare_phase_c`` 成功时写入）；无信封（mode off 存量 /
         降级 / stale）→ 不补。补投影材料全部自审计记录重建（不重
         算）：``metadata.task_id`` → 权威 active TaskFact →
         scope_digest；``decision_v21`` payload 的 state_version →
@@ -907,7 +1062,7 @@ class V21PipelineService:
         evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
         delta_envelope = evidence.get("state_delta_v21")
         if not isinstance(delta_envelope, dict):
-            # 无信封：当时未产生投影计划（flag off / 降级 / stale），
+            # 无信封：当时未产生投影计划（mode off / 降级 / stale），
             # 无补投影可做，静默返回。
             return
         reference = delta_envelope.get("payload")
