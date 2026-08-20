@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -20,6 +21,11 @@ CANONICAL_INPUT_SCHEMA_VERSION = "canonical-planner-input/1.0"
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+# Retry policy for transient provider failures.  Only outcomes in
+# ``_RETRYABLE_OUTCOMES`` are retried; protocol errors fail fast.
+_RETRY_BACKOFF_BASE_SECONDS = 1.0
+_RETRY_BACKOFF_CAP_SECONDS = 30.0
 
 
 class ModelExchangeError(ValueError):
@@ -170,6 +176,10 @@ class CanonicalInputDigests:
 class ModelExchangeInvocationError(RuntimeError):
     """A real invocation failed; the display-safe attempt evidence is retained."""
 
+    #: Evidence of every attempt made for this logical exchange.  Empty when
+    #: the caller ran with ``max_retries=0`` (the legacy single-attempt path).
+    attempt_evidence: tuple["ModelExchangeEvidence", ...] = ()
+
     def __init__(self, evidence: ModelExchangeEvidence) -> None:
         super().__init__(f"model invocation failed: {evidence.outcome.value}")
         self.evidence = evidence
@@ -220,12 +230,143 @@ def invoke_with_model_exchange(
     retry_count: int = 0,
     prior_exchange_digest: str | None = None,
     invoke: Callable[[Any, Sequence[Any]], Any] | None = None,
+    max_retries: int = 0,
+    retry_sleep: Callable[[float], Any] | None = None,
+    retry_rng: random.Random | None = None,
 ) -> tuple[Any, ModelExchangeEvidence]:
     """Invoke an OpenAI-compatible model and bind success to hashed request data.
 
     The caller supplies an already configured/bound ChatOpenAI-compatible object.
     Only digests, counts and controlled identifiers leave this function.
+
+    ``max_retries=0`` (the default and the serial competition contract)
+    executes exactly one attempt and is behaviourally identical to the
+    pre-retry implementation.  A positive budget retries only transient
+    failures (429 / 5xx-style timeouts, rate limits and transport errors)
+    with exponential backoff plus jitter; every attempt emits its own
+    display-safe evidence with a distinct ``attempt_index``.
     """
+
+    if isinstance(max_retries, bool) or not isinstance(max_retries, int):
+        raise ModelExchangeError("max_retries must be an integer")
+    if max_retries < 0:
+        raise ModelExchangeError("max_retries must be non-negative")
+    if max_retries == 0:
+        return _invoke_attempt(
+            invoker,
+            model_input=model_input,
+            sources=sources,
+            tool_schemas=tool_schemas,
+            authority_binding=authority_binding,
+            case_id=case_id,
+            arm_id=arm_id,
+            repeat_index=repeat_index,
+            round_index=round_index,
+            provider_id=provider_id,
+            model=model,
+            base_url=base_url,
+            context_mode=context_mode,
+            context_plan_digest=context_plan_digest,
+            transform_applied=transform_applied,
+            attempt_index=attempt_index,
+            retry_count=retry_count,
+            prior_exchange_digest=prior_exchange_digest,
+            invoke=invoke,
+        )
+
+    sleep = retry_sleep if retry_sleep is not None else time.sleep
+    rng = retry_rng if retry_rng is not None else _SHARED_RETRY_RNG
+    attempt_evidence: list[ModelExchangeEvidence] = []
+    total_attempts = 1 + max_retries
+    for number in range(total_attempts):
+        try:
+            return _invoke_attempt(
+                invoker,
+                model_input=model_input,
+                sources=sources,
+                tool_schemas=tool_schemas,
+                authority_binding=authority_binding,
+                case_id=case_id,
+                arm_id=arm_id,
+                repeat_index=repeat_index,
+                round_index=round_index,
+                provider_id=provider_id,
+                model=model,
+                base_url=base_url,
+                context_mode=context_mode,
+                context_plan_digest=context_plan_digest,
+                transform_applied=transform_applied,
+                attempt_index=attempt_index + number,
+                retry_count=retry_count + number,
+                prior_exchange_digest=prior_exchange_digest,
+                invoke=invoke,
+            )
+        except ModelExchangeInvocationError as exc:
+            attempt_evidence.append(exc.evidence)
+            exhausted = number == total_attempts - 1
+            transient = exc.evidence.outcome in _RETRYABLE_OUTCOMES
+            if exhausted or not transient:
+                exc.attempt_evidence = tuple(attempt_evidence)
+                raise
+            sleep(retry_backoff_seconds(number, rng=rng))
+    raise AssertionError("unreachable retry loop exit")  # pragma: no cover
+
+
+def retry_backoff_seconds(
+    retry_number: int,
+    *,
+    rng: random.Random | None = None,
+    base: float = _RETRY_BACKOFF_BASE_SECONDS,
+    cap: float = _RETRY_BACKOFF_CAP_SECONDS,
+) -> float:
+    """Exponential backoff with equal-ratio jitter for retry ``retry_number``.
+
+    The deterministic bound for the k-th retry (0-based) is
+    ``[min(cap, base * 2**k) / 2, min(cap, base * 2**k)]``.
+    """
+
+    if retry_number < 0:
+        raise ModelExchangeError("retry_number must be non-negative")
+    if base <= 0 or cap <= 0:
+        raise ModelExchangeError("retry backoff base and cap must be positive")
+    selected = rng if rng is not None else _SHARED_RETRY_RNG
+    delay = min(cap, base * (2**retry_number))
+    return selected.uniform(delay / 2.0, delay)
+
+
+_RETRYABLE_OUTCOMES = frozenset(
+    {
+        ModelExchangeOutcome.TIMEOUT,
+        ModelExchangeOutcome.RATE_LIMITED,
+        ModelExchangeOutcome.TRANSPORT_ERROR,
+    }
+)
+_SHARED_RETRY_RNG = random.Random()
+
+
+def _invoke_attempt(
+    invoker: Any,
+    *,
+    model_input: Sequence[Any],
+    sources: Sequence[Any],
+    tool_schemas: Sequence[Any],
+    authority_binding: Mapping[str, Any] | None,
+    case_id: str,
+    arm_id: str,
+    repeat_index: int,
+    round_index: int,
+    provider_id: str,
+    model: str,
+    base_url: str,
+    context_mode: str,
+    context_plan_digest: str | None,
+    transform_applied: bool,
+    attempt_index: int,
+    retry_count: int,
+    prior_exchange_digest: str | None,
+    invoke: Callable[[Any, Sequence[Any]], Any] | None,
+) -> tuple[Any, ModelExchangeEvidence]:
+    """Execute exactly one provider attempt and emit its evidence."""
 
     endpoint = normalize_openai_base_url(base_url)
     digests = build_canonical_input_digests(

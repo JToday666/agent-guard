@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import math
 from ipaddress import ip_address
 import json
 import re
@@ -73,6 +74,10 @@ _PROVIDER_PREFLIGHT_TOOL = "agentguard_competition_probe"
 _LIVE_SMOKE_ARM_ID = "A4"
 _LIVE_SMOKE_CASE_ID = "BN-001"
 _LIVE_SMOKE_TOOL = "read_file"
+_PARALLEL_STREAMS_MAX = 7
+_WORKER_PORT_BASE_DEFAULT = 19080
+_STREAM_PORT_STRIDE = 10
+_WORKER_PORT_BASE_MAX = 65535 - (_STREAM_PORT_STRIDE * _PARALLEL_STREAMS_MAX + 7)
 _DASHBOARD_COMPETITION_REPORT_KEYS = (
     "schema_version",
     "profile_id",
@@ -227,6 +232,9 @@ class RunRequest:
     value_sources: Mapping[str, str]
     selected_case_ids: tuple[str, ...] = ()
     variant: ExperimentVariant | None = None
+    parallel_streams: int = 1
+    worker_port_base: int = _WORKER_PORT_BASE_DEFAULT
+    provider_rate_limit: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,6 +449,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--detector-mode",
         choices=[mode.value for mode in DetectorMode],
     )
+    run_parser.add_argument(
+        "--parallel-streams",
+        type=int,
+        default=None,
+        help=(
+            "run the corpus as N parallel attack-type streams "
+            f"(1..{_PARALLEL_STREAMS_MAX}); 1 keeps the serial matrix"
+        ),
+    )
+    run_parser.add_argument(
+        "--worker-port-base",
+        type=int,
+        default=None,
+        help=f"loopback port base for parallel stream workers "
+        f"(default {_WORKER_PORT_BASE_DEFAULT})",
+    )
+    run_parser.add_argument(
+        "--provider-rate-limit",
+        type=float,
+        default=None,
+        help="accepted and recorded provider RPS ceiling; enforcement lands later",
+    )
     return parser
 
 
@@ -469,6 +499,9 @@ def resolve_run_request(
         "context_mode": "suite_default",
         "rte_mode": "suite_default",
         "detector_mode": "suite_default",
+        "parallel_streams": "default",
+        "worker_port_base": "default",
+        "provider_rate_limit": "default",
     }
 
     planner_values = profile.planner.public_dump()
@@ -569,6 +602,56 @@ def resolve_run_request(
             value_sources[key] = "cli"
             explicit_variant = True
 
+    parallel_values: dict[str, Any] = {
+        "parallel_streams": config.get("parallel_streams", 1),
+        "worker_port_base": config.get("worker_port_base", _WORKER_PORT_BASE_DEFAULT),
+        "provider_rate_limit": config.get("provider_rate_limit"),
+    }
+    for key in tuple(parallel_values):
+        if key in config:
+            value_sources[key] = "json_config"
+    for key, cli_value in (
+        ("parallel_streams", args.parallel_streams),
+        ("worker_port_base", args.worker_port_base),
+        ("provider_rate_limit", args.provider_rate_limit),
+    ):
+        if cli_value is not None:
+            parallel_values[key] = cli_value
+            value_sources[key] = "cli"
+    try:
+        parallel_streams = _strict_int(
+            parallel_values["parallel_streams"], "parallel_streams"
+        )
+        worker_port_base = _strict_int(
+            parallel_values["worker_port_base"], "worker_port_base"
+        )
+    except CompetitionConfigurationError as exc:
+        raise InvalidCompetitionRun("configuration_invalid", str(exc)) from exc
+    if not 1 <= parallel_streams <= _PARALLEL_STREAMS_MAX:
+        raise InvalidCompetitionRun(
+            "configuration_invalid",
+            f"parallel_streams must be between 1 and {_PARALLEL_STREAMS_MAX}",
+        )
+    if not 1 <= worker_port_base <= _WORKER_PORT_BASE_MAX:
+        raise InvalidCompetitionRun(
+            "configuration_invalid",
+            "worker_port_base must leave room for every stream's port table",
+        )
+    provider_rate_limit = parallel_values["provider_rate_limit"]
+    if provider_rate_limit is not None:
+        if isinstance(provider_rate_limit, bool) or not isinstance(
+            provider_rate_limit, (int, float)
+        ):
+            raise InvalidCompetitionRun(
+                "configuration_invalid", "provider_rate_limit must be a number"
+            )
+        provider_rate_limit = float(provider_rate_limit)
+        if not math.isfinite(provider_rate_limit) or provider_rate_limit <= 0:
+            raise InvalidCompetitionRun(
+                "configuration_invalid",
+                "provider_rate_limit must be a positive finite number",
+            )
+
     try:
         repeats = _strict_int(scalar_values["repeats"], "repeats")
         seed = _strict_int(scalar_values["seed"], "seed")
@@ -582,10 +665,11 @@ def resolve_run_request(
                 "variant_not_allowed_for_suite",
                 "matrix/product use the frozen A0-A4 axes; overrides are only valid for contracts/demo",
             )
-        if not full_corpus or selected_case_ids:
+        if not full_corpus:
             raise InvalidCompetitionRun(
                 "full_corpus_required",
-                "matrix/product require the exact frozen 70-case corpus",
+                "matrix/product require the frozen case corpus "
+                "(use --case-id for a subset group run)",
             )
         if repeats != 1:
             raise InvalidCompetitionRun(
@@ -615,6 +699,18 @@ def resolve_run_request(
         except (CompetitionConfigurationError, ValueError) as exc:
             raise InvalidCompetitionRun("configuration_invalid", str(exc)) from exc
 
+    if parallel_streams > 1:
+        if variant is not None:
+            raise InvalidCompetitionRun(
+                "parallel_streams_require_frozen_roster",
+                "parallel streams require the frozen A0-A4 roster, not a variant",
+            )
+        if repeats != 1:
+            raise InvalidCompetitionRun(
+                "parallel_streams_single_repeat_only",
+                "parallel streams support exactly one matrix repeat",
+            )
+
     try:
         normalized_base_url = normalize_openai_base_url(
             str(planner_values.get("base_url") or "")
@@ -633,6 +729,9 @@ def resolve_run_request(
                 planner_values["max_tool_rounds"], "max_tool_rounds"
             ),
             fallback_allowed=bool(planner_values["fallback_allowed"]),
+            # Parallel streams may carry a bounded retry budget (task #4);
+            # serial runs keep the frozen zero-retry observability rule.
+            parallel_retry_allowed=parallel_streams > 1,
         )
         if not planner.model:
             raise CompetitionConfigurationError("planner model is required")
@@ -670,6 +769,9 @@ def resolve_run_request(
         value_sources=value_sources,
         selected_case_ids=selected_case_ids,
         variant=variant,
+        parallel_streams=parallel_streams,
+        worker_port_base=worker_port_base,
+        provider_rate_limit=provider_rate_limit,
     )
 
 
@@ -689,6 +791,11 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
     qualification_eligible = live_executor and _qualification_eligible(
         request, cases, arms
     )
+    parallel_mode = request.parallel_streams > 1
+    # Parallel streams rewrite frozen cases per loopback port table, so their
+    # rows can never support the frozen single-stream qualification claim.
+    if parallel_mode:
+        qualification_eligible = False
     selected_executor = executor or _live_executor
     artifacts = ArtifactDirectory(
         request.artifacts,
@@ -699,8 +806,14 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
     all_rows: list[dict[str, Any]] = []
     contract_failures: list[dict[str, str]] = []
     runtime_fixture_observations: list[dict[str, Any]] = []
+    stream_failures: list[dict[str, Any]] = []
     expected_fixture_observations = request.profile.repeats * len(arms)
     try:
+        parallel_plan = (
+            _build_parallel_plan(request, cases=cases, arms=arms, artifacts=artifacts)
+            if parallel_mode
+            else None
+        )
         artifacts.write_json("profile.json", request.profile.public_dump())
         artifacts.write_json(
             "effective-config.json",
@@ -712,6 +825,9 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
                 "provider": request.provider.public_dump(),
                 "selected_case_ids": list(request.selected_case_ids),
                 "variant": request.variant.public_dump() if request.variant else None,
+                "parallel_streams": request.parallel_streams,
+                "worker_port_base": request.worker_port_base,
+                "provider_rate_limit": request.provider_rate_limit,
             },
         )
         artifacts.write_json(
@@ -724,7 +840,10 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
             ),
         )
         artifacts.write_json("arms.json", [arm.public_dump() for arm in arms])
-        artifacts.write_json("schedule.json", _schedule(request, cases, arms))
+        schedule = _schedule(request, cases, arms)
+        if parallel_plan is not None:
+            schedule["parallelism"] = _parallel_schedule_payload(request, parallel_plan)
+        artifacts.write_json("schedule.json", schedule)
         artifacts.write_json(
             "runtime-fixtures.json",
             _runtime_fixture_artifact(
@@ -735,58 +854,75 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
             ),
         )
 
-        for repeat_index in range(request.profile.repeats):
-            for arm in arms:
-                relative_root = f"arms/{arm.arm_id}/repeat-{repeat_index + 1}"
-                arm_request = ArmRunRequest(
-                    profile=request.profile,
-                    arm=arm,
-                    repeat_index=repeat_index,
-                    seed=request.profile.seed + repeat_index,
-                    cases=cases,
-                    provider=request.provider,
-                    artifact_directory=artifacts.root / relative_root,
-                    suite=request.profile.suite,
-                    qualification_eligible=qualification_eligible,
-                )
-                try:
-                    result = selected_executor(arm_request)
-                except InvalidCompetitionRun:
-                    raise
-                except Exception as exc:
-                    raise InvalidCompetitionRun(
-                        "arm_executor_failed",
-                        "competition arm executor failed",
-                    ) from exc
-                fixture_observation = _runtime_fixture_observation(
-                    result.contracts,
-                    request=arm_request,
-                    required=live_executor,
-                )
-                if fixture_observation is not None:
-                    runtime_fixture_observations.append(fixture_observation)
-                    artifacts.write_json(
-                        "runtime-fixtures.json",
-                        _runtime_fixture_artifact(
-                            request.profile,
-                            observations=runtime_fixture_observations,
-                            expected_observations=expected_fixture_observations,
-                            status="collecting",
-                        ),
+        if parallel_plan is None:
+            for repeat_index in range(request.profile.repeats):
+                for arm in arms:
+                    relative_root = f"arms/{arm.arm_id}/repeat-{repeat_index + 1}"
+                    arm_request = ArmRunRequest(
+                        profile=request.profile,
+                        arm=arm,
+                        repeat_index=repeat_index,
+                        seed=request.profile.seed + repeat_index,
+                        cases=cases,
+                        provider=request.provider,
+                        artifact_directory=artifacts.root / relative_root,
+                        suite=request.profile.suite,
+                        qualification_eligible=qualification_eligible,
                     )
-                rows, failures = _admit_arm_result(
-                    result,
-                    request=arm_request,
-                )
-                all_rows.extend(rows)
-                contract_failures.extend(failures)
-                _write_arm_artifacts(
-                    artifacts,
-                    relative_root=relative_root,
-                    request=arm_request,
-                    rows=rows,
-                    contracts=result.contracts,
-                )
+                    try:
+                        result = selected_executor(arm_request)
+                    except InvalidCompetitionRun:
+                        raise
+                    except Exception as exc:
+                        raise InvalidCompetitionRun(
+                            "arm_executor_failed",
+                            "competition arm executor failed",
+                        ) from exc
+                    fixture_observation = _runtime_fixture_observation(
+                        result.contracts,
+                        request=arm_request,
+                        required=live_executor,
+                    )
+                    if fixture_observation is not None:
+                        runtime_fixture_observations.append(fixture_observation)
+                        artifacts.write_json(
+                            "runtime-fixtures.json",
+                            _runtime_fixture_artifact(
+                                request.profile,
+                                observations=runtime_fixture_observations,
+                                expected_observations=expected_fixture_observations,
+                                status="collecting",
+                            ),
+                        )
+                    rows, failures = _admit_arm_result(
+                        result,
+                        request=arm_request,
+                    )
+                    all_rows.extend(rows)
+                    contract_failures.extend(failures)
+                    _write_arm_artifacts(
+                        artifacts,
+                        relative_root=relative_root,
+                        request=arm_request,
+                        rows=rows,
+                        contracts=result.contracts,
+                    )
+        if parallel_plan is not None:
+            (
+                all_rows,
+                contract_failures,
+                runtime_fixture_observations,
+                stream_failures,
+            ) = _execute_parallel_matrix(
+                request,
+                cases=cases,
+                arms=arms,
+                plan=parallel_plan,
+                artifacts=artifacts,
+                qualification_eligible=qualification_eligible,
+                executor=executor,
+                live_executor=live_executor,
+            )
 
         artifacts.write_json(
             "runtime-fixtures.json",
@@ -795,6 +931,7 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
                 observations=runtime_fixture_observations,
                 expected_observations=expected_fixture_observations,
                 required=live_executor,
+                digest_relaxed=parallel_mode,
             ),
         )
         completeness = _validate_matrix(
@@ -804,6 +941,8 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
             all_rows,
             qualification_eligible=qualification_eligible,
         )
+        if parallel_mode:
+            completeness["runtime_fixture_digest_relaxed"] = True
         expected_case_runs = _expected_case_runs(request)
         if len(all_rows) != expected_case_runs:
             raise InvalidCompetitionRun(
@@ -816,6 +955,10 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
             else ExitCode.PASSED
         )
         status = "functional_contract_failed" if contract_failures else "passed"
+        if stream_failures:
+            # Partial data: force non-qualification and record failures.
+            qualification_eligible = False
+            artifacts.write_json("stream-failures.json", stream_failures)
         artifacts.write_json("completeness.json", completeness)
         artifacts.write_json(
             "contract-results.json",
@@ -845,6 +988,9 @@ def run(request: RunRequest, *, executor: ArmExecutor | None = None) -> ExitCode
                 exit_code is ExitCode.PASSED and qualification_eligible
             ),
         )
+        if stream_failures:
+            report["stream_failures"] = stream_failures
+            report["competition_qualified"] = False
         artifacts.write_json("observational-metrics.json", report["arms"])
         artifacts.write_json("result.json", report)
         _write_dashboard_evaluation_run(
@@ -931,6 +1077,9 @@ def _load_run_config(path: Path | None) -> dict[str, Any]:
         "detector_mode",
         "repeats",
         "seed",
+        "parallel_streams",
+        "worker_port_base",
+        "provider_rate_limit",
     }
     unknown = sorted(set(raw) - allowed)
     if unknown:
@@ -1118,6 +1267,444 @@ def _schedule(
             for arm in arms
         ],
     }
+
+
+@dataclass(frozen=True, slots=True)
+class _ParallelStreamPlanEntry:
+    """One port-rewritten attack-type stream ready for spawn."""
+
+    stream_index: int
+    attack_type: str
+    port_table: dict[str, int]
+    rewritten_cases: tuple[AttackCase, ...]
+    worker_request: Any
+
+
+def _build_parallel_plan(
+    request: RunRequest,
+    *,
+    cases: Sequence[AttackCase],
+    arms: Sequence[ArmSpec],
+    artifacts: ArtifactDirectory,
+) -> list[_ParallelStreamPlanEntry]:
+    """Partition cases into streams, allocate ports and rewrite cases.
+
+    The parent process performs the loopback bind pre-flight for every
+    stream before any worker is spawned; a busy port invalidates the run.
+    """
+
+    # Lazy import: competition_parallel imports this module at top level.
+    from . import competition_parallel as streams
+
+    stream_specs = streams.build_streams(cases, arms)
+    if len(stream_specs) != request.parallel_streams:
+        raise InvalidCompetitionRun(
+            "parallel_stream_count_mismatch",
+            (
+                f"parallel_streams={request.parallel_streams} does not match the "
+                f"{len(stream_specs)} attack-type stream groups in the corpus"
+            ),
+        )
+    # Any configured provider rate limit enables the global single token
+    # (task #4): at most one in-flight provider request across all streams.
+    provider_global_token: Any | None = None
+    if request.provider_rate_limit is not None:
+        provider_global_token = streams.stream_spawn_context().BoundedSemaphore(1)
+    plan: list[_ParallelStreamPlanEntry] = []
+    for spec in stream_specs:
+        port_table = streams.allocate_port_table(
+            spec.stream_index, base=request.worker_port_base
+        )
+        streams.check_ports_available(port_table)
+        rewritten_cases = tuple(
+            streams.rewrite_cases_for_ports(spec.cases, port_table)
+        )
+        rewritten_spec = streams.StreamSpec(
+            stream_index=spec.stream_index,
+            attack_type=spec.attack_type,
+            cases=rewritten_cases,
+            arms=spec.arms,
+        )
+        worker_request = streams.StreamWorkerRequest(
+            stream=rewritten_spec,
+            port_table=port_table,
+            profile=request.profile,
+            provider=request.provider,
+            artifact_root=artifacts.root,
+            suite=request.profile.suite,
+            qualification_eligible=False,
+            repeat_index=0,
+            seed=request.profile.seed,
+            provider_global_token=provider_global_token,
+        )
+        plan.append(
+            _ParallelStreamPlanEntry(
+                stream_index=spec.stream_index,
+                attack_type=spec.attack_type,
+                port_table=port_table,
+                rewritten_cases=rewritten_cases,
+                worker_request=worker_request,
+            )
+        )
+    return plan
+
+
+def _parallel_schedule_payload(
+    request: RunRequest, plan: Sequence[_ParallelStreamPlanEntry]
+) -> dict[str, Any]:
+    return {
+        "parallel_streams": request.parallel_streams,
+        "worker_port_base": request.worker_port_base,
+        "provider_rate_limit": request.provider_rate_limit,
+        "streams": [
+            {
+                "stream_index": entry.stream_index,
+                "attack_type": entry.attack_type,
+                "case_ids": [case.case_id for case in entry.rewritten_cases],
+                "port_table": dict(sorted(entry.port_table.items())),
+            }
+            for entry in plan
+        ],
+    }
+
+
+def _parallel_stream_entry(
+    worker_request: Any,
+    result_queue: Any,
+    arm_executor: ArmExecutor | None,
+) -> None:
+    """Spawn-child entry: run one stream and report through the queue.
+
+    Fail-soft: the per-stream result (or failure record) is written to a
+    JSON file under ``artifact_root/stream-<N>/``.  The queue carries only
+    a small status tuple, avoiding the multiprocessing payload deadlock
+    that large row payloads can trigger.
+    """
+
+    from . import competition_parallel as streams
+
+    stream_index = worker_request.stream.stream_index
+    artifact_dir = Path(worker_request.artifact_root) / f"stream-{stream_index}"
+    try:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        result = streams._stream_worker(worker_request, arm_executor=arm_executor)
+        result_path = artifact_dir / "result.json"
+        result_path.write_text(
+            json.dumps(
+                streams.stream_result_to_dict(result), ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
+        result_queue.put(("ok", stream_index))
+    except InvalidCompetitionRun as exc:
+        _write_stream_failure(
+            artifact_dir, stream_index, exc.reason_code, str(exc)
+        )
+        result_queue.put(("invalid", stream_index, exc.reason_code, str(exc)))
+    except Exception as exc:  # noqa: BLE001 - relayed fail-soft to the parent.
+        _write_stream_failure(
+            artifact_dir, stream_index, type(exc).__name__, str(exc)
+        )
+        result_queue.put(("failed", stream_index, type(exc).__name__, str(exc)))
+
+
+def _write_stream_failure(
+    artifact_dir: Path,
+    stream_index: int,
+    reason_code: str,
+    message: str,
+) -> None:
+    """Write a failure record for a crashed stream worker."""
+    try:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        failure_path = artifact_dir / "failure.json"
+        failure_path.write_text(
+            json.dumps(
+                {
+                    "stream_index": stream_index,
+                    "reason_code": reason_code,
+                    "message": message,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _build_degraded_row(
+    arm: ArmSpec,
+    case: AttackCase,
+    *,
+    reason_code: str,
+    message: str,
+    repeat_index: int = 0,
+) -> dict[str, Any]:
+    """Build a degraded placeholder row for a failed stream's (arm, case)."""
+    return {
+        "arm_id": arm.arm_id,
+        "repeat_index": repeat_index,
+        "case_id": case.case_id,
+        "case_digest": case.metadata.get("case_digest"),
+        "attack_type": case.attack_type,
+        "is_malicious": case.is_malicious,
+        "run_valid": False,
+        "run_status": "degraded",
+        "model_invoked": False,
+        "task_input_digest": canonical_sha256(case.input.payload),
+        "policy_digest": None,
+        "degraded": True,
+        "degraded_reason": reason_code,
+        "degraded_message": message,
+        "attack_success": None,
+        "overblocked": None,
+        "task_success": None,
+        "v21_selected": False,
+        "legacy_floor_applied": False,
+        "receipt_covered": False,
+        "decision_comparisons": [],
+    }
+
+
+def _run_parallel_streams(
+    plan: Sequence[_ParallelStreamPlanEntry],
+    *,
+    executor: ArmExecutor | None,
+) -> tuple[list[Any | None], list[dict[str, Any]]]:
+    """Spawn every stream worker and collect their results fail-soft.
+
+    Returns ``(results, failures)`` where *results* is aligned with *plan*
+    (``None`` for failed/crashed streams) and *failures* records each
+    skipped stream with its reason code and message.
+    """
+
+    from . import competition_parallel as streams
+
+    ctx = streams.stream_spawn_context()
+    result_queue = ctx.Queue()
+    processes: list[Any] = []
+    for entry in plan:
+        process = ctx.Process(
+            target=_parallel_stream_entry,
+            args=(entry.worker_request, result_queue, executor),
+            name=f"competition-stream-{entry.stream_index}",
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            for started in processes:
+                started.join(timeout=10.0)
+                if started.is_alive():
+                    started.terminate()
+            results: list[Any | None] = [None] * len(plan)
+            failures: list[dict[str, Any]] = [
+                {
+                    "stream_index": entry.stream_index,
+                    "reason_code": "stream_spawn_failed",
+                    "message": str(exc),
+                }
+            ]
+            return results, failures
+        processes.append(process)
+    for process in processes:
+        process.join()
+    collected: dict[int, tuple[Any, ...]] = {}
+    while True:
+        try:
+            payload = result_queue.get(timeout=0.5)
+        except Exception:
+            break
+        if isinstance(payload, tuple) and len(payload) >= 2:
+            collected[int(payload[1])] = payload
+    results = []
+    failures = []
+    for idx, (entry, process) in enumerate(
+        zip(plan, processes, strict=True)
+    ):
+        payload = collected.get(entry.stream_index)
+        if payload is not None and payload[0] == "ok":
+            artifact_dir = (
+                Path(entry.worker_request.artifact_root)
+                / f"stream-{entry.stream_index}"
+            )
+            result_path = artifact_dir / "result.json"
+            if result_path.exists():
+                data = json.loads(result_path.read_text(encoding="utf-8"))
+                results.append(streams.stream_result_from_dict(data))
+            else:
+                results.append(None)
+                failures.append(
+                    {
+                        "stream_index": entry.stream_index,
+                        "reason_code": "stream_result_file_missing",
+                        "message": (
+                            f"stream {entry.stream_index} did not write "
+                            f"result.json"
+                        ),
+                    }
+                )
+            continue
+        reason_code = (
+            str(payload[2])
+            if payload and len(payload) > 2
+            else f"exit_code_{process.exitcode}"
+        )
+        message = (
+            str(payload[3])
+            if payload and len(payload) > 3
+            else (
+                f"stream {entry.stream_index} worker exited with "
+                f"code {process.exitcode}"
+            )
+        )
+        results.append(None)
+        failures.append(
+            {
+                "stream_index": entry.stream_index,
+                "reason_code": reason_code,
+                "message": message,
+            }
+        )
+    return results, failures
+
+
+def _execute_parallel_matrix(
+    request: RunRequest,
+    *,
+    cases: Sequence[AttackCase],
+    arms: Sequence[ArmSpec],
+    plan: Sequence[_ParallelStreamPlanEntry],
+    artifacts: ArtifactDirectory,
+    qualification_eligible: bool,
+    executor: ArmExecutor | None,
+    live_executor: bool,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, str]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    """Execute all streams, admit per stream arm and reassemble frozen order.
+
+    Fail-soft: failed streams contribute degraded placeholder rows so the
+    matrix stays complete and the report can still be generated.  The fourth
+    return element records each skipped stream.
+    """
+
+    results, stream_failures = _run_parallel_streams(plan, executor=executor)
+    failed_stream_indices = {f["stream_index"] for f in stream_failures}
+    failure_by_index = {f["stream_index"]: f for f in stream_failures}
+    expected_arm_ids = tuple(arm.arm_id for arm in arms)
+    admitted_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    observations_by_identity: dict[tuple[int, str], dict[str, Any]] = {}
+    contract_failures: list[dict[str, str]] = []
+    contract_names_by_arm: dict[str, set[str]] = {arm.arm_id: set() for arm in arms}
+    for entry, worker_result in zip(plan, results, strict=True):
+        if worker_result is None:
+            # Failed stream: fill degraded rows for all (arm, case) pairs.
+            failure = failure_by_index.get(entry.stream_index, {})
+            reason = str(failure.get("reason_code", "stream_failed"))
+            message = str(failure.get("message", "stream worker failed"))
+            for arm in arms:
+                for case in entry.rewritten_cases:
+                    row = _build_degraded_row(
+                        arm,
+                        case,
+                        reason_code=reason,
+                        message=message,
+                    )
+                    admitted_rows[(arm.arm_id, case.case_id)] = row
+            continue
+        if (
+            tuple(worker_result.arm_ids) != expected_arm_ids
+            or len(worker_result.arm_results) != len(arms)
+        ):
+            raise InvalidCompetitionRun(
+                "stream_result_invalid",
+                f"stream {entry.stream_index} returned an invalid arm roster",
+            )
+        for arm, arm_result in zip(arms, worker_result.arm_results, strict=True):
+            arm_request = ArmRunRequest(
+                profile=request.profile,
+                arm=arm,
+                repeat_index=0,
+                seed=request.profile.seed,
+                cases=entry.rewritten_cases,
+                provider=request.provider,
+                artifact_directory=(
+                    artifacts.root / f"stream-{entry.stream_index}" / arm.arm_id.lower()
+                ),
+                suite=request.profile.suite,
+                qualification_eligible=qualification_eligible,
+            )
+            fixture_observation = _runtime_fixture_observation(
+                arm_result.contracts,
+                request=arm_request,
+                required=live_executor,
+                digest_relaxed=True,
+            )
+            if fixture_observation is not None:
+                identity = (
+                    int(fixture_observation["repeat_index"]),
+                    str(fixture_observation["arm_id"]),
+                )
+                # Every stream observes every arm once; one observation per
+                # (repeat, arm) keeps the serial observation contract intact.
+                observations_by_identity.setdefault(identity, fixture_observation)
+            rows, failures = _admit_arm_result(arm_result, request=arm_request)
+            contract_failures.extend(failures)
+            contract_names_by_arm[arm.arm_id].update(arm_result.contracts)
+            for row in rows:
+                admitted_rows[(arm.arm_id, str(row["case_id"]))] = row
+    all_rows: list[dict[str, Any]] = []
+    for arm in arms:
+        relative_root = f"arms/{arm.arm_id}/repeat-1"
+        arm_rows: list[dict[str, Any]] = []
+        for case in cases:
+            row = admitted_rows.get((arm.arm_id, case.case_id))
+            if row is None:
+                # Defensive fail-soft: should not happen because failed
+                # streams fill degraded rows above, but if it does, emit
+                # a degraded placeholder rather than killing the run.
+                row = _build_degraded_row(
+                    arm,
+                    case,
+                    reason_code="stream_result_missing",
+                    message=(
+                        f"parallel streams produced no row for "
+                        f"{arm.arm_id}/{case.case_id}"
+                    ),
+                )
+                admitted_rows[(arm.arm_id, case.case_id)] = row
+            arm_rows.append(row)
+        all_rows.extend(arm_rows)
+        arm_request = ArmRunRequest(
+            profile=request.profile,
+            arm=arm,
+            repeat_index=0,
+            seed=request.profile.seed,
+            cases=tuple(cases),
+            provider=request.provider,
+            artifact_directory=artifacts.root / relative_root,
+            suite=request.profile.suite,
+            qualification_eligible=qualification_eligible,
+        )
+        _write_arm_artifacts(
+            artifacts,
+            relative_root=relative_root,
+            request=arm_request,
+            rows=arm_rows,
+            contracts={name: {} for name in sorted(contract_names_by_arm[arm.arm_id])},
+        )
+    observations = [
+        observations_by_identity[identity]
+        for identity in sorted(observations_by_identity)
+    ]
+    return all_rows, contract_failures, observations, stream_failures
 
 
 def _admit_arm_result(
@@ -1807,6 +2394,7 @@ def _runtime_fixture_observation(
     *,
     request: ArmRunRequest,
     required: bool,
+    digest_relaxed: bool = False,
 ) -> dict[str, Any] | None:
     """Admit one display-safe runtime fixture contract from an arm executor."""
 
@@ -1831,7 +2419,19 @@ def _runtime_fixture_observation(
         "byte_count",
         "roots",
     }
-    if set(payload) != expected_keys:
+    payload_keys = set(payload)
+    observed_relaxed = False
+    if "digest_relaxed" in payload_keys:
+        # Parallel streams rewrite the scratch sandbox for their loopback
+        # port table; the runtime flags that the frozen digest was skipped.
+        if payload["digest_relaxed"] is not True:
+            raise InvalidCompetitionRun(
+                "runtime_fixture_evidence_invalid",
+                "runtime fixture digest relaxation flag is invalid",
+            )
+        observed_relaxed = True
+        payload_keys.discard("digest_relaxed")
+    if payload_keys != expected_keys:
         raise InvalidCompetitionRun(
             "runtime_fixture_evidence_invalid",
             "runtime fixture contract has an invalid shape",
@@ -1851,7 +2451,10 @@ def _runtime_fixture_observation(
             "runtime_fixture_evidence_invalid",
             "runtime fixture contract bundle digest is invalid",
         )
-    if bundle_digest != request.profile.dataset.runtime_fixture_bundle_digest:
+    if (
+        not (digest_relaxed and observed_relaxed)
+        and bundle_digest != request.profile.dataset.runtime_fixture_bundle_digest
+    ):
         raise InvalidCompetitionRun(
             "runtime_fixture_identity_mismatch",
             "runtime fixture contract differs from the packaged profile",
@@ -1932,6 +2535,7 @@ def _validate_runtime_fixture_observations(
     observations: Sequence[Mapping[str, Any]],
     expected_observations: int,
     required: bool,
+    digest_relaxed: bool = False,
 ) -> dict[str, Any]:
     if not observations and not required:
         return _runtime_fixture_artifact(
@@ -1939,6 +2543,7 @@ def _validate_runtime_fixture_observations(
             observations=observations,
             expected_observations=expected_observations,
             status="not_applicable",
+            digest_relaxed=digest_relaxed,
         )
     if len(observations) != expected_observations:
         raise InvalidCompetitionRun(
@@ -1950,6 +2555,7 @@ def _validate_runtime_fixture_observations(
         observations=observations,
         expected_observations=expected_observations,
         status="verified",
+        digest_relaxed=digest_relaxed,
     )
 
 
@@ -1959,6 +2565,7 @@ def _runtime_fixture_artifact(
     observations: Sequence[Mapping[str, Any]],
     expected_observations: int,
     status: str,
+    digest_relaxed: bool = False,
 ) -> dict[str, Any]:
     expected_digest = profile.dataset.runtime_fixture_bundle_digest
     identities: set[tuple[int, str]] = set()
@@ -1987,7 +2594,10 @@ def _runtime_fixture_artifact(
                 "runtime fixture observation identity is duplicated",
             )
         identities.add(identity)
-        if fixture.get("bundle_digest") != expected_digest:
+        if (
+            not digest_relaxed
+            and fixture.get("bundle_digest") != expected_digest
+        ):
             raise InvalidCompetitionRun(
                 "runtime_fixture_identity_mismatch",
                 "runtime fixture observation differs from the packaged profile",
@@ -2475,11 +3085,12 @@ def _live_executor(request: ArmRunRequest) -> ArmRunResult:
 
 
 def _expected_case_runs(request: RunRequest) -> int:
-    case_count = (
-        request.profile.dataset.case_count
-        if request.profile.full_corpus
-        else len(request.selected_case_ids)
-    )
+    if request.selected_case_ids:
+        case_count = len(request.selected_case_ids)
+    elif request.profile.full_corpus:
+        case_count = request.profile.dataset.case_count
+    else:
+        case_count = 0
     return case_count * len(_execution_arms(request)) * request.profile.repeats
 
 
@@ -2536,4 +3147,10 @@ def _file_sha256(path: Path) -> str:
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised through main tests
-    raise SystemExit(main())
+    # Delegate to the canonical module object: running with ``python -m``
+    # loads this file as ``__main__``, and any ``from .competition_runner
+    # import ...`` elsewhere then creates a second module copy whose class
+    # objects would break isinstance checks across the boundary.
+    from agentguard_langgraph_bench.bench.competition_runner import main as _main
+
+    raise SystemExit(_main())

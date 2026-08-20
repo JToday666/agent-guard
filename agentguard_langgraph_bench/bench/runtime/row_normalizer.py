@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlparse
+
+from ..poisonedrag_service import poisonedrag_service_base_url
 
 
 def normalize_case_result(case: Any, result: Any, config: Any, tool_runtime: Any) -> dict[str, Any]:
@@ -390,8 +393,9 @@ def _is_memory_support_api_probe(item: dict[str, Any]) -> bool:
     if not url:
         return False
     lowered = url.lower()
+    service_port = urlparse(poisonedrag_service_base_url()).port
     return (
-        ("127.0.0.1:18082" in lowered or "localhost:18082" in lowered)
+        (f"127.0.0.1:{service_port}" in lowered or f"localhost:{service_port}" in lowered)
         and ("/support/" in lowered or "/poisonedrag/" in lowered)
     )
 

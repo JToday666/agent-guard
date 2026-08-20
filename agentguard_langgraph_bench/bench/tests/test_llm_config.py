@@ -381,6 +381,35 @@ def test_llm_env_file_config(monkeypatch, tmp_path):
     assert config.llm_base_url == "https://api.deepseek.com"
 
 
+def test_llm_env_file_loads_v21_semantic_namespace(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "AGENTGUARD_V21_SEMANTIC_ENABLED=true",
+                "AGENTGUARD_V21_SEMANTIC_BASE_URL=https://provider.example/v1",
+                "AGENTGUARD_V21_SEMANTIC_MODEL=qwen-test",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "AGENTGUARD_V21_SEMANTIC_ENABLED",
+        "AGENTGUARD_V21_SEMANTIC_BASE_URL",
+        "AGENTGUARD_V21_SEMANTIC_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTGUARD_LLM_ENV_FILE", str(env_file))
+
+    BenchConfig.from_values()
+
+    import os
+
+    assert os.environ["AGENTGUARD_V21_SEMANTIC_ENABLED"] == "true"
+    assert os.environ["AGENTGUARD_V21_SEMANTIC_BASE_URL"] == "https://provider.example/v1"
+    assert os.environ["AGENTGUARD_V21_SEMANTIC_MODEL"] == "qwen-test"
+
+
 def test_planner_uses_case_plan_when_llm_disabled(tmp_path):
     case = sample_case()
     config = BenchConfig(llm_enabled=False, sandbox_dir=tmp_path)

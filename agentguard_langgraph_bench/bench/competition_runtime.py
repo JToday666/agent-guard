@@ -13,8 +13,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import re
 import secrets
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -52,8 +55,13 @@ from .competition_models import (
     V21RolloutMode,
     canonical_sha256,
 )
+from .competition_parallel import (
+    STREAM_SERVICE_DEFAULT_PORTS,
+    STREAM_SERVICE_ENV_VARS,
+)
 from .competition_runner import (
     ArmRunRequest,
+    ProviderRuntimeConfig,
     ArmRunResult,
     InvalidCompetitionRun,
 )
@@ -64,9 +72,11 @@ from .model_exchange import (
     ModelExchangeInvocationError,
     invoke_with_model_exchange,
 )
+from .provider_rate_limit import global_provider_token
 from .runtime_fixture_contract import (
     RUNTIME_FIXTURE_CONTRACT_NAME,
     RuntimeFixtureContractError,
+    build_runtime_fixture_snapshot,
     validate_runtime_fixture_bundle,
 )
 from .runner import run_cases
@@ -88,6 +98,91 @@ _PREFLIGHT_TOOL = {
 }
 
 CaseRunner = Callable[..., list[dict[str, Any]]]
+
+_STREAM_PORT_REWRITE_PATTERN = re.compile(r"127\.0\.0\.1:1808([0-7])")
+_STREAM_PORT_REWRITE_MARKER = b"127.0.0.1:1808"
+
+
+def _stream_port_table_from_env() -> dict[str, int] | None:
+    """Per-service loopback ports when any stream port env var is set.
+
+    Unset services fall back to the legacy single-stream defaults, so a
+    partially exported table still resolves every fixture service.
+    """
+
+    table: dict[str, int] = {}
+    any_set = False
+    for service, env_name in STREAM_SERVICE_ENV_VARS.items():
+        raw = os.environ.get(env_name)
+        if raw is None or not raw.strip():
+            table[service] = STREAM_SERVICE_DEFAULT_PORTS[service]
+            continue
+        any_set = True
+        try:
+            port = int(raw.strip())
+        except ValueError as exc:
+            raise InvalidCompetitionRun(
+                "stream_port_env_invalid",
+                f"stream port environment variable {env_name} is not an integer",
+            ) from exc
+        if not 0 < port < 65536:
+            raise InvalidCompetitionRun(
+                "stream_port_env_invalid",
+                f"stream port environment variable {env_name} is out of range",
+            )
+        table[service] = port
+    return table if any_set else None
+
+
+def _stream_ports_remapped(port_table: Mapping[str, int] | None) -> bool:
+    """True when the stream worker moved the instrumentation service port."""
+
+    return bool(
+        port_table is not None
+        and port_table["instrumentation"]
+        != STREAM_SERVICE_DEFAULT_PORTS["instrumentation"]
+    )
+
+
+def _rewrite_sandbox_stream_ports(
+    sandbox_dir: Path, port_table: Mapping[str, int]
+) -> None:
+    """Retarget frozen sandbox text files at this stream's loopback ports.
+
+    Static snapshot files keep the legacy ``127.0.0.1:1808x`` endpoints
+    verbatim; parallel streams must read them through their own port table.
+    Generated fixture files are already covered by the config env accessors.
+    """
+
+    service_by_offset = {
+        port - STREAM_SERVICE_DEFAULT_PORTS["instrumentation"]: service
+        for service, port in STREAM_SERVICE_DEFAULT_PORTS.items()
+    }
+
+    def _replace(match: re.Match[str]) -> str:
+        service = service_by_offset[int(match.group(1))]
+        return f"127.0.0.1:{port_table[service]}"
+
+    for path in sorted(sandbox_dir.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        raw = path.read_bytes()
+        if _STREAM_PORT_REWRITE_MARKER not in raw:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InvalidCompetitionRun(
+                "stream_sandbox_rewrite_failed",
+                "sandbox fixture with legacy loopback ports is not text",
+            ) from exc
+        rewritten = _STREAM_PORT_REWRITE_PATTERN.sub(_replace, text)
+        if "127.0.0.1:1808" in rewritten:
+            raise InvalidCompetitionRun(
+                "stream_sandbox_rewrite_residue",
+                "sandbox fixture still references legacy loopback ports",
+            )
+        path.write_bytes(rewritten.encode("utf-8"))
 
 
 def execute_competition_arm(
@@ -114,12 +209,23 @@ def execute_competition_arm(
     ) as raw_scratch:
         scratch = Path(raw_scratch)
         sandbox_dir = scratch / "sandbox"
+        stream_ports = _stream_port_table_from_env()
+        stream_remapped = _stream_ports_remapped(stream_ports)
         try:
             restore_initial_sandbox(sandbox_dir)
-            runtime_fixtures = validate_runtime_fixture_bundle(
-                sandbox_dir,
-                expected_digest=(request.profile.dataset.runtime_fixture_bundle_digest),
-            )
+            if stream_remapped and stream_ports is not None:
+                # Port-rewritten static fixtures cannot reproduce the frozen
+                # bundle digest; keep the structural walk, skip the digest
+                # comparison and surface the relaxation in the contract.
+                _rewrite_sandbox_stream_ports(sandbox_dir, stream_ports)
+                runtime_fixtures = build_runtime_fixture_snapshot(sandbox_dir)
+            else:
+                runtime_fixtures = validate_runtime_fixture_bundle(
+                    sandbox_dir,
+                    expected_digest=(
+                        request.profile.dataset.runtime_fixture_bundle_digest
+                    ),
+                )
         except RuntimeFixtureContractError as exc:
             raise InvalidCompetitionRun(
                 exc.reason_code,
@@ -159,6 +265,7 @@ def execute_competition_arm(
                 scratch=scratch,
                 task_ids=task_ids,
                 trace_ids=trace_ids,
+                stream_port_remap=stream_ports if stream_remapped else None,
             )
             with _deny_approval_fixture(
                 base_url=base_url,
@@ -169,7 +276,10 @@ def execute_competition_arm(
                     list(request.cases),
                     config=config,
                     fake_core=False,
-                    reset_environment=True,
+                    # A stream worker already restored and port-rewrote its
+                    # scratch sandbox; a second restore would resurrect the
+                    # legacy 1808x endpoints inside static fixture files.
+                    reset_environment=not stream_remapped,
                     scenario_stateful=True,
                     isolate_scenarios=True,
                     benchmark_run_id=(
@@ -202,16 +312,74 @@ def execute_competition_arm(
                     if trace_id is not None
                     else None
                 )
-                rows.append(
-                    _normalize_case_row(
-                        raw_row,
-                        case=case,
-                        request=request,
-                        policy_digest=policy_digest,
-                        task_fact=task_evidence[case.case_id],
-                        trace=trace,
+                try:
+                    rows.append(
+                        _normalize_case_row(
+                            raw_row,
+                            case=case,
+                            request=request,
+                            policy_digest=policy_digest,
+                            task_fact=task_evidence[case.case_id],
+                            trace=trace,
+                        )
                     )
-                )
+                except InvalidCompetitionRun as exc:
+                    if (
+                        request.profile.planner.parallel_retry_allowed
+                        and _row_has_provider_fault(raw_row)
+                    ):
+                        # Parallel runs carry a bounded retry budget: a case
+                        # whose model requests all faulted provider-side may
+                        # be re-executed once before the run fails closed.
+                        rows.append(
+                            _retry_provider_fault_case(
+                                case,
+                                request=request,
+                                config=config,
+                                base_url=base_url,
+                                control_token=runtime_secrets.control_token,
+                                policy_digest=policy_digest,
+                                task_fact=task_evidence[case.case_id],
+                                trace_id=trace_id,
+                            )
+                        )
+                    else:
+                        # Fail-soft: preserve a degraded row so the rest of
+                        # the run data is not lost.  Data protection takes
+                        # priority over run-level validity.
+                        print(
+                            f"WARNING: case {case.case_id} normalization "
+                            f"failed ({exc.reason_code}); emitting degraded "
+                            f"row",
+                            file=sys.stderr,
+                        )
+                        rows.append(
+                            {
+                                "arm_id": request.arm.arm_id,
+                                "repeat_index": request.repeat_index,
+                                "case_id": case.case_id,
+                                "case_digest": case.metadata.get("case_digest"),
+                                "attack_type": case.attack_type,
+                                "is_malicious": case.is_malicious,
+                                "run_valid": False,
+                                "run_status": "degraded",
+                                "model_invoked": False,
+                                "task_input_digest": canonical_sha256(
+                                    case.input.payload
+                                ),
+                                "policy_digest": policy_digest,
+                                "degraded": True,
+                                "degraded_reason": exc.reason_code,
+                                "degraded_message": str(exc),
+                                "attack_success": None,
+                                "overblocked": None,
+                                "task_success": None,
+                                "v21_selected": False,
+                                "legacy_floor_applied": False,
+                                "receipt_covered": False,
+                                "decision_comparisons": [],
+                            }
+                        )
 
         contracts = {
             "guard_api_loopback": _passed("guard_api_loopback_ready"),
@@ -223,6 +391,7 @@ def execute_competition_arm(
             RUNTIME_FIXTURE_CONTRACT_NAME: {
                 **_passed("runtime_fixture_bundle_verified"),
                 **runtime_fixtures.public_dump(),
+                **({"digest_relaxed": True} if stream_remapped else {}),
             },
             "task_ingress_identity": _passed(
                 "task_ingress_not_applicable"
@@ -515,6 +684,36 @@ def _require_guard_api_ready(base_url: str) -> None:
         )
 
 
+def _preflight_llm(
+    provider: ProviderRuntimeConfig, *, extra_body: dict[str, Any] | None
+):
+    from langchain_openai import ChatOpenAI  # type: ignore[import-not-found]
+
+    kwargs: dict[str, Any] = dict(
+        model=provider.model,
+        api_key=SecretStr(provider.api_key),
+        base_url=provider.base_url,
+        temperature=0,
+        timeout=provider.request_timeout,
+        max_retries=0,
+    )
+    if extra_body is not None:
+        kwargs["extra_body"] = extra_body
+    return ChatOpenAI(**kwargs).bind_tools(
+        [_PREFLIGHT_TOOL], tool_choice="required"
+    )
+
+
+def _preflight_thinking_mode_fallback(exc: Exception) -> bool:
+    """Detect providers that reject forced tool_choice while thinking is on."""
+
+    cause = exc.__cause__
+    if cause is None:
+        return False
+    message = str(cause).lower()
+    return "tool_choice" in message and "thinking" in message
+
+
 def _provider_tool_call_preflight(request: ArmRunRequest) -> ModelExchangeEvidence:
     provider = request.provider
     try:
@@ -524,14 +723,7 @@ def _provider_tool_call_preflight(request: ArmRunRequest) -> ModelExchangeEviden
             "provider_transport_unavailable",
             "langchain-openai is required for competition execution",
         ) from exc
-    llm = ChatOpenAI(
-        model=provider.model,
-        api_key=SecretStr(provider.api_key),
-        base_url=provider.base_url,
-        temperature=0,
-        timeout=provider.request_timeout,
-        max_retries=0,
-    ).bind_tools([_PREFLIGHT_TOOL], tool_choice="required")
+    llm = _preflight_llm(provider, extra_body=None)
     messages = [
         ("system", "You are a provider capability probe. Use the supplied tool."),
         ("user", "Call agentguard_competition_probe with probe=ready."),
@@ -552,32 +744,70 @@ def _provider_tool_call_preflight(request: ArmRunRequest) -> ModelExchangeEviden
             "content": messages[1][1],
         },
     ]
-    try:
-        _, evidence = invoke_with_model_exchange(
-            llm,
-            model_input=messages,
-            sources=sources,
-            tool_schemas=[_PREFLIGHT_TOOL],
-            authority_binding={
-                "profile_id": request.profile.profile_id,
-                "arm_id": request.arm.arm_id,
-                "repeat_index": request.repeat_index,
-                "purpose": "provider_tool_call_preflight",
-            },
-            case_id="__provider_preflight__",
-            arm_id=request.arm.arm_id,
-            repeat_index=request.repeat_index,
-            round_index=1,
-            provider_id=provider.provider_id,
-            model=provider.model,
-            base_url=provider.base_url,
-            context_mode="off",
-        )
-    except ModelExchangeInvocationError as exc:
-        raise InvalidCompetitionRun(
-            "provider_preflight_failed",
-            f"provider tool-call preflight failed: {exc.evidence.outcome.value}",
-        ) from exc
+    # Global single token (task #4): when the parallel run installed one, the
+    # preflight holds it for the whole exchange; no-op otherwise.
+    with global_provider_token():
+        try:
+            _, evidence = invoke_with_model_exchange(
+                llm,
+                model_input=messages,
+                sources=sources,
+                tool_schemas=[_PREFLIGHT_TOOL],
+                authority_binding={
+                    "profile_id": request.profile.profile_id,
+                    "arm_id": request.arm.arm_id,
+                    "repeat_index": request.repeat_index,
+                    "purpose": "provider_tool_call_preflight",
+                },
+                case_id="__provider_preflight__",
+                arm_id=request.arm.arm_id,
+                repeat_index=request.repeat_index,
+                round_index=1,
+                provider_id=provider.provider_id,
+                model=provider.model,
+                base_url=provider.base_url,
+                context_mode="off",
+            )
+        except ModelExchangeInvocationError as exc:
+            # Some providers (e.g. qwen thinking-mode deployments) reject
+            # tool_choice=required while thinking is enabled; retry the probe
+            # once with thinking disabled instead of failing the whole run.
+            if not _preflight_thinking_mode_fallback(exc):
+                raise InvalidCompetitionRun(
+                    "provider_preflight_failed",
+                    "provider tool-call preflight failed: "
+                    f"{exc.evidence.outcome.value}",
+                ) from exc
+            try:
+                llm = _preflight_llm(
+                    provider, extra_body={"enable_thinking": False}
+                )
+                _, evidence = invoke_with_model_exchange(
+                    llm,
+                    model_input=messages,
+                    sources=sources,
+                    tool_schemas=[_PREFLIGHT_TOOL],
+                    authority_binding={
+                        "profile_id": request.profile.profile_id,
+                        "arm_id": request.arm.arm_id,
+                        "repeat_index": request.repeat_index,
+                        "purpose": "provider_tool_call_preflight",
+                    },
+                    case_id="__provider_preflight__",
+                    arm_id=request.arm.arm_id,
+                    repeat_index=request.repeat_index,
+                    round_index=1,
+                    provider_id=provider.provider_id,
+                    model=provider.model,
+                    base_url=provider.base_url,
+                    context_mode="off",
+                )
+            except ModelExchangeInvocationError as retry_exc:
+                raise InvalidCompetitionRun(
+                    "provider_preflight_failed",
+                    "provider tool-call preflight failed: "
+                    f"{retry_exc.evidence.outcome.value}",
+                ) from retry_exc
     if evidence.tool_names != ("agentguard_competition_probe",):
         raise InvalidCompetitionRun(
             "provider_tool_call_unsupported",
@@ -594,6 +824,7 @@ def _bench_config(
     scratch: Path,
     task_ids: Mapping[str, str],
     trace_ids: Mapping[str, str],
+    stream_port_remap: Mapping[str, int] | None = None,
 ) -> BenchConfig:
     values: dict[str, Any] = {
         "core_base_url": base_url,
@@ -638,7 +869,24 @@ def _bench_config(
         "competition_repeat_index": request.repeat_index,
         "competition_context_mode": request.arm.context_mode.value,
         "competition_rte_mode": request.arm.rte_mode.value,
+        # A non-zero provider retry budget can only reach the runner through
+        # the parallel-stream exemption (serial runs stay pinned at 0), so it
+        # doubles as the parallel-mode retry flag for BenchConfig validation.
+        "competition_parallel_retry_allowed": request.provider.max_retries > 0,
     }
+    if stream_port_remap is not None:
+        # Parallel streams shift every fixture service off the legacy
+        # 1808x defaults; the browser and MockToolRegistry refuse loopback
+        # targets outside the allow-list.
+        allowed_ports = {
+            int(item.strip())
+            for item in os.getenv(
+                "AGENTGUARD_ALLOWED_LOCAL_SERVICE_PORTS", "18082,18083"
+            ).split(",")
+            if item.strip()
+        }
+        allowed_ports.update(stream_port_remap.values())
+        values["allowed_local_service_ports"] = tuple(sorted(allowed_ports))
     return BenchConfig(**values)
 
 
@@ -732,6 +980,97 @@ def _fetch_trace(base_url: str, *, control_token: str, trace_id: str) -> dict[st
     return payload
 
 
+def _row_has_provider_fault(raw: Mapping[str, Any]) -> bool:
+    """True when the case failed only because every model request faulted.
+
+    A provider-side fault (timeout, rate limit or transport error with no
+    response observed) is an infrastructure failure, not evidence about the
+    agent or the guard, so parallel runs may re-execute the case once.
+    """
+
+    if raw.get("model_invoked") is True:
+        return False
+    raw_exchanges = raw.get("model_exchanges")
+    if raw_exchanges is None and isinstance(raw.get("raw_state"), Mapping):
+        raw_exchanges = raw["raw_state"].get("model_exchanges")
+    if not isinstance(raw_exchanges, list) or not raw_exchanges:
+        return False
+    fault_outcomes = {"timeout", "rate_limited", "transport_error"}
+    for item in raw_exchanges:
+        if not isinstance(item, Mapping):
+            return False
+        if item.get("response_observed"):
+            return False
+        if item.get("outcome") not in fault_outcomes:
+            return False
+    return True
+
+
+def _retry_provider_fault_case(
+    case: Any,
+    *,
+    request: ArmRunRequest,
+    config: BenchConfig,
+    base_url: str,
+    control_token: str,
+    policy_digest: str,
+    task_fact: Mapping[str, Any],
+    trace_id: str | None,
+) -> dict[str, Any]:
+    """Re-execute one provider-faulted case once and normalize the new row.
+
+    Only reachable when the planner carries the parallel retry budget; serial
+    runs keep the frozen zero-retry observability rule.  A second fault fails
+    the run closed.
+    """
+
+    with _deny_approval_fixture(
+        base_url=base_url,
+        control_token=control_token,
+        enabled=request.arm.guard_enabled,
+    ):
+        retry_rows = case_runner(
+            [case],
+            config=config,
+            fake_core=False,
+            # The arm's primary batch already restored the environment; the
+            # retry only needs scenario isolation.
+            reset_environment=False,
+            scenario_stateful=True,
+            isolate_scenarios=True,
+            benchmark_run_id=(
+                f"competition-{request.arm.arm_id.lower()}-"
+                f"r{request.repeat_index + 1}-case-retry"
+            ),
+            run_metadata={
+                "competition_profile_id": request.profile.profile_id,
+                "competition_arm_id": request.arm.arm_id,
+                "competition_repeat_index": request.repeat_index,
+                "competition_seed": request.seed,
+                "approval_fixture": "deny",
+                "case_retry_reason": "provider_fault",
+            },
+        )
+    if len(retry_rows) != 1:
+        raise InvalidCompetitionRun(
+            "live_case_count_mismatch",
+            "provider-fault case retry returned the wrong case count",
+        )
+    trace = (
+        _fetch_trace(base_url, control_token=control_token, trace_id=trace_id)
+        if trace_id is not None
+        else None
+    )
+    return _normalize_case_row(
+        retry_rows[0],
+        case=case,
+        request=request,
+        policy_digest=policy_digest,
+        task_fact=task_fact,
+        trace=trace,
+    )
+
+
 def _normalize_case_row(
     raw: Mapping[str, Any],
     *,
@@ -764,9 +1103,6 @@ def _normalize_case_row(
             "graph model exchange evidence is invalid",
         ) from exc
     model_invoked = any(item.model_invoked for item in exchanges)
-    source_digest = _first_digest(raw, exchanges, "source_set_digest")
-    input_digest = _first_digest(raw, exchanges, "model_input_digest")
-    tool_digest = _first_digest(raw, exchanges, "tool_schema_digest")
     authority_rows = _decision_authorities(trace)
     pre_model = None
     if not model_invoked:
@@ -774,8 +1110,27 @@ def _normalize_case_row(
         if pre_model is None:
             raise InvalidCompetitionRun(
                 "model_invocation_evidence_missing",
-                "case neither invoked the model nor has an authenticated pre-model block",
+                (
+                    f"{request.arm.arm_id}/r{request.repeat_index}/"
+                    f"{case.case_id} neither invoked the model nor has an "
+                    "authenticated pre-model block"
+                ),
             )
+    # An authenticated pre-model block never reaches the provider, so no
+    # round-1 exchange digests can exist.  Derive them from the frozen case
+    # payload (the only authenticated input) instead of failing the run.
+    pre_model_digest_fallback = (
+        canonical_sha256(case.input.payload) if pre_model is not None else None
+    )
+    source_digest = _first_digest(
+        raw, exchanges, "source_set_digest", fallback=pre_model_digest_fallback
+    )
+    input_digest = _first_digest(
+        raw, exchanges, "model_input_digest", fallback=pre_model_digest_fallback
+    )
+    tool_digest = _first_digest(
+        raw, exchanges, "tool_schema_digest", fallback=pre_model_digest_fallback
+    )
 
     terminal_receipts = _terminal_receipt_evidence(trace)
     tool_executions = _tool_execution_evidence(
@@ -822,6 +1177,9 @@ def _normalize_case_row(
         "v21_selected": _v21_selected(request.arm, authority_rows),
         "legacy_floor_applied": _legacy_floor(request.arm, authority_rows),
         "receipt_covered": receipt_covered,
+        # Additive effect-analysis evidence; stripped by the official
+        # admission projection (_PUBLIC_CASE_KEYS allowlist).
+        "decision_comparisons": _decision_comparisons(trace),
     }
     if row["guided_plan_applied"] or row["fallback_applied"]:
         row["run_valid"] = False
@@ -832,6 +1190,8 @@ def _first_digest(
     raw: Mapping[str, Any],
     exchanges: Sequence[ModelExchangeEvidence],
     field_name: str,
+    *,
+    fallback: str | None = None,
 ) -> str:
     if exchanges:
         return str(getattr(exchanges[0], field_name))
@@ -856,6 +1216,8 @@ def _first_digest(
     for value in candidates:
         if _is_sha256(value):
             return str(value)
+    if fallback is not None and _is_sha256(fallback):
+        return fallback
     raise InvalidCompetitionRun(
         "canonical_input_evidence_missing",
         f"case has no authenticated {field_name} evidence",
@@ -878,6 +1240,79 @@ def _decision_authorities(
         if isinstance(authority, Mapping):
             authorities.append(dict(authority))
     return authorities
+
+
+def _decision_comparisons(
+    trace: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Project per-evaluation current/raw-V21/selected decisions.
+
+    Reads the critical ``decision_authority`` typed envelope from committed
+    policy evaluations.  The projection is display-safe and additive: the
+    official admission pipeline only whitelists ``_PUBLIC_CASE_KEYS``, so
+    this key never reaches public competition artifacts.  Effect-analysis
+    tooling uses it to attribute V2 saves and V2 overblocks.
+    """
+
+    if trace is None:
+        return []
+    comparisons: list[dict[str, Any]] = []
+    for event in trace.get("audit_events", []):
+        if (
+            not isinstance(event, Mapping)
+            or event.get("record_type") != "policy_evaluation"
+        ):
+            continue
+        evidence = event.get("evidence")
+        envelope = (
+            evidence.get("decision_authority") if isinstance(evidence, Mapping) else None
+        )
+        payload = (
+            envelope.get("payload")
+            if isinstance(envelope, Mapping)
+            and envelope.get("schema_version") == "1.0"
+            else None
+        )
+        if not isinstance(payload, Mapping):
+            continue
+
+        def _decision_of(key: str) -> str | None:
+            decision = payload.get(key)
+            if isinstance(decision, Mapping):
+                value = decision.get("decision")
+                if value in {"allow", "deny", "ask"}:
+                    return str(value)
+            return None
+
+        authority = payload.get("decision_authority")
+        metadata = event.get("metadata")
+        semantic_id = (
+            metadata.get("v21_semantic_judgment_id")
+            if isinstance(metadata, Mapping)
+            else None
+        )
+        comparisons.append(
+            {
+                "authority_source": authority.get("source")
+                if isinstance(authority, Mapping)
+                else None,
+                "authority_mode": authority.get("mode")
+                if isinstance(authority, Mapping)
+                else None,
+                "legacy_floor_applied": bool(authority.get("legacy_floor_applied"))
+                if isinstance(authority, Mapping)
+                else False,
+                "official_decision": _decision_of("selected_decision"),
+                "current_decision": _decision_of("current_decision"),
+                "raw_v21_decision": _decision_of("raw_v21_decision"),
+                # V21-13 semantic shadow reference keys only (D11): the
+                # judgment body never leaves the audit metadata.
+                "semantic_judgment_id": str(semantic_id)
+                if isinstance(semantic_id, str) and semantic_id
+                else None,
+            }
+        )
+    return comparisons
 
 
 def _observed_arm(expected: ArmSpec, trace: Mapping[str, Any] | None) -> dict[str, Any]:

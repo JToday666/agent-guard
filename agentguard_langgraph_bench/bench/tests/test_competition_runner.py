@@ -1238,6 +1238,42 @@ def test_variant_json_then_cli_precedence(tmp_path: Path) -> None:
     assert request.value_sources["context_mode"] == "cli"
 
 
+def test_product_suite_allows_case_id_subset_for_five_arm_group_run(
+    tmp_path: Path,
+) -> None:
+    """Product suite with --case-id should produce all 5 arms for a subset group."""
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--suite",
+            "product",
+            "--case-id",
+            "JB-001",
+            "--case-id",
+            "JB-002",
+            "--artifacts",
+            str(tmp_path / "artifacts"),
+            "--llm-model",
+            "stub-model",
+            "--llm-base-url",
+            "https://provider.example/v1",
+        ]
+    )
+
+    request = resolve_run_request(args, environ={"AGENTGUARD_LLM_API_KEY": _SECRET})
+
+    assert request.profile.suite == CompetitionSuite.PRODUCT
+    assert request.selected_case_ids == ("JB-001", "JB-002")
+    assert request.variant is None  # No variant for product suite
+    # Should have all 5 arms
+    arms = _execution_arms(request)
+    assert len(arms) == 5
+    assert [arm.arm_id for arm in arms] == ["A0", "A1", "A2", "A3", "A4"]
+    # Expected case runs should be based on selected cases
+    expected = _expected_case_runs(request)
+    assert expected == 2 * 5 * 1  # 2 cases × 5 arms × 1 repeat
+
+
 def test_cli_entrypoint_returns_two_when_live_provider_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

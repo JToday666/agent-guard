@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -19,6 +19,9 @@ from typing import Any, Mapping, Sequence
 COMPETITION_PROFILE_SCHEMA_VERSION = "competition-langgraph-profile/1.0"
 COMPETITION_CONFIG_SCHEMA_VERSION = "competition-langgraph-config/1.0"
 COMPETITION_PROFILE_ID = "competition-langgraph-v2"
+# Parallel streams amplify transient provider QPS; a bounded retry budget is
+# therefore exempt from the serial zero-retry observability rule.
+COMPETITION_PARALLEL_RETRY_MAX = 5
 PROFILE_PACKAGE_DIR = Path(__file__).resolve().parent / "profiles"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -148,6 +151,10 @@ class PlannerSpec:
     max_retries: int = 0
     max_tool_rounds: int = 6
     fallback_allowed: bool = False
+    # Set only by the runner when parallel streams are active; never parsed
+    # from the frozen profile JSON and excluded from equality/public dumps so
+    # the profile contract stays byte-stable.
+    parallel_retry_allowed: bool = field(default=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.execution_mode != "autonomous_llm":
@@ -174,7 +181,13 @@ class PlannerSpec:
             raise CompetitionConfigurationError(
                 "planner request_timeout must be greater than zero"
             )
-        if self.max_retries != 0:
+        if self.parallel_retry_allowed:
+            if not 0 <= self.max_retries <= COMPETITION_PARALLEL_RETRY_MAX:
+                raise CompetitionConfigurationError(
+                    "competition parallel planner max_retries must be between "
+                    f"0 and {COMPETITION_PARALLEL_RETRY_MAX}"
+                )
+        elif self.max_retries != 0:
             raise CompetitionConfigurationError(
                 "competition planner max_retries must be zero so every request is observable"
             )
