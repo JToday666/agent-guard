@@ -40,6 +40,15 @@ shard is a disjoint round-robin case subset with its own port table):
         --arm A0 --arm-parallel 4 --stream-index-offset 40 \
         --llm-model qwen3.7-plus --llm-base-url https://<provider>/v1 \
         --llm-api-key-env COMPETITION_LLM_KEY
+
+Multi-repeat variance estimation (every repeat gets its own repeat-N/
+subdirectory and a repeats-summary.json aggregate is written at the root):
+
+    uv run python scripts/competition-v2-effect-run.py run \
+        --artifacts /tmp/agentguard-v2-effect-r3 \
+        --repeats 3 \
+        --llm-model qwen3.7-plus --llm-base-url https://<provider>/v1 \
+        --llm-api-key-env COMPETITION_LLM_KEY
 """
 
 from __future__ import annotations
@@ -84,6 +93,7 @@ from agentguard_langgraph_bench.bench.v2_effect_metrics import (
 # --parallel-streams window (stream indices 0..6 on the same base).
 _DEFAULT_STREAM_INDEX_OFFSET = 20
 _REPORT_SCHEMA_VERSION = "dual-arm-effect-report/1.0"
+_REPEATS_SUMMARY_SCHEMA_VERSION = "dual-arm-repeats-summary/1.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +109,9 @@ class ArmWorkerRequest:
     # Position of this worker in the run's work list; used as the queue key
     # so sharded single-arm workers stay distinguishable.
     slot: int = 0
+    # Repeat round this worker belongs to (0-based); single-repeat runs keep
+    # the historical default.
+    repeat_index: int = 0
     # V21-13 semantic judgment env applied to the product arm only; the
     # API key value stays process-local and is never written to artifacts.
     semantic_env: dict[str, str] = field(default_factory=dict)
@@ -222,7 +235,7 @@ def execute_effect_arm(request: ArmWorkerRequest) -> dict[str, Any]:
     arm_request = ArmRunRequest(
         profile=request.profile,
         arm=arm,
-        repeat_index=0,
+        repeat_index=request.repeat_index,
         seed=request.profile.seed,
         cases=rewritten,
         provider=request.provider,
@@ -366,6 +379,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="shard the selected single arm into N parallel workers (requires --arm)",
     )
+    run_parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help=(
+            "number of repeat rounds (>=1); with repeats>1 each round writes "
+            "to artifacts/repeat-N/ and a repeats-summary.json aggregate is "
+            "produced at the artifacts root"
+        ),
+    )
     return parser
 
 
@@ -442,32 +465,25 @@ def build_effect_report(
     return report
 
 
-def run_effect(args: argparse.Namespace) -> int:
-    artifacts = Path(args.artifacts).resolve()
-    if artifacts.exists() and any(artifacts.iterdir()):
-        print(
-            f"artifacts directory must be fresh: {artifacts}", file=sys.stderr
-        )
-        return int(ExitCode.INVALID_RUN)
-    artifacts.mkdir(parents=True, exist_ok=True)
-    try:
-        profile = load_competition_profile(args.profile)
-        cases = _select_cases(profile, args.case_id)
-        arms = build_effect_arms(profile)
-        provider = resolve_provider(profile, args)
-        semantic_env = build_semantic_env(args)
-    except InvalidCompetitionRun as exc:
-        print(f"{exc.reason_code}: {exc}", file=sys.stderr)
-        return int(ExitCode.INVALID_RUN)
+def _run_one_repeat(
+    *,
+    args: argparse.Namespace,
+    profile: CompetitionProfile,
+    provider: ProviderRuntimeConfig,
+    semantic_env: dict[str, str],
+    cases: tuple[Any, ...],
+    arm_ids: list[str],
+    shard_count: int,
+    repeat_index: int,
+    repeat_artifacts: Path,
+    port_offset: int,
+    mode: str,
+) -> tuple[int, list[str]]:
+    """Execute one repeat round (all arms/shards) and write its artifacts.
 
-    arm_ids = [args.arm] if args.arm else list(EFFECT_ARM_IDS)
-    shard_count = args.arm_parallel
-    if shard_count > 1 and not args.arm:
-        print(
-            "--arm-parallel requires --arm (intra-arm sharding is single-arm only)",
-            file=sys.stderr,
-        )
-        return int(ExitCode.INVALID_RUN)
+    Returns ``(exit_code, failures)``; a non-empty failure list is always
+    carried back to the caller even on a fail-soft success.
+    """
 
     # One work item per (arm, shard).  Shards split the arm's case set into
     # disjoint round-robin subsets; every shard still executes its cases
@@ -496,22 +512,20 @@ def run_effect(args: argparse.Namespace) -> int:
         ArmWorkerRequest(
             arm_index=arm_index,
             slot=slot,
+            repeat_index=repeat_index,
             port_table=streams.allocate_port_table(
-                args.stream_index_offset + arm_index * shard_count + shard_index,
+                port_offset + arm_index * shard_count + shard_index,
                 base=args.worker_port_base,
             ),
             profile=profile,
             provider=provider,
             cases=shard,
-            artifact_root=artifacts,
+            artifact_root=repeat_artifacts,
             semantic_env=semantic_env,
         )
         for slot, (arm_index, shard_index, shard) in enumerate(work_items)
     ]
 
-    mode = "serial" if args.serial else "parallel"
-    if shard_count > 1:
-        mode += f" x{shard_count} shards"
     print(
         f"=== dual-arm effect run: {len(cases)} cases x arms "
         f"{'/'.join(arm_ids)} ({mode}) ==="
@@ -580,10 +594,10 @@ def run_effect(args: argparse.Namespace) -> int:
         # never thrown away.  Failures are recorded in the report.
         if not collected:
             _write_json(
-                artifacts / "effect-failure.json",
+                repeat_artifacts / "effect-failure.json",
                 {"failures": failures, "completed_slots": []},
             )
-            return int(ExitCode.INVALID_RUN)
+            return int(ExitCode.INVALID_RUN), failures
 
     # Merge shard payloads back into one arm result in frozen dataset order.
     order = {str(case.case_id): position for position, case in enumerate(cases)}
@@ -622,19 +636,22 @@ def run_effect(args: argparse.Namespace) -> int:
         }
     if not arms_result:
         _write_json(
-            artifacts / "effect-failure.json",
+            repeat_artifacts / "effect-failure.json",
             {"failures": failures, "completed_arms": []},
         )
         for failure in failures:
             print(f"FAILED {failure}", file=sys.stderr)
-        return int(ExitCode.INVALID_RUN)
+        return int(ExitCode.INVALID_RUN), failures
 
     for arm_id, payload in arms_result.items():
-        _write_json(artifacts / f"arms/{arm_id}/run.json", payload["rows"])
+        _write_json(repeat_artifacts / f"arms/{arm_id}/run.json", payload["rows"])
         _write_json(
-            artifacts / f"arms/{arm_id}/durations.json", payload["case_durations_ms"]
+            repeat_artifacts / f"arms/{arm_id}/durations.json",
+            payload["case_durations_ms"],
         )
-        _write_json(artifacts / f"arms/{arm_id}/contracts.json", payload["contracts"])
+        _write_json(
+            repeat_artifacts / f"arms/{arm_id}/contracts.json", payload["contracts"]
+        )
     report = build_effect_report(
         profile=profile,
         provider=provider,
@@ -656,8 +673,189 @@ def run_effect(args: argparse.Namespace) -> int:
     if failures:
         report["run_failures"] = list(failures)
         report["competition_qualified"] = False
-    _write_json(artifacts / "effect-report.json", report)
+    _write_json(repeat_artifacts / "effect-report.json", report)
     _print_summary(report)
+    return int(ExitCode.PASSED), failures
+
+
+def _report_summary_value(report: Mapping[str, Any], path: Sequence[str]) -> Any:
+    value: Any = report
+    for key in path:
+        if not isinstance(value, Mapping) or key not in value:
+            return None
+        value = value[key]
+    return value
+
+
+def _extract_repeat_metrics(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Pull the headline effect metrics out of one repeat's report."""
+
+    return {
+        "paired_valid_asr_baseline": _report_summary_value(
+            report, ("paired", "paired_valid_asr_baseline")
+        ),
+        "paired_valid_asr_product": _report_summary_value(
+            report, ("paired", "paired_valid_asr_product")
+        ),
+        "blocked_successful_attack_rate": _report_summary_value(
+            report, ("paired", "blocked_successful_attack_rate")
+        ),
+        "valid_run_rate_baseline": _report_summary_value(
+            report, ("arms", BASELINE_ARM_ID, "stability", "valid_run_rate")
+        ),
+        "valid_run_rate_product": _report_summary_value(
+            report, ("arms", PRODUCT_ARM_ID, "stability", "valid_run_rate")
+        ),
+        "asr_valid_malicious_baseline": _report_summary_value(
+            report, ("arms", BASELINE_ARM_ID, "safety", "asr_valid_malicious")
+        ),
+        "asr_valid_malicious_product": _report_summary_value(
+            report, ("arms", PRODUCT_ARM_ID, "safety", "asr_valid_malicious")
+        ),
+    }
+
+
+def build_repeats_summary(
+    *,
+    profile_id: str,
+    reports: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate per-repeat headline metrics with mean and range (max-min)."""
+
+    repeats = [
+        {
+            "repeat_index": index,
+            "duration_seconds": report.get("duration_seconds"),
+            "has_failures": bool(report.get("run_failures")),
+            "metrics": _extract_repeat_metrics(report),
+        }
+        for index, report in enumerate(reports)
+    ]
+    metric_names = sorted({key for item in repeats for key in item["metrics"]})
+    aggregates: dict[str, dict[str, Any]] = {}
+    for name in metric_names:
+        values = [
+            float(item["metrics"][name])
+            for item in repeats
+            if isinstance(item["metrics"][name], (int, float))
+        ]
+        if values:
+            aggregates[name] = {
+                "mean": round(sum(values) / len(values), 6),
+                "min": min(values),
+                "max": max(values),
+                "range": round(max(values) - min(values), 6),
+                "sample_count": len(values),
+            }
+        else:
+            aggregates[name] = {
+                "mean": None,
+                "min": None,
+                "max": None,
+                "range": None,
+                "sample_count": 0,
+            }
+    return {
+        "schema_version": _REPEATS_SUMMARY_SCHEMA_VERSION,
+        "run_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "profile_id": profile_id,
+        "repeat_count": len(repeats),
+        "repeats": repeats,
+        "aggregates": aggregates,
+    }
+
+
+def run_effect(args: argparse.Namespace) -> int:
+    artifacts = Path(args.artifacts).resolve()
+    if artifacts.exists() and any(artifacts.iterdir()):
+        print(
+            f"artifacts directory must be fresh: {artifacts}", file=sys.stderr
+        )
+        return int(ExitCode.INVALID_RUN)
+    artifacts.mkdir(parents=True, exist_ok=True)
+    try:
+        profile = load_competition_profile(args.profile)
+        cases = _select_cases(profile, args.case_id)
+        # Validates the frozen A0/A4 arm shapes; raises on drift.
+        build_effect_arms(profile)
+        provider = resolve_provider(profile, args)
+        semantic_env = build_semantic_env(args)
+    except InvalidCompetitionRun as exc:
+        print(f"{exc.reason_code}: {exc}", file=sys.stderr)
+        return int(ExitCode.INVALID_RUN)
+
+    arm_ids = [args.arm] if args.arm else list(EFFECT_ARM_IDS)
+    shard_count = args.arm_parallel
+    if shard_count > 1 and not args.arm:
+        print(
+            "--arm-parallel requires --arm (intra-arm sharding is single-arm only)",
+            file=sys.stderr,
+        )
+        return int(ExitCode.INVALID_RUN)
+
+    repeats = args.repeats
+    if repeats < 1:
+        print("--repeats must be >= 1", file=sys.stderr)
+        return int(ExitCode.INVALID_RUN)
+
+    # repeats == 1 keeps the historical flat artifact layout; repeats > 1
+    # isolates every round under its own repeat-N/ subdirectory so the
+    # script-created directories never clash with the fresh-directory check.
+    repeat_reports: list[dict[str, Any]] = []
+    overall_failures: list[str] = []
+    for repeat_index in range(repeats):
+        repeat_artifacts = (
+            artifacts if repeats == 1 else artifacts / f"repeat-{repeat_index}"
+        )
+        repeat_artifacts.mkdir(parents=True, exist_ok=True)
+        # Each repeat owns a disjoint port-table window; within a repeat the
+        # allocation is identical to the historical single-repeat behaviour.
+        port_offset = args.stream_index_offset + repeat_index * len(arm_ids) * shard_count
+        mode = "serial" if args.serial else "parallel"
+        if shard_count > 1:
+            mode += f" x{shard_count} shards"
+        if repeats > 1:
+            mode = f"repeat {repeat_index + 1}/{repeats}, {mode}"
+        exit_code, failures = _run_one_repeat(
+            args=args,
+            profile=profile,
+            provider=provider,
+            semantic_env=semantic_env,
+            cases=cases,
+            arm_ids=arm_ids,
+            shard_count=shard_count,
+            repeat_index=repeat_index,
+            repeat_artifacts=repeat_artifacts,
+            port_offset=port_offset,
+            mode=mode,
+        )
+        labeled = [
+            f"repeat-{repeat_index}: {failure}" for failure in failures
+        ]
+        overall_failures.extend(labeled)
+        if exit_code != int(ExitCode.PASSED):
+            if repeats > 1:
+                for failure in labeled:
+                    print(f"FAILED {failure}", file=sys.stderr)
+                print(
+                    f"repeat {repeat_index} failed; aborting the remaining "
+                    "repeat rounds",
+                    file=sys.stderr,
+                )
+            return exit_code
+        if repeats > 1:
+            report_path = repeat_artifacts / "effect-report.json"
+            repeat_reports.append(
+                json.loads(report_path.read_text(encoding="utf-8"))
+            )
+
+    if repeats > 1:
+        summary = build_repeats_summary(
+            profile_id=profile.profile_id, reports=repeat_reports
+        )
+        if overall_failures:
+            summary["run_failures"] = list(overall_failures)
+        _write_json(artifacts / "repeats-summary.json", summary)
     return int(ExitCode.PASSED)
 
 

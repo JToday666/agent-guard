@@ -165,6 +165,16 @@ def create_app(
     # 官方决策。局部保留引用以便 lifespan shutdown 关闭共享
     # httpx.Client（评审 M2）。
     semantic_provider = semantic_provider_from_settings(settings)
+    # memory 豁免 env 审计：AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS 在任何部署面
+    # 读 env 即生效且无条件覆盖竞赛默认（仅 model_call），静默生效会让产物
+    # 不可检测/不可归因，这里显式打 WARNING（含生效动作集与 env 名）。
+    if settings.memory_not_required_actions:
+        logger.warning(
+            "AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS is set; memory "
+            "required-checks exemption overrides competition defaults. "
+            "actions=%s env=AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS",
+            ",".join(sorted(settings.memory_not_required_actions)),
+        )
     v21_pipeline_service = V21PipelineService(
         settings=settings,
         store=store,
@@ -173,10 +183,13 @@ def create_app(
         # V21-13 Stage 1 shadow：flag 关/未 configured 时恒 None（零
         # 开销）；在场时产物只供证据/评测，不改变官方决策。
         semantic_provider=semantic_provider,
+        # memory required-checks 豁免：env（消融分析用）已设置时优先，
+        # 否则保持 competition_active 下的既有默认（仅 model_call），
+        # 非 competition 路径行为不变。
         memory_not_required_actions=(
-            frozenset({"model_call"})
-            if competition_active
-            else frozenset()
+            settings.memory_not_required_actions
+            if settings.memory_not_required_actions
+            else (frozenset({"model_call"}) if competition_active else frozenset())
         ),
         competition_model_output_observation=competition_active,
     )

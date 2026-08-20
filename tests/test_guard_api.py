@@ -4916,3 +4916,20 @@ def test_audit_events_post_idempotent_hit_repairs_without_duplicates() -> None:
     assert (
         len(store.provenance_nodes) == 1
     )  # audit node only (no source link), not doubled
+
+
+def test_guard_api_settings_memory_not_required_actions_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS env 驱动豁免集（评审 Fix）：
+    设置时解析为 frozenset、未设置时空集（覆盖测试缺口，行为不变）。"""
+
+    monkeypatch.delenv("AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS", raising=False)
+    assert GuardApiSettings().memory_not_required_actions == frozenset()
+
+    monkeypatch.setenv(
+        "AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS", "model_call,effect_write"
+    )
+    assert GuardApiSettings().memory_not_required_actions == frozenset(
+        {"model_call", "effect_write"}
+    )

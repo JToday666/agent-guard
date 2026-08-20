@@ -137,6 +137,15 @@ class GuardApiSettings:
             "AGENTGUARD_V21_SEMANTIC_SAMPLE_RATE", default=1.0
         )
     )
+    # memory guard required-checks 豁免开关（消融分析用，如 no-memory-guard
+    # 臂）：逗号分隔的 action 名单，命中名单的 action 跳过 memory required
+    # 检查。默认未设置（空 frozenset）时保持 competition_active 现有行为
+    # 不变。
+    memory_not_required_actions: frozenset[str] = field(
+        default_factory=lambda: _env_str_set(
+            "AGENTGUARD_MEMORY_NOT_REQUIRED_ACTIONS"
+        )
+    )
     audit_checkpoint_path: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_AUDIT_CHECKPOINT_PATH")
     )
@@ -575,6 +584,15 @@ def _optional_env(name: str) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _env_str_set(name: str) -> frozenset[str]:
+    """逗号分隔 env 解析为去空白 frozenset；未设置返回空集。"""
+
+    value = os.getenv(name)
+    if value is None:
+        return frozenset()
+    return frozenset(item.strip() for item in value.split(",") if item.strip())
 
 
 def _env_bool(name: str, *, default: bool) -> bool:

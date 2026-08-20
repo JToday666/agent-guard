@@ -236,6 +236,138 @@ def test_serial_run_writes_report_and_arm_artifacts(
     assert (artifacts / "arms/A0/contracts.json").exists()
 
 
+def test_default_repeats_keeps_flat_artifact_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without --repeats the artifact layout stays exactly as before: no
+    repeat-N/ subdirectories and no repeats-summary.json."""
+
+    module = _load_script()
+    payloads = _fake_arms_payload()
+    repeat_indexes: list[int] = []
+
+    def fake_execute(request):
+        arm_id = module.EFFECT_ARM_IDS[request.arm_index]
+        repeat_indexes.append(request.repeat_index)
+        return payloads[arm_id]
+
+    monkeypatch.setattr(
+        module, "resolve_provider", lambda profile, args: _fake_provider()
+    )
+    monkeypatch.setattr(module, "execute_effect_arm", fake_execute)
+    artifacts = tmp_path / "effect"
+
+    exit_code = module.main(
+        [
+            "run",
+            "--artifacts",
+            str(artifacts),
+            "--case-id",
+            "PI-001",
+            "--case-id",
+            "BN-001",
+            "--serial",
+        ]
+    )
+
+    assert exit_code == 0
+    assert repeat_indexes == [0, 0]
+    assert (artifacts / "effect-report.json").exists()
+    assert (artifacts / "arms/A0/run.json").exists()
+    assert not (artifacts / "repeat-0").exists()
+    assert not (artifacts / "repeats-summary.json").exists()
+
+
+def test_repeats_two_writes_repeat_subdirectories_and_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_script()
+    payloads = _fake_arms_payload()
+    executions: list[tuple[int, str]] = []
+
+    def fake_execute(request):
+        arm_id = module.EFFECT_ARM_IDS[request.arm_index]
+        executions.append((request.repeat_index, arm_id))
+        return payloads[arm_id]
+
+    monkeypatch.setattr(
+        module, "resolve_provider", lambda profile, args: _fake_provider()
+    )
+    monkeypatch.setattr(module, "execute_effect_arm", fake_execute)
+    artifacts = tmp_path / "effect"
+
+    exit_code = module.main(
+        [
+            "run",
+            "--artifacts",
+            str(artifacts),
+            "--case-id",
+            "PI-001",
+            "--case-id",
+            "BN-001",
+            "--serial",
+            "--repeats",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    # Both arms ran in each repeat round with the matching repeat index.
+    assert executions == [(0, "A0"), (0, "A4"), (1, "A0"), (1, "A4")]
+    # Every repeat owns its own isolated artifact subdirectory.
+    for index in (0, 1):
+        repeat_dir = artifacts / f"repeat-{index}"
+        assert (repeat_dir / "effect-report.json").exists()
+        assert (repeat_dir / "arms/A0/run.json").exists()
+        assert (repeat_dir / "arms/A4/run.json").exists()
+    # Nothing leaks into the historical flat layout.
+    assert not (artifacts / "effect-report.json").exists()
+    assert not (artifacts / "arms").exists()
+    summary = json.loads((artifacts / "repeats-summary.json").read_text())
+    assert summary["repeat_count"] == 2
+    assert [item["repeat_index"] for item in summary["repeats"]] == [0, 1]
+    metrics = summary["repeats"][0]["metrics"]
+    assert metrics["paired_valid_asr_baseline"] == pytest.approx(1.0)
+    assert metrics["paired_valid_asr_product"] == pytest.approx(0.0)
+    assert metrics["blocked_successful_attack_rate"] == pytest.approx(1.0)
+    assert metrics["valid_run_rate_baseline"] == pytest.approx(1.0)
+    assert metrics["valid_run_rate_product"] == pytest.approx(1.0)
+    assert metrics["asr_valid_malicious_baseline"] == pytest.approx(1.0)
+    assert metrics["asr_valid_malicious_product"] == pytest.approx(0.0)
+    blocked = summary["aggregates"]["blocked_successful_attack_rate"]
+    assert blocked["mean"] == pytest.approx(1.0)
+    assert blocked["range"] == pytest.approx(0.0)
+    assert blocked["sample_count"] == 2
+    # Deterministic fake rows make every repeat identical, so all ranges
+    # collapse to zero.
+    for aggregate in summary["aggregates"].values():
+        assert aggregate["range"] == pytest.approx(0.0)
+
+
+def test_repeats_rejects_values_below_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module, "resolve_provider", lambda profile, args: _fake_provider()
+    )
+
+    exit_code = module.main(
+        [
+            "run",
+            "--artifacts",
+            str(tmp_path / "effect"),
+            "--case-id",
+            "BN-001",
+            "--serial",
+            "--repeats",
+            "0",
+        ]
+    )
+
+    assert exit_code == 2
+
+
 def test_serial_run_fails_closed_when_an_arm_crashes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
