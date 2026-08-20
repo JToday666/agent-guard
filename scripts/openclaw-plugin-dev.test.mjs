@@ -287,11 +287,13 @@ test("buildInstallPatch keeps unrelated keys and manages allow only when present
   ]);
   const entry = patch.plugins.entries[PLUGIN_ID];
   assert.equal(entry.enabled, true);
-  assert.equal(entry.hooks.timeoutMs, 10000);
+  assert.equal(entry.hooks.timeoutMs, 600_000);
   assert.equal(entry.hooks.allowConversationAccess, true);
   assert.equal(entry.config.enforcementMode, "enforce");
   assert.equal(entry.config.agentId, "main");
   assert.equal(entry.config.guardApiBaseUrl, "http://127.0.0.1:8088");
+  assert.equal(entry.config.requestTimeoutMs, 60_000);
+  assert.equal(entry.config.approvalTimeoutMs, 600_000);
   assert.deepEqual(entry.config.adapterToken, strategy.secretRef);
   assert.equal(Object.hasOwn(patch.plugins, "allow"), false);
   assert.equal(patch.secrets.providers.agentguard_adapter.source, "env");
@@ -303,6 +305,43 @@ test("buildInstallPatch keeps unrelated keys and manages allow only when present
     strategy,
   });
   assert.deepEqual(withAllow.plugins.allow, ["qqbot", PLUGIN_ID]);
+});
+
+test("buildInstallPatch preserves existing runtime config on reinstall", () => {
+  const strategy = pickCredentialStrategy("linux");
+  const patch = buildInstallPatch({
+    config: {
+      plugins: {
+        entries: {
+          [PLUGIN_ID]: {
+            enabled: true,
+            hooks: { timeoutMs: 600_000, allowConversationAccess: true },
+            config: {
+              guardApiBaseUrl: "http://127.0.0.1:8088",
+              agentId: "main",
+              enforcementMode: "enforce",
+              requestTimeoutMs: 60_000,
+              approvalPollIntervalMs: 100,
+              approvalTimeoutMs: 600_000,
+              runtimeBindingId: "binding:openclaw:main",
+            },
+          },
+        },
+      },
+    },
+    stagingDir: "/repo/.openclaw-dev/agentguard-security",
+    guardApiBaseUrl: "http://127.0.0.1:8088",
+    strategy,
+  });
+  const entry = patch.plugins.entries[PLUGIN_ID];
+  // 既有运行时配置不得被重装默认值覆盖。
+  assert.equal(entry.hooks.timeoutMs, 600_000);
+  assert.equal(entry.config.approvalTimeoutMs, 600_000);
+  assert.equal(entry.config.requestTimeoutMs, 60_000);
+  assert.equal(entry.config.runtimeBindingId, "binding:openclaw:main");
+  // 接线键始终按本次安装参数权威写入。
+  assert.equal(entry.config.guardApiBaseUrl, "http://127.0.0.1:8088");
+  assert.deepEqual(entry.config.adapterToken, strategy.secretRef);
 });
 
 test("buildUninstallPatch removes only AgentGuard-owned references", () => {

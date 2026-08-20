@@ -96,6 +96,9 @@ export function isAgentGuardLoadPath(value, stagingDir) {
 // 单一完整安装 patch；只覆盖 AgentGuard 键，无关 entries 保留。
 // plugins.allow 是可选 allowlist：仅当现有配置已声明时才维护，
 // 避免凭空引入 allowlist 阻断其他插件加载。
+// 既有 entry 的运行时配置（超时、轮询间隔、enforcementMode、runtimeBindingId 等）
+// 优先保留（重装不丢失运行时配置）；guardApiBaseUrl/adapterToken/agentId 为
+// 安装权威接线键，始终按本次安装参数写入。默认超时按人工审批场景设定。
 export function buildInstallPatch({
   config = {},
   stagingDir,
@@ -107,6 +110,15 @@ export function buildInstallPatch({
   const currentPaths = Array.isArray(plugins.load?.paths)
     ? plugins.load.paths
     : [];
+  const existingEntry = plugins.entries?.[PLUGIN_ID];
+  const existingHooks =
+    existingEntry && typeof existingEntry === "object"
+      ? (existingEntry.hooks ?? {})
+      : {};
+  const existingConfig =
+    existingEntry && typeof existingEntry === "object"
+      ? (existingEntry.config ?? {})
+      : {};
   const patch = {
     secrets: {
       providers: { [strategy.providerName]: strategy.provider },
@@ -124,15 +136,18 @@ export function buildInstallPatch({
       entries: {
         [PLUGIN_ID]: {
           enabled: true,
-          hooks: { timeoutMs: 10000, allowConversationAccess: true },
+          // hooks.timeoutMs 必须 >= approvalTimeoutMs，否则审批等待会被 hook 超时杀死。
+          hooks: { timeoutMs: 600_000, allowConversationAccess: true, ...existingHooks },
           config: {
+            requestTimeoutMs: 60_000,
+            approvalPollIntervalMs: 100,
+            approvalTimeoutMs: 600_000,
+            enforcementMode: ENFORCEMENT_MODE,
+            ...existingConfig,
+            // 接线键由安装权威写入，不受既有配置覆盖。
             guardApiBaseUrl,
             adapterToken: strategy.secretRef,
             agentId,
-            enforcementMode: ENFORCEMENT_MODE,
-            requestTimeoutMs: 3000,
-            approvalPollIntervalMs: 100,
-            approvalTimeoutMs: 3000,
           },
         },
       },
