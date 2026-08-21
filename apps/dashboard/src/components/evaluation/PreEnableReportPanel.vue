@@ -3,7 +3,7 @@
     <header class="pre-enable-report__header">
       <div>
         <span>C10 · PRE-ENABLE OBSERVATION</span>
-        <h2 id="pre-enable-report-title">正式决策与 V2 Shadow 预启用报告</h2>
+        <h2 id="pre-enable-report-title">正式决策与 V2 评判预启用报告</h2>
         <p>功能证据与效果指标来自同一次 EvaluationRun；所有比率保留原始分子与分母。</p>
       </div>
       <StatusBadge :label="availabilityLabel" :tone="availabilityTone" />
@@ -32,8 +32,8 @@
           <p>报告只读取 current official，不以 V2 结果替换运行时决策。</p>
         </article>
         <article class="is-shadow">
-          <span>V2 SHADOW</span>
-          <strong>影子观测</strong>
+          <span>V2 PARALLEL</span>
+          <strong>V2 评判</strong>
           <p>记录分叉、解释覆盖与 benign ASK，不改变 official 响应。</p>
         </article>
         <article class="is-gate">
@@ -225,7 +225,7 @@ const metrics = computed(() => [
     value: props.report.divergenceExplanationCoverage,
     detail: "categorized / divergent",
   },
-  { label: "Benign ASK", value: props.report.benignAsk, detail: "shadow ASK / benign labeled" },
+  { label: "Benign ASK", value: props.report.benignAsk, detail: "V2 ASK / benign labeled" },
   {
     label: "Decision label coverage",
     value: props.report.decisionLabelCoverage,

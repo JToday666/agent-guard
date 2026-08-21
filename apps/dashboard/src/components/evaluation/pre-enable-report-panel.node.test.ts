@@ -12,7 +12,7 @@ test("the C10 report is embedded in the existing Evaluation page", () => {
   assert.match(evaluationPageSource, /<PreEnableReportPanel/);
   assert.match(evaluationPageSource, /:report="store\.evaluationRun\.preEnableReport"/);
   assert.match(panelSource, /CURRENT OFFICIAL/);
-  assert.match(panelSource, /V2 SHADOW/);
+  assert.match(panelSource, /V2 PARALLEL/);
   assert.match(panelSource, /FORMAL GATE B/);
   assert.match(panelSource, /未声明通过/);
   assert.match(panelSource, /效果仅作 observational 展示，不应用数值门槛/);

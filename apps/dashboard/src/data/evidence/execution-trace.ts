@@ -955,7 +955,7 @@ export function buildRuntimeSupervisionViewModel(
     .map((step) => ({
       code: "unsupported_contract" as const,
       severity: "warning" as const,
-      message: `步骤 ${step.stepId} 的 V2.1 影子证据不完整或与正式判定冲突。`,
+      message: `步骤 ${step.stepId} 的 V2 评判证据不完整或与正式判定冲突。`,
       sourceRefs: step.supervision.v21Assessment.sourceRefs,
     }));
   const windowWarnings: SupervisionWarning[] = truncationReasons.length

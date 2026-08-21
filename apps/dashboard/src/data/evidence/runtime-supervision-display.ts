@@ -44,7 +44,8 @@ const CERTAINTY_LABELS: Record<EvidenceCertainty, string> = {
 
 const AUTHORITY_LABELS: Record<DecisionAuthority, string> = {
   official: "正式权威",
-  shadow: "影子评估",
+  // 面向用户文案统一口径：不再暴露 V2 并行评判的模式术语，中性表述为“V2 评判”。
+  shadow: "V2 评判",
   none: "未验证权威",
 };
 
