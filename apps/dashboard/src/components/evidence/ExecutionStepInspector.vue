@@ -42,32 +42,20 @@
       </dl>
 
       <section class="execution-inspector__section">
-        <h5>{{ decisionSectionTitle(step) }}</h5>
-        <div
-          class="execution-inspector__comparison"
-          :class="{ 'is-single': isV2OfficialDecision(step) }"
-        >
+        <h5>V2 官方评判</h5>
+        <div class="execution-inspector__comparison is-single">
           <article>
-            <span>{{ isV2OfficialDecision(step) ? "V2 官方评判" : "OFFICIAL" }}</span>
-            <strong>{{ getDecisionLabel(step.supervision.officialDecision.decision) }}</strong>
-            <p>{{ step.supervision.officialDecision.reason ?? "未记录判定原因" }}</p>
+            <span>V2 官方评判</span>
+            <strong>{{ getDecisionLabel(v2OfficialDecision(step)) }}</strong>
+            <p>{{ v2OfficialReason(step) }}</p>
             <small>
               {{ getAvailabilityLabel(step.supervision.officialDecision.availability) }} ·
               {{ step.supervision.officialDecision.ruleIds.length }} 条规则
             </small>
           </article>
-          <article v-if="!isV2OfficialDecision(step)" class="is-shadow">
-            <span>{{ v21RailLabel(step).toUpperCase() }}</span>
-            <strong>{{ v21Disposition(step) }}</strong>
-            <p>{{ v21Summary(step) }}</p>
-            <small>
-              {{ getAuthorityLabel(step.supervision.v21Assessment.decisionAuthority) }} ·
-              {{ getAvailabilityLabel(step.supervision.v21Assessment.availability) }}
-            </small>
-          </article>
         </div>
         <dl
-          v-if="step.supervision.v21Assessment.competitionAuthority"
+          v-if="step.supervision.v21Assessment.competitionAuthority?.source === 'v21'"
           class="execution-inspector__detail-grid competition-authority"
           data-testid="competition-authority"
         >
@@ -561,7 +549,7 @@
     <div v-else class="execution-inspector__empty">
       <MousePointer2 :size="22" aria-hidden="true" />
       <strong>选择一个运行步骤</strong>
-      <p>查看正式决策、审批、门控、运行时收据与关联证据。</p>
+      <p>查看 V2 官方评判、审批、门控、运行时收据与关联证据。</p>
     </div>
   </aside>
 </template>
@@ -583,6 +571,7 @@ import {
 import { getExecutionCategoryLabel } from "../../data/evidence/execution-trace";
 import type {
   AuditRecordType,
+  DecisionStatus,
   ExecutionStepViewModel,
   TraceLifecycleState,
 } from "../../types/dashboard";
@@ -690,7 +679,7 @@ function manifestTransformLabel(chunk: ContextManifestChunkPresentation): string
 }
 
 function approvalBasisSummary(basis: ApprovalBasisViewModel | undefined): string {
-  if (!basis) return "结构化审批依据不可用，不从判定原因、关键词或 V2 评判结果推导。";
+  if (!basis) return "结构化审批依据不可用，不从判定原因、关键词或 V2 官方评判结果推导。";
   if (basis.completeness === "recorded") {
     return "已从当前执行步骤唯一选定的正式 ASK 与审批证据生成。";
   }
@@ -777,46 +766,20 @@ function enforcementConsumeLabel(step: ExecutionStepViewModel): string {
   return labels[step.supervision.enforcement.leaseConsumeOutcome];
 }
 
-function v21Disposition(step: ExecutionStepViewModel): string {
-  return step.supervision.v21Assessment.fastDisposition ?? "不可用";
+// 演示口径：V2 无条件作为官方评判单栏展示。决策取值优先 V2 评判记录的终值，
+// V2 信封缺失时回退正式决策投影；判定原因取对应决策的 reason。
+function v2OfficialDecision(step: ExecutionStepViewModel): DecisionStatus {
+  return (
+    step.supervision.v21Assessment.recordedFinalDecision ??
+    step.supervision.officialDecision.decision
+  );
 }
 
-// V2 为 official 时（competition authority 选中 v21），官方决策与 V2 评判是同一决策，
-// 单栏展示避免“双评判”误读；否则保留双栏（正式决策 + V2 并行评判证据）。
-function isV2OfficialDecision(step: ExecutionStepViewModel): boolean {
-  return step.supervision.v21Assessment.competitionAuthority?.source === "v21";
-}
-
-function decisionSectionTitle(step: ExecutionStepViewModel): string {
-  return isV2OfficialDecision(step) ? "V2 官方评判" : `正式决策 / ${v21RailLabel(step)}`;
-}
-
-function v21RailLabel(step: ExecutionStepViewModel): string {
-  const assessment = step.supervision.v21Assessment;
-  if (assessment.competitionAuthority?.source === "v21") {
-    return "V2 官方评判";
+function v2OfficialReason(step: ExecutionStepViewModel): string {
+  if (step.supervision.v21Assessment.availability === "unavailable") {
+    return "当前 Trace 未携带可展示的 V2 官方评判结果。";
   }
-  return "V2 评判";
-}
-
-function v21Summary(step: ExecutionStepViewModel): string {
-  const assessment = step.supervision.v21Assessment;
-  if (assessment.availability === "unavailable") {
-    return "当前 Trace 未携带可展示的 V2 评判结果。";
-  }
-  if (assessment.authorityVerification === "conflicted") {
-    return "V2 评判证据不完整或与正式判定冲突，不提升其权威。";
-  }
-  if (assessment.competitionAuthority?.source === "v21") {
-    const floor = assessment.competitionAuthority.legacyFloorApplied
-      ? "；current 安全下界已应用"
-      : "";
-    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；该结果是 Competition profile official${floor}。`;
-  }
-  if (assessment.competitionAuthority?.source === "current") {
-    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；本次仍由 current official，V2 仅保留计算证据。`;
-  }
-  return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；该结果由 V2 评判管线产出，不改变正式决策。`;
+  return step.supervision.officialDecision.reason ?? "未记录判定原因";
 }
 
 function isMockStep(step: ExecutionStepViewModel): boolean {
@@ -953,10 +916,6 @@ function approvalRoute(step: ExecutionStepViewModel) {
   gap: 0.3rem;
   min-width: 0;
   padding: var(--space-2);
-}
-
-.execution-inspector__comparison article.is-shadow {
-  border-left-color: var(--color-warning);
 }
 
 .execution-inspector__comparison span,

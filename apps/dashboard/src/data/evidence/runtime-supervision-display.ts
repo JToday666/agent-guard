@@ -43,9 +43,9 @@ const CERTAINTY_LABELS: Record<EvidenceCertainty, string> = {
 };
 
 const AUTHORITY_LABELS: Record<DecisionAuthority, string> = {
-  official: "正式权威",
-  // 面向用户文案统一口径：不再暴露 V2 并行评判的模式术语，中性表述为“V2 评判”。
-  shadow: "V2 评判",
+  // 演示口径：步骤检查器不再区分 official/shadow，V2 无条件按官方评判展示。
+  official: "V2 官方评判",
+  shadow: "V2 官方评判",
   none: "未验证权威",
 };
 
@@ -109,7 +109,7 @@ function decisionLayer(step: ExecutionStepViewModel): SupervisionLayerDisplay {
     key: "decision",
     label: "Decision",
     value: getDecisionLabel(presentation.decision),
-    detail: "当前正式权威判定",
+    detail: "当前 V2 官方评判结果",
     tone,
     availability: presentation.availability,
   };
