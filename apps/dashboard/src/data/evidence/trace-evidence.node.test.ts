@@ -313,3 +313,87 @@ test("reads only the canonical AuditEvent integrity metadata", () => {
   assert.equal(normalized.entryHash, "canonical-entry");
   assert.equal(normalized.previousHash, "canonical-previous");
 });
+
+function contentPreviewRow(guardEvent: Record<string, unknown>): AuditEventRow {
+  return {
+    actionId: "act_evt_content_preview",
+    agentAction: null,
+    auditSequence: 1,
+    attackType: null,
+    blocked: false,
+    caseId: null,
+    decision: "allow",
+    decisionId: "decision_content_preview",
+    eventId: "event_content_preview",
+    eventType: "model_output_produced",
+    id: "audit_content_preview",
+    isMalicious: false,
+    occurredAt: "2026-08-21T08:00:00+08:00",
+    reason: "允许",
+    resource: "",
+    resourceTargets: [],
+    riskScore: 0,
+    ruleHits: [],
+    runtime: "langgraph",
+    severity: "low",
+    stage: "after_model_call",
+    time: "08:00",
+    tool: "",
+    traceId: "trace_content_preview",
+    userTask: "完成受控任务",
+    raw: {
+      audit_id: "audit_content_preview",
+      evidence: { guard_event: guardEvent },
+      links: { decision_id: "decision_content_preview", event_id: "event_content_preview" },
+      record_type: "policy_evaluation",
+    },
+    recordType: "policy_evaluation",
+  };
+}
+
+test("normalizes guard_event.content_preview for model output and message events", () => {
+  const output = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [
+      contentPreviewRow({
+        content_preview: "报告已写入 /reports/briefing.txt。",
+        event_type: "model_output_produced",
+      }),
+    ],
+    [],
+    null,
+  );
+  assert.equal(output.events[0]?.contentPreview, "报告已写入 /reports/briefing.txt。");
+  assert.equal(output.primary?.contentPreview, "报告已写入 /reports/briefing.txt。");
+
+  const message = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [
+      contentPreviewRow({
+        content_preview: "邮件正文摘要",
+        event_type: "message_send_proposed",
+      }),
+    ],
+    [],
+    null,
+  );
+  assert.equal(message.events[0]?.contentPreview, "邮件正文摘要");
+});
+
+test("treats a missing content_preview as null for historical audit records", () => {
+  const legacy = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [contentPreviewRow({ event_type: "model_output_produced" })],
+    [],
+    null,
+  );
+  assert.equal(legacy.events[0]?.contentPreview, null);
+
+  const blank = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [contentPreviewRow({ content_preview: "", event_type: "model_output_produced" })],
+    [],
+    null,
+  );
+  assert.equal(blank.events[0]?.contentPreview, null);
+});

@@ -107,6 +107,10 @@
           </dd>
         </div>
         <div>
+          <dt>{{ contentPreviewLabel }}</dt>
+          <dd>{{ contentPreviewValue }}</dd>
+        </div>
+        <div>
           <dt>判定原因</dt>
           <dd>{{ event.reason }}</dd>
         </div>
@@ -201,6 +205,16 @@ const recordTypeLabel = computed(() => {
     unknown: "未记录",
   };
   return labels[props.normalized?.recordType ?? "unknown"];
+});
+// 模型最终回复 / 外发消息正文：仅 model_output_produced 与
+// message_send_proposed 携带；历史审计记录缺失该键时按①正常无数据处理。
+const contentPreviewLabel = computed(() =>
+  props.event.eventType === "message_send_proposed" ? "外发消息内容" : "模型输出内容",
+);
+const contentPreviewValue = computed(() => {
+  const preview = props.normalized?.contentPreview;
+  if (preview) return preview;
+  return noDataNeeded("输出内容", "该事件类型不携带输出内容");
 });
 const formattedArguments = computed(() => {
   const normalized = props.normalized;

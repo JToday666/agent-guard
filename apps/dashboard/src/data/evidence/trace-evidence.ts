@@ -524,6 +524,9 @@ function normalizeAuditEvent(
       ...readContextSources(guardEvent.context_sources),
       ...readContextSources(metadata.context_sources),
     ].filter((value, index, values) => values.indexOf(value) === index),
+    // 模型最终回复 / 外发消息正文：服务端投影已脱敏截断；历史审计记录
+    // 无该键时保持 null，由视图层按三态文案显示「无需该数据」。
+    contentPreview: readMaskedString(guardEvent.content_preview),
     decision,
     decisionId: firstString(links.decision_id),
     decisionReason: firstString(guardDecision.reason, raw.reason, event.reason),
@@ -671,6 +674,7 @@ function combineTraceEvidence(
     actionId: pickLatest(events, (event) => event.actionId),
     approval: latestApproval,
     contextSources: pickArray(events, (event) => event.contextSources),
+    contentPreview: pickLatest(events, (event) => event.contentPreview),
     decision: decisionRecord?.decision ?? "unknown",
     decisionId: decisionRecord?.decisionId ?? null,
     decisionReason:
