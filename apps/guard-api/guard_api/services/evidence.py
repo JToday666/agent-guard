@@ -463,6 +463,22 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
         projection["tool"] = tool_projection
     else:
         projection["tool"] = None
+    # 模型最终回复 / 外发消息正文：沿用 user_task 同款有界脱敏口径
+    # （scrub_text + CONTENT_PREVIEW_LIMIT）。OpenClaw message_sending
+    # hook 统一映射为 message_send_proposed 事件类型，故按 payload 类型
+    # 判别即可覆盖两个运行时。缺失/为空不写该键，历史审计记录保持兼容。
+    content_preview: str | None = None
+    if isinstance(payload, MessageSendPayload):
+        content_preview = payload.content_preview
+    elif (
+        isinstance(payload, ModelCallPayload)
+        and event.event_type == "model_output_produced"
+    ):
+        content_preview = payload.content_preview
+    if content_preview:
+        projection["content_preview"] = bound_redacted_value(
+            content_preview, text_limit=CONTENT_PREVIEW_LIMIT
+        )
     resources = [
         {
             "type": resource.resource_type,
