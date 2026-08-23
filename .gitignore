@@ -57,5 +57,8 @@ pnpm-debug.log*
 .diag_*.py
 .fullrun-launch.sh
 
-# 实验报告输出目录
-reports/
+# 实验报告输出目录；仅允许受审查的规范基线说明入库。
+reports/*
+!reports/baselines/
+reports/baselines/*
+!reports/baselines/README.md
