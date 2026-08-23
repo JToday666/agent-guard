@@ -44,15 +44,16 @@ uv run pytest -q -m postgres
 pnpm --filter @agentguard/dashboard test:e2e
 
 echo "[alpha] building local artifacts without publishing"
-python_package_dirs=(
-  apps/cli
-  apps/guard-api
-  packages/agentguard-core
-  packages/agentguard-langgraph-adapter
-  agentguard_langgraph_bench/bench
+python_package_specs=(
+  "apps/cli:aegis-agentguard-cli"
+  "apps/guard-api:aegis-agentguard-api"
+  "packages/agentguard-core:aegis-agentguard-core"
+  "packages/agentguard-langgraph-adapter:agentguard-langgraph-adapter"
+  "agentguard_langgraph_bench/bench:agentguard-langgraph-bench"
 )
-for package_dir in "${python_package_dirs[@]}"; do
-  uv build "${package_dir}" --out-dir release-dist --no-create-gitignore
+for package_spec in "${python_package_specs[@]}"; do
+  IFS=: read -r package_dir artifact_dir <<<"${package_spec}"
+  uv build "${package_dir}" --out-dir "release-dist/${artifact_dir}" --no-create-gitignore
 done
 pnpm --filter @agentguard/dashboard build
 pnpm --filter @agentguard-ai/openclaw-plugin build
