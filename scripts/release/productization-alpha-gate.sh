@@ -11,6 +11,7 @@ if [[ "${mode}" != "fast" && "${mode}" != "--full" ]]; then
 fi
 
 cd "${repo_root}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${repo_root}/.uv-cache}"
 
 echo "[alpha] checking whitespace and generated roadmap contracts"
 git diff --check
@@ -43,7 +44,16 @@ uv run pytest -q -m postgres
 pnpm --filter @agentguard/dashboard test:e2e
 
 echo "[alpha] building local artifacts without publishing"
-uv build --all-packages --out-dir release-dist
+python_package_dirs=(
+  apps/cli
+  apps/guard-api
+  packages/agentguard-core
+  packages/agentguard-langgraph-adapter
+  agentguard_langgraph_bench/bench
+)
+for package_dir in "${python_package_dirs[@]}"; do
+  uv build "${package_dir}" --out-dir release-dist --no-create-gitignore
+done
 pnpm --filter @agentguard/dashboard build
 pnpm --filter @agentguard-ai/openclaw-plugin build
 docker build --tag agentguard-guard-api:productization-alpha-local apps/guard-api
