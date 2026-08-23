@@ -234,6 +234,20 @@ P1 继续复用 `POST /v1/guard/evaluate` 和 `GuardEvent.payload`，不新增�
 | `memory_write_proposed` | `MemoryEventPayload` | 长期记忆写入审计 |
 | `message_send_proposed` | `MessageSendPayload` | 出站消息外发 DLP |
 
+### 5.1 Dashboard 证据预览投影
+
+`guard_event.content_preview` 是 Guard API 面向证据查询/Dashboard 的可选投影字段，不是
+`GuardEvent.payload.content_preview` 的无条件透传。它遵守以下兼容与隐私边界：
+
+- `AGENTGUARD_EVIDENCE_CONTENT_PREVIEW_ENABLED=false` 为默认值；关闭时以及历史记录中字段
+  均保持缺失，消费者不得把缺失解释为空正文。
+- 只有 `model_output_produced` 与 `message_send_proposed` 可以进入该投影；
+  `model_input_prepared` 即使开关启用也绝不投影，避免把完整模型输入暴露给调查 UI。
+- 服务端先递归脱敏，再使用冻结的正文长度预算截断；Dashboard 只把前端掩码作为兜底，
+  不能替代服务端处理。
+- 该字段是 optional 的只读兼容扩展。旧客户端必须忽略未知字段；新客户端必须接受字段
+  缺失、空值被省略和经过截断/脱敏的值。
+
 ## 6. SecurityContext
 
 `SecurityContext` 记录用户任务、来源、会话、运行时、信任级别和派生资源，是任务一致性判断的主要输入。
@@ -255,6 +269,19 @@ P1 继续复用 `POST /v1/guard/evaluate` 和 `GuardEvent.payload`，不新增�
   "metadata": {}
 }
 ```
+
+`SecurityContext.visible_source_refs` 的 wire 语义必须保持三态，不能用通用“数组缺省为空”
+规则处理：
+
+- 字段缺失或 `null`：Runtime 无法证明模型实际可见的来源集合；下游必须保持未知并
+  fail closed，不能推断为空集合。
+- `[]`：可信 Runtime 调用上下文明确证明可见来源集合为空。
+- 非空数组：可信 Runtime 精确证明的 canonical source refs；空字符串、重复项和超限值
+  必须规范化或拒绝，不能扩大集合。
+
+只有 Adapter 从 Runtime 控制的顶层调用上下文读取该字段。用户输入、模型输出、自由
+`metadata` 或其他非可信嵌套字段中的同名值不能授予“已证明为空”或可见来源权威；
+LangGraph Adapter 会忽略这类伪造。生产者无法证明时必须省略字段，而不是发送 `[]`。
 
 ## 7. ToolCallEvent Payload
 
@@ -355,13 +382,17 @@ Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `
 AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
 AuditEvent 默认保持 `schema_version="0.3"` 以兼容现有生产者，并允许未知扩展字段用于前向兼容。
 
-### 9.1 当前版本与已冻结目标
+### 9.1 当前版本与剩余边界
 
-当前 `schemas/audit_event.schema.json`、Core `AuditEvent` 类型和 Guard API 基础写入/读取
-已经支持 AuditEvent `0.3 | 0.4`，并有 `0.4` 基础契约测试。现有 Guard API 策略审计、
-LangGraph Adapter 和 OpenClaw Plugin 仍主要生产 `0.3`；事件时策略快照、结构化 evidence、
-稳定 links、统一幂等、runtime outcome 和 PostgreSQL 共享契约测试尚未完成。因此基础双读
-不等于 AuditEvent `0.4` 端到端迁移已经交付。
+当前 `schemas/audit_event.schema.json`、Core `AuditEvent` 类型和 Guard API 读写支持
+AuditEvent `0.3 | 0.4`。Guard API 规范 writer 已写 `0.4` 的策略审计、结构化 evidence、
+稳定 links 与事件时策略引用；LangGraph 运行时回执、OpenClaw 最小 outcome 路径、请求
+幂等/冲突语义以及 Memory/PostgreSQL 共享契约已经落地。冻结生产者的 `0.3` 输入仍只在
+服务端边界兼容分类，不能据此要求新 writer 继续生成旧形态。
+
+剩余边界是 OpenClaw allow 后的完整执行确证、动作 cohort 覆盖率、结构化风险分解和部分
+跨 Runtime/宿主能力；缺失事实仍必须保持未知。已有 writer/links/幂等和存储路径也不能
+扩大为 R05、正式 S4 或全量生产验收已完成。
 
 2026-08-05 冻结了 AuditEvent `0.4` 目标契约；2026-08-07 进一步冻结了
 [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)，

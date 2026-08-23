@@ -64,9 +64,9 @@ OpenClaw plugin config 示例：
   },
   "agentId": "main",
   "enforcementMode": "enforce",
-  "requestTimeoutMs": 5000,
+  "requestTimeoutMs": 60000,
   "approvalPollIntervalMs": 1000,
-  "approvalTimeoutMs": 25000,
+  "approvalTimeoutMs": 600000,
   "strongApprovalBindingEnabled": false,
   "runtimeBindingId": "binding:cred_openclaw_main",
   "diagnosticLogging": false
@@ -87,16 +87,16 @@ Windows 上安装脚本使用 env provider 而非 file provider：OpenClaw 的 f
 - state `.env` 与仓库根 `.env` 一样应被视为敏感文件；卸载时会删除该键。
 - 后续可接入 DPAPI 或 Windows Credential Manager 的 exec provider 替换 env provider，接口契约（SecretRef）不变。
 
-安装、卸载与 verify 的口径与 POSIX 一致：config patch dry-run 先行、失败按基线整体回滚、卸载只移除 AgentGuard 自有引用；不再使用 `openclaw plugins install --link`。CI 的 `openclaw-runtime-smoke` 矩阵 job 在 ubuntu-latest 与 windows-latest 上对真实 OpenClaw 运行时执行同一门禁。
+安装、卸载与 verify 的口径与 POSIX 一致：config patch dry-run 先行、失败按基线整体回滚、卸载只移除 AgentGuard 自有引用；不再使用 `openclaw plugins install --link`。当前 CI 没有真实 OpenClaw runtime 的 ubuntu/windows 矩阵；跨平台验收仍需按下文脚本在隔离环境中手动执行并归档报告。
 
 ## 运行时版本兼容
 
-`package.json` 的 peer range 为 `openclaw >=2026.6.6 <2027.0.0`，这是允许安装的声明范围，不表示范围内每个版本都已实测。开发/证据 pin 自 PR-RTE-02 rev5 起为 `2026.7.1-2`（C2 Gate PASS 的证据版本）。当前经过真实运行时验证（安装、hooks 加载、heartbeat、verify、卸载清理）的版本仅为：
+`package.json` 的 peer range 为 `openclaw >=2026.6.6 <2027.0.0`，这是允许安装的声明范围，不表示范围内每个版本都已实测。开发/证据 pin 自 PR-RTE-02 rev5 起为 `2026.7.1-2`（C2 Gate PASS 的证据版本）。当前版本证据边界为：
 
-- `2026.6.6`（23-hook 集）
-- `2026.7.1-2`（23-hook 集；RTE-03 的 24-hook 集以 CI `openclaw-runtime-smoke` 矩阵复验为准）
+- `2026.6.6`：历史 23-hook 基线，不满足当前 24-hook 验收要求，也不是 RTE-03 的证据锚点。
+- `2026.7.1-2`：`after_tool_call` 语义和 24-hook 实现的当前证据 pin；真实 runtime 报告仍按具体提交和平台单独记录。
 
-CI `openclaw-runtime-smoke` 门禁即以上述两个版本 × ubuntu/windows 为矩阵运行；新增兼容版本时应同步扩展该矩阵与本文档。
+`.github/workflows/ci.yml` 目前只自动执行插件测试和契约检查，不代表上述 peer range 已逐版本、逐平台实测。新增兼容版本时必须更新证据 pin、隔离 runtime 报告和本文档；恢复自动 smoke 矩阵前不得宣称该矩阵已覆盖。
 
 ## 验证
 
@@ -118,9 +118,9 @@ pnpm openclaw:plugin:reliability
 pnpm openclaw:plugin:uninstall
 ```
 
-`pnpm openclaw:plugin:verify` 采用多证据口径：`plugins inspect`（loaded、24 hooks、staging 指向）、Gateway RPC 连通、Guard API 新鲜 heartbeat、enforce 模式与版本范围一致性；任一证据缺失即失败。
+`pnpm openclaw:plugin:verify` 采用多证据口径：`plugins inspect`（loaded、24 hooks、staging 指向）、Gateway RPC 连通、Guard API 新鲜 heartbeat、enforce 模式与版本范围一致性。唯一受限例外是隔离 Gateway 尚未触发 hook 时，inspect 的空 hook 集可由本次启动后、scope 匹配的新鲜 heartbeat 补足，并显式标记 `hook_evidence_source=heartbeat-fallback`；这是插件自报证据，不等同于宿主 inspect 实证，其他失败仍会 fail closed。
 
-真实运行时兼容门禁（CI `openclaw-runtime-smoke` job）由 `scripts/openclaw-runtime-smoke.mjs` 驱动：工作区外安装指定版本 OpenClaw → 隔离 profile 事务化安装 → 随机端口真实前台 Gateway → 新鲜 heartbeat（loaded、24 hooks）→ 安装器 verify → 卸载与残留检查，输出脱敏 JSON 报告。本机隔离干跑示例：
+真实运行时兼容验收由 `scripts/openclaw-runtime-smoke.mjs` 驱动：工作区外安装指定版本 OpenClaw → 隔离 profile 事务化安装 → 随机端口真实前台 Gateway → 新鲜 heartbeat（loaded、24 hooks）→ 安装器 verify → 卸载与残留检查，输出脱敏 JSON 报告。该脚本当前不是 CI job；本机隔离干跑示例：
 
 ```bash
 node scripts/openclaw-runtime-smoke.mjs --openclaw-root <工作区外的 openclaw 安装根目录> --expect-version 2026.7.1-2

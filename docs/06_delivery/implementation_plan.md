@@ -2,14 +2,15 @@
 
 ## 1. 文档定位
 
-本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环、P1 核心路径和部分 P2 能力已经实现；下文明确区分当前能力、剩余能力和仅供路线参考的历史阶段。
+本文面向开发执行，定义 AgentGuard 的 P0/P1/P2 模块边界和验收标准。P0 最小闭环、P1 核心路径和部分 P2 能力已经实现；当前进入 Productization Alpha，状态仍为 **in progress**。下文明确区分当前能力、剩余能力和仅供路线参考的历史阶段。
 
 关联入口：
 
 - [系统总体架构](../01_overview/architecture.md)
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [AttackBench 攻击样本与评测](../05_redteam/attackbench.md)
-- [演示脚本](demo_script.md)
+- [Productization Alpha Status](productization_alpha_status.md)
+- [安装、升级和故障排查](install_upgrade_troubleshooting.md)
 
 ## 2. 阶段目标
 
@@ -17,7 +18,9 @@
 | ---- | ------------------- | ------------------------------------------------------------------------------ |
 | P0   | LangGraph 保底闭环  | 攻击样本能触发危险工具调用，Guard API 调用 Core 得到阻断决策，Dashboard 能展示 |
 | P1   | 完整可解释链路      | 上下文、模型、工具结果、记忆和消息链路可追踪，可计算 FPR/FNR                   |
-| P2   | OpenClaw 与冲奖增强 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、消融实验         |
+| P2   | 跨 runtime 与防护深化 | OpenClaw 接入、Memory Guard、Action Critic、Provenance Graph、可验证消融实验 |
+
+LangGraph V2 competition profile 的 Core/API/runner/Dashboard 实现表面已经进入代码基线，但真实外部 Provider 的固定 A0–A4、70 例、`70×5=350` qualifying matrix 尚未完成。contracts/demo/stub 运行只证明对应链路，不得作为正式效果结论或生产就绪证据。
 
 ## 3. P0 当前实现
 
@@ -105,7 +108,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 - Memory Guard 策略深化、真实 runtime memory 接入和审批/回滚语义完善。
 - Action Critic 从确定性 review 扩展到可评测、可消融的 LLM-as-Judge / rule hybrid 方案。
 - 多渠道审批。
-- 消融实验。
+- 真实 Provider、固定数据集与完整证据约束下的正式消融验收；已有 tooling 不等于正式效果结论。
 - OpenClaw verify / E2E / reliability 报告已能写入 adapter status；后续需接入 CI 或发布脚本作为强制门禁。
 - 当前已落地边界、明确冻结项和需要另行决策的后续工作统一记录在
   [`docs/TODO.md`](../TODO.md)；本文件只保留阶段路线和验收口径。
@@ -116,7 +119,7 @@ P0 闭环的 Guard API / Control Plane、schemas、Core 策略、LangGraph wrapp
 | ---- | --------------------------------------------------------- |
 | A    | 无状态 Core、Guard API、schemas、policies、contract tests |
 | B    | LangGraph、沙箱工具、AttackBench runner                   |
-| C    | Dashboard、OpenClaw Plugin、文档、Demo                    |
+| C    | Dashboard、OpenClaw Plugin、产品文档与可重复验收          |
 
 ## 9. P0 验收标准
 

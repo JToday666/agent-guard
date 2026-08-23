@@ -2,7 +2,8 @@
 
 ## 文档用途
 
-本文只记录当前已落地边界、明确冻结项和仍需单独决策的真实后续工作。已经完成的
+本文只记录当前已落地边界、明确冻结项和仍需单独决策的真实后续工作。Productization Alpha 当前为 **in progress**；最终 SHA 与门禁结果见
+[状态页](06_delivery/productization_alpha_status.md)。已经完成的
 迁移过程、旧接口和阶段性兼容方案不再作为待办长期保留。详细契约以
 [文档地图](README.md) 中列出的稳定文档为准。
 
@@ -24,7 +25,7 @@
   Mock 与 API 共用领域类型，但 API 失败不回退到 Mock。
 - 审批只允许未过期 pending 状态原子转换一次；runtime credential 与
   `runtime + agent_id` 绑定，浏览器只持有 session、CSRF token 和 approval nonce。
-- OpenClaw 插件使用一套配置解析与 23 个受支持 hook；关键安全 gate 缺失、Guard API
+- OpenClaw 插件使用一套配置解析与 24 个受支持 hook；关键安全 gate 缺失、Guard API
   不可达或响应无效时按配置的强制 fail-closed 路径处理。
 - Python 发布入口收敛为 `aegis-agentguard-core`、`aegis-agentguard-api` 和
   `aegis-agentguard-cli`；Core 只维护 `agentguard_core` 公共导入面。
@@ -52,6 +53,13 @@
 
 ## 需要另行决策的后续工作
 
+### Productization Alpha 收口
+
+- 真实外部 Provider 的 LangGraph V2 固定 A0–A4、70 例、`70×5=350` qualifying matrix 尚未完成；contracts/demo/stub 结果不得作为正式效果结论。
+- R05 仍被 OpenClaw 宿主的 atomic replace-and-seal 与 authoritative invocation-start 能力缺口阻塞；24 hooks 已注册不等于 R05、Gate B 或正式 S4 已完成。
+- Memory Guard 的 commit/rollback 仍只更新控制面记录状态，尚未执行真实 runtime memory 回滚或恢复。
+- Productization Alpha 新增 CI 定义需在最终集成 SHA 的托管 GitHub Actions 实际通过后才能登记为验收证据；状态页填写前不得追溯宣称已经覆盖。
+
 ### 动作终态与执行覆盖指标
 
 只有稳定 `action_id`、审批终态和 runtime receipt 覆盖达到可解释门槛后，才在现有
@@ -73,7 +81,7 @@
 
 ### 发布与供应链
 
-基础 GitHub CI 已覆盖 Python 静态检查、类型检查、PostgreSQL migration/测试，以及 Dashboard、OpenClaw 插件和本地工具检查。容器公开发布、SBOM、制品签名、构建 provenance、可信发布和部署自动化仍需作为独立交付任务实施和验收，不能从基础 CI 通过反推为已具备。
+Productization Alpha 分支定义了 Python 分层、PostgreSQL 16 migration/tests、Dashboard build、Playwright Chromium E2E、OpenClaw 插件和本地工具 job；只有最终集成 SHA 的托管 CI 实际通过后，才可登记为已验证覆盖。容器公开发布、SBOM、制品签名、构建 provenance、可信发布和部署自动化仍需作为独立交付任务实施和验收，不能从基础 CI 配置或通过反推为已具备。
 
 ## 维护原则
 

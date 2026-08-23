@@ -10,3 +10,9 @@ This directory preserves historical evidence from the 2026 competition and defen
 The reports describe runs that depended on an ephemeral local environment, ignored `.openclaw-dev` tooling, and temporary result directories. They are not clean-clone product instructions, formal effectiveness claims, or production-readiness evidence. Supported examples and current product documentation live outside this archive.
 
 Raw run outputs remain outside Git. `manifest.json` records the checksums of the small, curated files retained here.
+
+Current supported entry points:
+
+- [Productization Alpha Status](../../06_delivery/productization_alpha_status.md)
+- [Installation, upgrade, and troubleshooting](../../06_delivery/install_upgrade_troubleshooting.md)
+- [Clean-clone minimal examples](../../../examples/README.md)

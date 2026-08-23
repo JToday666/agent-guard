@@ -1,7 +1,10 @@
 # AgentGuard + OpenClaw 现场演示运行手册（落地版）
 
-> 本文档是《AgentGuard + OpenClaw 现场演示方案》12 步攻击链演示的**落地版运行手册**。
-> 所有路径、命令、规则名、端口与决策口径均已与当前真实环境对齐，可直接照此执行。
+> [!WARNING]
+> 历史竞赛/答辩材料，保留在旧路径仅为一个里程碑周期的链接兼容；不是 Productization Alpha 的安装、验收或能力事实来源。本文依赖本机 `.openclaw-dev`、临时文件和当时环境，“可直接执行”的旧表述不适用于干净 clone。当前入口见[安装、升级和故障排查](install_upgrade_troubleshooting.md)与[状态页](productization_alpha_status.md)。
+
+> 本文档是《AgentGuard + OpenClaw 现场演示方案》12 步攻击链在答辩环境中的历史运行手册。
+> 路径、命令、规则名、端口与决策口径只与当时环境对齐；当前源码不可直接照此执行。
 >
 > 关联文档：[openclaw_e2e_demo_design.md](openclaw_e2e_demo_design.md)（既有端到端演示设计）
 

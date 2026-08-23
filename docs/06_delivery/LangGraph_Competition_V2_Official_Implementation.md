@@ -1,5 +1,7 @@
 # LangGraph-only V2 Official 竞赛闭环实施决议
 
+> 本文是受限 competition profile 的专项实现与评测契约，不是产品安装入口或生产就绪声明。当前产品状态见 [`productization_alpha_status.md`](productization_alpha_status.md)，历史竞赛/答辩证据见 [`docs/archive/competition-2026/`](../archive/competition-2026/README.md)。真实外部 Provider 的 `70×5=350` qualifying matrix 尚未完成。
+
 ## 1. 目标与完成口径
 
 新增 `competition-langgraph-v2` 专项 profile，用于 Memory store、loopback
