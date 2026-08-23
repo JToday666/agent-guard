@@ -104,35 +104,68 @@ export function buildInstallPatch({
   agentId = AGENT_ID,
 }) {
   const plugins = config.plugins ?? {};
-  const currentPaths = Array.isArray(plugins.load?.paths)
-    ? plugins.load.paths
+  const existingLoad =
+    plugins.load &&
+    typeof plugins.load === "object" &&
+    !Array.isArray(plugins.load)
+      ? plugins.load
+      : {};
+  const currentPaths = Array.isArray(existingLoad.paths)
+    ? existingLoad.paths
     : [];
+  const existingEntry =
+    plugins.entries?.[PLUGIN_ID] &&
+    typeof plugins.entries[PLUGIN_ID] === "object" &&
+    !Array.isArray(plugins.entries[PLUGIN_ID])
+      ? plugins.entries[PLUGIN_ID]
+      : {};
+  const existingHooks =
+    existingEntry.hooks &&
+    typeof existingEntry.hooks === "object" &&
+    !Array.isArray(existingEntry.hooks)
+      ? existingEntry.hooks
+      : {};
+  const existingConfig =
+    existingEntry.config &&
+    typeof existingEntry.config === "object" &&
+    !Array.isArray(existingEntry.config)
+      ? existingEntry.config
+      : {};
   const patch = {
     secrets: {
       providers: { [strategy.providerName]: strategy.provider },
     },
     plugins: {
       load: {
+        ...existingLoad,
         paths: [
           ...currentPaths.filter(
             (item) =>
-              typeof item === "string" && !isAgentGuardLoadPath(item, stagingDir),
+              typeof item === "string" &&
+              !isAgentGuardLoadPath(item, stagingDir),
           ),
           stagingDir,
         ],
       },
       entries: {
         [PLUGIN_ID]: {
+          ...existingEntry,
           enabled: true,
-          hooks: { timeoutMs: 10000, allowConversationAccess: true },
+          hooks: {
+            timeoutMs: 600_000,
+            allowConversationAccess: true,
+            ...existingHooks,
+          },
           config: {
+            enforcementMode: ENFORCEMENT_MODE,
+            requestTimeoutMs: 60_000,
+            approvalPollIntervalMs: 100,
+            approvalTimeoutMs: 600_000,
+            ...existingConfig,
+            // Only installation-owned wiring is authoritative on reinstall.
             guardApiBaseUrl,
             adapterToken: strategy.secretRef,
             agentId,
-            enforcementMode: ENFORCEMENT_MODE,
-            requestTimeoutMs: 3000,
-            approvalPollIntervalMs: 100,
-            approvalTimeoutMs: 3000,
           },
         },
       },
@@ -651,10 +684,25 @@ export async function executeVerify(deps) {
 
   // 证据 4：enforce 模式、插件版本与 OpenClaw 版本一致性
   const config = readConfigJson(deps, configPath);
-  const entryConfig = config.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
+  const entry = config.plugins?.entries?.[PLUGIN_ID] ?? {};
+  const entryHooks = entry.hooks ?? {};
+  const entryConfig = entry.config ?? {};
   if (entryConfig.enforcementMode !== ENFORCEMENT_MODE) {
     failures.push(
       `expected enforcementMode=${ENFORCEMENT_MODE}, got ${String(entryConfig.enforcementMode)}`,
+    );
+  }
+  const hookTimeoutMs = entryHooks.timeoutMs;
+  const approvalTimeoutMs = entryConfig.approvalTimeoutMs;
+  if (
+    typeof hookTimeoutMs === "number" &&
+    Number.isFinite(hookTimeoutMs) &&
+    typeof approvalTimeoutMs === "number" &&
+    Number.isFinite(approvalTimeoutMs) &&
+    hookTimeoutMs < approvalTimeoutMs
+  ) {
+    failures.push(
+      `hooks.timeoutMs (${hookTimeoutMs}) must be >= approvalTimeoutMs (${approvalTimeoutMs}); verify does not modify configuration`,
     );
   }
   const versionResult = deps.run("openclaw", ["--version"], {

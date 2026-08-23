@@ -287,11 +287,13 @@ test("buildInstallPatch keeps unrelated keys and manages allow only when present
   ]);
   const entry = patch.plugins.entries[PLUGIN_ID];
   assert.equal(entry.enabled, true);
-  assert.equal(entry.hooks.timeoutMs, 10000);
+  assert.equal(entry.hooks.timeoutMs, 600_000);
   assert.equal(entry.hooks.allowConversationAccess, true);
   assert.equal(entry.config.enforcementMode, "enforce");
   assert.equal(entry.config.agentId, "main");
   assert.equal(entry.config.guardApiBaseUrl, "http://127.0.0.1:8088");
+  assert.equal(entry.config.requestTimeoutMs, 60_000);
+  assert.equal(entry.config.approvalTimeoutMs, 600_000);
   assert.deepEqual(entry.config.adapterToken, strategy.secretRef);
   assert.equal(Object.hasOwn(patch.plugins, "allow"), false);
   assert.equal(patch.secrets.providers.agentguard_adapter.source, "env");
@@ -303,6 +305,61 @@ test("buildInstallPatch keeps unrelated keys and manages allow only when present
     strategy,
   });
   assert.deepEqual(withAllow.plugins.allow, ["qqbot", PLUGIN_ID]);
+});
+
+test("buildInstallPatch preserves existing entry hooks and runtime config", () => {
+  const strategy = pickCredentialStrategy("win32");
+  const patch = buildInstallPatch({
+    config: {
+      plugins: {
+        load: { paths: ["/other/plugin"], watch: false },
+        entries: {
+          [PLUGIN_ID]: {
+            enabled: false,
+            displayName: "keep-entry-field",
+            hooks: {
+              timeoutMs: 12_345,
+              allowConversationAccess: false,
+              customHookField: "keep-hook-field",
+            },
+            config: {
+              guardApiBaseUrl: "http://127.0.0.1:9999",
+              adapterToken: "stale-token",
+              agentId: "stale-agent",
+              enforcementMode: "observe",
+              requestTimeoutMs: 7_000,
+              approvalPollIntervalMs: 250,
+              approvalTimeoutMs: 45_000,
+              runtimeBindingId: "binding:openclaw:main",
+              customConfigField: "keep-config-field",
+            },
+          },
+        },
+      },
+    },
+    stagingDir: "/repo/.openclaw-dev/agentguard-security",
+    guardApiBaseUrl: "http://127.0.0.1:8088",
+    strategy,
+    agentId: "main",
+  });
+
+  const entry = patch.plugins.entries[PLUGIN_ID];
+  assert.equal(patch.plugins.load.watch, false);
+  assert.equal(entry.displayName, "keep-entry-field");
+  assert.equal(entry.hooks.timeoutMs, 12_345);
+  assert.equal(entry.hooks.allowConversationAccess, false);
+  assert.equal(entry.hooks.customHookField, "keep-hook-field");
+  assert.equal(entry.config.enforcementMode, "observe");
+  assert.equal(entry.config.requestTimeoutMs, 7_000);
+  assert.equal(entry.config.approvalPollIntervalMs, 250);
+  assert.equal(entry.config.approvalTimeoutMs, 45_000);
+  assert.equal(entry.config.runtimeBindingId, "binding:openclaw:main");
+  assert.equal(entry.config.customConfigField, "keep-config-field");
+
+  assert.equal(entry.enabled, true);
+  assert.equal(entry.config.guardApiBaseUrl, "http://127.0.0.1:8088");
+  assert.deepEqual(entry.config.adapterToken, strategy.secretRef);
+  assert.equal(entry.config.agentId, "main");
 });
 
 test("buildUninstallPatch removes only AgentGuard-owned references", () => {
@@ -1005,7 +1062,14 @@ function setupVerifyWorld(world, { hookCount, typedHooks, heartbeat }) {
   world.seedConfig({
     plugins: {
       entries: {
-        [PLUGIN_ID]: { enabled: true, config: { enforcementMode: "enforce" } },
+        [PLUGIN_ID]: {
+          enabled: true,
+          hooks: { timeoutMs: 600_000 },
+          config: {
+            enforcementMode: "enforce",
+            approvalTimeoutMs: 600_000,
+          },
+        },
       },
     },
   });
@@ -1109,6 +1173,30 @@ test("executeVerify uses inspect evidence when hookCount reaches 23", async () =
     const payload = await executeVerify(world.deps);
     assert.equal(payload.hook_evidence_source, "inspect");
     assert.equal(payload.hook_count, OPENCLAW_REQUIRED_HOOKS.length);
+  } finally {
+    world.cleanup();
+  }
+});
+
+test("executeVerify rejects hook timeout shorter than approval timeout without mutation", async () => {
+  const world = createWorld();
+  try {
+    setupVerifyWorld(world, {
+      hookCount: OPENCLAW_REQUIRED_HOOKS.length,
+      typedHooks: OPENCLAW_REQUIRED_HOOKS.map((name) => ({ name })),
+      heartbeat: freshHeartbeat(),
+    });
+    const config = world.readConfig();
+    config.plugins.entries[PLUGIN_ID].hooks.timeoutMs = 30_000;
+    config.plugins.entries[PLUGIN_ID].config.approvalTimeoutMs = 600_000;
+    world.seedConfig(config);
+    const before = world.readConfig();
+
+    await assert.rejects(
+      () => executeVerify(world.deps),
+      /hooks\.timeoutMs \(30000\) must be >= approvalTimeoutMs \(600000\)/,
+    );
+    assert.deepEqual(world.readConfig(), before);
   } finally {
     world.cleanup();
   }

@@ -822,16 +822,13 @@ export async function decisionToToolResult(
   }
   if (response.decision.decision === "deny") {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
-    return { block: true, blockReason: safeDecisionMessage(response) };
+    return { block: true, blockReason: blockedDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return {
       block: true,
-      blockReason: safeDecisionMessage(
-        response,
-        response.approval?.approval_id,
-      ),
+      blockReason: approvalNotGrantedMessage(response.approval?.approval_id),
     };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
@@ -851,7 +848,10 @@ export async function decisionToToolResult(
   });
   return {
     block: true,
-    blockReason: safeDecisionMessage(response, response.approval.approval_id),
+    blockReason: approvalOutcomeMessage(
+      response.approval.approval_id,
+      approval,
+    ),
   };
 }
 
@@ -865,16 +865,13 @@ export async function decisionToMessageResult(
   }
   if (response.decision.decision === "deny") {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
-    return { cancel: true, cancelReason: safeDecisionMessage(response) };
+    return { cancel: true, cancelReason: blockedDecisionMessage(response) };
   }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return {
       cancel: true,
-      cancelReason: safeDecisionMessage(
-        response,
-        response.approval?.approval_id,
-      ),
+      cancelReason: approvalNotGrantedMessage(response.approval?.approval_id),
     };
   }
   const approval = await waiter.waitForApproval(response.approval.approval_id);
@@ -894,7 +891,10 @@ export async function decisionToMessageResult(
   });
   return {
     cancel: true,
-    cancelReason: safeDecisionMessage(response, response.approval.approval_id),
+    cancelReason: approvalOutcomeMessage(
+      response.approval.approval_id,
+      approval,
+    ),
   };
 }
 
@@ -946,6 +946,41 @@ function safeDecisionMessage(
     response.decision.reason ||
     "Blocked by AgentGuard policy.";
   return approvalId ? `${message} (approval_id=${approvalId})` : message;
+}
+
+const BLOCKED_ACTION_GUIDANCE =
+  "This action was blocked by AgentGuard and was NOT executed. Do not automatically retry the same blocked action. If the task cannot be completed without it, clearly tell the user that AgentGuard blocked the action.";
+
+const APPROVAL_NOT_GRANTED_GUIDANCE =
+  "This action required AgentGuard approval, but approval was not granted; the action was NOT executed. Do not automatically retry the same action. If the task cannot be completed without it, clearly tell the user that AgentGuard approval was not granted.";
+
+const REVIEW_DENIED_GUIDANCE =
+  "This action was denied by AgentGuard review and was NOT executed. Do not automatically retry the same denied action. If the task cannot be completed without it, clearly tell the user that AgentGuard review denied the action.";
+
+const APPROVAL_EXPIRED_GUIDANCE =
+  "AgentGuard approval timed out or expired before this action could run; the action was NOT executed. Do not automatically retry the same action. If the task cannot be completed without it, clearly tell the user that AgentGuard approval expired.";
+
+function blockedDecisionMessage(response: GuardEvaluationResponse): string {
+  return `${safeDecisionMessage(response)} ${BLOCKED_ACTION_GUIDANCE}`;
+}
+
+function approvalNotGrantedMessage(approvalId?: string): string {
+  return approvalId
+    ? `${APPROVAL_NOT_GRANTED_GUIDANCE} (approval_id=${approvalId})`
+    : APPROVAL_NOT_GRANTED_GUIDANCE;
+}
+
+function approvalOutcomeMessage(
+  approvalId: string,
+  approval: ApprovalWaitResponse,
+): string {
+  if (approval.status === "timeout" || approval.status === "expired") {
+    return `${APPROVAL_EXPIRED_GUIDANCE} (approval_id=${approvalId})`;
+  }
+  if (approval.status === "resolved" && approval.decision === "deny") {
+    return `${REVIEW_DENIED_GUIDANCE} (approval_id=${approvalId})`;
+  }
+  return `${APPROVAL_NOT_GRANTED_GUIDANCE} (approval_id=${approvalId})`;
 }
 
 function nonEmptyString(value: unknown, fallback: string): string {

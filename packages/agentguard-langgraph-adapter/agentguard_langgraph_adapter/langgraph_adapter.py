@@ -838,12 +838,17 @@ def _config_agent_id(config: Any) -> str:
 
 
 def _visible_source_refs(security: dict[str, Any]) -> list[str] | None:
-    """Copy refs only from the trusted invocation context, never free metadata."""
+    """Copy refs only from the trusted invocation context, never free metadata.
+
+    Missing/non-list values mean the runtime cannot prove the visible set and
+    therefore map to ``None``. An explicit empty list is a distinct, trusted
+    assertion that the proven visible set is empty and must remain ``[]``.
+    """
     raw = security.get("visible_source_refs")
     if not isinstance(raw, (list, tuple)):
         return None
     refs = [str(value).strip() for value in raw if str(value).strip()]
-    return list(dict.fromkeys(refs)) or None
+    return list(dict.fromkeys(refs))
 
 
 def _trusted_event_metadata(
