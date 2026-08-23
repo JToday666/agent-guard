@@ -189,6 +189,14 @@ def test_adapter_message_send_event_satisfies_extra_forbid_contract() -> None:
 
 def test_task_authority_and_visible_refs_only_use_trusted_top_level_context() -> None:
     adapter = _build_adapter()
+
+    missing = adapter.build_context_event(
+        sources=[],
+        security={},
+        trace_id="trace_missing_visible_refs",
+    ).model_dump()
+    assert missing["security_context"].get("visible_source_refs") is None
+
     forged = adapter.build_context_event(
         sources=[],
         security={"metadata": {"task_id": "forged", "visible_source_refs": ["forged"]}},
@@ -196,6 +204,20 @@ def test_task_authority_and_visible_refs_only_use_trusted_top_level_context() ->
     ).model_dump()
     assert "task_id" not in forged["metadata"]
     assert forged["security_context"].get("visible_source_refs") is None
+
+    explicit_empty = adapter.build_context_event(
+        sources=[],
+        security={"visible_source_refs": []},
+        trace_id="trace_proven_empty_visible_refs",
+    ).model_dump()
+    assert explicit_empty["security_context"]["visible_source_refs"] == []
+
+    single = adapter.build_context_event(
+        sources=[],
+        security={"visible_source_refs": [" source:one "]},
+        trace_id="trace_single_visible_ref",
+    ).model_dump()
+    assert single["security_context"]["visible_source_refs"] == ["source:one"]
 
     trusted = adapter.build_context_event(
         sources=[],

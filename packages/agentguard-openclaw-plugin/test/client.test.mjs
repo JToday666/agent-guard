@@ -29,6 +29,15 @@ const askDecision = {
   },
 };
 
+const BLOCKED_ACTION_GUIDANCE =
+  "This action was blocked by AgentGuard and was NOT executed. Do not automatically retry the same blocked action. If the task cannot be completed without it, clearly tell the user that AgentGuard blocked the action.";
+const APPROVAL_NOT_GRANTED_GUIDANCE =
+  "This action required AgentGuard approval, but approval was not granted; the action was NOT executed. Do not automatically retry the same action. If the task cannot be completed without it, clearly tell the user that AgentGuard approval was not granted.";
+const REVIEW_DENIED_GUIDANCE =
+  "This action was denied by AgentGuard review and was NOT executed. Do not automatically retry the same denied action. If the task cannot be completed without it, clearly tell the user that AgentGuard review denied the action.";
+const APPROVAL_EXPIRED_GUIDANCE =
+  "AgentGuard approval timed out or expired before this action could run; the action was NOT executed. Do not automatically retry the same action. If the task cannot be completed without it, clearly tell the user that AgentGuard approval expired.";
+
 function runtimeOutcomeReceipt(
   eventId = "evt_001",
   outcomeKind = "pre_execution_deny",
@@ -292,13 +301,13 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
   assert.equal(await decisionToToolResult(allowDecision, {}), undefined);
   assert.deepEqual(await decisionToToolResult(denyDecision, {}), {
     block: true,
-    blockReason: "no",
+    blockReason: `no ${BLOCKED_ACTION_GUIDANCE}`,
   });
 
   assert.equal(await decisionToMessageResult(allowDecision, {}), undefined);
   assert.deepEqual(await decisionToMessageResult(denyDecision, {}), {
     cancel: true,
-    cancelReason: "no",
+    cancelReason: `no ${BLOCKED_ACTION_GUIDANCE}`,
   });
 
   assert.equal(
@@ -314,15 +323,36 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
     await decisionToMessageResult(askDecision, {
       waitForApproval: async () => ({ status: "resolved", decision: "deny" }),
     }),
-    { cancel: true, cancelReason: "needs review (approval_id=app_001)" },
+    {
+      cancel: true,
+      cancelReason: `${REVIEW_DENIED_GUIDANCE} (approval_id=app_001)`,
+    },
   );
 
   assert.deepEqual(
     await decisionToToolResult(askDecision, {
       waitForApproval: async () => ({ status: "pending", decision: null }),
     }),
-    { block: true, blockReason: "needs review (approval_id=app_001)" },
+    {
+      block: true,
+      blockReason: `${APPROVAL_NOT_GRANTED_GUIDANCE} (approval_id=app_001)`,
+    },
   );
+
+  assert.deepEqual(
+    await decisionToToolResult(askDecision, {
+      waitForApproval: async () => ({ status: "timeout", decision: "deny" }),
+    }),
+    {
+      block: true,
+      blockReason: `${APPROVAL_EXPIRED_GUIDANCE} (approval_id=app_001)`,
+    },
+  );
+
+  assert.deepEqual(await decisionToMessageResult(askDecision, {}), {
+    cancel: true,
+    cancelReason: `${APPROVAL_NOT_GRANTED_GUIDANCE} (approval_id=app_001)`,
+  });
 });
 
 test("GuardApiClient caps approval polling by the single approval timeout", async () => {
