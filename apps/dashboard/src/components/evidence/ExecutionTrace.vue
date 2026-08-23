@@ -130,7 +130,10 @@
       <CircleDashed :size="22" aria-hidden="true" />
       <div>
         <strong>暂未记录运行步骤</strong>
-        <p>已持久化的原始记录仍可在审计记录中查看。</p>
+        <p>
+          运行步骤投影尚未生成（运行时未上报步骤记录）。若步骤投影失败，页面上方会单独显示
+          「部分运行监督投影暂不可用」警告，与该状态含义不同。已持久化的原始记录仍可在审计记录中查看。
+        </p>
       </div>
       <button type="button" @click="emit('show-audit')">查看审计记录</button>
     </div>

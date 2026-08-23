@@ -39,7 +39,14 @@
         </div>
         <div>
           <dt>执行状态</dt>
-          <dd>{{ getExecutionStatusLabel(normalized.execution.status) }}</dd>
+          <dd>
+            {{
+              getExecutionStatusLabel(normalized.execution.status, {
+                decision: normalized.decision,
+                intervention: normalized.intervention,
+              })
+            }}
+          </dd>
         </div>
         <div>
           <dt>副作用</dt>
@@ -80,7 +87,7 @@
         <div>
           <dt>规范摘要</dt>
           <dd>
-            <code>{{ normalized.policy.digest ?? "未记录" }}</code>
+            <code>{{ normalized.policy.digest ?? policyDigestMissingText }}</code>
           </dd>
         </div>
       </dl>
@@ -91,11 +98,17 @@
       <dl class="evidence-copy">
         <div>
           <dt>用户任务</dt>
-          <dd>{{ event.userTask ?? "未提供" }}</dd>
+          <dd>{{ event.userTask ?? noDataNeeded("用户任务", "该事件类型不携带用户任务") }}</dd>
         </div>
         <div>
           <dt>Agent 行为</dt>
-          <dd>{{ event.agentAction ?? "未提供" }}</dd>
+          <dd>
+            {{ event.agentAction ?? noDataNeeded("Agent 行为描述", "该事件类型不携带行为描述") }}
+          </dd>
+        </div>
+        <div :data-availability="contentPreviewDisplay.availability">
+          <dt>{{ contentPreviewDisplay.label }}</dt>
+          <dd>{{ contentPreviewDisplay.value }}</dd>
         </div>
         <div>
           <dt>判定原因</dt>
@@ -123,7 +136,7 @@
       <h3>命中规则</h3>
       <div class="rule-list">
         <span v-for="rule in event.ruleHits" :key="rule">{{ ruleLabel(rule) }}</span
-        ><span v-if="!event.ruleHits.length">未记录规则命中</span>
+        ><span v-if="!event.ruleHits.length">{{ ruleHitsEmptyText }}</span>
       </div>
     </section>
 
@@ -158,6 +171,7 @@ import type {
   NormalizedAuditEvidence,
 } from "../../types/dashboard";
 import {
+  getContentPreviewDisplay,
   getExecutionStatusLabel,
   getInterventionLabel,
   getResultDispositionLabel,
@@ -174,6 +188,7 @@ import {
 import StatusBadge from "../common/StatusBadge.vue";
 import StructuredDataView from "../common/StructuredDataView.vue";
 import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
+import { noDataNeeded } from "../../utils/missing-data-display";
 import { serializeStructuredData } from "../../utils/structured-data";
 
 defineOptions({ name: "EventEvidence" });
@@ -192,11 +207,26 @@ const recordTypeLabel = computed(() => {
   };
   return labels[props.normalized?.recordType ?? "unknown"];
 });
-const formattedArguments = computed(() =>
-  props.normalized?.toolArguments
-    ? serializeStructuredData(props.normalized.toolArguments)
-    : "未记录",
+const contentPreviewDisplay = computed(() =>
+  getContentPreviewDisplay(props.event.eventType, props.normalized?.contentPreview),
 );
+const formattedArguments = computed(() => {
+  const normalized = props.normalized;
+  if (normalized?.toolArguments) return serializeStructuredData(normalized.toolArguments);
+  // 有工具名才是工具事件；非工具调用事件本就无工具参数（①正常无数据）。
+  if (normalized?.toolName) return "工具参数未记录";
+  return noDataNeeded("工具参数", "本记录非工具调用");
+});
+// ②按字段契约：策略引用应包含 digest，缺失属数据异常。
+const policyDigestMissingText = "规范摘要缺失（策略引用应包含 digest，属数据异常）";
+// 命中规则空列表按判定结果区分：allow 属①正常无数据；deny/ask 无命中则提示异常。
+const ruleHitsEmptyText = computed(() => {
+  if (props.event.decision === "allow") return noDataNeeded("命中规则", "动作为允许");
+  if (props.event.decision === "deny" || props.event.decision === "ask") {
+    return `异常：动作为${getDecisionLabel(props.event.decision)}，但未记录任何命中规则`;
+  }
+  return "未记录规则命中";
+});
 const policyLabel = computed(() => {
   const policy = props.normalized?.policy;
   if (!policy) return "未记录";

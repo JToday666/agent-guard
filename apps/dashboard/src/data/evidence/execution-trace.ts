@@ -225,21 +225,30 @@ interface OutcomeSelection {
   conflicted: boolean;
 }
 
-function selectPrimaryPolicyCheck(
+interface ChainResolution {
+  policy: PolicySelection;
+  outcome: OutcomeSelection;
+}
+
+// 预执行提议阶段评估对应的事件类型；多链步骤中，含此类评估的链为主链。
+const PRE_EXECUTION_PROPOSAL_EVENT_TYPES = new Set([
+  "memory_write_proposed",
+  "message_send_proposed",
+  "tool_call_proposed",
+]);
+
+function isPreExecutionProposal(event: NormalizedAuditEvidence): boolean {
+  return PRE_EXECUTION_PROPOSAL_EVENT_TYPES.has(event.eventType || event.stage);
+}
+
+function isReceiptCandidate(event: NormalizedAuditEvidence): boolean {
+  return event.execution.receiptRecorded && event.execution.status !== "unknown";
+}
+
+function legacyPolicySelection(
   checks: readonly NormalizedAuditEvidence[],
-  outcomes: readonly NormalizedAuditEvidence[],
   approval: ApprovalSelection,
 ): PolicySelection {
-  const outcomePolicyIds = new Set(
-    outcomes.flatMap((event) => (event.policyAuditId ? [event.policyAuditId] : [])),
-  );
-  if (outcomePolicyIds.size > 1) return { check: null, conflicted: true };
-  const outcomePolicyId = [...outcomePolicyIds][0];
-  if (outcomePolicyId) {
-    const check = checks.find((event) => event.auditId === outcomePolicyId) ?? null;
-    return { check, conflicted: check === null };
-  }
-
   if (approval.conflicted) return { check: null, conflicted: true };
   if (approval.id) {
     const matches = checks.filter((event) => event.approval.approvalId === approval.id);
@@ -249,32 +258,100 @@ function selectPrimaryPolicyCheck(
   return { check: checks.at(-1) ?? null, conflicted: false };
 }
 
-function selectRuntimeOutcome(
+// 多链配对语义：一次工具调用可能产生多组各自自洽的“评估+回执”链（每条回执的
+// policy_audit_id 精确指向步骤内的一条评估）。只要每条回执都能唯一配对，步骤即视为
+// 一致（recorded），主判定取主链（预执行提议阶段的评估优先），其余链作为附属评估。
+// 仅当真正不一致时才判定冲突：回执指向步骤内不存在的评估、回执引用多条评估、
+// 回执缺失策略链接或身份字段与所配对评估不符、或多条回执归并同一评估。
+function resolveStepChains(
+  checks: readonly NormalizedAuditEvidence[],
   outcomes: readonly NormalizedAuditEvidence[],
-  policy: PolicySelection,
   actionId: string | null,
-): OutcomeSelection {
-  if (policy.conflicted) return { conflicted: true, outcome: null };
-  const receiptCandidates = outcomes.filter(
-    (event) => event.execution.receiptRecorded && event.execution.status !== "unknown",
+  approval: ApprovalSelection,
+): ChainResolution {
+  const conflictedResolution: ChainResolution = {
+    policy: { check: null, conflicted: true },
+    outcome: { conflicted: true, outcome: null },
+  };
+  const receiptCandidates = outcomes.filter(isReceiptCandidate);
+  const referencedPolicyIds = new Set(
+    outcomes.flatMap((event) => (event.policyAuditId ? [event.policyAuditId] : [])),
   );
-  if (!policy.check) {
-    return { conflicted: receiptCandidates.length > 0, outcome: null };
+
+  if (referencedPolicyIds.size === 0) {
+    const policy = legacyPolicySelection(checks, approval);
+    // 无策略链接的回执无法配对，沿用既有冲突语义。
+    return {
+      policy,
+      outcome: { conflicted: policy.conflicted || receiptCandidates.length > 0, outcome: null },
+    };
   }
-  const linkedCandidates = receiptCandidates.filter(
-    (event) =>
+
+  let outcomeConflicted = false;
+  const referencedChecks: NormalizedAuditEvidence[] = [];
+  const chainReceipts = new Map<NormalizedAuditEvidence, NormalizedAuditEvidence[]>();
+  for (const outcome of outcomes) {
+    if (!outcome.policyAuditId) {
+      if (isReceiptCandidate(outcome)) outcomeConflicted = true;
+      continue;
+    }
+    const matches = checks.filter((check) => check.auditId === outcome.policyAuditId);
+    if (matches.length === 0) return conflictedResolution;
+    if (matches.length > 1) {
+      outcomeConflicted = true;
+      continue;
+    }
+    const check = matches[0]!;
+    if (!referencedChecks.includes(check)) referencedChecks.push(check);
+    if (!isReceiptCandidate(outcome)) continue;
+    const identityPaired =
       actionId !== null &&
-      event.actionId === actionId &&
-      event.policyAuditId === policy.check?.auditId &&
-      event.eventId !== null &&
-      event.eventId === policy.check?.eventId &&
-      event.decisionId !== null &&
-      event.decisionId === policy.check?.decisionId,
-  );
-  if (receiptCandidates.length !== linkedCandidates.length || linkedCandidates.length > 1) {
-    return { conflicted: true, outcome: null };
+      outcome.actionId === actionId &&
+      outcome.eventId !== null &&
+      outcome.eventId === check.eventId &&
+      outcome.decisionId !== null &&
+      outcome.decisionId === check.decisionId;
+    if (!identityPaired) {
+      outcomeConflicted = true;
+      continue;
+    }
+    const receipts = chainReceipts.get(check) ?? [];
+    receipts.push(outcome);
+    chainReceipts.set(check, receipts);
   }
-  return { conflicted: false, outcome: linkedCandidates[0] ?? null };
+
+  if (chainReceipts.size === 0) {
+    // 无可配对回执：沿用既有单引用选择语义，多引用仍视为冲突。
+    if (referencedChecks.length !== 1) return conflictedResolution;
+    return {
+      policy: { check: referencedChecks[0]!, conflicted: false },
+      outcome: { conflicted: outcomeConflicted, outcome: null },
+    };
+  }
+
+  // 主链选择：预执行提议阶段的评估优先；其次审批关联；否则取步骤内首条已配对链。
+  const chainChecks = [...chainReceipts.keys()];
+  const primaryCheck =
+    chainChecks.find(isPreExecutionProposal) ??
+    chainChecks.find(
+      (check) => approval.id !== null && check.approval.approvalId === approval.id,
+    ) ??
+    chainChecks[0]!;
+  const primaryReceipts = chainReceipts.get(primaryCheck)!;
+  if (primaryReceipts.length !== 1) {
+    // 多条回执归并同一评估：无法唯一确定执行结果，但判定本身仍可用。
+    return {
+      policy: { check: primaryCheck, conflicted: false },
+      outcome: { conflicted: true, outcome: null },
+    };
+  }
+  return {
+    policy: { check: primaryCheck, conflicted: false },
+    outcome: {
+      conflicted: outcomeConflicted,
+      outcome: outcomeConflicted ? null : primaryReceipts[0]!,
+    },
+  };
 }
 
 function isExplicitStart(event: NormalizedAuditEvidence): boolean {
@@ -497,18 +574,19 @@ function buildStep(
   const approval: ApprovalSelection = approvalEvidenceConflicted
     ? { conflicted: true, id: null, request: null, status: "unknown" }
     : selectedApproval;
-  const selectedPolicy = selectPrimaryPolicyCheck(checks, outcomes, approval);
+  const resolved = resolveStepChains(checks, outcomes, actionId, approval);
   const policyConflicted =
-    selectedPolicy.conflicted || checks.some((event) => duplicateConflicts.has(event.auditId));
+    resolved.policy.conflicted || checks.some((event) => duplicateConflicts.has(event.auditId));
   const policy: PolicySelection = policyConflicted
     ? { check: null, conflicted: true }
-    : selectedPolicy;
-  const selectedOutcome = selectRuntimeOutcome(outcomes, policy, actionId);
+    : resolved.policy;
   const outcomeConflicted =
-    selectedOutcome.conflicted || outcomes.some((event) => duplicateConflicts.has(event.auditId));
+    policyConflicted ||
+    resolved.outcome.conflicted ||
+    outcomes.some((event) => duplicateConflicts.has(event.auditId));
   const outcomeSelection: OutcomeSelection = outcomeConflicted
     ? { conflicted: true, outcome: null }
-    : selectedOutcome;
+    : resolved.outcome;
   const outcome = outcomeSelection.outcome ?? undefined;
   const execution = outcome?.execution.status ?? "unknown";
   const hasStart = observations.some(isExplicitStart);

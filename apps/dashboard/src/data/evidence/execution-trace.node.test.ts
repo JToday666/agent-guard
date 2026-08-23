@@ -742,6 +742,171 @@ test("fails closed when more than one runtime receipt can close an action", () =
   assert.equal(step.supervision.controlIntegrity.status, "correlation_conflict");
 });
 
+test("treats self-consistent multi-chain evaluation-receipt pairs as recorded", () => {
+  const base = normalizedEvents()[0]!;
+  const actionId = "call_multi_chain_read_file";
+  const preExecutionPolicy = evidence(base, {
+    actionId,
+    auditId: "audit_multi_chain_policy_pre",
+    chainIndex: 201,
+    decision: "allow",
+    decisionId: "decision_multi_chain_pre",
+    eventId: "event_multi_chain_pre",
+    eventType: "tool_call_proposed",
+    occurredAt: "2026-08-20T20:28:50Z",
+    stage: "before_tool_call",
+    toolName: "read_file",
+  });
+  const preExecutionReceipt = evidence(base, {
+    actionId,
+    auditId: "audit_multi_chain_receipt_pre",
+    chainIndex: 202,
+    decision: "allow",
+    decisionId: "decision_multi_chain_pre",
+    eventId: "event_multi_chain_pre",
+    eventType: "runtime_outcome",
+    execution: {
+      ...base.execution,
+      completedAt: "2026-08-20T20:28:51Z",
+      receiptRecorded: true,
+      status: "executed",
+    },
+    occurredAt: "2026-08-20T20:28:51Z",
+    policyAuditId: preExecutionPolicy.auditId,
+    recordType: "runtime_outcome",
+    stage: "after_tool_call",
+    toolName: "read_file",
+  });
+  const resultPolicy = evidence(base, {
+    actionId,
+    auditId: "audit_multi_chain_policy_result",
+    chainIndex: 203,
+    decision: "allow",
+    decisionId: "decision_multi_chain_result",
+    eventId: "event_multi_chain_result",
+    eventType: "tool_result_produced",
+    occurredAt: "2026-08-20T20:28:52Z",
+    stage: "before_tool_call",
+    toolName: "read_file",
+  });
+  const resultReceipt = evidence(base, {
+    actionId,
+    auditId: "audit_multi_chain_receipt_result",
+    chainIndex: 204,
+    decision: "allow",
+    decisionId: "decision_multi_chain_result",
+    eventId: "event_multi_chain_result",
+    eventType: "runtime_outcome",
+    execution: {
+      ...base.execution,
+      completedAt: "2026-08-20T20:28:53Z",
+      receiptRecorded: true,
+      status: "executed",
+    },
+    occurredAt: "2026-08-20T20:28:53Z",
+    policyAuditId: resultPolicy.auditId,
+    recordType: "runtime_outcome",
+    stage: "tool_result_persist",
+    toolName: "read_file",
+  });
+
+  // 故意把结果链放在前面，验证主链选择不依赖事件顺序。
+  const events = [resultPolicy, resultReceipt, preExecutionPolicy, preExecutionReceipt];
+  const step = buildTrace(events).steps[0]!;
+
+  assert.equal(step.actionId, actionId);
+  assert.equal(step.decision, "allow");
+  assert.equal(step.primaryAuditId, "audit_multi_chain_policy_pre");
+  assert.equal(step.policyChecks.length, 2);
+  assert.equal(step.supervision.officialDecision.availability, "recorded");
+  assert.equal(step.supervision.officialDecision.policyAuditId, "audit_multi_chain_policy_pre");
+  assert.deepEqual(step.supervision.officialDecision.reasonCodes, []);
+  assert.equal(step.supervision.execution.availability, "recorded");
+  assert.equal(step.supervision.execution.status, "executed");
+  assert.ok(
+    step.supervision.execution.sourceRefs.some((ref) => ref.id === "audit_multi_chain_receipt_pre"),
+  );
+  assert.equal(step.supervision.controlIntegrity.status, "no_violation_observed");
+
+  const viewModel = buildRuntimeSupervisionViewModel({
+    approvals: [],
+    dataSource: createDashboardDataSourceDescriptor({ isProduction: false, viteMode: "test" }),
+    elementSourceMode: "live",
+    events,
+    traceId: fixture.source_facts.trace_id,
+  });
+  assert.equal(
+    viewModel.warnings.some((warning) => warning.code === "correlation_conflict"),
+    false,
+  );
+  assert.equal(viewModel.completeness.runtimeReceipts, "recorded");
+});
+
+test("keeps correlation conflict when a multi-chain receipt references a missing evaluation", () => {
+  const base = normalizedEvents()[0]!;
+  const actionId = "call_multi_chain_broken";
+  const preExecutionPolicy = evidence(base, {
+    actionId,
+    auditId: "audit_broken_chain_policy_pre",
+    chainIndex: 211,
+    decision: "allow",
+    decisionId: "decision_broken_chain_pre",
+    eventId: "event_broken_chain_pre",
+    eventType: "tool_call_proposed",
+    occurredAt: "2026-08-20T20:30:00Z",
+    toolName: "read_file",
+  });
+  const preExecutionReceipt = evidence(base, {
+    actionId,
+    auditId: "audit_broken_chain_receipt_pre",
+    chainIndex: 212,
+    decision: "allow",
+    decisionId: "decision_broken_chain_pre",
+    eventId: "event_broken_chain_pre",
+    eventType: "runtime_outcome",
+    execution: {
+      ...base.execution,
+      completedAt: "2026-08-20T20:30:01Z",
+      receiptRecorded: true,
+      status: "executed",
+    },
+    occurredAt: "2026-08-20T20:30:01Z",
+    policyAuditId: preExecutionPolicy.auditId,
+    recordType: "runtime_outcome",
+    stage: "after_tool_call",
+    toolName: "read_file",
+  });
+  const brokenReceipt = evidence(base, {
+    actionId,
+    auditId: "audit_broken_chain_receipt_result",
+    chainIndex: 213,
+    decision: "allow",
+    decisionId: "decision_broken_chain_result",
+    eventId: "event_broken_chain_result",
+    eventType: "runtime_outcome",
+    execution: {
+      ...base.execution,
+      completedAt: "2026-08-20T20:30:02Z",
+      receiptRecorded: true,
+      status: "executed",
+    },
+    occurredAt: "2026-08-20T20:30:02Z",
+    policyAuditId: "audit_missing_evaluation",
+    recordType: "runtime_outcome",
+    stage: "tool_result_persist",
+    toolName: "read_file",
+  });
+
+  const step = buildTrace([preExecutionPolicy, preExecutionReceipt, brokenReceipt]).steps[0]!;
+
+  assert.equal(step.decision, "unknown");
+  assert.equal(step.supervision.officialDecision.availability, "partial");
+  assert.deepEqual(step.supervision.officialDecision.reasonCodes, ["POLICY_CORRELATION_CONFLICT"]);
+  assert.equal(step.supervision.execution.availability, "partial");
+  assert.equal(step.supervision.execution.receiptRecorded, false);
+  assert.equal(step.supervision.controlIntegrity.status, "correlation_conflict");
+});
+
 test("requires receipt event and decision links to match the selected policy", () => {
   const corrupted = normalizedEvents().map((event) =>
     event.auditId === "audit_outcome_code_exec_001"

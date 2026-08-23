@@ -309,7 +309,7 @@ test("evidence detail keeps five intervention outcomes distinct", async ({ page 
       traceId: "trace_004",
     },
     {
-      execution: "暂无执行回执",
+      execution: "等待运行时回执（deny/ask 动作的执行结果尚未返回）",
       title: "模型输出修订",
       traceId: "trace_008",
     },

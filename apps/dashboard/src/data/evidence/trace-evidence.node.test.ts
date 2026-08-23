@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { AuditEventRow, AuditIntegrity } from "../../types/dashboard";
 import { approvals, auditEvents } from "../sources/mock-data.ts";
-import { buildTraceEvidenceViewModel } from "./trace-evidence.ts";
+import { buildTraceEvidenceViewModel, getContentPreviewDisplay } from "./trace-evidence.ts";
 
 const integrity: AuditIntegrity = {
   anchor: {
@@ -111,7 +111,14 @@ test("does not infer execution or zero side effects from deny and blocked", () =
     evidence.facts.find((fact) => fact.id === "execution")?.availability,
     "not_recorded",
   );
-  assert.equal(evidence.facts.find((fact) => fact.id === "side_effects")?.value, "未记录");
+  assert.equal(
+    evidence.facts.find((fact) => fact.id === "side_effects")?.value,
+    "副作用未测量（等待运行时测量回执，不可按 0 处理）",
+  );
+  assert.equal(
+    evidence.facts.find((fact) => fact.id === "execution")?.value,
+    "等待运行时回执（deny/ask 动作的执行结果尚未返回）",
+  );
   assert.equal(evidence.conclusion.title, "策略决定：拒绝");
 });
 
@@ -305,4 +312,123 @@ test("reads only the canonical AuditEvent integrity metadata", () => {
   assert.equal(normalized.chainIndex, 42);
   assert.equal(normalized.entryHash, "canonical-entry");
   assert.equal(normalized.previousHash, "canonical-previous");
+});
+
+function contentPreviewRow(guardEvent: Record<string, unknown>): AuditEventRow {
+  const eventType =
+    typeof guardEvent.event_type === "string" ? guardEvent.event_type : "model_output_produced";
+  return {
+    actionId: "act_evt_content_preview",
+    agentAction: null,
+    auditSequence: 1,
+    attackType: null,
+    blocked: false,
+    caseId: null,
+    decision: "allow",
+    decisionId: "decision_content_preview",
+    eventId: "event_content_preview",
+    eventType,
+    id: "audit_content_preview",
+    isMalicious: false,
+    occurredAt: "2026-08-21T08:00:00+08:00",
+    reason: "允许",
+    resource: "",
+    resourceTargets: [],
+    riskScore: 0,
+    ruleHits: [],
+    runtime: "langgraph",
+    severity: "low",
+    stage: "after_model_call",
+    time: "08:00",
+    tool: "",
+    traceId: "trace_content_preview",
+    userTask: "完成受控任务",
+    raw: {
+      audit_id: "audit_content_preview",
+      evidence: { guard_event: guardEvent },
+      links: { decision_id: "decision_content_preview", event_id: "event_content_preview" },
+      record_type: "policy_evaluation",
+    },
+    recordType: "policy_evaluation",
+  };
+}
+
+test("normalizes guard_event.content_preview for model output and message events", () => {
+  const output = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [
+      contentPreviewRow({
+        content_preview: "报告已写入 /reports/briefing.txt。",
+        event_type: "model_output_produced",
+      }),
+    ],
+    [],
+    null,
+  );
+  assert.equal(output.events[0]?.contentPreview, "报告已写入 /reports/briefing.txt。");
+  assert.equal(output.primary?.contentPreview, "报告已写入 /reports/briefing.txt。");
+
+  const message = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [
+      contentPreviewRow({
+        content_preview: "邮件正文摘要",
+        event_type: "message_send_proposed",
+      }),
+    ],
+    [],
+    null,
+  );
+  assert.equal(message.events[0]?.contentPreview, "邮件正文摘要");
+});
+
+test("treats a missing content_preview as null for historical audit records", () => {
+  const legacy = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [contentPreviewRow({ event_type: "model_output_produced" })],
+    [],
+    null,
+  );
+  assert.equal(legacy.events[0]?.contentPreview, null);
+
+  const blank = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [contentPreviewRow({ content_preview: "", event_type: "model_output_produced" })],
+    [],
+    null,
+  );
+  assert.equal(blank.events[0]?.contentPreview, null);
+});
+
+test("never normalizes a model input content preview", () => {
+  const input = buildTraceEvidenceViewModel(
+    "trace_content_preview",
+    [
+      contentPreviewRow({
+        content_preview: "private full prompt",
+        event_type: "model_input_prepared",
+      }),
+    ],
+    [],
+    null,
+  );
+  assert.equal(input.events[0]?.contentPreview, null);
+});
+
+test("distinguishes recorded, unavailable and not-required content previews", () => {
+  assert.deepEqual(getContentPreviewDisplay("model_output_produced", "safe output"), {
+    availability: "recorded",
+    label: "模型输出内容",
+    value: "safe output",
+  });
+  assert.deepEqual(getContentPreviewDisplay("message_send_proposed", null), {
+    availability: "unavailable",
+    label: "外发消息内容",
+    value: "输出内容未返回（功能未启用或历史记录未投影）",
+  });
+  assert.deepEqual(getContentPreviewDisplay("model_input_prepared", "must not render"), {
+    availability: "not_required",
+    label: "输出内容",
+    value: "无需输出内容（该事件类型不携带输出内容）",
+  });
 });

@@ -88,6 +88,7 @@ def build_audit_event(
     decision_authority_evidence: dict[str, object] | None = None,
     decision_authority: DecisionAuthority | None = None,
     audit_id: str | None = None,
+    evidence_content_preview_enabled: bool = False,
 ) -> AuditEvent:
     """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
 
@@ -171,6 +172,7 @@ def build_audit_event(
         policy_bundle=policy_bundle,
         policy_revision=policy_revision,
         approval_id=approval_id,
+        evidence_content_preview_enabled=evidence_content_preview_enabled,
     )
     if v21_evidence is not None:
         # shadow 信封走专用 typed bound 通道（仿 guard_decision 的
@@ -366,9 +368,13 @@ def _policy_evaluation_evidence(
     policy_bundle: PolicyBundle,
     policy_revision: int | None,
     approval_id: str | None,
+    evidence_content_preview_enabled: bool,
 ) -> dict[str, object]:
     evidence: dict[str, object] = {
-        "guard_event": _guard_event_projection(event),
+        "guard_event": _guard_event_projection(
+            event,
+            content_preview_enabled=evidence_content_preview_enabled,
+        ),
         "guard_decision": _bounded_decision_dump(decision_dump),
         "policy": {
             "bundle_id": policy_bundle.bundle_id,
@@ -417,7 +423,11 @@ def _policy_evaluation_evidence(
     return enforce_evidence_budget(evidence)
 
 
-def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
+def _guard_event_projection(
+    event: GuardEvent,
+    *,
+    content_preview_enabled: bool = False,
+) -> dict[str, object]:
     """§9.1 有界、脱敏的 GuardEvent 投影。"""
 
     context = event.security_context
@@ -439,7 +449,8 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
     payload = event.payload
     if isinstance(payload, ContextBuildPayload):
         context_sources.extend(
-            source.model_dump(mode="json") for source in payload.sources
+            source.model_dump(mode="json", exclude_none=True)
+            for source in payload.sources
         )
     projection["context_sources"] = bound_value(
         redact_structure(_unique_context_sources(context_sources)),
@@ -463,6 +474,27 @@ def _guard_event_projection(event: GuardEvent) -> dict[str, object]:
         projection["tool"] = tool_projection
     else:
         projection["tool"] = None
+    # Default-off browser evidence surface. Model inputs are deliberately
+    # excluded even though they share ModelCallPayload with model outputs.
+    # Empty values are omitted so disabled and historical records retain the
+    # same wire shape. Enabled values use the frozen bounded redaction path.
+    content_preview: str | None = None
+    if content_preview_enabled:
+        if (
+            isinstance(payload, MessageSendPayload)
+            and event.event_type == "message_send_proposed"
+        ):
+            content_preview = payload.content_preview
+        elif (
+            isinstance(payload, ModelCallPayload)
+            and event.event_type == "model_output_produced"
+        ):
+            content_preview = payload.content_preview
+    if content_preview:
+        projection["content_preview"] = bound_redacted_value(
+            content_preview,
+            text_limit=CONTENT_PREVIEW_LIMIT,
+        )
     resources = [
         {
             "type": resource.resource_type,

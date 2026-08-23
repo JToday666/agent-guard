@@ -9,7 +9,10 @@ from agentguard_core import (
     GuardEvent,
     PolicyBundle,
 )
+from guard_api.services.audit import AuditService
 from guard_api.services.evidence import build_audit_event
+from guard_api.settings import GuardApiSettings
+from guard_api.storage.memory import MemoryControlPlaneStore
 
 
 def _event(event_type: str, payload: dict[str, object]) -> GuardEvent:
@@ -45,6 +48,7 @@ def _audit(
     *,
     decision: GuardDecision | None = None,
     approval_id: str | None = None,
+    content_preview_enabled: bool = False,
 ) -> AuditEvent:
     return build_audit_event(
         event,
@@ -52,6 +56,7 @@ def _audit(
         policy_bundle=PolicyBundle(),
         policy_revision=None,
         approval_id=approval_id,
+        evidence_content_preview_enabled=content_preview_enabled,
     )
 
 
@@ -253,3 +258,195 @@ def test_explicit_source_action_id_is_preserved_for_memory_write() -> None:
     assert audit.links["action_id"] == "call_memory_write_001"
     assert audit.metadata["action_id"] == "call_memory_write_001"
     assert audit.metadata["action_name"] == "memory_write_proposed"
+
+
+def test_content_preview_setting_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTGUARD_EVIDENCE_CONTENT_PREVIEW_ENABLED", raising=False)
+    assert GuardApiSettings().evidence_content_preview_enabled is False
+
+    monkeypatch.setenv("AGENTGUARD_EVIDENCE_CONTENT_PREVIEW_ENABLED", "true")
+    assert GuardApiSettings().evidence_content_preview_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            "model_output_produced",
+            {
+                "phase": "output",
+                "content_preview": "报告已写入 /reports/briefing.txt。",
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": False,
+                "sanitized": False,
+            },
+        ),
+        (
+            "message_send_proposed",
+            {
+                "channel": "email",
+                "recipient": "reviewer@example.com",
+                "content_preview": "Reviewer briefing summary",
+                "contains_sensitive_data": False,
+                "sanitized": False,
+            },
+        ),
+    ],
+)
+def test_content_preview_projection_is_default_off(
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
+    guard_event = _audit(_event(event_type, payload)).evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert "content_preview" not in guard_event
+
+
+@pytest.mark.parametrize(
+    ("event_type", "expected"),
+    [
+        ("model_output_produced", "报告已写入 /reports/briefing.txt。"),
+        ("message_send_proposed", "Reviewer briefing summary"),
+    ],
+)
+def test_content_preview_projection_can_be_enabled(
+    event_type: str,
+    expected: str,
+) -> None:
+    payload: dict[str, object]
+    if event_type == "model_output_produced":
+        payload = {
+            "phase": "output",
+            "content_preview": expected,
+            "contains_instruction_like_text": False,
+            "contains_sensitive_data": False,
+            "sanitized": False,
+        }
+    else:
+        payload = {
+            "channel": "email",
+            "recipient": "reviewer@example.com",
+            "content_preview": expected,
+            "contains_sensitive_data": False,
+            "sanitized": False,
+        }
+
+    guard_event = _audit(
+        _event(event_type, payload),
+        content_preview_enabled=True,
+    ).evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert guard_event["content_preview"] == expected
+
+
+def test_audit_service_applies_the_content_preview_setting() -> None:
+    service = AuditService(
+        store=MemoryControlPlaneStore(),
+        evidence_content_preview_enabled=True,
+    )
+    audit = service.record_evaluation(
+        _event(
+            "model_output_produced",
+            {
+                "phase": "output",
+                "content_preview": "bounded browser evidence",
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": False,
+                "sanitized": False,
+            },
+        ),
+        _decision(),
+        policy_bundle=PolicyBundle(),
+        policy_revision=None,
+    )
+
+    guard_event = audit.evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert guard_event["content_preview"] == "bounded browser evidence"
+
+
+def test_content_preview_is_redacted_when_enabled() -> None:
+    guard_event = _audit(
+        _event(
+            "model_output_produced",
+            {
+                "phase": "output",
+                "content_preview": "done; Bearer abcdef1234567890 used",
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": True,
+                "sanitized": False,
+            },
+        ),
+        content_preview_enabled=True,
+    ).evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    projected = str(guard_event["content_preview"])
+    assert "abcdef1234567890" not in projected
+    assert "[redacted]" in projected
+
+
+def test_content_preview_is_truncated_when_enabled() -> None:
+    from guard_api.services.redaction import CONTENT_PREVIEW_LIMIT
+
+    guard_event = _audit(
+        _event(
+            "model_output_produced",
+            {
+                "phase": "output",
+                "content_preview": "x" * (CONTENT_PREVIEW_LIMIT + 500),
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": False,
+                "sanitized": False,
+            },
+        ),
+        content_preview_enabled=True,
+    ).evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert guard_event["content_preview"] == "x" * CONTENT_PREVIEW_LIMIT + "..."
+
+
+@pytest.mark.parametrize(
+    "event_type", ["model_output_produced", "message_send_proposed"]
+)
+def test_empty_content_preview_is_omitted_when_enabled(event_type: str) -> None:
+    payload: dict[str, object]
+    if event_type == "model_output_produced":
+        payload = {
+            "phase": "output",
+            "content_preview": "",
+            "contains_instruction_like_text": False,
+            "contains_sensitive_data": False,
+            "sanitized": False,
+        }
+    else:
+        payload = {
+            "channel": "email",
+            "recipient": "reviewer@example.com",
+            "content_preview": "",
+            "contains_sensitive_data": False,
+            "sanitized": False,
+        }
+    guard_event = _audit(
+        _event(event_type, payload),
+        content_preview_enabled=True,
+    ).evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert "content_preview" not in guard_event
+
+
+def test_model_input_content_preview_is_never_projected() -> None:
+    guard_event = _audit(
+        _event(
+            "model_input_prepared",
+            {
+                "phase": "input",
+                "content_preview": "full prompt context",
+                "contains_instruction_like_text": False,
+                "contains_sensitive_data": False,
+                "sanitized": False,
+            },
+        ),
+        content_preview_enabled=True,
+    ).evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    assert "content_preview" not in guard_event

@@ -8,12 +8,12 @@
         <div>
           <dt>工具</dt>
           <dd>
-            <code>{{ primary?.toolName ?? "未记录" }}</code>
+            <code>{{ primary?.toolName ?? toolMissingText }}</code>
           </dd>
         </div>
         <div>
           <dt>模型意图</dt>
-          <dd>{{ primary?.modelIntent ?? "未记录" }}</dd>
+          <dd>{{ primary?.modelIntent ?? noDataNeeded("模型意图", "本记录未携带模型意图") }}</dd>
         </div>
       </dl>
       <StructuredDataView
@@ -21,7 +21,7 @@
         :value="primary.toolArguments"
         class="evidence-dossier__structured"
       />
-      <p v-else class="evidence-dossier__missing">工具参数未记录</p>
+      <p v-else class="evidence-dossier__missing">{{ toolArgumentsMissingText }}</p>
       <ul v-if="primary?.resources.length" class="resource-evidence-list">
         <li v-for="resource in primary.resources" :key="resource.id">
           <div>
@@ -33,7 +33,7 @@
           <code>{{ resource.value }}</code>
         </li>
       </ul>
-      <p v-else class="evidence-dossier__missing">资源目标未记录</p>
+      <p v-else class="evidence-dossier__missing">{{ resourcesMissingText }}</p>
     </section>
 
     <section>
@@ -49,7 +49,7 @@
           <span>最终风险</span>
           <strong>{{
             primary?.risk.finalScore === null || primary?.risk.finalScore === undefined
-              ? "未记录"
+              ? getMissingDataLabel("not_implemented")
               : `${primary.risk.finalScore} / 100`
           }}</strong>
         </div>
@@ -75,20 +75,20 @@
           </div>
         </li>
       </ol>
-      <p v-else class="evidence-dossier__missing">结构化风险因子未记录</p>
+      <p v-else class="evidence-dossier__missing">{{ riskFactorsMissingText }}</p>
 
       <ul v-if="primary?.ruleHits.length" class="rule-evidence-list">
         <li v-for="rule in primary.ruleHits" :key="rule.ruleId">
           <div>
             <strong>{{ rule.name ?? ruleLabel(rule.ruleId) }}</strong>
           </div>
-          <p>{{ rule.reason ?? "规则原因未记录" }}</p>
+          <p>{{ rule.reason ?? ruleReasonMissingText }}</p>
           <ul v-if="rule.evidence.length">
             <li v-for="item in rule.evidence" :key="item">{{ item }}</li>
           </ul>
         </li>
       </ul>
-      <p v-else class="evidence-dossier__missing">命中规则未记录</p>
+      <p v-else class="evidence-dossier__missing">{{ ruleHitsMissingText }}</p>
     </section>
 
     <section>
@@ -111,7 +111,7 @@
         <div>
           <dt>规范摘要</dt>
           <dd>
-            <code>{{ primary?.policy.digest ?? "未记录" }}</code>
+            <code>{{ primary?.policy.digest ?? policyDigestMissingText }}</code>
           </dd>
         </div>
         <div>
@@ -150,6 +150,11 @@ import {
   getRiskAggregationLabel,
 } from "../../utils/dashboard-formatters";
 import { prepareEvidenceDataForDisplay, ruleLabel } from "../../utils/rule-display";
+import {
+  getMissingDataLabel,
+  noDataNeeded,
+  notImplemented,
+} from "../../utils/missing-data-display";
 import StructuredDataView from "../common/StructuredDataView.vue";
 
 defineOptions({ name: "EvidenceDossier" });
@@ -162,7 +167,45 @@ const safeRawEvidence = computed(() =>
 );
 const riskAggregationLabel = computed(() => {
   const method = primary.value?.risk.aggregationMethod;
-  return method ? getRiskAggregationLabel(method) : "未记录";
+  return method ? getRiskAggregationLabel(method) : riskAggregationMissingText;
+});
+
+// 风险分解属③未实现：core 契约 GuardDecision 无 risk_breakdown 字段，判定内核不输出。
+const riskFactorsMissingText = notImplemented(
+  "结构化风险因子",
+  "当前版本判定内核未输出 risk_breakdown",
+);
+const riskAggregationMissingText = notImplemented(
+  "风险聚合方法",
+  "当前版本判定内核未输出 risk_breakdown",
+);
+// ③逐规则原因：判定内核仅输出证据项。
+const ruleReasonMissingText = notImplemented("逐规则原因", "判定内核仅输出证据项");
+// ②按字段契约：策略引用应包含 digest，缺失属数据异常。
+const policyDigestMissingText = "规范摘要缺失（策略引用应包含 digest，属数据异常）";
+
+// 工具调用识别：有工具名或工具参数才视为工具事件；非工具事件本就无这些数据（①）。
+const isToolCallEvent = computed(() =>
+  Boolean(primary.value?.toolName || primary.value?.toolArguments),
+);
+const toolMissingText = computed(() =>
+  isToolCallEvent.value ? "未记录" : noDataNeeded("工具名称", "本记录非工具调用"),
+);
+const toolArgumentsMissingText = computed(() =>
+  isToolCallEvent.value ? "工具参数未记录" : noDataNeeded("工具参数", "本记录非工具调用"),
+);
+const resourcesMissingText = computed(() =>
+  isToolCallEvent.value ? "资源目标未记录" : noDataNeeded("资源目标", "本记录非工具调用"),
+);
+
+// 命中规则空列表按判定结果区分：allow 属①正常无数据；deny/ask 无命中则提示异常。
+const ruleHitsMissingText = computed(() => {
+  const decision = primary.value?.decision ?? "unknown";
+  if (decision === "allow") return noDataNeeded("命中规则", "动作为允许");
+  if (decision === "deny" || decision === "ask") {
+    return `异常：动作为${getDecisionEvidenceLabel(decision)}，但未记录任何命中规则`;
+  }
+  return "命中规则未记录";
 });
 
 function resourceTypeLabel(type: string | null): string {

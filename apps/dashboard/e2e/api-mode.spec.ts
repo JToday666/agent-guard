@@ -688,6 +688,38 @@ test("API mode conditionally refreshes a running action until its terminal recei
   await expect(page.locator(".execution-trace__connection")).toContainText("运行结果已确认");
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v1"');
   expect(requests.traceConditionalHeaders).toContain('"trace-runtime-v2"');
+  const terminalRequestCount = requests.traceConditionalHeaders.length;
+  await page.waitForTimeout(2_300);
+  expect(requests.traceConditionalHeaders).toHaveLength(terminalRequestCount);
+});
+
+test("API mode pauses evidence polling while the page is hidden", async ({ page }) => {
+  const requests = await installApiRoutes(page);
+  await page.goto("/evidence/trace_api_001");
+  await expect(page.locator(".execution-trace__connection")).toContainText("自动更新中");
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(page.locator(".execution-trace__connection")).toContainText("页面隐藏，已暂停更新");
+  const hiddenRequestCount = requests.traceConditionalHeaders.length;
+  await page.waitForTimeout(2_300);
+  expect(requests.traceConditionalHeaders).toHaveLength(hiddenRequestCount);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect
+    .poll(() => requests.traceConditionalHeaders.length)
+    .toBeGreaterThan(hiddenRequestCount);
 });
 
 test("terminal reconciliation retries Provenance after its first failure", async ({ page }) => {
