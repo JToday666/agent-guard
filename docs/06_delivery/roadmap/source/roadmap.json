@@ -85,7 +85,7 @@
         "agentguard_langgraph_bench/**",
         "packages/agentguard-langgraph-adapter/**",
         "packages/agentguard-openclaw-plugin/**",
-        "packages/agentguard-openclaw-bench-tools/**",
+        "benchmarks/openclaw-bench-tools/**",
         "schemas/guard_event.schema.json",
         "schemas/runtime_outcome_receipt.schema.json",
         "scripts/openclaw-rte05-host-chain.mjs",
@@ -99,7 +99,7 @@
       "label": "Residual OpenClaw host capability verification",
       "path_patterns": [
         "packages/agentguard-openclaw-plugin/**",
-        "packages/agentguard-openclaw-bench-tools/**",
+        "benchmarks/openclaw-bench-tools/**",
         "scripts/openclaw-rte05-host-chain.mjs",
         "tests/runtime_conformance/**",
         "tests/test_openclaw_*.py",

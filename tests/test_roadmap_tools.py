@@ -189,10 +189,10 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "FE07",
     ):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05",):
+    for node_id in ("R05", "LGV2-C", "LGV2-B"):
         assert nodes[node_id]["effective_status"] == "in_progress"
     assert nodes["RM-00"]["effective_status"] == "completed"
-    for node_id in ("CT03R", "LGV2-C", "LGV2-B"):
+    for node_id in ("CT03R", "CT-O1", "CT06"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
 
@@ -201,7 +201,7 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"CT03R", "LGV2-C", "LGV2-B"} <= ready_ids
+    assert {"CT03R", "CT-O1", "CT06"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -216,6 +216,8 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "RM-00",
         "C10",
         "CT05",
+        "LGV2-C",
+        "LGV2-B",
         "LGV2-I",
         "LGV2-FE",
     }.isdisjoint(ready_ids)
@@ -276,8 +278,8 @@ def test_lgv2_competition_dependencies_and_surfaces_are_scoped(
     document = build_normalized(roadmap_root)
     nodes = normalized_nodes(document)
 
-    assert nodes["LGV2-C"]["effective_status"] == "ready"
-    assert nodes["LGV2-B"]["effective_status"] == "ready"
+    assert nodes["LGV2-C"]["effective_status"] == "in_progress"
+    assert nodes["LGV2-B"]["effective_status"] == "in_progress"
     assert nodes["LGV2-I"]["effective_status"] == "not_ready"
     assert nodes["LGV2-I"]["unmet_dependencies"] == ["E-LGV2-C-I"]
     assert nodes["LGV2-I"]["resource_conflicts"] == []
@@ -308,7 +310,7 @@ def test_reference_runtime_surface_cannot_authorize_openclaw_changes(
     assert "runtime-binding-activation" not in nodes["I02A"]["change_surfaces"]
     residual_paths = (
         "packages/agentguard-openclaw-plugin/src/index.ts",
-        "packages/agentguard-openclaw-bench-tools/src/index.ts",
+        "benchmarks/openclaw-bench-tools/src/index.ts",
         "scripts/openclaw-rte05-host-chain.mjs",
         "tests/runtime_conformance/contract_cases.json",
         "tests/test_openclaw_plugin_contract.py",
@@ -825,6 +827,17 @@ def test_close_rejects_unmet_start_exit_and_resource_blockers(
     roadmap_root: Path,
 ) -> None:
     active = read_json(object_path(roadmap_root, "nodes", "R05"))
+    # The canonical roadmap now has I02A completed after C10. Reopening C10 in
+    # this isolated fixture must also rewind that dependent, otherwise global
+    # dependency validation masks the close-command blocker under test.
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "I02A",
+        evidence_refs=[],
+        lifecycle="not_started",
+        work=None,
+    )
     mutate_object(
         roadmap_root,
         "nodes",
