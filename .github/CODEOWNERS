@@ -1,0 +1,18 @@
+# Default repository owners
+* @JToday666 @Taiyixcx @zhuzhu0607 @txzy404
+
+# Security- and contract-sensitive surfaces
+/.github/ @JToday666
+/SECURITY.md @JToday666
+/schemas/ @JToday666
+/packages/agentguard-core/ @JToday666
+/apps/guard-api/ @JToday666
+
+# Runtime adapters and product surfaces
+/packages/agentguard-langgraph-adapter/ @JToday666 @Taiyixcx
+/packages/agentguard-openclaw-plugin/ @JToday666 @zhuzhu0607
+/apps/dashboard/ @JToday666 @txzy404
+
+# Delivery and roadmap truth sources
+/docs/06_delivery/roadmap/ @JToday666
+/docs/archive/ @JToday666

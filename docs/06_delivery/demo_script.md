@@ -1,5 +1,8 @@
 # 演示脚本
 
+> [!WARNING]
+> 历史竞赛/答辩展示顺序，保留在旧路径仅为一个里程碑周期的链接兼容；不是 Productization Alpha 的产品验收或能力事实来源。当前入口见[Productization Alpha Status](productization_alpha_status.md)。
+
 ## 1. 文档定位
 
 本文定义答辩和开发验收使用的演示顺序。演示必须展示防御前后对比、阻断证据和指标结果，避免只展示静态页面。

@@ -1,13 +1,15 @@
 # AgentGuard 本地部署入口
 
-本文件只提供仓库根目录的最小启动入口。完整安装、Dashboard、鉴权、无头模式、
-OpenClaw 和故障排查统一维护在
-[部署、安装与使用说明](docs/06_delivery/deployment_install_usage.md)，不要在本文件
-复制完整流程。
+本文件只提供仓库根目录的最小启动入口。安装、升级与故障排查从
+[产品化入口](docs/06_delivery/install_upgrade_troubleshooting.md)开始；完整环境变量、
+Dashboard、鉴权、无头模式和 OpenClaw 细节维护在
+[部署、安装与使用说明](docs/06_delivery/deployment_install_usage.md)，不要在本文件复制完整流程。
 
 其他直接入口：
 
 - [文档地图](docs/README.md)
+- [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md)
+- [兼容矩阵](docs/06_delivery/compatibility_matrix.md)
 - [OpenClaw 插件部署与验证](docs/03_adapters/openclaw_plugin_deployment.md)
 - [AgentGuard 0.1.0 Beta 1 发布记录](docs/06_delivery/beta_release.md)
 
@@ -16,12 +18,12 @@ OpenClaw 和故障排查统一维护在
 在仓库根目录执行：
 
 ```bash
-uv sync --frozen
+uv sync --locked --all-groups
 pnpm install --frozen-lockfile
 ```
 
-从 `.env.example` 创建本地 `.env`，至少配置独立的 PostgreSQL 开发库、测试库、
-adapter token 和 control token。`.env`、真实密码、token、launch code、CSRF token、
+从 `.env.example` 创建本地 `.env`，至少配置独立的 PostgreSQL 开发库、测试库和
+control token。API 启动后为每个 runtime/agent 签发 adapter credential，不使用未注册的静态 token。`.env`、真实密码、token、launch code、CSRF token、
 approval nonce 和 browser session 均不得提交。
 
 可选：`AGENTGUARD_V21_SEMANTIC_*`（V21-13 Stage 1 shadow 语义评判，见

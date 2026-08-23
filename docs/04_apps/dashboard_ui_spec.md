@@ -933,4 +933,4 @@ failed
 - 用户可见内容按不可信文本处理。
 - 页面、日志和导出不包含长期凭证、CSRF token 或内部规则编号。
 - 组件、类型、formatter 和 token 得到复用。
-- 验证范围按仓库根目录 [AGENTS.md](../../AGENTS.md) 的 Dashboard 检查流程执行。
+- 验证范围按仓库根目录 [CONTRIBUTING.md](../../CONTRIBUTING.md) 的 Dashboard 检查流程执行。

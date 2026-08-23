@@ -21,7 +21,7 @@
 - LangGraph Adapter 写入运行时回执、`tool_call_started` 和 Trace 生命周期 observation；
 - Trace 与 Provenance 使用独立 ETag 和 `304`，Trace 响应包含窗口完整性；
 - Provenance writer 在写入时物化稳定节点与关系，并保护节点、边和审批状态冲突；
-- Dashboard 已提供三视图、全 Guard 阶段的确定性步骤投影、约 2 秒条件轮询和按需溯源
+- Dashboard 已提供三视图、全 Guard 阶段的确定性步骤投影、默认 10 秒的可配置条件轮询和按需溯源
   更新。
 - 真实 LangGraph / AttackBench 主演示链已通过实际 Uvicorn HTTP 服务分别连接 Memory 与
   PostgreSQL，完成审批释放、受控执行、Trace、ETag 和 Provenance 验收；Dashboard 又通过
@@ -333,7 +333,8 @@ event_id=<raw audit id>
 
 ### 7.1 Trace
 
-Dashboard 已采用约 2 秒的条件轮询作为第一阶段实时机制：
+Dashboard 已采用可配置的条件轮询作为第一阶段实时机制。`VITE_EVIDENCE_POLL_INTERVAL_MS`
+默认 10,000 ms，下限 2,000 ms；低于下限的有效值按下限处理，缺失或无效值回退默认值：
 
 ```text
 GET /v1/traces/{trace_id}

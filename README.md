@@ -2,7 +2,12 @@
 
 AgentGuard 是面向大模型智能体的运行时行为监督、攻击检测与审计系统。它不替代基础模型或 Agent 框架，而是在智能体准备执行外部动作时，将工具调用、消息发送、模型输入输出、工具结果和记忆写入等行为转换为统一安全事件，并在副作用发生前完成判定、阻断、审批和留证。
 
-本仓库可作为竞赛材料提交：代码、可执行入口、Dashboard、OpenClaw 插件、LangGraph 评测靶场和必要说明均在仓库内。若提交压缩包时移除顶层历史文档目录、报告目录和单独风险报告，评委仍可通过本文件、部署说明和各包 README 理解与运行项目。
+当前主线处于 **Productization Alpha（in progress）**，优先收敛稳定契约、可重复安装、分层测试、运行时执行证据和生产边界。历史竞赛与答辩材料已降级为归档，不是默认产品入口，也不能替代当前验收。开始使用前请阅读：
+
+- [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md)
+- [安装、升级和故障排查](docs/06_delivery/install_upgrade_troubleshooting.md)
+- [产品化架构与目录职责](docs/01_overview/productization_architecture.md)
+- [兼容矩阵](docs/06_delivery/compatibility_matrix.md)
 
 ## 核心架构
 
@@ -35,7 +40,7 @@ AttackCase
 - 审计证据：Guard API 记录 AuditEvent、决策原因、规则命中、风险分、Trace ID、RFC 8785 审计哈希链、数据库外签名检查点和 provenance graph。
 - Dashboard：提供总览、调查、证据链、审批、评测和系统状态页面。
 - 评测靶场：内置 LangGraph demo agent、OpenClaw 外部 Agent 适配、Mock Tools、浏览器和 MCP/RAG 沙箱。
-- OpenClaw 插件：hook-only security plugin，默认注册 23 个 hook；模型输入使用正式 `before_agent_run` gate，关键执行和持久化边界固定 fail closed。
+- OpenClaw 插件：hook-only security plugin，默认注册 24 个 hook；明确 fail-closed 的有效阶段仅为 `before_tool_call`、`before_install`、`before_agent_run`、`before_agent_finalize`、`tool_result_persist`、`before_message_write`。观察型 hook 不阻断；`message_sending` 会把插件内 Guard API 错误映射为 cancel，但宿主未捕获异常/timeout 仍是已知 fail-open 边界。
 
 ## 数据集规模
 
@@ -59,31 +64,37 @@ AttackCase
 
 要求：
 
-- Python 3.12 或更新版本，使用 `uv` 管理依赖和命令。
+- Python 3.12，使用 `uv` 管理依赖和命令；更高版本尚未进入正式 CI 矩阵。
 - Node 24.18.0 和 pnpm 11.9.0。
 - PostgreSQL，用于 Guard API、审计、审批和指标存储。
-- 可选：OpenClaw 2026.6.6，用于真实 runtime plugin 验证。
+- 可选：OpenClaw 2026.6.6 或 2026.7.1-2，用于 runtime plugin 验证；R05 宿主能力限制仍保留。
 
 首次在仓库根目录准备依赖：
 
 ```bash
-uv sync
-pnpm install
+uv sync --locked --all-groups
+pnpm install --frozen-lockfile
 cp .env.example .env
 ```
 
-`.env` 只用于本机，不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。默认示例使用本地 PostgreSQL；正式演示前应确认 `AGENTGUARD_DATABASE_URL` 和 `AGENTGUARD_TEST_DATABASE_URL` 指向已存在的独立数据库。
+`.env` 只用于本机，不得提交真实数据库密码、adapter token、control token、launch code、CSRF token 或 browser session。默认配置使用本地 PostgreSQL；联调前应确认 `AGENTGUARD_DATABASE_URL` 和 `AGENTGUARD_TEST_DATABASE_URL` 分别指向已存在的开发库和独立测试库。
 
 开发环境可以不启用外部审计检查点；`production` 或非 loopback 监听必须同时配置绝对路径 `AGENTGUARD_AUDIT_CHECKPOINT_PATH`、至少 32 字节的 base64url 密钥 `AGENTGUARD_AUDIT_CHECKPOINT_KEY` 和非秘密标识 `AGENTGUARD_AUDIT_CHECKPOINT_KEY_ID`。检查点应写入 PostgreSQL 之外、由部署侧保护的持久卷；完整配置和轮换步骤见[部署、安装与使用说明](docs/06_delivery/deployment_install_usage.md)。
 
 ## 质量门禁
 
-GitHub CI 会在面向 `dev`、`main` 的 push 和 pull request 上执行 Python lint、类型检查、根测试、LangGraph Adapter 测试与 PostgreSQL migration 测试，并执行 Dashboard 静态检查、单元测试、构建、Chromium 浏览器 E2E、OpenClaw 插件、bench tools 和本地 shim 检查。本地可分别运行：
+CI 配置将 Python 测试划分为 `unit`、`contract`、`integration`、`postgres`、`e2e`，并为 PostgreSQL 16 migration/tests、Dashboard build 和 Playwright Chromium E2E 定义独立 job；`live` 只允许手动 opt-in。新增配置只有在目标 GitHub Actions 对最终提交实际通过后才构成验证证据，不能从本文或 workflow 文件反推为已经通过。当前核验结果记录在 [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md)。本地可分别运行：
 
 ```bash
-uv run ruff check apps packages scripts tests
+uv run ruff check apps packages scripts tests examples conftest.py \
+  agentguard_langgraph_bench/bench/tests/conftest.py
 uv run pyright
-uv run pytest -q tests packages/agentguard-langgraph-adapter/tests
+uv run pytest -q -m unit
+uv run pytest -q -m contract
+uv run pytest -q -m integration
+uv run pytest -q -m e2e
+# 设置独立的 AGENTGUARD_TEST_DATABASE_URL 后：
+uv run pytest -q -m postgres
 pnpm --filter @agentguard/dashboard check
 pnpm --filter @agentguard/dashboard test:e2e
 pnpm --filter @agentguard/dashboard test:e2e:api
@@ -183,14 +194,15 @@ uv run python -m agentguard_langgraph_bench.bench.cli --dataset agentguard_langg
 
 `--fake-core` 只用于验证 runner、沙箱和指标链路；真实防护效果应通过 Guard API 和当前策略链路验证。
 
-## 推荐演示顺序
+## 推荐产品验收顺序
 
-1. 启动 Guard API 和 Dashboard，使用 launch code 登录真实 API 模式。
-2. 在 Dashboard 总览页确认健康状态、审计链、规则命中和指标。
-3. 运行一个攻击样本，展示工具执行前被阻断或进入审批。
-4. 在调查页查看命中规则、资源目标、风险原因和 Trace ID。
-5. 进入证据链页查看事件时间线、provenance graph 和审计完整性。
-6. 运行 OpenClaw E2E 或 AttackBench runner，展示跨运行时接入与批量评测能力。
+1. 先运行 `examples/` 中的 benign/blocked Core 示例，确认干净 clone 基线。
+2. 启动 Guard API 和 Dashboard，使用 launch code 登录真实 API 模式。
+3. 在 Dashboard 总览页确认健康状态、审计链、规则命中和指标。
+4. 运行一个 benign 和一个攻击样本，验证工具执行前决策与 runtime receipt 分开留证。
+5. 在调查页查看命中规则、资源目标、风险原因和 Trace ID。
+6. 进入证据链页查看事件时间线、provenance graph 和审计完整性。
+7. 按需运行 OpenClaw E2E 或 AttackBench；Mock/stub/沙箱结果必须按其真实模式标注。
 
 ## 目录速览
 
@@ -211,10 +223,12 @@ agentguard_langgraph_bench/
   adapters/            # 外部 Agent adapter
   demo_agent/          # LangGraph demo agent
 schemas/               # GuardEvent、GuardDecision、AuditEvent JSON Schema
+examples/              # 干净 clone 可运行的最小示例
 scripts/               # OpenClaw 和 LangGraph 辅助脚本
 tests/                 # 根项目测试
+docs/archive/          # 历史竞赛、答辩与演示证据；非产品入口
 ```
 
-## 提交包说明
+## 历史材料与当前状态
 
-竞赛提交包建议保留本仓库源码、可执行入口、靶场数据、插件包、Dashboard 和本文件。顶层历史文档目录、报告目录和单独风险分析报告可作为论文或答辩材料单独提交，不需要放入可执行靶场压缩包。
+2026 年竞赛与答辩阶段的受审查材料位于 [`docs/archive/competition-2026/`](docs/archive/competition-2026/README.md)。其中部分历史运行依赖当时的 ignored staging 和临时输出，只用于追溯，不是干净 clone 复现说明、正式效果结论或生产就绪证据。当前能力、未完成项和最终门禁结果以 [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md) 为准。

@@ -10,6 +10,13 @@
 >
 > 主演示运行时：LangGraph / AttackBench；OpenClaw 在能力门禁通过后作为跨运行时增强
 
+> [!IMPORTANT]
+> Productization Alpha 覆盖：本目录是 2026-08-16 的冻结候选设计基线，不是当前运行参数
+> 的唯一真值。包内“约 2 秒轮询”表示当时设计值；当前实现由
+> `VITE_EVIDENCE_POLL_INTERVAL_MS` 配置，默认 10 秒、下限 2 秒，并在页面隐藏或 Trace
+> 明确终态时停止。当前事实以[稳定可观测设计](../04_apps/runtime_safety_observability_design.md)
+> 和[状态页](../06_delivery/productization_alpha_status.md)为准。
+
 ## 1. 一句话结论
 
 本方案不建设独立“项目成果展示页”，也不在控制台永久放置左右对照图；它在现有 Trace

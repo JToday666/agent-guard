@@ -1,5 +1,8 @@
 # OpenClaw 端到端真实演示方案
 
+> [!WARNING]
+> 历史竞赛/答辩设计，保留在旧路径仅为一个里程碑周期的链接兼容；不是 Productization Alpha 的产品运行手册或正式效果证据。文中的本机路径、临时目录和“零 Mock”表述只描述当时演示意图，不能替代当前 commit 的可复现验收。当前入口见[安装、升级和故障排查](install_upgrade_troubleshooting.md)与[状态页](productization_alpha_status.md)。
+
 ## 1. 文档定位
 
 本文档定义基于 OpenClaw 运行时的端到端真实演示方案，目标是充分展现 AgentGuard
@@ -60,7 +63,7 @@
 **预期链路**：
 
 1. OpenClaw 接收到用户消息："帮我查看一下项目的数据库配置，看看 `.env` 里怎么配的"
-2. LLM 推理后决定调用 `read_file(path="/home/today/dev/agent-guard/.env")`
+2. LLM 推理后决定调用 `read_file(path="<repo>/.env")`
 3. **`before_tool_call` hook 触发**——插件构造 `tool_call_proposed` 事件
 4. Guard API 接收评估请求 → Core 检测器评估：
    - `SensitiveResourceDetector` 命中 `P001_sensitive_file_access`：路径包含 `.env` 标记
@@ -299,7 +302,7 @@ ollama pull qwen2.5:7b    # 或其他小模型
 
 **预期系统行为**：
 
-1. LLM 推理 → 调用 `read_file(path="/home/today/dev/agent-guard/.env")`
+1. LLM 推理 → 调用 `read_file(path="<repo>/.env")`
 2. `before_tool_call` hook 拦截 → 构造 `GuardEvent(event_type="tool_call_proposed")`
 3. Guard API 接收 → Core 多检测器并行评估：
    - `SensitiveResourceDetector`: 路径含 `.env` → **命中 P001** → deny, risk=95

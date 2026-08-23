@@ -106,7 +106,7 @@ P2 observation hooks 构造 `AuditEvent(event_type="runtime_observation", runtim
 
 P1 审批真源是 AgentGuard Guard API / Dashboard。OpenClaw `requireApproval` 不作为 P1 审批权威源。
 
-fail-closed 阶段不是用户可调白名单，而是固定契约：`before_tool_call`、`message_sending`、`before_install`、`before_agent_run`、`before_agent_finalize`、`tool_result_persist` 和 `before_message_write`。其中前四个返回 SDK 正式阻断结果；`before_agent_finalize` 请求安全重写；两个同步持久化 hook 只对本地处理错误 fail closed，远端可用性由下一次 `before_agent_run` gate 承担。`approvalTimeoutMs` 是唯一审批等待上限，hook timeout 会覆盖初始评估、审批等待、轮询间隔和安全余量。
+固定 fail-closed 的有效阶段不是用户可调白名单：`before_tool_call`、`before_install`、`before_agent_run`、`before_agent_finalize`、`tool_result_persist` 和 `before_message_write`。前三个返回 SDK 正式阻断结果；`before_agent_finalize` 请求安全重写；两个同步持久化 hook 只对本地处理错误 fail closed，远端可用性由下一次 `before_agent_run` gate 承担。`message_sending` 会把插件内 Guard API 错误映射为 `cancel`，但 OpenClaw 对未被插件捕获的 handler 异常或宿主 timeout 仍可能 fail open，因此不列入宿主级固定清单。`approvalTimeoutMs` 是唯一审批等待上限，hook timeout 会覆盖初始评估、审批等待、轮询间隔和安全余量。
 
 ## 7. 鉴权边界
 
@@ -141,7 +141,7 @@ uv run pytest \
   tests/test_guard_api.py::test_audit_events_plural_write_and_filter_for_dashboard -q
 ```
 
-OpenClaw 2026.6.6 验证：
+OpenClaw `2026.7.1-2` 手动验证：
 
 ```bash
 pnpm openclaw:plugin:install
@@ -208,10 +208,10 @@ OpenClaw 2026.6.6 的 `openclaw plugins validate --root ... --entry ...` 面向 
 
 ## 10. E2E 验收报告
 
-最近一次本机真实 E2E 验收报告保存在：
+手动 E2E runner 会在系统临时目录生成瞬时报告：
 
 ```text
 <系统临时目录>/agentguard-openclaw-e2e-acceptance-report.md
 ```
 
-该验收使用 OpenClaw 2026.6.6、Guard API、独立 PostgreSQL 测试库和确定性 hook runner，覆盖 `before_tool_call`、`message_sending`、`before_agent_run`、`before_agent_finalize`、`before_install`、`tool_result_persist`、观察型 hooks、audit integrity 和 provenance。
+该文件未绑定 commit SHA、OpenClaw 版本、平台和校验值时不能称为“最近一次真实证据”。当前语义证据 pin 为 OpenClaw `2026.7.1-2`；形成可引用证据前必须在隔离环境重跑并归档这些元数据。runner 覆盖 `before_tool_call`、`message_sending`、`before_agent_run`、`before_agent_finalize`、`before_install`、`tool_result_persist`、观察型 hooks、audit integrity 和 provenance。

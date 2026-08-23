@@ -1,6 +1,9 @@
 # AgentGuard Demo 运行与复现指南
 
-> 本文档提供 AgentGuard + OpenClaw 端到端演示的**完整运行与复现步骤**，包括环境准备、服务启动、策略注入、链验证和现场演示执行。所有命令均经过实际验证，可直接照此执行。
+> [!WARNING]
+> 历史竞赛/答辩材料，保留在旧路径仅为一个里程碑周期的链接兼容；不是 Productization Alpha 的安装或复现入口。本文依赖 ignored `.openclaw-dev` 脚本、临时状态和 2026-08-19 的本机环境，因此“所有命令可直接执行”的旧表述不适用于干净 clone。当前入口见[安装、升级和故障排查](install_upgrade_troubleshooting.md)与[状态页](productization_alpha_status.md)。
+
+> 以下是 2026-08-19 答辩环境中的 AgentGuard + OpenClaw 端到端演示步骤，包括环境准备、服务启动、策略注入、链验证和现场演示执行；它们只记录当时的验证过程，不保证在当前源码或干净 clone 中可直接执行。
 >
 > 最后验证时间：2026-08-19
 > 验证环境：Ubuntu 24.04 / Node v24.18.0 / Python 3.12+ / PostgreSQL 14+

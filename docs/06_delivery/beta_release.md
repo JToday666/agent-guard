@@ -4,6 +4,8 @@
 > 发布日期：2026-08-05
 > 许可证：MIT
 
+> 历史边界：公开 `v0.1.0-beta.1` 的 OpenClaw 插件是 22-hook 制品。当前 Productization Alpha 源码已演进为 24 hooks，但尚未升版或发布；两者不可视为同一构建。任何下一次发布前必须统一提升 Python/Node 版本与映射，禁止覆盖 Beta 1。
+
 ## 发布物与版本
 
 本次 Beta 已按以下版本映射发布：
@@ -52,9 +54,11 @@ import agentguard_cli
 
 ## 当前发布边界
 
-2026-08-05 的首次 PyPI、npm 和 Git tag 由发布负责人在本地完成。当前仓库已经增加
-基础 CI、Windows 安全回归门禁和 `Release Check` 工作流：PR 与 `dev` / `main` push
-会在全新临时目录构建并验证 Python/npm 制品，但不会自动上传注册表或创建 tag。
+2026-08-05 的首次 PyPI、npm 和 Git tag 由发布负责人在本地完成。随后仓库增加了
+基础 CI 和 `Internal Source Build Check` 工作流：PR 与 `dev` / `main` push 可在 Ubuntu
+24.04 的临时目录构建并验证 Python/npm 源码制品，但不会上传 workflow artifact、注册表或创建 tag。
+该历史发布记录不追溯宣称当时已运行 Productization Alpha 新增的 PostgreSQL 或浏览器
+E2E job；当前门禁结果以[状态页](productization_alpha_status.md)记录的已验证代码 SHA 和托管 CI run 为准。
 
 Guard API 镜像构建和 GHCR 发布仍未完成，不属于本次 Python/npm Beta 发布物。
 
@@ -142,7 +146,7 @@ Core → API → CLI → npm：
 - Git tag `v0.1.0-beta.1` 已存在并指向本次 Beta 源码。
 
 后续发布继续要求所有本地检查通过、制品摘要经复核，且发布凭证只存在于本机凭证
-存储或进程环境中。不得根据 `Release Check` 通过推断注册表自动发布、供应链签名或
+存储或进程环境中。不得根据 `Internal Source Build Check` 通过推断注册表自动发布、供应链签名或
 远端审批已经配置完成。
 
 当前 tag 只形成 Git 引用；仓库没有 tag 触发的自动发布流程。创建后续 tag 前必须

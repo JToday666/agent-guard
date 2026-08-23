@@ -2,31 +2,31 @@
 
 ## 1. 定位与组件关系
 
-本文是 AgentGuard 当前 MVP 的统一运行手册，覆盖本地开发、演示验收、无头机器使用和生产化边界。当前系统按以下职责拆分：
+本文是 AgentGuard 当前 Alpha 的详细运行手册，覆盖本地开发、无头验收和生产化边界。首次安装、升级或排障请先从[安装、升级和故障排查](install_upgrade_troubleshooting.md)进入；支持版本见[兼容矩阵](compatibility_matrix.md)，当前状态见[Productization Alpha Status](productization_alpha_status.md)。当前系统按以下职责拆分：
 
 | 组件                      | 部署形态                | 职责                                                                                                           |
 | ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
 | AgentGuard Core          | Python 库               | 无状态安全判定内核，负责事件规范化、检测器、策略匹配、风险评分和 `GuardDecision` 输出。                        |
 | Guard API / Control Plane | FastAPI 服务            | 对外 HTTP 入口，负责鉴权、调用 core、审计入库、审批、指标、Trace、策略快照和 Dashboard 查询。                  |
-| `agentguardctl` CLI       | Python console script   | 无图形界面机器上的工程控制台，通过 Guard API 做健康检查、登录链接、审计导出、指标、Trace、插件验证和评测委托。 |
+| `agentguardctl` CLI       | Python console script   | 无图形界面机器上的工程控制台；控制面命令通过 Guard API，本机 OpenClaw verify 只封装仓库脚本。                  |
 | Dashboard                 | Vue/Vite 前端           | 图形化监督端，只通过 Guard API 读取审计、审批、Trace、指标和策略状态。                                         |
 | OpenClaw 插件             | OpenClaw runtime plugin | Runtime Adapter，通过 adapter token 把 OpenClaw hook 事件送入 Guard API，不保存 Dashboard 会话。               |
 | AttackBench runner        | Python 评测入口         | 运行攻击样本和正常样本，生成阻断率、误报、漏报和延迟指标。                                                     |
 
-依赖方向固定为：Runtime Adapter 调用 Guard API，Guard API 调用 AgentGuard Core，Dashboard 和 CLI 都只调用 Guard API。Core 不启动服务、不访问数据库、不读取 token。
+依赖方向固定为：Runtime Adapter 调用 Guard API，Guard API 调用 AgentGuard Core，Dashboard 真实 API 模式与 CLI 控制面命令调用 Guard API。Dashboard mock 仅用于 UI 开发，CLI 本机维护命令可封装仓库脚本；二者都不形成第二套控制面。Core 不启动服务、不访问数据库、不读取 token。
 
 ## 2. 前置条件
 
 在仓库根目录准备依赖：
 
 ```bash
-uv sync
-pnpm install
+uv sync --locked --all-groups
+pnpm install --frozen-lockfile
 ```
 
 当前根 `package.json` 声明 Node `24.18.0` 和 pnpm `11.9.0`。Python 依赖通过 `uv` 管理，根 `pyproject.toml` 以 editable 方式接入 `aegis-agentguard-core`、`aegis-agentguard-api` 和 `aegis-agentguard-cli`。
 
-Beta 1 已于 2026-08-05 发布。按需要安装 Core、API 和 CLI 三个正式组件：
+Beta 1 已于 2026-08-05 发布。下列命令安装的是历史 Beta 1 制品，不包含当前 Productization Alpha 的未发布增量；按需要安装 Core、API 和 CLI 三个公开组件：
 
 ```bash
 pip install aegis-agentguard-core==0.1.0b1
@@ -58,7 +58,7 @@ AGENTGUARD_TEST_DATABASE_URL=postgresql+psycopg://postgres:<password>@127.0.0.1:
 AGENTGUARD_ADAPTER_TOKEN=
 AGENTGUARD_CONTROL_TOKEN=ag_control_xxx
 AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID=development-2026-08
-AGENTGUARD_TASK_SCOPE_KEYS={"development-2026-08":"<至少 32 字节随机值的 base64url 编码>"}
+AGENTGUARD_TASK_SCOPE_KEYS='{"development-2026-08":"<至少 32 字节随机值的 base64url 编码>"}'
 AGENTGUARD_HOST=127.0.0.1
 AGENTGUARD_PORT=8088
 AGENTGUARD_AUDIT_CHECKPOINT_PATH=
@@ -138,7 +138,7 @@ Core 边界：
 
 ## 4. 本地真实 API 模式
 
-本模式用于开发联调和演示真实 Guard API 数据链路。
+本模式用于开发联调和验证真实 Guard API 数据链路。它不等同于生产部署。
 
 第一个终端启动 Guard API：
 
@@ -271,8 +271,8 @@ CLI 边界：
 最小流程：
 
 ```bash
-uv sync
-pnpm install
+uv sync --locked --all-groups
+pnpm install --frozen-lockfile
 cp .env.example .env
 pnpm guard-api:dev
 ```
@@ -361,7 +361,7 @@ uv run agentguardctl eval import --help
 
 ## 10. 生产化边界
 
-当前文档不是完整生产运维手册。当前实现适合本地开发、无头验收、演示复现和单机原型部署。
+当前文档不是完整生产运维手册。当前实现适合本地开发、无头验收和单机原型部署；历史演示复现不构成生产证据。
 
 当 `AGENTGUARD_ENV=production` 时，Guard API 会拒绝使用默认 token、默认数据库 URL，或缺少数据库外签名检查点的配置。生产化至少需要：
 
