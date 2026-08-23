@@ -8,9 +8,28 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+_WHEEL_DIRECTORIES = (
+    "aegis-agentguard-core",
+    "aegis-agentguard-api",
+    "aegis-agentguard-cli",
+)
+
 
 def _run(command: list[str]) -> None:
     subprocess.run(command, check=True)
+
+
+def _local_wheels(root: Path) -> list[Path]:
+    wheels: list[Path] = []
+    for directory in _WHEEL_DIRECTORIES:
+        wheel_dir = root / directory
+        matches = sorted(wheel_dir.glob("*.whl"))
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"expected exactly one wheel in {wheel_dir}, found {len(matches)}"
+            )
+        wheels.append(matches[0])
+    return wheels
 
 
 def main() -> int:
@@ -18,13 +37,7 @@ def main() -> int:
     parser.add_argument("wheelhouse", type=Path)
     args = parser.parse_args()
     root = args.wheelhouse.resolve()
-    find_links: list[str] = []
-    for directory in (
-        "aegis-agentguard-core",
-        "aegis-agentguard-api",
-        "aegis-agentguard-cli",
-    ):
-        find_links.extend(["--find-links", str(root / directory)])
+    wheels = _local_wheels(root)
 
     with tempfile.TemporaryDirectory(prefix="agentguard-wheel-install-") as temp_dir:
         environment = Path(temp_dir)
@@ -38,10 +51,7 @@ def main() -> int:
                 "install",
                 "--python",
                 str(python),
-                *find_links,
-                "aegis-agentguard-core==0.1.0b1",
-                "aegis-agentguard-api==0.1.0b1",
-                "aegis-agentguard-cli==0.1.0b1",
+                *(str(wheel) for wheel in wheels),
             ]
         )
         _run(

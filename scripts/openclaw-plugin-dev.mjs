@@ -742,7 +742,7 @@ export async function executeVerify(deps) {
   };
 
   // inspect 的 hookCount 需 hooks 被 agent runtime 实际触发后才上报；
-  // 仅剩 inspect 类 hook 失败且 Guard API 新鲜 heartbeat 实证 loaded/23 hooks
+  // 仅剩 inspect 类 hook 失败且 Guard API 新鲜 heartbeat 实证 loaded/24 hooks
   // 时，以 heartbeat 为 hook 证据通过并标记回退来源；两者皆缺时仍失败。
   if (failures.length > 0 && isInspectOnlyHookFailure(failures)) {
     if (

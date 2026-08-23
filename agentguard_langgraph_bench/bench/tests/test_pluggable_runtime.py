@@ -60,13 +60,10 @@ def test_adapter_loader_accepts_standalone_langgraph_subprocess_alias():
     assert adapter.runtime == "langgraph"
 
 
-def test_standalone_langgraph_subprocess_has_default_wrapper_command():
+def test_standalone_langgraph_subprocess_requires_an_explicit_command():
     command = _agent_command(BenchConfig(agent_adapter="standalone-langgraph-subprocess", runtime="langgraph"))
 
-    assert "scripts/langgraph_adapter_wrapper.py" in command
-    assert "/home/zhuwei/code/langgraph/examples/bench_tool_agent.py" in command
-    assert "{input_json}" in command
-    assert "{output_json}" in command
+    assert command == ""
     assert _agent_command(BenchConfig(agent_adapter="subprocess")) == ""
 
 

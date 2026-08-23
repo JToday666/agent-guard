@@ -5,6 +5,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.e2e
+
 
 def test_core_rule_matrix_outputs_summary_and_case_details(tmp_path: Path) -> None:
     output_dir = tmp_path / "matrix"

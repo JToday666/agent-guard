@@ -111,11 +111,11 @@ def test_run_manifest_records_true_langgraph_gate_fields(tmp_path):
     assert manifest["tool_invocation_base_url"] == "http://127.0.0.1:18090/tools"
 
 
-def test_standalone_langgraph_subprocess_has_default_graph_evidence():
+def test_standalone_langgraph_subprocess_has_portable_graph_evidence():
     config = BenchConfig(agent_adapter="standalone-langgraph-subprocess", runtime="langgraph")
     adapter = type("Adapter", (), {"name": "standalone-langgraph-subprocess"})()
 
-    assert _langgraph_graph_module(adapter, config).endswith("bench_tool_agent.py")
+    assert _langgraph_graph_module(adapter, config) == "external:configured-subprocess"
     assert _langgraph_graph_object(adapter, config) == "build_graph"
 
 

@@ -1133,7 +1133,11 @@ test("executeVerify fails when inspect hookCount=0 and heartbeat is stale", asyn
     setupVerifyWorld(world, {
       hookCount: 0,
       typedHooks: [],
-      heartbeat: { last_heartbeat_at: "2020-01-01T00:00:00Z", loaded: true, hook_count: 23 },
+      heartbeat: {
+        last_heartbeat_at: "2020-01-01T00:00:00Z",
+        loaded: true,
+        hook_count: OPENCLAW_REQUIRED_HOOKS.length - 1,
+      },
     });
     world.deps.heartbeatTimeoutMs = 5;
     await assert.rejects(
@@ -1145,7 +1149,7 @@ test("executeVerify fails when inspect hookCount=0 and heartbeat is stale", asyn
   }
 });
 
-test("executeVerify fails when fresh heartbeat lacks loaded/23 hooks", async () => {
+test("executeVerify fails when fresh heartbeat lacks loaded/24 hooks", async () => {
   const world = createWorld();
   try {
     setupVerifyWorld(world, {
@@ -1162,7 +1166,7 @@ test("executeVerify fails when fresh heartbeat lacks loaded/23 hooks", async () 
   }
 });
 
-test("executeVerify uses inspect evidence when hookCount reaches 23", async () => {
+test("executeVerify uses inspect evidence when hookCount reaches 24", async () => {
   const world = createWorld();
   try {
     setupVerifyWorld(world, {

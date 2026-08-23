@@ -24,7 +24,6 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_AGENT_PATH = Path("/home/zhuwei/code/langgraph/examples/bench_tool_agent.py")
 MAX_TOOL_RESULT_CHARS = 5000
 SDK_ROOT = Path(__file__).resolve().parents[1] / "packages" / "agentguard-langgraph-adapter"
 if SDK_ROOT.exists() and str(SDK_ROOT) not in sys.path:
@@ -2299,7 +2298,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--agent-path", default=str(DEFAULT_AGENT_PATH))
+    parser.add_argument(
+        "--agent-path",
+        required=True,
+        help="path to the external benchmark agent; no developer-machine default",
+    )
     args = parser.parse_args()
     module = _load_agent_module(Path(args.agent_path))
     _patch_agent_module(module)

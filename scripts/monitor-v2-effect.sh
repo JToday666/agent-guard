@@ -3,7 +3,9 @@
 # Usage: watch -n 30 bash scripts/monitor-v2-effect.sh
 #   or:  bash scripts/monitor-v2-effect.sh   (one-shot)
 
-REPORTS=/home/today/dev/agent-guard/reports
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
+REPORTS="${repo_root}/reports"
 
 count_cases() { ls "$1" 2>/dev/null | grep -c '^[A-Z]'; }
 

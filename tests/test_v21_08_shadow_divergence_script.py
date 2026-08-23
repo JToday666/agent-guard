@@ -466,6 +466,7 @@ def test_stale_judgment_category_counted_as_degraded(tmp_path: Path) -> None:
     assert "degraded_stale_judgment" in markdown
 
 
+@pytest.mark.e2e
 def test_cli_subprocess_smoke(tmp_path: Path) -> None:
     deps = _build_dependencies()
     input_path = _write_jsonl(tmp_path, _fixture_records(deps))
@@ -564,4 +565,3 @@ def test_allow_production_flag_is_parsed() -> None:
         ["--store", "postgres", "--output-dir", "out"]
     )
     assert default_args.allow_production is False
-

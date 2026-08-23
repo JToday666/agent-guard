@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -106,23 +105,7 @@ def _agent_command(config: Any) -> str:
     command = str(getattr(config, "agent_command", "") or "").strip()
     if command:
         return command
-    if str(getattr(config, "agent_adapter", "") or "") != "standalone-langgraph-subprocess":
-        return ""
-    repo_root = Path(__file__).resolve().parents[3]
-    wrapper = repo_root / "scripts" / "langgraph_adapter_wrapper.py"
-    agent_path = Path("/home/zhuwei/code/langgraph/examples/bench_tool_agent.py")
-    return " ".join(
-        [
-            shlex.quote(sys.executable),
-            shlex.quote(str(wrapper)),
-            "--agent-path",
-            shlex.quote(str(agent_path)),
-            "--input",
-            "{input_json}",
-            "--output",
-            "{output_json}",
-        ]
-    )
+    return ""
 
 
 def _subprocess_timeout(config: Any) -> float:
@@ -246,7 +229,8 @@ def _timeout_response(
                 "diagnostics": diagnostics,
             }
         ],
-        "langgraph_graph_module": getattr(context.config, "langgraph_graph_module", None) or f"external:/home/zhuwei/code/langgraph/examples/bench_tool_agent.py",
+        "langgraph_graph_module": getattr(context.config, "langgraph_graph_module", None)
+        or "external:configured-subprocess",
         "langgraph_graph_object": getattr(context.config, "langgraph_graph_object", None) or "build_graph",
         "langgraph_recursion_limit": getattr(context.config, "langgraph_recursion_limit", None),
         "runtime_config": {

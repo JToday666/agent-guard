@@ -144,10 +144,11 @@ def test_matrix_terminal_cases_align_with_c2_requirements(runtime: str) -> None:
         entry = entries[case_id]
         if runtime == "openclaw" and case_id in {"CF-08", "CF-09"}:
             # Tier 3：真实运行时语义，evidence 为绑定测试，其内校验
-            # live 取证工件；真实运行时复验由 smoke 矩阵承担。
+            # live 取证工件；当前 CI 没有真实 runtime smoke 矩阵。
             assert entry["status"] == "PASS"
             assert entry["evidence"].endswith("rte-conformance-tier3-evidence.test.mjs")
             assert "rte02-live-evidence.json" in entry["note"]
-            assert "openclaw-runtime-smoke" in entry["note"]
+            assert "当前 CI 不含真实 runtime smoke 矩阵" in entry["note"]
+            assert "scripts/openclaw-runtime-smoke.mjs" in entry["note"]
         elif entry["status"] == "PASS":
             assert entry.get("evidence"), (runtime, case_id)

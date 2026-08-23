@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
-from types import SimpleNamespace
+import os
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 def _load_wrapper():
@@ -813,7 +816,10 @@ def test_llm_planning_unavailable_detects_missing_api_key() -> None:
 
 
 def test_external_agent_shrink_keeps_browser_inspect_selector_hints() -> None:
-    path = Path("/home/zhuwei/code/langgraph/examples/bench_tool_agent.py")
+    configured_path = os.environ.get("AGENTGUARD_LANGGRAPH_AGENT_PATH")
+    if not configured_path:
+        pytest.skip("AGENTGUARD_LANGGRAPH_AGENT_PATH is required for external-agent tests")
+    path = Path(configured_path)
     spec = importlib.util.spec_from_file_location("bench_tool_agent", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

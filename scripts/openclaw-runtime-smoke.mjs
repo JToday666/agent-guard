@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // OpenClaw 真实运行时兼容门禁 smoke driver。
-// 供 CI openclaw-runtime-smoke job 调用，也可本机隔离干跑。
+// 当前由维护者在本机隔离环境手动执行；未来 CI 可复用同一入口。
 // 流程：隔离 profile → 工作区外 openclaw CLI → 事务化安装 → 真实 Guard API（_test 库）
-//       → 随机端口真实前台 Gateway → 新鲜 heartbeat（23 hooks / loaded）
+//       → 随机端口真实前台 Gateway → 新鲜 heartbeat（24 hooks / loaded）
 //       → 安装器 verify 口径 → uninstall 清理与残留检查 → 脱敏 JSON 报告。
 // 安全边界：严禁触碰用户真实 profile（~/.openclaw）与用户真实 Gateway。
 
@@ -803,7 +803,7 @@ async function runSmoke(options) {
 
     if (!options.skipGuardApi) {
       const controlToken = requireProcessEnv("AGENTGUARD_CONTROL_TOKEN");
-      // Step 7 新鲜 heartbeat（23 hooks、loaded）
+      // Step 7 新鲜 heartbeat（24 hooks、loaded）
       const heartbeat = await waitForFreshHeartbeat({
         fetchImpl: (...args) => fetch(...args),
         baseUrl: guardApiBaseUrl,
@@ -836,7 +836,9 @@ async function runSmoke(options) {
         status.expected_hook_count === EXPECTED_HOOK_COUNT;
       record("fresh-heartbeat", heartbeatOk, scopeAdapterStatus);
       if (!heartbeatOk) {
-        throw new Error("adapter 状态与 23 hooks/loaded 预期不符");
+        throw new Error(
+          `adapter 状态与 ${EXPECTED_HOOK_COUNT} hooks/loaded 预期不符`,
+        );
       }
 
       // Step 8 重启前台 Gateway 后执行安装器 verify 口径（多证据）
@@ -909,7 +911,7 @@ async function runSmoke(options) {
           ...(fallback
             ? {
                 reason:
-                  "隔离 Gateway 中 inspect hookCount 不达标（需 hooks 实际触发），以 Guard API heartbeat 23 hooks/loaded 实证替代",
+                  `隔离 Gateway 中 inspect hookCount 不达标（需 hooks 实际触发），以 Guard API heartbeat ${EXPECTED_HOOK_COUNT} hooks/loaded 实证替代`,
                 heartbeat: scopeAdapterStatus,
               }
             : {}),
