@@ -1,0 +1,17 @@
+{
+  "archive_version": 1,
+  "source_branch": "demo/v2-rollback-baseline",
+  "source_commit": "9cfe2f09450d0434dd1bb6da2fac5fad42184ebe",
+  "archived_at": "2026-08-24",
+  "reproducibility": "historical-ephemeral-environment",
+  "files": [
+    {
+      "path": "DEMO-LONGCHAIN-001-e2e-report.md",
+      "sha256": "b75e0786246147bc6152f911de7fb31b40f3d0f9c0639923be3d7995c55624df"
+    },
+    {
+      "path": "assets/demo_longchain_attack.jsonl",
+      "sha256": "8c81677005cd6f8daae887933caca647b68a88a31d0e7c155e5db773bc908b9e"
+    }
+  ]
+}
