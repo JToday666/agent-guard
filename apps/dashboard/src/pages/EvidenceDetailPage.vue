@@ -199,7 +199,9 @@
               节点参与信任、污染与确定性展示。
             </InlineNotice>
             <InlineNotice
-              v-else-if="runtimeSupervision.provenancePresentation.contractKind !== 'ct-provenance/1.0'"
+              v-else-if="
+                runtimeSupervision.provenancePresentation.contractKind !== 'ct-provenance/1.0'
+              "
               title="内容溯源证据不完整"
               tone="warning"
             >
@@ -217,6 +219,7 @@
                 :key="traceId"
                 :element-source-mode="isMockPreview ? 'mock' : 'live'"
                 :graph="provenance"
+                :load-error="provenanceError"
                 :presentation="runtimeSupervision.provenancePresentation"
                 :selected-node-id="selectedProvenanceNodeId"
                 @select-node="handleSelectProvenanceNode"

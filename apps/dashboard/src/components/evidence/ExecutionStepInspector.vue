@@ -42,7 +42,7 @@
       </dl>
 
       <section class="execution-inspector__section">
-        <h5>正式决策 / {{ v21RailLabel(step) }}</h5>
+        <h5>正式决策 / {{ getV21RailLabel(step.supervision.v21Assessment) }}</h5>
         <div class="execution-inspector__comparison">
           <article>
             <span>OFFICIAL</span>
@@ -54,9 +54,9 @@
             </small>
           </article>
           <article class="is-shadow">
-            <span>{{ v21RailLabel(step).toUpperCase() }}</span>
+            <span>{{ getV21RailLabel(step.supervision.v21Assessment).toUpperCase() }}</span>
             <strong>{{ v21Disposition(step) }}</strong>
-            <p>{{ v21Summary(step) }}</p>
+            <p>{{ getV21Summary(step.supervision.v21Assessment) }}</p>
             <small>
               {{ getAuthorityLabel(step.supervision.v21Assessment.decisionAuthority) }} ·
               {{ getAvailabilityLabel(step.supervision.v21Assessment.availability) }}
@@ -142,7 +142,7 @@
         </header>
 
         <p v-if="!contextManifest" class="context-manifest__notice">
-          Manifest 不可用；不会从原始 Prompt、内容入口或 Provenance 推断。
+          {{ manifestAbsentPrefix }}；不会从原始 Prompt、内容入口或 Provenance 推断。
         </p>
         <template v-else>
           <p v-if="contextManifest.missingReasons.length" class="context-manifest__notice">
@@ -162,25 +162,25 @@
             <div>
               <dt>Plan ID</dt>
               <dd>
-                <code translate="no">{{ contextManifest.planId ?? "不可用" }}</code>
+                <code translate="no">{{ contextManifest.planId ?? "未记录" }}</code>
               </dd>
             </div>
             <div>
               <dt>Context Ref</dt>
               <dd>
-                <code translate="no">{{ contextManifest.contextRef ?? "不可用" }}</code>
+                <code translate="no">{{ contextManifest.contextRef ?? "未记录" }}</code>
               </dd>
             </div>
             <div class="is-wide">
               <dt>Plan Digest</dt>
               <dd>
-                <code translate="no">{{ contextManifest.planDigest ?? "不可用" }}</code>
+                <code translate="no">{{ contextManifest.planDigest ?? "未记录" }}</code>
               </dd>
             </div>
             <div class="is-wide">
               <dt>Manifest Digest</dt>
               <dd>
-                <code translate="no">{{ contextManifest.manifestDigest ?? "不可用" }}</code>
+                <code translate="no">{{ contextManifest.manifestDigest ?? "未记录" }}</code>
               </dd>
             </div>
           </dl>
@@ -304,7 +304,11 @@
           <div>
             <dt>依据完整性</dt>
             <dd>
-              {{ approvalBasis ? getAvailabilityLabel(approvalBasis.completeness) : "不可用" }}
+              {{
+                approvalBasis
+                  ? getAvailabilityLabel(approvalBasis.completeness)
+                  : approvalMissingReasons(approvalBasis)
+              }}
             </dd>
           </div>
           <div>
@@ -320,7 +324,7 @@
           </div>
           <div class="is-wide">
             <dt>请求上下文</dt>
-            <dd>{{ approvalBasis?.sourceContext.taskPreview ?? "不可用" }}</dd>
+            <dd>{{ approvalFieldValue(approvalBasis?.sourceContext.taskPreview) }}</dd>
           </div>
           <div>
             <dt>来源类型</dt>
@@ -345,7 +349,7 @@
         <dl v-else class="execution-inspector__detail-grid">
           <div>
             <dt>终态</dt>
-            <dd>{{ approvalBasis?.resolution.status ?? "不可用" }}</dd>
+            <dd>{{ approvalFieldValue(approvalBasis?.resolution.status) }}</dd>
           </div>
           <div>
             <dt>决议</dt>
@@ -361,7 +365,7 @@
           </div>
           <div class="is-wide">
             <dt>决议原因</dt>
-            <dd>{{ approvalBasis?.resolution.resolutionReason ?? "未记录" }}</dd>
+            <dd>{{ approvalFieldValue(approvalBasis?.resolution.resolutionReason) }}</dd>
           </div>
         </dl>
       </section>
@@ -458,13 +462,10 @@
           <div class="is-wide">
             <dt>Control Integrity</dt>
             <dd>
-              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status) }}<template
-                v-if="step.supervision.controlIntegrity.reasonCodes.length"
-              >
+              {{ getControlIntegrityLabel(step.supervision.controlIntegrity.status)
+              }}<template v-if="step.supervision.controlIntegrity.reasonCodes.length">
                 · {{ step.supervision.controlIntegrity.reasonCodes.join(" · ") }}</template
-              ><template
-                v-else-if="step.supervision.controlIntegrity.status !== 'not_applicable'"
-              >
+              ><template v-else-if="step.supervision.controlIntegrity.status !== 'not_applicable'">
                 · 未发现违例原因</template
               >
             </dd>
@@ -573,6 +574,8 @@ import {
   getSemanticsSummary,
   getSourceModeLabel,
   getSupervisionLayerDisplays,
+  getV21RailLabel,
+  getV21Summary,
   SHOW_ENFORCEMENT_PANEL,
   type SupervisionLayerKey,
 } from "../../data/evidence/runtime-supervision-display.ts";
@@ -642,8 +645,12 @@ function listOrUnavailable(values: readonly string[]): string {
   return values.length ? values.join(" · ") : "不可用";
 }
 
+// ③未启用/未生成：上下文构建功能未启用或本步骤无上下文组装（非 context 步骤不渲染本面板，
+// 天然即「无需 Context Manifest」）。
+const manifestAbsentPrefix = "上下文清单未生成（上下文构建功能未启用，或本步骤无上下文组装）";
+
 function manifestStatusLabel(manifest: ContextManifestViewModel | undefined): string {
-  if (!manifest) return "不可用";
+  if (!manifest) return "未生成";
   const labels: Record<ContextManifestViewModel["state"], string> = {
     budget_dropped: "预算降级",
     correlation_conflict: "关联冲突",
@@ -707,6 +714,12 @@ function approvalMissingReasons(basis: ApprovalBasisViewModel | undefined): stri
   return basis.missingReasons.length ? basis.missingReasons.join(" · ") : "无";
 }
 
+// 审批依据字段缺失：整体无 basis 时复用缺失原因码；有 basis 但字段为空才是「未记录」。
+function approvalFieldValue(value: string | null | undefined): string {
+  if (value) return value;
+  return props.approvalBasis ? "未记录" : approvalMissingReasons(props.approvalBasis);
+}
+
 function approvalResolutionDecision(basis: ApprovalBasisViewModel | undefined): string {
   if (!basis) return "不可用";
   if (basis.resolution.decision === "allow_once") return "单次放行";
@@ -722,7 +735,7 @@ function approvalResolutionActor(basis: ApprovalBasisViewModel | undefined): str
 }
 
 function layerValue(step: ExecutionStepViewModel, key: SupervisionLayerKey): string {
-  return getSupervisionLayerDisplays(step).find((layer) => layer.key === key)?.value ?? "不可用";
+  return getSupervisionLayerDisplays(step).find((layer) => layer.key === key)?.value ?? "未返回";
 }
 
 function enforcementGateLabel(step: ExecutionStepViewModel): string {
@@ -765,37 +778,6 @@ function enforcementConsumeLabel(step: ExecutionStepViewModel): string {
 
 function v21Disposition(step: ExecutionStepViewModel): string {
   return step.supervision.v21Assessment.fastDisposition ?? "不可用";
-}
-
-function v21RailLabel(step: ExecutionStepViewModel): string {
-  const assessment = step.supervision.v21Assessment;
-  if (assessment.competitionAuthority?.source === "v21") {
-    return "V2 Competition Official";
-  }
-  if (assessment.competitionAuthority) {
-    return `V2 ${assessment.competitionAuthority.mode}`;
-  }
-  return "V2 Shadow";
-}
-
-function v21Summary(step: ExecutionStepViewModel): string {
-  const assessment = step.supervision.v21Assessment;
-  if (assessment.availability === "unavailable") {
-    return "当前 Trace 未携带可展示的 V2.1 影子评估。";
-  }
-  if (assessment.authorityVerification === "conflicted") {
-    return "影子证据不完整或与正式判定冲突，不提升其权威。";
-  }
-  if (assessment.competitionAuthority?.source === "v21") {
-    const floor = assessment.competitionAuthority.legacyFloorApplied
-      ? "；current 安全下界已应用"
-      : "";
-    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；该结果是 Competition profile official${floor}。`;
-  }
-  if (assessment.competitionAuthority?.source === "current") {
-    return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；本次仍由 current official，V2 仅保留计算证据。`;
-  }
-  return `记录终值 ${assessment.recordedFinalDecision ?? "未知"}；仅作影子解释，不改变正式决策。`;
 }
 
 function isMockStep(step: ExecutionStepViewModel): boolean {

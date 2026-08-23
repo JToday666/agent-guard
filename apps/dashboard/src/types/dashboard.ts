@@ -226,6 +226,7 @@ export interface NormalizedAuditEvidence {
   eventType: string;
   occurredAt: string;
   originalTask: string | null;
+  contentPreview?: string | null;
   source: EvidenceSource;
   contextSources: string[];
   modelIntent: string | null;

@@ -453,9 +453,7 @@ const auditAnchorPresentation = computed<{
     };
   }
   return {
-    detail: anchor.errorCode
-      ? `${anchor.errorCode}：检查点文件暂不可验证`
-      : "检查点文件暂不可验证",
+    detail: anchor.errorCode ? `${anchor.errorCode}：检查点文件暂不可验证` : "检查点文件暂不可验证",
     label: "外部锚点不可用",
     tone: "danger",
   };

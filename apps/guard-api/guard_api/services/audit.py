@@ -73,10 +73,12 @@ class AuditService:
         store: ControlPlaneStore,
         provenance_writer: ProvenanceWriter | None = None,
         checkpoint_service: AuditCheckpointService | None = None,
+        evidence_content_preview_enabled: bool = False,
     ) -> None:
         self.store = store
         self.provenance_writer = provenance_writer or ProvenanceWriter(store=store)
         self.checkpoint_service = checkpoint_service
+        self.evidence_content_preview_enabled = evidence_content_preview_enabled
 
     def prepare_submission(
         self,
@@ -335,9 +337,7 @@ class AuditService:
                 (
                     "binding_failed",
                     "failed",
-                    frozenset(
-                        {"rte-05:binding_mismatch", "rte-05:lease_consumed"}
-                    ),
+                    frozenset({"rte-05:binding_mismatch", "rte-05:lease_consumed"}),
                 ),
                 (
                     "timed_out",
@@ -352,9 +352,7 @@ class AuditService:
                 (
                     "binding_failed",
                     "passed",
-                    frozenset(
-                        {"rte-05:binding_exact", "rte-05:lease_expired"}
-                    ),
+                    frozenset({"rte-05:binding_exact", "rte-05:lease_expired"}),
                 ),
                 (
                     "binding_failed",
@@ -588,6 +586,7 @@ class AuditService:
             decision_authority_evidence=decision_authority_evidence,
             decision_authority=decision_authority,
             audit_id=audit_id,
+            evidence_content_preview_enabled=self.evidence_content_preview_enabled,
         )
         audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)
@@ -628,13 +627,9 @@ class AuditService:
         expected = strict_decision_authority_envelope(expected_envelope)
         evidence = persisted.evidence
         actual_raw = (
-            evidence.get("decision_authority")
-            if isinstance(evidence, dict)
-            else None
+            evidence.get("decision_authority") if isinstance(evidence, dict) else None
         )
-        actual = strict_decision_authority_envelope(
-            {"decision_authority": actual_raw}
-        )
+        actual = strict_decision_authority_envelope({"decision_authority": actual_raw})
         if actual != expected:
             raise CriticalDecisionEvidenceError(
                 "persisted authority evidence differs from the selected result"

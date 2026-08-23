@@ -36,6 +36,7 @@ function evidence(overrides: Partial<NormalizedAuditEvidence> = {}): NormalizedA
     auditId: "audit_1",
     chainIndex: 1,
     contextSources: [],
+    contentPreview: null,
     decision: "allow",
     decisionId: "decision_1",
     decisionReason: "允许继续",

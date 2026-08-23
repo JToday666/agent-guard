@@ -163,9 +163,7 @@ class GuardApiSettings:
     # Unified V2.1 authority mode.  ``off`` is the global default; reference
     # and competition profiles must select their mode explicitly.
     v21_mode: str = field(
-        default_factory=lambda: (
-            os.getenv("AGENTGUARD_V21_MODE", "off").strip().lower()
-        )
+        default_factory=lambda: os.getenv("AGENTGUARD_V21_MODE", "off").strip().lower()
     )
     # A competition activation is immutable process input.  It is loaded once
     # during application construction and is never exposed through a mutation
@@ -196,6 +194,14 @@ class GuardApiSettings:
     context_builder_enabled: bool = field(
         default_factory=lambda: _env_bool(
             "AGENTGUARD_CONTEXT_BUILDER_ENABLED", default=False
+        )
+    )
+    # Browser-facing output previews are an explicit, default-off evidence
+    # surface. Even when enabled, only bounded/redacted model outputs and
+    # proposed outbound messages are projected; model inputs remain private.
+    evidence_content_preview_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "AGENTGUARD_EVIDENCE_CONTENT_PREVIEW_ENABLED", default=False
         )
     )
     # RTE-05 strong approval binding rollout gate.  Default-off preserves the
@@ -408,8 +414,7 @@ class GuardApiSettings:
         # 门控恒 False。
         if not math.isfinite(self.v21_semantic_timeout_seconds):
             raise GuardApiConfigurationError(
-                "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS must be a finite "
-                "number"
+                "AGENTGUARD_V21_SEMANTIC_TIMEOUT_SECONDS must be a finite number"
             )
         if self.v21_semantic_timeout_seconds <= 0:
             raise GuardApiConfigurationError(
@@ -495,18 +500,14 @@ class GuardApiSettings:
                 )
             if self.v21_shadow_server_secret_bytes() is None:
                 raise GuardApiConfigurationError(
-                    "V2.1 official modes require "
-                    "AGENTGUARD_V21_SHADOW_SERVER_SECRET"
+                    "V2.1 official modes require AGENTGUARD_V21_SHADOW_SERVER_SECRET"
                 )
             if not self.task_scope_configured():
                 raise GuardApiConfigurationError(
                     "V2.1 official modes require AGENTGUARD_TASK_SCOPE_ACTIVE_KEY_ID "
                     "and AGENTGUARD_TASK_SCOPE_KEYS"
                 )
-            if (
-                effective_v21_mode == "active"
-                and not self.rte05_strong_binding_enabled
-            ):
+            if effective_v21_mode == "active" and not self.rte05_strong_binding_enabled:
                 raise GuardApiConfigurationError(
                     "AGENTGUARD_V21_MODE=active requires "
                     "AGENTGUARD_RTE05_STRONG_BINDING_ENABLED=true"

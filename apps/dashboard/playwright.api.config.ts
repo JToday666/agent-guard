@@ -35,7 +35,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm dev --host 127.0.0.1 --port 4174",
+    command: "VITE_EVIDENCE_POLL_INTERVAL_MS=2000 pnpm dev --host 127.0.0.1 --port 4174",
     reuseExistingServer: false,
     timeout: 30_000,
     url: baseURL,

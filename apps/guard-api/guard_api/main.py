@@ -106,6 +106,7 @@ def create_app(
         store=store,
         provenance_writer=provenance_writer,
         checkpoint_service=audit_checkpoint_service,
+        evidence_content_preview_enabled=settings.evidence_content_preview_enabled,
     )
     audit_window_service = AuditWindowService(
         store=store,
@@ -116,8 +117,8 @@ def create_app(
     # 提前创建以便 ApprovalService 承接 human allow_once → grant 投影（T6），
     # 且与 V21ShadowService 共用同一实例，不重复注册。
     security_state_service = SecurityStateService(store)
-    resolved_llm_reviewer = llm_approval_reviewer or HttpLlmApprovalReviewer.from_settings(
-        settings
+    resolved_llm_reviewer = (
+        llm_approval_reviewer or HttpLlmApprovalReviewer.from_settings(settings)
     )
     approval_service = ApprovalService(
         store=store,
@@ -155,8 +156,7 @@ def create_app(
     competition_active = (
         competition_activation is not None
         and settings.effective_v21_mode() == "active"
-        and competition_activation.manifest.profile_id
-        == "competition-langgraph-v2"
+        and competition_activation.manifest.profile_id == "competition-langgraph-v2"
         and competition_activation.manifest.runtime == "langgraph"
         and competition_activation.manifest.selection_basis == "profile_all"
     )
@@ -174,9 +174,7 @@ def create_app(
         # 开销）；在场时产物只供证据/评测，不改变官方决策。
         semantic_provider=semantic_provider,
         memory_not_required_actions=(
-            frozenset({"model_call"})
-            if competition_active
-            else frozenset()
+            frozenset({"model_call"}) if competition_active else frozenset()
         ),
         competition_model_output_observation=competition_active,
     )

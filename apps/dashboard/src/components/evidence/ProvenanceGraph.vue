@@ -203,7 +203,9 @@
         {{ selectedNodeId ? "一个节点并显示相关路径" : "无节点" }}。
       </p>
     </template>
-    <p v-else class="provenance-empty">该证据链暂无溯源节点</p>
+    <p v-else class="provenance-empty">
+      {{ loadError ? "溯源关系加载失败，请按页面提示重试" : provenanceEmptyText }}
+    </p>
   </div>
 </template>
 
@@ -261,6 +263,7 @@ import type {
   ProvenancePresentationViewModel,
 } from "../../types/runtime-supervision";
 import { getDecisionLabel, getEventTypeLabel } from "../../utils/dashboard-formatters";
+import { noDataNeeded } from "../../utils/missing-data-display";
 import { getProvenanceRelationLabel, getProvenanceRiskScore } from "../../utils/provenance";
 import { formatRuleIdsInTextForDisplay } from "../../utils/rule-display";
 
@@ -269,9 +272,14 @@ defineOptions({ name: "ProvenanceGraph" });
 const props = defineProps<{
   elementSourceMode: ElementSourceMode;
   graph: ProvenanceGraph;
+  /** 溯源数据获取错误（②）：非空时空态提示重试，而非误报「无数据」。 */
+  loadError?: string;
   presentation: ProvenancePresentationViewModel;
   selectedNodeId?: string;
 }>();
+
+// 无错误且无节点：属①正常无数据（历史/简单记录本就不产生溯源关系）。
+const provenanceEmptyText = noDataNeeded("溯源关系", "历史/简单记录未生成溯源节点");
 
 const emit = defineEmits<{
   "select-node": [nodeId: string];

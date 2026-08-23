@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { OPENCLAW_REQUIRED_HOOK_COUNT } from "../../../../packages/agentguard-openclaw-plugin/hook-contract.mjs";
+import { dashboardEnv } from "../config/dashboard-env";
 import { mergeApprovalsWithAuditEvidence } from "../data/approvals/evidence";
 import {
   createApprovalMutationSelector,
@@ -106,7 +107,7 @@ const POLL_INTERVAL_MS = 10_000;
 const TRACE_CACHE_MAX_ENTRIES = 8;
 const TRACE_DETAIL_TTL_MS = 60_000;
 const TRACE_PROVENANCE_TTL_MS = 120_000;
-const TRACE_POLL_INTERVAL_MS = 2_000;
+const TRACE_POLL_INTERVAL_MS = dashboardEnv.evidencePollIntervalMs;
 
 interface ScopeRefreshState {
   error: string | null;
@@ -978,7 +979,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     record.controller = null;
     if (result === "failed") {
       record.failureCount += 1;
-      const retryInMs = getTracePollBackoffMs(record.failureCount);
+      const retryInMs = getTracePollBackoffMs(record.failureCount, TRACE_POLL_INTERVAL_MS);
       updateTracePollingState(record.traceId, { retryInMs, status: "backoff" });
       scheduleTracePoll(retryInMs);
       return;
@@ -1030,7 +1031,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     record: NonNullable<typeof activeTerminalReconciliation>,
   ): void {
     record.failureCount += 1;
-    const retryInMs = getTracePollBackoffMs(record.failureCount);
+    const retryInMs = getTracePollBackoffMs(record.failureCount, TRACE_POLL_INTERVAL_MS);
     updateTracePollingState(record.traceId, { retryInMs, status: "backoff" });
     scheduleTerminalReconciliation(retryInMs);
   }

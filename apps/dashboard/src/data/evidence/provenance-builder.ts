@@ -6,6 +6,7 @@ import type {
   ProvenanceNode,
   TraceEvidenceViewModel,
 } from "../../types/dashboard";
+import { getMissingDataLabel, noDataNeeded } from "../../utils/missing-data-display.ts";
 import {
   getDecisionEvidenceLabel,
   getExecutionStatusLabel,
@@ -73,7 +74,7 @@ function buildInputs(primary: NormalizedAuditEvidence): {
     {
       critical: true,
       kind: "task",
-      label: primary.originalTask ?? "原始任务未记录",
+      label: primary.originalTask ?? noDataNeeded("原始任务", "本事件未携带用户任务"),
       phase: "input_trust",
       refId: "task",
       summary: "用户授权目标",
@@ -84,7 +85,7 @@ function buildInputs(primary: NormalizedAuditEvidence): {
       label: primary.source.label ?? primary.source.type ?? "来源未记录",
       phase: "input_trust",
       refId: "source",
-      status: primary.source.trustLevel ?? "信任等级未记录",
+      status: primary.source.trustLevel ?? "信任等级缺失（来源证据应包含信任等级，属数据异常）",
       summary: primary.source.type,
     },
     {
@@ -98,7 +99,7 @@ function buildInputs(primary: NormalizedAuditEvidence): {
     {
       critical: true,
       kind: "model_intent",
-      label: primary.modelIntent ?? "模型意图未记录",
+      label: primary.modelIntent ?? noDataNeeded("模型意图", "该字段允许为空"),
       phase: "context_intent",
       refId: "model-intent",
       summary: "模型计划",
@@ -106,11 +107,15 @@ function buildInputs(primary: NormalizedAuditEvidence): {
     {
       critical: true,
       kind: "action",
-      label: primary.toolName ?? "工具未记录",
+      label: primary.toolName ?? noDataNeeded("工具信息", "本记录非工具调用"),
       nodeKey: "action",
       phase: "tool_policy",
       refId: primary.actionId ?? "action",
-      summary: primary.toolArguments ? "参数已脱敏记录" : "参数未记录",
+      summary: primary.toolArguments
+        ? "参数已脱敏记录"
+        : primary.toolName
+          ? "工具参数未记录"
+          : noDataNeeded("工具参数", "本记录非工具调用"),
     },
     {
       critical: true,
@@ -128,7 +133,10 @@ function buildInputs(primary: NormalizedAuditEvidence): {
       nodeKey: "decision",
       phase: "tool_policy",
       refId: primary.decisionId ?? "decision",
-      status: primary.risk.finalScore === null ? "风险未记录" : `风险 ${primary.risk.finalScore}`,
+      status:
+        primary.risk.finalScore === null
+          ? `风险评分：${getMissingDataLabel("not_implemented")}`
+          : `风险 ${primary.risk.finalScore}`,
       summary: primary.decisionReason,
     },
     {
@@ -137,7 +145,10 @@ function buildInputs(primary: NormalizedAuditEvidence): {
       label: getInterventionLabel(primary.intervention),
       phase: "outcome_audit",
       refId: "runtime-result",
-      status: getExecutionStatusLabel(primary.execution.status),
+      status: getExecutionStatusLabel(primary.execution.status, {
+        decision: primary.decision,
+        intervention: primary.intervention,
+      }),
       summary: `${getResultDispositionLabel(primary.resultDisposition)} · ${getSideEffectLabel(primary.sideEffects)}`,
     },
     {

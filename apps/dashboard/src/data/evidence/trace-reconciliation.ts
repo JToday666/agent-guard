@@ -1,14 +1,17 @@
+import {
+  DEFAULT_EVIDENCE_POLL_INTERVAL_MS,
+  MIN_EVIDENCE_POLL_INTERVAL_MS,
+} from "../../config/dashboard-env.ts";
+
 export type ConditionalReadResult = "modified" | "not_modified" | "skipped" | "failed" | "aborted";
 
-export const TRACE_POLL_INTERVAL_MS = 2_000;
-export const TRACE_POLL_MAX_BACKOFF_MS = 16_000;
-
-export function getTracePollBackoffMs(failureCount: number): number {
+export function getTracePollBackoffMs(
+  failureCount: number,
+  intervalMs = DEFAULT_EVIDENCE_POLL_INTERVAL_MS,
+): number {
   const normalizedFailureCount = Math.max(1, Math.floor(failureCount));
-  return Math.min(
-    TRACE_POLL_INTERVAL_MS * 2 ** (normalizedFailureCount - 1),
-    TRACE_POLL_MAX_BACKOFF_MS,
-  );
+  const normalizedInterval = Math.max(MIN_EVIDENCE_POLL_INTERVAL_MS, Math.floor(intervalMs));
+  return Math.min(normalizedInterval * 2 ** (normalizedFailureCount - 1), normalizedInterval * 8);
 }
 
 export function isSuccessfulConditionalRead(
