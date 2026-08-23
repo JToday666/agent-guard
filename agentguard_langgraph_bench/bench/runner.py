@@ -254,7 +254,7 @@ def _langgraph_graph_module(agent_adapter: AgentAdapterProtocol | None, config: 
     if adapter_name == "standalone-langgraph-subprocess" or (
         adapter_name == "subprocess" and str(getattr(config, "runtime", "") or "") == "langgraph"
     ):
-        return "external:/home/zhuwei/code/langgraph/examples/bench_tool_agent.py"
+        return "external:configured-subprocess"
     return ""
 
 

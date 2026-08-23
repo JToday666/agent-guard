@@ -1,4 +1,4 @@
-name: Release Check
+name: Internal Source Build Check
 
 on:
   push:
@@ -11,80 +11,83 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-check-${{ github.workflow }}-${{ github.ref }}
+  group: source-build-check-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-verify:
-    name: Build and verify release artifacts
-    runs-on: ubuntu-latest
+    name: Build and verify ephemeral source artifacts
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reject release-tag execution
+        run: test "$GITHUB_REF_TYPE" != "tag"
 
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           python-version: "3.12"
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+          version: "0.12.5"
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.18.0"
-          cache: pnpm
+
+      - name: Install integrity-pinned pnpm
+        run: |
+          corepack enable
+          corepack install
+          test "$(pnpm --version)" = "11.9.0"
 
       - name: Install locked environments
         run: |
           uv sync --locked --all-groups
           pnpm install --frozen-lockfile
 
-      - name: Validate release versions
+      - name: Validate internal version mapping
         run: uv run python scripts/check-release-versions.py
 
-      - name: Set release root
-        run: echo "RELEASE_ROOT=${RUNNER_TEMP}/agentguard-release" >> "$GITHUB_ENV"
+      - name: Set ephemeral build root
+        run: echo "BUILD_ROOT=${RUNNER_TEMP}/agentguard-internal-source-build" >> "$GITHUB_ENV"
 
       - name: Build artifacts in a fresh directory
         run: |
-          test ! -e "$RELEASE_ROOT"
+          test ! -e "$BUILD_ROOT"
           mkdir -p \
-            "$RELEASE_ROOT/aegis-agentguard-core" \
-            "$RELEASE_ROOT/aegis-agentguard-api" \
-            "$RELEASE_ROOT/aegis-agentguard-cli" \
-            "$RELEASE_ROOT/npm"
-          uv build packages/agentguard-core --out-dir "$RELEASE_ROOT/aegis-agentguard-core"
-          uv build apps/guard-api --out-dir "$RELEASE_ROOT/aegis-agentguard-api"
-          uv build apps/cli --out-dir "$RELEASE_ROOT/aegis-agentguard-cli"
+            "$BUILD_ROOT/aegis-agentguard-core" \
+            "$BUILD_ROOT/aegis-agentguard-api" \
+            "$BUILD_ROOT/aegis-agentguard-cli" \
+            "$BUILD_ROOT/npm"
+          uv build packages/agentguard-core --out-dir "$BUILD_ROOT/aegis-agentguard-core"
+          uv build apps/guard-api --out-dir "$BUILD_ROOT/aegis-agentguard-api"
+          uv build apps/cli --out-dir "$BUILD_ROOT/aegis-agentguard-cli"
           pnpm --filter @agentguard-ai/openclaw-plugin build
-          pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination "$RELEASE_ROOT/npm"
+          pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination "$BUILD_ROOT/npm"
 
       - name: Scan exact artifact set
-        run: uv run python scripts/check-release-artifacts.py "$RELEASE_ROOT"
+        run: uv run python scripts/check-release-artifacts.py "$BUILD_ROOT"
 
       - name: Verify isolated Python installation
-        run: uv run python scripts/verify-wheel-install.py "$RELEASE_ROOT"
+        run: uv run python scripts/verify-wheel-install.py "$BUILD_ROOT"
 
       - name: Verify isolated OpenClaw plugin installation
         run: >-
           node scripts/verify-npm-tarball.mjs
-          "$RELEASE_ROOT/npm/agentguard-ai-openclaw-plugin-0.1.0-beta.1.tgz"
+          "$BUILD_ROOT/npm/agentguard-ai-openclaw-plugin-0.1.0-beta.1.tgz"
 
       - name: Create and verify source-bound manifest
         run: |
-          uv run python scripts/release-artifact-manifest.py create "$RELEASE_ROOT" \
+          uv run python scripts/release-artifact-manifest.py create "$BUILD_ROOT" \
             --source-revision "$GITHUB_SHA"
-          uv run python scripts/release-artifact-manifest.py verify "$RELEASE_ROOT" \
+          uv run python scripts/release-artifact-manifest.py verify "$BUILD_ROOT" \
             --source-revision "$GITHUB_SHA"
 
-      - name: Upload verified artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: agentguard-release-${{ github.sha }}
-          path: ${{ runner.temp }}/agentguard-release
-          if-no-files-found: error
-          retention-days: 14
+      - name: Confirm artifacts remain internal and ephemeral
+        run: |
+          test -f "$BUILD_ROOT/release-artifact-manifest.json"
+          echo "Verified source artifacts for $GITHUB_SHA; no package, image, tag, or workflow artifact was published."

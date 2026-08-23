@@ -20,8 +20,6 @@ from __future__ import annotations
 import base64
 from contextlib import contextmanager
 
-import pytest
-
 from agentguard_core import GuardEngine, GuardEvent, PolicyBundle, utc_now_iso
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.actions.fingerprints import authorization_projection
@@ -1323,7 +1321,7 @@ def test_pipeline_replay_does_not_rerun_assess(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# postgres 后端（环境可用则覆盖，不可用自动跳过）
+# postgres 后端（未配置 URL 时由 get_test_database_url 跳过；初始化错误必须失败）
 # ---------------------------------------------------------------------------
 
 
@@ -1342,10 +1340,7 @@ def _postgres_store():
 
 
 def test_pipeline_postgres_backend() -> None:
-    try:
-        store = _postgres_store()
-    except Exception as exc:  # noqa: BLE001 - 环境不可用自动跳过。
-        pytest.skip(f"postgres test environment unavailable: {exc}")
+    store = _postgres_store()
 
     settings = _pipeline_settings()
     evaluation_service, pipeline = _evaluation_stack(store, settings=settings)

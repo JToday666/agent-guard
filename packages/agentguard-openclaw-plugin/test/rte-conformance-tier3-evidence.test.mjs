@@ -2,11 +2,10 @@
 //
 // CF-08（stable action correlation）与 CF-09（blocked-call after-hook
 // semantics）属真实运行时语义，由 PR-RTE-02 rev3 live 取证工件承载证据，
-// 证据版本锁定 2026.7.1-2（rev5 pin bump）。CI openclaw-runtime-smoke
-// 矩阵在每个安装版本上复跑 spike 探针，复验 CF-08 跨 hook 身份与
-// CF-09 blocked 零调用语义（探测版本漂移，RTE-04 硬化）；live observer
-// emission 仍需模型 turn，由归档取证工件锁定。本文件把矩阵声明与证据
-// 工件机器化绑定：工件缺失或语义退化即红。
+// 证据版本锁定 2026.7.1-2（rev5 pin bump）。当前自动 CI 只验证归档
+// 工件与契约的机器化绑定，不会重跑真实 runtime、spike 探针或模型 turn；
+// 这些必须由维护者通过隔离 smoke 脚本重新执行并归档。本文件保证工件
+// 缺失或已记录语义退化时失败，但不能把历史工件扩大为当前平台实证。
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -133,13 +132,14 @@ test("matrix binds CF-08/CF-09 to this Tier 3 evidence chain", () => {
       `${caseId} evidence must point at the Tier 3 binding test`,
     );
     assert.ok(existsSync(path.join(REPO_ROOT, entry.evidence)), caseId);
-    // 证据链注明 live 取证工件；smoke 矩阵按实际覆盖范围描述
-    // （安装/注册/heartbeat + 安装版本上复跑 spike 探针复验语义）。
+    // 证据链注明 live 取证工件，并明确当前 CI 不会把历史工件
+    // 扩大为真实 runtime smoke 或本次平台验证。
     assert.ok(entry.note.includes("rte02-live-evidence.json"), caseId);
-    assert.ok(entry.note.includes("openclaw-runtime-smoke"), caseId);
+    assert.ok(entry.note.includes("当前 CI 不含真实 runtime smoke 矩阵"), caseId);
+    assert.ok(entry.note.includes("scripts/openclaw-runtime-smoke.mjs"), caseId);
     assert.ok(
-      entry.note.includes("复跑 spike 探针"),
-      `${caseId} note must describe smoke probe revalidation`,
+      entry.note.includes("手动复验"),
+      `${caseId} note must keep runtime revalidation manual`,
     );
   }
 });

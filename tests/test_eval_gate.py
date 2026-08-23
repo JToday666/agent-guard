@@ -5,6 +5,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.e2e
+
 
 def _run_gate(*extra_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

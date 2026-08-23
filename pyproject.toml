@@ -26,6 +26,7 @@ dev = [
 
 [tool.uv]
 package = false
+required-version = "==0.12.5"
 
 [tool.uv.sources]
 aegis-agentguard-cli = { path = "apps/cli", editable = true }
@@ -39,4 +40,16 @@ target-version = ["py312"]
 extend-exclude = "(^|/)(agentguard_langgraph_bench|migrations|node_modules)/"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+addopts = "--strict-markers --import-mode=importlib"
+testpaths = [
+  "tests",
+  "packages/agentguard-langgraph-adapter/tests",
+]
+markers = [
+  "unit: isolated tests without process, network, database, or external-host dependencies",
+  "contract: schemas, frozen contracts, and cross-implementation public behavior",
+  "integration: multi-component tests that do not require PostgreSQL or an external host",
+  "postgres: PostgreSQL migration, persistence, parity, and concurrency tests",
+  "e2e: local end-to-end or cross-process tests without a real external provider",
+  "live: explicit opt-in tests against a real host or provider; never part of automatic CI",
+]

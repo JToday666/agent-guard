@@ -119,12 +119,12 @@
       "CF-08": {
         "status": "PASS",
         "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-tier3-evidence.test.mjs",
-        "note": "Tier 3：跨 hook 单一 toolCallId 由 live 取证工件 rte02-live-evidence.json(.jsonl) 承载并经绑定测试机器化校验；证据版本锁定 2026.7.1-2（rev5 pin bump）。CI openclaw-runtime-smoke 矩阵在每个安装版本上复跑 spike 探针，复验 CF-08 跨 hook 身份与 CF-09 blocked 零调用语义（探测版本漂移，RTE-04 硬化）；live observer emission 仍需模型 turn，由归档取证工件锁定。"
+        "note": "Tier 3：跨 hook 单一 toolCallId 由 live 取证工件 rte02-live-evidence.json(.jsonl) 承载并经绑定测试机器化校验；证据版本锁定 2026.7.1-2（rev5 pin bump）。当前 CI 不含真实 runtime smoke 矩阵；安装、heartbeat、spike 探针和模型 turn 必须通过 scripts/openclaw-runtime-smoke.mjs 手动复验并按版本、平台和提交另行归档。"
       },
       "CF-09": {
         "status": "PASS",
         "evidence": "packages/agentguard-openclaw-plugin/test/rte-conformance-tier3-evidence.test.mjs",
-        "note": "Tier 3：pin 2026.7.1-2 语义为触发但不代表 invocation（blocked 零执行 + emission-on-blocked），live 取证工件 rte02-live-evidence.json 经绑定测试校验；blocked gate 不派生 terminal fact（rte-conformance-openclaw.test.mjs CF-02/CF-05 经 host harness 复证）。CI openclaw-runtime-smoke 矩阵在每个安装版本上复跑 spike 探针，复验 blocked 零调用语义（探测版本漂移，RTE-04 硬化）；live observer emission 由归档取证工件锁定。"
+        "note": "Tier 3：pin 2026.7.1-2 语义为触发但不代表 invocation（blocked 零执行 + emission-on-blocked），live 取证工件 rte02-live-evidence.json 经绑定测试校验；blocked gate 不派生 terminal fact（rte-conformance-openclaw.test.mjs CF-02/CF-05 经 host harness 复证）。当前 CI 不含真实 runtime smoke 矩阵；blocked 零调用和 live observer emission 必须通过 scripts/openclaw-runtime-smoke.mjs 手动复验并另行归档。"
       },
       "CF-10": {
         "status": "NOT_SUPPORTED",

@@ -19,18 +19,17 @@
 
 | Profile | 位置 | CI 拾取 |
 | ---- | ---- | ---- |
-| LangGraph（CF-01~08、12） | `tests/test_runtime_conformance_langgraph.py` | `python` job（`uv run pytest tests ...`） |
-| Guard API 幂等/冲突（CF-10/11，两个 runtime 共享后端） | `tests/test_runtime_conformance_guard_api.py` | 同上 |
-| OpenClaw in-process（CF-01~07、12） | `packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs`（已标注 case ID） | `node` job（插件 test glob） |
-| OpenClaw Tier 3（CF-08/09） | `rte-conformance-tier3-evidence.test.mjs` 绑定 live 证据 `rte02-live-evidence.json(.jsonl)`（证据版本锁定 2026.7.1-2）；CI `openclaw-runtime-smoke` 验证 24-hook 集安装/注册/heartbeat，并在每个安装版本上复跑 spike 探针复验 CF-08/09 语义（探测版本漂移，RTE-04 硬化）；live observer emission 由归档取证工件锁定 | 独立 smoke job |
-| LangGraph Strong Binding（CF-13~16） | `tests/test_rte05_runtime_conformance_langgraph.py`：真实 Guard API 链覆盖 exact consume、TOCTOU、replay/expiry、LLM 隔离及 invocation-count；CF-17 因同步边界无 active-call cache 明确为 `NOT_SUPPORTED` | 独立 `rte05-strong-binding` Memory/PostgreSQL matrix gate |
-| OpenClaw Strong Binding（CF-13~17） | `packages/agentguard-openclaw-plugin/test/rte05-strong-binding.test.mjs` 覆盖 fail-closed、TOCTOU、lease/LLM 隔离与 capacity；`scripts/openclaw-rte05-host-chain.mjs` 经 pinned `openclaw@2026.7.1-2` 的真实 global hook runner、agent-harness tool wrapper 和 after helper 连接真实 Uvicorn Guard API，复验 consume→invoke→terminal 同一 IDs、失败零调用及 secret exclusion。当前 public host 既无 atomic replace-and-seal，也无 authoritative tool-start hook，故 CF-13 为 `NOT_SUPPORTED`；插件不得合成 production start fact，单插件 restricted-path canary 也不是 C3 能力声明，heartbeat 保持 `C3=false`。CF-14~17 各自输入语义独立通过 | 同一独立 RTE-05 Memory/PostgreSQL matrix gate，在每个 storage profile 构建插件并运行契约与跨进程 live test；OpenClaw host seal/start-hook blocker 未解除前不得把 RTE-05 标记完整完成 |
+| LangGraph（CF-01~08、12） | `tests/test_runtime_conformance_langgraph.py` | 按 marker 进入分层 Python job；无独立 runtime job |
+| Guard API 幂等/冲突（CF-10/11，两个 runtime 共享后端） | `tests/test_runtime_conformance_guard_api.py` | 按 marker 进入分层 Python/PostgreSQL job |
+| OpenClaw in-process（CF-01~07、12） | `packages/agentguard-openclaw-plugin/test/rte-conformance-openclaw.test.mjs`（已标注 case ID） | Node quality 的插件 test glob |
+| OpenClaw Tier 3（CF-08/09） | `rte-conformance-tier3-evidence.test.mjs` 只绑定归档 live 证据 `rte02-live-evidence.json(.jsonl)`（证据版本锁定 2026.7.1-2）；真实安装、注册、heartbeat 与 spike 探针必须另行手动运行 `scripts/openclaw-runtime-smoke.mjs` 并归档 | CI 只校验归档工件契约；没有 runtime smoke 矩阵 |
+| LangGraph Strong Binding（CF-13~16） | `tests/test_rte05_runtime_conformance_langgraph.py`：真实 Guard API 链覆盖 exact consume、TOCTOU、replay/expiry、LLM 隔离及 invocation-count；CF-17 因同步边界无 active-call cache 明确为 `NOT_SUPPORTED` | 按 marker 进入分层 Python/PostgreSQL job；没有独立 RTE-05 matrix |
+| OpenClaw Strong Binding（CF-13~17） | `packages/agentguard-openclaw-plugin/test/rte05-strong-binding.test.mjs` 覆盖 fail-closed、TOCTOU、lease/LLM 隔离与 capacity；`scripts/openclaw-rte05-host-chain.mjs` 可在显式 opt-in 下连接真实 Uvicorn Guard API。当前 public host 既无 atomic replace-and-seal，也无 authoritative tool-start hook，故 CF-13 为 `NOT_SUPPORTED`；插件不得合成 production start fact，单插件 restricted-path canary 也不是 C3 能力声明，heartbeat 保持 `C3=false` | 插件契约进入 Node quality；真实宿主链仅为手动 live，OpenClaw blocker 未解除前不得把 RTE-05 标记完整完成 |
 
-既有 S1 job 的命令与语义保持不变。RTE-05 使用独立 matrix job；PostgreSQL
-profile 固定以 PostgreSQL 16 service 为双存储验收权威；matrix 通过 pytest
-filter 选择 Guard API/lease tests，并以 `AGENTGUARD_RTE05_STORAGE_BACKEND`
-让 LangGraph 只产生对应 backend fixture。两个 profile 都执行 Guard API/lease、
-LangGraph 真实链和 OpenClaw strong-binding 契约，不用既有全仓测试替代专项 gate。
+当前 CI 由通用 Python 分层、PostgreSQL 16、Node quality 和手动 live job 组成，
+并没有本节旧设计中的独立 RTE-05 双存储 matrix。`AGENTGUARD_RTE05_STORAGE_BACKEND`
+仍可用于维护者的专项复验，但在真实宿主链与两个 storage profile 都被托管 CI
+实际执行前，不得把通用测试结果表述为专项 gate 已闭合。
 
 ## 矩阵维护规则
 

@@ -712,19 +712,14 @@ def test_d9_backfill_skips_records_without_envelope(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# postgres 后端（环境可用则覆盖，不可用自动跳过）
+# postgres 后端（未配置 URL 时由共享 helper 跳过；初始化错误必须失败）
 # ---------------------------------------------------------------------------
 
 
 def test_projection_postgres_backend() -> None:
-    import pytest
-
     from tests.test_v21_09_pipeline import _postgres_store
 
-    try:
-        store = _postgres_store()
-    except Exception as exc:  # noqa: BLE001 - 环境不可用自动跳过。
-        pytest.skip(f"postgres test environment unavailable: {exc}")
+    store = _postgres_store()
 
     settings = _pipeline_settings()
     evaluation_service, _ = _evaluation_stack(store, settings=settings)

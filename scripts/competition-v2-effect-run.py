@@ -453,7 +453,7 @@ def run_effect(args: argparse.Namespace) -> int:
     try:
         profile = load_competition_profile(args.profile)
         cases = _select_cases(profile, args.case_id)
-        arms = build_effect_arms(profile)
+        build_effect_arms(profile)
         provider = resolve_provider(profile, args)
         semantic_env = build_semantic_env(args)
     except InvalidCompetitionRun as exc:
