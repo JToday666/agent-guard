@@ -26,12 +26,13 @@ docs/
 ### 产品安装与维护
 
 1. [Productization Alpha Status](06_delivery/productization_alpha_status.md)
-2. [安装、升级和故障排查](06_delivery/install_upgrade_troubleshooting.md)
-3. [兼容矩阵](06_delivery/compatibility_matrix.md)
-4. [产品化架构与目录职责](01_overview/productization_architecture.md)
-5. [接口契约与事件模型](02_core/interface_contract.md)
-6. [安全策略](../SECURITY.md)
-7. [贡献指南](../CONTRIBUTING.md)
+2. [Dependabot critical/high 分诊与修复记录](06_delivery/dependabot_critical_high_triage.md)
+3. [安装、升级和故障排查](06_delivery/install_upgrade_troubleshooting.md)
+4. [兼容矩阵](06_delivery/compatibility_matrix.md)
+5. [产品化架构与目录职责](01_overview/productization_architecture.md)
+6. [接口契约与事件模型](02_core/interface_contract.md)
+7. [安全策略](../SECURITY.md)
+8. [贡献指南](../CONTRIBUTING.md)
 
 ### P0 最小闭环
 
