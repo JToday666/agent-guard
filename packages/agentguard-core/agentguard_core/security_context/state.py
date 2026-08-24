@@ -142,9 +142,7 @@ class OnlineSecurityState(BaseModel):
     source_index: list[SourceFact] = Field(default_factory=list)
 
     # 5) sticky_taint_summary
-    sticky_taint_summaries: list[StickyTaintSummary] = Field(
-        default_factory=list
-    )
+    sticky_taint_summaries: list[StickyTaintSummary] = Field(default_factory=list)
 
     # 6) relevant_flows
     relevant_flows: list[FlowFact] = Field(default_factory=list)

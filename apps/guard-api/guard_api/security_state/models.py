@@ -14,9 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 #: 编排结果状态：透传 core ``ApplyOutcome`` 语义并区分幂等重放。
-ProjectApplyOutcome = Literal[
-    "applied", "replayed_noop", "needs_rebuild", "conflict"
-]
+ProjectApplyOutcome = Literal["applied", "replayed_noop", "needs_rebuild", "conflict"]
 
 
 @dataclass(frozen=True, slots=True)

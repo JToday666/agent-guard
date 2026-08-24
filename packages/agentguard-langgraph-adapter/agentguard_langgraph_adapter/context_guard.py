@@ -15,7 +15,6 @@ import json
 import re
 from typing import Any, Mapping, Sequence
 
-
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SCOPE_DIGEST = re.compile(r"^(?:sha256|hmac-sha256):[0-9a-f]{64}$")
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$")
@@ -174,9 +173,7 @@ def validate_and_prepare_context(
         raise ContextPlanValidationError("context-plan:event_mismatch")
     if plan.get("runtime") != runtime:
         raise ContextPlanValidationError("context-plan:runtime_mismatch")
-    context_ref = _require_identity(
-        plan, "context_ref", "context-plan:context_ref"
-    )
+    context_ref = _require_identity(plan, "context_ref", "context-plan:context_ref")
     scope_digest = _require_scope_digest(
         plan.get("scope_digest"), "context-plan:scope_digest"
     )
@@ -233,9 +230,7 @@ def validate_and_prepare_context(
         if chunk.get("schema_version") != "1.0":
             raise ContextPlanValidationError("context-plan:chunk_schema_version")
         chunk_id = _require_identity(chunk, "chunk_id", "context-plan:chunk_id")
-        source_ref = _require_identity(
-            chunk, "source_ref", "context-plan:source_ref"
-        )
+        source_ref = _require_identity(chunk, "source_ref", "context-plan:source_ref")
         if chunk_id in seen_chunk_ids or source_ref in seen_source_refs:
             raise ContextPlanValidationError("context-plan:duplicate_identity")
         seen_chunk_ids.add(chunk_id)
@@ -290,9 +285,7 @@ def validate_and_prepare_context(
             chunk.get("sensitive"), bool
         ):
             raise ContextPlanValidationError("context-plan:chunk_flags")
-        _evidence_refs(
-            chunk.get("evidence_refs"), "context-plan:chunk_evidence_refs"
-        )
+        _evidence_refs(chunk.get("evidence_refs"), "context-plan:chunk_evidence_refs")
 
         state = chunk.get("transform_state")
         if state not in _SUPPORTED_STATES:
@@ -395,9 +388,7 @@ def _validate_role_classification(
         if not verified_reference_fact:
             # Reject the whole plan even if it says excluded, so later runtime
             # changes cannot reintroduce system-role content through fallback.
-            raise ContextPlanValidationError(
-                "context-plan:system_role_unverified"
-            )
+            raise ContextPlanValidationError("context-plan:system_role_unverified")
         return
 
     if compartment == "trusted_runtime_fact":
@@ -415,9 +406,7 @@ def _validate_role_classification(
             raise ContextPlanValidationError("context-plan:task_transform_mismatch")
     elif compartment == "untrusted_evidence":
         if role not in {"user", "tool"}:
-            raise ContextPlanValidationError(
-                "context-plan:untrusted_role_mismatch"
-            )
+            raise ContextPlanValidationError("context-plan:untrusted_role_mismatch")
         if trust != "untrusted" or authority != "untrusted_claim":
             raise ContextPlanValidationError(
                 "context-plan:untrusted_authority_mismatch"
@@ -433,7 +422,9 @@ def _validate_role_classification(
 
 def _annotated_content(content: Any, *, source_ref: str, taints: Any) -> str:
     labels = _unique_text_list(taints, "context-plan:taints")
-    rendered = content if isinstance(content, str) else _canonical_json(content, path="$")
+    rendered = (
+        content if isinstance(content, str) else _canonical_json(content, path="$")
+    )
     # The wrapper is a model-facing annotation, not a parser boundary the
     # untrusted source may control. Escape body markup deterministically while
     # preserving readable text and the sole template closing tag.
@@ -534,15 +525,9 @@ def _transformations(value: Any) -> tuple[Mapping[str, Any], ...]:
         )
         output_digest = item.get("output_digest")
         if output_digest is not None:
-            _require_digest(
-                output_digest, "context-plan:transformation_output_digest"
-            )
-        _require_identity(
-            item, "mechanism_id", "context-plan:transformation_mechanism"
-        )
-        _require_text(
-            item, "mechanism_version", "context-plan:transformation_version"
-        )
+            _require_digest(output_digest, "context-plan:transformation_output_digest")
+        _require_identity(item, "mechanism_id", "context-plan:transformation_mechanism")
+        _require_text(item, "mechanism_version", "context-plan:transformation_version")
         if item.get("declassification_id") is not None:
             raise ContextPlanValidationError(
                 "context-plan:declassification_not_supported"
@@ -563,10 +548,14 @@ def _canonical_json(value: Any, *, path: str) -> str:
     if isinstance(value, float):
         raise ContextPlanValidationError("context-plan:canonical_float")
     if isinstance(value, (list, tuple)):
-        return "[" + ",".join(
-            _canonical_json(item, path=f"{path}[{index}]")
-            for index, item in enumerate(value)
-        ) + "]"
+        return (
+            "["
+            + ",".join(
+                _canonical_json(item, path=f"{path}[{index}]")
+                for index, item in enumerate(value)
+            )
+            + "]"
+        )
     if isinstance(value, Mapping):
         parts: list[str] = []
         for key in sorted(value):

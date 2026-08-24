@@ -141,9 +141,7 @@ def apply_safe_eviction(
         unprovable.add("behavior")
 
     # source_index：只收缩 benign source（从最旧开始），同样保持原相对顺序。
-    benign_count = sum(
-        1 for source in state.source_index if is_benign_source(source)
-    )
+    benign_count = sum(1 for source in state.source_index if is_benign_source(source))
     benign_overflow = benign_count - limits.benign_sources
     new_source_index = list(state.source_index)
     if benign_overflow > 0:

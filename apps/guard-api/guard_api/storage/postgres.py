@@ -642,9 +642,7 @@ class PostgresControlPlaneStore:
                 self._active_store_session.reset(token)
 
     @contextmanager
-    def runtime_outcome_transaction(
-        self, approval_id: str | None
-    ) -> Iterator[None]:
+    def runtime_outcome_transaction(self, approval_id: str | None) -> Iterator[None]:
         """Atomically validate and first-write one runtime outcome.
 
         Audit-chain serialization is acquired before the approval row, matching
@@ -1837,8 +1835,7 @@ class PostgresControlPlaneStore:
             lease_row = (
                 session.execute(
                     select(execution_leases).where(
-                        execution_leases.c.lease_id
-                        == _derive_lease_id(consumption_id)
+                        execution_leases.c.lease_id == _derive_lease_id(consumption_id)
                     )
                 )
                 .mappings()

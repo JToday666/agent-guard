@@ -154,9 +154,7 @@ def _with_compiled_task_grants(
     ]
     merged = {grant.grant_id: grant for grant in (*retained, *compiled)}
     return state.model_copy(
-        update={
-            "active_grants": [merged[grant_id] for grant_id in sorted(merged)]
-        }
+        update={"active_grants": [merged[grant_id] for grant_id in sorted(merged)]}
     )
 
 

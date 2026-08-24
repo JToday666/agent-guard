@@ -573,9 +573,11 @@ def _merge_provenance_mapping(
                 merged[key] = value
             continue
         current = merged[key]
-        if key in {"evidence_refs", "taints"} and isinstance(
-            current, list
-        ) and isinstance(value, list):
+        if (
+            key in {"evidence_refs", "taints"}
+            and isinstance(current, list)
+            and isinstance(value, list)
+        ):
             merged[key] = _merge_provenance_sequence(current, value)
             continue
         if key == "coverage" and isinstance(current, str) and isinstance(value, str):

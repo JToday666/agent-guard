@@ -193,9 +193,7 @@ def finalize_v21(
             # 变 final decision；stage2/stage3 分支留待 V21-13+。
             decision = "ask"
 
-    risk_score, severity = FINALIZE_RISK_SEVERITY_MAP[
-        (disposition, assessment.impact)
-    ]
+    risk_score, severity = FINALIZE_RISK_SEVERITY_MAP[(disposition, assessment.impact)]
     return GuardDecision(
         decision_id=decision_id,
         decision=decision,

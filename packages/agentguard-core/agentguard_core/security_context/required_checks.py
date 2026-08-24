@@ -61,9 +61,7 @@ class PolicyProfile(BaseModel):
     requires_task_authority: bool = True
 
     #: policy 明确无需 capability 检查的低影响动作集合（02 §6.3）。
-    capability_not_required_actions: frozenset[str] = Field(
-        default_factory=frozenset
-    )
+    capability_not_required_actions: frozenset[str] = Field(default_factory=frozenset)
 
     #: policy 声明不需要 source/dataflow/memory 判定的动作类型
     #: （02 §6.2/§6.5/§6.6 的 not_applicable 行）。
@@ -201,7 +199,7 @@ def build_required_check_plan(
 
     semantic_dimensions: list[
         Literal["task_alignment", "instruction_semantics", "intent_ambiguity"]
-    ] = ["task_alignment"] if "task" in required else []
+    ] = (["task_alignment"] if "task" in required else [])
 
     projection: dict[str, Any] = {
         "plan_version": REQUIRED_CHECK_PLAN_VERSION,

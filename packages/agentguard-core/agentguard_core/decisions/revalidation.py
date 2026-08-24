@@ -153,8 +153,7 @@ def validate_semantic_binding(
     if judgment.snapshot_digest != assessment.snapshot_digest:
         return False
     if reference_time is not None and (
-        _normalize_instant(judgment.expires_at)
-        < _normalize_instant(reference_time)
+        _normalize_instant(judgment.expires_at) < _normalize_instant(reference_time)
     ):
         return False
     return True

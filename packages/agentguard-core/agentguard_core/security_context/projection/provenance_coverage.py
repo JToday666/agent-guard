@@ -172,9 +172,7 @@ def _window_stale(ctx: CoverageContext, domain: CoverageDomain) -> bool:
     return stale
 
 
-def _gap_overlaps_window(
-    gap: GapRange, window: RequiredHistoryWindow
-) -> bool:
+def _gap_overlaps_window(gap: GapRange, window: RequiredHistoryWindow) -> bool:
     """gap 与 required history window 的区间重叠（同域同 producer）。"""
     if gap.domain != window.sequence_domain:
         return False
@@ -193,9 +191,7 @@ def _gap_hits_domain(ctx: CoverageContext, domain: CoverageDomain) -> bool:
             return True
         if ctx.gap_context is not None:
             for window in ctx.gap_context.required_history_windows:
-                if window.domain == domain and _gap_overlaps_window(
-                    gap, window
-                ):
+                if window.domain == domain and _gap_overlaps_window(gap, window):
                     return True
     return False
 
@@ -212,9 +208,7 @@ def _required_refs(ctx: CoverageContext) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def source_coverage(
-    state: OnlineSecurityState, ctx: CoverageContext
-) -> DomainCoverage:
+def source_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainCoverage:
     """source 域判定（02 §6.2 判定表）。
 
     - complete：required source refs 均有 producer/trust/taint 事实；
@@ -231,18 +225,12 @@ def source_coverage(
 
     refs = _required_refs(ctx)
     if not refs:
-        return _result(
-            state, domain, "unknown", ["v21-05:source_refs_unresolvable"]
-        )
+        return _result(state, domain, "unknown", ["v21-05:source_refs_unresolvable"])
 
     if _gap_hits_domain(ctx, domain):
-        return _result(
-            state, domain, "partial", ["v21-05:sequence_gap_localized"]
-        )
+        return _result(state, domain, "partial", ["v21-05:sequence_gap_localized"])
     if _window_stale(ctx, domain):
-        return _result(
-            state, domain, "stale", ["v21-05:source_watermark_behind"]
-        )
+        return _result(state, domain, "stale", ["v21-05:source_watermark_behind"])
 
     index = {source.source_id: source for source in state.source_index}
     missing = [ref for ref in refs if ref not in index]
@@ -254,14 +242,10 @@ def source_coverage(
             ["v21-05:source_identity_not_established"],
         )
     if missing:
-        return _result(
-            state, domain, "partial", ["v21-05:source_refs_missing"]
-        )
+        return _result(state, domain, "partial", ["v21-05:source_refs_missing"])
 
     weak = [
-        ref
-        for ref in refs
-        if index[ref].trust == "unknown" or not index[ref].producer
+        ref for ref in refs if index[ref].trust == "unknown" or not index[ref].producer
     ]
     if weak:
         return _result(
@@ -299,44 +283,28 @@ def dataflow_coverage(
         return early
 
     if domain in ctx.truncated:
-        return _result(
-            state, domain, "partial", ["v21-05:flow_lookup_truncated"]
-        )
+        return _result(state, domain, "partial", ["v21-05:flow_lookup_truncated"])
     if _gap_hits_domain(ctx, domain):
-        return _result(
-            state, domain, "partial", ["v21-05:sequence_gap_localized"]
-        )
+        return _result(state, domain, "partial", ["v21-05:sequence_gap_localized"])
     if _window_stale(ctx, domain):
-        return _result(
-            state, domain, "stale", ["v21-05:flow_watermark_behind"]
-        )
+        return _result(state, domain, "stale", ["v21-05:flow_watermark_behind"])
 
     flows = state.relevant_flows
     refs = _required_refs(ctx)
     if not flows:
         if refs:
-            return _result(
-                state, domain, "partial", ["v21-05:no_relevant_flows"]
-            )
-        return _result(
-            state, domain, "unknown", ["v21-05:flow_refs_unresolvable"]
-        )
+            return _result(state, domain, "partial", ["v21-05:no_relevant_flows"])
+        return _result(state, domain, "unknown", ["v21-05:flow_refs_unresolvable"])
 
     if any(flow.strength == "possible" for flow in flows):
-        return _result(
-            state, domain, "partial", ["v21-05:possible_flow_link"]
-        )
+        return _result(state, domain, "partial", ["v21-05:possible_flow_link"])
 
     if refs:
         flow_refs = {
-            ref
-            for flow in flows
-            for ref in (flow.source_ref, flow.target_ref)
+            ref for flow in flows for ref in (flow.source_ref, flow.target_ref)
         }
         if any(ref not in flow_refs for ref in refs):
-            return _result(
-                state, domain, "partial", ["v21-05:unresolved_artifact_ref"]
-            )
+            return _result(state, domain, "partial", ["v21-05:unresolved_artifact_ref"])
     return _result(state, domain, "complete", ["v21-05:dataflow_complete"])
 
 
@@ -345,9 +313,7 @@ def dataflow_coverage(
 # ---------------------------------------------------------------------------
 
 
-def memory_coverage(
-    state: OnlineSecurityState, ctx: CoverageContext
-) -> DomainCoverage:
+def memory_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainCoverage:
     """memory 域判定（02 §6.6 判定表）。
 
     - complete：required memory refs、change lifecycle、trust/taint、
@@ -365,18 +331,12 @@ def memory_coverage(
         return early
 
     if _gap_hits_domain(ctx, domain):
-        return _result(
-            state, domain, "partial", ["v21-05:sequence_gap_localized"]
-        )
+        return _result(state, domain, "partial", ["v21-05:sequence_gap_localized"])
     if _window_stale(ctx, domain):
-        return _result(
-            state, domain, "stale", ["v21-05:memory_watermark_behind"]
-        )
+        return _result(state, domain, "stale", ["v21-05:memory_watermark_behind"])
 
     if not state.memory_index:
-        return _result(
-            state, domain, "unknown", ["v21-05:memory_state_unavailable"]
-        )
+        return _result(state, domain, "unknown", ["v21-05:memory_state_unavailable"])
 
     facts = {fact.memory_id: fact for fact in state.memory_index}
     refs = _required_refs(ctx)
@@ -385,17 +345,12 @@ def memory_coverage(
         # required refs 必须全量命中：任一缺失（含全部缺失）→ partial，
         # 禁止“部分命中即 complete”的误判（02 §6.6 fail-closed 口径）。
         if len(matched) != len(refs):
-            return _result(
-                state, domain, "partial", ["v21-05:memory_refs_missing"]
-            )
+            return _result(state, domain, "partial", ["v21-05:memory_refs_missing"])
         considered = matched
     else:
         considered = list(facts.values())
 
-    if any(
-        fact.change_status is None or not fact.source_refs
-        for fact in considered
-    ):
+    if any(fact.change_status is None or not fact.source_refs for fact in considered):
         return _result(
             state,
             domain,
@@ -403,7 +358,5 @@ def memory_coverage(
             ["v21-05:memory_lifecycle_or_source_link_missing"],
         )
     if any(fact.trust_state == "unknown" for fact in considered):
-        return _result(
-            state, domain, "partial", ["v21-05:memory_trust_unknown"]
-        )
+        return _result(state, domain, "partial", ["v21-05:memory_trust_unknown"])
     return _result(state, domain, "complete", ["v21-05:memory_complete"])

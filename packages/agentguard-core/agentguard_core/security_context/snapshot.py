@@ -219,5 +219,7 @@ def build_snapshot(
         snapshot_digest="",
     )
     return snapshot.model_copy(
-        update={"snapshot_digest": canonical_sha256(snapshot_digest_projection(snapshot))}
+        update={
+            "snapshot_digest": canonical_sha256(snapshot_digest_projection(snapshot))
+        }
     )

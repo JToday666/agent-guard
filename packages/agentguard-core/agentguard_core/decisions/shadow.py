@@ -572,11 +572,7 @@ def _assess_kernel(
                 stable_source_refs = frozenset(
                     {
                         *overlay.stable_source_refs,
-                        *(
-                            ref
-                            for ref in action_ir.data_refs
-                            if ref in source_ids
-                        ),
+                        *(ref for ref in action_ir.data_refs if ref in source_ids),
                     }
                 )
                 context = default_coverage_context(state, plan).model_copy(
@@ -758,9 +754,7 @@ def assess(
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
         memory_not_required_actions=memory_not_required_actions,
-        source_dataflow_not_required_actions=(
-            source_dataflow_not_required_actions
-        ),
+        source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     ).assessment
 
 
@@ -790,9 +784,7 @@ def shadow_assess_with_coverage(
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
         memory_not_required_actions=memory_not_required_actions,
-        source_dataflow_not_required_actions=(
-            source_dataflow_not_required_actions
-        ),
+        source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     )
 
 
@@ -839,9 +831,7 @@ def shadow_assess(
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
         memory_not_required_actions=memory_not_required_actions,
-        source_dataflow_not_required_actions=(
-            source_dataflow_not_required_actions
-        ),
+        source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     ).assessment
 
 

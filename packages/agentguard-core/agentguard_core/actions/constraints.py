@@ -139,7 +139,9 @@ def _destination_identifier(destination: CanonicalResource) -> str:
     return destination.canonical_id
 
 
-def _destination_matches_identifier(identifier: str, op: str, values: list[str]) -> bool:
+def _destination_matches_identifier(
+    identifier: str, op: str, values: list[str]
+) -> bool:
     # destination 匹配标识（host_ascii/domain_ascii）恒为小写 ASCII：
     # 约束值统一 casefold 后再比，避免约束侧大写导致静默不匹配。
     if op == "exact":

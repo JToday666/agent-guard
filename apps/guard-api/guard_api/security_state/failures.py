@@ -35,9 +35,7 @@ ProjectionFailureException = (
 #: 投影 apply / rebuild 重放阶段可能抛出的全部 fail-closed 异常
 #: （V21-04 入口校验 + V21-05/06/07 接线后 typed handler 分支异常）。
 #: 分支异常携带 ``dirty_domains``（V21-05）：优先用于置脏相关域。
-PROJECTION_FAILURE_EXCEPTIONS: tuple[
-    type[ProjectionFailureException], ...
-] = (
+PROJECTION_FAILURE_EXCEPTIONS: tuple[type[ProjectionFailureException], ...] = (
     ProjectionError,
     ProvenanceProjectionError,
     CapabilityProjectionError,

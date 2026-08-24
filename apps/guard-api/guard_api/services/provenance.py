@@ -780,9 +780,7 @@ class ProvenanceWriter:
                 "authority_mode": authority.get("mode"),
                 "authority_selection_basis": authority.get("selection_basis"),
                 "authority_matched_path_ids": authority.get("matched_path_ids"),
-                "authority_legacy_floor_applied": authority.get(
-                    "legacy_floor_applied"
-                ),
+                "authority_legacy_floor_applied": authority.get("legacy_floor_applied"),
                 "authority_activation_ref_digest": authority.get(
                     "activation_ref_digest"
                 ),

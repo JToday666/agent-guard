@@ -82,9 +82,7 @@ class ConsumptionIntent(BaseModel):
     @classmethod
     def digest_fields(cls) -> frozenset[str]:
         """``intent_digest`` 白名单：防双花的三元稳定身份（01 §31）。"""
-        return frozenset(
-            {"grant_id", "action_id", "authorization_fingerprint"}
-        )
+        return frozenset({"grant_id", "action_id", "authorization_fingerprint"})
 
 
 def consumption_intent_digest(
@@ -191,9 +189,7 @@ def compute_authority_verdict(
             if expected_fingerprint != action_ir.authorization_fingerprint:
                 mismatches.append(f"{grant.grant_id}:fingerprint_mismatch")
                 continue
-        if grant.action_types and action_ir.action_type not in set(
-            grant.action_types
-        ):
+        if grant.action_types and action_ir.action_type not in set(grant.action_types):
             continue
         if grant.resource_constraints and not all(
             matches_resource(constraint, action_ir.resources)
@@ -282,13 +278,10 @@ def build_consumption_intent(
             "v21-06:scope_mismatch",
             "action scope_digest does not match the grant scope",
         )
-    if grant.action_types and action_ir.action_type not in set(
-        grant.action_types
-    ):
+    if grant.action_types and action_ir.action_type not in set(grant.action_types):
         raise AuthorityProjectionError(
             "v21-06:action_type_not_granted",
-            f"action_type {action_ir.action_type!r} is not covered by the "
-            "grant",
+            f"action_type {action_ir.action_type!r} is not covered by the " "grant",
         )
     if grant.resource_constraints and not all(
         matches_resource(constraint, action_ir.resources)

@@ -44,8 +44,17 @@ class _CtNodeMetadataBase(BaseModel):
 class CtSourceNodeMetadata(_CtNodeMetadataBase):
     node_kind: Literal["source"] = "source"
     source_type: Literal[
-        "user", "web", "email", "tool_result", "mcp", "rag", "memory",
-        "file", "model", "runtime", "other",
+        "user",
+        "web",
+        "email",
+        "tool_result",
+        "mcp",
+        "rag",
+        "memory",
+        "file",
+        "model",
+        "runtime",
+        "other",
     ]
     trust: Literal["trusted", "untrusted", "unknown"]
     verification_state: Literal["verified", "unverified", "not_applicable"]
@@ -103,9 +112,16 @@ class CtEdgeMetadata(BaseModel):
     kind: Literal["edge"] = "edge"
     flow_id: str = Field(min_length=1, max_length=512)
     flow_relation: Literal[
-        "received_from", "read_from", "derived_from", "assembled_into",
-        "influenced_by", "returned_by", "written_to", "persisted_to",
-        "loaded_from_memory", "sent_to",
+        "received_from",
+        "read_from",
+        "derived_from",
+        "assembled_into",
+        "influenced_by",
+        "returned_by",
+        "written_to",
+        "persisted_to",
+        "loaded_from_memory",
+        "sent_to",
     ]
     source_ref: str = Field(min_length=1, max_length=512)
     target_ref: str = Field(min_length=1, max_length=512)
@@ -250,9 +266,7 @@ def _materialize(
     node_id_by_ref: dict[str, str] = {}
     for ref in sorted(node_kind_by_ref):
         node_kind = node_kind_by_ref[ref]
-        coverage: Coverage = (
-            "unknown" if node_kind == "other" else base_coverage
-        )
+        coverage: Coverage = "unknown" if node_kind == "other" else base_coverage
         metadata = _NODE_METADATA_ADAPTER.validate_python(
             {
                 "contract": CT_PROVENANCE_CONTRACT,

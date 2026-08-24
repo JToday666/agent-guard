@@ -197,9 +197,7 @@ class ContextBuilderService:
                     if policy_record is not None
                     else _UNVERSIONED_POLICY_REVISION
                 ),
-                policy_digest=canonical_sha256(
-                    policy_bundle.model_dump(mode="json")
-                ),
+                policy_digest=canonical_sha256(policy_bundle.model_dump(mode="json")),
                 plan=_context_snapshot_plan(),
                 authoritative_head_revision=task_fact.revision,
             )
@@ -433,8 +431,7 @@ def build_context_assembly(
         "context_ref": context_ref,
         "chunks": [chunk.model_dump(mode="json") for chunk in chunks],
         "transformations": [
-            transformation.model_dump(mode="json")
-            for transformation in transformations
+            transformation.model_dump(mode="json") for transformation in transformations
         ],
         "excluded_chunk_ids": excluded_chunk_ids,
         "reason_codes": plan_reasons,
@@ -538,13 +535,14 @@ def _classify_source(
                 }
             )
             if sensitive:
-                return upgraded, "authenticated_task", "excluded", (
-                    "SENSITIVE_OR_CREDENTIAL",
+                return (
+                    upgraded,
+                    "authenticated_task",
+                    "excluded",
+                    ("SENSITIVE_OR_CREDENTIAL",),
                 )
             return upgraded, "authenticated_task", "preserved", ()
-        return fact, "authenticated_task", "excluded", (
-            "TASK_AUTHORITY_MISMATCH",
-        )
+        return fact, "authenticated_task", "excluded", ("TASK_AUTHORITY_MISMATCH",)
 
     if fact.source_type == "runtime":
         fixed_values = {
@@ -582,9 +580,7 @@ def _classify_source(
                 }
             )
             return upgraded, "trusted_runtime_fact", "preserved", ()
-        return fact, "trusted_runtime_fact", "excluded", (
-            "RUNTIME_FACT_UNVERIFIED",
-        )
+        return fact, "trusted_runtime_fact", "excluded", ("RUNTIME_FACT_UNVERIFIED",)
 
     if fact.source_type in _UNTRUSTED_EVIDENCE_TYPES:
         strengthened_taints = _ordered_taints((*taints, "UNTRUSTED"))
@@ -597,15 +593,24 @@ def _classify_source(
                 reasons = _append_unique(reasons, "SENSITIVE_OR_CREDENTIAL")
             return strengthened, "untrusted_evidence", "excluded", reasons
         if sensitive:
-            return strengthened, "untrusted_evidence", "excluded", (
-                "SENSITIVE_OR_CREDENTIAL",
+            return (
+                strengthened,
+                "untrusted_evidence",
+                "excluded",
+                ("SENSITIVE_OR_CREDENTIAL",),
             )
         if instruction_like:
-            return strengthened, "untrusted_evidence", "quarantined", (
-                "UNTRUSTED_EXTERNAL_INSTRUCTION",
+            return (
+                strengthened,
+                "untrusted_evidence",
+                "quarantined",
+                ("UNTRUSTED_EXTERNAL_INSTRUCTION",),
             )
-        return strengthened, "untrusted_evidence", "annotated", (
-            "UNTRUSTED_EVIDENCE_ANNOTATED",
+        return (
+            strengthened,
+            "untrusted_evidence",
+            "annotated",
+            ("UNTRUSTED_EVIDENCE_ANNOTATED",),
         )
 
     if fact.source_type == "memory":
@@ -618,9 +623,7 @@ def _classify_source(
         trust: Literal["trusted", "untrusted", "unknown"] = (
             "trusted"
             if trust_state == "clean" and not merged_taints
-            else "untrusted"
-            if trust_state == "tainted"
-            else "unknown"
+            else "untrusted" if trust_state == "tainted" else "unknown"
         )
         inherited = fact.model_copy(
             update={
@@ -635,20 +638,27 @@ def _classify_source(
             }
         )
         if trust_state in {"quarantined", "unknown"}:
-            return inherited, "memory_context", "excluded", (
-                "MEMORY_NOT_ACTIVE_TRACE_SAFE",
+            return (
+                inherited,
+                "memory_context",
+                "excluded",
+                ("MEMORY_NOT_ACTIVE_TRACE_SAFE",),
             )
         if sensitive:
-            return inherited, "memory_context", "excluded", (
-                "SENSITIVE_OR_CREDENTIAL",
-            )
+            return inherited, "memory_context", "excluded", ("SENSITIVE_OR_CREDENTIAL",)
         if instruction_like and trust != "trusted":
-            return inherited, "memory_context", "quarantined", (
-                "UNTRUSTED_EXTERNAL_INSTRUCTION",
+            return (
+                inherited,
+                "memory_context",
+                "quarantined",
+                ("UNTRUSTED_EXTERNAL_INSTRUCTION",),
             )
         if trust == "untrusted":
-            return inherited, "memory_context", "annotated", (
-                "UNTRUSTED_MEMORY_ANNOTATED",
+            return (
+                inherited,
+                "memory_context",
+                "annotated",
+                ("UNTRUSTED_MEMORY_ANNOTATED",),
             )
         return inherited, "memory_context", "preserved", ()
 
@@ -674,4 +684,6 @@ def _is_sha256_digest(value: object) -> bool:
     if not isinstance(value, str) or not value.startswith("sha256:"):
         return False
     digest = value.removeprefix("sha256:")
-    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+    return len(digest) == 64 and all(
+        character in "0123456789abcdef" for character in digest
+    )

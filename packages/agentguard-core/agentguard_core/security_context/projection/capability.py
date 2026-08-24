@@ -194,8 +194,7 @@ def compile_task_to_grants(
     if task.authority != "authoritative":
         raise CapabilityProjectionError(
             "v21-06:forged_issuer",
-            f"task_fact.authority must be 'authoritative', "
-            f"got {task.authority!r}",
+            f"task_fact.authority must be 'authoritative', " f"got {task.authority!r}",
         )
     _check_binding(
         scope_digest=task.scope_digest,
@@ -242,9 +241,7 @@ def compile_task_to_grants(
                     "task_id": task.task_id,
                     "action_types": action_types,
                     "resource_constraints": list(task.resource_constraints),
-                    "destination_constraints": list(
-                        task.destination_constraints
-                    ),
+                    "destination_constraints": list(task.destination_constraints),
                     "argument_constraints": [],
                     "exact_authorization_fingerprint": None,
                     "usage_limit": None,
@@ -294,8 +291,7 @@ def compile_approval_to_grant(
     if not approval.authorization_fingerprint:
         raise CapabilityProjectionError(
             "v21-06:missing_authorization_fingerprint",
-            "human_approval grant projection requires an "
-            "authorization_fingerprint",
+            "human_approval grant projection requires an " "authorization_fingerprint",
         )
     if not approval.action_types:
         raise CapabilityProjectionError(
@@ -339,9 +335,7 @@ def compile_approval_to_grant(
             "resource_constraints": list(approval.resource_constraints),
             "destination_constraints": list(approval.destination_constraints),
             "argument_constraints": list(approval.argument_constraints),
-            "exact_authorization_fingerprint": (
-                approval.authorization_fingerprint
-            ),
+            "exact_authorization_fingerprint": (approval.authorization_fingerprint),
             "usage_limit": 1,
             "remaining_uses": 1,
             "delegable": False,
@@ -378,8 +372,10 @@ def apply_grant_upserts(
             order.append(grant.grant_id)
         merged[grant.grant_id] = grant
     for item in items:
-        grant = item if isinstance(item, CapabilityGrant) else (
-            CapabilityGrant.model_validate(item)
+        grant = (
+            item
+            if isinstance(item, CapabilityGrant)
+            else (CapabilityGrant.model_validate(item))
         )
         if grant.grant_id not in merged:
             order.append(grant.grant_id)
@@ -430,17 +426,17 @@ def apply_grant_consumptions(
     }
     appended = list(state.grant_consumptions)
     for item in items:
-        consumption = item if isinstance(item, GrantConsumption) else (
-            GrantConsumption.model_validate(item)
+        consumption = (
+            item
+            if isinstance(item, GrantConsumption)
+            else (GrantConsumption.model_validate(item))
         )
         current = existing_by_id.get(consumption.consumption_id)
         if current is None:
             existing_by_id[consumption.consumption_id] = consumption
             appended.append(consumption)
             continue
-        if current.model_dump(mode="json") != consumption.model_dump(
-            mode="json"
-        ):
+        if current.model_dump(mode="json") != consumption.model_dump(mode="json"):
             raise CapabilityProjectionError(
                 "v21-06:consumption_identity_conflict",
                 f"consumption_id {consumption.consumption_id!r} is already "

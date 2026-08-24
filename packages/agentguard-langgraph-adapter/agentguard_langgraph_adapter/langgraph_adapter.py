@@ -395,7 +395,9 @@ class LangGraphAdapter:
                 "sanitized": sanitized,
             },
             metadata=_trusted_event_metadata(
-                security, adapter="agentguard_langgraph_adapter", hook="context_assembled"
+                security,
+                adapter="agentguard_langgraph_adapter",
+                hook="context_assembled",
             ),
         )
 
@@ -433,9 +435,7 @@ class LangGraphAdapter:
             "content_preview": preview,
             "provider": provider,
             "model": model,
-            "contains_instruction_like_text": _contains_instruction_like_text(
-                preview
-            ),
+            "contains_instruction_like_text": _contains_instruction_like_text(preview),
             "contains_sensitive_data": _contains_sensitive_text(preview),
             "sanitized": sanitized,
             "tool_plan": tool_plan or [],

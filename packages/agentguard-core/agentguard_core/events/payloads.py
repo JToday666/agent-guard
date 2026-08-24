@@ -97,9 +97,7 @@ class ContextSource(BaseModel):
     # CT-PR-04 additive binding fields.  They remain optional so legacy
     # producers retain their canonical request shape; when isolation is
     # required the server accepts a source only if all bindings are present.
-    content_digest: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    content_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     role: str | None = Field(default=None, min_length=1, max_length=32)
     sequence_index: int | None = Field(default=None, ge=0)
 
@@ -147,7 +145,9 @@ class ModelCallPayload(BaseModel):
             raise ValueError("context plan model-input identity must be complete")
         if self.visible_source_refs is not None:
             if any(not ref or len(ref) > 512 for ref in self.visible_source_refs):
-                raise ValueError("visible_source_refs must contain bounded non-empty refs")
+                raise ValueError(
+                    "visible_source_refs must contain bounded non-empty refs"
+                )
             if len(self.visible_source_refs) != len(set(self.visible_source_refs)):
                 raise ValueError("visible_source_refs must be unique")
         return self

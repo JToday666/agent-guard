@@ -52,9 +52,7 @@ CAPABILITY_PROVIDER_KEY = "lease_store"
 _REASON_PREFIX = "v21-06"
 
 
-def _watermark_for(
-    watermarks: StateWatermarks, sequence_domain: SequenceDomain
-):
+def _watermark_for(watermarks: StateWatermarks, sequence_domain: SequenceDomain):
     """序列域 → 对应状态水位（跨域比较禁止，02 §5）。"""
     if sequence_domain == "policy":
         return watermarks.committed_sequence
@@ -155,23 +153,17 @@ def capability_coverage(
 
     revoked_ids = frozenset(state.revoked_grant_ids)
     active = [
-        grant
-        for grant in state.active_grants
-        if _grant_is_active(grant, revoked_ids)
+        grant for grant in state.active_grants if _grant_is_active(grant, revoked_ids)
     ]
     if not active:
-        return result(
-            "unknown", [f"{_REASON_PREFIX}:grant_state_not_established"]
-        )
+        return result("unknown", [f"{_REASON_PREFIX}:grant_state_not_established"])
 
     covered_actions = {
         action_type for grant in active for action_type in grant.action_types
     }
     missing = [cap for cap in required if cap not in covered_actions]
     if len(missing) == len(required):
-        return result(
-            "unknown", [f"{_REASON_PREFIX}:grant_state_not_established"]
-        )
+        return result("unknown", [f"{_REASON_PREFIX}:grant_state_not_established"])
     if missing:
         return result("partial", [f"{_REASON_PREFIX}:required_capability_unresolved"])
     return result("complete", [f"{_REASON_PREFIX}:capability_complete"])

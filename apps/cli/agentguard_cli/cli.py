@@ -499,9 +499,7 @@ def _request_json(
                 json=json_body,
             )
     except httpx.HTTPError as exc:
-        raise CliError(
-            f"Guard API request failed ({type(exc).__name__})"
-        ) from exc
+        raise CliError(f"Guard API request failed ({type(exc).__name__})") from exc
     if 300 <= response.status_code < 400:
         raise CliError("Guard API redirects are not allowed")
     if response.status_code >= 400:
@@ -519,7 +517,9 @@ def _api_base_url(env: Env) -> str:
     else:
         host = env.get("AGENTGUARD_HOST", "127.0.0.1")
         port = env.get("AGENTGUARD_PORT", "8088")
-        authority_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        authority_host = (
+            f"[{host}]" if ":" in host and not host.startswith("[") else host
+        )
         candidate = f"http://{authority_host}:{port}"
     try:
         return validate_guard_api_base_url(candidate)

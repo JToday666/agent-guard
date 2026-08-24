@@ -100,9 +100,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 status_code=409,
             ) from None
         except RuntimeOutcomeReceiptError as exc:
-            status_code = (
-                409 if exc.code == "RUNTIME_OUTCOME_PARENT_MISMATCH" else 422
-            )
+            status_code = 409 if exc.code == "RUNTIME_OUTCOME_PARENT_MISMATCH" else 422
             raise ApiAuthError(exc.code, status_code=status_code) from None
 
     @app.get("/v1/audit/window", response_model=None)

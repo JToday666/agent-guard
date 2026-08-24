@@ -154,9 +154,7 @@ def rebuild_locked(
     # CAS 锚点取 max 保持不回退；内容不完整的风险已由全域 dirty
     # fail-closed 承担（不得解释为 complete）。
     if rebuilt.state_version < expected_version:
-        rebuilt = rebuilt.model_copy(
-            update={"state_version": expected_version}
-        )
+        rebuilt = rebuilt.model_copy(update={"state_version": expected_version})
 
     # F5：成功路径不得丢弃既有列级 dirty 域：回写前并入
     # （rebuilt.dirty_domains ∩ 既有列级 dirty_domains 的并集）。
@@ -259,9 +257,7 @@ def _decode_legacy_delta(
             f"{LEGACY_PROJECTOR_VERSION!r}: {non_empty}",
         )
     supported_version = (
-        LEGACY_PROJECTOR_VERSION
-        if require_empty_typed
-        else PREVIOUS_PROJECTOR_VERSION
+        LEGACY_PROJECTOR_VERSION if require_empty_typed else PREVIOUS_PROJECTOR_VERSION
     )
     if delta.projector_version != supported_version:
         raise ProjectionError(

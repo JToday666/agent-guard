@@ -106,20 +106,14 @@ def fact_digest_projection(fact: BaseModel) -> dict[str, Any]:
             destination_constraints=fact.destination_constraints,
         )
         payload["resource_constraints"] = normalized["resource_constraints"]
-        payload["destination_constraints"] = normalized[
-            "destination_constraints"
-        ]
+        payload["destination_constraints"] = normalized["destination_constraints"]
         payload["argument_constraints"] = sorted(
-            (
-                item.model_dump(mode="json")
-                for item in fact.argument_constraints
-            ),
+            (item.model_dump(mode="json") for item in fact.argument_constraints),
             key=lambda item: canonical_sha256(item),
         )
         return payload
     return {
-        field: _canonical_value(getattr(fact, field))
-        for field in sorted(digest_fields)
+        field: _canonical_value(getattr(fact, field)) for field in sorted(digest_fields)
     }
 
 
@@ -444,8 +438,7 @@ class CapabilityGrant(BaseModel):
         errors: list[str] = []
         if self.exact_authorization_fingerprint is None:
             errors.append(
-                "human_approval grant requires "
-                "exact_authorization_fingerprint"
+                "human_approval grant requires " "exact_authorization_fingerprint"
             )
         if self.usage_limit != 1:
             errors.append(
@@ -458,13 +451,10 @@ class CapabilityGrant(BaseModel):
                 f"got {self.remaining_uses!r}"
             )
         if self.delegable:
-            errors.append(
-                "human_approval grant must not be delegable"
-            )
+            errors.append("human_approval grant must not be delegable")
         if errors:
             raise ValueError(
-                "human_approval single-use invariant violated: "
-                + "; ".join(errors)
+                "human_approval single-use invariant violated: " + "; ".join(errors)
             )
         return self
 

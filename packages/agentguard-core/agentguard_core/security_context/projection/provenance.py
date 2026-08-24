@@ -86,9 +86,7 @@ MAX_SUMMARY_REFS: int = 64
 MAX_SUMMARY_EVIDENCE_REFS: int = 64
 
 #: 安全保持型 sticky 保护标签（02 §5.1）：永不按普通淘汰移除。
-_PROTECTED_LABELS: frozenset[str] = frozenset(
-    {"CREDENTIAL", "PERSISTENT_UNTRUSTED"}
-)
+_PROTECTED_LABELS: frozenset[str] = frozenset({"CREDENTIAL", "PERSISTENT_UNTRUSTED"})
 
 
 class ProvenanceProjectionError(ValueError):
@@ -169,9 +167,7 @@ def _dedupe_by_key(
     return [merged[item_key] for item_key in sorted(merged)]
 
 
-def _bounded_union(
-    left: list[str], right: list[str], limit: int
-) -> list[str]:
+def _bounded_union(left: list[str], right: list[str], limit: int) -> list[str]:
     """字符串 ref 的确定性有界并集（排序后截断至 ``limit``）。"""
     return sorted(set(left) | set(right))[:limit]
 
@@ -290,8 +286,7 @@ def apply_declassification_upserts(
         by_id[item.declass_id] = item
 
     summaries = [
-        summary.model_copy(deep=True)
-        for summary in state.sticky_taint_summaries
+        summary.model_copy(deep=True) for summary in state.sticky_taint_summaries
     ]
     for item in sorted(by_id.values(), key=lambda entry: entry.declass_id):
         removed = set(item.removed_taints)
@@ -333,9 +328,7 @@ def apply_memory_upserts(
     for incoming in sorted(items, key=lambda fact: fact.memory_id):
         existing = merged.get(incoming.memory_id)
         merged[incoming.memory_id] = (
-            incoming
-            if existing is None
-            else _merge_memory_fact(existing, incoming)
+            incoming if existing is None else _merge_memory_fact(existing, incoming)
         )
     return state.model_copy(
         update={"memory_index": [merged[key] for key in sorted(merged)]}
@@ -469,9 +462,9 @@ def _merge_evidence_refs(
     seen: dict[str, EvidenceRef] = {}
     for ref in [*left, *right]:
         seen.setdefault(ref.model_dump_json(), ref)
-    return sorted(
-        seen.values(), key=lambda ref: ref.model_dump_json()
-    )[:MAX_SUMMARY_EVIDENCE_REFS]
+    return sorted(seen.values(), key=lambda ref: ref.model_dump_json())[
+        :MAX_SUMMARY_EVIDENCE_REFS
+    ]
 
 
 def _merge_two_summaries(
@@ -491,9 +484,7 @@ def _merge_two_summaries(
         memory_refs=_bounded_union(
             left.memory_refs, right.memory_refs, MAX_SUMMARY_REFS
         ),
-        evidence_refs=_merge_evidence_refs(
-            left.evidence_refs, right.evidence_refs
-        ),
+        evidence_refs=_merge_evidence_refs(left.evidence_refs, right.evidence_refs),
     )
 
 
@@ -511,9 +502,7 @@ def _merge_same_taint_groups(
         groups.setdefault(frozenset(summary.taints), []).append(summary)
 
     merged: list[StickyTaintSummary] = []
-    for _taints, group in sorted(
-        groups.items(), key=lambda pair: sorted(pair[0])
-    ):
+    for _taints, group in sorted(groups.items(), key=lambda pair: sorted(pair[0])):
         if len(group) == 1:
             merged.append(group[0])
             continue
@@ -559,17 +548,13 @@ def apply_sticky_taint_upserts(
         if existing is None:
             by_id[incoming.summary_id] = incoming
         else:
-            by_id[incoming.summary_id] = _merge_two_summaries(
-                existing, incoming
-            )
+            by_id[incoming.summary_id] = _merge_two_summaries(existing, incoming)
 
     merged = [by_id[summary_id] for summary_id in sorted(by_id)]
     if len(merged) > MAX_STICKY_TAINT_SUMMARIES:
         merged = _merge_same_taint_groups(merged)
     if len(merged) > MAX_STICKY_TAINT_SUMMARIES:
-        protected = sum(
-            1 for summary in merged if _is_protected_summary(summary)
-        )
+        protected = sum(1 for summary in merged if _is_protected_summary(summary))
         raise ProvenanceProjectionError(
             "v21-05:sticky_taint_summary_overflow",
             "sticky taint summaries exceed the bounded capacity after "

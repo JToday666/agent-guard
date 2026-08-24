@@ -319,9 +319,7 @@ def compute_coverage(
 # ---------------------------------------------------------------------------
 
 
-def _gap_overlaps(
-    gap: GapRange, window: RequiredHistoryWindow
-) -> bool:
+def _gap_overlaps(gap: GapRange, window: RequiredHistoryWindow) -> bool:
     """sequence interval 重叠（仅同 domain + producer 可比，02 §5）。"""
     if gap.domain != window.sequence_domain:
         return False
@@ -346,9 +344,7 @@ def _affected_domains(
         ref in gap.reason for ref in context.parent_event_ids
     ):
         return set(COVERAGE_DOMAINS), "v21-04:gap_matched_parent_event_ids"
-    if context.stable_refs and any(
-        ref in gap.reason for ref in context.stable_refs
-    ):
+    if context.stable_refs and any(ref in gap.reason for ref in context.stable_refs):
         return set(COVERAGE_DOMAINS), "v21-04:gap_matched_stable_refs"
 
     windowed: set[CoverageDomain] = {
