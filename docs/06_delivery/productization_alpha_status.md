@@ -9,7 +9,7 @@
 | 已验证代码 SHA | `ee2800277c79fd841b2341a2fdfe2dfd015abeef`（本状态证明提交的 parent） |
 | 托管 CI run | [CI 32699929514](https://github.com/JToday666/agent-guard/actions/runs/32699929514)：全部自动门禁通过；[Release Check 32699929536](https://github.com/JToday666/agent-guard/actions/runs/32699929536)：通过 |
 
-> 为避免提交自引用，本状态证明记录其 parent（被验证代码）SHA，而不是声称包含自身 SHA。上述代码与门禁已满足集成条件，但 PR 尚未进入 `dev`，因此状态为 **ready for integration**，不是 completed；合入后必须以实际 `dev` 集成 SHA 关闭 `PA01` 并形成最终状态证明。
+> 为避免提交自引用，本状态证明记录其 parent（被验证代码）SHA，而不是声称包含自身 SHA。上述代码与门禁已满足集成条件，但 PR 尚未进入 `dev`，因此状态为 **ready for integration**，不是 completed；合入后必须以实际 `dev` 集成 SHA 形成最终状态证明。`PA01` 将继续保持活动以执行功能冻结，直到 Alpha 完成后的独立恢复开发评审决定是否协调释放其表面并关闭节点。
 
 ## 本轮目标
 
@@ -74,7 +74,7 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 
 ## 后续优先级
 
-1. 将通过全部自动门禁的 PR #189 合入 `dev`，以实际集成 SHA 追加 commit/test/CI/review/rollback evidence，关闭 `PA01` 并形成最终状态证明。
+1. 将通过全部自动门禁的 PR #189 合入 `dev`，以实际集成 SHA 形成最终状态证明；`PA01` 继续占用产品表面并执行功能冻结，直至独立的恢复开发评审。
 2. 在 GitHub 平台启用并核验 `dev` 分支保护、required checks 与安全报告入口，再开始外部技术试用。
 3. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。
 4. Alpha 完成后另行评审是否恢复功能开发；真实 Memory Guard、R05 host capability、正式 350-run 与生产发布仍留在后续里程碑。
