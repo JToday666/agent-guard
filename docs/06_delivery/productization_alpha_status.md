@@ -47,7 +47,7 @@
 - CODEOWNERS 已进入仓库；截至 2026-08-24，classic branch protection endpoint 对 `dev` 仍返回未启用，但 active repository ruleset `dev merge check` 会阻止删除、非快进和绕过 PR，只允许 squash，并严格要求下文 11 个 GitHub Actions checks 基于最新 `dev` 全部通过。每个 context 均绑定 GitHub Actions App `integration_id=15368`，ruleset 无 bypass actor。
 - 仓库级 secret scanning、push protection、Private Vulnerability Reporting、Dependabot alerts 与 Dependabot security updates 已启用并经 API 回读确认。启用后的初始快照为 secret scanning 开放告警 0 个、Dependabot 开放告警 162 个（critical 1、high 63、medium 28、low 70）；这是治理入口与待办基线，不是“依赖安全”或“无漏洞”的证明。critical/high 告警完成去重、可达性分析和修复前，不开始外部技术试用。
 
-2026-08-25 已对上述 64 条 critical/high 告警逐条完成静态分诊：14 条 OpenClaw/MCP 传递依赖为 `needs_review`，50 条为 `not_actionable`（其中 44 条属于未被产品或 runner 安装/启动的 legacy benchmark fixture）。本轮仍升级了全部涉及的产品、工具链和 fixture 锁文件，没有 dismiss 告警；完整输入映射、边界证据和安全版本见[Dependabot critical/high 分诊与修复记录](dependabot_critical_high_triage.md)。在修复进入 `dev`、11 项 required checks 通过且 GitHub 重新扫描确认 critical/high 为 0 前，外部技术试用限制保持不变。
+2026-08-25 已对上述 64 条 critical/high 告警逐条完成静态分诊：14 条 OpenClaw/MCP 传递依赖为 `needs_review`，50 条为 `not_actionable`（其中 44 条属于未被产品或 runner 安装/启动的 legacy benchmark fixture）。本轮仍升级了全部涉及的产品、工具链和 fixture 锁文件，没有 dismiss 告警；[PR #192](https://github.com/JToday666/agent-guard/pull/192) 的 11 项 required checks 全部成功，并以 `2fdbe20396b3dda4d3990a89688106e7720ddc6b` 合入 `dev`，合入后的 [dev CI](https://github.com/JToday666/agent-guard/actions/runs/32759050061) 亦全部成功。Dependency Graph 重扫后，GitHub API 确认本批 64 条全部为 `fixed`、`dismissed_at` 均为空，开放告警变为 critical 0、high 0、medium 28、low 67。完整输入映射、边界证据和回读结果见[Dependabot critical/high 分诊与修复记录](dependabot_critical_high_triage.md)。critical/high 依赖告警不再构成单独阻塞项，但这不会自动授权外部试用、生产部署或对外发布。
 
 ## CI 状态口径
 
@@ -70,7 +70,7 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 - Productization Alpha 默认 Python 门禁范围内的 Ruff 与 Pyright 通过；Python 发布包的 Black 检查逐文件通过；`git diff --check` 与 roadmap contract 检查通过。该范围明确不含上文披露的 legacy benchmark tree 及其现存 Ruff 诊断。
 - Dashboard format/lint/typecheck/unit（40 个测试文件）和 production build 通过；OpenClaw 插件 18 个测试文件通过，本地 shim/installer/runtime 相关测试 68 passed。
 - Markdown 相对目标检查对全部 138 份 tracked/unignored 文档通过。
-- critical/high 依赖安全候选的 Productization Alpha 快速门禁为 2,339 passed、16 skipped、181 deselected；Dashboard 229、OpenClaw 206、benchmark tools 4、兼容 shim 68 项 Node 测试全部通过，Dashboard production build 成功。
+- critical/high 依赖安全批次的 Productization Alpha 快速门禁为 2,339 passed、16 skipped、181 deselected；Dashboard 229、OpenClaw 206、benchmark tools 4、兼容 shim 68 项 Node 测试全部通过，Dashboard production build 成功。
 - 隔离 clean-clone acceptance 在 memory backend 下完成 8/8：真实启动 Guard API，验证健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源、凭证撤销与临时资源清理；外部 Provider 保持关闭。
 - Dashboard 隐藏页暂停与终态停止轮询的两项定向 Playwright 回归通过。
 - Dashboard 到真实 Guard API 的 memory 浏览器闭环本地为 4/4 passed：official allow、浏览器 allow-once 审批、deny 零调用/not-invoked receipt、flag-off 回滚只读。
@@ -82,7 +82,7 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 
 ## 后续优先级
 
-1. 将已完成分诊与锁文件治理的 1 个 critical / 63 个 high 批次通过 required checks 合入 `dev`，等待 GitHub 重新扫描确认归零；随后再按同样流程处理初始快照中的 28 个 medium 与 70 个 low，不批量绕过或自动合并。
+1. 按同样的去重、可达性分析、修复和 required-check 流程处理重扫后剩余的 28 个 medium 与 67 个 low，不批量绕过、dismiss 或自动合并。
 2. 保持 `PA01` 的功能冻结；需要恢复功能开发时，另行评审并协调释放其产品表面。
 3. 完成 Python/Node 唯一版本映射和内部 release candidate，再进行两次独立干净环境试用验收；在此之前不发布 `v0.2.0-alpha.1`。
 4. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。

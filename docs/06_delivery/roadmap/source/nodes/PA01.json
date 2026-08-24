@@ -17,6 +17,7 @@
     "evidence/PA01/EV-PA01-F3D35F371C70.json",
     "evidence/PA01/EV-PA01-2636E7E5C8BA.json",
     "evidence/PA01/EV-PA01-768E9449D3FC.json",
+    "evidence/PA01/EV-PA01-CF6CE41EE8A1.json",
     "evidence/PA01/EV-PA01-WORKTREE.json"
   ],
   "exact_title": "Productization Alpha — Cross-cutting stabilization",
@@ -29,10 +30,11 @@
     "Feature development is frozen while installation, contracts, security boundaries, structure, documentation, CI, and release engineering are stabilized.",
     "This is an internal milestone only; it does not publish a SemVer release, update main, or claim production readiness.",
     "The internal Productization Alpha milestone is integrated at dev a9702bc; this claim remains active only to enforce the feature freeze until a separate resumption review.",
-    "GitHub platform governance is enabled: dev requires 11 source-bound checks, and repository security reporting, secret scanning, push protection, and Dependabot security updates are active."
+    "GitHub platform governance is enabled: dev requires 11 source-bound checks, and repository security reporting, secret scanning, push protection, and Dependabot security updates are active.",
+    "The initial critical/high dependency batch is merged at dev 2fdbe203; GitHub readback confirms 64 alerts fixed without dismissal and zero critical/high alerts remain."
   ],
   "optional": false,
-  "revision": 3,
+  "revision": 4,
   "roles": [
     "task"
   ],
@@ -45,11 +47,11 @@
     }
   ],
   "work": {
-    "base_sha": "7f58e531c63cb7a3c6f372f4255bb6d80e06e1cf",
-    "branch": "codex/productization-alpha-dependency-security",
+    "base_sha": "2fdbe20396b3dda4d3990a89688106e7720ddc6b",
+    "branch": "codex/productization-alpha-dependency-security-closeout",
     "owner": "codex-root",
-    "started_at": "2026-08-24T17:01:26Z",
+    "started_at": "2026-08-24T17:53:00Z",
     "substate": "active",
-    "worktree_slug": "productization-alpha-dependency-security"
+    "worktree_slug": "productization-alpha-dependency-security-closeout"
   }
 }
