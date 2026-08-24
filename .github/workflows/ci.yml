@@ -285,6 +285,13 @@ jobs:
         with:
           node-version: "24.18.0"
 
+      - name: Set up uv and Python for real API browser E2E
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          version: "0.12.5"
+
       - name: Install integrity-pinned pnpm
         run: |
           corepack enable
@@ -293,6 +300,9 @@ jobs:
 
       - name: Install locked Node environment
         run: pnpm install --frozen-lockfile
+
+      - name: Install locked Python environment for real API browser E2E
+        run: uv sync --locked --all-groups
 
       - name: Install Playwright Chromium
         run: pnpm --filter @agentguard/dashboard exec playwright install --with-deps chromium
@@ -303,6 +313,11 @@ jobs:
       - name: Run Dashboard API-mode browser E2E
         run: pnpm --filter @agentguard/dashboard test:e2e:api
 
+      - name: Run Dashboard real Guard API memory E2E
+        env:
+          AGENTGUARD_S1_STORAGE_BACKEND: memory
+        run: pnpm --filter @agentguard/dashboard test:e2e:s1-live
+
       - name: Upload Playwright artifacts
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -312,6 +327,7 @@ jobs:
             apps/dashboard/playwright-report/
             apps/dashboard/test-results/
             apps/dashboard/test-results-api/
+            apps/dashboard/test-results-s1-live-memory/
           if-no-files-found: ignore
           retention-days: 7
 

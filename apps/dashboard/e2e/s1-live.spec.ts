@@ -170,7 +170,8 @@ test.describe.serial("S1 live runtime supervision", () => {
       .getByLabel("运行步骤详情")
       .locator(".execution-inspector__section")
       .filter({ hasText: "Approval Basis" });
-    await expect(rollbackBasis).toContainText("不可用");
+    await expect(rollbackBasis).toContainText("无需审批");
+    await expect(rollbackBasis).toContainText("未触发 ask 决策");
 
     await page.goto(`${rollbackBaseURL}/evidence/${readableTraceId}?view=provenance`);
     await expect(page.getByRole("heading", { name: "证据链详情" })).toBeVisible();
